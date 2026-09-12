@@ -435,7 +435,9 @@ export class ChannelSettingsService {
         },
         onStatus: (stage) => {
           // Local commit/activation, not a remote login callback, owns these stages.
-          if (!['saving_local_session', 'connected'].includes(stage)) this.#updateLoginAttempt(attemptId, stage)
+          if (!['saving_local_session', 'connected', 'expired', 'failed', 'cancelled'].includes(stage)) {
+            this.#updateLoginAttempt(attemptId, stage)
+          }
         }
       })
       if (abort.signal.aborted || this.#activeQrAttempt?.attemptId !== attemptId) {
@@ -458,11 +460,13 @@ export class ChannelSettingsService {
       if (this.#activeQrAttempt?.attemptId !== attemptId) return this.#emit()
       if (this.#connectionCommit) return this.#emit()
       await this.#developerSession.discardPendingLogin?.().catch(() => undefined)
+      if (this.#activeQrAttempt?.attemptId !== attemptId) return this.#emit()
       if (channelFailureCode(error) === 'feishu_login_cancelled') {
         this.#finishQr()
         return this.#emit()
       }
       this.#failQr(error)
+      if (['expired', 'awaiting_refresh'].includes(this.#activeQrAttempt.stage)) return this.#emit()
       throw error
     }
     return this.#emit()
@@ -508,7 +512,7 @@ export class ChannelSettingsService {
       if (this.#activeQrAttempt?.attemptId === commit.attemptId) {
         this.#activeQrAttempt = { ...this.#activeQrAttempt,
           commitUncertain: true,
-          detail: '连接保存结果暂时无法确认；恢复本地服务后可核对保存结果。' }
+          detail: '暂时无法确认连接是否保存完成，请点击“核对保存结果”继续。' }
       }
     } finally {
       commit.busy = false
@@ -654,7 +658,8 @@ export class ChannelSettingsService {
     if (this.#connectionCommit) {
       await this.#resolveConnectionCommit()
       await this.#emit()
-    } else if (this.#activeQrAttempt.stage === 'expired') {
+    } else if (['expired', 'awaiting_refresh'].includes(this.#activeQrAttempt.stage)) {
+      this.#activeQrAbort?.abort()
       this.#finishQr()
       await this.connect()
     }
@@ -1272,7 +1277,7 @@ export class ChannelSettingsService {
       inspecting_identity: '正在读取账号与企业信息',
       saving_local_session: '正在保存连接',
       connected: '已连接',
-      expired: '登录二维码已过期，请关闭后重试。',
+      expired: '二维码已过期，请点击刷新后重新扫码。',
       cancelled: '登录已取消。',
       failed: '飞书账号登录失败。'
     }
@@ -2571,13 +2576,16 @@ export class ChannelSettingsService {
   #failQr(error: unknown): void {
     this.#activeQrAbort = null
     if (!this.#activeQrAttempt) return
+    const code = channelFailureCode(error)
+    const timedOut = ['feishu_login_timeout', 'feishu_login_scan_timeout', 'feishu_login_handoff_timeout',
+      'feishu_login_identity_timeout', 'feishu_request_timeout'].includes(code)
     this.#activeQrAttempt = {
       ...this.#activeQrAttempt,
-      stage: channelFailureCode(error) === 'feishu_login_expired' ? 'expired' : 'failed',
+      stage: code === 'feishu_login_expired' ? 'expired' : timedOut ? 'awaiting_refresh' : 'failed',
       qrDataUrl: null,
       expiresAt: null,
       waitUntil: null,
-      detail: channelFailureDetail(error)
+      detail: timedOut ? '请刷新二维码后继续扫码。' : channelFailureDetail(error)
     }
     void this.#emit()
   }

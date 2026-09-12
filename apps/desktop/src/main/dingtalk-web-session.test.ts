@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from 'electron'
+import QRCode from 'qrcode'
+import type { DingTalkLoginFetch } from './dingtalk-login-transport'
+vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn(async () => 'data:image/png;base64,aW1hZ2U=') } }))
 import {
   DingTalkConsoleError, ElectronDingTalkWebSession, parseDingTalkWebIdentity,
   requireDingTalkWebSession, type StoredDingTalkCookie
 } from './dingtalk-web-session'
 
 const navigation = vi.hoisted(() => ({
-  destination: 'https://open-dev.dingtalk.com/', loadFailure: false,
+  destination: 'https://open-dev.dingtalk.com/', loadFailure: false, loading: false,
   windows: [] as Array<{ options: Record<string, unknown>; destroyed: boolean }>,
-  observation: { kind: 'loading' } as unknown,
-  beforeObserve: () => {},
   views: [] as Array<{ options: Record<string, unknown>; setBounds: ReturnType<typeof vi.fn>; reload: ReturnType<typeof vi.fn> }>
 }))
 vi.mock('electron', () => {
@@ -17,13 +18,14 @@ vi.mock('electron', () => {
     let loaded = false
     let closed = false
     return {
-      getURL: () => loaded ? navigation.destination : 'about:blank', isLoading: () => false,
+      getURL: () => loaded ? navigation.destination : 'about:blank',
+      isLoading: () => navigation.loading, isLoadingMainFrame: () => navigation.loading,
       setWindowOpenHandler: vi.fn(), on: vi.fn(), setZoomFactor: vi.fn(), focus: vi.fn(),
       isDestroyed: () => closed, close: vi.fn(() => { closed = true }), reload: vi.fn(),
-      mainFrame: { executeJavaScript: vi.fn(async () => { navigation.beforeObserve(); return navigation.observation }) },
       loadURL: async () => {
         if (navigation.loadFailure) throw new Error('net unavailable')
         loaded = true
+        if (navigation.loading) await new Promise(() => {})
       }
     }
   }
@@ -58,9 +60,8 @@ beforeEach(() => {
   navigation.windows = []
   navigation.destination = 'https://open-dev.dingtalk.com/'
   navigation.loadFailure = false
+  navigation.loading = false
   navigation.views = []
-  navigation.observation = { kind: 'loading' }
-  navigation.beforeObserve = () => {}
 })
 afterEach(() => vi.useRealTimers())
 
@@ -191,23 +192,109 @@ describe('DingTalk console cookie transport', () => {
     expect(navigation.windows[0]!.destroyed).toBe(true)
   })
 
-  it('promotes a browser-free cookie jar on first login as well as on restart', async () => {
+  it('runs API QR, direct authentication, SSO and identity in the same jar without opening a page', async () => {
     const f = fixture()
-    expect(await f.web.login({ signal: new AbortController().signal })).toEqual(identity)
-    expect(navigation.windows[0]!.options.show).toBe(false)
-    expect(navigation.views[0]!.options).toMatchObject({ webPreferences: {
-      sandbox: true, nodeIntegration: false, contextIsolation: true, devTools: false
-    } })
-    expect(f.apiSession.cookies.set).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'access_token', httpOnly: true, sameSite: 'lax', secure: true
-    }))
-    f.apiSession.cookies.get.mockClear()
-    await f.web.inspect()
-    expect(f.apiSession.cookies.get).toHaveBeenCalled()
+    const stages: string[] = []
+    const qrReady = vi.fn()
+    f.session.fetch.mockImplementationOnce(async () => {
+      expect(stages.at(-1)).toBe('inspecting_identity')
+      return json({ success: true, data: baseInfo })
+    })
+    expect(await f.web.login({ signal: new AbortController().signal, onStage: stage => stages.push(stage), onQrReady: qrReady }))
+      .toEqual(identity)
+    expect(stages).toEqual(['preparing', 'awaiting_scan', 'completing_login', 'inspecting_identity'])
+    expect(qrReady).toHaveBeenCalledWith({ payload: 'data:image/png;base64,aW1hZ2U=', expiresAt: null })
+    expect(QRCode.toDataURL).toHaveBeenCalledWith(qrPayload, expect.objectContaining({ type: 'image/png' }))
+    expect(navigation.windows).toHaveLength(0)
+    expect(f.apiSession.cookies.set).not.toHaveBeenCalled()
+  })
+
+  it('isolates a refreshed generation and suppresses the old late completion', async () => {
+    const f = fixture()
+    const stages: string[] = []
+    let release!: (response: Response) => void
+    f.loginFetch.mockImplementationOnce(async () => portalRedirect())
+      .mockImplementationOnce(async () => new Response(bootstrap))
+      .mockImplementationOnce(async () => json({ success: true, result: qrPayload }))
+      .mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const pending = f.web.login({ signal: new AbortController().signal, onStage: stage => stages.push(stage) })
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    f.web.refreshLoginQr()
+    expect(await pending).toEqual(identity)
+    release(json({ success: true, result: { secondaryValidationResult: '' } }))
+    await Promise.resolve()
+    expect(stages.filter(stage => stage === 'preparing')).toHaveLength(2)
+    expect(stages.filter(stage => stage === 'completing_login')).toHaveLength(1)
     expect(f.session.clearStorageData).toHaveBeenCalledOnce()
   })
 
-  it('does not promote a late identity response after login was cancelled', async () => {
+  it('stops an expired generation until an explicit refresh, without querying or downgrading stages', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    const abort = new AbortController()
+    const stages: string[] = []
+    let polls = 0
+    f.loginFetch.mockImplementation(async (url) => {
+      if (new URL(url).pathname === '/oauth2/login_with_qr') {
+        polls += 1
+        return json({ success: false, errorCode: '11019' })
+      }
+      return loginResponse(url)
+    })
+    const pending = f.web.login({ signal: abort.signal, onStage: stage => stages.push(stage) })
+    const cancelled = expect(pending).rejects.toThrow('dingtalk_operation_cancelled')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(stages.at(-1)).toBe('expired')
+    expect(polls).toBe(1)
+    abort.abort()
+    await cancelled
+  })
+
+  it('uses a bounded identity phase and cancels a blocked Cookie read without adopting anything', async () => {
+    vi.useFakeTimers()
+    const f = fixture({ identity: 100 })
+    f.session.cookies.get.mockImplementation(() => new Promise(() => {}))
+    const onStage = vi.fn()
+    const pending = expect(f.web.login({ signal: new AbortController().signal, onStage }))
+      .rejects.toThrow('dingtalk_login_identity_timeout')
+    await vi.advanceTimersByTimeAsync(101)
+    await pending
+    expect(onStage).toHaveBeenLastCalledWith('inspecting_identity')
+    expect(f.session.fetch).not.toHaveBeenCalled()
+  })
+
+  it('bounds a stuck native page by the independent overall deadline and destroys it', async () => {
+    vi.useFakeTimers()
+    const f = fixture({ overall: 100 })
+    f.loginFetch.mockImplementation(async url => new URL(url).pathname === '/oauth2/login_with_qr'
+      ? json({ success: true, result: { chooseOrganization: true } }) : loginResponse(url))
+    navigation.destination = challengeUrl
+    const stages: string[] = []
+    const pending = expect(f.web.login({ signal: new AbortController().signal, onStage: stage => stages.push(stage) }))
+      .rejects.toThrow('dingtalk_login_timeout')
+    await vi.advanceTimersByTimeAsync(101)
+    await pending
+    expect(stages.at(-1)).toBe('awaiting_interaction')
+    expect(navigation.windows.every(entry => entry.destroyed)).toBe(true)
+  })
+
+  it.each(['loading', 'callback'] as const)('waits for native SSO %s before taking a Cookie snapshot', async phase => {
+    vi.useFakeTimers()
+    const f = fixture({ request: 400, handoff: 500 })
+    f.loginFetch.mockImplementation(async url => new URL(url).pathname === '/oauth2/login_with_qr'
+      ? json({ success: true, result: { chooseOrganization: true } }) : loginResponse(url))
+    navigation.destination = phase === 'callback' ? callbackUrl : 'https://open-dev.dingtalk.com/fe/app'
+    navigation.loading = phase === 'loading'
+    const failure = phase === 'loading' ? 'dingtalk_login_request_timeout' : 'dingtalk_login_handoff_timeout'
+    const pending = expect(f.web.login({ signal: new AbortController().signal })).rejects.toThrow(failure)
+    await vi.advanceTimersByTimeAsync(501)
+    await pending
+    expect(f.session.cookies.get).not.toHaveBeenCalled()
+    expect(f.session.fetch).not.toHaveBeenCalled()
+    expect(navigation.windows.every(entry => entry.destroyed)).toBe(true)
+  })
+
+  it('discards a late identity response after cancellation', async () => {
     const f = fixture()
     const abort = new AbortController()
     f.session.fetch.mockImplementationOnce(async () => {
@@ -215,81 +302,7 @@ describe('DingTalk console cookie transport', () => {
       return json({ success: true, data: baseInfo })
     })
     await expect(f.web.login({ signal: abort.signal })).rejects.toThrow('dingtalk_operation_cancelled')
-    expect(f.session.clearStorageData).not.toHaveBeenCalled()
-    expect(f.apiSession.clearStorageData).toHaveBeenCalledTimes(2)
-    expect(navigation.windows[0]!.destroyed).toBe(true)
-    f.session.cookies.get.mockClear()
-    await f.web.snapshot()
-    expect(f.session.cookies.get).toHaveBeenCalledOnce()
-  })
-
-  it('projects the official QR from a hidden page, deduplicates it and refreshes an expired QR in the same login', async () => {
-    vi.useFakeTimers()
-    const f = fixture()
-    const abort = new AbortController()
-    const onQrReady = vi.fn()
-    const onStage = vi.fn()
-    navigation.destination = 'https://login.dingtalk.com/oauth2/challenge.htm'
-    navigation.observation = { kind: 'qr', dataUrl: 'data:image/png;base64,aW1hZ2U=' }
-    const login = f.web.login({ signal: abort.signal, onQrReady, onStage })
-    const cancelled = expect(login).rejects.toThrow('dingtalk_operation_cancelled')
-    await vi.advanceTimersByTimeAsync(1_500)
-    expect(onQrReady).toHaveBeenCalledExactlyOnceWith({ payload: 'data:image/png;base64,aW1hZ2U=', expiresAt: null })
-    expect(navigation.windows.every((entry) => entry.options.show === false)).toBe(true)
-    expect(f.session.fetch).not.toHaveBeenCalled()
-
-    navigation.observation = { kind: 'expired' }
-    await vi.advanceTimersByTimeAsync(750)
-    expect(onStage).toHaveBeenLastCalledWith('expired')
-    f.web.refreshLoginQr()
-    expect(navigation.views[0]!.reload).toHaveBeenCalledOnce()
-    expect(onStage).toHaveBeenLastCalledWith('preparing')
-    navigation.observation = { kind: 'qr', dataUrl: 'data:image/png;base64,bmV3' }
-    await vi.advanceTimersByTimeAsync(750)
-    expect(onQrReady).toHaveBeenLastCalledWith({ payload: 'data:image/png;base64,bmV3', expiresAt: null })
-    abort.abort()
-    await vi.advanceTimersByTimeAsync(750)
-    await cancelled
-    expect(navigation.windows.every((entry) => entry.destroyed)).toBe(true)
-    f.web.refreshLoginQr()
-    expect(navigation.views[0]!.reload).toHaveBeenCalledOnce()
-  })
-
-  it('offers in-app official interaction only after a stable non-QR page, without popping up a window', async () => {
-    vi.useFakeTimers()
-    const f = fixture()
-    const abort = new AbortController()
-    const onStage = vi.fn()
-    navigation.destination = 'https://login.dingtalk.com/oauth2/challenge.htm'
-    navigation.observation = { kind: 'interaction' }
-    const login = f.web.login({ signal: abort.signal, onStage })
-    const cancelled = expect(login).rejects.toThrow('dingtalk_operation_cancelled')
-    await vi.advanceTimersByTimeAsync(1_500)
-    expect(onStage).not.toHaveBeenCalledWith('awaiting_interaction')
-    await vi.advanceTimersByTimeAsync(1_500)
-    expect(onStage).toHaveBeenLastCalledWith('awaiting_interaction')
-    expect(navigation.windows.every((entry) => entry.options.show === false)).toBe(true)
-    navigation.observation = { kind: 'scanned' }
-    await vi.advanceTimersByTimeAsync(750)
-    expect(onStage).toHaveBeenLastCalledWith('scan_confirmed')
-    abort.abort()
-    await vi.advanceTimersByTimeAsync(750)
-    await cancelled
-  })
-
-  it('drops a late QR observation after cancellation', async () => {
-    vi.useFakeTimers()
-    const f = fixture()
-    const abort = new AbortController()
-    const onQrReady = vi.fn()
-    navigation.destination = 'https://login.dingtalk.com/oauth2/challenge.htm'
-    navigation.observation = { kind: 'qr', dataUrl: 'data:image/png;base64,aW1hZ2U=' }
-    navigation.beforeObserve = () => abort.abort()
-    const login = f.web.login({ signal: abort.signal, onQrReady })
-    const cancelled = expect(login).rejects.toThrow('dingtalk_operation_cancelled')
-    await vi.advanceTimersByTimeAsync(1_500)
-    await cancelled
-    expect(onQrReady).not.toHaveBeenCalled()
+    expect(f.apiSession.cookies.set).not.toHaveBeenCalled()
   })
 
   it('does not turn a network failure into expiry or an interactive login', async () => {
@@ -393,6 +406,10 @@ describe('DingTalk console cookie transport', () => {
       { ...baseInfo, staffId: '' }, { ...baseInfo, corpId: undefined }]) {
       expect(() => parseDingTalkWebIdentity(candidate)).toThrow('dingtalk_login_identity_unavailable')
     }
+    expect(parseDingTalkWebIdentity({ ...baseInfo, orgName: '  ', corpName: ' 企业 ', nick: '', name: ' 用户 ' }))
+      .toEqual({ ...identity, corpName: '企业', userName: '用户' })
+    expect(parseDingTalkWebIdentity({ corpId: 'corp-1', staffId: 'staff-1' }))
+      .toEqual({ ...identity, corpName: null, userName: null })
   })
 })
 
@@ -403,7 +420,7 @@ function cookie(change: Partial<StoredDingTalkCookie> = {}): StoredDingTalkCooki
   return { name: 'access_token', value: 'private-cookie', domain: '.dingtalk.com', path: '/',
     httpOnly: true, secure: true, sameSite: 'lax', session: true, ...change }
 }
-function fixture() {
+function fixture(timings: Partial<{ identity: number; overall: number; request: number; handoff: number }> = {}) {
   const jar = [cookie()]
   const session = {
     cookies: { get: vi.fn(async () => jar), set: vi.fn(async (_cookie: Record<string, unknown>) => {}) },
@@ -415,8 +432,28 @@ function fixture() {
     cookies: { get: vi.fn(async () => jar), set: vi.fn(async (_cookie: Record<string, unknown>) => {}) },
     clearStorageData: vi.fn(async () => {})
   }
-  return { jar, session, apiSession, web: new ElectronDingTalkWebSession({
-    session: session as unknown as Session, fetch: session.fetch,
+  const loginFetch = vi.fn<DingTalkLoginFetch>(async url => loginResponse(url))
+  return { jar, session, apiSession, loginFetch, web: new ElectronDingTalkWebSession({
+    session: session as unknown as Session, fetch: session.fetch, loginFetch, timings,
     createSession: () => apiSession as unknown as Session
   }) }
+}
+
+const callbackUrl = 'https://open-dev.dingtalk.com/dingtalk_sso_call_back?continue=original'
+const challengeUrl = `https://login.dingtalk.com/oauth2/challenge.htm?${new URLSearchParams({
+  redirect_uri: callbackUrl, client_id: 'portal-client', response_type: 'code', scope: 'openid corpid'
+})}`
+const bootstrap = '<script>window.__LOGIN_PAGE_VARS = { needLogin: true, exclusiveCorpId: "" };</script>'
+const qrPayload = 'https://login.dingtalk.com/oauth2/qr_confirm.htm?code=private-ticket'
+const portalRedirect = () => new Response(null, { status: 302, headers: { location: challengeUrl } })
+function loginResponse(raw: string): Response {
+  const url = new URL(raw)
+  if (url.origin === 'https://open-dev.dingtalk.com') return url.pathname === '/' ? portalRedirect() : new Response('console')
+  switch (url.pathname) {
+    case '/oauth2/challenge.htm': return new Response(bootstrap)
+    case '/oauth2/generate_qrcode': return json({ success: true, result: qrPayload })
+    case '/oauth2/login_with_qr': return json({ success: true, result: { secondaryValidationResult: '' } })
+    case '/oauth2/confirm_auth': return json({ success: true, result: { url: callbackUrl + '&code=private-authorization' } })
+    default: throw new Error('Unexpected request')
+  }
 }

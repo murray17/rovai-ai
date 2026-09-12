@@ -1281,6 +1281,44 @@ describe('channel settings service', () => {
     expect(session.discardPendingLogin).not.toHaveBeenCalled()
   })
 
+  it.each(['feishu_login_timeout', 'feishu_login_scan_timeout', 'feishu_login_handoff_timeout',
+    'feishu_login_identity_timeout', 'feishu_request_timeout', 'feishu_login_expired'])(
+    'keeps %s quiet and lets the QR region start one isolated replacement', async (code) => {
+      const session = developerSession()
+      const options: NonNullable<Parameters<typeof session.beginLogin>[0]>[] = []
+      session.beginLogin = vi.fn(async (input) => {
+        options.push(input!)
+        input?.onStatus?.('awaiting_scan')
+        input?.onQrReady?.({ payload: `data:image/png;base64,qr-${options.length}`, expiresAt: null })
+        if (options.length === 1) throw new Error(code)
+        return new Promise<FeishuDeveloperIdentity>((_, reject) => {
+          input?.signal?.addEventListener('abort', () => reject(new Error('feishu_login_cancelled')), { once: true })
+        })
+      })
+      const service = new ChannelSettingsService({
+        credentialStore: memoryCredentialStore(), developerSession: session,
+        core: channelCore(() => coreSnapshot({ account: connectedAccount() }))
+      })
+      const first = (await service.connect()).activeQrAttempt!
+      expect(first).toMatchObject({ stage: code.endsWith('_expired') ? 'expired' : 'awaiting_refresh', qrDataUrl: null })
+      if (!code.endsWith('_expired')) expect(first.detail).not.toMatch(/超时|过期|失败/u)
+      const refreshing = service.refreshLoginQr(first.attemptId)
+      await vi.waitFor(() => expect(options).toHaveLength(2))
+      const next = (await service.get()).activeQrAttempt!
+      expect(next.attemptId).not.toBe(first.attemptId)
+      expect(next.stage).toBe('awaiting_scan')
+      expect(await service.refreshLoginQr(first.attemptId)).toBe(false)
+      options[0].onStatus?.('scan_confirmed')
+      options[0].onQrReady?.({ payload: 'data:image/png;base64,late', expiresAt: null })
+      expect((await service.get()).activeQrAttempt).toEqual(next)
+      await service.cancelQrAttempt(next.attemptId)
+      await refreshing
+      expect(session.activatePendingLogin).not.toHaveBeenCalled()
+      expect((await service.get()).channels[0].connection.status).toBe('connected')
+      expect((await service.get()).activeQrAttempt).toBeNull()
+    }
+  )
+
   it('ignores late QR, stage and failure callbacks from a cancelled attempt', async () => {
     const session = developerSession()
     const options: NonNullable<Parameters<typeof session.beginLogin>[0]>[] = []

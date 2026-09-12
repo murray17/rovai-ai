@@ -107,7 +107,7 @@ app.whenReady().then(async () => {
   cases.push('real Electron Session HTTP login, trusted redirects, passive HTML, Cookie restoration and management without login windows')
   parent.showInactive()
   for (const theme of ['day', 'night']) {
-    for (const stage of ['awaiting_scan', 'completing_login', 'saving_local_session', 'failed']) {
+    for (const stage of ['awaiting_scan', 'completing_login', 'saving_local_session', 'expired', 'awaiting_refresh', 'failed']) {
       await parent.webContents.executeJavaScript('window.feishuLoginTest.capture(' + JSON.stringify(theme) + ',' + JSON.stringify(stage) + ',' + JSON.stringify(qr) + ')')
       writeFileSync(join(fixture, theme + '-' + stage + '.png'), (await parent.capturePage()).toPNG())
     }
@@ -115,6 +115,10 @@ app.whenReady().then(async () => {
   parent.webContents.setZoomFactor(2)
   await parent.webContents.executeJavaScript('window.feishuLoginTest.capture("night","saving_local_session",' + JSON.stringify(qr) + ')')
   writeFileSync(join(fixture, 'night-200-percent.png'), (await parent.capturePage()).toPNG())
+  await parent.webContents.executeJavaScript('window.feishuLoginTest.capture("night","expired",' + JSON.stringify(qr) + ')')
+  writeFileSync(join(fixture, 'night-expired-200-percent.png'), (await parent.capturePage()).toPNG())
+  await parent.webContents.executeJavaScript('window.feishuLoginTest.capture("night","awaiting_refresh",' + JSON.stringify(qr) + ')')
+  writeFileSync(join(fixture, 'night-refresh-200-percent.png'), (await parent.capturePage()).toPNG())
   cases.push('day/night layouts at 1040x700 and 200 percent zoom')
   process.stdout.write(JSON.stringify({ ok: true, cases, liveProbe }) + '\n')
   parent.destroy()

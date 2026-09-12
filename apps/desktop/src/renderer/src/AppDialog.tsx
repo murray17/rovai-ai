@@ -137,11 +137,12 @@ export function AppDialogImpact({ tone = 'neutral', label, children }: {
   return <li className={`app-dialog-impact is-${tone}`}><span>{label}</span><p>{children}</p></li>
 }
 
-export function DialogControlIcon({ name }: { name: 'close' | 'chevron' | 'plus' | 'check' | 'save' }): React.JSX.Element {
+export function DialogControlIcon({ name }: { name: 'close' | 'chevron' | 'plus' | 'check' | 'save' | 'refresh' }): React.JSX.Element {
   return <svg className="dialog-glyph" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {name === 'close' ? <path d="m5 5 10 10M15 5 5 15" />
       : name === 'plus' ? <path d="M10 4v12M4 10h12" />
       : name === 'check' ? <path d="m4.5 10 3.5 3.5L15.5 6" />
+      : name === 'refresh' ? <path d="M16.5 4.5v5h-5M16.5 9.5a6.5 6.5 0 1 0-1.8 5" />
       : name === 'save' ? <><path d="M5 3h9l3 3v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M6 3v5h7V3M6 17v-6h8v6" /></>
       : <path d="m6 8 4 4 4-4" />}
   </svg>

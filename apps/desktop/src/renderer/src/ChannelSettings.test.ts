@@ -172,6 +172,17 @@ describe('Channel settings', () => {
     expect(snapshot.channels).toHaveLength(2)
     expect(snapshot.channels[1].memberBots[0].appId).toBe('u-app-1')
     expect(markup).not.toMatch(/app secret|client secret|access token/i)
+    const account = snapshot.channels[1].connection.account!
+    account.userName = null
+    account.tenantName = null
+    const unnamed = renderToStaticMarkup(createElement(ChannelSettingsView, {
+      agents: [agent('agent-a', 0)], snapshot, selectedKind: 'dingtalk'
+    }))
+    expect(unnamed).toContain('钉钉用户')
+    expect(unnamed).toContain('当前企业')
+    expect(unnamed).toContain('已连接')
+    expect(account.userName).toBeNull()
+    expect(account.tenantName).toBeNull()
   })
 
   it.each(['not_connected', 'session_expired', 'connected'] as const)(
@@ -313,6 +324,10 @@ describe('Channel settings', () => {
     expect(channelErrorMessage(new Error(
       "Error invoking remote method 'rovai:channels-publish-member-bot': Error: dingtalk_approval_mode_invalid"
     ))).toBe('钉钉开放平台操作尚未完成；请查看下方状态，排除问题后重试。')
+    expect(channelErrorMessage(new Error('dingtalk_login_identity_timeout')))
+      .toBe('读取钉钉账号与企业身份超时，请稍后重试。')
+    expect(channelErrorMessage(new Error('dingtalk_login_protocol_incompatible')))
+      .toBe('钉钉登录接口返回了暂不支持的结果，无法继续本次连接。')
   })
 
   it('keeps only present members in deterministic roster order', () => {

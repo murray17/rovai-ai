@@ -136,6 +136,45 @@ describe('HTTP Feishu developer login and saved sessions', () => {
     expect(onStatus.mock.calls.flat()).toEqual(['loading_local_session', 'preparing', 'awaiting_scan', 'scan_confirmed', 'completing_login', 'inspecting_identity'])
   })
 
+  it.each(['', '   ', null, undefined])('verifies the portal session when confirmation has an empty optional cross-login URI: %j', async (crossLoginUri) => {
+    const { service, store } = create()
+    const onStatus = vi.fn()
+    polling.push(
+      { next_step: 'qr_login_polling', step_info: { status: 2 } },
+      { next_step: 'enter_app', step_info: { cross_login_uri: crossLoginUri } }
+    )
+    const outcome = service.beginLogin({ onStatus }).then(
+      (identity) => ({ identity }),
+      (error: Error) => ({ error: error.message })
+    )
+    await vi.advanceTimersByTimeAsync(25)
+    expect(await outcome).toMatchObject({ identity: { userId: 'user-1', tenantId: 'tenant-1' } })
+    expect(electron.sessions).toHaveLength(1)
+    expect(electron.sessions[0].fetch.mock.calls.map(([url]) => new URL(url).pathname))
+      .toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/app'])
+    expect(onStatus.mock.calls.flat()).toEqual([
+      'loading_local_session', 'preparing', 'awaiting_scan', 'scan_confirmed', 'completing_login', 'inspecting_identity'
+    ])
+    expect(store.record).toBeNull()
+    await service.activatePendingLogin(store.commit(service.pendingConnection()))
+    expect(onStatus).toHaveBeenLastCalledWith('connected')
+  })
+
+  it('keeps the previous session when an empty cross-login URI does not establish portal authentication', async () => {
+    const { service, store } = await connected()
+    const oldSession = electron.sessions[0]
+    const previous = store.record
+    portalFailure = 'expired'
+    polling.push({ next_step: 'enter_app', step_info: { cross_login_uri: '' } })
+    const outcome = service.beginLogin().catch((error: Error) => error.message)
+    await vi.advanceTimersByTimeAsync(15)
+    expect(await outcome).toBe('feishu_login_interaction_required')
+    expect(() => service.pendingConnection()).toThrow('feishu_login_pending_session_missing')
+    expect(store.record).toBe(previous)
+    expect(oldSession.clearStorageData).not.toHaveBeenCalled()
+    expect(electron.sessions[1].clearStorageData).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['token', 'flowKey', 'business', 'unknownStep', 'interaction', 'identity', 'handoff'])(
     'ends an incomplete or unsupported login explicitly: %s', async (failure) => {
       const { service } = create()
@@ -163,6 +202,21 @@ describe('HTTP Feishu developer login and saved sessions', () => {
     await vi.advanceTimersByTimeAsync(1100)
     expect(await outcome).toBe({ expired: 'feishu_login_expired', request: 'feishu_request_timeout', total: 'feishu_login_timeout' }[kind])
     expect(() => service.pendingConnection()).toThrow()
+  })
+
+  it.each(['scan', 'handoff', 'identity'] as const)('bounds the %s phase independently and stops its requests', async (phase) => {
+    const { service } = create(undefined, { requestTimeoutMs: 5000, [`${phase}TimeoutMs`]: 40 })
+    if (phase !== 'scan') polling.push(complete())
+    if (phase === 'handoff') intercept = (url) => url.includes('/cross') ? new Promise(() => {}) : undefined
+    const outcome = service.beginLogin().catch((error: Error) => error.message)
+    if (phase === 'identity') electron.sessions[0].cookies.get.mockImplementation(() => new Promise(() => {}))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await outcome).toBe(`feishu_login_${phase}_timeout`)
+    expect(() => service.pendingConnection()).toThrow('feishu_login_pending_session_missing')
+    expect(electron.sessions[0].clearStorageData).toHaveBeenCalledOnce()
+    const requests = electron.sessions[0].fetch.mock.calls.length
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(electron.sessions[0].fetch).toHaveBeenCalledTimes(requests)
   })
 
   it('isolates a late init response from a replacement attempt', async () => {

@@ -2708,6 +2708,7 @@ export interface ChannelQrAttemptView {
     | 'loading_local_session'
     | 'preparing'
     | 'awaiting_scan'
+    | 'awaiting_refresh'
     | 'scan_confirmed'
     | 'completing_login'
     | 'awaiting_interaction'
@@ -2720,7 +2721,7 @@ export interface ChannelQrAttemptView {
   qrDataUrl: string | null
   /** Server-provided expiry only. */
   expiresAt: string | null
-  /** Local waiting deadline, not a guaranteed QR lifetime. */
+  /** Legacy local deadline metadata; the login dialog does not display it. */
   waitUntil?: string | null
   /** Local transaction acknowledgement is unknown; cancellation stays locked. */
   commitUncertain?: boolean
@@ -2729,9 +2730,9 @@ export interface ChannelQrAttemptView {
 
 export interface ChannelAccountView {
   accountId: string
-  userName: string
+  userName: string | null
   email?: string
-  tenantName: string
+  tenantName: string | null
   brand: 'feishu' | 'lark' | 'dingtalk'
   connectedAt: string
   lastVerifiedAt: string

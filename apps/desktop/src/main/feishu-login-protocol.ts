@@ -12,6 +12,9 @@ export interface FeishuLoginProfile {
   deviceInfo: string
   pollIntervalMs: number
   requestTimeoutMs: number
+  scanTimeoutMs: number
+  handoffTimeoutMs: number
+  identityTimeoutMs: number
   loginTimeoutMs: number
 }
 
@@ -25,7 +28,10 @@ export const FEISHU_LOGIN_PROFILE: Readonly<FeishuLoginProfile> = {
   deviceInfo: 'platform=websdk',
   pollIntervalMs: 1_500,
   requestTimeoutMs: 15_000,
-  loginTimeoutMs: 180_000
+  scanTimeoutMs: 5 * 60_000,
+  handoffTimeoutMs: 30_000,
+  identityTimeoutMs: 20_000,
+  loginTimeoutMs: 10 * 60_000
 }
 
 export type FeishuQrPoll =
@@ -40,7 +46,8 @@ export class FeishuLoginProtocol {
     const origin = trustedFeishuUrl(this.profile.loginOrigin)
     if (!isFeishuLoginUrl(origin.href) || origin.origin !== this.profile.loginOrigin
       || !this.profile.appId || !this.profile.apiVersion || !this.profile.deviceInfo
-      || ![this.profile.pollIntervalMs, this.profile.requestTimeoutMs, this.profile.loginTimeoutMs]
+      || ![this.profile.pollIntervalMs, this.profile.requestTimeoutMs, this.profile.scanTimeoutMs,
+        this.profile.handoffTimeoutMs, this.profile.identityTimeoutMs, this.profile.loginTimeoutMs]
         .every((value) => Number.isFinite(value) && value > 0)) {
       throw new FeishuSessionError('feishu_login_profile_invalid')
     }
@@ -69,10 +76,12 @@ export class FeishuLoginProtocol {
     const step = record(data.step_info)
     if (step.status === 5) return { kind: 'expired' }
     if (nextStep === 'enter_app') {
-      const raw = firstString(step.cross_login_uri)
-      if (step.cross_login_uri != null && !raw) {
+      const crossLoginUri = step.cross_login_uri
+      if (crossLoginUri != null && typeof crossLoginUri !== 'string') {
         throw new FeishuSessionError('feishu_login_protocol_incomplete', { missingFields: ['cross_login_uri'] })
       }
+      // An empty optional handoff still requires the same Session's portal identity check.
+      const raw = firstString(crossLoginUri)
       return { kind: 'complete', ...(raw ? { crossLoginUri: trustedFeishuUrl(raw).href } : {}) }
     }
     if (nextStep !== 'qr_login_polling') {

@@ -89,8 +89,8 @@ pub struct UpsertDingTalkAccountCommand {
     pub account_id: String,
     pub user_id_digest: String,
     pub corp_id: String,
-    pub user_name: String,
-    pub corp_name: String,
+    pub user_name: Option<String>,
+    pub corp_name: Option<String>,
     pub oauth_profile_ref: String,
 }
 
@@ -136,8 +136,8 @@ pub struct DingTalkConnectionAccountInput {
     pub account_id: String,
     pub user_id_digest: String,
     pub corp_id: String,
-    pub user_name: String,
-    pub corp_name: String,
+    pub user_name: Option<String>,
+    pub corp_name: Option<String>,
     pub oauth_profile_ref: String,
 }
 
@@ -708,8 +708,8 @@ pub struct DingTalkAccountView {
     pub account_id: String,
     pub user_id_digest: String,
     pub corp_id: String,
-    pub user_name: String,
-    pub corp_name: String,
+    pub user_name: Option<String>,
+    pub corp_name: Option<String>,
     pub oauth_profile_ref: String,
     pub status: String,
     pub version: i64,
@@ -2748,8 +2748,8 @@ impl ChannelService {
         validate_digest(&envelope.payload.user_id_digest, "userIdDigest")?;
         validate_nonempty(&envelope.payload.corp_id, "corpId")?;
         validate_nonempty(&envelope.payload.oauth_profile_ref, "oauthProfileRef")?;
-        let user_name = normalize_display_name(&envelope.payload.user_name)?;
-        let corp_name = normalize_display_name(&envelope.payload.corp_name)?;
+        let user_name = normalize_dingtalk_display_name(envelope.payload.user_name.as_deref())?;
+        let corp_name = normalize_dingtalk_display_name(envelope.payload.corp_name.as_deref())?;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
                 return Ok(rejected(
@@ -11066,6 +11066,28 @@ fn normalize_display_name(value: &str) -> Result<String> {
     Ok(value)
 }
 
+fn normalize_dingtalk_display_name(value: Option<&str>) -> Result<Option<String>> {
+    value
+        .map(|value| {
+            let name = value.trim();
+            if name.is_empty() || name.len() > 512 || name.contains('\0') {
+                anyhow::bail!("DingTalk display name is invalid");
+            }
+            Ok(name.to_string())
+        })
+        .transpose()
+}
+
+fn optional_dingtalk_identity_name<'a>(
+    identity: &'a serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<&'a str>> {
+    if identity.get(key).is_none_or(Value::is_null) {
+        return Ok(None);
+    }
+    required_json_string(identity, key, 512).map(Some)
+}
+
 fn normalize_optional_email(value: Option<&str>) -> Result<Option<String>> {
     let Some(value) = value else {
         return Ok(None);
@@ -11442,8 +11464,22 @@ fn validate_developer_session_documents(
             .get("cookies")
             .and_then(Value::as_array)
             .context("Feishu developer session cookies are missing")?;
-        if session_object.len() != 1 || cookies.len() > 512 {
+        if session_object
+            .keys()
+            .any(|key| !matches!(key.as_str(), "cookies" | "portalOrigin"))
+            || cookies.len() > 512
+        {
             anyhow::bail!("Feishu developer session shape is invalid");
+        }
+        if let Some(origin) = session_object.get("portalOrigin") {
+            let portal_brand = match origin.as_str() {
+                Some("https://open.feishu.cn" | "https://open.larkoffice.com") => "feishu",
+                Some("https://open.larksuite.com") => "lark",
+                _ => anyhow::bail!("Feishu developer session portal origin is invalid"),
+            };
+            if identity_object.get("brand").and_then(Value::as_str) != Some(portal_brand) {
+                anyhow::bail!("Feishu developer session portal origin does not match its brand");
+            }
         }
         for cookie in cookies {
             let cookie = cookie
@@ -11455,6 +11491,8 @@ fn validate_developer_session_documents(
             let domain = domain.trim_start_matches('.').to_ascii_lowercase();
             if !(domain == "feishu.cn"
                 || domain.ends_with(".feishu.cn")
+                || domain == "larkoffice.com"
+                || domain.ends_with(".larkoffice.com")
                 || domain == "larksuite.com"
                 || domain.ends_with(".larksuite.com"))
             {
@@ -11463,16 +11501,16 @@ fn validate_developer_session_documents(
             required_json_string(cookie, "path", 4096)?;
         }
     } else {
-        for (key, maximum) in [
-            ("corpId", 512),
-            ("corpName", 512),
-            ("userId", 512),
-            ("userName", 512),
-        ] {
-            required_json_string(identity_object, key, maximum)?;
+        for key in ["corpId", "userId"] {
+            required_json_string(identity_object, key, 512)?;
         }
         if session_object.get("schemaVersion").and_then(Value::as_i64) == Some(2) {
+            optional_dingtalk_identity_name(identity_object, "userName")?;
+            optional_dingtalk_identity_name(identity_object, "corpName")?;
             return validate_dingtalk_web_session(session_object);
+        }
+        for key in ["userName", "corpName"] {
+            required_json_string(identity_object, key, 512)?;
         }
         // Legacy OAuth rows remain readable until an explicit Web Session
         // reconnect replaces them atomically. They are not converted to cookies.
@@ -11642,8 +11680,8 @@ fn validate_dingtalk_connection(command: &CommitDingTalkAccountConnectionCommand
     validate_digest(&account.user_id_digest, "userIdDigest")?;
     validate_nonempty(&account.corp_id, "corpId")?;
     validate_nonempty(&account.oauth_profile_ref, "oauthProfileRef")?;
-    normalize_display_name(&account.user_name)?;
-    normalize_display_name(&account.corp_name)?;
+    normalize_dingtalk_display_name(account.user_name.as_deref())?;
+    normalize_dingtalk_display_name(account.corp_name.as_deref())?;
     validate_developer_session_documents(
         DINGTALK_PROVIDER,
         &command.developer_session.identity,
@@ -11653,8 +11691,8 @@ fn validate_dingtalk_connection(command: &CommitDingTalkAccountConnectionCommand
     let user_id = required_json_string(identity, "userId", 512)?;
     if opaque_digest("dingtalk-user", user_id) != account.user_id_digest
         || required_json_string(identity, "corpId", 512)? != account.corp_id
-        || required_json_string(identity, "userName", 512)? != account.user_name
-        || required_json_string(identity, "corpName", 512)? != account.corp_name
+        || optional_dingtalk_identity_name(identity, "userName")? != account.user_name.as_deref()
+        || optional_dingtalk_identity_name(identity, "corpName")? != account.corp_name.as_deref()
     {
         anyhow::bail!("DingTalk account and developer identity do not match");
     }
@@ -11873,8 +11911,8 @@ fn persist_dingtalk_account(
             account.account_id,
             account.user_id_digest,
             account.corp_id,
-            normalize_display_name(&account.user_name)?,
-            normalize_display_name(&account.corp_name)?,
+            normalize_dingtalk_display_name(account.user_name.as_deref())?,
+            normalize_dingtalk_display_name(account.corp_name.as_deref())?,
             account.oauth_profile_ref,
             now,
         ],
@@ -12776,6 +12814,19 @@ mod tests {
         });
         let session = json!({"schemaVersion": 2, "cookies": [cookie.clone()]});
         validate_developer_session_documents(DINGTALK_PROVIDER, &identity, &session).unwrap();
+        for names in [json!({}), json!({"userName": null, "corpName": null})] {
+            let mut optional = json!({"corpId": "corp-1", "userId": "staff-1"});
+            optional
+                .as_object_mut()
+                .unwrap()
+                .extend(names.as_object().unwrap().clone());
+            validate_developer_session_documents(DINGTALK_PROVIDER, &optional, &session).unwrap();
+            optional["userId"] = json!("");
+            assert!(
+                validate_developer_session_documents(DINGTALK_PROVIDER, &optional, &session)
+                    .is_err()
+            );
+        }
         for (field, invalid) in [
             ("domain", json!("dingtalk.com.evil.example")),
             ("path", json!("relative")),
@@ -12836,10 +12887,11 @@ mod tests {
             "tenantName": "测试租户"
         });
         let session = json!({
+            "portalOrigin": "https://open.larkoffice.com",
             "cookies": [{
                 "name": "session",
                 "value": "plaintext-cookie",
-                "domain": ".feishu.cn",
+                "domain": ".larkoffice.com",
                 "path": "/",
                 "secure": true,
                 "httpOnly": true,
@@ -12847,6 +12899,54 @@ mod tests {
                 "session": true
             }]
         });
+        // The Desktop's portal origin crosses the same admission boundary as its Cookie snapshot.
+        for (origin, brand) in [
+            ("https://open.feishu.cn", "feishu"),
+            ("https://open.larkoffice.com", "feishu"),
+            ("https://open.larksuite.com", "lark"),
+        ] {
+            let mut branded_identity = identity.clone();
+            branded_identity["brand"] = json!(brand);
+            let mut branded_session = session.clone();
+            branded_session["portalOrigin"] = json!(origin);
+            validate_developer_session_documents(
+                FEISHU_PROVIDER,
+                &branded_identity,
+                &branded_session,
+            )
+            .unwrap();
+        }
+        let mut legacy_session = session.clone();
+        legacy_session
+            .as_object_mut()
+            .unwrap()
+            .remove("portalOrigin");
+        validate_developer_session_documents(FEISHU_PROVIDER, &identity, &legacy_session).unwrap();
+        for invalid_origin in [
+            json!(null),
+            json!(""),
+            json!("https://open.larksuite.com"),
+            json!("https://open.larkoffice.com.evil.example"),
+            json!("http://open.feishu.cn"),
+            json!("https://open.feishu.cn/app"),
+            json!("https://user@open.feishu.cn"),
+        ] {
+            let mut invalid = session.clone();
+            invalid["portalOrigin"] = invalid_origin;
+            assert!(
+                validate_developer_session_documents(FEISHU_PROVIDER, &identity, &invalid).is_err()
+            );
+        }
+        let mut invalid = session.clone();
+        invalid["unexpected"] = json!(true);
+        assert!(
+            validate_developer_session_documents(FEISHU_PROVIDER, &identity, &invalid).is_err()
+        );
+        invalid = session.clone();
+        invalid["cookies"][0]["domain"] = json!("larkoffice.com.evil.example");
+        assert!(
+            validate_developer_session_documents(FEISHU_PROVIDER, &identity, &invalid).is_err()
+        );
         let connected = service
             .commit_feishu_account_connection(
                 &mut database,
@@ -13049,6 +13149,54 @@ mod tests {
         assert_eq!(published.len(), 1);
         assert_eq!(published[0].agent_id, agent_id);
         assert_eq!(published[0].payload["appSecret"], "plaintext-app-secret");
+        // Same atomic connection owner: optional display data must survive the
+        // Main/Core transaction without becoming a fabricated name or identity.
+        let nullable_identity =
+            json!({"corpId": "optional-corp", "userId": "optional-staff", "userName": null});
+        let nullable_connection = CommitDingTalkAccountConnectionCommand {
+            expected_previous_account_version: None,
+            account: DingTalkConnectionAccountInput {
+                account_id: "optional-account".into(),
+                user_id_digest: opaque_digest("dingtalk-user", "optional-staff"),
+                corp_id: "optional-corp".into(),
+                user_name: None,
+                corp_name: None,
+                oauth_profile_ref: "dingtalk-web:optional".into(),
+            },
+            developer_session: ChannelDeveloperSessionInput {
+                identity: nullable_identity.clone(),
+                session: json!({"schemaVersion": 2, "cookies": []}),
+            },
+        };
+        let connected = service
+            .commit_dingtalk_account_connection(
+                &mut database,
+                &dingtalk_host_envelope("optional-dingtalk-name", nullable_connection.clone()),
+            )
+            .unwrap();
+        assert_eq!(connected.result.status, CommandResultStatus::Applied);
+        let names: (Option<String>, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT user_name, corp_name FROM dingtalk_account WHERE id='optional-account'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(names, (None, None));
+        let saved = service
+            .channel_developer_session(
+                &mut database,
+                &GetChannelDeveloperSessionParams {
+                    provider: DINGTALK_PROVIDER.into(),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.identity, nullable_identity);
+        let mut mismatched = nullable_connection;
+        mismatched.developer_session.identity["userId"] = json!("another-staff");
+        assert!(validate_dingtalk_connection(&mismatched).is_err());
     }
 
     #[test]
@@ -13195,8 +13343,8 @@ mod tests {
                         account_id: "dingtalk-account-1".to_string(),
                         user_id_digest: dingtalk_owner_user_digest(),
                         corp_id: "ding-corp-1".to_string(),
-                        user_name: "Owner".to_string(),
-                        corp_name: "测试组织".to_string(),
+                        user_name: Some("Owner".to_string()),
+                        corp_name: Some("测试组织".to_string()),
                         oauth_profile_ref: "dingtalk/oauth/profile-1".to_string(),
                     },
                 ),

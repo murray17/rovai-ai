@@ -29,7 +29,7 @@ last_updated: 2026-09-12
 
 复用 Qualification Runner、Case admission、合同测试、双 View Judge、Core 持久证据、用户 CLI 和 Rovai Automation。新增受限只读 Trace 导出、日报与曲线、Host 报告准备、两级 Gate 及每周报告历史。通用集 12 个 Case；Memory 与 Review Duo 各有 3 个专属 Case。没有专属集的其他 Skill 先补样本，不能默认为已覆盖。
 
-本次没有新增数据库字段，沿用 main 的 Data Contract 99、Camp Snapshot 34、formatter/manifest 23 及 Built-in tool/context 语义。旧评测构建使用 Data Contract 98，不能冒充本次合并构建的执行证据。Memory 精确计数、文档体系重构和队员成长仍属后续项，日报中的两项 Memory 指标为未知。User Automation 新增 owner-only 元数据操作，不注入 Agent 上下文。
+评测增量没有新增数据库字段，合入时沿用 main 的 Data Contract 99、Camp Snapshot 34、formatter/manifest 23 及 Built-in tool/context 语义；后续钉钉名称可空增量将 Data Contract 升至 100，见下文。旧评测构建使用 Data Contract 98，不能冒充本次合并构建的执行证据。Memory 精确计数、文档体系重构和队员成长仍属后续项，日报中的两项 Memory 指标为未知。User Automation 新增 owner-only 元数据操作，不注入 Agent 上下文。
 
 2026-09-10 开发者明确授权继续实现两条评测线，并授权实现者自行选择必要实现细节、最后汇总。该评测增量不修改核心模型可见机制或内置 Skill 内容，因此自身不触发产品模型上下文 revision；后续实际上下文／Skill 机制改动仍按 Gate 流程确认和验证。
 
@@ -78,3 +78,17 @@ Claude Code 模型目录从 help 别名改为无 Prompt 控制初始化，原生
 
 飞书接口扫码改造按 [Feishu Channel v16](../../contracts/feishu-channel-v16.md) 实施，替换隐藏浏览器扫码，
 统一身份解析、会话恢复、可信域和提交结果核对。该独立增量不改变模型上下文；验证边界见[实施计划](implementation-plan.md#飞书接口扫码登录)。
+
+## 钉钉接口扫码登录
+
+按用户提出的开发者账号连接范围实现 [DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)。
+通过本次后台上下文调用实际 OAuth QR 接口，Main 本地生成二维码、串行处理结构化状态并完成 SSO；保留 `/baseInfo`、
+pending → Core commitConnection → activate 的提交次序。官方页面只承接额外交互，未知协议明确失败。
+名称别名取首个去除空白后有效的值，允许缺失但不放宽 corpId/staffId 身份；Migration 150 将 Data Contract 升为
+v1.58/schema 100，仅放宽 dingtalk_account 两个展示名的 NULL 约束，保持绑定与触发器及回滚。
+
+此增量不改变模型上下文或平台能力 gate。已完成隔离匿名 QR 初始化和等待响应的实测，协议/状态/取消/存储的自动验证
+及本机 Electron 呈现验证；真实手机确认、企业选择、SSO 身份和 packaged App 账号操作尚待隔离验收。
+来源与各类证据边界见[协议调查](../../research/dingtalk-login-protocol.md)，不能以匿名 Probe 或模拟 SSO 宣称完整登录已实测。
+自动检查、并发时限复验与隔离 UI 记录见[实施计划](implementation-plan.md#钉钉接口扫码登录)。
+当前文档导航、渠道架构、UI 与开发验收路由同步至 v13；Runtime、根 README 与其他 Provider 能力无需变更。

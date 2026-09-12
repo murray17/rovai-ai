@@ -3,7 +3,7 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-12
 ---
 
 # 渠道设置
@@ -11,7 +11,7 @@ last_updated: 2026-09-03
 渠道设置是 Owner 在 Rovai 本机维护当前开放渠道连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
 [Feishu Channel v16](../../contracts/feishu-channel-v16.md)与
-[DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)；本页只拥有信息层级、交互与可访问性。
+[DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)；本页只拥有信息层级、交互与可访问性。
 
 当前渠道页同时开放飞书和钉钉管理。两个 Provider 使用同一 Tab、连接、账号、队员 Bot 和管理信息层级；Renderer 只展示
 typed Snapshot 已提供的 Provider，不制造缺失平台。钉钉已有账号、Bot、发布、重连与受控管理链接按真实状态呈现，Cookie、
@@ -45,11 +45,14 @@ Dialog、状态点和间距复用现有组件语法。
 主进程依次投影“正在准备二维码”“请使用飞书扫码”“已扫码，请在手机上确认”“正在建立登录会话”
 （`completing_login`）和“正在读取账号与企业信息”；允许跳过未观察到的阶段，不允许倒退。
 `onQrReady` 只更新图像，已扫码后收起二维码并展示确认进度。没有服务端明确有效期时，`expiresAt` 为空，
-只展示标明“本次等待”的 `waitUntil`，不得宣称它是二维码有效期。
+不展示本地 `waitUntil` 或默认等待分钟数；服务端确实提供有效期时才可展示二维码到期时间。
 
 提交前关闭必须取消 exact attempt，迟到状态不再更新或打开 UI。普通取消为 quiet no-op，Dialog 立即关闭，
-不形成 failed state、页面 alert 或 toast；“关闭”、取消按钮和 Escape 都应可用。二维码过期提供“刷新二维码”，
-刷新创建新 attempt。请求超时、本地总等待超时、二维码过期、服务端拒绝、额外交互、身份解析和本地保存失败分别提示。
+不形成 failed state、页面 alert 或 toast；“关闭”、取消按钮和 Escape 都应可用。Main 确认二维码过期后，移除旧码，
+在原二维码区域显示“二维码已过期 / 点击刷新”的按钮，保留区域尺寸并支持键盘操作；刷新创建新 attempt。
+本地等待、请求或登录阶段超时后保留 Dialog，进入 `awaiting_refresh`，二维码区域显示“点击刷新”，正文提示“请刷新二维码后继续扫码。”；
+不出现超时错误、页面 alert 或 toast，不关闭 Dialog，不自动生成新码。该状态不宣称服务端二维码已过期；已过期才展示过期标签。
+刷新开启独立的新尝试，旧响应不能改回状态。服务端拒绝、额外交互、身份解析和本地保存失败仍分别提示，提交阶段的保护不变。
 账号登录是唯一的扫码流程；队员发布不增加兼容扫码或平台 registration 入口。
 
 账号登录在 preparing 前展示 `loading_local_session`（“正在读取 Rovai 本地渠道数据…”）。Main 开始本地事务时进入
@@ -61,7 +64,10 @@ Dialog、状态点和间距复用现有组件语法。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
 钉钉未连接时主动作是“连接钉钉”，Session 失效或已有历史账号时为“重新连接”，已连接时保留“断开”。登录复用内置
-QR Dialog、隐藏官方页面和必要时嵌入的 sandbox 原生交互页；Renderer 不获得 Web Session。DingTalk-only Snapshot 直接把
+QR Dialog，二维码由 Main 接口取得完整内容后本地生成，仅在额外交互时嵌入 sandbox 原生官方页；Renderer 不获得 Web Session。
+扫码完成后显示“正在建立钉钉开发者登录会话”，开始身份查询前显示“正在读取钉钉账号与企业身份”；图像更新不得倒退阶段。
+服务端未提供可靠有效期时不显示二维码到期倒计时。确认身份后名称缺失显示“钉钉用户”“当前企业”，占位不写回账号。
+DingTalk-only Snapshot 直接把
 钉钉作为当前 Provider，不再显示“当前版本没有可用的渠道”。暂时不可用的 Host 仍显示 Provider Tab，但只禁用连接与发布
 动作并给出真实状态，不退回“敬请期待”。
 
@@ -176,7 +182,7 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 下一轮召回后不留下完成占位。钉钉真正排队时发送排队 AI Card，admission 后与旧执行卡都通过 Robot recall 删除，
 不更新成“已开始”“状态已结束”或“此执行记录已结束”。安全、固定 URL、Token、callback、双身份和串行更新边界由
 [Feishu Channel v16](../../contracts/feishu-channel-v16.md)和
-[DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)拥有。
+[DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)拥有。
 
 ## 局域网执行台设置
 
@@ -213,5 +219,5 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Feishu Channel v16](../../contracts/feishu-channel-v16.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)
+- [DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

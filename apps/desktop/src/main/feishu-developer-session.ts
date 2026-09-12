@@ -183,36 +183,48 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
       options.onQrReady?.({ payload, expiresAt: initialized.expiresAt,
         waitUntil: new Date(attempt.deadline).toISOString() })
       this.#stage(attempt, 'awaiting_scan')
-      for (;;) {
-        await loginDelay(this.#protocol.profile.pollIntervalMs, signal)
-        this.#checkAttempt(attempt)
-        const result = await this.#protocol.poll(http, attempt.flowKey, signal)
-        this.#checkAttempt(attempt)
-        if (result.kind === 'expired') throw new FeishuSessionError('feishu_login_expired')
-        if (result.kind === 'scanned') this.#stage(attempt, 'scan_confirmed')
-        if (result.kind !== 'complete') continue
-        this.#stage(attempt, 'completing_login')
-        await this.#protocol.complete(http, result.crossLoginUri, signal)
-        this.#checkAttempt(attempt)
-        // Navigation establishes the target Session before any identity is accepted.
-        const portal = await http.request(this.#protocol.profile.portalUrl, { kind: 'navigation' }, { signal })
-        this.#checkAttempt(attempt)
-        this.#stage(attempt, 'inspecting_identity')
-        if (isFeishuLoginUrl(portal.finalUrl)) {
-          throw new FeishuSessionError('feishu_login_interaction_required')
-        }
-        requirePortalResponse(portal.response)
-        const html = await abortable(portal.response.text(), signal)
-        this.#checkAttempt(attempt)
-        const bootstrap = readOpenPlatformBootstrap(html, portal.finalUrl)
-        const stored = await abortable(this.#capture(attempt.session, bootstrap.apiOrigin), signal)
-        this.#checkAttempt(attempt)
-        this.#pendingLoginReplacement = {
-          replacementSession: attempt.session, identity: bootstrap.identity, session: stored, attempt
-        }
-        ready = true
-        return bootstrap.identity
-      }
+      const result = await this.#withPhaseTimeout(attempt, this.#protocol.profile.scanTimeoutMs,
+        'feishu_login_scan_timeout', async () => {
+          for (;;) {
+            await loginDelay(this.#protocol.profile.pollIntervalMs, signal)
+            this.#checkAttempt(attempt)
+            const state = await this.#protocol.poll(http, initialized.flowKey, signal)
+            this.#checkAttempt(attempt)
+            if (state.kind === 'expired') throw new FeishuSessionError('feishu_login_expired')
+            if (state.kind === 'scanned') this.#stage(attempt, 'scan_confirmed')
+            if (state.kind === 'complete') return state
+          }
+        })
+      this.#stage(attempt, 'completing_login')
+      const portal = await this.#withPhaseTimeout(attempt, this.#protocol.profile.handoffTimeoutMs,
+        'feishu_login_handoff_timeout', async () => {
+          await this.#protocol.complete(http, result.crossLoginUri, signal)
+          this.#checkAttempt(attempt)
+          // Navigation establishes the target Session before any identity is accepted.
+          const portal = await http.request(this.#protocol.profile.portalUrl, { kind: 'navigation' }, { signal })
+          this.#checkAttempt(attempt)
+          return portal
+        })
+      this.#stage(attempt, 'inspecting_identity')
+      const pending = await this.#withPhaseTimeout(attempt, this.#protocol.profile.identityTimeoutMs,
+        'feishu_login_identity_timeout', async () => {
+          if (isFeishuLoginUrl(portal.finalUrl)) {
+            throw new FeishuSessionError('feishu_login_interaction_required')
+          }
+          requirePortalResponse(portal.response)
+          const html = await abortable(portal.response.text(), signal)
+          this.#checkAttempt(attempt)
+          const bootstrap = readOpenPlatformBootstrap(html, portal.finalUrl)
+          const stored = await abortable(this.#capture(attempt.session, bootstrap.apiOrigin), signal)
+          this.#checkAttempt(attempt)
+          return {
+            replacementSession: attempt.session, identity: bootstrap.identity, session: stored, attempt
+          }
+        })
+      this.#checkAttempt(attempt)
+      this.#pendingLoginReplacement = pending
+      ready = true
+      return pending.identity
     } catch (error) {
       const failure = error instanceof Error && /^feishu_[a-z_]+$/.test(error.message)
         ? error : new FeishuSessionError('feishu_login_failed')
@@ -404,6 +416,20 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     if (this.#activeAttempt !== attempt || attempt.generation !== this.#loginGeneration) {
       throw new FeishuSessionError('feishu_login_cancelled')
     }
+  }
+
+  async #withPhaseTimeout<T>(attempt: LoginAttempt, timeoutMs: number, code: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    this.#checkAttempt(attempt)
+    const deadline = Date.now() + timeoutMs
+    const timer = setTimeout(() => attempt.controller.abort(new FeishuSessionError(code)), timeoutMs)
+    try {
+      const value = await abortable(operation(), attempt.controller.signal)
+      if (Date.now() >= deadline) attempt.controller.abort(new FeishuSessionError(code))
+      this.#checkAttempt(attempt)
+      return value
+    } finally { clearTimeout(timer) }
   }
 
   #stage(attempt: LoginAttempt, stage: FeishuLoginStage): void {

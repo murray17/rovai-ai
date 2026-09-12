@@ -2,6 +2,7 @@ export type FeishuLoginStage =
   | 'loading_local_session'
   | 'preparing'
   | 'awaiting_scan'
+  | 'awaiting_refresh'
   | 'scan_confirmed'
   | 'completing_login'
   | 'inspecting_identity'
@@ -17,7 +18,7 @@ const LOGIN_STAGES: readonly FeishuLoginStage[] = [
 ]
 
 export function canAdvanceFeishuLoginStage(current: FeishuLoginStage, next: FeishuLoginStage): boolean {
-  if (current === next || ['connected', 'expired', 'cancelled', 'failed'].includes(current)) return false
+  if (current === next || ['connected', 'expired', 'awaiting_refresh', 'cancelled', 'failed'].includes(current)) return false
   return !LOGIN_STAGES.includes(next) || LOGIN_STAGES.indexOf(next) > LOGIN_STAGES.indexOf(current)
 }
 
@@ -25,8 +26,8 @@ const LOGIN_FAILURE_DETAILS: Readonly<Record<string, string>> = {
     feishu_developer_identity_incomplete:
       '已登录飞书，但未能读取完整的账号与企业信息。请关闭后重试。',
     feishu_login_failed: '飞书扫码登录未完成，请关闭后重试。',
-    feishu_login_expired: '二维码已过期，请关闭后重新扫码。',
-    feishu_login_timeout: '本次登录等待已超时，请关闭后重新扫码。',
+    feishu_login_expired: '二维码已过期，请点击刷新后重新扫码。',
+    feishu_login_timeout: '请刷新二维码后继续扫码。',
     feishu_request_timeout: '飞书请求超时，请检查网络后重试。',
     feishu_network_error: '无法连接飞书，请检查网络后重试。',
     feishu_login_server_rejected: '飞书拒绝了本次登录请求，请稍后重试。',

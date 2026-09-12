@@ -144,7 +144,7 @@ export class ChannelSettingsCoordinator {
   }
 
   async refreshLoginQr(attemptId: string): Promise<void> {
-    if (!await this.#feishu.refreshLoginQr(attemptId)) this.#dingtalk.refreshLoginQr(attemptId)
+    if (!await this.#feishu.refreshLoginQr(attemptId)) await this.#dingtalk.refreshLoginQr(attemptId)
   }
 
   dispose(): void {

@@ -42,7 +42,9 @@ Web 端点不是官方公开的长期稳定 API；协议变化必须明确失败
 | 已知账号选择、授权或验证步骤 | 返回对应的额外交互提示，停止自动流程 |
 | 未知步骤、状态或响应格式 | 明确的适配错误，不无限等待 |
 
-当前真实初始化响应未提供明确有效期，因此 `expiresAt=null`；`waitUntil` 只表示本地等待期限，不宣称二维码服务端有效期。
+当前真实初始化响应未提供明确有效期，因此 `expiresAt=null`；`waitUntil` 只保留为兼容元数据，Dialog 不显示本地截止时间。
+收到 `status=5` 后，由 Main 投影 `expired`；Renderer 在原二维码区域呈现可点击的刷新按钮，不继续显示旧码，
+也不依据本地等待截止时间推断服务端过期。
 
 ## 2. 请求与可信地址
 
@@ -64,13 +66,15 @@ Authorization 或请求正文；Cookie 由 Session 按目标域与路径选择�
 不一致则拒绝。管理 API 只允许该 origin 下的 `/developers/` 路径。品牌按精确主机映射：`open.feishu.cn` 与
 `open.larkoffice.com` 为 `feishu`，`open.larksuite.com` 为 `lark`；不得用包含 `lark` 的字符串猜品牌。
 
-HTTP 单请求默认 15 秒，包括重定向与响应正文读取。整个自动登录默认 180 秒，使用独立定时器，不能依赖轮询检查。
+HTTP 单请求默认 15 秒，包括重定向与响应正文读取。扫码等待默认 5 分钟、自动会话交接 30 秒、身份读取 20 秒，
+整个自动登录默认 10 分钟；各阶段与总期限由独立定时器驱动取消，不能依赖轮询检查。
 取消同时结束 fetch、正文读取和轮询等待；无响应或不配合取消的 Promise 也不能阻止本地终止。HTTP 层缓冲有界正文，
 不将未受期限保护的远端正文流交给后续调用者。当前不自动重试远端登录步骤；配置可调整等待策略，不能把本地超时映射成二维码过期。
 
 ## 3. 被动 bootstrap 与身份归一化
 
-跨域交接 URI 存在时先验证再访问，随后请求开放平台页面。只有可信站点的完整身份与 CSRF bootstrap 成功解析，
+跨域交接 URI 为非空字符串时先验证再访问，随后请求开放平台页面。该可选字段省略、为 `null` 或仅含空白的字符串时，
+直接用本次 Session 请求开放平台；非字符串值仍返回协议错误。只有可信站点的完整身份与 CSRF bootstrap 成功解析，
 才能生成待提交会话；扫码、Cookie 存在或 HTTP 200 均不能单独证明连接成功。
 
 HTML 用 HTML parser 提取 inline script，再用 JS parser 读取已知 `window.user`、`window.csrfToken`、
@@ -95,6 +99,9 @@ email 变化不构成切换。在线检查保留 valid/invalid/unavailable 三�
 `StoredFeishuDeveloperSession` 增加可选 `portalOrigin`，恢复时按保存品牌校验；旧记录按 brand 选择门户。
 Cookie 持久化保留 domain、path、expirationDate、secure、httpOnly、sameSite、session 和可选 hostOnly。
 旧记录通过 Chromium domain 的前导点识别 host-only；不把 host-only cookie 扩成整个父域。
+Core 的 Session JSON 准入同步接受 `cookies` 与可选 `portalOrigin`，保留仅含 `cookies` 的旧记录读取。
+`portalOrigin` 只接受与 identity brand 匹配的三个精确 HTTPS 开放平台 origin，拒绝路径、凭据、相似域和其他 Session 字段；
+Cookie 域与 Main 保持一致，接受 `feishu.cn`、`larkoffice.com`、`larksuite.com` 及各自子域。
 
 ## 4. 主进程状态与本地提交
 
@@ -111,9 +118,14 @@ inspecting_identity → saving_local_session → connected`。允许跳过未观
 `saving_local_session`，投影可选 `commitUncertain=true`，提供“核对保存结果”。后续核对/状态刷新仍复用该命令；
 已取得 applied 回执时只继续激活，不重新提交。进程重启后以 Core 已持久记录恢复，不假定网络错误等于未提交。
 
-`ChannelQrAttemptView` 新增 `completing_login` 和可选 `waitUntil`、`commitUncertain`，其余字段与
+`ChannelQrAttemptView` 包含 `completing_login`、`awaiting_refresh` 和可选 `waitUntil`、`commitUncertain`，其余字段与
 `ChannelSettingsSnapshot.schemaVersion=4` 保持。`channels.refreshLoginQr(attemptId)` 对过期飞书 attempt 创建新尝试，
-对结果不明的本地提交核对原命令；钉钉行为不变。用户普通取消仍为 quiet no-op。
+对结果不明的本地提交核对原命令；钉钉遵循其当前渠道合同。用户普通取消仍为 quiet no-op。
+
+本地登录、请求或阶段超时先结束旧请求并清理临时会话，再进入 `awaiting_refresh`，保留 Dialog 与二维码区域的刷新按钮。
+不显示扫码超时报错，不自动关闭或重新生成；只有用户点击刷新才创建新 attempt。渠道确认过期使用独立的 `expired`。
+这两种可刷新结果由 Main 正常返回，不成为 IPC 拒绝或页面 alert；其他网络、协议与身份错误仍明确报告。
+该恢复规则只适用于本地提交前，不能绕过 `saving_local_session` 的取消和重复连接保护。
 
 错误分别覆盖二维码过期、本地总期限、请求/正文超时、网络错误、服务端拒绝、协议变化、额外交互、身份/CSRF
 解析不全及本地拒绝。日志白名单为 attemptId、阶段、请求耗时、HTTP 状态、业务错误码、已脱敏的域/路径和缺失字段名；
