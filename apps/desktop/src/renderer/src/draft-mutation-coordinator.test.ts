@@ -69,6 +69,31 @@ describe('DraftMutationCoordinator', () => {
     expect(coordinator.getCurrentDraft()).toMatchObject({ revision: 12, content: document('new') })
   })
 
+  it('returns a queued input after earlier saves and fences late results from another Camp', async () => {
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    const mutations: Array<{ draft: CampComposerDraftView; mutation: DraftMutation }> = []
+    const coordinator = new DraftMutationCoordinator({
+      load: async () => draft('camp-a', 1),
+      mutate: async (current, mutation) => {
+        mutations.push({ draft: current, mutation })
+        if (mutation.kind === 'return_pending_input') await waiting
+        return draft(current.campId, current.revision + 1, mutation.kind === 'return_pending_input' ? 'queued' : 'typed')
+      }
+    })
+    coordinator.beginEpoch('camp-a', draft('camp-a', 1))
+    await coordinator.saveContent(document('typed'))
+    const returned = coordinator.returnPendingInput('input-b', 3, null)
+    await Promise.resolve()
+    expect(mutations[1]).toMatchObject({ draft: { revision: 2 }, mutation: {
+      kind: 'return_pending_input', pendingInputId: 'input-b', expectedRevision: 3, editToken: null
+    } })
+    coordinator.beginEpoch('camp-b', draft('camp-b', 4, 'keep this'))
+    release()
+    await expect(returned).rejects.toBeInstanceOf(StaleDraftEpochError)
+    expect(coordinator.getCurrentDraft()).toMatchObject({ campId: 'camp-b', content: document('keep this') })
+  })
+
   it('waits for earlier mutations before deciding that a content snapshot is unchanged', async () => {
     const changes: string[] = []
     const mutate = vi.fn(async (current: CampComposerDraftView, mutation: DraftMutation) => ({

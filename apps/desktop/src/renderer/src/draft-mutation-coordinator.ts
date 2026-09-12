@@ -7,6 +7,7 @@ import type {
 import { composerDocumentsEqualDirect } from './composer-document'
 
 export type DraftMutation =
+  | { kind: 'return_pending_input'; pendingInputId: string; expectedRevision: number; editToken: string | null; commandId: string }
   | { kind: 'quote'; action: MessageQuoteAction; commandId: string }
   | { kind: 'save_content'; content: ComposerDocument }
   | { kind: 'add_source_attachment'; file: File }
@@ -171,6 +172,13 @@ export class DraftMutationCoordinator {
     await this.queue
     this.assertActive(epoch, campId)
     return this.requireCurrentDraft()
+  }
+
+  returnPendingInput(pendingInputId: string, expectedRevision: number, editToken: string | null): Promise<CampComposerDraftView> {
+    const commandId = crypto.randomUUID()
+    return this.enqueue('return_pending_input', (current) => this.bindings.mutate(current, {
+      kind: 'return_pending_input', pendingInputId, expectedRevision, editToken, commandId
+    }))
   }
 
   private enqueue(

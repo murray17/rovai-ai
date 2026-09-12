@@ -5,6 +5,8 @@ import type {
   AgentRunView,
   AgentRunExecutionEvidenceView,
   CampComposerDraftView,
+  CampPendingInputsView,
+  CoreEvent,
   CampOpenMessageCoverage,
   CampOpenProjection,
   LocalAttachmentOwnerLocator,
@@ -251,17 +253,30 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
 }
 
 if (attachmentReviewMode) installAttachmentSurfaceState(reviewImages[0])
+let pendingQueue: CampPendingInputsView = { campId, executionActive: false, editSession: null, items: [] }
+const pendingListeners = new Set<(event: CoreEvent) => void>()
+let releaseReturn: (() => void) | null = null
+let returnGate: Promise<void> | null = null
+let rejectReturn = false
+let failDraftReadAfterReturn = false
+let failDraftRead = false
+let failDraftSave = false
+const pendingCalls: string[] = []
+const invalidatePending = () => {
+  for (const listener of pendingListeners) listener({ method: 'camp.pendingInputs.changed', params: { campId, reason: 'edited' } } as CoreEvent)
+}
 let copiedPublicText = ''
 let repliedPublicMessageId: string | null = null
 
 Object.assign(window, { rovai: {
-  platform: 'darwin', onEvent: () => () => {},
+  platform: 'darwin', onEvent: (listener: (event: CoreEvent) => void) => { pendingListeners.add(listener); return () => pendingListeners.delete(listener) },
   clipboard: { write: async ({ text }: { text: string }) => { copiedPublicText = text } },
   request: async (method: string, params?: {
     imageId?: string
     content?: CampComposerDraftView['content']
     evidenceId?: string
     replyToCampMessageId?: string
+    command?: { pendingInputId: string; expectedRevision: number; action: { type: string; expectedDraftRevision: number } }
   }): Promise<unknown> => {
     if (method === 'agentRunEvidence.list') return { schemaVersion: 1, agentRunId: 'text-run',
       requestedAfterSequence: 0, nextAfterSequence: 60, throughSequence: 60, hasMore: false, evidence: textEvidence }
@@ -271,13 +286,35 @@ Object.assign(window, { rovai: {
       return { payload: { text: fullNarration } }
     }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
-    if (method === 'camp.composerDraft.get') return draft
+    if (method === 'camp.composerDraft.get') {
+      if (failDraftRead) throw new Error('Draft read unavailable')
+      return structuredClone(draft)
+    }
+    if (method === 'camp.pendingInputs.get') return structuredClone(pendingQueue)
+    if (method === 'camp.pendingInputs.edit') {
+      const command = params!.command!
+      pendingCalls.push(command.action.type)
+      if (returnGate) await returnGate
+      if (rejectReturn) return { status: 'rejected', code: 'pending_input.changed' }
+      const item = pendingQueue.items.find(entry => entry.id === command.pendingInputId)!
+      if (command.action.type === 'return_to_composer') {
+        if (command.action.expectedDraftRevision !== draft.revision) throw new Error('Wrong Draft revision')
+        draft = { ...draft, revision: draft.revision + 1, content: item.content, body: item.body,
+          attachments: item.attachments, quotes: item.quotes, replyIntent: item.replyIntent }
+        failDraftRead = failDraftReadAfterReturn
+      }
+      pendingQueue = { ...pendingQueue, items: pendingQueue.items.filter(entry => entry.id !== item.id) }
+      invalidatePending()
+      return { status: 'applied', code: 'pending_input.returned_to_composer', payload: { draftRevision: draft.revision } }
+    }
     if (method === 'camp.composerDraft.startReply') {
       repliedPublicMessageId = params?.replyToCampMessageId ?? null
       draft = { ...draft, revision: draft.revision + 1 }
       return draft
     }
     if (method === 'camp.composerDraft.save') {
+      pendingCalls.push('save_content')
+      if (failDraftSave) throw new Error('Draft save unavailable')
       const content = params?.content ?? { version: 2, segments: [] }
       draft = { ...draft, content, body: content.segments.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
         revision: draft.revision + 1 }
@@ -380,6 +417,35 @@ reactRoot.render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let anchor: HTMLElement | null = null
 Object.assign(window, { campOpenTest: {
+  showPendingQueue: () => {
+    pendingCalls.length = 0
+    pendingQueue = { campId, executionActive: true, editSession: null, items: ['B', 'C'].map((name, index) => ({
+      id: `pending-${name}`, campId, enqueueSequence: index + 1, revision: 1, state: 'queued',
+      body: name === 'B' ? 'B：请检查输入框和排队行为。' : 'C：继续执行下一条消息。',
+      content: { version: 2, segments: [{ kind: 'text', text: name === 'B' ? 'B：请检查输入框和排队行为。' : 'C：继续执行下一条消息。' }] },
+      attachments: [], quotes: [], replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null
+    })) }
+    current = { ...current, camp: { ...current.camp, title: '待发送消息移回输入框' },
+      tasks: [], turns: [], agentRuns: [], messageDeliveries: [], messages: messages.slice(-1) }
+    updateSnapshot(current)
+    invalidatePending()
+  },
+  holdPendingReturn: (reject = false, failRead = false) => {
+    rejectReturn = reject
+    failDraftReadAfterReturn = failRead
+    returnGate = new Promise<void>(resolve => { releaseReturn = resolve })
+  },
+  releasePendingReturn: () => { releaseReturn?.(); returnGate = null },
+  allowDraftRead: () => { failDraftRead = false; failDraftReadAfterReturn = false },
+  failDraftSave: (fail: boolean) => { failDraftSave = fail },
+  pendingState: () => ({
+    queue: pendingQueue.items.map(item => item.id), calls: pendingCalls, draft: structuredClone(draft),
+    text: element('#camp-message')?.textContent, editable: element('#camp-message')?.getAttribute('contenteditable'),
+    focused: document.activeElement === element('#camp-message'),
+    rowCount: document.querySelectorAll('.pending-input-row').length,
+    editingCount: document.querySelectorAll('.pending-input-row.is-editing, .pending-input-editor').length,
+    error: document.querySelector('.pending-input-notice')?.textContent ?? '',
+  }),
   showCurrentUserProfile: () => {
     current = { ...current, tasks: [], turns: [], agentRuns: [], messageDeliveries: [], timeline: [],
       agentRunImages: [], agentRunFileChanges: [],
