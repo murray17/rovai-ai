@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-09-10
+last_updated: 2026-09-12
 ---
 
 # App Shell 与统一侧栏
@@ -163,7 +163,9 @@ Project/Camp 行、菜单、临时提醒和设置返回均可键盘操作，Icon
 Snapshot 刷新、设置/记忆页和应用失焦均不得提前清除。
 
 页面缩放继续使用标准 `CommandOrControl + / - / 0` 快捷键；App 拦截 Electron 的默认倍率阶梯，
-将键盘放大和缩小固定为每次增减 10 个百分点，`CommandOrControl 0` 重置为 100%。键盘调整后，
+与设置页统一采用 [Chrome 桌面缩放档位](../themes/README.md#外观与阅读偏好)，按方向切换相邻档位，
+到达 25% 或 500% 后停止。已有非预设比例按调整方向进入相邻档位；低于 25% 的历史保存值继续
+显示和恢复，放大时进入 25%，缩小时保持当前值。`CommandOrControl 0` 重置为 100%。键盘调整后，
 App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，并通过 polite live region 播报同一文字。
 浮层使用双主题语义 Token，在首次训练和所有一级页面上保持同一位置与行为。
 
