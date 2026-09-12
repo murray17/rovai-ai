@@ -2150,6 +2150,7 @@ mod windows_tests {
         path_entries: Vec<SearchPathEntry>,
     ) -> RuntimeSearchEnvironment {
         RuntimeSearchEnvironment {
+            startup_configurations: BTreeMap::new(),
             generation,
             path_value: env::join_paths(path_entries.iter().map(|entry| entry.path.as_os_str()))
                 .unwrap(),
