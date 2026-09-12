@@ -145,4 +145,12 @@ fallback 接纳。最小命令为 `cargo test -p rovai-core --bin rovai-core hea
 - 单聊保留已有窗口内正文草稿生命周期，事务回执携带无路径 Draft View 和正文；没有正文 autosave 或 schema 扩张。
 - Rust 新测试分别由 Camp/Single Chat 的转移事务拥有，覆盖 CAS 拒绝、剩余 FIFO、重新入队、回放和发布竞争；旧编辑测试保留兼容 owner。
   该新转移涉及两个持久 owner，纯函数或既有 save/cancel 用例不能证明，使用已有隔离 SQLite fixture。
-- 验证记录在完成本地门禁和隔离 Electron 检查后补齐。
+- 验证：`pnpm typecheck`、桌面构建、Rust format/check/clippy、`pnpm test:rust:pr`（555 Library + 35 CLI + 309 slow）通过。
+  全量 Vitest 覆盖 174 文件 / 1790 用例；本机并发运行有进程/定时用例超时，相关 6 文件 / 55 用例串行复跑通过，
+  其余 171 文件已通过。`pnpm test` 后续 Node 套件 317 通过、2 项 Windows 专属跳过；文档及 Skill 门禁通过。
+- 隔离 Electron 使用生产 CampWorkspace / SingleChatPanel：覆盖已有输入覆盖、队列退回、焦点、无蓝色编辑行，
+  以及保存失败保留脏文字、发布竞争拒绝、提交后读取失败重载、私聊丢失回执的同命令重放。
+  双向离开竞态和重叠导航使用独立可幂等完成的引用计数 lease，取消一个导航不能释放另一个导航的保护。
+  这些夹具不启动 Core、SQLite、Skill Library 或真实 Runtime；需求与规范双轴复核通过。
+- 界面证据为合成数据：[公屏日间](../../assets/pending-input-return/camp-day.png)、
+  [单聊夜间](../../assets/pending-input-return/single-chat-night.png)。
