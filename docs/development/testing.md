@@ -438,6 +438,11 @@ pnpm accept:task-card-ui
 fixture、截图、窗口尺寸和直接调用 capture 脚本的方法见
 [桌面 UI 验收](ui-acceptance.md)。
 
+侧栏可见窗口可独立运行 `ROVAI_SIDEBAR_ACCEPT_SCOPE=navigation-windows pnpm accept:sidebar-ui`。
+它复用同一隔离 packaged App/Core fixture，覆盖 5 → 15 条、收起重开、第八条改名/删除补位、快速对话、
+项目置顶迁移、重启及双主题小窗口；等待 Core ready 并明确模拟前台。默认 `all` 保留完整菜单/设置/确认
+Dialog 验收，专项结果不能替代默认全套结果。
+
 `accept:v0.16`、`accept:v0.17` 等带版本号的聚合命令属于历史版本验收入口，不是常青
 日常门禁。其精确断言、Migration 版本和证据应从对应版本实施文档或测试源码读取。
 

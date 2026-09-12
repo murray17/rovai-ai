@@ -102,6 +102,17 @@ last_updated: 2026-09-12
   新增覆盖第六条状态变化、终态移出前五条、丢事件轮询、已读/改名/删除/排序、过时响应和在途收起。
 - `accept:sidebar-ui` 的现有隔离 packaged App fixture 增加真实 Core IPC 的第八条改名、收起期间改名、
   重新展开及删除补位断言；不发送模型消息，不使用日常数据。
+- 验证通过：类型检查、桌面与 Debug Core 构建、Rust format/Clippy、完整 workspace（555 Library、35 CLI、
+  237 Main，6 项既有 ignored）、309 slow tests；完整单 worker `pnpm test` 为 175 文件 / 1794 Vitest 用例，
+  Node 套件 317 通过、2 项既有平台跳过。窗口 reader / refresh coordinator 的 17 项定向回归通过。
+- `ROVAI_SIDEBAR_ACCEPT_SCOPE=navigation-windows pnpm accept:sidebar-ui` 使用上述 Debug Core 打包产物通过：
+  普通/置顶项目、快速对话、完整前缀刷新、后台第八条改名和删除补位、收起重开、重启恢复 5 条、日夜主题与
+  1040×700。等待 Core `ready` 后才派发 fixture RPC，显式模拟前台；键盘检查使用当前 `:focus-visible`
+  行操作反馈，不要求已被全局 CSS 移除的浏览器 outline。没有修改产品启动、焦点或确认 Dialog。
+- 失败证据保留：本机并行运行曾使既有 Runtime identity probe 与评测短超时用例失败；低并发完整复跑通过，
+  未改断言或超时。首次 packaged 启动未在 20 秒内提供调试端口；同构建启动探针约 2 秒就绪。后续探针明确
+  复现窗口先于 Core ready 的验收竞态。默认 `all` 侧栏验收仍有旧删除文案和设置入口选择器，保留这些断言，
+  本次专项通过不宣称旧的全套 UI 验收通过。
 
 ## 明确限制
 
