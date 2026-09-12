@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>History initialization</title></head>
+<body><main id="view"></main><script>
+history.replaceState(null, '', '#runtimes');
+document.querySelector('#view').innerHTML = '<h1 id="rendered">运行时</h1><button id="navigate">设置</button>';
+document.querySelector('#navigate').onclick = () => {
+  history.pushState({ page: 'settings' }, '', '?tab=all#settings');
+  document.querySelector('#rendered').textContent = '启动设置';
+};
+</script></body></html>

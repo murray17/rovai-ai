@@ -1,3 +1,4 @@
+import { FilePreviewFrameNavigation } from './file-preview/file-preview-navigation'
 import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, extname, join } from 'node:path'
@@ -151,6 +152,7 @@ import {
   parseCopyPathRequest,
   parseFilePreviewCamp,
   parseGenerationRequest,
+  parseHtmlSiteRequest,
   parseHandleRequest,
   parseLineRequest,
   parseOpenFilePreviewRequest,
@@ -477,6 +479,10 @@ executionView.onChanged((snapshot) => {
 const filePreview = new FilePreviewService(
   new CoreFilePreviewSourceAuthority(core),
   {
+    previewHostOrigin(webContentsId) {
+      if (mainWindow?.webContents.id !== webContentsId) throw new Error('Preview window is unavailable')
+      return new URL(mainWindow.webContents.getURL()).origin
+    },
     async selectRoot(webContentsId) {
       const window = mainWindow?.webContents.id === webContentsId ? mainWindow : null
       if (!window || window.isDestroyed()) return null
@@ -815,8 +821,13 @@ function createWindow(): void {
     const current = window.webContents.getURL()
     if (current && url !== current) event.preventDefault()
   })
-  window.webContents.on('will-frame-navigate', (details) => {
-    if (!details.isMainFrame) details.preventDefault()
+  const previewNavigation = new FilePreviewFrameNavigation(url => filePreview.ownsHtmlPreviewOrigin(webContentsId, url))
+  window.webContents.on('will-frame-navigate', details => {
+    if (!details.isMainFrame && !previewNavigation.allows(details.url, details.frame, window.webContents.mainFrame, window.webContents.mainFrame.framesInSubtree)) details.preventDefault()
+  })
+
+  window.webContents.on('will-redirect', details => {
+    if (!details.isMainFrame && !previewNavigation.allows(details.url, details.frame, window.webContents.mainFrame, window.webContents.mainFrame.framesInSubtree)) details.preventDefault()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -1109,6 +1120,12 @@ ipcMain.handle('rovai:file-preview-resolve-line', (event, value: unknown) =>
 
 ipcMain.handle('rovai:file-preview-read-binary', (event, value: unknown) =>
   filePreview.readBinary(requireFilePreviewSender(event), parseGenerationRequest(value)))
+
+ipcMain.handle('rovai:file-preview-prepare-html-site', (event, value: unknown) =>
+  filePreview.prepareHtmlSite(requireFilePreviewSender(event), parseGenerationRequest(value)))
+
+ipcMain.handle('rovai:file-preview-release-html-site', (event, value: unknown) =>
+  filePreview.releaseHtmlSite(requireFilePreviewSender(event), parseHtmlSiteRequest(value)))
 
 ipcMain.handle('rovai:file-preview-prepare-html', (event, value: unknown) =>
   filePreview.prepareHtml(requireFilePreviewSender(event), parseGenerationRequest(value)))

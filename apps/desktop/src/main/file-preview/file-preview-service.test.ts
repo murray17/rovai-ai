@@ -90,6 +90,33 @@ function request(rawReference: string): OpenFilePreviewRequest {
 }
 
 describe('FilePreviewService', () => {
+  it('binds HTTP preview sites to the existing handle, generation, window and Camp lifetime', async () => {
+    const { root, service } = await fixture()
+    await writeFile(join(root, 'index.html'), '<h1>site</h1>')
+    const opened = await service.open(1, request('index.html?tab=all#focus'))
+    if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('expected file')
+    const file = opened.value.file
+    const input = { handleId:file.handleId, expectedGeneration:file.contentGeneration }
+    expect((await service.prepareHtmlSite(2,input)).ok).toBe(false)
+    const prepared = await service.prepareHtmlSite(1,input)
+    if (!prepared.ok) throw new Error('expected site')
+    expect(new URL(prepared.value.documentUrl).search).toBe('?tab=all')
+    expect(new URL(prepared.value.documentUrl).hash).toBe('#focus')
+    expect(service.ownsHtmlPreviewOrigin(1,prepared.value.entryUrl)).toBe(true)
+    await service.releaseHtmlSite(2,{previewId:prepared.value.previewId})
+    expect(service.ownsHtmlPreviewOrigin(1,prepared.value.entryUrl)).toBe(true)
+    const reloaded = await service.reload(1,{...input,reopenToken:file.reopenToken})
+    if (!reloaded.ok) throw new Error('expected reload')
+    expect(service.ownsHtmlPreviewOrigin(1,prepared.value.entryUrl)).toBe(false)
+    expect((await service.prepareHtmlSite(1,input)).ok).toBe(false)
+    const next = await service.prepareHtmlSite(1,{handleId:file.handleId,expectedGeneration:reloaded.value.contentGeneration})
+    if (!next.ok) throw new Error('expected fresh site')
+    expect(next.value.origin).not.toBe(prepared.value.origin)
+    await service.bindCamp(1,'camp-2')
+    expect(service.ownsHtmlPreviewOrigin(1,next.value.entryUrl)).toBe(false)
+    expect((await service.prepareHtmlSite(1,{handleId:file.handleId,expectedGeneration:reloaded.value.contentGeneration})).ok).toBe(false)
+  })
+
   it('prepares HTML above the source budget without relaxing source reads or document protection', async () => {
     const { root, service } = await fixture()
     const html = '<h1>大文件网页</h1>' + ' '.repeat(4 * 1024 * 1024)
@@ -98,17 +125,16 @@ describe('FilePreviewService', () => {
     expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { kind: 'html' } } })
     if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('expected file preview')
     const readRequest = { handleId: opened.value.file.handleId, expectedGeneration: opened.value.file.contentGeneration }
-    const prepared = await service.prepareHtml(1, readRequest)
+    const prepared = await service.prepareHtmlSite(1, readRequest)
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) throw new Error('expected HTML document')
-    expect(prepared.value.html).toBe(html)
-    const assetUrl = `rovai-preview://asset/${prepared.value.tabToken}/site.css`
-    expect(service.authorizeHtmlAsset(1, 'GET', assetUrl)).toBe(true)
-    expect(service.authorizeHtmlAsset(2, 'GET', assetUrl)).toBe(false)
+    expect(new URL(prepared.value.documentUrl).pathname).toBe('/large.html')
+    expect(service.ownsHtmlPreviewOrigin(1, prepared.value.entryUrl)).toBe(true)
+    expect(service.ownsHtmlPreviewOrigin(2, prepared.value.entryUrl)).toBe(false)
     expect(await service.readText(1, readRequest)).toMatchObject({ ok: false, error: { code: 'file_too_large' } })
     await service.release(1, { handleId: readRequest.handleId })
-    expect(service.authorizeHtmlAsset(1, 'GET', assetUrl)).toBe(false)
-    expect(await service.prepareHtml(1, readRequest)).toMatchObject({ ok: false })
+    expect(service.ownsHtmlPreviewOrigin(1, prepared.value.entryUrl)).toBe(false)
+    expect(await service.prepareHtmlSite(1, readRequest)).toMatchObject({ ok: false })
 
     for (const [path, size] of [['oversized.html', 32 * 1024 * 1024 + 1], ['large.md', 4 * 1024 * 1024 + 1]] as const) {
       await writeFile(join(root, path), '# oversized')
@@ -116,7 +142,7 @@ describe('FilePreviewService', () => {
       const oversized = await service.open(1, request(path))
       expect(oversized).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { kind: 'paged_text' } } })
       if (!oversized.ok || oversized.value.kind !== 'file_preview') throw new Error('expected paged preview')
-      expect(await service.prepareHtml(1, {
+      expect(await service[path.endsWith('.html') ? 'prepareHtmlSite' : 'prepareHtml'](1, {
         handleId: oversized.value.file.handleId, expectedGeneration: oversized.value.file.contentGeneration
       })).toMatchObject({ ok: false, error: { code: 'file_too_large' } })
     }
@@ -999,20 +1025,20 @@ describe('FilePreviewService', () => {
     expect(native.selectRoot).not.toHaveBeenCalled()
   })
 
-  it('derives an external HTML tab resource scope from its own directory and releases it with the tab', async () => {
+  it('derives an external Markdown tab resource scope from its own directory and releases it with the tab', async () => {
     const { root, service, native } = await fixture()
     const outside = await mkdtemp(join(tmpdir(), 'rovai-file-preview-html-outside-'))
     directories.push(outside)
     const pages = join(outside, 'pages')
     await mkdir(join(pages, 'assets'), { recursive: true })
     await mkdir(join(pages, 'images'), { recursive: true })
-    await writeFile(join(pages, 'index.html'), '<link rel="stylesheet" href="./assets/site.css"><a href="details.html">Details</a>')
+    await writeFile(join(pages, 'index.md'), '<link rel="stylesheet" href="./assets/site.css"><a href="details.html">Details</a>')
     await writeFile(join(pages, 'details.html'), '<h1>Details</h1>')
     await writeFile(join(pages, 'assets', 'site.css'), 'body{background:url(../images/bg.png)}')
     await writeFile(join(pages, 'images', 'bg.png'), new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
     await writeFile(join(root, 'not-in-html-scope.css'), 'body{color:red}')
 
-    const opened = await service.open(1, request(join(pages, 'index.html')))
+    const opened = await service.open(1, request(join(pages, 'index.md')))
     expect(opened.ok).toBe(true)
     if (!opened.ok || opened.value.kind !== 'file_preview') return
     const prepared = await service.prepareHtml(1, {

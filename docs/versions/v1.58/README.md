@@ -129,3 +129,12 @@ Data Contract 99、当前版本指针、模型上下文和 Runtime classifier �
 Data Contract 从 v1.58 / schema 100 升为 v1.58 / schema 101；不改变模型上下文、事件协议或平台资格。
 当前合同为 [Runtime Launch v40](../../contracts/runtime-launch-and-verification-v40.md)，架构与设置 brief
 同步。实现、测试 owner 与交付证据见[实施计划](implementation-plan.md#runtime-自定义启动设置)。
+
+
+## HTML 交互预览
+
+按用户确认迁移正式 HTML 预览至可撤销、不同源 HTTP 站点，默认脚本/依赖/内部 iframe 加载，补充诊断与源码切换。
+当前合同 [File Preview v12](../../contracts/file-preview-v12.md)，取舍 [V1.58-D07](decisions.md#v1-58-d07)，
+实现与两份原稿独立验收见 [HTML 预览验证](html-preview-http.md)。Contracts、Architecture、UI、开发测试与当前规范
+导航同步；不改变版本指针、数据库、模型上下文、Runtime classifier/兼容性、根 README 产品定位或其他文件类型。
+本增量不代表整个 v1.58 或日常安装版已完成部署。

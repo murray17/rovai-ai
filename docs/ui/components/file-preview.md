@@ -188,7 +188,7 @@ Viewer 不显示预览/源码切换、右上角复制按钮、整行工具栏或
 - Markdown 继续通过 `SafeMarkdown` 渲染安全 GFM，并在文件预览中显式使用 document 模式；超出 4 MiB 显示分页原文；
   行长随预览容器变化：小于 960px 时正文区域最大 780px，960px 起整体可到 1120px、普通正文最大 860px，
   1200px 起普通正文最大 930px。代码和表格使用更宽的内容轨道，并在自身区域横向滚动；窗口宽度不代替容器宽度。
-- HTML 在 sandbox iframe 中执行，采用独立的 32 MiB 网页文档上限，超过 4 MiB 源码阈值仍展示网页；超过网页上限或初始化失败回退只读原文；
+- HTML 默认在不同源 HTTP(S) iframe 中执行，采用独立的 32 MiB 网页上限；超过网页上限使用分页原文，初始化失败明确显示失败和重试，源码查看读取未注入原稿；
 - 代码/文本通过同一个只读 CodeMirror 6 Viewer 显示行号、搜索、定位、选择与系统复制，大文件分页；
 - 图片/SVG 提供适应、原始尺寸、缩放和重置，不把 SVG 注入宿主 DOM；
 - Diff/Patch 按文件和 hunk 展示，解析失败回退文本。
@@ -216,8 +216,8 @@ Viewer 底色与会话阅读区共用语义 surface。选中文字只保留普�
 Markdown 选择渲染正文；代码/文本选择已加载全文（包含未渲染的滚动区外行），分页文本只选择当前页；
 Patch 与 File Change 选择当前阅读器的差异文档。搜索输入框保留自身全选，HTML 保留 iframe 内原生选择。
 
-HTML 与 Markdown 的相对脚本、样式、图片和其他本地资源从当前文档所在目录解析，只在当前 Tab 生命周期内可用；
-HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab。用户不需要看到或理解资源 token、capability、
+HTML 原生解析文档/资源相对路径与站点根相对路径，自动加载已有范围内的实际依赖和 HTTP(S) 网络依赖；支持内部 iframe。
+网页自身路由和普通点击保留，可信 file: 链接才进入文件 Tab 桥接。Markdown 的文档目录资源和文件链接规则不变。用户不需要看到或理解资源 token、capability、
 临时目录范围或 Root Grant，关闭父 Tab 后已打开的子 Tab 仍保持自己的只读句柄。
 
 不支持的 Office、PDF、音视频、压缩包、数据库、可执行文件和未知二进制不进入预览。显式点击继续调用系统默认
@@ -233,7 +233,7 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 
 - 完整代码/可解码文本查已加载全文，CodeMirror 使用 Decoration，保留原生选择。
 - Markdown 查渲染可见正文，包含跨行内格式文字；DOM Range/CSS Highlight 不改写正文节点。
-- HTML 通过现有无 same-origin 的隔离 iframe 传递有界正文快照、位置与快捷键；宿主匹配，iframe 只绘制和定位，不扩大资源或系统调用权限。
+- HTML 通过与宿主不同源、allow-scripts + allow-same-origin 的 iframe 传递有界正文快照、位置与快捷键；宿主匹配，iframe 只绘制和定位，不扩大资源或系统调用权限。
 - Patch 查差异正文；行号、增删符号、hunk 与导航元数据不算正文。
 - File Change 可选当前文件/本次全部变更及仅增删行，跨文件定位复用已加载的不可变 detail；仅操作记录没有可查正文，不读取当前磁盘文件补齐证据。
 - 分页文本只查当前已加载页并明确标注，换页重算，不把当前页零结果表述为全文零结果。图片/SVG 与无内容状态禁用文件查找。
@@ -247,11 +247,11 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 才显示／激活目标 Tab 和预览 Pane。文件已移动、删除、无权或读取失败时，当前页只显示红色 Toast `无法打开该文件`，不创建失败预览页、不切换
 当前 Tab、不替换已有 ready 内容，也不抢焦点；不支持应用内预览的类型同样不从这类入口启动系统应用或显示目录。
 精确事务与资源清理边界见
-[File Preview v11](../../contracts/file-preview-v11.md)。
+[File Preview v12](../../contracts/file-preview-v12.md)。
 
 首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
 无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
-公开文案。错误码到文案的 closed mapping 由 [File Preview v11](../../contracts/file-preview-v11.md) 继承的 v8 失败呈现拥有。
+公开文案。错误码到文案的 closed mapping 由 [File Preview v12](../../contracts/file-preview-v12.md) 继承的 v8 失败呈现拥有。
 该状态不显示路径、尺寸、标题、卡片、边框、按钮、技术详情或内部能力名称；错误内容区之外的 Tabs、Viewer 布局和
 其他 Camp 界面沿用既有视觉，不以本状态为理由重做。
 历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、
@@ -263,3 +263,14 @@ unreadable 或 kind_changed，不写回历史，也不启动后台监控。
 
 macOS/Windows 复用同一 DOM、reducer、Viewer 和主题 token，只投影 `⌘/Ctrl`、Finder/文件资源管理器、系统字体和
 既有 window chrome 差异。焦点状态使用现有 2px focus token，焦点不得被 sticky 内容完全遮挡。
+
+
+## HTML 运行反馈
+
+预览顶部提供非阻塞摘要与可展开文本详情；文档、脚本、资源、诊断通道分别反馈。脚本异常保留已经渲染的内容，
+不能声称异常后的代码已经恢复。缺失 CSS/图片、网络或浏览器策略失败不覆盖整个页面，也不弹授权框。
+12 秒未收到响应时说明实际未知并提供重试；文档本身失败才显示完整失败页，不无限转圈或自动刷新。
+
+“查看源码／交互预览”使用既有只读源码阅读器与网页查找模式，切换保留 iframe。详情最多 100 项，按文本呈现；
+未知位置明确标注，不显示注入后的伪源码位置。窗口、Tab、Camp、刷新与失效上下文清理见
+[File Preview v12](../../contracts/file-preview-v12.md)。

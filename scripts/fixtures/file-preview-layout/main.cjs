@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict')
-const { mkdirSync, writeFileSync } = require('node:fs')
+const { mkdirSync, writeFileSync, realpathSync } = require('node:fs')
 const { isAbsolute, join, dirname } = require('node:path')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, ipcMain } = require('electron')
 
-const [renderer, userData, shortcutModule, shortcutPreload] = process.argv.slice(2)
+const [renderer, userData, shortcutModule, shortcutPreload, siteModule, sourceModule] = process.argv.slice(2)
 const { installCloseTabShortcut } = require(shortcutModule)
 assert.ok(isAbsolute(renderer) && isAbsolute(userData), 'The preview fixture requires isolated absolute paths')
 mkdirSync(userData, { recursive: true })
@@ -17,6 +17,19 @@ app.whenReady().then(async () => {
     show: process.platform === 'linux', width: 1440, height: 920, useContentSize: true,
     webPreferences: { preload: shortcutPreload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false }
   })
+  const { HtmlPreviewSite } = require(siteModule)
+  const { createPreviewFileSource } = require(sourceModule)
+  const htmlFile = join(userData, 'find.html')
+  writeFileSync(htmlFile, '<h1>HTML 文件预览</h1><p>文件<strong>预览</strong> bridge</p><p hidden>隐藏词</p><p style="display:none">隐藏词</p><button>按钮可见词</button>')
+  let site
+  ipcMain.handle('html-fixture-prepare', async event => {
+    assert.equal(event.senderFrame, window.webContents.mainFrame)
+    await site?.close()
+    site = await HtmlPreviewSite.create({generation:'fixture', hostOrigin:'null', entryPath:'/find.html', validate:async()=>{}, openResource:createPreviewFileSource(realpathSync(userData), realpathSync(htmlFile), false)})
+    return site.descriptor
+  })
+  ipcMain.handle('html-fixture-release', async () => { await site?.close() })
+  app.on('before-quit', () => { void site?.close() })
   installCloseTabShortcut(window.webContents, process.platform, () => window.close())
   let nativeCloseRequests = 0
   window.on('close', event => { nativeCloseRequests += 1; event.preventDefault() })
@@ -1135,7 +1148,7 @@ app.whenReady().then(async () => {
   })
   await check('HTML find uses the isolated bridge and excludes hidden text', async () => {
     await run('window.previewTest.openHtml()')
-    assert.equal(await run('document.querySelector(".file-preview-html").getAttribute("sandbox")'), 'allow-scripts')
+    assert.equal(await run('document.querySelector(".file-preview-html").getAttribute("sandbox")'), 'allow-scripts allow-same-origin')
     await click('.file-preview-find-trigger')
     await run('window.previewTest.setSourceSearch("文件预览")')
     assert.equal((await run('window.previewTest.findSnapshot()')).count, '1 / 2')

@@ -1,0 +1,7 @@
+<!doctype html><html><head><link rel="stylesheet" href="./assets/missing.css"></head><body>
+<h1 id="retained">Content stays visible</h1>
+<script>throw new ReferenceError('synchronous fixture');</script>
+<script>Promise.reject(new Error('promise fixture'));</script>
+<img src="./assets/missing.png">
+<iframe src="./child-error.html" title="Child diagnostic"></iframe>
+</body></html>

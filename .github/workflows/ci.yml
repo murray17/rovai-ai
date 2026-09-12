@@ -81,7 +81,7 @@ jobs:
             esac
 
             case "$file" in
-              apps/desktop/*|packages/contracts/*|scripts/*|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig*.json|vite*.*|vitest*.*)
+              apps/desktop/*|packages/*|scripts/*|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig*.json|vite*.*|vitest*.*)
                 node=true
                 ;;
             esac
