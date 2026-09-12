@@ -43,6 +43,12 @@ Renderer 自动测试必须覆盖双 Provider 都可选、钉钉连接状态与�
 无“敬请期待”或 `aria-disabled` 预告，以及秘密和项目绝对路径仍不泄露。类型检查、Renderer 全量测试和 packaged App 构建
 继续是合入门禁；真实扫码、发布、私聊、群聊与手机卡片仍由独立真实租户验收拥有。
 
+## 共享执行文本的当前规则
+
+命令、正文与工具结果的内容呈现按 [Run Process Detail Surface v33](run-process-detail-surface-v33.md)
+保留原值，取代继承版本中的执行内容脱敏与 Shell 正文省略。渠道的类型投影、长度预算、Owner 校验和
+管理凭据边界继续由各自合同拥有。此路由不改变本版字段、动作布局或 Provider 能力。
+
 ## References
 
 - [DingTalk Channel v11](dingtalk-channel-v11.md)

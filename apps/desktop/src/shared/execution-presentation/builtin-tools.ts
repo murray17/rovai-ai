@@ -40,7 +40,6 @@ export function builtinOperation(payloadValue: unknown): string | null {
 }
 
 const PROJECTION_FACT = /(?:CharCount|Digest|SecretDetected|Redacted|Truncated|TruncatedCount|OmittedCount|Count|Present)$/u
-const SECRET_FIELD = /(?:^|[-_])(?:token|password|passwd|authorization|api[-_]?key|secret|credential|cookie)(?:[-_]|$)/iu
 
 export function builtinInputText(payloadValue: unknown): string | null {
   const payload = record(payloadValue)
@@ -51,9 +50,8 @@ export function builtinInputText(payloadValue: unknown): string | null {
   const input = record(projection.canonicalInput)
   const message = operation === 'camp.message.send' || operation === 'team.gather'
   const fields = Object.entries(input).filter(([key, value]) =>
-    !PROJECTION_FACT.test(key) && !SECRET_FIELD.test(key) && key !== 'changedFields'
-    && !(message && key === 'body') && input[`${key}Redacted`] !== true
-    && value !== '[已隐藏]'
+    value !== null && value !== undefined && !PROJECTION_FACT.test(key) && key !== 'changedFields'
+    && !(message && key === 'body')
   )
   if (fields.length === 0) return null
   const names: Record<string, string> = { recipientAgentIds: 'to', mentionsCurrentUser: 'mentionUser', requestedStatus: 'status' }
@@ -99,6 +97,7 @@ export function supportingBuiltinShells(
   type Invocation = { operation: string; signature: string; first: number; last: number }
   const core = new Map<string, Invocation>()
   const shells = new Map<string, Invocation>()
+  const associated = new Set<string>()
   for (const event of run) {
     const payload = record(event.payload)
     const id = event.canonical?.operationId ?? event.id
@@ -115,6 +114,10 @@ export function supportingBuiltinShells(
     const command = getCommand(payload)
     const cliOperation = command ? parseCommand(command) : null
     if (!cliOperation) continue
+    if (event.canonical.outcome === 'succeeded' && payload.executionWindowBuiltinOperation === cliOperation) {
+      associated.add(id)
+      continue
+    }
     const item = record(payload.item)
     const output = payload.output ?? item.aggregatedOutput ?? item.output
     // Only a complete JSON response is proof; never match a substring of a mixed log.
@@ -137,7 +140,7 @@ export function supportingBuiltinShells(
     coreByResponse.set(responseKey, candidates)
   }
   for (const value of shells.values()) shellCounts.set(key(value), (shellCounts.get(key(value)) ?? 0) + 1)
-  const hidden = new Set<string>()
+  const hidden = associated
   for (const [id, shell] of shells) {
     const responseKey = key(shell)
     if (shellCounts.get(responseKey) !== 1) continue

@@ -9050,3 +9050,5 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .message-quote-selection-toolbar > button { display: flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-float); font-size: 12px; cursor: pointer; }
 .message-quote-selection-error { position: absolute; right: 0; width: min(280px, calc(100vw - 24px)); margin-top: 5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--danger); font-size: 11px; box-shadow: var(--shadow-float); }
 .message-quotes button:focus-visible, .message-quotes-popover button:focus-visible, .message-quote-selection-toolbar button:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 2px; }
+
+.execution-window-navigation { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }

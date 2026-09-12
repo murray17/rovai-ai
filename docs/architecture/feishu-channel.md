@@ -322,7 +322,7 @@ hash 和冻结的 `ChannelConversation/App/Camp/Agent/focusRun/maxRunCreatedAt` 
 
 浏览器先取当前 snapshot，再以 Fetch Streaming 建立 SSE。Main 每次都把冻结 scope 交给 Core，Core 复核 focus Run、
 渠道/App、Camp、队员、成员关系和历史上界，并只返回同 Camp/队员且不晚于 focus Run 的公开投影。Main 继续复用 shared
-execution grouping、redactor 与 result projector，把公开正文和连续操作组投影为页面所需的最小 shape；reasoning、完整工具输入、
+execution grouping 与 result projector，把公开正文和连续操作组投影为页面所需的最小 shape；reasoning、完整工具输入、
 原始 patch、任意文件、终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续时间线，
 外部触发者固定显示“你”；AgentRun、连续操作组和每个 Command 使用独立嵌套 disclosure，文件变化逐文件展开，不提供分页。
 

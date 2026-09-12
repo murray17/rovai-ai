@@ -42,7 +42,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Images v4（历史）](runtime-images-v4.md) | v3 来源/读取/去重不变；Runtime 图片并入 Agent 图片区，按作者分区并采用 Agent 原比例与用户 72px 两种 Gallery variant；自动展示来源由 v5 收紧 |
 | [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
-| [Camp Open Projection v17（当前）](camp-open-projection-v17.md) | v16 wire 不变；公屏审批排除私有 Conversation |
+| [Camp Open Projection v18（当前）](camp-open-projection-v18.md) | Open schema 7；首屏仅业务摘要，执行详情按可视窗口分页并预取相邻页 |
+| [Camp Open Projection v17（历史）](camp-open-projection-v17.md) | v16 wire 不变；公屏审批排除私有 Conversation |
 | [Camp Open Projection v16（历史）](camp-open-projection-v16.md) | v15 wire/附件读取不变；`agentRunImages` 只投影两类 Adapter 已确认原生生图，未知来源保留但不展示 |
 | [Camp Open Projection v15（历史）](camp-open-projection-v15.md) | v14 取消兼容不变；统一 source/Managed/legacy 无路径附件 View，历史读取 availability unknown 且不访问文件系统；图片集合语义由 v16 收紧 |
 | [Camp Open Projection v14（历史）](camp-open-projection-v14.md) | v13 wire/修复不变；精确兼容投影旧取消失败行，不改写底层证据 |
@@ -362,7 +363,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v32（当前）](run-process-detail-surface-v32.md) | v31 布局和普通工具结果不变；Built-in 使用 CLI 名称、仅显示公开入参，省略正文并折叠可靠关联的 Shell 载体 |
+| [Run Process Detail Surface v33（当前）](run-process-detail-surface-v33.md) | 执行按窗口加载，关闭组不挂载子行，Diff 按条读取，取消执行内容脱敏 |
+| [Run Process Detail Surface v32（历史）](run-process-detail-surface-v32.md) | v31 布局和普通工具结果不变；Built-in 使用 CLI 名称、仅显示公开入参，省略正文并折叠可靠关联的 Shell 载体 |
 | [Run Process Detail Surface v31（历史）](run-process-detail-surface-v31.md) | v30 公开指令不变；统一终态步骤摘要、子行状态形状、Tool 详情与文件入口，并收敛 Evidence 历史压缩及默认模型观察写入边界 |
 | [Run Process Detail Surface v30（历史）](run-process-detail-surface-v30.md) | v29 布局、Tool 行与 Compaction 不变；活动 Tool 组摘要优先展示已有公开证据中的具体当前指令 |
 | [Run Process Detail Surface v29（历史）](run-process-detail-surface-v29.md) | v28 布局与取消不变；增加 active AgentRun 的本地非 Tool Compaction 展示旁路 |

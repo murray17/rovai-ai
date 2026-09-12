@@ -15,6 +15,7 @@ const fixtureSource = join(root, 'scripts/fixtures/camp-open-projection')
 
 test('business-only CampOpen keeps cards, earlier pages and reading position across refresh', { timeout: 60_000 }, t => runFixture(t))
 test('execution text loads sparse history and complete Blob bodies in place with retry', { timeout: 60_000 }, t => runFixture(t, '--text-evidence'))
+test('execution window pages on demand, preserves the anchor and mounts details only on expansion', { timeout: 120_000 }, t => runFixture(t, '--execution-window'))
 test('terminal Run artifacts retain their authors and layout across themes and widths', { timeout: 60_000 }, t => runFixture(t, '--run-artifacts'))
 test('public message groups follow rendered content height and preserve individual actions', { timeout: 60_000 }, t => runFixture(t, '--message-groups'))
 test('current user avatars and structured mentions open a live, keyboard-accessible profile card', { timeout: 60_000 }, t => runFixture(t, '--current-user-profile'))
@@ -47,7 +48,9 @@ async function runFixture(t, mode = '--camp-open') {
     let output = ''
     child.stdout.on('data', chunk => { output += chunk.toString() })
     child.stderr.on('data', chunk => { output += chunk.toString() })
-    const timeout = setTimeout(() => child.kill('SIGKILL'), 45_000)
+    // The window scenario traverses both viewports and captures expanded results
+    // in both themes; retain a separate bounded Electron budget for that pass.
+    const timeout = setTimeout(() => child.kill('SIGKILL'), mode === '--execution-window' ? 75_000 : 45_000)
     let code
     try { [code] = await closed } finally { clearTimeout(timeout) }
     assert.equal(code, 0, `CampOpen refresh regression failed:\n${output}`)

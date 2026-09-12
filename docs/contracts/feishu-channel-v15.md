@@ -33,6 +33,12 @@ Owner callback、欢迎卡和恢复边界。本版只修订执行卡动作的视
 `flex_mode=stretch`，所有按钮和列均保持填充/等权布局；终态无停止入口。v14 的欢迎卡和 v13 的最近输出折叠、
 预算、Token、Owner callback 与授权测试保持不变。
 
+## 共享执行文本的当前规则
+
+命令、正文与工具结果的内容呈现按 [Run Process Detail Surface v33](run-process-detail-surface-v33.md)
+保留原值，取代继承版本中的执行内容脱敏与 Shell 正文省略。渠道的类型投影、长度预算、Owner 校验和
+管理凭据边界继续由各自合同拥有。此路由不改变本版字段、动作布局或 Provider 能力。
+
 ## References
 
 - [Feishu Channel v14](feishu-channel-v14.md)
