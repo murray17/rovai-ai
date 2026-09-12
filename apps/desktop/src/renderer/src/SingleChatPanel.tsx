@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -623,6 +624,7 @@ export function SingleChatPanel({
   visible,
   onOpen,
   onClose,
+  onLeaveGuardChange,
   onNotify = () => undefined,
   target,
   notificationFocus,
@@ -645,6 +647,7 @@ export function SingleChatPanel({
   visible: boolean
   onOpen(): void
   onClose(): void
+  onLeaveGuardChange?(guard: (() => void) | null): void
   onNotify?(message: string): void
 }): React.JSX.Element {
   const panelId = useId()
@@ -695,6 +698,14 @@ export function SingleChatPanel({
   const returningPendingRef = useRef(false)
   const returnRequestInFlightRef = useRef(false)
   const [pendingReturnRecovery, setPendingReturnRecovery] = useState<PendingReturnRecovery | null>(null)
+  useLayoutEffect(() => {
+    onLeaveGuardChange?.(() => {
+      if (returningPendingRef.current) {
+        throw new Error('单聊消息移回结果尚未确认，请先在单聊中重试恢复消息。')
+      }
+    })
+    return () => onLeaveGuardChange?.(null)
+  }, [onLeaveGuardChange])
   const [error, setError] = useState<string | null>(null)
   const [endDialogOpen, setEndDialogOpen] = useState(false)
   const [endTarget, setEndTarget] = useState<SingleChatEndTarget | null>(null)

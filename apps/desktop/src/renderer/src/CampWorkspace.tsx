@@ -1547,6 +1547,10 @@ export function CampWorkspace({
   })
   const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
   const pendingInputsRef = useRef<PendingCampInputsHandle>(null)
+  const singleChatLeaveGuardRef = useRef<(() => void) | null>(null)
+  const bindSingleChatLeaveGuard = useCallback((guard: (() => void) | null): void => {
+    singleChatLeaveGuardRef.current = guard
+  }, [])
   const [pendingRefresh, setPendingRefresh] = useState(0)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
   const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind; error: string }>>([])
@@ -2193,6 +2197,7 @@ export function CampWorkspace({
     try {
       await draftCoordinator.load()
       if (draftCampId.current !== campId) return
+      pendingInputsRef.current?.clearError()
       setComposerPersistenceError(null)
       setDraftLoadState({ state: 'ready' })
     } catch (error) {
@@ -2214,6 +2219,7 @@ export function CampWorkspace({
     composerHandle?.setInteractionLocked(true)
     try {
       await pendingInputsRef.current?.prepareForLeave()
+      singleChatLeaveGuardRef.current?.()
       if (draftLoadState.state !== 'ready') {
         return { complete(didLeave) {
           if (!didLeave) composerHandle?.setInteractionLocked(false)
@@ -2708,10 +2714,11 @@ export function CampWorkspace({
     routingMutatingRef.current = true
     setRoutingMutating(true)
     composerHandle.setInteractionLocked(true)
-    let keepLocked = false
+    let transferAttempted = false
     try {
       await attachmentPreparationQueue.current
       await composerHandle.flush()
+      transferAttempted = true
       const next = await draftCoordinator.returnPendingInput(item.id, item.revision, editToken)
       composerHandle.replaceDocument(next.content, 'end')
       setFailedAttachments([])
@@ -2721,13 +2728,13 @@ export function CampWorkspace({
     } catch (error) {
       // A rejection has no transfer side effects. An unknown result or failed
       // post-commit read must reload before old local text can autosave again.
-      if (!(error instanceof PendingInputReturnRejectedError)) {
-        keepLocked = true
+      if (transferAttempted && !(error instanceof PendingInputReturnRejectedError)) {
+        composerLockAwaitingDisabledCommitRef.current = true
         setDraftLoadState({ state: 'error', error: error instanceof Error ? error : new Error(readErrorMessage(error)) })
       }
       throw error
     } finally {
-      if (!keepLocked) composerHandle.setInteractionLocked(false)
+      if (!composerLockAwaitingDisabledCommitRef.current) composerHandle.setInteractionLocked(false)
       routingMutatingRef.current = false
       setRoutingMutating(false)
     }
@@ -4765,6 +4772,7 @@ export function CampWorkspace({
             </CampDetailPopover>}
             {snapshot.camp.activationState === 'active' && (
               <SingleChatPanel
+                onLeaveGuardChange={bindSingleChatLeaveGuard}
                 target={singleChatTarget}
                 notificationFocus={notificationFocus?.kind === 'single_chat' ? notificationFocus : null}
                 onNotificationFocusPresented={onNotificationFocusPresented}

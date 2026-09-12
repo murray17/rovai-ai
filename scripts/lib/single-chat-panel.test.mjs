@@ -13,7 +13,10 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/single-chat-panel')
 
-test('production Single Chat panel preserves private conversation layout and terminal disclosure', { timeout: 90_000 }, async (t) => {
+test('production Single Chat panel preserves private conversation layout and terminal disclosure', { timeout: 90_000 }, t => runFixture(t))
+test('Single Chat pending withdrawal recovers a lost receipt and fences navigation', { timeout: 90_000 }, t => runFixture(t, '--pending-return'))
+
+async function runFixture(t, mode = '--panel') {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-single-chat-panel-test-'))
   let child
@@ -34,6 +37,7 @@ test('production Single Chat panel preserves private conversation layout and ter
       join(fixtureSource, 'main.cjs'),
       join(fixture, 'renderer/index.html'),
       join(fixture, 'user-data'),
+      mode,
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
     ], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
@@ -52,6 +56,11 @@ test('production Single Chat panel preserves private conversation layout and ter
     assert.ok(reportLine, `Single Chat native UI report was missing:\n${output}`)
     const report = JSON.parse(reportLine)
     assert.equal(report.ok, true)
+    if (mode === '--pending-return') {
+      assert.deepEqual(report.verified, { withdrawalRecovery: true, navigationFence: true, identicalCommandReplay: true })
+      process.stdout.write(`${JSON.stringify(report)}\n`)
+      return
+    }
     assert.deepEqual(report.verified, {
       selectorTriggerAndOptionAvatars: true,
       transcriptAvatarFree: true,
@@ -88,4 +97,4 @@ test('production Single Chat panel preserves private conversation layout and ter
       await rm(fixture, { recursive: true, force: true })
     }
   }
-})
+}

@@ -5,6 +5,7 @@ import { createPendingInputsRefresh, shouldRefreshPendingInputs } from './pendin
 
 export interface PendingCampInputsHandle {
   prepareForLeave(): Promise<void>
+  clearError(): void
 }
 
 export class PendingInputReturnRejectedError extends Error {}
@@ -93,9 +94,12 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
   const submittedKey = JSON.stringify(submittedInputIds)
   const refresh = useCallback(() => readerRef.current?.refresh() ?? Promise.resolve(), [])
 
-  useImperativeHandle(ref, () => ({ async prepareForLeave() {
-    if (busyRef.current) throw new Error('待发送消息正在移回或删除，请稍后再离开。')
-  } }), [])
+  useImperativeHandle(ref, () => ({
+    clearError: () => setError(null),
+    async prepareForLeave() {
+      if (busyRef.current) throw new Error('待发送消息正在移回或删除，请稍后再离开。')
+    }
+  }), [])
 
   useEffect(() => {
     mounted.current = true

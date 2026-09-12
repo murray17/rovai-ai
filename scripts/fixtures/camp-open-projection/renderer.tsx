@@ -260,6 +260,7 @@ let returnGate: Promise<void> | null = null
 let rejectReturn = false
 let failDraftReadAfterReturn = false
 let failDraftRead = false
+let failDraftSave = false
 const pendingCalls: string[] = []
 const invalidatePending = () => {
   for (const listener of pendingListeners) listener({ method: 'camp.pendingInputs.changed', params: { campId, reason: 'edited' } } as CoreEvent)
@@ -313,6 +314,7 @@ Object.assign(window, { rovai: {
     }
     if (method === 'camp.composerDraft.save') {
       pendingCalls.push('save_content')
+      if (failDraftSave) throw new Error('Draft save unavailable')
       const content = params?.content ?? { version: 2, segments: [] }
       draft = { ...draft, content, body: content.segments.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
         revision: draft.revision + 1 }
@@ -435,6 +437,7 @@ Object.assign(window, { campOpenTest: {
   },
   releasePendingReturn: () => { releaseReturn?.(); returnGate = null },
   allowDraftRead: () => { failDraftRead = false; failDraftReadAfterReturn = false },
+  failDraftSave: (fail: boolean) => { failDraftSave = fail },
   pendingState: () => ({
     queue: pendingQueue.items.map(item => item.id), calls: pendingCalls, draft: structuredClone(draft),
     text: element('#camp-message')?.textContent, editable: element('#camp-message')?.getAttribute('contenteditable'),
