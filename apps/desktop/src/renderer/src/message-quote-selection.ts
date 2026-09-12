@@ -92,16 +92,42 @@ function rangePoint(positions: TextPosition[], node: Node, offset: number, end: 
   return positions.filter((entry) => node.contains(entry.node)).at(-1)?.end ?? null
 }
 
+function messageQuoteRootAt(node: Node): HTMLElement | null {
+  const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
+  return element?.closest<HTMLElement>('[data-message-quote-body]') ?? null
+}
+
+/**
+ * Native block/line selection may place an empty endpoint in adjacent UI. Clamp that boundary
+ * back to the message, while continuing to reject any actual selected text outside it.
+ */
+function rangeWithinMessage(nativeRange: Range, ownerKey: string): { range: Range; root: HTMLElement } | null {
+  const selectedText = nativeRange.toString().trim()
+  const roots = [messageQuoteRootAt(nativeRange.startContainer), messageQuoteRootAt(nativeRange.endContainer)]
+  const seen = new Set<HTMLElement>()
+  for (const root of roots) {
+    if (!root || root.dataset.quoteOwner !== ownerKey || seen.has(root)) continue
+    seen.add(root)
+    const range = nativeRange.cloneRange()
+    try {
+      if (!root.contains(range.startContainer)) range.setStart(root, 0)
+      if (!root.contains(range.endContainer)) range.setEnd(root, root.childNodes.length)
+    } catch { continue }
+    if (!range.collapsed && range.toString().trim() === selectedText) return { range, root }
+  }
+  return null
+}
+
 export function readMessageQuoteSelection(
   selection: Selection | null,
   ownerKey: string,
   message: (id: string) => { id: string; body: string; authorType: string } | undefined
 ): { selection: MessageQuoteSelection; range: Range; root: HTMLElement } | null {
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null
-  const range = selection.getRangeAt(0)
-  const element = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer as Element : range.startContainer.parentElement
-  const root = element?.closest<HTMLElement>('[data-message-quote-body]')
-  if (!root || root.dataset.quoteOwner !== ownerKey || !root.contains(range.endContainer) || !root.isConnected) return null
+  const contained = rangeWithinMessage(selection.getRangeAt(0), ownerKey)
+  if (!contained) return null
+  const { range, root } = contained
+  if (!root.isConnected) return null
   const source = message(root.dataset.messageQuoteBody ?? '')
   if (!source || !['user', 'agent'].includes(source.authorType) || source.id.startsWith('optimistic:')) return null
   if ([...root.querySelectorAll(INVALID_RANGE)].some((excluded) => range.intersectsNode(excluded))) return null

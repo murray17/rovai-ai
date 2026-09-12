@@ -13,6 +13,7 @@ import '../../../apps/desktop/src/renderer/src/styles.css'
 const lineSourceIndex = cases.length
 const messages = cases.map((entry, index) => ({ id: `source-${index}`, authorType: entry.authorType ?? 'agent', body: entry.source }))
 messages.push({ id: `source-${lineSourceIndex}`, authorType: 'agent', body: 'Before the code.\n\n```ts\nconst first = 1;\nconst second = 2;\nconst third = 3;\nconst fourth = 4;\n```\n\nsame text\n\nsame text' })
+messages.push({ id: `source-${lineSourceIndex + 1}`, authorType: 'agent', body: 'A following message.' })
 const errors: string[] = []
 window.addEventListener('error', event => errors.push(String(event.error ?? event.message)))
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
@@ -117,7 +118,7 @@ Object.assign(window, { quoteTest: {
     check(document.querySelector('textarea')!.value === '这几处如何一起调整？', 'question preserved')
     check(document.querySelector('.message-quotes-row')!.getBoundingClientRect().height <= 36, 'compact height')
     fail = true; select(0, 0, 12); await frames()
-    document.querySelector<HTMLButtonElement>('.message-quote-selection-toolbar button')!.click(); await frames()
+    document.querySelector<HTMLButtonElement>('.message-quote-selection-toolbar button')!.click(); await pause(30); await frames()
     check(latest.length === 3 && !!document.querySelector('[role="alert"]') && !window.getSelection()!.isCollapsed, 'failure retains quotes and selection')
     check(document.querySelector('[role="alert"]')?.textContent?.includes('12,000'), 'contextBridge failure objects retain actionable quote errors')
     document.dispatchEvent(new Event('copy')); await frames()
@@ -134,11 +135,11 @@ Object.assign(window, { quoteTest: {
     check(document.activeElement === trigger && !document.querySelector('.message-quotes-popover'), 'escape dismisses and restores trigger')
     trigger.click(); await frames()
     failRemoval = true
-    document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await frames()
+    document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await pause(30); await frames()
     check(latest.length === 3 && document.querySelector('[role="alert"]')?.textContent?.includes('草稿已更新'), 'failed removal keeps quotes and reports the failure')
     failRemoval = false
     const remainingIds = latest.slice(1).map(quote => quote.quoteId)
-    document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await frames()
+    document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await pause(30); await frames()
     check(latest.length === 2 && latest.every((quote, index) => quote.quoteId === remainingIds[index]), 'individual removal preserves remaining order')
     check(document.activeElement?.classList.contains('message-quote-jump') && trigger.textContent === '引用 2 段叮叮', 'keyboard removal focuses the remaining row and updates the count')
     check(!document.querySelector('.message-quotes-undo') && !document.body.textContent?.includes('撤销移除'), 'no undo control in the bubble or composer')
@@ -199,7 +200,7 @@ Object.assign(window, { quoteTest: {
     viewport.className = 'conversation-timeline'
     trigger.click(); await frames()
     while (latest.length) {
-      document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await frames()
+      document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await pause(30); await frames()
     }
     await pause(250)
     check(!document.querySelector('.message-quotes') && !document.querySelector('.message-quotes-popover'), 'last removal closes the bubble and leaves no empty metadata row')
@@ -223,6 +224,25 @@ Object.assign(window, { quoteTest: {
     const popup = document.querySelector('.message-quotes-popover')
     const rect = popup?.getBoundingClientRect()
     return { open: !!popup, triggerFocused: document.activeElement?.classList.contains('message-quotes-trigger'), x: rect ? rect.x + 20 : 0, y: rect ? rect.y + 20 : 0 }
+  },
+  async lastLineTarget() {
+    const paragraph = root(lineSourceIndex).querySelector<HTMLElement>('p:last-child')!
+    paragraph.scrollIntoView({ block: 'center' }); await frames()
+    const rect = paragraph.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  },
+  lastLineState() {
+    const selection = window.getSelection()
+    const candidate = readMessageQuoteSelection(selection, 'camp:fixture', id => messages.find(message => message.id === id))
+    return {
+      text: selection?.toString().trim(),
+      toolbar: !!document.querySelector('.message-quote-selection-toolbar'),
+      candidate: !!candidate
+    }
+  },
+  async clearSelection() {
+    window.getSelection()?.removeAllRanges()
+    document.dispatchEvent(new Event('selectionchange')); await frames()
   },
   async theme(value: string) {
     document.documentElement.dataset.theme = value
