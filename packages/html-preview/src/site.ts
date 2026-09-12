@@ -104,10 +104,10 @@ export class HtmlPreviewSite {
     return this.#closing
   }
 
-  report(kind: HtmlPreviewDiagnosticKind, message: string, resourceUrl: string | null): void {
+  report(kind: HtmlPreviewDiagnosticKind, message: string, resourceUrl: string | null, status: number | null = null): void {
     const item: HtmlPreviewDiagnostic = { previewId: this.descriptor.previewId, generation: this.descriptor.generation,
       kind, message: message.slice(0, 2000), resourceUrl: resourceUrl?.slice(0, 2048) ?? null,
-      line: null, column: null, stack: null, timestamp: new Date().toISOString() }
+      line: null, column: null, stack: null, timestamp: new Date().toISOString(), status }
     const key = htmlPreviewDiagnosticKey(item)
     if (this.closed || this.#diagnosticKeys.has(key) || this.#diagnostics.length >= HTML_PREVIEW_DIAGNOSTIC_LIMIT) return
     this.#diagnosticKeys.add(key); this.#diagnostics.push(item)
@@ -230,7 +230,7 @@ export class HtmlPreviewSite {
       if (signal.aborted || response.destroyed) return
       const status = error instanceof PreviewResourceError ? error.status : 410
       const message = error instanceof PreviewResourceError ? error.message : '预览文件上下文已失效，请重新打开。'
-      if (authenticated && url && !url.pathname.startsWith(INTERNAL)) this.report('resource', `${message}（HTTP ${status}）`, url.href)
+      if (authenticated && url && !url.pathname.startsWith(INTERNAL)) this.report('resource', `${message}（HTTP ${status}）`, url.href, status)
       if (response.headersSent) { response.destroy(); return }
       response.removeHeader('Content-Length'); response.setHeader('Cache-Control', 'no-store')
       // An authenticated failed navigation is still a real error response. Its

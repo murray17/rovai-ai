@@ -95,6 +95,7 @@ export interface FilePreviewSourceAuthority {
 
 export interface FilePreviewNativeActions {
   previewHostOrigin?(webContentsId: number): string
+  previewProtectedRoots?(): readonly string[]
   selectRoot(webContentsId: number): Promise<string | null>
   confirmOpen(displayName: string): Promise<boolean>
   openPath(path: string): Promise<string>
@@ -551,7 +552,7 @@ export class FilePreviewService {
         hostOrigin: this.#native.previewHostOrigin?.(webContentsId) ?? 'null',
         entryPath,
         validate,
-        openResource: createPreviewFileSource(record.canonicalRoot, record.canonicalPath, record.allowChildren)
+        openResource: createPreviewFileSource(record.canonicalRoot, record.canonicalPath, record.allowChildren, this.#native.previewProtectedRoots?.())
       })
       this.#record(webContentsId, request.handleId, request.expectedGeneration)
       if (this.#htmlPreparations.get(record.handleId) !== preparation) throw new FilePreviewAccessError('read_failed', '预览请求已经过期。')

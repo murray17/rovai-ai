@@ -36,5 +36,6 @@ it('rejects foreign windows, origins, generations, malformed envelopes and stale
 it('accepts only bounded diagnostic fields and leaves unavailable details unknown', () => {
   const diagnostic={previewId:'p',generation:'g',kind:'script',message:'Error',resourceUrl:null,line:null,column:null,stack:null,timestamp:new Date().toISOString()}
   expect(parseHtmlPreviewDiagnostic(diagnostic,diagnostic)).toEqual(diagnostic)
-  for(const patch of [{kind:'execute'},{line:0},{line:'2'},{column:-1},{timestamp:'invalid'},{message:'x'.repeat(2001)},{stack:'x'.repeat(8001)},{previewId:'other'},{generation:'old'}]) expect(parseHtmlPreviewDiagnostic({...diagnostic,...patch},diagnostic)).toBeNull()
+  expect(parseHtmlPreviewDiagnostic({...diagnostic,status:404},diagnostic)).toMatchObject({status:404})
+  for(const patch of [{status:0},{status:'404'},{status:600},{kind:'execute'},{line:0},{line:'2'},{column:-1},{timestamp:'invalid'},{message:'x'.repeat(2001)},{stack:'x'.repeat(8001)},{previewId:'other'},{generation:'old'}]) expect(parseHtmlPreviewDiagnostic({...diagnostic,...patch},diagnostic)).toBeNull()
 })

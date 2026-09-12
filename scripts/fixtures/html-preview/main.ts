@@ -41,7 +41,7 @@ app.whenReady().then(async () => {
     for (;;) {
       let ready = false
       if (name === 'many-frames.html') ready = (await Promise.all(frames().filter(frame=>frame.url.includes('/child.html')).map(frame=>frame.executeJavaScript(`document.querySelector('#child-ready')?.textContent === 'child ready'`).catch(()=>false)))).filter(Boolean).length === 8
-      else if (name === 'errors.html') ready = await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-html-stage')?.textContent.includes('child fixture')`)
+      else if (name === 'errors.html') ready = await run(`(() => { const text = document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-html-stage')?.textContent ?? ''; return text.includes('child fixture') && (text.match(/HTTP 404/g) ?? []).length === 2 })()`)
       else for (const frame of frames()) {
         if (!frame.url.includes('/'+name)) continue
         const selector = name === 'history.html' ? '#rendered' : name === 'canvas.html' ? '#canvas' : name === 'assets.html' ? '#assets-result' : name === 'original-history.html' ? '#view' : name === 'network.html' ? '#network-result' : name === 'stalled.html' ? '#partial' : '#root'
@@ -78,7 +78,7 @@ app.whenReady().then(async () => {
       cases.push({name,ok:evidence?.text === 'module dynamic JSON classic' && evidence?.color === 'rgb(1, 2, 3)' && evidence?.image === 12,evidence})
     } else if (name === 'errors.html') {
       const evidence = await run(`({text:document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-html-stage')?.textContent,state:document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-html-stage')?.dataset})`)
-      cases.push({name,ok:['synchronous fixture','promise fixture','missing.css','missing.png','child fixture'].every(text=>evidence.text?.includes(text)) && evidence.state?.documentState === 'loaded',evidence})
+      cases.push({name,ok:['synchronous fixture','promise fixture','missing.css','missing.png','child fixture','此页面有 5 项加载问题','HTTP 404'].every(text=>evidence.text?.includes(text)) && !evidence.text?.includes('状态码未知') && evidence.state?.documentState === 'loaded',evidence})
       await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) details')?.setAttribute('open','')`)
       await writeFile(join(userData,'diagnostics.png'), (await window.webContents.capturePage()).toPNG())
     } else if (name === 'many-frames.html') {

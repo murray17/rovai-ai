@@ -95,6 +95,26 @@ it('revokes context access and closes the listening port without retaining reusa
   await expect(read(site, '/assets/app.js', { cookie })).rejects.toThrow()
 })
 
+it('excludes private host stores even inside a broad root while retaining the explicitly admitted entry', async () => {
+  const { root } = await fixture()
+  const privateRoot = join(root, 'private')
+  await mkdir(privateRoot)
+  await writeFile(join(privateRoot, 'credentials.json'), '{"secret":"test-only"}')
+  const entry = join(privateRoot, 'attachment.html')
+  await writeFile(entry, '<h1>explicit attachment</h1>')
+  await symlink(join(privateRoot, 'credentials.json'), join(root, 'assets/alias.json'))
+  const source = createPreviewFileSource(root, entry, true, [privateRoot])
+  const signal = new AbortController().signal
+  for (const path of ['private/credentials.json', 'assets/alias.json']) {
+    await expect(source(path, signal)).rejects.toMatchObject({ status: 403 })
+  }
+  for (const path of ['private/attachment.html', 'assets/data.json']) {
+    const resource = await source(path, signal)
+    expect(resource.size).toBeGreaterThan(0)
+    await resource.file.close()
+  }
+})
+
 it('injects before author execution without modifying source bytes or original line mapping', () => {
   for (const source of ['<!doctype html><html><head><script>throw new Error("test")</script></head></html>', '<!doctype html>\n<script>throw new Error("test")</script>', '<h1>fragment</h1>', '<!doctype html>\r<html>\r<head><script>throw 1</script>']) {
     const result = injectPreviewScript(source, '/bridge.js')

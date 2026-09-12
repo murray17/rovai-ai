@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { request as httpRequest } from 'node:http'
 import { mkdir, mkdtemp, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -90,6 +91,37 @@ function request(rawReference: string): OpenFilePreviewRequest {
 }
 
 describe('FilePreviewService', () => {
+  it('projects desktop private-store exclusions into the HTTP resource service', async () => {
+    const { root, service, native } = await fixture()
+    const privateRoot = join(root, 'app-data')
+    await mkdir(privateRoot)
+    await writeFile(join(privateRoot, 'credentials.json'), '{"secret":"test-only"}')
+    await writeFile(join(root, 'index.html'), '<h1>public entry</h1>')
+    native.previewProtectedRoots = () => [privateRoot]
+    const opened = await service.open(1, request('index.html'))
+    if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('expected file')
+    const file = opened.value.file
+    const prepared = await service.prepareHtmlSite(1, { handleId: file.handleId, expectedGeneration: file.contentGeneration })
+    if (!prepared.ok) throw new Error('expected site')
+    const origin = new URL(prepared.value.origin)
+    const read = (path: string, cookie?: string) => new Promise<{ status: number; cookie?: string; body: string }>((resolve, reject) => {
+      const request = httpRequest({ hostname: '127.0.0.1', port: origin.port, path,
+        headers: { host: origin.host, ...(cookie ? { cookie } : {}) } }, response => {
+        const chunks: Buffer[] = []
+        response.on('data', chunk => chunks.push(chunk))
+        response.on('end', () => resolve({ status: response.statusCode!, cookie: response.headers['set-cookie']?.[0].split(';')[0], body: Buffer.concat(chunks).toString() }))
+      })
+      request.on('error', reject); request.end()
+    })
+    const bootstrap = await read(new URL(prepared.value.entryUrl).pathname)
+    expect(bootstrap.status).toBe(302)
+    expect(bootstrap.cookie).toBeTruthy()
+    expect((await read('/index.html', bootstrap.cookie)).status).toBe(200)
+    const denied = await read('/app-data/credentials.json', bootstrap.cookie)
+    expect(denied.status).toBe(403)
+    expect(denied.body).not.toContain('test-only')
+  })
+
   it('binds HTTP preview sites to the existing handle, generation, window and Camp lifetime', async () => {
     const { root, service } = await fixture()
     await writeFile(join(root, 'index.html'), '<h1>site</h1>')

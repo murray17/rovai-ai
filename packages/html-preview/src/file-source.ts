@@ -45,7 +45,13 @@ const MIME: Record<string, string> = {
 }
 
 /** A projection of an already admitted file capability, never a grant API. */
-export function createPreviewFileSource(root: string, entry: string, allowDependencies: boolean) {
+export function createPreviewFileSource(root: string, entry: string, allowDependencies: boolean, protectedRoots: readonly string[] = []) {
+  // A broad workspace must not turn the host's private stores into web assets.
+  // An explicitly admitted entry (e.g. a managed attachment) remains readable.
+  const protectedPaths = Promise.all(protectedRoots.map(async path => {
+    const absolute = resolve(path)
+    return [absolute, await realpath(absolute).catch(() => absolute)]
+  })).then(paths => paths.flat())
   return async (path: string, signal: AbortSignal): Promise<PreviewResource> => {
     signal.throwIfAborted()
     const candidate = resolve(root, path)
@@ -54,6 +60,10 @@ export function createPreviewFileSource(root: string, entry: string, allowDepend
     let file: FileHandle | null = null
     try {
       const canonical = await realpath(candidate)
+      if ((candidate !== entry || canonical !== entry) && (await protectedPaths).some(protectedRoot =>
+        previewPathWithin(protectedRoot, candidate) || previewPathWithin(protectedRoot, canonical))) {
+        throw new PreviewResourceError(403, '主应用的私有数据不能作为网页资源加载。')
+      }
       if (!mime) throw new PreviewResourceError(415, '不支持这个资源类型。')
       if (!previewPathWithin(root, canonical) || (!allowDependencies && canonical !== entry)) throw new PreviewResourceError(403, '资源链接超出预览范围。')
       file = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))

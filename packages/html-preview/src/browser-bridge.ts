@@ -26,7 +26,7 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
   let loaded = document.readyState !== 'loading'
   const children = new Map<Window, { id: string; documentId: string | null }>()
   const diagnostics: HtmlPreviewDiagnostic[] = []
-  const keys = new Set<string>()
+  const keys = new Map<string, number>()
   const abort = new AbortController()
   let indexes: { document: Document; index: ReturnType<typeof createIndex>; offset: number }[] = []
   const clean = (value: unknown, limit: number): string => {
@@ -40,8 +40,16 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
     const item = parseDiagnostic(value, config)
     if (!item) return
     const key = item.kind === 'resource' && item.resourceUrl ? JSON.stringify([item.kind, item.resourceUrl]) : JSON.stringify([item.kind, item.message, item.resourceUrl, item.line, item.column])
-    if (keys.has(key) || diagnostics.length >= 100) return
-    keys.add(key); diagnostics.push(item); send('diagnostic', { diagnostic: item })
+    const previous = keys.get(key)
+    if (previous !== undefined) {
+      // The browser error event often arrives before the service's HTTP result.
+      if (item.status == null || diagnostics[previous].status != null) return
+      diagnostics[previous] = item
+    } else {
+      if (diagnostics.length >= 100) return
+      keys.set(key, diagnostics.length); diagnostics.push(item)
+    }
+    send('diagnostic', { diagnostic: item })
   }
   const position = (url: string | null, line: number | null, column: number | null): { line: number | null; column: number | null } => {
     if (url !== config.documentUrl || line !== config.map.line || column === null || column < config.map.column) return { line, column }

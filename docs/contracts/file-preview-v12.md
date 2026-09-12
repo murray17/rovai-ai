@@ -49,6 +49,9 @@ replaceState、根相对 fetch 或 `?canvas=1` 均不依赖入口 query token。
 
 站点根使用当前具体文件能力的 canonical root，保留入口在根内的位置；外部具体文件沿用既有临时目录范围。
 `allowChildren=false` 时仅服务同一文件（含不同 query），不因 HTML 自动依赖扩张到附件父目录。
+Desktop 还投影主应用私有目录排除项（userData、Core 数据和自动化服务目录），即使这些目录落在
+较宽的既有文件范围内，也不能成为网页依赖；检查解析前路径和 realpath，返回 403。已明确打开的入口文件
+仍可读取，确保托管附件入口可用；这一例外不扩大其依赖范围，不产生新的用户授权操作。
 
 浏览器原生解析 `./`、`../`、根相对路径、CSS import/url、脚本、ESM/import map、动态 import、fetch、图片、字体
 和内部 iframe。query 不进入磁盘文件名。资源服务逐段一次解码，拒绝编码分隔符、非法路径与向上越界；使用
@@ -80,13 +83,15 @@ webSecurity、不忽略证书、不做代理。普通网页失败不触发授权
   column: number | null
   stack: string | null
   timestamp: string // ISO timestamp
+  status?: number | null // 仅资源服务实际观察到的 HTTP 状态
 }
 ```
 
 同步异常、unhandled rejection、资源 error、securitypolicyviolation 与站点失败统一到上述结构。服务端失败通过
 同源、cookie 保护的 NDJSON 通道送入根页面 bridge；子 frame 不各自占用长连接，避免耗尽 HTTP/1 连接槽。浏览器不提供的状态或源码位置保持未知；捕获不代表脚本恢复，
 跨域受限错误不补造细节。每实例/页面最多 100 项、message 2000 字符、URL 2048、stack 8000；资源按 URL 去重，
-其他按类型、消息及位置去重。宿主仅作文本呈现。
+其他按类型、消息及位置去重。服务端已知状态可补全先到的浏览器未知状态，保持同一资源仅一项；不以未知结果
+覆盖已知状态。宿主仅作文本呈现。
 
 消息使用固定 protocol、previewId、generation、documentId、connectionId。宿主检查 `event.source` 为当前 iframe、
 精确 origin、实例、generation、shape，并向当前 WindowProxy 发送新 challenge；连接完成前不接受业务消息。

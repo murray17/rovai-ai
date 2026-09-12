@@ -19,6 +19,8 @@ last_updated: 2026-09-13
   浏览器通道；不导入 Electron。不同实例拥有不同 origin，权限检查独立于端口和 URL 随机性。
 - Main 复用 FilePreviewService 的来源、handle、Camp binding、generation、version 与窗口生命周期；旧 HTML
   srcdoc wrapper 退出，Markdown 原协议保留。正常浏览器依赖与子 iframe 无资源重写或 History 修补。
+- Desktop 私有数据目录即使位于较宽文件范围内，也不作为网页依赖提供；直接路径和 symlink 均验证 403，
+  明确打开的入口与范围内普通 JSON 仍可读取。未将托管附件资源根整体列为私有目录。
 - 正式 Provider/Pane 使用 descriptor；错误详情不覆盖已显示内容。源码模式沿用原有只读读取、分页与查找。
   新通道验证 source/origin/实例/generation/挑战/文档身份，同源真实子 frame 逐级转发诊断。
 
@@ -42,7 +44,8 @@ last_updated: 2026-09-13
 样式、JSON、字体及外部 iframe 成功加载，无 CORS 头的请求仍被浏览器拒绝。8 个内部 frame 均完成各自 JSON 请求，
 诊断采用每根页面单一流，避免占满 HTTP/1 连接槽。故障集验证缺失
 CSS/图片的 HTTP 404、同步异常、Promise rejection、同源子页面异常与已渲染正文同时存在；原稿位置显示为
-`errors.html:3` 与 `child-error.html:1`，未显示注入后伪位置。重复资源错误归并为同一项。外部脚本一直 pending 时，文档与诊断状态独立，12 秒后显示“尚未完成加载”并保留正文。
+`errors.html:3` 与 `child-error.html:1`，未显示注入后伪位置。重复资源错误归并为同一项，服务端实际 404 补全浏览器
+先到的未知状态，最终仍为 5 项问题。外部脚本一直 pending 时，文档与诊断状态独立，12 秒后显示“尚未完成加载”并保留正文。
 源码逐字匹配磁盘文本，切回页面保留临时交互状态；刷新换代及旧站点撤销、Tab 关闭撤销均有正式组件断言。
 
 普通 Chrome 使用独立 profile、HTTP 宿主页和同一个共享服务及 HostChannel；从生产查找桥获得 History 正文、
@@ -62,7 +65,7 @@ pnpm test
 pnpm build:desktop
 pnpm docs:test
 pnpm docs:check
-DOCS_BASE_REF=decdedda72de8feadfa3380f3e9d02c07374cf4c pnpm docs:check:ci
+DOCS_BASE_REF=cc91ec0d10d3ccfe10d77ccebfeadebea7e64fd1 pnpm docs:check:ci
 ```
 
 `ROVAI_HTML_HISTORY_SAMPLE`、`ROVAI_HTML_CANVAS_SAMPLE` 为可选的原始文件验收路径。测试先复制到临时资源目录并
@@ -77,7 +80,12 @@ HTTP 共享单元测试另验证 cookie/Host/来源/跨实例拒绝、query、MI
 
 ## 本地检查结果
 
-已通过 TypeScript、184 个 Vitest 文件/1919 项测试、完整 `pnpm test`（其 Node 子集 317 通过、2 项平台专属跳过）、
-桌面构建、桌面 contextBridge、文件链接导航与文件预览布局回归。文档单测、治理及固定 base 检查通过；Clippy 通过。
+首次完整 `pnpm test` 通过（Vitest 184 文件/1919 项，Node 子集 317 通过、2 项平台专属跳过），桌面 contextBridge、
+文件链接导航、文件预览布局、TypeScript、桌面构建和文档单测通过。
+同步 main 后，默认并发的一次 Vitest 中 3 项评测模块断言等待超时；保留原断言，降低并发重跑，185 个文件/1927 项
+全部通过（`pnpm exec vitest run --maxWorkers=2`）。新增私有目录和诊断补全验证包含在此结果中；Clippy 与固定 base
+文档治理再次通过。
 最终正式 HTML 回归包括两份原稿、HTTP/CORS/字体/外部 frame、8 个内部 frame、pending 脚本超时、源码原文、
-History 导航、刷新代际、真实导航 404 与关闭撤销；普通 Chrome 验证也通过。Rust PR 套件和远端 CI 结果以 PR 记录为准。
+History 导航、刷新代际、真实导航 404 与关闭撤销；普通 Chrome、文件预览布局、TypeScript 和桌面构建在最终代码上
+再次通过。Rust PR 套件各段通过：同步 main 后的库测试 559 项、CLI 35 项、慢测试 310 项；Clippy 无警告。
+远端 CI 的最终提交状态见 [PR #363](https://github.com/murray17/rovai-ai/pull/363)。

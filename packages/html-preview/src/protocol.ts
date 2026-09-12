@@ -17,6 +17,8 @@ export interface HtmlPreviewDiagnostic {
   column: number | null
   stack: string | null
   timestamp: string
+  /** Only supplied when the resource service observed an HTTP status. */
+  status?: number | null
 }
 
 export const HTML_PREVIEW_DIAGNOSTIC_LIMIT = 100
@@ -29,13 +31,15 @@ export function parseHtmlPreviewDiagnostic(value: unknown, preview: Pick<HtmlPre
     || typeof item.message !== 'string' || !item.message || item.message.length > 2000
     || !(item.resourceUrl === null || (typeof item.resourceUrl === 'string' && item.resourceUrl.length <= 2048))
     || !(item.stack === null || (typeof item.stack === 'string' && item.stack.length <= 8000))
+    || !(item.status == null || (Number.isSafeInteger(item.status) && (item.status as number) >= 100 && (item.status as number) <= 599))
     || ![item.line, item.column].every(number => number === null || (Number.isSafeInteger(number) && (number as number) > 0))
     || typeof item.timestamp !== 'string' || item.timestamp.length > 40 || !Number.isFinite(Date.parse(item.timestamp))) return null
   return {
     previewId: preview.previewId, generation: preview.generation,
     kind: item.kind as HtmlPreviewDiagnosticKind, message: item.message,
     resourceUrl: item.resourceUrl as string | null, line: item.line as number | null,
-    column: item.column as number | null, stack: item.stack as string | null, timestamp: item.timestamp
+    column: item.column as number | null, stack: item.stack as string | null, timestamp: item.timestamp,
+    ...(item.status === undefined ? {} : { status: item.status as number | null })
   }
 }
 

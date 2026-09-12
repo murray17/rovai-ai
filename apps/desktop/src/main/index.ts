@@ -479,6 +479,13 @@ executionView.onChanged((snapshot) => {
 const filePreview = new FilePreviewService(
   new CoreFilePreviewSourceAuthority(core),
   {
+    previewProtectedRoots() {
+      return [
+        app.getPath('userData'),
+        ...(coreDataPath === null ? [] : [coreDataPath]),
+        userAutomationRoot(app.getPath('appData'), app.getPath('userData'), hasExplicitUserDataDirectory)
+      ]
+    },
     previewHostOrigin(webContentsId) {
       if (mainWindow?.webContents.id !== webContentsId) throw new Error('Preview window is unavailable')
       return new URL(mainWindow.webContents.getURL()).origin

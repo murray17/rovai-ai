@@ -57,7 +57,11 @@ export function HtmlViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Ele
         if (message.document === 'failed') setFailure(typeof message.message === 'string' ? message.message.slice(0, 2000) : '无法加载页面。')
       } else if (message.type === 'diagnostic') {
         const diagnostic = parseHtmlPreviewDiagnostic(message.diagnostic, preview)
-        if (diagnostic) setDiagnostics(items => items.length >= 100 || items.some(item => htmlPreviewDiagnosticKey(item) === htmlPreviewDiagnosticKey(diagnostic)) ? items : [...items, diagnostic])
+        if (diagnostic) setDiagnostics(items => {
+          const index = items.findIndex(item => htmlPreviewDiagnosticKey(item) === htmlPreviewDiagnosticKey(diagnostic))
+          if (index >= 0) return diagnostic.status != null && items[index].status == null ? items.map((item, offset) => offset === index ? diagnostic : item) : items
+          return items.length >= 100 ? items : [...items, diagnostic]
+        })
       } else if (message.type === 'channel-unavailable') setChannelState('unavailable')
       else if (message.type === 'fragment-result' && typeof message.found === 'boolean') setNotice(message.found ? null : '未找到指定的页内位置。')
       else if (message.type === 'link' && typeof message.href === 'string' && message.href.startsWith('file:') && message.href.length <= 4096 && tab.file) {
