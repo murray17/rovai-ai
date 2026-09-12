@@ -128,6 +128,9 @@ app.whenReady().then(async () => {
     return { refreshes, attached: Boolean(child), bounds: child?.getBounds() ?? null }
   })
   await parent.loadFile(join(fixture, 'renderer/index.html'))
+  // The production menu needs DOM focus even when macOS keeps this fixture hidden.
+  parent.webContents.debugger.attach('1.3')
+  await parent.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
   const cases = await parent.webContents.executeJavaScript('window.dingtalkLoginTest.run()', true)
   cases.push('QR is generated locally without loading the official page')
   // Native child surfaces need an actual compositor frame on macOS. Showing the

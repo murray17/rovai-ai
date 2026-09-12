@@ -30,7 +30,12 @@ function button(label: string): HTMLButtonElement {
 }
 async function stage(value: string) { await window.loginFixture.stage(value); await settle() }
 async function connect() {
-  button('重新连接').click()
+  button('管理连接').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await settle()
+  const switchAccount = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    .find(item => item.textContent?.startsWith('切换账号'))
+  check(switchAccount, 'The connected account menu must offer account switching')
+  switchAccount.click()
   for (let attempt = 0; attempt < 200 && !document.querySelector('[role="dialog"]'); attempt++) await wait(25)
   await settle()
   check(document.querySelector('[role="dialog"]'), 'Connect must open the Rovai dialog: ' + document.body.textContent)
@@ -39,7 +44,7 @@ function closed() {
   check(!document.querySelector('[role="dialog"]'), 'Cancel must close the dialog')
   check(document.body.textContent?.includes('原账号'), 'Cancel must preserve the original account')
   check(!document.body.textContent?.includes('dingtalk_operation_cancelled'), 'Cancel must not show an IPC failure')
-  check(!button('重新连接').disabled, 'Cancel must release connect busy state')
+  check(!button('管理连接').disabled, 'Cancel must release connect busy state')
 }
 function layout() {
   const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
@@ -81,10 +86,10 @@ Object.assign(window, { dingtalkLoginTest: {
     await stage('scan_confirmed')
     check(!document.querySelector('img[alt="钉钉连接二维码"]'), 'A scanned QR must be removed')
     await stage('completing_login')
-    check(document.querySelector('[role="status"]')?.textContent?.includes('正在建立钉钉开发者登录会话'),
+    check(document.querySelector('[role="dialog"] [role="status"]')?.textContent?.includes('正在建立钉钉开发者登录会话'),
       'SSO progress must precede identity inspection')
     await stage('inspecting_identity')
-    check(document.querySelector('[role="status"]')?.textContent?.includes('正在读取钉钉账号与企业身份'),
+    check(document.querySelector('[role="dialog"] [role="status"]')?.textContent?.includes('正在读取钉钉账号与企业身份'),
       'Identity inspection has its own visible stage')
     check(!document.body.textContent?.includes('二维码有效期至'), 'Missing server expiry must not invent a countdown')
     cases.push('SSO and identity progress remain distinct without a fabricated QR expiry')
