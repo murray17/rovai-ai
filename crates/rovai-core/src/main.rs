@@ -8148,11 +8148,30 @@ impl Core {
                 > = serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
+                let cleanup = matches!(
+                    params.command.action,
+                    rovai_core::pending_camp_input::PendingInputEditAction::ReturnToComposer { .. }
+                )
+                .then(|| {
+                    CampAttachmentStore::new(&self.data_dir)
+                        .draft_attachment_cleanup_plan(&database, &camp_id)
+                })
+                .transpose()?;
                 let execution = rovai_core::pending_camp_input::edit_input(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
                 )?;
                 drop(database);
+                if execution.result.code == "pending_input.returned_to_composer"
+                    && !execution.replayed
+                    && let Some(cleanup) = cleanup
+                    && let Err(error) = CampAttachmentStore::new(&self.data_dir)
+                        .cleanup_detached_attachments(cleanup)
+                {
+                    eprintln!(
+                        "Returned Pending input; detached Draft attachment cleanup failed: {error:#}"
+                    );
+                }
                 if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
                     emit_pending_inputs_changed(&self.output, &camp_id, "edited");
                 }

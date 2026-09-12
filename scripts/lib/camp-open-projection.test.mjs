@@ -20,6 +20,8 @@ test('terminal Run artifacts retain their authors and layout across themes and w
 test('public message groups follow rendered content height and preserve individual actions', { timeout: 60_000 }, t => runFixture(t, '--message-groups'))
 test('current user avatars and structured mentions open a live, keyboard-accessible profile card', { timeout: 60_000 }, t => runFixture(t, '--current-user-profile'))
 
+test('pending edit withdraws into the ordinary Composer and fences failed or uncertain returns', { timeout: 60_000 }, t => runFixture(t, '--pending-return'))
+
 async function runFixture(t, mode = '--camp-open') {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-camp-open-projection-test-'))

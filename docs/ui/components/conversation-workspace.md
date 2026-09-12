@@ -270,7 +270,7 @@ Agent 公共消息继续左对齐，仅正文使用与用户消息相同的雾�
 一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
-[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，评审方向见
+[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)，评审方向见
 [HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/message-reply-chain/README.md)。
 
 渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
@@ -306,7 +306,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 标签出现后对象在空白 Draft 失效时，标签消失并持久抑制该来源；正文或附件已经存在时，保留全部 Draft，
 展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
-[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，交互探索见
+[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)，交互探索见
 [延续路由原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 内单聊
@@ -339,8 +339,8 @@ Camp 公共 Source Attachment 组件。`Enter` 发送、`Shift+Enter` 换行，I
 
 同一段 Single Chat 有非终态 Run 时 Composer 仍可输入后续正文和附件。Draft 为空时主要动作显示“停止”；一旦存在正文
 或附件，主要动作恢复为“发送”，提交后把内容放入该 Conversation 自己的 FIFO，不改变当前 Run 输入。队列按顺序展示，
-支持删除和独占编辑；编辑中可修改正文并添加、移除或重排附件。发布前附件失效时队首显示可理解的修复状态并阻塞同一
-Conversation 的后项，用户保存有效内容或删除队首后恢复；不得阻塞 Camp 公屏或其他 Single Chat。停止只结束当前回复，
+支持删除和移回普通输入框编辑；移回会覆盖当前正文、附件和引用并取消原队列项。发布前附件失效时队首显示可理解的修复状态并阻塞同一
+Conversation 的后项，用户移回编辑或删除队首后恢复；不得阻塞 Camp 公屏或其他 Single Chat。停止只结束当前回复，
 对话和未发布队列仍可继续。发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
 用户上滚阅读时不得抢走位置。选择另一个对象恢复其 active transcript 或创建新 transcript，UI 不区分这两种内部结果。
 切换对象时立即撤下旧 Snapshot；新对象加载完成前，发送、附件、停止与结束等依赖当前 Conversation 的操作保持禁用。
@@ -362,13 +362,13 @@ Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即�
 “结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
 并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
 同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
-[Single Chat v4](../../contracts/single-chat-v4.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
+[Single Chat v5](../../contracts/single-chat-v5.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
 
 panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
 结束和发送均需可键盘到达，不添加额外焦点框；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
 不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
 
-领域、权限与输出路由见 [Single Chat v4](../../contracts/single-chat-v4.md)，组件数据流见
+领域、权限与输出路由见 [Single Chat v5](../../contracts/single-chat-v5.md)，组件数据流见
 [Single Chat Architecture](../../architecture/single-chat.md)。
 
 ## Camp 执行过程
@@ -442,7 +442,7 @@ selection 不算“正在查看 non-terminal Run”。从其他 Camp、一级页
 Composer 或唯一 Stop。
 
 本工作区显式提交后入队的消息，在真正发布时沿用发送后的精确定位规则；上一轮被取消同样适用。
-Renderer 保留本次 `pendingInputId`，通过 [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md#desktop-submission-outcomes)
+Renderer 保留本次 `pendingInputId`，通过 [Pending Camp Input v4](../../contracts/pending-camp-input-v4.md#desktop-submission-outcomes)
 的持久结果找到对应 Turn，等待其 Run 投影到达后展开并恢复详情底部跟随，不夺走 Composer 焦点。
 删除待发送消息、无执行发布或离开 Camp 会消费或丢弃意图；其他窗口的发送和后台新 Run 不触发该行为。
 
@@ -832,7 +832,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
 [会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
 [Camp Attachment v9](../../contracts/camp-attachment-v9.md)，发送边界见
-[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)。
+[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
 独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除
@@ -941,42 +941,28 @@ Composer 输入和 Runtime 进度刷新不重新解析正文未变的历史 Mark
 附件、路由和发送，附件准备期间只禁用发送；不改成“加入待发送”或“提交中”。队列未空时，即使当前
 没有运行也继续入队。队列条位于 Composer 上方，与输入框同宽、同轴，按 FIFO 排列，不显示单条
 序号，不提供排序或合并；较长队列在有界区域滚动。Pending 不作为用户消息显示在公共时间线。
-普通排队不额外显示自动续发说明；编辑时不再显示队首等待、编辑标题或本地草稿说明，
-仅保留当前编辑行的状态标识和保存、取消操作。即使 CampTurn 正在执行，编辑器内也不复制 Composer 的
-“停止”入口。发送失败或编辑占用失效等需要处理的情况仍显示错误提示。
+普通排队不额外显示自动续发说明。队列使用系统字体、10.5px 正文、32px 最小行高与 6px 空心圆点；
+普通底色由 `--surface-subtle` 44% 与 `--conversation-surface` 混合。Day/Night 使用相同结构。
 
-队列继承现有系统字体栈，正文为 10.5px；普通行最小高度为 32px，以 6px 空心圆点起行。普通底色
-由 `--surface-subtle` 44% 与 `--conversation-surface` 混合，编辑底色由 `--brand-soft` 42% 与同一
-会话底色混合，配合轻边框和“正在编辑”文字区分状态。Day/Night 沿用各自语义 token，不新增全局字级或控件样式。
+仅右侧 24px 铅笔按钮触发编辑，正文和行背景不响应。点击后把完整消息移出队列，覆盖普通输入框的正文、
+附件、@成员、Reply 和选文引用，并把光标置于末尾。提示文字为“移回输入框编辑（覆盖当前内容）”。
+原行消失，不保留蓝色编辑行、“正在编辑”标记、独立编辑器或保存/取消按钮。再次点击其他行按同一规则覆盖。
+再次发送按新消息处理：执行中或队列非空时进入队尾，否则直接发送，不恢复原序号或位置。
 
-队列正文和行背景仅展示，不响应编辑；只有右侧独立的 24px 小铅笔按钮在同一个输入位置打开编辑。
-普通草稿独立保留，结束编辑后恢复；删除使用相邻的独立按钮。编辑正文继续使用 StructuredMentionComposer，
-支持 @成员、@所有队员及取消已有 Reply。Pending 行只展示正文，不展示附件或附件数量；无正文时摘要留空。
-编辑时可继续选择、粘贴或拖入附件，复用普通 Composer 的横向附件带、图片缩略图、文件卡及移除按钮。
-附件支持预览；右键或键盘菜单可前移、后移以调整顺序。编辑期间主会话列的拖放目标是当前 Pending
-编辑器，沿用普通 Composer 的接收层与归属提示，不写入隐藏的普通草稿；准备中或编辑占用失效时不接收。
-正文和附件不能同时为空，纯附件保存有效并保留原队列位置。切换编辑项或关闭编辑
-遇到未保存修改时提供“保存 / 放弃修改 / 继续编辑”，不静默丢弃。
+移回请求在 Core 事务内完成出队和 Draft 写入，成功前锁定普通输入框及附件/路由操作；期间离开 Camp 被 guard
+阻止。失败保留输入；若消息已经先发出，提示它已变化或发出并刷新队列。未知结果或成功后的 Draft 读取失败
+先显示加载错误，用户重读后再恢复输入，不能用旧正文覆盖已经移回的 Draft。切换 Camp、页面和关窗均沿用
+普通 Composer Draft 的保存路径。旧版遗留编辑占用使用中性的“上次编辑未完成 · 请移回输入框”提示；移回或删除
+会清除该行占用，新 Desktop 不再创建占用。
 
-正常 Camp/页面导航复用统一离开 guard，先锁定并捕获待发送编辑器的完整 ComposerDocument、Reply 与编辑归属，
-在同一窗口暂存；普通 Draft 独立 flush。导航失败恢复原编辑器交互并撤销暂存，不在 cleanup 中异步保存。
-返回后先读取 Core 队列，只有 Camp、Pending ID、canonical/base revision、editToken 全部相同且无需 recovery 时，
-才继续在原输入位置展示未保存的编辑，并以 Core 最新 working refs 展示附件。导航不发送 begin/takeover/save/cancel，
-不更新 canonical Pending，也不改变 FIFO。编辑或附件 mutation 在途时先保留当前会话，待完成后再离开。
+Pending 行只展示正文，不展示附件或附件数量；纯附件摘要留空。移回后完整复用普通 Composer 的横向附件带、
+预览、移除、引用与 Mention 能力；失败附件可先移回再修复。用户原文件不移动、不删除。
 
-Core 编辑占用跨重启保留。窗口刷新/异常退出、编辑占用或版本变化时不自动认领或释放；恢复条提供“重新编辑 / 放弃未保存修改 / 删除”。
-未保存修改只在 Renderer 内存，异常退出可以丢失，重新编辑从已保存内容开始。等待编辑的队首阻塞后续输入，
-后面一条的编辑不阻塞前面消息。
+上一轮正常结束、失败终态或停止完成都取当前队列第一条；输入框编辑不阻塞续发。停止仍只结束当前执行，
+待其完全结算才发送下一条，不提供暂停/继续队列入口。队首发送失败时原位展示错误并阻塞后续；用户移回编辑
+或删除后，剩余队列继续推进。移回的消息需要用户再次发送才重新进入队列。
 
-Composer 点击一次“停止”后，必须等当前执行完全停止，才自动发送队首一条；其余输入等待新一轮结束后按 FIFO 自动继续，
-不提供“暂停队列”或“继续发送”入口。上一轮正常结束、失败终态或停止完成都按同一规则推进，
-仍等待现有编辑、审批、恢复或运行状态结算。队首发送失败时原位展示错误，用户编辑保存后自动再次准入，
-或删除后让下一条继续；不隐藏失败、不自动重试，也不让后续消息越过队首。
-
-需要排队时，正文、附件、Reply/Continuation intent 与 Execution Request 作为完整发送意图一起进入 Pending；
-文件不移动。Cancel 放弃 working refs 并保留 Pending canonical refs；Delete 取消整条 Pending 并释放编辑占用。
-队首发布前发现附件缺失、不可读或 kind 变化时进入 `needs_repair` 并继续阻塞 FIFO，编辑保存或删除后再推进。
-持久化和原子发布由 [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md) 拥有。
+持久化、双方 revision、幂等与发布竞争由 [Pending Camp Input v4](../../contracts/pending-camp-input-v4.md) 拥有。
 
 ## 多段消息选文引用
 

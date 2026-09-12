@@ -53,10 +53,12 @@ Renderer 使用生产 CampWorkspace、适配器与 CSS，1440×920 隔离 Electr
 
 本机诊断记录位于 `/tmp/rovai-camp-diag-20260912`，原始内容仅留在本机私有目录，不纳入仓库。
 严格 Clippy、桌面构建和 diff-aware 文档门禁已通过；Rust 基础 553 项、CLI 35 项、数据库集成 309 项已验证，
-staged 路由的 workspace 验证另覆盖 Core Main 237 项（6 项既有忽略）。`VITEST_MAX_WORKERS=1 pnpm test` 已通过：176 个 Vitest 文件、1,802 项测试；脚本测试 317 项通过、2 项既有平台跳过。
+staged 路由的 workspace 验证另覆盖 Core Main 237 项（6 项既有忽略）。合并主线前 `VITEST_MAX_WORKERS=1 pnpm test` 已通过：176 个 Vitest 文件、1,802 项测试；脚本测试 317 项通过、2 项既有平台跳过。
 默认并行执行曾触发已有 Supervisor/Evaluation 测试的短时轮询超时；单独复跑 35 项通过，随后完整单 worker 门禁通过，未修改这些既有测试。
 最终 Electron 的正文 Blob 重试和执行窗口两项均通过；窗口测试包括屏幕外延迟读取、键盘焦点、跨组边界保留已展开结果、
 不重复读取保留结果，以及 Day/Night 两个真实主题。Impeccable detector 执行一次，38 项均为既有 CSS 提示，新增样式行没有命中。
+
+合并主线 `f30024ae76bdeb3534e10a56d0da6a6a8bd56e13` 后再次通过类型检查、严格 Clippy、桌面构建、文档门禁与完整 `pnpm test`：175 个 Vitest 文件、1,794 项测试及 317 项脚本测试。测试数量变化来自主线待发送消息功能的既有测试收口。三项 Electron 验收同时覆盖执行窗口、正文 Blob 和主线待发送消息退回输入框；两个 Rust 退回输入框 owner 与执行分页 owner 定向复跑通过。
 
 ## 权威与影响
 

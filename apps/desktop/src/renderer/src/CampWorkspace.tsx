@@ -76,8 +76,7 @@ import {
   draftCoordinatorChangeRefreshesProjection,
   type DraftMutation
 } from './draft-mutation-coordinator'
-import { PendingCampInputs, type PendingAttachmentDropTarget, type PendingCampInputsHandle } from './PendingCampInputs'
-import type { PendingInputLeavePreparation } from './pending-input-navigation'
+import { PendingCampInputs, PendingInputReturnRejectedError, pendingError, type PendingCampInputsHandle } from './PendingCampInputs'
 import { AttachmentCard, AttachmentPlaceholder, ComposerAttachmentStrip } from './AttachmentCard'
 export { attachmentRevealLabel } from './AttachmentCard'
 import {
@@ -420,6 +419,16 @@ async function mutateComposerDraft(
 ): Promise<CampComposerDraftView> {
   const common = { campId: draft.campId, expectedRevision: draft.revision }
   switch (mutation.kind) {
+    case 'return_pending_input': {
+      const result = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.edit', {
+        commandId: mutation.commandId,
+        command: { campId: draft.campId, pendingInputId: mutation.pendingInputId,
+          expectedRevision: mutation.expectedRevision, editToken: mutation.editToken,
+          action: { type: 'return_to_composer', expectedDraftRevision: draft.revision } }
+      })
+      if (result.status === 'rejected') throw new PendingInputReturnRejectedError(pendingError(result.code))
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId: draft.campId })
+    }
     case 'quote':
       return window.rovai.request<CampComposerDraftView>('messageQuotes.mutateDraft', {
         commandId: mutation.commandId,
@@ -1538,11 +1547,10 @@ export function CampWorkspace({
     hasUnavailableAtom: false
   })
   const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
-  const [pendingEditing, setPendingEditing] = useState(false)
   const pendingInputsRef = useRef<PendingCampInputsHandle>(null)
-  const [pendingAttachmentDropTarget, setPendingAttachmentDropTarget] = useState<PendingAttachmentDropTarget>(null)
-  const updatePendingAttachmentDropTarget = useCallback((target: PendingAttachmentDropTarget): void => {
-    setPendingAttachmentDropTarget(() => target)
+  const singleChatLeaveGuardRef = useRef<(() => CampLeavePreparation) | null>(null)
+  const bindSingleChatLeaveGuard = useCallback((guard: (() => CampLeavePreparation) | null): void => {
+    singleChatLeaveGuardRef.current = guard
   }, [])
   const [pendingRefresh, setPendingRefresh] = useState(0)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
@@ -2190,6 +2198,7 @@ export function CampWorkspace({
     try {
       await draftCoordinator.load()
       if (draftCampId.current !== campId) return
+      pendingInputsRef.current?.clearError()
       setComposerPersistenceError(null)
       setDraftLoadState({ state: 'ready' })
     } catch (error) {
@@ -2209,12 +2218,15 @@ export function CampWorkspace({
     }
     const composerHandle = composerHandleRef.current
     composerHandle?.setInteractionLocked(true)
-    let pendingPreparation: PendingInputLeavePreparation | undefined
+    const pendingLeavePreparations: CampLeavePreparation[] = []
     try {
-      pendingPreparation = await pendingInputsRef.current?.prepareForLeave()
+      const privatePreparation = singleChatLeaveGuardRef.current?.()
+      if (privatePreparation) pendingLeavePreparations.push(privatePreparation)
+      const publicPreparation = await pendingInputsRef.current?.prepareForLeave()
+      if (publicPreparation) pendingLeavePreparations.push(publicPreparation)
       if (draftLoadState.state !== 'ready') {
         return { complete(didLeave) {
-          pendingPreparation?.complete(didLeave)
+          for (const preparation of pendingLeavePreparations) preparation.complete(didLeave)
           if (!didLeave) composerHandle?.setInteractionLocked(false)
         } }
       }
@@ -2229,7 +2241,7 @@ export function CampWorkspace({
         complete(didLeave) {
           if (completed) return
           completed = true
-          pendingPreparation?.complete(didLeave)
+          for (const preparation of pendingLeavePreparations) preparation.complete(didLeave)
           if (!didLeave) composerHandle?.setInteractionLocked(false)
           if (didLeave && settlePending) {
             void settlePending(draft).catch(() => undefined)
@@ -2237,7 +2249,7 @@ export function CampWorkspace({
         }
       }
     } catch (error) {
-      pendingPreparation?.complete(false)
+      for (const preparation of pendingLeavePreparations) preparation.complete(false)
       composerHandle?.setInteractionLocked(false)
       const normalized = error instanceof Error ? error : new Error(readErrorMessage(error))
       setComposerPersistenceError(normalized)
@@ -2698,6 +2710,43 @@ export function CampWorkspace({
     }
   }
 
+  const returnPendingInputToComposer = async (
+    item: import('@contracts').PendingCampInputView,
+    editToken: string | null
+  ): Promise<void> => {
+    const composerHandle = composerHandleRef.current
+    if (!composerHandle || composerSubmittingRef.current || routingMutatingRef.current || draftLoadState.state !== 'ready') {
+      throw new Error('输入框正在处理变更，请稍后再试。')
+    }
+    routingMutatingRef.current = true
+    setRoutingMutating(true)
+    composerHandle.setInteractionLocked(true)
+    let transferAttempted = false
+    try {
+      await attachmentPreparationQueue.current
+      await composerHandle.flush()
+      transferAttempted = true
+      const next = await draftCoordinator.returnPendingInput(item.id, item.revision, editToken)
+      composerHandle.replaceDocument(next.content, 'end')
+      setFailedAttachments([])
+      setComposerPersistenceError(null)
+      setReplyInteractionError(null)
+      window.requestAnimationFrame(() => composerHandleRef.current?.focus('end'))
+    } catch (error) {
+      // A rejection has no transfer side effects. An unknown result or failed
+      // post-commit read must reload before old local text can autosave again.
+      if (transferAttempted && !(error instanceof PendingInputReturnRejectedError)) {
+        composerLockAwaitingDisabledCommitRef.current = true
+        setDraftLoadState({ state: 'error', error: error instanceof Error ? error : new Error(readErrorMessage(error)) })
+      }
+      throw error
+    } finally {
+      if (!composerLockAwaitingDisabledCommitRef.current) composerHandle.setInteractionLocked(false)
+      routingMutatingRef.current = false
+      setRoutingMutating(false)
+    }
+  }
+
   const focusComposerAtBoundary = (
     _modality: ReplyFocusModality,
     boundary: 'start' | 'end'
@@ -2711,10 +2760,6 @@ export function CampWorkspace({
     message: CampMessageView,
     modality: ReplyFocusModality
   ): Promise<void> => {
-    if (pendingEditing) {
-      onNotify?.('请先保存或取消待发送消息的编辑，再回复另一条消息。')
-      return
-    }
     if (
       message.id.startsWith('optimistic:')
       || routingMutatingRef.current
@@ -2881,7 +2926,6 @@ export function CampWorkspace({
   useLayoutEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
-    setPendingEditing(false)
     setQuoteSourceId(null)
     setPendingQueue(null)
     conversationFindRequestGeneration.current += 1
@@ -3384,8 +3428,7 @@ export function CampWorkspace({
 
   const submitMessage = async (): Promise<void> => {
     if (
-      pendingEditing
-      || composerSendDisabled
+      composerSendDisabled
       || composerSubmittingRef.current
       || routingMutatingRef.current
     ) return
@@ -3455,8 +3498,7 @@ export function CampWorkspace({
 
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
     if (
-      pendingEditing
-      || draftLoadState.state !== 'ready'
+      draftLoadState.state !== 'ready'
       || composerSubmittingRef.current
       || routingMutatingRef.current
     ) return
@@ -3542,7 +3584,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  }) || (pendingEditing ? !pendingAttachmentDropTarget : composerInteractionDisabled)
+  }) || composerInteractionDisabled
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -3599,8 +3641,7 @@ export function CampWorkspace({
     const inputs = droppedAttachmentInputs(event.dataTransfer)
     clearAttachmentDragState()
     if (inputs.length === 0) return
-    if (pendingEditing) pendingAttachmentDropTarget?.(inputs.map(({ file }) => file))
-    else void prepareFiles(inputs)
+    void prepareFiles(inputs)
   }
 
   useEffect(() => {
@@ -4740,6 +4781,7 @@ export function CampWorkspace({
             </CampDetailPopover>}
             {snapshot.camp.activationState === 'active' && (
               <SingleChatPanel
+                onLeaveGuardChange={bindSingleChatLeaveGuard}
                 target={singleChatTarget}
                 notificationFocus={notificationFocus?.kind === 'single_chat' ? notificationFocus : null}
                 onNotificationFocusPresented={onNotificationFocusPresented}
@@ -4829,16 +4871,10 @@ export function CampWorkspace({
       >
         <PendingCampInputs ref={pendingInputsRef} key={snapshot.camp.id} campId={snapshot.camp.id}
           submittedInputIds={submittedInputIds}
-          quoteMessages={visibleCampMessages} onRevealQuote={revealQuote}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
-          members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
-          attachmentDragActive={pendingEditing && attachmentDragState !== null}
-          onAttachmentDropTargetChange={updatePendingAttachmentDropTarget}
-          onQueueChange={setPendingQueue} onEditingChange={(editing) => {
-            setPendingEditing(editing)
-            if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
-          }} />
-        <div hidden={pendingEditing}>
+          disabled={composerInteractionDisabled || preparingAttachments.length > 0}
+          onQueueChange={setPendingQueue} onReturnToComposer={returnPendingInputToComposer} />
+        <div>
         <div className="composer-route-slot">
         {draftLoadState.state === 'loading' && (
           <div className="composer-route-rail" aria-label="正在加载接收者路由" aria-busy="true">
@@ -4892,7 +4928,7 @@ export function CampWorkspace({
         <MessageQuoteSelectionToolbar
           ownerKey={`camp:${snapshot.camp.id}`}
           messages={visibleCampMessages}
-          disabled={composerInteractionDisabled || pendingEditing}
+          disabled={composerInteractionDisabled}
           onAdd={async (selection) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote({ type: 'add', selection })) }}
         />
         <div className="composer-box">

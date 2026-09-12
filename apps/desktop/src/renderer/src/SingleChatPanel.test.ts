@@ -287,9 +287,9 @@ describe('Single Chat presentation', () => {
     expect(chooseTargetSource).toContain('snapshotRef.current = null')
     expect(chooseTargetSource).toContain('setSnapshot(null)')
     expect(chooseTargetSource).toContain('singleChatTargetRequestIsCurrent')
-    expect(source).toContain('disabled={!snapshot || !currentTargetReady || ending}')
+    expect(source).toContain('disabled={!snapshot || !currentTargetReady || returningPending || ending}')
     expect(source).toContain('disabled={!currentTargetReady || cancelling}')
-    expect(source).toContain('!selectedMember || !currentTargetReady || sending || ending')
+    expect(source).toContain('!selectedMember || !currentTargetReady || sending || returningPending || ending')
   })
 
   it('pins the end command to the conversation shown when confirmation opens', () => {
