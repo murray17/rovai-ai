@@ -92,7 +92,10 @@ pub fn runtime_script(executable: &Path) -> Result<PathBuf> {
 
 pub fn node_executable() -> Result<PathBuf> {
     let mut environment = Command::new("node");
-    crate::runtime_discovery::configure_active_runtime_command(&mut environment);
+    crate::runtime_discovery::configure_runtime_command(
+        crate::agent_profile::AdapterKind::ZcodeApp,
+        &mut environment,
+    );
     let search_path = environment
         .as_std()
         .get_envs()
@@ -150,7 +153,10 @@ pub fn node_executable() -> Result<PathBuf> {
 pub fn command(executable: &Path) -> Result<Command> {
     let script = runtime_script(executable)?;
     let mut command = Command::new(node_executable()?);
-    crate::runtime_discovery::configure_active_runtime_command(&mut command);
+    crate::runtime_discovery::configure_runtime_command(
+        crate::agent_profile::AdapterKind::ZcodeApp,
+        &mut command,
+    );
     command
         .args(["--eval", include_str!("zcode/stdio-owner.cjs")])
         .arg(script);
@@ -176,7 +182,9 @@ pub fn default_executables() -> Vec<PathBuf> {
         let mut paths = vec![PathBuf::from(
             "/Applications/ZCode.app/Contents/MacOS/ZCode",
         )];
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = crate::runtime_discovery::runtime_home_directory(
+            crate::agent_profile::AdapterKind::ZcodeApp,
+        ) {
             paths.push(home.join("Applications/ZCode.app/Contents/MacOS/ZCode"));
         }
         paths
@@ -225,38 +233,49 @@ pub struct NativeConfig {
 
 impl NativeConfig {
     pub fn output_root(&self) -> Result<PathBuf> {
-        let storage = std::env::var("ZCODE_STORAGE_DIR")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .map(|v| PathBuf::from(v.trim()));
+        let storage = crate::runtime_discovery::runtime_environment_variable(
+            crate::agent_profile::AdapterKind::ZcodeApp,
+            "ZCODE_STORAGE_DIR",
+        )
+        .and_then(|value| value.into_string().ok())
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| PathBuf::from(v.trim()));
         Ok(storage
             .unwrap_or(
-                dirs::home_dir()
-                    .context("ZCode native Home unavailable")?
-                    .join(".zcode"),
+                crate::runtime_discovery::runtime_home_directory(
+                    crate::agent_profile::AdapterKind::ZcodeApp,
+                )
+                .context("ZCode native Home unavailable")?
+                .join(".zcode"),
             )
             .join("cli/exec"))
     }
     pub fn load(cwd: &Path) -> Result<Self> {
-        let home = dirs::home_dir().context("ZCode native Home unavailable")?;
-        let native_environment = std::env::vars()
-            .filter(|(key, _)| {
-                matches!(
-                    key.as_str(),
-                    "ZCODE_MODEL"
-                        | "ZCODE_DATA_BASE_DIR"
-                        | "ZCODE_BASE_URL"
-                        | "ZCODE_STORAGE_DIR"
-                        | "ZCODE_SESSION_DB"
-                        | "ZCODE_SESSION_DB_PATH"
-                        | "ZCODE_HTTP_PROXY"
-                        | "ZCODE_NO_PROXY"
-                        | "ZCODE_AGENT_CA_CERT"
-                        | "ZCODE_HTTP_TIMEOUT"
-                        | "ZCODE_TIMEOUT"
-                )
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
+        let home = crate::runtime_discovery::runtime_home_directory(
+            crate::agent_profile::AdapterKind::ZcodeApp,
+        )
+        .context("ZCode native Home unavailable")?;
+        let native_environment = crate::runtime_discovery::runtime_environment(
+            crate::agent_profile::AdapterKind::ZcodeApp,
+        )
+        .into_iter()
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "ZCODE_MODEL"
+                    | "ZCODE_DATA_BASE_DIR"
+                    | "ZCODE_BASE_URL"
+                    | "ZCODE_STORAGE_DIR"
+                    | "ZCODE_SESSION_DB"
+                    | "ZCODE_SESSION_DB_PATH"
+                    | "ZCODE_HTTP_PROXY"
+                    | "ZCODE_NO_PROXY"
+                    | "ZCODE_AGENT_CA_CERT"
+                    | "ZCODE_HTTP_TIMEOUT"
+                    | "ZCODE_TIMEOUT"
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
         Self::load_layers(cwd, &home, &native_environment)
     }
 

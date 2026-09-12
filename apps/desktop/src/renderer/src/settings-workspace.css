@@ -634,7 +634,7 @@
   background: transparent;
 }
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:hover,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:has(.runtime-install-guide) {
-  background: var(--workspace-surface-subtle);
+  background: transparent;
 }
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:has(.runtime-install-guide) {
   border-radius: 10px;
@@ -1579,4 +1579,58 @@
 
 @media (max-width: 600px) {
   :root .settings-panel.settings-panel-monitoring .monitoring-filters { display: grid; grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Runtime settings share the member editor's quiet surface and action row. */
+:root .settings-panel-runtime .runtime-product-row { grid-template-columns: 40px minmax(0, 1fr) auto 110px 32px; }
+:root .settings-panel-runtime .runtime-product-status::before { content: none; }
+:root .settings-panel-runtime .runtime-product-check { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; background: transparent; border-color: transparent; color: var(--muted); }
+:root .settings-panel-runtime .runtime-product-check svg { width: 14px; height: 14px; }
+:root .settings-panel-runtime .runtime-product-settings, .runtime-startup-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; padding: 6px; color: var(--muted); }
+.runtime-product-settings svg, .runtime-startup-icon svg { width: 16px; height: 16px; }
+.runtime-startup-page { width: min(100%, 1040px); margin: 0 auto; padding: 8px 0 28px; }
+.runtime-startup-back { display: inline-flex; align-items: center; gap: 7px; padding: 5px 0; color: var(--muted); }
+.runtime-startup-back svg { width: 15px; height: 15px; }
+.runtime-startup-heading { display: flex; align-items: center; gap: 13px; margin: 25px 0 32px; }
+.runtime-startup-heading h1 { margin: 0; color: var(--ink); font-size: 20px; font-weight: 550; line-height: 1.4; }
+.runtime-startup-heading p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.runtime-startup-form { max-width: 800px; }
+.runtime-startup-section + .runtime-startup-section { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+.runtime-startup-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.runtime-startup-section-heading h2, .runtime-startup-section-heading > label { margin: 0; color: var(--ink); font-size: 13px; font-weight: 550; }
+.runtime-startup-form .quiet-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; font-size: 12px; }
+.runtime-startup-form .quiet-button svg { width: 14px; height: 14px; }
+.runtime-startup-path { display: flex; gap: 8px; }
+.runtime-startup-path > input { flex: 1; min-width: 0; }
+.runtime-startup-form input { width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: var(--workspace-surface-raised); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.runtime-startup-form input[aria-invalid="true"] { border-color: var(--danger); }
+.runtime-startup-inspection { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; }
+.runtime-startup-result { min-width: 0; color: var(--success); font-size: 12px; overflow-wrap: anywhere; }
+.runtime-startup-result.is-warning { color: var(--attention); }
+.runtime-startup-result.is-error, .runtime-environment-error { color: var(--danger); }
+.runtime-startup-version { margin-left: 10px; color: var(--muted); font-size: 11px; }
+.runtime-startup-environment { display: grid; gap: 9px; }
+.runtime-environment-labels, .runtime-environment-row { display: grid; grid-template-columns: minmax(120px, .85fr) minmax(140px, 1.35fr) 32px; gap: 8px; align-items: center; }
+.runtime-environment-labels { color: var(--muted); font-size: 12px; }
+.runtime-environment-row > input, .runtime-environment-value { min-width: 0; }
+.runtime-environment-value { position: relative; }
+.runtime-environment-value input { padding-right: 38px; }
+.runtime-environment-value button { position: absolute; right: 2px; top: 2px; }
+.runtime-environment-error { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.runtime-startup-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 24px; margin-top: 28px; border-top: 1px solid var(--line); }
+.runtime-startup-actions .member-editor-save { color: var(--ink); background: var(--surface-muted); }
+.runtime-startup-form .inline-error { margin-top: 20px; }
+@media (max-width: 900px) {
+  :root .settings-panel-runtime .runtime-product-row { grid-template-columns: 40px minmax(0, 1fr) 110px 32px; gap: 8px; }
+  :root .settings-panel-runtime .runtime-product-status { grid-column: 2; grid-row: 2; justify-self: start; }
+  :root .settings-panel-runtime .runtime-product-check { grid-column: 3; grid-row: 1 / 3; }
+  :root .settings-panel-runtime .runtime-product-settings { grid-column: 4; grid-row: 1 / 3; }
+  :root .settings-panel-runtime .runtime-product-logo { grid-row: 1 / 3; }
+  .runtime-startup-path { flex-wrap: wrap; }
+  .runtime-startup-path > input { flex-basis: 100%; }
+  .runtime-environment-labels { display: none; }
+  .runtime-environment-row { grid-template-columns: minmax(0, 1fr) 32px; }
+  .runtime-environment-row > input { grid-column: 1; }
+  .runtime-environment-value { grid-column: 1; }
+  .runtime-environment-row > button { grid-column: 2; grid-row: 1 / 3; }
 }

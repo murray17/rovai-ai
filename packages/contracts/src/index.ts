@@ -350,6 +350,25 @@ export interface CommandHealth {
   path?: string | null
 }
 
+export interface RuntimeEnvironmentVariable { name: string; value: string }
+
+export interface RuntimeStartupConfiguration {
+  programPath: string | null
+  environment: RuntimeEnvironmentVariable[]
+}
+
+export interface RuntimeStartupSettings {
+  runtimeKind: AdapterKind
+  revision: number
+  configuration: RuntimeStartupConfiguration
+}
+
+export interface RuntimeStartupInspection {
+  status: 'missing' | 'recognized' | 'version_unverified' | 'authentication_required' | 'ready' | 'check_failed'
+  executablePath: string | null
+  reportedVersion: string | null
+}
+
 export type RuntimeDiscoveryStatus = 'detecting' | 'found' | 'missing'
 
 export type RuntimeSearchPathSource =
@@ -3594,6 +3613,10 @@ export type CoreMethod =
   | 'runtime.subsystems.retry'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
+  | 'runtime.startup.get'
+  | 'runtime.startup.inspect'
+  | 'runtime.startup.check'
+  | 'runtime.startup.save'
   | 'runtime.modelCatalog.open'
   | 'runtime.pendingExecution.cancel'
   | 'members.list'
