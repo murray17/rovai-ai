@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: standalone-server-preview-operation
-last_updated: 2026-09-12
+last_updated: 2026-09-13
 ---
 
 # 独立 Server 开发预览
@@ -61,7 +61,8 @@ Web 与 Host 必须使用同一协议版本，当前为 [Host Web v2](../contrac
 ## 网络与停止
 
 默认推荐 loopback。局域网监听显式设置 `--allow-insecure-lan`，Host 自动发现实际网络接口。
-反向代理可补充 `--web-public-origin https://<代理地址>`；不要求唯一手填 LAN 地址。198.18/15 不默认推荐但不禁止连接。明文网络可能暴露令牌和内容；不可信网络使用
+反向代理可补充 `--web-public-origin https://<代理地址>`；不要求唯一手填 LAN 地址。地址发现排除 198.18.0.0/15，
+不提供展示、复制或扫码；网络层不主动封禁。明文网络可能暴露令牌和内容；不可信网络使用
 外部 HTTPS 或可信 VPN。本实现不创建域名、证书或预览代理，不信任任意代理转发头。
 
 Unix 用 SIGINT/SIGTERM；Windows 用 console Ctrl-C/Ctrl-Break。停止沿用 Core protocol 3；只有 durable

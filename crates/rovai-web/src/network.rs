@@ -37,6 +37,14 @@ impl Network {
     }
 
     pub fn addresses(&self) -> Result<Vec<Address>> {
+        Ok(self
+            .request_addresses()?
+            .into_iter()
+            .filter(|address| advertise(&address.origin))
+            .collect())
+    }
+
+    fn request_addresses(&self) -> Result<Vec<Address>> {
         let mut addresses = Vec::new();
         if let Some(origin) = &self.external {
             addresses.push(Address {
@@ -89,7 +97,7 @@ impl Network {
     pub fn allows(&self, host: Option<&str>, origin: Option<&str>) -> bool {
         // Each request must use one actual Host interface (or explicit proxy)
         // and its own same origin. Choosing another displayed address grants nothing.
-        self.addresses().is_ok_and(|addresses| {
+        self.request_addresses().is_ok_and(|addresses| {
             addresses.iter().any(|address| {
                 host == address
                     .origin
@@ -99,6 +107,22 @@ impl Network {
             })
         })
     }
+}
+
+// Address discovery is presentation, not a network admission rule.
+fn advertise(origin: &str) -> bool {
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
+    let ip = match url.host() {
+        Some(url::Host::Ipv4(ip)) => Some(ip),
+        Some(url::Host::Ipv6(ip)) => ip.to_ipv4_mapped(),
+        _ => None,
+    };
+    !ip.is_some_and(|ip| {
+        let [a, b, _, _] = ip.octets();
+        a == 198 && matches!(b, 18 | 19)
+    })
 }
 
 fn recommend(ip: IpAddr) -> bool {
@@ -114,12 +138,34 @@ mod tests {
 
     // Unique owner of interface recommendation vs request-origin admission.
     #[test]
-    fn interface_choice_never_grants_cross_origin_access_or_excludes_benchmark_network() {
+    fn discovery_excludes_benchmark_addresses_without_changing_origin_admission() {
         let network = Network::new(
             "127.0.0.1:4317".parse().unwrap(),
             Some("http://198.18.0.1:4317".into()),
         )
         .unwrap();
+        assert!(
+            network
+                .addresses()
+                .unwrap()
+                .iter()
+                .all(|address| { address.origin == "http://127.0.0.1:4317" })
+        );
+        for (ip, visible) in [
+            ("198.17.255.255", true),
+            ("198.18.0.0", false),
+            ("198.18.0.1", false),
+            ("198.19.255.255", false),
+            ("198.20.0.0", true),
+            ("[::ffff:198.18.0.1]", false),
+            ("[::1]", true),
+        ] {
+            let origin = format!("http://{ip}:4317");
+            assert_eq!(advertise(&origin), visible, "{origin}");
+            let bound = Network::new(format!("{ip}:4317").parse().unwrap(), None).unwrap();
+            assert_eq!(!bound.addresses().unwrap().is_empty(), visible);
+            assert!(bound.allows(Some(&format!("{ip}:4317")), Some(&origin)));
+        }
         for (host, origin, allowed) in [
             ("127.0.0.1:4317", None, true),
             ("127.0.0.1:4317", Some("http://127.0.0.1:4317"), true),

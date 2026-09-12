@@ -3,7 +3,7 @@ document_type: ui-interaction-draft
 authority: host-remote-connection-settings-review
 status: implemented
 target_version: v1.59
-last_updated: 2026-09-12
+last_updated: 2026-09-13
 ---
 
 # 设置 · 远程连接交互稿
@@ -38,7 +38,7 @@ last_updated: 2026-09-12
 | 页头 | `SettingsPageHeader`、`settings-workspace.css` | 24px/620 标题、12px 说明、无装饰边线；和通用页同一内容轴 |
 | 内容区 | `.settings-panel-general`、`.general-settings`、`.general-settings-section` | 880px 开放阅读面、24px 分区间距与细分隔线；保留稳定滚动条占位，避免短页标题移动 |
 | 控件 | 通用设置的开关、quiet/primary button、输入边界 | 中性按钮、白色关闭态滑块、6px 控件圆角；只有状态使用语义状态色 |
-| 图标与弹窗 | `NavigationIcon`、`AppDialogContent/Header/Body/Footer` | 在同一 1.7px 线条体系中增加设备图标；取消优先获焦点，Escape 可取消 |
+| 图标与弹窗 | `NavigationIcon`、`AppDialogContent/Header/Body/Footer` | 侧栏沿用原图标，页面不放设备图标；复用现有 Dialog，二维码关闭后焦点回到触发按钮 |
 | 双主题 | `packages/ui/src/theme.css`、生产 `styles.css` | 同一组件树，全部颜色取语义 token；无按主题分叉的布局 |
 
 [新增 CSS](../../apps/desktop/src/renderer/src/remote-connection.css)只拥有连接状态、地址、目录与令牌行的局部组合，
@@ -48,9 +48,12 @@ last_updated: 2026-09-12
 
 Desktop 的“应用”组在“提醒”之后提供“远程连接”。通用页不再重复管理入口。
 关闭时显示访问范围与端口；默认仅此电脑，明确选择局域网后显示 HTTP 明文说明，不要求手填唯一地址。
-开启后显示 Host 返回的实际接口地址列表、独立复制地址、会话数以及遮掩的令牌输入框。
+页面收紧为“远程访问”开关、连接地址、管理令牌三行，字段标签代替重复副标题；开启仅通过开关，不另放开启按钮或成功提示。
+开启后显示 Host 返回的实际接口地址列表，复制地址旁提供二维码；令牌默认遮掩，可重复显示、复制或独立重新生成。
 切换地址只更新页面选择；不调用 start/stop/rotate，不授予权限或改变 Host 状态。
-198.18/15 接口可展示和选择，但不标记为默认 LAN 推荐。实际网络可达性取决于设备网络和防火墙。
+地址发现直接排除 198.18.0.0/15，不作为可复制、可扫码或推荐地址；没有特殊入口，网络层不主动封禁。
+二维码在本页生成，只含所选地址，不含令牌。没有可展示地址时禁用复制与二维码，服务仍可运行。
+实际网络可达性取决于设备网络和防火墙。
 
 登录成功的 Owner 可直接使用 Host 有权访问的目录；设置中没有目录预授权名单。浏览器“选择工作目录”
 使用 `HostWorkspacePicker` 读取 Host 文件系统，支持主目录、根/盘符、上一级、子目录和绝对路径输入。
@@ -72,11 +75,12 @@ Web 的同一菜单显示当前 Host 地址及连接状态，可退出本页登�
 - `HostWorkspacePicker`：浏览器文件系统适配，不复制 Core 的工作区业务规则。
 
 `pnpm test:remote-connection-review` 在隔离 Chrome profile 验证双主题、几何、键盘错误定位、
-开启/关闭/重新生成确认、页面返回后读取令牌、198.18/15 地址选择不改令牌和会话、窄宽屏及减少动效。
+开启/关闭/重新生成确认、页面返回后读取令牌、地址切换不改令牌、二维码解码结果与所选地址一致、
+空地址禁用复制和二维码、窄宽屏及减少动效。
 该稿使用模拟 API，不能替代实际网络验收。真实 `pnpm test:host-web` 证明无预授权目录的 HTTP 项目操作、
 令牌重复读取不撤销登录，以及已有草稿/上传/回执/撤销/关闭边界。真实 Desktop/Web 页面验收由
 `pnpm test:host-web-live` 拥有；结果与剩余缺口见[当前实施计划](../versions/v1.59/implementation-plan.md)。
 
-本轮已验证的外观见[日间](../versions/v1.59/evidence/owner-host/remote-day.png)与
-[夜间](../versions/v1.59/evidence/owner-host/remote-night.png)；
-[交互/产物哈希记录](../versions/v1.59/evidence/owner-host/remote-connection-review.json)明确标记模拟 API。
+本轮外观见[日间](../versions/v1.59/evidence/remote-access/remote-day.png)与
+[夜间](../versions/v1.59/evidence/remote-access/remote-night.png)；
+[交互/产物哈希记录](../versions/v1.59/evidence/remote-access/remote-connection-review.json)明确标记模拟 API。

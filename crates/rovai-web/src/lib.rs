@@ -56,7 +56,6 @@ struct WebState {
 /// Owns only a network listener and its credentials. Stopping or dropping it
 /// never stops, replaces, or creates a Core runner.
 pub struct WebServer {
-    pub origin: String,
     network: Arc<network::Network>,
     sessions: Arc<Sessions>,
     shutdown: Option<oneshot::Sender<()>>,
@@ -86,12 +85,6 @@ impl WebServer {
             .context("Web address could not be bound")?;
         let address = listener.local_addr()?;
         let network = Arc::new(network::Network::new(address, config.public_origin)?);
-        let origin = network
-            .addresses()?
-            .first()
-            .context("no usable console address")?
-            .origin
-            .clone();
         let state = WebState {
             core,
             sessions: sessions.clone(),
@@ -112,7 +105,6 @@ impl WebServer {
                 .await
         });
         Ok(Self {
-            origin,
             network,
             sessions,
             shutdown: Some(shutdown),
@@ -121,7 +113,12 @@ impl WebServer {
     }
 
     pub fn status(&self) -> Value {
-        json!({"enabled":!self.task.is_finished(), "origin":self.origin, "addresses":self.network.addresses().unwrap_or_default(), "listen":self.network.listen.to_string(), "sessions":self.sessions.count(), "sessionLifetimeSeconds":SESSION_LIFETIME.as_secs()})
+        let addresses = self.network.addresses().unwrap_or_default();
+        let mut status = json!({"enabled":!self.task.is_finished(), "addresses":addresses, "listen":self.network.listen.to_string(), "sessions":self.sessions.count(), "sessionLifetimeSeconds":SESSION_LIFETIME.as_secs()});
+        if let Some(address) = addresses.first() {
+            status["origin"] = json!(address.origin);
+        }
+        status
     }
     pub fn administrator_token(&self) -> String {
         self.sessions.administrator_token()

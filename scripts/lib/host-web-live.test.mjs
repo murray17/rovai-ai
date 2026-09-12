@@ -66,10 +66,10 @@ test('actual Desktop and browser share Camp geometry while three drafts and reau
     const portProbe = createServer(); await new Promise(resolve => portProbe.listen(0, '127.0.0.1', resolve)); const port = portProbe.address().port; await new Promise(resolve => portProbe.close(resolve))
     await desktop.click(`document.querySelector('.sidebar-settings-main')`)
     await desktop.click(`[...document.querySelectorAll('.settings-sidebar-menu button')].find(e=>e.textContent.trim()==='远程连接')`)
-    await desktop.wait(`document.querySelector('.remote-start-row button:not(:disabled)')!==null`)
+    await desktop.wait(`document.querySelector('[aria-label="远程访问"]:not(:disabled)')!==null`)
     await desktop.click(`document.querySelector('#remote-port')`); await desktop.evaluate(`document.querySelector('#remote-port').select()`); await desktop.send('Input.insertText', { text: String(port) })
     await desktop.evaluate(`(()=>{const e=document.querySelector('#remote-access');e.value='lan';e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
-    await desktop.click(`document.querySelector('.remote-start-row button')`)
+    await desktop.click(`document.querySelector('[aria-label="远程访问"]')`)
     await desktop.wait(`document.querySelector('#remote-token')?.value.length===64`)
     const started = { ...await desktop.evaluate(`window.rovai.hostWeb.status()`), ...await desktop.evaluate(`window.rovai.hostWeb.token()`) }
     assert.ok(started.addresses.length > 0)

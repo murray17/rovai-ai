@@ -5,7 +5,7 @@ authority: shared-host-web-transport
 status: accepted
 version: 2
 source_version: v1.59
-last_updated: 2026-09-12
+last_updated: 2026-09-13
 ---
 
 # Host Web v2
@@ -23,11 +23,14 @@ multi-tenant or strongly isolated execution platform and does not promise to def
 The former S1 isolation proof is not a delivery gate. Existing Runtime permission modes, approval, process cleanup and
 file-operation validation remain unchanged. Known sentinel failures remain evidence; they are not relabeled as passes.
 
-Local `host.web.status` returns `enabled`, `listen`, `origin`, `addresses` and session counts, never credentials.
+Local `host.web.status` returns `enabled`, `listen`, optional `origin`, `addresses` and session counts, never credentials.
 Each address contains `origin`, `interface` and `recommended`. Rust enumerates actual interfaces compatible with the
-listener, including 198.18/15 interfaces; that range is not a default LAN recommendation. IPv6 link-local URLs requiring
+listener. Discovery excludes 198.18.0.0/15 (including mapped IPv4 literals); these addresses are not shown, recommended,
+copied or encoded as QR codes. This is a presentation filter, not a network ban. IPv6 link-local URLs requiring
 browser-unsupported scope IDs are not advertised. Selecting an address is local presentation state only: it cannot
-change the listener, Owner, permissions or credentials. Interface discovery does not guarantee remote reachability.
+change the listener, Owner, permissions or credentials. QR codes contain only the selected address, never credentials.
+`origin` is the first advertised address and is omitted when discovery is empty; starting the listener does not require
+an advertised address. Interface discovery does not guarantee remote reachability.
 The listener accepts its actual interface authorities and optional explicit reverse-proxy `publicOrigin`; an Origin
 header must match the same authority's complete origin. Arbitrary Host, cross-origin requests and query parameters are
 rejected; there is no credentialed CORS. LAN HTTP requires an explicit enable choice, with HTTPS/VPN for untrusted networks.

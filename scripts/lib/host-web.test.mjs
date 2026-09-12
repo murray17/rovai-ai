@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { createServer } from 'node:net'
+import { request as httpRequest } from 'node:http'
 import test from 'node:test'
 import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from './runtime-camp-files-root.mjs'
 
@@ -40,7 +41,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     } finally {
       await new Promise((resolve) => occupied.close(resolve))
     }
-    const started = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory })
+    const started = await host.request('host.web.start', { listen: '127.0.0.1:0', publicOrigin: 'http://198.18.0.1:4317', uiDirectory })
     assert.equal(started.enabled, true)
     const origin = started.origin
     const administrator = started.administratorToken
@@ -49,8 +50,21 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(status.origin, origin)
     assert.equal((await host.request('host.web.token')).administratorToken, administrator)
     assert.ok(status.addresses.some(address => address.origin === origin))
+    assert.equal(status.addresses.some(address => address.origin.includes('198.18.')), false)
+    assert.equal(origin.includes('198.18.'), false, 'the default address comes from filtered discovery')
     await assert.rejects(host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory }), { code: 'HOST_WEB_START_FAILED' })
     const request = (path, options = {}) => fetch(`${origin}/api/v1/${path}`, { ...options, redirect: 'error', signal: AbortSignal.timeout(10_000) })
+    // Fetch normalizes Host to its URL. Use HTTP directly to exercise the
+    // configured proxy authority without changing this machine's interfaces.
+    for (const [requestOrigin, expected] of [['http://198.18.0.1:4317', 401], [origin, 403]]) {
+      const code = await new Promise((resolve, reject) => {
+        const req = httpRequest(`${origin}/api/v1/capabilities`, {
+          headers: { Host: '198.18.0.1:4317', Origin: requestOrigin }, signal: AbortSignal.timeout(10_000)
+        }, response => { response.resume(); response.on('end', () => resolve(response.statusCode)); response.on('error', reject) })
+        req.on('error', reject); req.end()
+      })
+      assert.equal(code, expected, 'excluded discovery addresses retain authentication and same-origin admission')
+    }
     const login = async (editor) => {
       const response = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 2, administratorToken: administrator, ...(editor ? { editor } : {}) }) })
       assert.equal(response.status, 200)

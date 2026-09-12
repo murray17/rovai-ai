@@ -4,7 +4,7 @@ version: v1.59
 lifecycle: current
 authority: version-implementation-plan
 status: in_progress
-last_updated: 2026-09-12
+last_updated: 2026-09-13
 ---
 
 # v1.59 实施与验收
@@ -15,7 +15,21 @@ last_updated: 2026-09-12
 
 ## 当前收敛：阶段 1–3，单 Owner 的真实业务闭环
 
-本轮变更：正式“远程连接”菜单复用现有设置风格，自动展示实际 Host 接口并独立选择复制地址；
+2026-09-13 增量：设置页保留原有壳层与控件，收紧为“远程访问”开关、连接地址和管理令牌；移除设备装饰图标、
+重复副标题、单独开启按钮及开启成功提示。复制地址旁增加本页生成的二维码，只编码所选地址。
+Rust 地址发现排除 198.18.0.0/15，既不展示也不作为默认地址；网络准入仍使用实际接口与明确代理地址，
+没有可展示地址也不阻止监听启动。原网络测试扩展 CIDR 两端及 IPv4-mapped IPv6，保留同源正反例；
+Host HTTP 验证过滤后的投影与未封禁的实际请求准入。浏览器验收通过独立解码器核对所显示二维码的地址。
+本增量[日间](evidence/remote-access/remote-day.png)、[夜间](evidence/remote-access/remote-night.png)、
+[二维码](evidence/remote-access/remote-qr.png)及[离线稿验收记录](evidence/remote-access/remote-connection-review.json)使用生产组件、模拟 API。
+[真实 Desktop/双浏览器回归](evidence/remote-access/desktop-web-live.json)再次通过开启、复制、登录、目录选择与编辑恢复；
+与前一轮一样使用同机隔离 profile，不声称第二台实体设备已验收。
+本增量通过 TypeScript、Desktop/Web 构建、`pnpm test`（175 文件/1798 项 Vitest；Node 317 通过、2 既有平台跳过）、
+Rust Web 4 项、PR library 795 通过/6 既有忽略、CLI 35、slow 309，以及 Clippy、fmt 和固定 base 文档治理。
+原生设置、真实 Host HTTP、最终 Desktop/双浏览器和 14 个日夜状态的交互稿验收均通过；二维码由独立解码器核对，
+另覆盖空地址、剪贴板失败、窄窗口开关同行和键盘焦点恢复。最终离线产物哈希记在上述交互稿记录中。
+
+前一增量（`c0cc4304`）：正式“远程连接”菜单复用现有设置风格，自动展示实际 Host 接口并独立选择复制地址；
 管理令牌可重新查看/复制，重新生成独立确认。取消工作目录预授权，登录后的浏览器可浏览 Host 目录、
 输入绝对路径，再进入现有 Core 项目校验与共享新建会话流程。交互稿直接挂载生产远程连接组件。
 本增量 [真实 Desktop/双浏览器记录](evidence/owner-host/desktop-web-live.json)已通过：从正式设置开启服务，
@@ -33,7 +47,7 @@ last_updated: 2026-09-12
 另修正验收鼠标先移动再按下；原样式的悬停加号保留，临时就绪状态改动和诊断计数已撤掉。
 旧证据保留原提交边界，不因当前模型变化而转为通过。
 
-本轮最终门禁通过：TypeScript、Desktop/Web build、`pnpm test`（Vitest 175 文件/1798 项，Node 317 通过/2 既有平台跳过），
+前一增量门禁通过：TypeScript、Desktop/Web build、`pnpm test`（Vitest 175 文件/1798 项，Node 317 通过/2 既有平台跳过），
 后续受影响的 App/client/draft coordinator 定向 185 项；Rust Web 4 项，Rust PR library 795 通过/6 既有忽略、
 CLI 35、slow 309；workspace all-target check、Clippy、fmt 和固定 main base 文档治理。
 重建 Host 的 HTTP、真实 Electron/双浏览器、最终原生设置与离线稿验证均通过，未跳过。

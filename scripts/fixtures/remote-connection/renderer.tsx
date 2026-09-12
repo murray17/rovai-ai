@@ -48,11 +48,11 @@ const windowControls = { getResetCapability: async () => ({ canReset: true, reas
 } } as WindowControlsApi
 
 let token = 'review-only-not-a-real-administrator-token'
-let hostStatus = { enabled: initialState === 'enabled', sessions: initialState === 'enabled' ? 2 : 0,
-  origin: 'http://192.168.1.12:4317', addresses: addresses('4317') }
+let hostStatus = { enabled: ['enabled', 'empty'].includes(initialState), sessions: initialState === 'enabled' ? 2 : 0,
+  origin: 'http://192.168.1.12:4317', addresses: initialState === 'empty' ? [] : addresses('4317') }
 function addresses(port: string) { return [
   { origin: `http://192.168.1.12:${port}`, interface: 'en0', recommended: true },
-  { origin: `http://198.18.0.1:${port}`, interface: 'utun0', recommended: false },
+  { origin: `http://192.168.2.12:${port}`, interface: 'en1', recommended: true },
   { origin: `http://127.0.0.1:${port}`, interface: 'lo0', recommended: false }
 ] }
 const delay = () => new Promise(resolve => setTimeout(resolve, 450))

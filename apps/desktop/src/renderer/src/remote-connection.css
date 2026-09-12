@@ -3,8 +3,6 @@
 .remote-connection-page { container: remote-settings / inline-size; }
 .settings-panel:has(.remote-connection-page) { scrollbar-gutter: stable; }
 .remote-status-row { display: flex; align-items: center; gap: 16px; min-height: 56px; }
-.remote-service-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 8px; color: var(--muted); background: var(--surface-muted); }
-.remote-service-icon svg { width: 24px; height: 24px; }
 .remote-copy { display: grid; gap: 5px; min-width: 0; flex: 1; }
 .remote-copy p, .remote-field p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .remote-copy :is(label,strong) { color: var(--ink); font-size: 13px; font-weight: 500; }
@@ -28,7 +26,6 @@
 .remote-network-note input { margin: 0; }
 .remote-address-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); }
 .remote-address-row code { overflow-wrap: anywhere; font-size: 13px; color: var(--ink); }
-.remote-section-heading { display: flex; align-items: center !important; justify-content: space-between; gap: 16px; }
 .remote-workspace { display: flex; min-height: 64px; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 12px 0; }
 .remote-workspace:last-child { border-bottom: 0; }
 .remote-workspace > div { display: grid; gap: 4px; min-width: 0; flex: 1; }
@@ -40,13 +37,23 @@
 .remote-token input { flex: 1; min-width: 160px !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; }
 .remote-error { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.6; }
 .remote-connection-page [aria-invalid='true'] { border-color: var(--danger) !important; }
-.remote-feedback { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
-.remote-start-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 0; }
+.remote-feedback { margin: 12px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
 @container remote-settings (max-width: 480px) {
   .remote-setting-row { flex-wrap: wrap; gap: 10px; }
   .remote-setting-row .remote-copy { flex-basis: 100%; }
-  .remote-service-icon { display: none; }
   .remote-title-row { gap: 6px; }
-  .remote-section-heading { align-items: flex-start !important; flex-wrap: wrap; }
 }
-.remote-connection-page select.remote-address-select { width: 100%; }
+.remote-access-fields { gap: 20px; }
+.remote-access-fields > .remote-setting-row { flex-wrap: nowrap; }
+.remote-access-fields .remote-field > label { font-size: 13px; }
+.remote-address-controls, .remote-address-actions { display: flex; align-items: center; gap: 8px; }
+.remote-address-actions { flex: none; }
+.remote-connection-page select.remote-address-select { width: 0; flex: 1; }
+.remote-qr { display: grid; justify-items: center; gap: 16px; }
+:root .app-dialog-body.remote-qr { padding-bottom: 24px; }
+.remote-qr svg { width: 208px; height: auto; max-width: 100%; }
+.remote-qr code { font-size: 12px; overflow-wrap: anywhere; text-align: center; }
+@container remote-settings (max-width: 480px) {
+  .remote-address-controls { flex-wrap: wrap; }
+  .remote-connection-page select.remote-address-select { flex-basis: 100%; }
+}
