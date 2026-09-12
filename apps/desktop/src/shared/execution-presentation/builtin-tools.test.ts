@@ -137,13 +137,16 @@ describe('Rovai Shell carrier presentation', () => {
     expect(steps(events).map(step => step.id)).toEqual(['core-1'])
     expect(JSON.stringify(events)).toBe(before)
     expect(steps([builtin(), shell("rovai send <<'JSON'\n{\"body\":\"message\"}\nJSON")])).toHaveLength(1)
+    expect(steps([builtin(), shell("rovai send --body '正文中的 `code`、$(literal) 与 <tag> 只是文本'")])).toHaveLength(1)
+    expect(steps([builtin(), shell("rovai send <<'JSON'\n{\"body\":\"`code` 与 $(literal)\"}\nJSON")])).toHaveLength(1)
+    expect(steps([builtin(), shell("rovai send <<<'{\"body\":\"`code`\"}'")])).toHaveLength(1)
     const task = { taskId: 'task-1', title: 'Task', status: 'open', assigneeAgentId: null, version: 1, availableActions: [], internalFact: true }
     const { internalFact: _, ...cliTask } = task
     expect(steps([builtin('team.create_task', { title: 'Task' }, task), shell("rovai task create --title Task", cliTask)])).toHaveLength(1)
   })
 
   it.each(['rovai send --help', 'rovai --version', "rovai send --body 'message' && git status",
-    "rovai send --body 'message' > /tmp/output.json", "rovai send --body '$(pwd)'",
+    "rovai send --body 'message' > /tmp/output.json", 'rovai send --body "$(pwd)"', "rovai send <<JSON\n{\"body\":\"$(pwd)\"}\nJSON",
     "rovai send <<JSON\n{\"body\":\"incomplete\"}", "echo 'rovai send'"])(
     'retains Shell work without a pure proven carrier: %s', command => {
       expect(steps([builtin(), shell(command)])).toHaveLength(2)

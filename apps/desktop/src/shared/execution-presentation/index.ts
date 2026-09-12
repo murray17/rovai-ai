@@ -1459,10 +1459,11 @@ function rovaiCommandCursor(tokens: ShellPreviewToken[]): number | null {
 
 /** Omit Rovai stdin before the one-line tokenizer can expose its JSON as commands.
  * Preserve every independent command and non-Rovai heredoc, including mixed Shells. */
-function omitBuiltinStdin(command: string): { command: string; complete: boolean } {
+function omitBuiltinStdin(command: string): { command: string; complete: boolean; hasExpansion: boolean } {
   const lines = command.split(/\r?\n/u)
   const output: string[] = []
   let complete = true
+  let hasExpansion = false
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex]
     let offset = 0
@@ -1490,12 +1491,18 @@ function omitBuiltinStdin(command: string): { command: string; complete: boolean
       const builtin = cursor !== null && Object.values(BUILTIN_CLI_NAMES).some(name =>
         name.split(' ').slice(1).every((part, position) => words[position] === part))
       if (redirect.endsWith('<<<')) {
-        if (builtin) omitted.push({ start: token.start, end: valueToken.end })
+        if (builtin) {
+          omitted.push({ start: token.start, end: valueToken.end })
+          hasExpansion ||= activeShellSyntax(valueToken.raw.slice(attached ? redirect.length : 0))
+        }
       } else if (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)) {
         let end = lineIndex + 1
         while (end < lines.length && (redirect.endsWith('-') ? lines[end].replace(/^\t+/u, '') : lines[end]) !== value) end += 1
-        if (builtin) omitted.push({ start: token.start, end: valueToken.end })
-        else retainedBodies.push(...lines.slice(lineIndex + 1, Math.min(end + 1, lines.length)))
+        if (builtin) {
+          omitted.push({ start: token.start, end: valueToken.end })
+          const quotedMarker = /['"\\]/u.test(valueToken.raw.slice(attached ? redirect.length : 0))
+          if (!quotedMarker) hasExpansion ||= activeHeredocSubstitution(lines.slice(lineIndex + 1, end).join('\n'))
+        } else retainedBodies.push(...lines.slice(lineIndex + 1, Math.min(end + 1, lines.length)))
         if (end === lines.length) complete = false
         lineIndex = end
       }
@@ -1505,17 +1512,41 @@ function omitBuiltinStdin(command: string): { command: string; complete: boolean
     for (const span of omitted.reverse()) rendered = rendered.slice(0, span.start) + rendered.slice(span.end)
     output.push(rendered.trimEnd(), ...retainedBodies)
   }
-  return { command: output.join('\n').trim(), complete }
+  return { command: output.join('\n').trim(), complete, hasExpansion }
+}
+
+function activeHeredocSubstitution(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '\\') { index += 1; continue }
+    if (value[index] === '`' || (value[index] === '$' && value[index + 1] === '(')) return true
+  }
+  return false
+}
+
+function activeShellSyntax(value: string): boolean {
+  let quote: 'single' | 'double' | null = null
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote === 'single') {
+      if (character === "'") quote = null
+      continue
+    }
+    if (character === '\\') { index += 1; continue }
+    if (character === '`' || (character === '$' && value[index + 1] === '(')) return true
+    if (character === '"') { quote = quote === 'double' ? null : 'double'; continue }
+    if (quote === null && (character === '<' || character === '>')) return true
+    if (quote === null && character === "'") quote = 'single'
+  }
+  return quote !== null
 }
 
 function pureBuiltinShellOperation(command: string): string | null {
   const source = unwrapShellCommand(stripAnsi(command).trim())
-  if (/[`]|\$\(/u.test(source)) return null
   const stdin = omitBuiltinStdin(source)
-  if (!stdin.complete) return null
+  if (!stdin.complete || stdin.hasExpansion) return null
   const tokens = tokenizeShellPreview(stdin.command)
   // Dynamic commands, redirection and additional work cannot be hidden as a CLI carrier.
-  if (tokens.some(token => token.operator || /[<>`]|\$\(/u.test(token.raw))) return null
+  if (tokens.some(token => token.operator || activeShellSyntax(token.raw))) return null
   const cursor = rovaiCommandCursor(tokens)
   if (cursor === null) return null
   const words = tokens.slice(cursor + 1).map(token => token.value)

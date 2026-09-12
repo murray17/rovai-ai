@@ -22,12 +22,14 @@ last_updated: 2026-09-12
 
 已通过 `pnpm typecheck`、`pnpm test`（175 个 Vitest 文件、1794 项；脚本测试 317 项通过，2 项 Windows-only 跳过）、
 `pnpm build:desktop`、diff-aware 文档门禁，以及 Rust PR 的 553 项基础、35 项 CLI 和 309 项慢速测试。
-Staged Rust 路由按没有 Rust 改动跳过。Clippy 与打包安装在发布步骤继续检查。
+Staged Rust 路由按没有 Rust 改动跳过。严格 Clippy 也已通过，打包安装在发布步骤继续检查。
 
 使用真实 `ToolCallRow`、共享投影和生产 CSS 的受控浏览器夹具，以 CUA 操作验证：七种状态展开共 7 个入参区域，
 完整结果读取次数为 0；空输入 Send 无箭头；随后展开普通 Shell 才读取一次完整结果。Inspector 实测 440px，
 工具行 28px，类型/状态/箭头为 16/16/20px，入参 10px；长输入 PageDown 内部滚动，Escape 返回对应 summary。
-日间窄面板和夜间宽面板截图已保留。此处是生产组件的定向验证，不冒充全量 Runtime Activity 矩阵或真实模型运行。
+日间窄面板和夜间宽面板截图已保留。
+另以本 Camp 已持久化的一组真实 Send / Shell 公开 Evidence 做只读回放：两个 Canonical 操作在 UI 中收敛为一个
+`rovai send` 静态行。正文中被单引号保护的 Markdown 反引号属于普通值，真实命令替换仍禁止折叠；两者均有回归。此处是生产组件的定向验证，不冒充全量 Runtime Activity 矩阵或真实模型运行。
 
 本机证据目录：`/tmp/rovai-builtin-tool-input-ui.cOLLDK`，包含测试日志、生产组件夹具、验收记录与截图。
 PR 合入及 daily App 的构建、隔离启动、签名与安装由最终发布记录补充。
