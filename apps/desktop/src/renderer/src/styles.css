@@ -8597,6 +8597,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 :root .command-palette-input { padding:11px 16px 14px; font-size:14px; font-weight:400; border-bottom:0; caret-color:var(--ink); }
 :root .command-palette-item { min-height:42px; padding:8px 10px; }
 :root .attachment-lightbox { padding:12px; border:1px solid var(--line-strong); border-radius:12px; background:var(--surface-raised); }
+:root .attachment-lightbox.image-gallery-lightbox { padding:0; }
 :root .attachment-lightbox > h2 { margin:2px 40px 12px 4px; font-size:13px; font-weight:400; }
 :root .attachment-lightbox-close { border:0; background:var(--surface-raised); color:var(--muted); border-radius:7px; box-shadow:none; }
 :root .execution-recipient-popover { border:1px solid var(--line-strong); border-top-width:1px; }

@@ -2,6 +2,7 @@ import { extname } from 'node:path'
 import type { FilePreviewKind } from '@contracts'
 
 const WHOLE_TEXT_LIMIT = 4 * 1024 * 1024
+const HTML_DOCUMENT_LIMIT = 32 * 1024 * 1024
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.mdown', '.mkd', '.mdx'])
 const HTML_EXTENSIONS = new Set(['.html', '.htm'])
@@ -86,7 +87,7 @@ export function classifyFilePreview(
     return { extension, mime: 'text/markdown', kind: textKind('markdown', size), openRisk }
   }
   if (HTML_EXTENSIONS.has(extension)) {
-    return { extension, mime: 'text/html', kind: textKind('html', size), openRisk }
+    return { extension, mime: 'text/html', kind: size > HTML_DOCUMENT_LIMIT ? 'paged_text' : 'html', openRisk }
   }
   if (PATCH_EXTENSIONS.has(extension)) {
     return { extension, mime: 'text/x-diff', kind: textKind('patch', size), openRisk }
@@ -106,6 +107,7 @@ export function classifyFilePreview(
 
 export const filePreviewLimits = {
   wholeTextBytes: WHOLE_TEXT_LIMIT,
+  htmlDocumentBytes: HTML_DOCUMENT_LIMIT,
   pageBytes: 256 * 1024,
   binaryBytes: 32 * 1024 * 1024,
   sampleBytes: 64 * 1024

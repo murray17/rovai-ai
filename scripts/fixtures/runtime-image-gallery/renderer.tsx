@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
+import type { LocalAttachmentOwnerLocator } from '@contracts'
 import { decodeImageUrl, ImageGallery } from '../../../apps/desktop/src/renderer/src/ImageGallery'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
@@ -24,16 +25,22 @@ Object.assign(window, { rovai: {
     }
     return { mediaType: 'image/svg+xml', data: params.imageId === 'broken' ? btoa('not an image') : encoded }
   },
-  composerAttachments: { preview: async (id: string) => {
+  composerAttachments: { preview: async (locator: LocalAttachmentOwnerLocator) => {
+    const id = locator.attachmentRefId
     attachmentCalls.push(id)
     if (id.startsWith('cache-')) {
       if (scenarioAttachmentResult === 'throw') throw new Error('attachment_temporarily_unavailable')
-      return scenarioAttachmentResult && {
-        mediaType: scenarioAttachmentResult.mediaType,
-        bytes: Uint8Array.from(atob(scenarioAttachmentResult.data), character => character.charCodeAt(0))
+      return {
+        availability: 'available',
+        preview: scenarioAttachmentResult && {
+          mediaType: scenarioAttachmentResult.mediaType,
+          bytes: Uint8Array.from(atob(scenarioAttachmentResult.data), character => character.charCodeAt(0))
+        }
       }
     }
-    return { mediaType: 'image/svg+xml', bytes: new TextEncoder().encode(id === 'attachment-broken' ? 'not an image' : svg) }
+    return { availability: 'available', preview: {
+      mediaType: 'image/svg+xml', bytes: new TextEncoder().encode(id === 'attachment-broken' ? 'not an image' : svg)
+    } }
   } }
 } })
 const image = (id: string) => ({ id, displayName: id === 'broken' ? '已失效的图片.png' : '登录态恢复检查.svg', mediaType: 'image/svg+xml', byteSize: svg.length })
@@ -71,7 +78,7 @@ Object.assign(window, { imageGalleryTest: {
     if (kind === 'runtime') scenarioRuntimeResult = result
     else scenarioAttachmentResult = result
   },
-  showScenario: (kind: 'runtime' | 'attachment', id: string) => {
+  showScenario: (kind: 'runtime' | 'attachment', id: string, offset = 0) => {
     const runtimeImage = image(id)
     const source = kind === 'runtime'
       ? { kind, campId: 'cache-fixture', image: runtimeImage }
@@ -80,7 +87,7 @@ Object.assign(window, { imageGalleryTest: {
         }, locator: {
           owner: 'message', campId: 'cache-fixture', messageId: `message-${id}`, attachmentRefId: id
         } }
-    flushSync(() => root.render(<StrictMode><main><ImageGallery images={[source]} /></main></StrictMode>))
+    flushSync(() => root.render(<StrictMode><main style={{ paddingTop: offset }}><ImageGallery images={[source]} /></main></StrictMode>))
     return {
       decoded: document.querySelectorAll('.image-tile-preview img').length,
       loading: [...document.querySelectorAll('.image-tile-placeholder')]

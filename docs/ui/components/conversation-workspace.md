@@ -684,7 +684,9 @@ Agent 图片继续共用 `ImageGallery` / `ImageTile` / Lightbox：单张按原�
 十个主题 token 家族，未知格式回退 Generic；桌面两列、窄容器一列，并可保留大小和打开入口。`previewKind`
 不是图片的 image MIME/扩展名对象进入 Agent 文件区的 Image 家族。
 
-图片接近可视区域时读取，通过 Chromium 真实图片解码后展示；损坏/消失的 Runtime 图片显示“图片已不可用”，
+图片接近可视区域时读取，历史附件的 `availability = unknown` 不阻止该懒加载；缓存图片的重验也只在接近
+可视区域时发起。通过 Chromium 真实图片解码后自动展示缩略图，点击或键盘激活才放大，加载成功不自动打开
+Lightbox。读取失败沿用当前图片错误展示，不新增持久状态、后台扫描或文件复制。损坏/消失的 Runtime 图片显示“图片已不可用”，
 不影响其他图片或 AgentRun。稳定路径重开时可读取更新后的内容，不承诺历史不可变；临时路径和 inline 内容由
 已有 Blob 保留。缩略图点击或键盘激活打开大图，关闭后焦点回到该图，两个主题均使用现有颜色与焦点 token。
 
@@ -837,7 +839,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 
 Renderer 对新 source refs、Managed v2 和 legacy 附件只消费同一个无路径 View，不显示或分支判断底层
 storage model。历史加载时 `availability = unknown`，不得为了填充附件卡而批量 `stat`、启动 watcher 或
-持久化状态。用户执行预览、打开或显示所在位置后，当前卡片才按该次结果更新为 available、missing、
+持久化状态。图片接近可视区域时按需预览，或用户执行预览、打开、显示所在位置后，当前卡片才按该次结果更新为 available、missing、
 unreadable 或 kind_changed；重新读取历史仍从 unknown 开始。状态使用既有 Porcelain Day / Steel Night
 语义 token，不引入新的视觉世界，也不暴露 source、Authority/View 路径或内部 operation ID。
 
