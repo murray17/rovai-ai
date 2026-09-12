@@ -5,6 +5,7 @@ const { app, BrowserWindow } = require('electron')
 const [renderer, userData] = process.argv.slice(2)
 assert.ok(isAbsolute(renderer) && isAbsolute(userData))
 mkdirSync(userData, { recursive: true })
+mkdirSync(join(userData, 'managed-skill-library'), { recursive: true })
 app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 
@@ -79,6 +80,9 @@ app.whenReady().then(async () => {
   }
   try {
     await window.loadFile(renderer); await settle()
+    // Keep native DOM focus events available without depending on the active desktop window.
+    window.webContents.debugger.attach('1.3')
+    await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     assert.equal(await run("document.querySelectorAll('.general-save-row .dialog-glyph').length"), 1)
     assert.equal(await run("document.querySelectorAll('.general-save-state').length"), 0)
     await click('.general-default-member-picker > summary')
@@ -157,6 +161,149 @@ app.whenReady().then(async () => {
     await run('window.settingsTest.updateError()'); await settle()
     assert.equal(await run("document.querySelector('#about-update-status').classList.contains('about-status-quiet')"), false)
     await capture('about-download-error')
+
+    await navigate('channels')
+    await waitFor('document.hasFocus()')
+    const trigger = '.channel-connection-trigger'
+    const menu = '.channel-connection-menu'
+    const savedAccount = await run('window.settingsTest.state.channels.channels[0].connection.account')
+    const savedBots = await run('JSON.stringify(window.settingsTest.state.channels.channels.map(c => c.memberBots))')
+    const updateChannel = async (kind, patch) => {
+      await run(`window.settingsTest.updateChannel(${JSON.stringify(kind)}, ${JSON.stringify(patch)})`)
+      await settle()
+    }
+    const menuClosed = async () => assert.equal(await run(`document.querySelector(${JSON.stringify(menu)}) === null`), true)
+    const channelRequests = () => run("window.settingsTest.requests.filter(r => r.method.startsWith('channels.'))")
+    const finishChannelAction = async error => {
+      await run(`window.settingsTest.finishChannelAction(${JSON.stringify(error)})`)
+      await settle()
+    }
+    for (const kind of ['feishu', 'dingtalk']) {
+      const account = { ...savedAccount, accountId: `sample-${kind}`, brand: kind }
+      const connected = { status: 'connected', account }
+      const tab = `.channel-provider-tab:has(.channel-mark-${kind})`
+      await updateChannel(kind, { connection: connected })
+      await click(tab)
+      assert.equal(await run("document.querySelectorAll('.channel-connection-actions button').length"), 1)
+      assert.equal(await run("document.querySelector('.channel-account-heading .channel-connection-status').textContent"), '已连接')
+      const requestCount = (await channelRequests()).length
+      await run(`document.querySelector(${JSON.stringify(trigger)}).focus()`)
+      await key('Enter')
+      assert.ok(await run("document.activeElement.matches('[role=menuitem]') && document.activeElement.textContent.startsWith('切换账号')"))
+      await key('Down')
+      assert.ok(await run("document.activeElement.matches('[role=menuitem]') && document.activeElement.textContent.startsWith('断开连接')"))
+      await key('Up')
+      assert.ok(await run("document.activeElement.matches('[role=menuitem]') && document.activeElement.textContent.startsWith('切换账号')"))
+      await key('Escape'); await menuClosed()
+      await click(trigger); await click('#channel-connection-heading'); await menuClosed()
+      assert.equal((await channelRequests()).length, requestCount, 'dismissing the menu never submits an action')
+
+      await run(`document.querySelector(${JSON.stringify(trigger)}).focus()`)
+      await key('Space'); await key('Enter')
+      await waitFor("document.querySelector('.channel-qr-dialog') !== null")
+      assert.deepEqual((await channelRequests()).at(-1), { method: 'channels.connect', params: { kind } })
+      await menuClosed()
+      assert.ok(await run("document.querySelector('.channel-connection-trigger').disabled"))
+      assert.equal(await run("document.querySelector('.channel-account-heading strong').textContent"), savedAccount.userName)
+      await key('Escape')
+      await waitFor("document.querySelector('.channel-qr-dialog') === null && !document.querySelector('.channel-connection-trigger').disabled")
+      assert.equal(await run("document.querySelector('.channel-account-heading .channel-connection-status').textContent"), '已连接')
+      assert.equal(await run("document.querySelector('.channel-settings [role=alert]')"), null)
+
+      await click(trigger); await click(`${menu} [role=menuitem]:first-child`)
+      await waitFor("document.querySelector('.channel-qr-dialog') !== null")
+      await finishChannelAction(`${kind}_connection_error`)
+      assert.equal(await run("document.querySelector('.channel-account-heading strong').textContent"), savedAccount.userName)
+      assert.equal(await run("document.querySelector('.channel-connection-status').textContent"), '已连接')
+      assert.ok(await run("document.querySelector('.channel-settings [role=alert]') !== null"))
+      await click(trigger); await click(`${menu} [role=menuitem]:first-child`)
+      await finishChannelAction(null)
+      assert.equal(await run("document.querySelector('.channel-account-heading strong').textContent"), '新账号')
+      await updateChannel(kind, { connection: connected })
+
+      await click(trigger); await click(`${menu} .is-danger`)
+      assert.deepEqual((await channelRequests()).at(-1), { method: 'channels.disconnect', params: { kind } })
+      await menuClosed()
+      assert.equal(await run("document.querySelector('.channel-connection-status').textContent"), '断开中…')
+      assert.ok(await run("document.querySelector('.channel-connection-trigger').disabled"))
+      const disconnectCount = (await channelRequests()).length
+      await click(trigger)
+      assert.equal((await channelRequests()).length, disconnectCount, 'busy state prevents duplicate disconnect')
+      await finishChannelAction(`${kind}_connection_error`)
+      assert.equal(await run("document.querySelector('.channel-connection-status').textContent"), '已连接')
+      await click(trigger); await click(`${menu} .is-danger`)
+      await finishChannelAction(null)
+      assert.equal(await run("document.querySelector('.channel-connection-actions button').textContent"), kind === 'feishu' ? '登录开放平台' : '连接钉钉')
+      assert.equal(await run('JSON.stringify(window.settingsTest.state.channels.channels.map(c => c.memberBots))'), savedBots)
+
+      await updateChannel(kind, { connection: { status: 'session_expired', account } })
+      assert.equal(await run("document.querySelector('.channel-connection-actions button').textContent"), '重新连接')
+      assert.equal(await run("document.querySelector('.channel-connection-status').textContent"), '登录已失效')
+      assert.equal(await run("document.querySelector('.channel-account-heading strong').textContent"), savedAccount.userName)
+      await click('.channel-connection-actions button')
+      assert.deepEqual((await channelRequests()).at(-1), { method: 'channels.connect', params: { kind } })
+      await key('Escape')
+      await updateChannel(kind, { connection: { status: 'session_expired', account: null } })
+      assert.equal(await run("document.querySelector('.channel-connection-actions button').textContent"), '重新连接')
+      assert.ok(await run("document.querySelector('.channel-account-empty').textContent.includes('登录已失效')"))
+
+      await updateChannel(kind, { connection: connected })
+      await click(trigger)
+      await updateChannel(kind, { hostStatus: 'unavailable' })
+      await menuClosed()
+      assert.ok(await run("document.querySelector('.channel-connection-trigger').disabled"))
+      assert.equal(await run("document.querySelector('.channel-connection-status').textContent"), '已连接')
+      await updateChannel(kind, { hostStatus: 'ready' }); await menuClosed()
+      await click(trigger)
+      await click(`.channel-provider-tab:has(.channel-mark-${kind === 'feishu' ? 'dingtalk' : 'feishu'})`)
+      await menuClosed()
+    }
+
+    for (const theme of ['day', 'night']) {
+      await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+      for (const [width, height, zoom] of [[1440, 920, 1], [1040, 700, 1], [1440, 920, 2], [1040, 700, 2]]) {
+        window.setContentSize(width, height); window.webContents.setZoomFactor(zoom)
+        for (const kind of ['feishu', 'dingtalk']) {
+          await updateChannel(kind, { connection: { status: 'connected', account: {
+            ...savedAccount, accountId: `sample-${kind}`, brand: kind,
+            userName: zoom === 2 ? 'Murray / 渠道开发与应用发布负责人' : savedAccount.userName,
+            email: zoom === 2 ? 'developer-account-with-a-long-name@example.com' : 'murray@example.com',
+            tenantName: zoom === 2 ? 'Rovai 智能协作与开放平台应用研发工作室' : savedAccount.tenantName
+          } } })
+          await click(`.channel-provider-tab:has(.channel-mark-${kind})`)
+          const alignment = await run(`(() => {
+            const button = document.querySelector('.channel-connection-trigger')
+            const label = button.querySelector('span').getBoundingClientRect()
+            const icon = button.querySelector('svg').getBoundingClientRect()
+            return { delta: Math.abs(label.y + label.height / 2 - icon.y - icon.height / 2), gap: icon.x - label.right, iconWidth: icon.width }
+          })()`)
+          assert.ok(alignment.delta < .1 && Math.abs(alignment.gap - 6) < .1 && alignment.iconWidth === 16, JSON.stringify(alignment))
+          assert.ok(await run(`(() => {
+            const row = document.querySelector('.channel-connection-row'), bounds = row.getBoundingClientRect()
+            return row.scrollWidth <= row.clientWidth + 1 && [...row.querySelectorAll('strong, small, button, .channel-connection-status')]
+              .every(node => node.scrollWidth <= node.clientWidth + 1 && node.getBoundingClientRect().right <= Math.min(innerWidth, bounds.right) + 1)
+          })()`), `connection row fits ${kind}/${theme}/${width}/${zoom}`)
+          // At 520 CSS px, the existing Bot table owns a separate overflow limitation.
+          if (width / zoom >= 720) await noOverflow(`${kind}/${theme}/${width}/${zoom}`)
+          await click(trigger)
+          await waitFor("getComputedStyle(document.querySelector('.channel-connection-trigger svg')).transform === 'matrix(-1, 0, 0, -1, 0, 0)'")
+          assert.ok(await run(`(() => {
+            const menu = document.querySelector('.channel-connection-menu').getBoundingClientRect()
+            return menu.left >= 0 && menu.right <= innerWidth && menu.top >= 0 && menu.bottom <= innerHeight
+          })()`), 'menu stays inside the viewport')
+          await capture(`connection-${kind}-${theme}-${width}-${zoom}`)
+          await key('Escape')
+        }
+      }
+    }
+    await run("document.documentElement.dataset.motionPreference='reduce'")
+    await click(trigger)
+    assert.equal(await run("getComputedStyle(document.querySelector('.channel-connection-trigger svg')).transitionDuration"), '0s')
+    await key('Escape')
+    await run("delete document.documentElement.dataset.motionPreference")
+    await run(`window.settingsTest.state.channels.channels.forEach(channel => window.settingsTest.updateChannel(channel.kind, {
+      connection: { status: 'connected', account: { ...${JSON.stringify(savedAccount)}, accountId: 'sample-' + channel.kind, brand: channel.kind } }
+    }))`)
 
     for (const theme of ['day', 'night']) {
       await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)

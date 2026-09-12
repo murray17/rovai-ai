@@ -12,7 +12,7 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/settings-workspace')
-test('settings preserve large-roster selection, sparse usage and failure recovery across themes and zoom', { timeout: 120_000 }, async t => {
+test('settings preserve channel actions, large-roster selection, sparse usage and failure recovery across themes and zoom', { timeout: 120_000 }, async t => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-settings-workspace-test-'))
   let child, closed
@@ -25,7 +25,7 @@ test('settings preserve large-roster selection, sparse usage and failure recover
       } }, build: { outDir: join(fixture, 'renderer'), minify: false } })
     const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete env.ELECTRON_RUN_AS_NODE
-    process.stdout.write(`Isolated settings fixture: ${fixture} (no Core/Runtime)\n`)
+    process.stdout.write(`Isolated settings fixture: ${fixture}; userData: ${join(fixture, 'user-data')}; Skill Library: ${join(fixture, 'user-data/managed-skill-library')} (no Core/Runtime)\n`)
     child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')

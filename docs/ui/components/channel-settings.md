@@ -3,7 +3,7 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-12
 ---
 
 # 渠道设置
@@ -36,7 +36,12 @@ Dialog、状态点和间距复用现有组件语法。
 <a id="渠道连接与二维码"></a>
 ## 渠道连接与 OAuth
 
-飞书未连接时主动作是“登录开放平台”，已连接时为“切换账号”，并保留次级“断开”。连接行只展示真实 `userName`、
+飞书和钉钉已连接时，将“已连接”状态放在真实账号名旁；连接行右侧只保留“管理连接”文字按钮与展开箭头。
+菜单依次提供“切换账号”和“断开连接”，后者用分隔线与危险色区分，并说明“退出开发者账号，保留已发布 Bot”。
+按钮文字与 16px 箭头垂直居中，间距 6px；展开时箭头旋转，减少动效偏好下不播放过渡。
+账号、企业和 email 过长时换行，窄窗口将账号与操作依次下移，不裁切必要身份信息。
+
+飞书未连接时主动作是“登录开放平台”。连接行只展示真实 `userName`、
 `tenantName`、可选 email 与 Feishu/Lark brand，不显示 controller App 或“平台 Owner/企业”占位值。说明必须明确：
 连接只决定以后发布的目标，切换不会迁移或停用已发布 Bot。点击“切换账号”后，当前账号在新二维码成功完成前继续
 有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
@@ -50,7 +55,9 @@ Dialog、状态点和间距复用现有组件语法。
 `system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
-钉钉未连接时主动作是“连接钉钉”，Session 失效或已有历史账号时为“重新连接”，已连接时保留“断开”。登录复用内置
+钉钉未连接时主动作是“连接钉钉”。任一 Provider 的 Session 失效时，保留快照仍提供的账号身份，标记“登录已失效”，
+右侧直接提供“重新连接”，不藏入管理菜单。连接或断开进行中禁用操作；断开期间原账号旁显示“断开中…”，失败后恢复可操作状态。
+切换 Provider、账号身份、连接状态或 Host 可用性时关闭旧菜单，恢复后不自动重开。登录复用内置
 QR Dialog、隐藏官方页面和必要时嵌入的 sandbox 原生交互页；Renderer 不获得 Web Session。DingTalk-only Snapshot 直接把
 钉钉作为当前 Provider，不再显示“当前版本没有可用的渠道”。暂时不可用的 Host 仍显示 Provider Tab，但只禁用连接与发布
 动作并给出真实状态，不退回“敬请期待”。
@@ -193,6 +200,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 - 首次读取使用页面内 status；无 Snapshot 时提供重试；已有 Snapshot 刷新失败保留旧内容并显示 alert；
 - 所有异步操作使用稳定 busy key，防止双击；失败后恢复原动作；
 - Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；
+- 连接菜单支持 Enter/Space/向下方向键打开、方向键选择、Escape/点击外部关闭，取消不触发渠道操作；菜单关闭不强制重新聚焦入口；
 - 状态不仅靠颜色，始终有文本；loading/failed 通过 `role=status/alert` 公布；
 - 飞书与钉钉 Provider Tab 都使用原生 button/Tab、`aria-selected` 与可见焦点；Host 不可用只禁用下游动作，不禁用 Tab；
 - Tab 顺序按页面视觉顺序，链接和按钮均可键盘操作，焦点不因 Snapshot 更新跳到页面起点。
