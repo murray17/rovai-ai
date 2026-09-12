@@ -24,6 +24,19 @@ const state = {
 }
 state.preferences.newConversationDefaults.memberAgentIds = fixture.largeRoster.slice(0, 12).map(a => a.agentId)
 const channelListeners = new Set(), webListeners = new Set()
+let pendingChannelAction = null
+const emitChannels = () => channelListeners.forEach(fn => fn(clone(state.channels)))
+async function channelAction(action, kind) {
+  await request(`channels.${action}`, { kind })
+  if (action === 'connect') {
+    state.channels.activeQrAttempt = {
+      attemptId: `fixture-${kind}`, kind, purpose: 'account_login', agentId: null, stage: 'awaiting_scan',
+      detail: '隔离测试：等待扫码', qrDataUrl: null, expiresAt: null
+    }
+    emitChannels()
+  }
+  return new Promise((resolve, reject) => { pendingChannelAction = { action, kind, resolve, reject } })
+}
 async function request(method, params) {
   requests.push({ method, params: clone(params) })
   if (state.failure === method) {
@@ -48,6 +61,16 @@ Object.assign(window, { rovai: {
   windowControls: { getResetCapability: async () => ({ canReset: true, reason: null }), resetBounds: async () => ({ performed: true }) },
   channels: {
     get: async () => clone(state.channels), onChanged: fn => { channelListeners.add(fn); return () => channelListeners.delete(fn) },
+    connect: kind => channelAction('connect', kind),
+    disconnect: kind => channelAction('disconnect', kind),
+    cancelQrAttempt: async attemptId => {
+      await request('channels.cancelQrAttempt', { attemptId })
+      state.channels.activeQrAttempt = null
+      emitChannels()
+      pendingChannelAction.reject(new Error(pendingChannelAction.kind === 'feishu' ? 'feishu_login_cancelled' : 'dingtalk_operation_cancelled'))
+      pendingChannelAction = null
+      return clone(state.channels)
+    },
     getExecutionWebSettings: async () => clone(state.executionWeb),
     onExecutionWebSettingsChanged: fn => { webListeners.add(fn); return () => webListeners.delete(fn) },
     setExecutionWebSettings: async value => {
@@ -117,6 +140,24 @@ function Fixture() {
 }
 window.settingsTest = {
   requests, state,
+  updateChannel: (kind, patch) => {
+    Object.assign(state.channels.channels.find(channel => channel.kind === kind), patch)
+    emitChannels()
+  },
+  finishChannelAction: error => {
+    const pending = pendingChannelAction
+    pendingChannelAction = null
+    state.channels.activeQrAttempt = null
+    if (error) pending.reject(new Error(error))
+    else {
+      const channel = state.channels.channels.find(channel => channel.kind === pending.kind)
+      channel.connection = pending.action === 'disconnect'
+        ? { status: 'not_connected', account: null }
+        : { status: 'connected', account: { ...channel.connection.account, accountId: 'switched-account', userName: '新账号' } }
+      pending.resolve(clone(state.channels))
+    }
+    emitChannels()
+  },
   fail: method => { state.failure = method },
   settle: () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 35))))
 }

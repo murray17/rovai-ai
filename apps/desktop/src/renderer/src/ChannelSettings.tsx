@@ -1,6 +1,7 @@
 import { feishuLoginFailureDetail } from '../../shared/feishu-login-progress'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AgentProfile,
   ChannelAccountView,
@@ -522,18 +523,26 @@ export function ChannelConnectionRow({
   onConnect?: (channel: ChannelProviderView) => void
   onDisconnect?: (channel: ChannelProviderView) => void
 }): React.JSX.Element {
+  const [menuOpen, setMenuOpen] = useState(false)
   const account = channel.connection.account
   const connected = channel.connection.status === 'connected' && account !== null
+  const expired = channel.connection.status === 'session_expired'
   const hostReady = channel.hostStatus === 'ready'
+  const disabled = busy !== null || !hostReady
+  const menuDisabled = disabled || (!onConnect && !onDisconnect)
   const providerName = channel.displayName
   const connectBusy = busy === `connect:${channel.kind}`
   const disconnectBusy = busy === `disconnect:${channel.kind}`
   const connectLabel = !hostReady ? '尚未开放'
-    : channel.kind === 'dingtalk'
-      ? channel.connection.status === 'not_connected' ? '连接钉钉' : '重新连接'
-      : connected ? '切换账号' : '登录开放平台'
+    : expired ? '重新连接'
+      : channel.kind === 'dingtalk' ? '连接钉钉' : '登录开放平台'
+
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [channel.kind, channel.connection.status, account?.accountId, menuDisabled])
+
   return (
-    <div className="channel-connection-row">
+    <div className="channel-connection-row" aria-busy={connectBusy || disconnectBusy}>
       <ChannelMark kind={channel.kind} />
       <div className="channel-connection-label">
         <strong>{providerName}开放平台</strong>
@@ -541,44 +550,84 @@ export function ChannelConnectionRow({
           ? '开发者账号会话 · 保存在 Rovai 本地数据库'
           : '渠道宿主尚未就绪'}</span>
       </div>
-      {connected ? (
+      {account ? (
         <div className="channel-account-summary">
           <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.userName ?? `${providerName}用户`)}</span>
           <span>
-            <strong>{account.userName ?? `${providerName}用户`}</strong>
+            <span className="channel-account-heading">
+              <strong>{account.userName ?? `${providerName}用户`}</strong>
+              <span className={`channel-connection-status${connected ? ' is-connected' : ''}${expired ? ' is-expired' : ''}`} role="status">
+                {disconnectBusy ? '断开中…' : connected ? '已连接' : expired ? '登录已失效' : '未连接'}
+              </span>
+            </span>
             <small>{account.email ? `${account.email} · ` : ''}{account.tenantName ?? '当前企业'} · {account.brand === 'lark' ? 'Lark' : providerName}</small>
           </span>
         </div>
       ) : (
         <span className="channel-account-empty">{!hostReady ? '连接能力尚未开放'
-          : channel.kind === 'dingtalk' && channel.connection.status === 'session_expired'
+          : expired
             ? '登录已失效，请重新连接' : `还没有连接${providerName}账号`}</span>
       )}
-      <span className={`channel-connection-status${connected ? ' is-connected' : ''}`}>
-        {connected ? '已连接' : channel.connection.status === 'session_expired' ? '需重新连接' : '未连接'}
-      </span>
       <div className="channel-connection-actions">
-        {connected && (
+        {connected ? (
+          <DropdownMenu.Root open={menuOpen && !menuDisabled} onOpenChange={setMenuOpen} modal={false}>
+            <DropdownMenu.Trigger asChild>
+              <button
+                className="quiet-button compact channel-connection-trigger"
+                type="button"
+                disabled={menuDisabled}
+                title={!hostReady ? `${providerName}渠道宿主尚未接入` : undefined}
+                aria-label={`管理连接（${providerName}）`}
+              >
+                <span>管理连接</span>
+                <DialogControlIcon name="chevron" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                className="compact-menu channel-connection-menu"
+                align="end"
+                sideOffset={6}
+                collisionPadding={12}
+                loop
+                onCloseAutoFocus={(event) => event.preventDefault()}
+                aria-label={`${providerName}连接操作`}
+              >
+                <DropdownMenu.Item
+                  className="compact-option channel-connection-menu-item"
+                  disabled={!onConnect}
+                  onSelect={() => onConnect?.(channel)}
+                >
+                  <svg className="channel-connection-menu-icon" viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M3 6h13m-3-3 3 3-3 3M17 14H4m3-3-3 3 3 3" />
+                  </svg>
+                  <span>切换账号<small>重新扫码，连接另一个开发者账号</small></span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator className="channel-connection-menu-separator" />
+                <DropdownMenu.Item
+                  className="compact-option channel-connection-menu-item is-danger"
+                  disabled={!onDisconnect}
+                  onSelect={() => onDisconnect?.(channel)}
+                >
+                  <svg className="channel-connection-menu-icon" viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M8 3H4v14h4M9 10h8m-3-3 3 3-3 3" />
+                  </svg>
+                  <span>断开连接<small>退出开发者账号，保留已发布 Bot</small></span>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        ) : (
           <button
-            className="channel-row-action is-danger"
+            className="quiet-button compact"
             type="button"
-            disabled={busy !== null || !onDisconnect}
-            onClick={() => onDisconnect?.(channel)}
+            disabled={disabled || !onConnect}
+            title={!hostReady ? `${providerName}渠道宿主尚未接入` : undefined}
+            onClick={() => onConnect?.(channel)}
           >
-            {disconnectBusy ? '断开中…' : '断开'}
+            {connectBusy ? '等待扫码…' : connectLabel}
           </button>
         )}
-        <button
-          className="quiet-button compact"
-          type="button"
-          disabled={!hostReady || busy !== null || !onConnect}
-          title={!hostReady ? `${providerName}渠道宿主尚未接入` : undefined}
-          onClick={() => onConnect?.(channel)}
-        >
-          {connectBusy
-            ? '等待扫码…'
-            : connectLabel}
-        </button>
       </div>
     </div>
   )

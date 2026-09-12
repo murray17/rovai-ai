@@ -185,6 +185,14 @@ let sendHeld = false
 let rejectSend = false
 let resultAttempts = 0
 const requests: Array<{ method: string; params: unknown }> = []
+let pendingReturnGate: Promise<void> | null = null
+let releasePendingReturn: (() => void) | null = null
+const pendingReturnReceipts = new Map<string, StoredCommandResult>()
+type LeavePreparation = { complete(didLeave: boolean): void }
+let leaveGuard: (() => LeavePreparation) | null = null
+const pendingLeaves: LeavePreparation[] = []
+let lastCancelledLeave: LeavePreparation | undefined
+const bindLeaveGuard = (guard: (() => LeavePreparation) | null): void => { leaveGuard = guard }
 
 function setMode(phase: Phase, notify = true): void {
   if (phase === 'terminal') currentSnapshot = terminalSnapshot
@@ -290,6 +298,27 @@ Object.assign(window, {
       requests.push({ method, params })
       if (method === 'singleChat.list') return [currentSnapshot.conversation]
       if (method === 'singleChat.get') return currentSnapshot
+      if (method === 'singleChat.pendingInputs.edit') {
+        const { commandId, command } = params as unknown as { commandId: string,
+          command: { pendingInputId: string, expectedRevision: number,
+            action: { type: string, expectedDraftRevision: number } } }
+        if (pendingReturnGate) await pendingReturnGate
+        const receipt = pendingReturnReceipts.get(commandId)
+        if (receipt) return structuredClone(receipt)
+        const item = currentSnapshot.pendingInputs.items.find(entry => entry.id === command.pendingInputId)
+        if (!item || item.revision !== command.expectedRevision
+          || command.action.type !== 'return_to_composer'
+          || currentSnapshot.draft.revision !== command.action.expectedDraftRevision) {
+          throw new Error('Unexpected pending return fixture command')
+        }
+        currentSnapshot = { ...currentSnapshot,
+          draft: { revision: currentSnapshot.draft.revision + 1, attachments: [], quotes: [], updatedAt: '2026-09-12T00:00:00Z' },
+          pendingInputs: { ...currentSnapshot.pendingInputs, items: currentSnapshot.pendingInputs.items.filter(entry => entry.id !== item.id) } }
+        pendingReturnReceipts.set(commandId, { status: 'applied', code: 'single_chat.pending_input_returned_to_composer',
+          payload: { pendingInputId: item.id, body: item.body, draft: structuredClone(currentSnapshot.draft) } } as unknown as StoredCommandResult)
+        for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { campId, conversationId, reason: 'pending_input_edited' } })
+        throw new Error('Fixture lost the successful withdrawal response')
+      }
       if (method === 'singleChat.open') return {
         status: 'applied', code: 'single_chat.opened',
         payload: { conversationId, conversationVersion: currentSnapshot.conversation.version, created: false }
@@ -371,6 +400,7 @@ function Fixture(): React.JSX.Element {
     >
       <PublicExecutionFixture phase={phase} />
       <SingleChatPanel
+        onLeaveGuardChange={bindLeaveGuard}
         target={notificationTarget}
         notificationFocus={notificationTarget ? { requestId: notificationTarget.requestId,
           kind: 'single_chat', conversationId: notificationTarget.conversationId, agentRunId: notificationTarget.agentRunId,
@@ -391,6 +421,30 @@ createRoot(document.getElementById('root')!).render(<Fixture />)
 
 Object.assign(window, {
   singleChatTest: {
+    showPendingQueue: () => {
+      currentSnapshot = { ...terminalSnapshot, pendingInputs: { executionActive: true, editSession: null,
+        items: ['B', 'C'].map((name, index) => ({ id: `private-pending-${name}`, conversationId,
+          enqueueSequence: index + 1, revision: 1, state: 'queued', body: `私聊 ${name}：移回后继续编辑。`,
+          lastAttemptErrorCode: null, attachments: [], quotes: [] })) } }
+      pendingReturnGate = new Promise<void>(resolve => { releasePendingReturn = resolve })
+      for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { campId, conversationId, reason: 'pending_input_edited' } })
+    },
+    releasePendingReturn: () => { pendingReturnGate = null; releasePendingReturn?.() },
+    tryLeave: () => {
+      if (!leaveGuard) throw new Error('Single Chat did not register its leave guard')
+      try { leaveGuard().complete(false); return null } catch (error) { return (error as Error).message }
+    },
+    beginLeave: () => { pendingLeaves.push(leaveGuard!()) },
+    cancelLeave: () => { lastCancelledLeave = pendingLeaves.shift(); lastCancelledLeave?.complete(false) },
+    repeatLeaveCancellation: () => { lastCancelledLeave?.complete(false) },
+    pendingState: () => ({
+      commands: requests.filter(request => request.method === 'singleChat.pendingInputs.edit').map(request => request.params),
+      queue: currentSnapshot.pendingInputs.items.map(item => item.id),
+      text: document.querySelector<HTMLTextAreaElement>('.single-chat-composer textarea')?.value,
+      disabled: document.querySelector<HTMLTextAreaElement>('.single-chat-composer textarea')?.disabled,
+      editingCount: document.querySelectorAll('.pending-input-row.is-editing, .pending-input-editor').length,
+      rowCount: document.querySelectorAll('.single-chat-pending-queue .pending-input-row').length
+    }),
     resetDragEvents: () => { bubbledDragEvents.length = 0 },
     notification: (conversation: string) => locateNotification(conversation),
     settle: async () => {

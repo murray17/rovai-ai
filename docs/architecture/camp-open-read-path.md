@@ -3,12 +3,12 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-09-06
+last_updated: 2026-09-12
 ---
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v17](../contracts/camp-open-projection-v17.md)与
+字段与窗口见 [Camp Open Projection v18](../contracts/camp-open-projection-v18.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -22,10 +22,10 @@ last_updated: 2026-09-06
 | Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
 | Core Camp enter module | 在一次串行 request 中先读 activation state；Pending 直接读取投影，Active 先按原 Envelope 查 receipt 并校验 Lead，有效新 User enter 只读，需要修复时 reconcile 后再读；缺失或 rejected 时 fail closed |
-| Core Camp open read model | 在单一 SQLite transaction 中组装业务首屏投影、完整 non-terminal Execution Evidence、coverage 与 high-water；不读取 event_log 或 Context Manifest/Action history |
+| Core Camp open read model | 在单一 SQLite transaction 中组装业务首屏投影、空 Execution Evidence、coverage 与 high-water；不读取 event_log 或 Context Manifest/Action history |
 | Camp message history read | 以 stable sequence cursor 读取 earlier page；不回放 event 构造第二真源 |
 | Camp conversation find read | 扫描当前 Camp 公开 user/agent 正文投影，返回 exact total 与一个选中命中；不改变 Agent-facing discovery search，也不返回完整结果集 |
-| Run detail read | terminal Run 在用户展开后复用 Evidence page/content 接口；大 Evidence 正文继续按需读取，不随普通 Camp open 挂载 |
+| Run detail read | 可见展开的 Run 使用逻辑操作窗口与相邻页预取，单条展开复用 content 接口；大 Evidence 正文继续按需读取，不随普通 Camp open 挂载 |
 | Full Camp snapshot | 兼容、诊断与定向测试面；保持纯读，但不服务普通 open/refresh |
 
 ## Enter and refresh flow
@@ -41,7 +41,7 @@ Open 仅读取当前 Camp 的业务表。它及其嵌套 loader、CTE、view 不
 附件 hydration 对 source refs、Managed v2 和 legacy rows 统一返回无路径 View 与
 `availability = unknown`；Open、earlier、around、thread 和 timeline 不为可用性访问文件系统。
 `throughGlobalSequence` 仍从 `event_sequence` singleton 读取，不通过事件表求最大值。移除 timeline 与其
-exact count 后，打开成本不随其他 Camp 的事件历史增长；当前 Camp 的活动 Evidence 完整性不因此降级。
+exact count 后，打开成本不随其他 Camp 的事件历史增长；执行详情改由独立窗口读取，完整历史仍可按需访问。
 
 此边界只约束投影读取，不撤销已执行 Active reconciliation 的 command receipt，也不修改完整
 `camp_snapshot()`、显式 History/Find、Navigation 或 `events.subscribe` 的审计与 invalidation 语义。
@@ -54,7 +54,7 @@ app click / notification target
   -> Core reads authoritative activation state
        -> Pending: skip reconciliation
        -> Active: replay prior receipt or validate current Lead; reconcile only when needed
-  -> Core read transaction + complete non-terminal Evidence + bounded other collections + throughGlobalSequence
+  -> Core read transaction + bounded business collections + execution coverage + throughGlobalSequence
   -> Main parses typed response
   -> Renderer atomically commits target Camp ID + project + recent Camp surface
   -> next meaningful paint
@@ -64,7 +64,7 @@ cold startup
   -> Main Window Session returns a frozen local target
   -> Renderer paints the target route shell and removes the global StartupGate
   -> Renderer queues camps.enter ahead of Overview/preferences/runtime health
-  -> Core activation-aware enter + complete non-terminal Evidence + bounded other collections
+  -> Core activation-aware enter + bounded business collections + execution coverage
   -> Renderer commits Active Camp or meaningful Pending Camp Draft + meaningful content
   -> background navigation / campViewed / project restore
 
@@ -97,11 +97,20 @@ receipt 执行无效 join/group。它和 Camp Open 共用 Core 数据库锁，�
 业务依赖。可见来源 acknowledge 的去重也不使用全局 cursor 或 Snapshot watermark 作为来源变化，见
 [Notification Episode v6](../contracts/notification-episode-v6.md)。
 
-缓存只保存最近的 Camp 投影；除完整 non-terminal Evidence 外，其他 collection 保持有界。cache hit 可立即
+缓存只保存最近的 Camp 业务投影；collection 保持有界，执行详情独立保留两页展示和一页预取。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
 当前 Snapshot 清空，也不提前切换 route。普通请求在 400 ms 内不呈现 loading，超过预算只在目标导航行
 显示非阻塞进度。schema mismatch、Core restart、Camp mismatch 或 sequence regression 使缓存失效。
 Renderer 不通过 event replay 补齐权威对象。
+
+## Execution window flow
+
+可见展开的 Run 在首屏后读取一页 `agentRunExecution.page`，按详情高度估算页大小，并预取相邻更早一页。
+用户滚到边界或主动点击才继续加载；预取不挂载 DOM，也不递归读完整 Run。操作开始/完成按稳定身份合并，
+较早但仍运行的操作由最新页补充，不影响历史 cursor。完整输出和文件 Diff 在单条展开后读取。
+
+Renderer 最多挂载两页，按阅读锚点替换窗口，组内关闭的工具行不创建 DOM。Camp 切换拒绝迟到响应，
+错误保留已有内容；阅读历史时暂停最新页刷新。具体字段和界限由 Camp Open v18 拥有。
 
 ## Complete conversation find flow
 
@@ -142,6 +151,6 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v17](../contracts/camp-open-projection-v17.md)
+- [Camp Open Projection v18](../contracts/camp-open-projection-v18.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)

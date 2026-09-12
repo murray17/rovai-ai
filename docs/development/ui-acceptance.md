@@ -308,8 +308,9 @@ pnpm accept:runtime-activity-ui
   标签或空白分隔行。Shell 结果面使用独立主题 token，左边界与 16px Terminal 图标左边界同轴；其他 Tool
   detail 的颜色和缩进保持不变；
 - 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
-  Built-in `camp.read/search` fixture 的顶层 `input/output` 为空、公共结果只在 `coreEnvelope.result` 时，
-  两条 Tool 行仍可展开，完整结果不含 Envelope、request/receipt 或 canonical input。
+  Built-in 使用 CLI 名称，七种状态只展示公共 `canonicalInput`；结果、错误说明和请求/receipt 不可见。
+  缺少入参或省略后为空时没有 disclosure，即使存在完整结果 Blob 也不读取。可靠关联的纯 CLI 载体只计一步，
+  混合 Shell、帮助、提前失败和歧义关联保留；`--body` 及 stdin JSON 不显示占位或正文。
 - 超过 Renderer 原预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出在精确 Tool disclosure 打开前
   不读取、不把全文挂入 DOM；只打开外层 Tool 组仍必须保持零结果 region，打开精确 Tool 行后才按需读取并
   在固定最大高度的可聚焦结果 region 内完整渲染，

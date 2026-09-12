@@ -39,6 +39,143 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--execution-window') {
+      const settle = () => run('window.campOpenTest.settle()')
+      const waitFor = async expression => {
+        const deadline = Date.now() + 4000
+        do { await settle(); if (await run(expression)) return } while (Date.now() < deadline)
+        assert.fail(`Execution window condition: ${expression}`)
+      }
+      const report = []
+      for (const placement of ['bottom', 'inspector']) {
+        await run(`document.documentElement.dataset.theme = '${placement === 'bottom' ? 'day' : 'night'}'; window.campOpenTest.showExecutionWindow('${placement}')`)
+        await settle()
+        assert.equal((await run('window.campOpenTest.executionWindowState()')).requests.length, 0, 'closed Run performs no read')
+        await run('document.querySelector(".execution-disclosure summary").click()')
+        await run('new Promise(resolve => setTimeout(resolve, 350))')
+        assert.equal((await run('window.campOpenTest.executionWindowState()')).requests.length, 0, 'offscreen opened Run waits for the viewport')
+        await run('document.querySelector(".execution-disclosure").scrollIntoView({block:"nearest"})')
+        await waitFor('window.campOpenTest.executionWindowState().requests.length === 2')
+        let state = await run('window.campOpenTest.executionWindowState()')
+        assert.equal(state.toolRows, 0)
+        assert.equal(state.contentReads.length, 0)
+        assert.ok(state.dom < 600, `bounded initial DOM: ${state.dom}`)
+        assert.equal(state.overflow, false)
+        assert.ok(state.requests[0].limit < 30)
+        await run('document.querySelector(".execution-drawer-body").scrollTop = 630')
+        await settle()
+        const anchor = await run(`(() => { const n = document.querySelector('[data-execution-item-key]'); return {key:n.dataset.executionItemKey, top:n.getBoundingClientRect().top}; })()`)
+        await run('document.querySelector(".execution-window-navigation button").focus({preventScroll:true})')
+        window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+        window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+        window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
+        await waitFor('window.campOpenTest.executionWindowState().requests.length === 3')
+        assert.equal(await run('document.activeElement.matches(".execution-window-navigation button")'), true, 'paging retains keyboard focus')
+        const after = await run('document.querySelector(' + JSON.stringify(`[data-execution-item-key="${anchor.key}"], [data-execution-item-keys~="${anchor.key}"]`) + ').getBoundingClientRect().top')
+        assert.ok(Math.abs(after - anchor.top) < 2, `anchor preserved: ${after - anchor.top}`)
+        for (let index = 0; index < 3; index++) {
+          await run('document.querySelector(".execution-window-navigation button").click()')
+          await settle()
+        }
+        await run('[...document.querySelectorAll(".execution-window-navigation button")].find(button => button.textContent === "回到最新").click()')
+        await settle()
+        await run('document.querySelectorAll(".tool-activity-group > summary").forEach(summary => summary.click())')
+        await settle()
+        state = await run('window.campOpenTest.executionWindowState()')
+        assert.ok(state.toolRows > 0 && state.toolRows < 30)
+        assert.equal(state.contentReads.length, 0, 'opening a group does not fetch outputs or diffs')
+        await run('document.querySelector(".modified-file-row summary").click()')
+        await waitFor('window.campOpenTest.executionWindowState().contentReads.length === 1')
+        await waitFor('document.querySelector(".modified-file-row").textContent.includes("TOKEN=fixture-value")')
+        await run('document.querySelector(".modified-file-row").scrollIntoView({block:"center"})')
+        await settle()
+        await capture(`execution-window-diff-${placement}`)
+        await run('document.querySelector(".tool-call-disclosure summary").click()')
+        await waitFor('document.querySelector(".process-content").textContent.includes("OUTPUT_TOKEN=fixture-value")')
+        await run('document.querySelector(".tool-call-disclosure[open]").scrollIntoView({block:"center"})')
+        await settle()
+        assert.ok(await run('document.querySelector(".tool-call-disclosure[open]")?.textContent.includes("OUTPUT_TOKEN=fixture-value")'), 'page-boundary group changes retain the opened result')
+        assert.equal((await run('window.campOpenTest.executionWindowState()')).contentReads.length, 2, 'retained results do not refetch on a group boundary')
+        await capture(`execution-window-${placement}`)
+        report.push({ placement, background: await run('getComputedStyle(document.querySelector(".execution-drawer")).backgroundColor'), ...(await run('window.campOpenTest.executionWindowState()')), text: undefined })
+      }
+      assert.notEqual(report[0].background, report[1].background, 'both themes are applied')
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, report }))
+      app.exit(0)
+      return
+    }
+    if (mode === '--pending-return') {
+      const settle = () => run('window.campOpenTest.settle()')
+      const pendingState = async () => { await settle(); return run('window.campOpenTest.pendingState()') }
+      const waitFor = async expression => {
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          if (await run(expression)) return
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        throw new Error(`Pending fixture condition timed out: ${expression}`)
+      }
+      await run('window.campOpenTest.showPendingQueue()')
+      await waitFor('document.querySelectorAll(".pending-input-row").length === 2 && document.querySelector("#camp-message")?.getAttribute("contenteditable") === "true"')
+      await run('document.querySelector("#camp-message").focus()')
+      await run('window.campOpenTest.failDraftSave(true)')
+      await window.webContents.insertText('当前已有草稿')
+      await run('document.querySelector(".pending-input-edit").click()')
+      await waitFor('Boolean(window.campOpenTest.pendingState().error)')
+      let value = await pendingState()
+      assert.equal(value.text, '当前已有草稿', 'preflight save failure keeps dirty input')
+      assert.equal(value.editable, 'true')
+      assert.equal(value.calls.includes('return_to_composer'), false, 'failed preflight never dispatches withdrawal')
+      assert.equal(await run('Array.from(document.querySelectorAll("button")).some(button => button.textContent.includes("重新加载"))'), false)
+      await run('window.campOpenTest.failDraftSave(false)')
+      await settle()
+      await run('window.campOpenTest.holdPendingReturn(true); document.querySelector(".pending-input-edit").click()')
+      await waitFor('window.campOpenTest.pendingState().calls.includes("return_to_composer")')
+      value = await pendingState()
+      assert.equal(value.editable, 'false', 'return locks the native editor before the response')
+      assert.equal(value.rowCount, 2, 'queue row remains until Core confirms withdrawal')
+      assert.equal(value.text, '当前已有草稿')
+      await run('window.campOpenTest.releasePendingReturn()')
+      await waitFor('Boolean(window.campOpenTest.pendingState().error)')
+      value = await pendingState()
+      assert.equal(value.text, '当前已有草稿', 'publication winning the race keeps existing input')
+      assert.equal(value.editable, 'true')
+      assert.equal(value.rowCount, 2)
+      await run('window.campOpenTest.holdPendingReturn(); document.querySelector(".pending-input-edit").click()')
+      await settle()
+      await run('window.campOpenTest.releasePendingReturn()')
+      await waitFor('window.campOpenTest.pendingState().rowCount === 1 && window.campOpenTest.pendingState().editable === "true"')
+      value = await pendingState()
+      assert.deepEqual(value.queue, ['pending-C'])
+      assert.equal(value.text, 'B：请检查输入框和排队行为。')
+      assert.equal(value.focused, true)
+      assert.equal(value.editingCount, 0)
+      assert.ok(value.calls.indexOf('save_content') < value.calls.indexOf('return_to_composer'))
+      for (const theme of ['day', 'night']) {
+        await run('document.documentElement.dataset.theme = ' + JSON.stringify(theme))
+        await settle()
+        await capture(`pending-return-${theme}`)
+      }
+      // A committed withdrawal followed by read failure cannot autosave the previous text.
+      await run('window.campOpenTest.holdPendingReturn(false, true); document.querySelector(".pending-input-edit").click()')
+      await settle()
+      await run('window.campOpenTest.releasePendingReturn()')
+      await waitFor('window.campOpenTest.pendingState().queue.length === 0 && Boolean(window.campOpenTest.pendingState().error)')
+      value = await pendingState()
+      assert.equal(value.editable, 'false')
+      assert.equal(value.draft.body, 'C：继续执行下一条消息。')
+      await run('window.campOpenTest.allowDraftRead()')
+      await run('Array.from(document.querySelectorAll("button")).find(button => button.textContent.includes("重新加载"))?.click()')
+      await waitFor('window.campOpenTest.pendingState().editable === "true"')
+      value = await pendingState()
+      assert.equal(value.text, 'C：继续执行下一条消息。')
+      assert.equal(value.error, '', 'successful reload clears the stale transfer error')
+      assert.equal(value.rowCount, 0)
+      assert.equal(value.editingCount, 0)
+      console.log(JSON.stringify({ ok: true, mode, checks: ['overwrite', 'focus', 'no-edit-mode', 'preflight-failure-preserves-dirty-input', 'rejected-preserves-input', 'uncertain-reload-fence'] }))
+      window.destroy(); app.quit()
+      return
+    }
     if (mode === '--current-user-profile') {
       const settle = () => run('window.campOpenTest.settle()')
       const key = async keyCode => {

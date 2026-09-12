@@ -40,7 +40,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v17](../../contracts/camp-open-projection-v17.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v18](../../contracts/camp-open-projection-v18.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -60,10 +60,10 @@ Files Changed；时钟回拨时消息 sequence 优先，不能用非传递比较
 低强调度“加载更早消息”；加载时保持现有消息可读、按钮显示忙碌状态，失败原位允许重试。较早页 prepend
 后保持用户当前阅读锚点，不跳到顶部或最新消息。没有 earlier history 时不显示该控件。
 
-non-terminal Run 的全部 Evidence 随 Camp open/refresh 返回；Renderer 与 live event 按稳定 Evidence identity
-去重，在当前 Main Window Session 不按最后 80、600 或其他最后 N 项裁剪运行中正文与步骤。terminal Run
-Evidence 继续在用户展开精确 Run 后按需加载；关闭的 Drawer、隐藏 Inspector 或世界地图不得触发 terminal
-历史预取。普通 event refresh 保留用户已经加载的较早消息、Draft、滚动位置、Inspector 选择和地图模式。
+Camp open/refresh 仅返回 Run 摘要与 Evidence 总数；可见展开的 Run 才读取执行窗口，按详情高度估算首屏项数，
+并预取相邻更早一页。滚到边界或点击后才翻页，最多挂载两页；完整历史可继续按需访问，关闭的 Drawer、
+隐藏 Inspector、收起的 Run 与世界地图不读取历史。活动操作可补充到最新页，原始 Evidence 不被删除。
+普通 event refresh 保留较早消息、Draft、阅读位置、Inspector 选择和地图模式；在途执行刷新不覆盖历史阅读。
 
 用户主动提交消息时，时间线立即回到最底部并恢复 follow-latest；optimistic 用户消息和随后的权威回执
 渲染完成后仍须保持在最新位置。其他新增消息只有在用户原本位于底部附近时才自动跟随，用户手动上滚
@@ -270,7 +270,7 @@ Agent 公共消息继续左对齐，仅正文使用与用户消息相同的雾�
 一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
-[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，评审方向见
+[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)，评审方向见
 [HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/message-reply-chain/README.md)。
 
 渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
@@ -306,7 +306,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 标签出现后对象在空白 Draft 失效时，标签消失并持久抑制该来源；正文或附件已经存在时，保留全部 Draft，
 展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
-[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，交互探索见
+[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)，交互探索见
 [延续路由原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 内单聊
@@ -339,8 +339,8 @@ Camp 公共 Source Attachment 组件。`Enter` 发送、`Shift+Enter` 换行，I
 
 同一段 Single Chat 有非终态 Run 时 Composer 仍可输入后续正文和附件。Draft 为空时主要动作显示“停止”；一旦存在正文
 或附件，主要动作恢复为“发送”，提交后把内容放入该 Conversation 自己的 FIFO，不改变当前 Run 输入。队列按顺序展示，
-支持删除和独占编辑；编辑中可修改正文并添加、移除或重排附件。发布前附件失效时队首显示可理解的修复状态并阻塞同一
-Conversation 的后项，用户保存有效内容或删除队首后恢复；不得阻塞 Camp 公屏或其他 Single Chat。停止只结束当前回复，
+支持删除和移回普通输入框编辑；移回会覆盖当前正文、附件和引用并取消原队列项。发布前附件失效时队首显示可理解的修复状态并阻塞同一
+Conversation 的后项，用户移回编辑或删除队首后恢复；不得阻塞 Camp 公屏或其他 Single Chat。停止只结束当前回复，
 对话和未发布队列仍可继续。发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
 用户上滚阅读时不得抢走位置。选择另一个对象恢复其 active transcript 或创建新 transcript，UI 不区分这两种内部结果。
 切换对象时立即撤下旧 Snapshot；新对象加载完成前，发送、附件、停止与结束等依赖当前 Conversation 的操作保持禁用。
@@ -362,13 +362,13 @@ Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即�
 “结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
 并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
 同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
-[Single Chat v4](../../contracts/single-chat-v4.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
+[Single Chat v5](../../contracts/single-chat-v5.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
 
 panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
 结束和发送均需可键盘到达，不添加额外焦点框；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
 不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
 
-领域、权限与输出路由见 [Single Chat v4](../../contracts/single-chat-v4.md)，组件数据流见
+领域、权限与输出路由见 [Single Chat v5](../../contracts/single-chat-v5.md)，组件数据流见
 [Single Chat Architecture](../../architecture/single-chat.md)。
 
 ## Camp 执行过程
@@ -442,14 +442,14 @@ selection 不算“正在查看 non-terminal Run”。从其他 Camp、一级页
 Composer 或唯一 Stop。
 
 本工作区显式提交后入队的消息，在真正发布时沿用发送后的精确定位规则；上一轮被取消同样适用。
-Renderer 保留本次 `pendingInputId`，通过 [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md#desktop-submission-outcomes)
+Renderer 保留本次 `pendingInputId`，通过 [Pending Camp Input v4](../../contracts/pending-camp-input-v4.md#desktop-submission-outcomes)
 的持久结果找到对应 Turn，等待其 Run 投影到达后展开并恢复详情底部跟随，不夺走 Composer 焦点。
 删除待发送消息、无执行发布或离开 Camp 会消费或丢弃意图；其他窗口的发送和后台新 Run 不触发该行为。
 
 单聊与执行台的发送确认前和排队显示“连接中”，开始处理但尚未输出时显示“思考中”；正文、计划、工具或 final 到达即移除普通等待提示，
 后续正文不追加提示。需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出时显示“执行中”。成功后才显示“工作了 {时长}”
 并自动折叠过程；失败保留明确失败摘要及可操作错误，取消保持停止语义。正文或工具首次到达、单条工具返回、步骤组
-收口都不能触发整轮耗时总结。隐藏外层 summary 或切换终态不能卸载已经激活的工具结果。
+收口都不能触发整轮耗时总结。关闭 Run 后卸载详情；再次打开读取最新窗口。组跨页按稳定操作身份保留展开意图。
 
 已加载的正文片段与计划说明完整呈现，不按固定字符数只保留末尾；后续输出追加时不得裁掉正文开头或
 破坏已有 Markdown 结构。实时投影与历史 Evidence 回读、底部与 Inspector 共用此规则；这不改变 Evidence
@@ -462,24 +462,27 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 处理后关闭整个浮层，返回顶部执行入口，保留 Agent/Run selection、已展开记录与滚动位置。
 
 命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。已读取 Evidence 中的 Tool chronology
-完整保留，不用最后 N 项切片静默删除较早操作，也不增加第二条“较早 N 项”时间线。Built-in Tool 从
-Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
-静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
+按窗口呈现，较早记录有明确分页入口与回到最新操作，不把未加载部分当作不存在。Built-in Tool 使用对应
+`rovai` CLI 名称，所有状态的详情只显示同一 operation 的 Core 公共 `canonicalInput`；省略由消息面拥有的 Send/Gather 正文和
+投影辅助事实；语义字段不再按敏感值省略，不显示结果、错误说明或占位。没有可显示入参时为无箭头静态行，也不读取完整结果 Blob。
+纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；混合命令、帮助、
+提前失败或不确定关联保留。底层 Evidence 和 Canonical 身份不变。完整规则见
+[Built-in 入参与载体展示](../../contracts/run-process-detail-surface-v33.md)。
 
-同一 Run 内最大连续的 Tool items 默认收成一条可展开组摘要；narration、plan 与 diagnostic 都会截断
+同一 Run 内最大连续的 Tool items 默认收成一条可展开组摘要；收起时只挂载摘要，展开后才挂载子行，文件 Diff 在文件行展开后读取和解析；narration、plan 与 diagnostic 都会截断
 分组，不能跨 Run 或跨队员合并。有 running/waiting 操作时，活动组只显示“执行中/等待审批 · 当前操作”，
-不再同时追加累计数。当前操作优先展示已有公开证据中的具体指令：Shell 使用完整脱敏 command，File 使用
+不再同时追加累计数。当前操作优先展示已有公开证据中的具体指令：Shell 使用原 command，File 使用
 可靠阅读／编辑文件名或多文件数量，Web 搜索使用 typed query，其他操作使用非通用 Runtime title/toolName；
 没有具体值时回退稳定 Tool 行标题，不从 raw input/output 猜测。当前 Tool 已结算但尾组尚未收口时，继续显示
 “执行中 · <最近一条指令>”。真正收口后，无论成功、失败、停止、跳过或混合结果，摘要只显示
-`完成了 x 个步骤`，不追加各状态数量。`x` 按 Canonical Activity 计数；一个 Activity 的多文件行不重复计数。
+`完成了 x 个步骤`；分页窗口使用“已载入 x 项执行记录”，不把当前窗口数量表示成整轮总量。`x` 按可见 Canonical Activity 计数；同一 Built-in 与已关联 Shell 载体计一步，一个 Activity 的多文件行不重复计数。
 
 Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“完成了 x 个步骤”。
 它复用普通 command 的 28px 四轨行、状态点、disclosure 与结果文本框，并使用独立 16px SVG；同一
 `compactionId` 的 started/completed 在当前 Run 原位更新。只有明确 token 字段或非空 summary 才可展开；message count、
 elapsed、Runtime/事件/Session identity、trigger 与 phase 单独存在时保持无箭头、不可点击的静态单行。summary 的完整内容
 沿用本地 Managed Blob 惰性读取，不投影到渠道、局域网执行台、世界地图或公开 Evidence。精确归属、协议和失败关闭边界见
-[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
+[Run Process Detail Surface v33](../../contracts/run-process-detail-surface-v33.md)。
 独立图标沿用普通 command 的 muted 色，不使用品牌色。`imminent` 是一次性 `recorded` 记录，不压掉 Run 尚未输出时的“思考中”；只有
 非终态 Run 的 `started` 显示 running 状态并暂停重复的底部进行中提示，`completed` 使用完成状态。
 
@@ -494,14 +497,13 @@ narration、plan、diagnostic、waiting/cancelling 或 Run 终态才构成真实
 
 用户展开后保持展开，新 Tool 与组终态只原位更新，不自动收起或抢焦点。展开组只显示全部 Tool summary，
 完整结果仍须再展开精确 Tool；结果 region 在首次展开前不进入 DOM，Managed Blob 也不提前读取。收起组时
-其后代不参与布局，底部与 Inspector 移动同一 Drawer DOM 时保留组、Tool 与已经读取的结果状态。
+其后代不再挂载 DOM，底部与 Inspector 移动同一 Drawer DOM 时保留组、Tool 与已经读取的结果状态。
 
 `activity-v3` 的 Tool 行由 Renderer 统一生成中文 presentation，Core 不再生成本地化默认标题或 Codex
-`commandActions` 中文标题。Shell 行只要同一公开 payload 有 command，就优先使用完整脱敏预览：去掉外层
+`commandActions` 中文标题。Shell 行只要同一公开 payload 有 command，就优先使用完整命令预览：去掉外层
 Shell `-c/-lc` 包装，保留参数、Node inline/heredoc 代码开头、全部子命令及
-`&&`、`||`、`|`、`;`、`&`。已知 token、password、
-Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题值不做固定字符截断，由名称轨在真实
-宽度内单行视觉省略；完整脱敏值仍可通过 `title` 与辅助技术读取。没有公开 command 的 Runtime 继续使用
+`&&`、`||`、`|`、`;`、`&`。参数值不进行敏感内容扫描或替换；`rovai send/gather` 的正文参数与静态 stdin 内容保留原值。标题值不做固定字符截断，由名称轨在真实
+宽度内单行视觉省略；完整命令值仍可通过 `title` 与辅助技术读取。没有公开 command 的 Runtime 继续使用
 非通用 title/toolName 与“终端操作”。available typed read 显示 `阅读 <basename>`；typed write operation 或
 文件 Diff 明确 add 时显示 `新增 <basename>`，update、path-only write 或无法可靠区分时显示
 `编辑 <basename>`，否则使用 toolName/title/“文件操作”；`tool.web.search` 固定为“Web 搜索”，普通 Tool
@@ -529,9 +531,9 @@ Run 时间线与单聊工具行复用同一组件。forced-colors 保留形状�
 多个显示 `阅读 <文件一>，<文件二>`，文件名以中文逗号分隔并横向单行排列，空间不足时只省略文件名。展开后保留完整原命令、输出与整次状态；该摘要不拆分 Activity/Evidence、
 不改变步骤计数，也不参与权限或安全判断。
 
-Shell command Tool disclosure 展开后第一行显示 `$ ` 加完整脱敏 command；存在完整公开 output 时从第二行
+Shell command Tool disclosure 展开后第一行显示 `$ ` 加完整 command；存在完整公开 output 时从第二行
 连续显示，不插入“命令 / 输出”标签或空白分隔行。两者的数据来源不得互相替代；Claude/ACP terminal
-Evidence 自带 command，不依赖 Renderer 回看 started event。其他 Tool
+Evidence 自带 command，不依赖 Renderer 回看 started event。除上述仅显示入参的 Built-in 外，其他 Tool
 disclosure 继续在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
 直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
@@ -544,7 +546,7 @@ Shell、Web、Built-in 和普通 Tool detail 统一使用现有 Shell 详情底�
 内边距、字号和换行；不增加标签、分隔线或额外空行。底部和 Inspector 复用同一行为。仍不显示
 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
+[Run Process Detail Surface v33](../../contracts/run-process-detail-surface-v33.md)。
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
@@ -621,7 +623,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不删除底层 Input/Action 审计；业务取消本身不产生外部效果待确认提示。明确 canonical cancelled 的 Tool Call
 同样显示“已停止”，其他非取消路径独立投影的待确认提示仍保留。精确合同见
-[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
+[Run Process Detail Surface v33](../../contracts/run-process-detail-surface-v33.md)。
 
 当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
 notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
@@ -629,7 +631,7 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
 下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
 凭证、用户名或绝对路径。精确合同见
-[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
+[Run Process Detail Surface v33](../../contracts/run-process-detail-surface-v33.md)。
 
 同一 App/Core generation 内，权威 Run 为 `waiting/network_recovery` 时显示 attention 状态“连接中断，等待恢复”，
 并说明只有在确认当前输入未被接收后才会自动重试；新 epoch 已进入正式恢复但 Input 尚未 accepted 时显示“正在恢复”／
@@ -733,7 +735,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
+[Run Process Detail Surface v33](../../contracts/run-process-detail-surface-v33.md)。
 
 ## 会话 Pane 紧凑布局
 
@@ -830,7 +832,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
 [会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
 [Camp Attachment v9](../../contracts/camp-attachment-v9.md)，发送边界见
-[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)。
+[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
 独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除
@@ -939,42 +941,28 @@ Composer 输入和 Runtime 进度刷新不重新解析正文未变的历史 Mark
 附件、路由和发送，附件准备期间只禁用发送；不改成“加入待发送”或“提交中”。队列未空时，即使当前
 没有运行也继续入队。队列条位于 Composer 上方，与输入框同宽、同轴，按 FIFO 排列，不显示单条
 序号，不提供排序或合并；较长队列在有界区域滚动。Pending 不作为用户消息显示在公共时间线。
-普通排队不额外显示自动续发说明；编辑时不再显示队首等待、编辑标题或本地草稿说明，
-仅保留当前编辑行的状态标识和保存、取消操作。即使 CampTurn 正在执行，编辑器内也不复制 Composer 的
-“停止”入口。发送失败或编辑占用失效等需要处理的情况仍显示错误提示。
+普通排队不额外显示自动续发说明。队列使用系统字体、10.5px 正文、32px 最小行高与 6px 空心圆点；
+普通底色由 `--surface-subtle` 44% 与 `--conversation-surface` 混合。Day/Night 使用相同结构。
 
-队列继承现有系统字体栈，正文为 10.5px；普通行最小高度为 32px，以 6px 空心圆点起行。普通底色
-由 `--surface-subtle` 44% 与 `--conversation-surface` 混合，编辑底色由 `--brand-soft` 42% 与同一
-会话底色混合，配合轻边框和“正在编辑”文字区分状态。Day/Night 沿用各自语义 token，不新增全局字级或控件样式。
+仅右侧 24px 铅笔按钮触发编辑，正文和行背景不响应。点击后把完整消息移出队列，覆盖普通输入框的正文、
+附件、@成员、Reply 和选文引用，并把光标置于末尾。提示文字为“移回输入框编辑（覆盖当前内容）”。
+原行消失，不保留蓝色编辑行、“正在编辑”标记、独立编辑器或保存/取消按钮。再次点击其他行按同一规则覆盖。
+再次发送按新消息处理：执行中或队列非空时进入队尾，否则直接发送，不恢复原序号或位置。
 
-队列正文和行背景仅展示，不响应编辑；只有右侧独立的 24px 小铅笔按钮在同一个输入位置打开编辑。
-普通草稿独立保留，结束编辑后恢复；删除使用相邻的独立按钮。编辑正文继续使用 StructuredMentionComposer，
-支持 @成员、@所有队员及取消已有 Reply。Pending 行只展示正文，不展示附件或附件数量；无正文时摘要留空。
-编辑时可继续选择、粘贴或拖入附件，复用普通 Composer 的横向附件带、图片缩略图、文件卡及移除按钮。
-附件支持预览；右键或键盘菜单可前移、后移以调整顺序。编辑期间主会话列的拖放目标是当前 Pending
-编辑器，沿用普通 Composer 的接收层与归属提示，不写入隐藏的普通草稿；准备中或编辑占用失效时不接收。
-正文和附件不能同时为空，纯附件保存有效并保留原队列位置。切换编辑项或关闭编辑
-遇到未保存修改时提供“保存 / 放弃修改 / 继续编辑”，不静默丢弃。
+移回请求在 Core 事务内完成出队和 Draft 写入，成功前锁定普通输入框及附件/路由操作；期间离开 Camp 被 guard
+阻止。失败保留输入；若消息已经先发出，提示它已变化或发出并刷新队列。未知结果或成功后的 Draft 读取失败
+先显示加载错误，用户重读后再恢复输入，不能用旧正文覆盖已经移回的 Draft。切换 Camp、页面和关窗均沿用
+普通 Composer Draft 的保存路径。旧版遗留编辑占用使用中性的“上次编辑未完成 · 请移回输入框”提示；移回或删除
+会清除该行占用，新 Desktop 不再创建占用。
 
-正常 Camp/页面导航复用统一离开 guard，先锁定并捕获待发送编辑器的完整 ComposerDocument、Reply 与编辑归属，
-在同一窗口暂存；普通 Draft 独立 flush。导航失败恢复原编辑器交互并撤销暂存，不在 cleanup 中异步保存。
-返回后先读取 Core 队列，只有 Camp、Pending ID、canonical/base revision、editToken 全部相同且无需 recovery 时，
-才继续在原输入位置展示未保存的编辑，并以 Core 最新 working refs 展示附件。导航不发送 begin/takeover/save/cancel，
-不更新 canonical Pending，也不改变 FIFO。编辑或附件 mutation 在途时先保留当前会话，待完成后再离开。
+Pending 行只展示正文，不展示附件或附件数量；纯附件摘要留空。移回后完整复用普通 Composer 的横向附件带、
+预览、移除、引用与 Mention 能力；失败附件可先移回再修复。用户原文件不移动、不删除。
 
-Core 编辑占用跨重启保留。窗口刷新/异常退出、编辑占用或版本变化时不自动认领或释放；恢复条提供“重新编辑 / 放弃未保存修改 / 删除”。
-未保存修改只在 Renderer 内存，异常退出可以丢失，重新编辑从已保存内容开始。等待编辑的队首阻塞后续输入，
-后面一条的编辑不阻塞前面消息。
+上一轮正常结束、失败终态或停止完成都取当前队列第一条；输入框编辑不阻塞续发。停止仍只结束当前执行，
+待其完全结算才发送下一条，不提供暂停/继续队列入口。队首发送失败时原位展示错误并阻塞后续；用户移回编辑
+或删除后，剩余队列继续推进。移回的消息需要用户再次发送才重新进入队列。
 
-Composer 点击一次“停止”后，必须等当前执行完全停止，才自动发送队首一条；其余输入等待新一轮结束后按 FIFO 自动继续，
-不提供“暂停队列”或“继续发送”入口。上一轮正常结束、失败终态或停止完成都按同一规则推进，
-仍等待现有编辑、审批、恢复或运行状态结算。队首发送失败时原位展示错误，用户编辑保存后自动再次准入，
-或删除后让下一条继续；不隐藏失败、不自动重试，也不让后续消息越过队首。
-
-需要排队时，正文、附件、Reply/Continuation intent 与 Execution Request 作为完整发送意图一起进入 Pending；
-文件不移动。Cancel 放弃 working refs 并保留 Pending canonical refs；Delete 取消整条 Pending 并释放编辑占用。
-队首发布前发现附件缺失、不可读或 kind 变化时进入 `needs_repair` 并继续阻塞 FIFO，编辑保存或删除后再推进。
-持久化和原子发布由 [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md) 拥有。
+持久化、双方 revision、幂等与发布竞争由 [Pending Camp Input v4](../../contracts/pending-camp-input-v4.md) 拥有。
 
 ## 多段消息选文引用
 

@@ -92,3 +92,31 @@ v1.58/schema 100，仅放宽 dingtalk_account 两个展示名的 NULL 约束，�
 来源与各类证据边界见[协议调查](../../research/dingtalk-login-protocol.md)，不能以匿名 Probe 或模拟 SSO 宣称完整登录已实测。
 自动检查、并发时限复验与隔离 UI 记录见[实施计划](implementation-plan.md#钉钉接口扫码登录)。
 当前文档导航、渠道架构、UI 与开发验收路由同步至 v13；Runtime、根 README 与其他 Provider 能力无需变更。
+
+
+## Built-in 工具入参展示
+
+按用户确认的设计，本地执行台与单聊只调整 UI：23 项 Built-in 显示对应 CLI 名称，七种状态只显示现有公共入参，
+省略正文参数与占位，并将可靠关联的纯 Shell 载体折叠为一次操作。内部操作身份和历史数据保持不变。
+当前合同为 [Run Process Detail Surface v32](../../contracts/run-process-detail-surface-v32.md)，UI 与开发验收入口同步；
+没有架构数据流、模型上下文、Runtime classifier、兼容性或版本指针变更，其他 v1.58 验收缺口保持独立。
+实施与验证见[工具入参展示记录](builtin-tool-input-presentation.md)。
+
+
+## Camp 执行详情按需读取
+
+在长 Run 的 Camp 切换路径中，执行详情从首屏投影移至可视窗口：按需分页并预取相邻一页；同时取消执行
+命令和工具结果的内容脱敏，收起组不挂载子行，Diff 按条展开后读取。当前合同为
+[Camp Open v18](../../contracts/camp-open-projection-v18.md) 和
+[Run Process Detail Surface v33](../../contracts/run-process-detail-surface-v33.md)，
+取代上一个入参展示批次的 Shell 正文与凭据省略规则。字段白名单和 Built-in 入参用途保持原边界。
+
+本次更新 Contracts、Camp Open Architecture、会话 UI 与当前规范导航；Open wire 提升到 7，Snapshot 34、
+Data Contract 99、当前版本指针、模型上下文和 Runtime classifier 不变，无数据库迁移或历史删除。
+实施与测量见[执行窗口性能记录](camp-execution-loading.md)。
+
+## 待发送消息移回输入框
+
+按用户确认，公屏及单聊的编辑入口改为退出队列、覆盖普通输入框；剩余 FIFO 正常推进，重新发送进入当前队尾。
+当前合同为 [Pending Camp Input v4](../../contracts/pending-camp-input-v4.md)、[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)
+与 [Single Chat v5](../../contracts/single-chat-v5.md)。不改变数据库 schema、Runtime 或模型上下文；实现与验证见[实施计划](implementation-plan.md#待发送消息移回输入框)。

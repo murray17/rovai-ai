@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
-import type { AgentRunExecutionEvidenceView, AgentRunView } from '@contracts'
+import { createContext, useContext, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
+import type { AgentRunExecutionEvidenceView, AgentRunView, CanonicalRuntimeActivityView } from '@contracts'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { exactMutationDiffLines, inlineDiffLines } from './file-changes-presentation'
@@ -21,6 +21,12 @@ import {
   toolActivityGroupPresentation,
   type ToolProgressItem
 } from './execution-tool-grouping'
+
+/** Keep group disclosure choices when paging changes the first item of a group. */
+export const ExecutionToolGroupStateContext = createContext<{
+  expanded: ReadonlySet<string>
+  change(keys: string[], expanded: boolean): void
+} | null>(null)
 
 export type PresentableExecutionEvidence = AgentRunExecutionEvidenceView & {
   kind: Exclude<AgentRunExecutionEvidenceView['kind'], 'reasoning_summary'>
@@ -98,7 +104,8 @@ function ToolCallDetail({
   expanded,
   resultKey,
   title,
-  summaryRef
+  summaryRef,
+  inputOnly = false
 }: {
   campId: string
   detail: string
@@ -107,6 +114,7 @@ function ToolCallDetail({
   resultKey: string
   title: string
   summaryRef: RefObject<HTMLElement | null>
+  inputOnly?: boolean
 }): JSX.Element {
   const evidenceId = completeEvidence?.id ?? null
   const [result, setResult] = useState<ToolResultViewState>(() => ({
@@ -216,7 +224,7 @@ function ToolCallDetail({
       {result.status === 'ready' && (
         <>
           <span className="sr-only" id={scrollHelpId}>
-            结果区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。
+            {inputOnly ? '入参' : '结果'}区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。
           </span>
           <pre
             ref={resultRef}
@@ -224,7 +232,7 @@ function ToolCallDetail({
             data-tool-result-key={resultKey}
             tabIndex={0}
             role="region"
-            aria-label={`${title}的完整结果，可滚动`}
+            aria-label={`${title}的${inputOnly ? '入参' : '完整结果'}，可滚动`}
             aria-describedby={scrollHelpId}
             onKeyDown={(event) => handleToolResultKeyDown(event, summaryRef.current)}
           >
@@ -266,21 +274,43 @@ function ToolCallDetail({
 export type ToolCallStep = Extract<LiveExecutionProgress['items'][number], { kind: 'tool' }>['step']
 
 
-export function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError }: {
+export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence, itemKey, onFileOpenError }: {
   campId: string
   change: NonNullable<ToolCallStep['fileChanges']>[number]
   semanticKind: ToolCallStep['fileChangeSemantics']
+  completeEvidence?: PresentableExecutionEvidence
+  itemKey?: string
   onFileOpenError(message: string): void
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
   const [expanded, setExpanded] = useState(false)
   const diffId = useId()
+  const [loadedDiff, setLoadedDiff] = useState<{ evidenceId: string; diff: string } | null>(null)
+  const [diffError, setDiffError] = useState(false)
+  const [retry, setRetry] = useState(0)
+  const deferred = Boolean(completeEvidence && !change.diff)
+  const diff = deferred
+    ? loadedDiff && loadedDiff.evidenceId === completeEvidence?.id ? loadedDiff.diff : null
+    : change.diff
+  useEffect(() => {
+    if (!expanded || !deferred || !completeEvidence || diff !== null) return undefined
+    let disposed = false
+    setDiffError(false)
+    void window.rovai.request<{ canonical?: CanonicalRuntimeActivityView | null }>(
+      'agentRunEvidence.getContent', { campId, evidenceId: completeEvidence.id }
+    ).then(response => {
+      const entry = response.canonical?.diffProjection?.entries?.find(item => item.path === change.path)
+      if (!entry) throw new Error('文件差异不可用')
+      if (!disposed) setLoadedDiff({ evidenceId: completeEvidence.id, diff: entry.diff })
+    }).catch(() => { if (!disposed) setDiffError(true) })
+    return () => { disposed = true }
+  }, [expanded, deferred, campId, completeEvidence?.id, change.path, diff, retry])
   const fileName = change.path.split('/').filter(Boolean).at(-1) ?? change.path
   const verb = change.changeKind === 'add' ? '新增' : '编辑'
   const exactMutation = semanticKind === 'exact_mutation'
   const lines = useMemo(
-    () => exactMutation ? exactMutationDiffLines(change.diff) : inlineDiffLines(change.diff),
-    [change.diff, exactMutation]
+    () => !expanded || diff === null ? [] : exactMutation ? exactMutationDiffLines(diff) : inlineDiffLines(diff),
+    [diff, exactMutation, expanded]
   )
   const openFile = async (): Promise<void> => {
     if (!filePreview) {
@@ -297,6 +327,7 @@ export function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError 
   return (
     <details
       className={`process-action modified-file-row${expanded ? ' is-expanded' : ''}`}
+      data-execution-item-key={itemKey}
       data-activity-domain="file"
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >
@@ -344,6 +375,9 @@ export function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError 
         hidden={!expanded}
         aria-label={`${change.path} 的${exactMutation ? '修改片段' : '文件差异'}`}
       >
+          {expanded && diff === null && (diffError
+            ? <div role="status">文件差异读取失败。<button className="quiet-button compact" type="button" onClick={() => setRetry(value => value + 1)}>重试</button></div>
+            : <div role="status">正在读取文件差异…</div>)}
           {lines.map((line, index) => exactMutation
             ? (
                 <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
@@ -397,6 +431,7 @@ export function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
   return (
     <div
       className={`process-action tool-call-summary tool-call-static file-operation-row status-${status}`}
+      data-execution-item-key={`tool:${step.id}`}
       data-activity-domain="file"
       role="group"
       aria-label={`${verb} ${path}，${toolCallStatusLabel(status)}`}
@@ -441,7 +476,8 @@ export function ToolCallRow({
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
   const publicTitle = executionStepPublicTitle(step)
-  const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
+  const inputOnly = step.builtinOperation !== undefined
+  const hasDetail = Boolean(step.detail) || (!inputOnly && completeEvidence !== undefined)
   const openReadFile = async (path: string): Promise<void> => {
     if (!filePreview) {
       onFileOpenError('无法打开该文件')
@@ -507,6 +543,7 @@ export function ToolCallRow({
     return (
       <div
         className={`process-action tool-call-summary tool-call-static status-${status}${readSummary ? ' has-shell-read-summary' : ''}`}
+        data-execution-item-key={`tool:${step.id}`}
         data-activity-domain={step.activityDomain}
       >
         {summary}
@@ -517,6 +554,7 @@ export function ToolCallRow({
   return (
     <details
       className={`process-action tool-call-disclosure status-${status}`}
+      data-execution-item-key={`tool:${step.id}`}
       data-activity-domain={step.activityDomain}
       onToggle={(event) => {
         const nextExpanded = event.currentTarget.open
@@ -529,7 +567,8 @@ export function ToolCallRow({
         <ToolCallDetail
           campId={campId}
           detail={step.detail}
-          completeEvidence={completeEvidence}
+          completeEvidence={inputOnly ? undefined : completeEvidence}
+          inputOnly={inputOnly}
           expanded={expanded}
           resultKey={`${runId}:${step.id}`}
           title={publicTitle}
@@ -651,6 +690,7 @@ function ToolActivityGroupState({ status, label }: { status: string; label: stri
 
 export function ToolActivityGroup({
   campId,
+  partial = false,
   items,
   liveTail,
   cancelling,
@@ -660,6 +700,7 @@ export function ToolActivityGroup({
   onFileOpenError
 }: {
   campId: string
+  partial?: boolean
   items: ToolProgressItem[]
   liveTail: boolean
   cancelling: boolean
@@ -670,6 +711,14 @@ export function ToolActivityGroup({
   }
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const [localExpanded, setLocalExpanded] = useState(false)
+  const groupState = useContext(ExecutionToolGroupStateContext)
+  const groupKeys = items.map(item => `${runId}:${item.key}`)
+  const expanded = groupState ? groupKeys.some(key => groupState.expanded.has(key)) : localExpanded
+  const setExpanded = (value: boolean): void => {
+    if (groupState) groupState.change(groupKeys, value)
+    else setLocalExpanded(value)
+  }
   const settledPresentation = toolActivityGroupPresentation(items, runStatus, liveTail)
   const presentation = cancelling
     ? {
@@ -681,9 +730,15 @@ export function ToolActivityGroup({
         countLabel: null,
         accessibleLabel: '正在停止：等待执行结束'
       }
-    : settledPresentation
+    : partial && !settledPresentation.currentTitle
+      ? { ...settledPresentation, primary: `已载入 ${items.length} 项执行记录`, accessibleLabel: `已载入 ${items.length} 项执行记录` }
+      : settledPresentation
   return (
-    <details className={`tool-activity-group status-${presentation.status}`}>
+    <details className={`tool-activity-group status-${presentation.status}`} open={expanded}
+      data-execution-item-key={items[0]?.key}
+      data-execution-item-keys={items.map(item => item.key).join(' ')}
+      onToggle={event => { if (event.target === event.currentTarget) setExpanded(event.currentTarget.open) }}
+    >
       <summary
         className="tool-group-summary"
         aria-label={presentation.accessibleLabel}
@@ -705,7 +760,7 @@ export function ToolActivityGroup({
             {presentation.countLabel && (
               <>
                 <span className="tool-group-separator">·</span>
-                <span className="tool-group-count">{presentation.countLabel}</span>
+                <span className="tool-group-count">{partial ? `已载入 ${items.length} 项` : presentation.countLabel}</span>
               </>
             )}
           </span>
@@ -719,7 +774,7 @@ export function ToolActivityGroup({
           </svg>
         </span>
       </summary>
-      <div className="tool-group-items">
+      {expanded && <div className="tool-group-items">
         {items.flatMap((item) => {
           const step = item.step
           if (step.fileChanges?.length) {
@@ -727,6 +782,8 @@ export function ToolActivityGroup({
               <ModifiedFileRow
                 campId={campId}
                 change={change}
+                completeEvidence={completeEvidence.byToolId.get(step.id)}
+                itemKey={`${item.key}:file:${index}`}
                 key={`${item.key}:file:${index}:${change.path}`}
                 onFileOpenError={onFileOpenError}
                 semanticKind={step.fileChangeSemantics}
@@ -756,7 +813,7 @@ export function ToolActivityGroup({
             />
           )
         })}
-      </div>
+      </div>}
     </details>
   )
 }

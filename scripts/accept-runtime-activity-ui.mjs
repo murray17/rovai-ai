@@ -125,12 +125,13 @@ const runtimes = [
       toolName: 'Bash', title: 'Bash', input: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'", output: null
     }
   }),
-  runtime('antigravity', 'antigravity-app', 'Antigravity', 'camp.message.send', {
+  runtime('antigravity', 'antigravity-app', 'Antigravity', 'rovai send', {
     protocol: 'antigravity-log', domain: 'tool', semantic: 'tool.call',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', sourceAuthority: 'core',
     credibility: 'core_verified', payload: {
       toolCallId: 'op-antigravity', status: 'completed', kind: 'mcp_tool_call',
-      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'camp.message.send', output: 'delivered'
+      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'camp.message.send', output: 'delivered',
+      operationProjection: { operation: 'camp.message.send', canonicalInput: { recipientAgentIds: ['agent_101'] } }
     }
   })
 ]
@@ -1376,14 +1377,14 @@ async function seedFixture() {
       'sha256:legacy-empty-mcp-exposure', 'fixture-mcp-projection',
       '[]', 'fixture-active-tasks',
       0, ${runtimes.length}, 0,
-      4, '{"profileVersion":4,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
+      5, '{"profileVersion":5,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
-      '[]', 22,
+      '[]', 23,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
       '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}',
       'agent_v1', '{"schemaVersion":1,"included":false}',
       '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92',
-      22, 2, 2,
+      23, 2, 2,
       ${sqlLiteral(JSON.stringify(campAttachmentViewReceipt))},
       ${sqlLiteral(campAttachmentViewReceiptDigest)}
     );

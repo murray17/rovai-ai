@@ -3,7 +3,7 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-02
+last_updated: 2026-09-12
 ---
 
 # 飞书渠道架构
@@ -81,9 +81,10 @@ Developer Session revision CAS 保存远端刷新；断开/过期在 Core 同一
 路径只允许 `/developers/`，相似域、跨源 URL 和身份漂移均在创建前拒绝。
 
 HTTP 层统一拥有手动重定向、显式 finalUrl、Session Cookie policy、正文读取上限与单请求期限；登录上下文另外拥有
-独立总期限和 attempt/generation fence。单请求默认 15 秒、总等待 180 秒、串行轮询间隔 1.5 秒，均可配置。
+独立总期限和 attempt/generation fence。单请求默认 15 秒；扫码 5 分钟、交接 30 秒、身份读取 20 秒、整体 10 分钟，串行轮询间隔 1.5 秒，均可配置。
 不同站点之间只发导航 GET，不复制登录头或原始 Cookie；Cookie 的域、路径、有效期、host-only 与安全属性完整保存。
-本地等待超时、远端二维码过期、交互要求与协议变化分别返回明确错误；无隐藏浏览器或文字匹配 fallback。
+提交前本地等待、请求或阶段超时进入 awaiting_refresh，保留 Dialog 供用户点击二维码区域刷新；不显示超时错误。
+远端确认过期显示独立 expired 刷新态；交互要求与协议变化仍明确提示，无隐藏浏览器或文字匹配 fallback。
 
 `OpenPlatformApiClient` 先上传受控队员头像，再以固定 `developer_console` 模板和 publication intent correlation 调用
 `manifest/upsert_by_template`。只有上游明确拒绝模板且能够证明没有创建应用，才调用一次 self-build create；transport、
@@ -332,7 +333,7 @@ hash 和冻结的 `ChannelConversation/App/Camp/Agent/focusRun/maxRunCreatedAt` 
 
 浏览器先取当前 snapshot，再以 Fetch Streaming 建立 SSE。Main 每次都把冻结 scope 交给 Core，Core 复核 focus Run、
 渠道/App、Camp、队员、成员关系和历史上界，并只返回同 Camp/队员且不晚于 focus Run 的公开投影。Main 继续复用 shared
-execution grouping、redactor 与 result projector，把公开正文和连续操作组投影为页面所需的最小 shape；reasoning、完整工具输入、
+execution grouping 与 result projector，把公开正文和连续操作组投影为页面所需的最小 shape；reasoning、完整工具输入、
 原始 patch、任意文件、终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续时间线，
 外部触发者固定显示“你”；AgentRun、连续操作组和每个 Command 使用独立嵌套 disclosure，文件变化逐文件展开，不提供分页。
 

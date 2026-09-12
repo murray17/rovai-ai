@@ -83,7 +83,7 @@ import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
 import { DailyAnalysisService } from './daily-analysis'
 import { EvaluationHostService } from './evaluation-host'
-import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
+import { nextPageZoomPercentage, pageZoomAction, pageZoomFactor, pageZoomPercentage } from './page-zoom'
 import { applyWindowChromeAppearance, windowChromeOptions } from './window-chrome'
 import {
   parseWindowsApplicationMenuPopupRequest,
@@ -274,6 +274,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.messages.find',
   'agentRunEvidence.getContent',
   'agentRunEvidence.list',
+  'agentRunExecution.page',
   'tasks.create',
   'tasks.update',
   'tasks.list',
@@ -667,7 +668,7 @@ async function updateAppearancePreferences(patch: Partial<AppearancePreferences>
   const preferences = await appearanceStore.update(patch)
   nativeTheme.themeSource = nativeThemeSource(preferences.preference)
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.setZoomFactor(preferences.zoomPercentage / 100)
+    mainWindow.webContents.setZoomFactor(pageZoomFactor(preferences.zoomPercentage))
     mainWindow.webContents.send('rovai:page-zoom-changed', preferences.zoomPercentage)
   }
   return publishAppearance()
@@ -717,7 +718,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      zoomFactor: appearanceSnapshot().zoomPercentage / 100
+      zoomFactor: pageZoomFactor(appearanceSnapshot().zoomPercentage)
     }
   })
   const webContentsId = window.webContents.id
@@ -754,12 +755,12 @@ function createWindow(): void {
     event.preventDefault()
     const percentage = nextPageZoomPercentage(window.webContents.getZoomFactor(), action)
     if (percentage === null) return
-    window.webContents.setZoomFactor(percentage / 100)
+    window.webContents.setZoomFactor(pageZoomFactor(percentage))
     window.webContents.send('rovai:page-zoom-changed', percentage)
     void updateAppearancePreferences({ zoomPercentage: percentage }).catch((error) => {
       console.warn('[rovai] Page zoom preference could not be saved.', error)
       if (!window.isDestroyed()) {
-        window.webContents.setZoomFactor(appearanceSnapshot().zoomPercentage / 100)
+        window.webContents.setZoomFactor(pageZoomFactor(appearanceSnapshot().zoomPercentage))
         publishPageZoom()
       }
     })

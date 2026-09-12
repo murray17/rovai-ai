@@ -29,7 +29,7 @@ export function feishuExecutionPreviewFixture(
   const narration = [
     '先检查文件并定位逻辑，然后查看对应测试结果。',
     '继续检查文件变化和长结果，展开后只显示一个结果框。',
-    '下面演示权限信息脱敏和空输出。',
+    '下面演示命令与结果原文和空输出。',
     '正文保持原始顺序，留在对应的 command 之间。',
     '继续检查剩余步骤，再进入下一组示例。'
   ]
@@ -61,7 +61,7 @@ export function feishuExecutionPreviewFixture(
         command(`cargo test -p rovai-core preview_case_${label} -- --exact`, `running 1 test\ntest preview_case_${label} ... ok\ntest result: ok. 1 passed; 0 failed`)
         break
       case 7:
-        command("rovai send --public-only --body '这段测试正文必须隐藏'", 'message sent')
+        command("rovai send --public-only --body '这段测试正文保留原值'", 'message sent')
         break
       case 8:
         command(`API_TOKEN=preview-only-secret-${label} curl --header 'Authorization: Bearer preview-only-token-${label}' https://example.test/health`, `Authorization: Bearer preview-only-token-${label}\nCookie: session=preview-only-cookie-${label}\nstatus: ok`)

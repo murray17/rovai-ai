@@ -1,3 +1,5 @@
+import { APPEARANCE_ZOOM_FACTORS, APPEARANCE_ZOOM_OPTIONS } from '../shared/appearance'
+
 export interface PageZoomKeyboardInput {
   type: string
   key: string
@@ -10,7 +12,7 @@ export interface PageZoomKeyboardInput {
 
 export type PageZoomAction = 'in' | 'out' | 'reset'
 
-export const PAGE_ZOOM_STEP_PERCENTAGE = 10
+// Saved preferences still accept legacy values below the first Chrome preset.
 export const MIN_PAGE_ZOOM_PERCENTAGE = 10
 export const MAX_PAGE_ZOOM_PERCENTAGE = 500
 
@@ -40,6 +42,11 @@ export function pageZoomPercentage(zoomFactor: number): number | null {
   return Math.round(zoomFactor * 100)
 }
 
+export function pageZoomFactor(percentage: number): number {
+  const index = APPEARANCE_ZOOM_OPTIONS.indexOf(percentage)
+  return index === -1 ? percentage / 100 : APPEARANCE_ZOOM_FACTORS[index]
+}
+
 export function nextPageZoomPercentage(
   currentZoomFactor: number,
   action: PageZoomAction
@@ -49,16 +56,10 @@ export function nextPageZoomPercentage(
   if (action === 'reset') return 100
 
   if (action === 'in') {
-    if (currentPercentage >= MAX_PAGE_ZOOM_PERCENTAGE) return currentPercentage
-    return Math.min(
-      currentPercentage + PAGE_ZOOM_STEP_PERCENTAGE,
-      MAX_PAGE_ZOOM_PERCENTAGE
-    )
+    return APPEARANCE_ZOOM_OPTIONS.find((percentage) => percentage > currentPercentage)
+      ?? currentPercentage
   }
 
-  if (currentPercentage <= MIN_PAGE_ZOOM_PERCENTAGE) return currentPercentage
-  return Math.max(
-    currentPercentage - PAGE_ZOOM_STEP_PERCENTAGE,
-    MIN_PAGE_ZOOM_PERCENTAGE
-  )
+  return APPEARANCE_ZOOM_OPTIONS.findLast((percentage) => percentage < currentPercentage)
+    ?? currentPercentage
 }

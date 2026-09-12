@@ -4,6 +4,7 @@ import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import { dismissMessageQuoteSelection } from './message-quote-selection'
 import { currentUserDisplayName } from '@contracts'
 import { CurrentUserAvatar, useCurrentUserProfile } from './CurrentUserProfile'
+import { ExecutionReadingContext, useExecutionWindow } from './useExecutionWindow'
 import { prefersReducedMotion } from './reduced-motion'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
@@ -17,7 +18,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CampDetailPopover } from './CampDetailPopover'
 import { SingleChatPanel } from './SingleChatPanel'
 import {
-  CompactionEventRow, FileOperationRow, ModifiedFileRow, RuntimeRetryNotice,
+  CompactionEventRow, ExecutionToolGroupStateContext, FileOperationRow, ModifiedFileRow, RuntimeRetryNotice,
   ToolActivityGroup, ToolCallRow, isPresentableExecutionEvidence, type ToolCallStep
 } from './ExecutionToolGroup'
 import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
@@ -75,8 +76,7 @@ import {
   draftCoordinatorChangeRefreshesProjection,
   type DraftMutation
 } from './draft-mutation-coordinator'
-import { PendingCampInputs, type PendingAttachmentDropTarget, type PendingCampInputsHandle } from './PendingCampInputs'
-import type { PendingInputLeavePreparation } from './pending-input-navigation'
+import { PendingCampInputs, PendingInputReturnRejectedError, pendingError, type PendingCampInputsHandle } from './PendingCampInputs'
 import { AttachmentCard, AttachmentPlaceholder, ComposerAttachmentStrip } from './AttachmentCard'
 export { attachmentRevealLabel } from './AttachmentCard'
 import {
@@ -419,6 +419,16 @@ async function mutateComposerDraft(
 ): Promise<CampComposerDraftView> {
   const common = { campId: draft.campId, expectedRevision: draft.revision }
   switch (mutation.kind) {
+    case 'return_pending_input': {
+      const result = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.edit', {
+        commandId: mutation.commandId,
+        command: { campId: draft.campId, pendingInputId: mutation.pendingInputId,
+          expectedRevision: mutation.expectedRevision, editToken: mutation.editToken,
+          action: { type: 'return_to_composer', expectedDraftRevision: draft.revision } }
+      })
+      if (result.status === 'rejected') throw new PendingInputReturnRejectedError(pendingError(result.code))
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId: draft.campId })
+    }
     case 'quote':
       return window.rovai.request<CampComposerDraftView>('messageQuotes.mutateDraft', {
         commandId: mutation.commandId,
@@ -1537,11 +1547,10 @@ export function CampWorkspace({
     hasUnavailableAtom: false
   })
   const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
-  const [pendingEditing, setPendingEditing] = useState(false)
   const pendingInputsRef = useRef<PendingCampInputsHandle>(null)
-  const [pendingAttachmentDropTarget, setPendingAttachmentDropTarget] = useState<PendingAttachmentDropTarget>(null)
-  const updatePendingAttachmentDropTarget = useCallback((target: PendingAttachmentDropTarget): void => {
-    setPendingAttachmentDropTarget(() => target)
+  const singleChatLeaveGuardRef = useRef<(() => CampLeavePreparation) | null>(null)
+  const bindSingleChatLeaveGuard = useCallback((guard: (() => CampLeavePreparation) | null): void => {
+    singleChatLeaveGuardRef.current = guard
   }, [])
   const [pendingRefresh, setPendingRefresh] = useState(0)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
@@ -2146,9 +2155,9 @@ export function CampWorkspace({
   const executionProgressByRunId = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [
       run.id,
-      buildLiveExecutionProgress(executionEventsByRunId.get(run.id) ?? [], run.id)
+      buildLiveExecutionProgress(openCoverage ? (executionEventsByRunId.get(run.id) ?? []).slice(-48) : executionEventsByRunId.get(run.id) ?? [], run.id, { includePublicResults: false })
     ])),
-    [executionEventsByRunId, snapshot.agentRuns]
+    [executionEventsByRunId, snapshot.agentRuns, openCoverage]
   )
   const worldMapProjection = useMemo(
     () => projectCampWorldMap(snapshot.members, snapshot.agentRuns, executionProgressByRunId),
@@ -2189,6 +2198,7 @@ export function CampWorkspace({
     try {
       await draftCoordinator.load()
       if (draftCampId.current !== campId) return
+      pendingInputsRef.current?.clearError()
       setComposerPersistenceError(null)
       setDraftLoadState({ state: 'ready' })
     } catch (error) {
@@ -2208,12 +2218,15 @@ export function CampWorkspace({
     }
     const composerHandle = composerHandleRef.current
     composerHandle?.setInteractionLocked(true)
-    let pendingPreparation: PendingInputLeavePreparation | undefined
+    const pendingLeavePreparations: CampLeavePreparation[] = []
     try {
-      pendingPreparation = await pendingInputsRef.current?.prepareForLeave()
+      const privatePreparation = singleChatLeaveGuardRef.current?.()
+      if (privatePreparation) pendingLeavePreparations.push(privatePreparation)
+      const publicPreparation = await pendingInputsRef.current?.prepareForLeave()
+      if (publicPreparation) pendingLeavePreparations.push(publicPreparation)
       if (draftLoadState.state !== 'ready') {
         return { complete(didLeave) {
-          pendingPreparation?.complete(didLeave)
+          for (const preparation of pendingLeavePreparations) preparation.complete(didLeave)
           if (!didLeave) composerHandle?.setInteractionLocked(false)
         } }
       }
@@ -2228,7 +2241,7 @@ export function CampWorkspace({
         complete(didLeave) {
           if (completed) return
           completed = true
-          pendingPreparation?.complete(didLeave)
+          for (const preparation of pendingLeavePreparations) preparation.complete(didLeave)
           if (!didLeave) composerHandle?.setInteractionLocked(false)
           if (didLeave && settlePending) {
             void settlePending(draft).catch(() => undefined)
@@ -2236,7 +2249,7 @@ export function CampWorkspace({
         }
       }
     } catch (error) {
-      pendingPreparation?.complete(false)
+      for (const preparation of pendingLeavePreparations) preparation.complete(false)
       composerHandle?.setInteractionLocked(false)
       const normalized = error instanceof Error ? error : new Error(readErrorMessage(error))
       setComposerPersistenceError(normalized)
@@ -2697,6 +2710,43 @@ export function CampWorkspace({
     }
   }
 
+  const returnPendingInputToComposer = async (
+    item: import('@contracts').PendingCampInputView,
+    editToken: string | null
+  ): Promise<void> => {
+    const composerHandle = composerHandleRef.current
+    if (!composerHandle || composerSubmittingRef.current || routingMutatingRef.current || draftLoadState.state !== 'ready') {
+      throw new Error('输入框正在处理变更，请稍后再试。')
+    }
+    routingMutatingRef.current = true
+    setRoutingMutating(true)
+    composerHandle.setInteractionLocked(true)
+    let transferAttempted = false
+    try {
+      await attachmentPreparationQueue.current
+      await composerHandle.flush()
+      transferAttempted = true
+      const next = await draftCoordinator.returnPendingInput(item.id, item.revision, editToken)
+      composerHandle.replaceDocument(next.content, 'end')
+      setFailedAttachments([])
+      setComposerPersistenceError(null)
+      setReplyInteractionError(null)
+      window.requestAnimationFrame(() => composerHandleRef.current?.focus('end'))
+    } catch (error) {
+      // A rejection has no transfer side effects. An unknown result or failed
+      // post-commit read must reload before old local text can autosave again.
+      if (transferAttempted && !(error instanceof PendingInputReturnRejectedError)) {
+        composerLockAwaitingDisabledCommitRef.current = true
+        setDraftLoadState({ state: 'error', error: error instanceof Error ? error : new Error(readErrorMessage(error)) })
+      }
+      throw error
+    } finally {
+      if (!composerLockAwaitingDisabledCommitRef.current) composerHandle.setInteractionLocked(false)
+      routingMutatingRef.current = false
+      setRoutingMutating(false)
+    }
+  }
+
   const focusComposerAtBoundary = (
     _modality: ReplyFocusModality,
     boundary: 'start' | 'end'
@@ -2710,10 +2760,6 @@ export function CampWorkspace({
     message: CampMessageView,
     modality: ReplyFocusModality
   ): Promise<void> => {
-    if (pendingEditing) {
-      onNotify?.('请先保存或取消待发送消息的编辑，再回复另一条消息。')
-      return
-    }
     if (
       message.id.startsWith('optimistic:')
       || routingMutatingRef.current
@@ -2880,7 +2926,6 @@ export function CampWorkspace({
   useLayoutEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
-    setPendingEditing(false)
     setQuoteSourceId(null)
     setPendingQueue(null)
     conversationFindRequestGeneration.current += 1
@@ -3383,8 +3428,7 @@ export function CampWorkspace({
 
   const submitMessage = async (): Promise<void> => {
     if (
-      pendingEditing
-      || composerSendDisabled
+      composerSendDisabled
       || composerSubmittingRef.current
       || routingMutatingRef.current
     ) return
@@ -3454,8 +3498,7 @@ export function CampWorkspace({
 
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
     if (
-      pendingEditing
-      || draftLoadState.state !== 'ready'
+      draftLoadState.state !== 'ready'
       || composerSubmittingRef.current
       || routingMutatingRef.current
     ) return
@@ -3541,7 +3584,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  }) || (pendingEditing ? !pendingAttachmentDropTarget : composerInteractionDisabled)
+  }) || composerInteractionDisabled
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -3598,8 +3641,7 @@ export function CampWorkspace({
     const inputs = droppedAttachmentInputs(event.dataTransfer)
     clearAttachmentDragState()
     if (inputs.length === 0) return
-    if (pendingEditing) pendingAttachmentDropTarget?.(inputs.map(({ file }) => file))
-    else void prepareFiles(inputs)
+    void prepareFiles(inputs)
   }
 
   useEffect(() => {
@@ -3925,6 +3967,8 @@ export function CampWorkspace({
       deliveries={snapshot.messageDeliveries}
       turns={snapshot.turns}
       progressByRunId={executionProgressByRunId}
+      windowedEvidence={openCoverage !== null}
+      executionEventsByRunId={executionEventsByRunId}
       campId={snapshot.camp.id}
       truncatedEvidenceByRunId={truncatedEvidenceByRunId}
       loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
@@ -4737,6 +4781,7 @@ export function CampWorkspace({
             </CampDetailPopover>}
             {snapshot.camp.activationState === 'active' && (
               <SingleChatPanel
+                onLeaveGuardChange={bindSingleChatLeaveGuard}
                 target={singleChatTarget}
                 notificationFocus={notificationFocus?.kind === 'single_chat' ? notificationFocus : null}
                 onNotificationFocusPresented={onNotificationFocusPresented}
@@ -4826,16 +4871,10 @@ export function CampWorkspace({
       >
         <PendingCampInputs ref={pendingInputsRef} key={snapshot.camp.id} campId={snapshot.camp.id}
           submittedInputIds={submittedInputIds}
-          quoteMessages={visibleCampMessages} onRevealQuote={revealQuote}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
-          members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
-          attachmentDragActive={pendingEditing && attachmentDragState !== null}
-          onAttachmentDropTargetChange={updatePendingAttachmentDropTarget}
-          onQueueChange={setPendingQueue} onEditingChange={(editing) => {
-            setPendingEditing(editing)
-            if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
-          }} />
-        <div hidden={pendingEditing}>
+          disabled={composerInteractionDisabled || preparingAttachments.length > 0}
+          onQueueChange={setPendingQueue} onReturnToComposer={returnPendingInputToComposer} />
+        <div>
         <div className="composer-route-slot">
         {draftLoadState.state === 'loading' && (
           <div className="composer-route-rail" aria-label="正在加载接收者路由" aria-busy="true">
@@ -4889,7 +4928,7 @@ export function CampWorkspace({
         <MessageQuoteSelectionToolbar
           ownerKey={`camp:${snapshot.camp.id}`}
           messages={visibleCampMessages}
-          disabled={composerInteractionDisabled || pendingEditing}
+          disabled={composerInteractionDisabled}
           onAdd={async (selection) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote({ type: 'add', selection })) }}
         />
         <div className="composer-box">
@@ -5439,6 +5478,8 @@ function ExecutionDrawer({
   deliveries,
   turns,
   progressByRunId,
+  windowedEvidence,
+  executionEventsByRunId,
   campId,
   truncatedEvidenceByRunId,
   loadedEvidenceCountByRunId,
@@ -5464,6 +5505,8 @@ function ExecutionDrawer({
   deliveries: MessageDeliveryView[]
   turns: CampSnapshot['turns']
   progressByRunId: Map<string, LiveExecutionProgress>
+  windowedEvidence: boolean
+  executionEventsByRunId: Map<string, LiveRuntimeEvent[]>
   campId: string
   truncatedEvidenceByRunId: Map<string, AgentRunExecutionEvidenceView[]>
   loadedEvidenceCountByRunId: Map<string, number>
@@ -5480,6 +5523,18 @@ function ExecutionDrawer({
   memberById: Map<string, CampSnapshot['members'][number]>
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => setExpandedGroups(new Set()), [campId])
+  const groupState = useMemo(() => ({
+    expanded: expandedGroups,
+    change(keys: string[], expanded: boolean): void {
+      setExpandedGroups(previous => {
+        const next = new Set(previous)
+        for (const key of keys) { if (expanded) next.add(key); else next.delete(key) }
+        return next
+      })
+    }
+  }), [expandedGroups])
   const fastControl = memberFast.get(process.agentId)
   const drawerRef = useRef<HTMLElement>(null)
   const drawerBodyRef = useRef<HTMLDivElement>(null)
@@ -5531,7 +5586,7 @@ function ExecutionDrawer({
   const progressFollowKey = JSON.stringify([
     resolvedFocusedRun?.status ?? null,
     resolvedFocusedRun?.waitReason ?? null,
-    focusedProgress?.items ?? []
+    windowedEvidence ? resolvedFocusedRun?.executionEvidenceCount : focusedProgress?.items ?? []
   ])
   const followingLatestRef = useRef(false)
   const [followingLatest, setFollowingLatestState] = useState(false)
@@ -5892,6 +5947,8 @@ function ExecutionDrawer({
             ))
           }}
         >
+          <ExecutionReadingContext.Provider value={setFollowingLatest}>
+          <ExecutionToolGroupStateContext.Provider value={groupState}>
           <ol className="execution-process-timeline">
             {process.runs.map((run) => {
               const cancelling = cancellingTurnIds.has(run.campTurnId)
@@ -5929,6 +5986,8 @@ function ExecutionDrawer({
                     <AgentRunDeliveryRecipients sourceAgentRunId={run.id} deliveries={deliveries} memberById={memberById} />
                     <RunExecutionDisclosure
                       run={run}
+                      windowedEvidence={windowedEvidence}
+                      liveRevision={executionEventsByRunId.get(run.id)}
                       progress={progressByRunId.get(run.id)}
                       campId={campId}
                       truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
@@ -5944,6 +6003,8 @@ function ExecutionDrawer({
               )
             })}
           </ol>
+          </ExecutionToolGroupStateContext.Provider>
+          </ExecutionReadingContext.Provider>
         </div>
     </section>
   )
@@ -8215,6 +8276,8 @@ type RunExecutionHistoryStatus = 'idle' | 'loading' | 'ready' | 'failed'
 
 function RunExecutionContent({
   run,
+  windowedEvidence = false,
+  liveRevision,
   progress,
   campId,
   truncatedEvidence,
@@ -8228,6 +8291,8 @@ function RunExecutionContent({
   onFileOpenError
 }: {
   run: AgentRunView
+  windowedEvidence?: boolean
+  liveRevision?: unknown
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence: AgentRunExecutionEvidenceView[]
@@ -8243,37 +8308,50 @@ function RunExecutionContent({
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const publicFailure = run.status === 'failed' ? run.failure : null
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
-  const narrationEvidence = historicalEvidence ?? truncatedEvidence
+  const windowPage = useExecutionWindow(windowedEvidence, campId, run, liveRevision)
+  const displayedEvidence = windowedEvidence ? windowPage.evidence : historicalEvidence
+  const narrationEvidence = displayedEvidence ?? truncatedEvidence
   const [narrationBodies, setNarrationBodies] = useState<Map<string, string>>(new Map())
+  const narrationCache = useRef(new Map<string, { stamp: string; body: string }>())
   const [narrationStatus, setNarrationStatus] = useState<RunExecutionHistoryStatus>('idle')
   const [narrationRetry, setNarrationRetry] = useState(0)
   useEffect(() => {
     let disposed = false
-    setNarrationBodies(new Map())
-    if (!narrationEvidence.some((item) => item.eventType === 'agent.text.block'
-      && item.isTruncated && item.contentBlobId)) {
+    const needed = narrationEvidence.filter(item => item.eventType === 'agent.text.block'
+      && item.isTruncated && item.contentBlobId)
+    const stamps = new Map(needed.map(item => [item.id, `${item.contentBlobId}:${item.contentByteCount}`]))
+    const cache = narrationCache.current
+    for (const [id, cached] of cache) if (stamps.get(id) !== cached.stamp) cache.delete(id)
+    const cachedBodies = (): Map<string, string> => new Map([...cache].map(([id, value]) => [`narration:${id}`, value.body]))
+    setNarrationBodies(cachedBodies())
+    const missing = needed.filter(item => !cache.has(item.id))
+    if (missing.length === 0) {
       setNarrationStatus('ready')
       return undefined
     }
     setNarrationStatus('loading')
-    void loadExecutionNarrationBodies(narrationEvidence, (evidenceId) =>
+    void loadExecutionNarrationBodies(missing, (evidenceId) =>
       window.rovai.request('agentRunEvidence.getContent', { campId, evidenceId })
     ).then((bodies) => {
       if (disposed) return
-      setNarrationBodies(bodies)
+      for (const item of missing) {
+        const body = bodies.get(`narration:${item.id}`)
+        if (body !== undefined) cache.set(item.id, { stamp: stamps.get(item.id)!, body })
+      }
+      setNarrationBodies(cachedBodies())
       setNarrationStatus('ready')
     }).catch(() => {
       if (!disposed) setNarrationStatus('failed')
     })
     return () => { disposed = true }
   }, [campId, narrationEvidence, narrationRetry])
-  const historicalProgress = useMemo(() => historicalEvidence
+  const historicalProgress = useMemo(() => displayedEvidence
     ? buildLiveExecutionProgress(
-        historicalEvidence.map(liveRuntimeEventFromExecutionEvidence),
-        run.id
+        displayedEvidence.map(liveRuntimeEventFromExecutionEvidence),
+        run.id, { includePublicResults: false }
       )
-    : null, [historicalEvidence, run.id])
-  const effectiveTruncatedEvidence = (historicalEvidence ?? truncatedEvidence)
+    : null, [displayedEvidence, run.id])
+  const effectiveTruncatedEvidence = (displayedEvidence ?? truncatedEvidence)
     .filter((evidence) => evidence.isTruncated)
     .filter(isPresentableExecutionEvidence)
   const effectiveProgress = historicalProgress ?? progress
@@ -8285,10 +8363,24 @@ function RunExecutionContent({
   ).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   ), [effectiveProgress?.items, finalKey, narrationBodies])
-  const groupedProcessItems = useMemo(
-    () => groupConsecutiveToolItems(processItems),
-    [processItems]
-  )
+  const windowGroupKeys = useRef({ next: 0, byItem: new Map<string, string>() })
+  const groupedProcessItems = useMemo(() => {
+    const groups = groupConsecutiveToolItems(processItems)
+    if (!windowedEvidence) return groups
+    const identities = windowGroupKeys.current
+    const used = new Set<string>()
+    return groups.map(group => {
+      if (group.kind !== 'toolGroup') return group
+      // A page can prepend the first operation of an existing group. Keep its
+      // React identity so expanded child results and keyboard focus survive.
+      const key = group.items.map(item => identities.byItem.get(item.key))
+        .find((key): key is string => key !== undefined && !used.has(key))
+        ?? `window-tool-group:${identities.next++}`
+      used.add(key)
+      for (const item of group.items) identities.byItem.set(item.key, key)
+      return { ...group, key }
+    })
+  }, [processItems, windowedEvidence])
   const activeToolItems = useMemo(
     () => processItems.filter((item): item is ToolProgressItem => item.kind === 'tool'),
     [processItems]
@@ -8313,7 +8405,15 @@ function RunExecutionContent({
         : executionInitialFeedback(run.status, processItems, Boolean(finalBody))
 
   return (
-    <div className="process-content">
+    <div className="process-content" ref={windowPage.root}>
+      {windowedEvidence && (windowPage.hasEarlier || windowPage.error || windowPage.loading) && (
+        <div className="execution-window-navigation" role="status">
+          <button className="quiet-button compact" type="button" disabled={windowPage.loading} onClick={() => {
+            void windowPage.move(windowPage.error ? 'retry' : windowPage.evidence.length ? 'earlier' : 'latest')
+          }}>{windowPage.loading ? '正在读取执行记录…' : windowPage.error ? '重试' : '载入更早记录'}</button>
+          {windowPage.error && <span>执行记录读取失败。</span>}
+        </div>
+      )}
       {publicFailure && <RuntimeFailureNotice failure={publicFailure} presentation="agent-run" />}
       {showUnsettledWarning && (
         <p className="execution-uncertain" role="status">
@@ -8326,6 +8426,7 @@ function RunExecutionContent({
             <ToolActivityGroup
               key={item.key}
               campId={campId}
+              partial={windowedEvidence}
               items={item.items}
               liveTail={item.key === liveTailToolGroupKey}
               cancelling={cancelling}
@@ -8355,14 +8456,14 @@ function RunExecutionContent({
         }
         if (item.kind === 'narration') {
           return (
-            <div className={`process-copy stream-${item.kind}`} key={item.key}>
+            <div className={`process-copy stream-${item.kind}`} key={item.key} data-execution-item-key={item.key}>
               <SafeMarkdown>{item.body}</SafeMarkdown>
             </div>
           )
         }
         if (item.kind === 'plan') {
           return (
-            <div className="process-plan live-progress-plan" key={item.key}>
+            <div className="process-plan live-progress-plan" key={item.key} data-execution-item-key={item.key}>
               {item.explanation && <SafeMarkdown>{item.explanation}</SafeMarkdown>}
               {item.plan.length > 0 && (
                 <ol>
@@ -8383,6 +8484,8 @@ function RunExecutionContent({
           return step.fileChanges.map((change, index) => (
             <ModifiedFileRow
               change={change}
+              itemKey={`${item.key}:file:${index}`}
+              completeEvidence={completeEvidence.byToolId.get(step.id)}
               campId={campId}
               key={`${item.key}:file:${index}:${change.path}`}
               onFileOpenError={onFileOpenError}
@@ -8414,6 +8517,10 @@ function RunExecutionContent({
           />
         )
       })}
+      {windowedEvidence && windowPage.hasNewer && <div className="execution-window-navigation">
+        <button className="quiet-button compact" type="button" disabled={windowPage.loading} onClick={() => void windowPage.move('newer')}>载入较新记录</button>
+        <button className="quiet-button compact" type="button" disabled={windowPage.loading} onClick={() => void windowPage.move('latest')}>回到最新</button>
+      </div>}
       {(historyStatus === 'loading' || narrationStatus === 'loading') && (
         <div className="process-action current" role="status">
           <span className="process-spinner" aria-hidden="true" />
@@ -8486,6 +8593,8 @@ function RunExecutionContent({
 
 export function RunExecutionDisclosure({
   run,
+  windowedEvidence = false,
+  liveRevision,
   progress,
   campId,
   truncatedEvidence = [],
@@ -8498,6 +8607,8 @@ export function RunExecutionDisclosure({
   onFileOpenError = () => undefined
 }: {
   run: AgentRunView
+  windowedEvidence?: boolean
+  liveRevision?: unknown
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence?: AgentRunExecutionEvidenceView[]
@@ -8518,7 +8629,9 @@ export function RunExecutionDisclosure({
   const previousNonTerminal = useRef(nonTerminal)
   const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
   const [historyStatus, setHistoryStatus] = useState<RunExecutionHistoryStatus>('idle')
-  const shouldActivateContent = open || focused || nonTerminal
+  const shouldActivateContent = windowedEvidence
+    ? open || active || cancellingActive
+    : open || focused || nonTerminal
   const [contentMounted, setContentMounted] = useState(() => shouldActivateContent)
   useEffect(() => {
     const completed = previousNonTerminal.current && !nonTerminal
@@ -8532,7 +8645,7 @@ export function RunExecutionDisclosure({
   }, [shouldActivateContent])
 
   const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
-  const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
+  const historyNeeded = !windowedEvidence && !nonTerminal && loadedEvidenceCount < durableEvidenceCount
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
   const hasDisclosureWithoutProgress = nonTerminal
     || durableEvidenceCount > 0
@@ -8566,10 +8679,12 @@ export function RunExecutionDisclosure({
     }
   }
 
-  const shouldMountContent = contentMounted || shouldActivateContent
+  const shouldMountContent = windowedEvidence ? shouldActivateContent : contentMounted || shouldActivateContent
   const content = shouldMountContent ? (
     <RunExecutionContent
       run={run}
+      windowedEvidence={windowedEvidence}
+      liveRevision={liveRevision}
       progress={progress}
       campId={campId}
       truncatedEvidence={truncatedEvidence}
