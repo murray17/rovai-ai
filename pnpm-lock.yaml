@@ -149,6 +149,12 @@ importers:
 
   packages/contracts: {}
 
+  packages/html-preview:
+    dependencies:
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
+
 packages:
 
   '@babel/code-frame@7.29.7':

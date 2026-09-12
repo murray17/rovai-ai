@@ -1,3 +1,5 @@
+import { HtmlPreviewSite } from '../../../../../packages/html-preview/src/site'
+import { createPreviewFileSource } from '../../../../../packages/html-preview/src/file-source'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
@@ -10,6 +12,7 @@ import type {
   FilePreviewCapability,
   FilePreviewErrorCode,
   FilePreviewHtmlDocument,
+  FilePreviewHtmlSite,
   FilePreviewOperationResult,
   FilePreviewPageContent,
   FilePreviewPathPresentation,
@@ -91,6 +94,8 @@ export interface FilePreviewSourceAuthority {
 }
 
 export interface FilePreviewNativeActions {
+  previewHostOrigin?(webContentsId: number): string
+  previewProtectedRoots?(): readonly string[]
   selectRoot(webContentsId: number): Promise<string | null>
   confirmOpen(displayName: string): Promise<boolean>
   openPath(path: string): Promise<string>
@@ -318,6 +323,9 @@ export class FilePreviewService {
   readonly #bindingTasks = new Map<number, Promise<void>>()
   readonly #pending = new Map<string, PendingOpen>()
   readonly #rootGrants = new Map<string, RootGrant>()
+  readonly #htmlSites = new Map<string, { handleId: string; webContentsId: number; site: HtmlPreviewSite }>()
+  readonly #htmlPreparations = new Map<string, symbol>()
+  readonly #htmlClosures = new Set<Promise<void>>()
   readonly #htmlTokens = new Map<string, HtmlPreviewToken>()
   readonly #watchers: RootWatchRegistry
 
@@ -518,16 +526,77 @@ export class FilePreviewService {
     }
   }
 
+  async prepareHtmlSite(
+    webContentsId: number,
+    request: { handleId: string; expectedGeneration: string }
+  ): Promise<FilePreviewOperationResult<FilePreviewHtmlSite>> {
+    let site: HtmlPreviewSite | null = null
+    const preparation = Symbol()
+    try {
+      const record = this.#record(webContentsId, request.handleId, request.expectedGeneration)
+      if (record.version.size > filePreviewLimits.htmlDocumentBytes) return failed('file_too_large', '文件较大，请使用分页阅读。')
+      if (record.classification.mime !== 'text/html') throw new FilePreviewAccessError('read_failed', '这不是 HTML 文件。')
+      this.#htmlPreparations.set(record.handleId, preparation)
+      const validate = async (signal: AbortSignal): Promise<void> => {
+        signal.throwIfAborted()
+        this.#record(webContentsId, request.handleId, request.expectedGeneration)
+        await this.#revalidateRecordPath(record, true)
+        this.#record(webContentsId, request.handleId, request.expectedGeneration)
+        signal.throwIfAborted()
+      }
+      const parsed = this.#parsedReference(record.reopenTarget)
+      const entryPath = '/' + relative(record.canonicalRoot, record.canonicalPath).split(sep).map(encodeURIComponent).join('/')
+        + (parsed.query ? `?${parsed.query}` : '') + (parsed.fragment ? `#${encodeURIComponent(parsed.fragment)}` : '')
+      site = await HtmlPreviewSite.create({
+        generation: record.generation,
+        hostOrigin: this.#native.previewHostOrigin?.(webContentsId) ?? 'null',
+        entryPath,
+        validate,
+        openResource: createPreviewFileSource(record.canonicalRoot, record.canonicalPath, record.allowChildren, this.#native.previewProtectedRoots?.())
+      })
+      this.#record(webContentsId, request.handleId, request.expectedGeneration)
+      if (this.#htmlPreparations.get(record.handleId) !== preparation) throw new FilePreviewAccessError('read_failed', '预览请求已经过期。')
+      this.#closeHtmlSites(record.handleId)
+      this.#htmlSites.set(site.descriptor.previewId, { handleId: record.handleId, webContentsId, site })
+      return ok({ ...site.descriptor, contentGeneration: record.generation, contentVersion: record.version })
+    } catch (error) { await site?.close(); return this.#errorResult(error) }
+    finally { if (this.#htmlPreparations.get(request.handleId) === preparation) this.#htmlPreparations.delete(request.handleId) }
+  }
+
+  async releaseHtmlSite(webContentsId: number, request: { previewId: string }): Promise<{ released: true }> {
+    const record = this.#htmlSites.get(request.previewId)
+    if (record?.webContentsId === webContentsId) {
+      this.#htmlSites.delete(request.previewId)
+      await record.site.close()
+    }
+    return { released: true }
+  }
+
+  ownsHtmlPreviewOrigin(webContentsId: number, url: string): boolean {
+    let origin: string
+    try { origin = new URL(url).origin } catch { return false }
+    return [...this.#htmlSites.values()].some(record => record.webContentsId === webContentsId && !record.site.closed && record.site.descriptor.origin === origin)
+  }
+
+  #closeHtmlSites(handleId: string): void {
+    for (const [id, record] of this.#htmlSites) {
+      if (record.handleId !== handleId) continue
+      this.#htmlSites.delete(id)
+      const closing = record.site.close()
+      this.#htmlClosures.add(closing)
+      void closing.finally(() => this.#htmlClosures.delete(closing))
+    }
+  }
+
   async prepareHtml(
     webContentsId: number,
     request: { handleId: string; expectedGeneration: string }
   ): Promise<FilePreviewOperationResult<FilePreviewHtmlDocument>> {
     try {
       const record = this.#record(webContentsId, request.handleId, request.expectedGeneration)
-      // Markdown also uses this entry for local assets, retaining the source-text budget.
-      const limit = record.classification.mime === 'text/html'
-        ? filePreviewLimits.htmlDocumentBytes
-        : filePreviewLimits.wholeTextBytes
+      // This string/token entry remains only for Markdown; HTML has one URL path.
+      if (record.classification.mime === 'text/html') return failed('read_failed', 'HTML 预览需要站点入口。')
+      const limit = filePreviewLimits.wholeTextBytes
       if (record.version.size > limit) {
         return failed('file_too_large', '文件较大，请使用分页阅读。')
       }
@@ -662,6 +731,8 @@ export class FilePreviewService {
         await opened.file.close().catch(() => undefined)
         throw error
       }
+      this.#closeHtmlSites(record.handleId)
+      this.#htmlPreparations.delete(record.handleId)
       const oldFile = record.file
       const oldRoot = record.canonicalRoot
       const oldPath = record.canonicalPath
@@ -1331,7 +1402,7 @@ export class FilePreviewService {
     return opened.file
   }
 
-  async #revalidateRecordPath(record: PreviewHandleRecord): Promise<{
+  async #revalidateRecordPath(record: PreviewHandleRecord, requireVersion = false): Promise<{
     canonicalPath: string
     openRisk: 'normal' | 'confirm'
     canShowPath: boolean
@@ -1346,7 +1417,11 @@ export class FilePreviewService {
         || opened.canonicalPath !== record.canonicalPath
       ) throw new FilePreviewAccessError('read_failed', '文件来源已发生变化，请重新打开。')
       const classification = await this.#classify(opened)
-      if (!contentVersionMatches(record.version, opened.version)) record.hasExternalUpdate = true
+      if (!contentVersionMatches(record.version, opened.version)) {
+        record.hasExternalUpdate = true
+        if (requireVersion) throw new FilePreviewAccessError('read_failed', '文件已有更新，请重新加载。')
+      }
+      if (requireVersion && target.allowChildren !== record.allowChildren) throw new FilePreviewAccessError('read_failed', '文件资源范围已变化，请重新打开。')
       return {
         canonicalPath: opened.canonicalPath,
         canShowPath: target.sourceKind !== 'attachment' || target.canShowPath === true,
@@ -1464,7 +1539,10 @@ export class FilePreviewService {
 
   async #dropHandle(record: PreviewHandleRecord): Promise<void> {
     if (!this.#handles.delete(record.handleId)) return
+    this.#htmlPreparations.delete(record.handleId)
+    this.#closeHtmlSites(record.handleId)
     this.#revokeHtmlTokens(record.handleId)
+    await Promise.all(this.#htmlClosures)
     this.#watchers.unsubscribe(record.handleId)
     const file = record.file
     record.file = null
@@ -1488,6 +1566,7 @@ export class FilePreviewService {
       if (record.file && now - record.lastUsedAt > HANDLE_TTL_MS) {
         const file = record.file
         record.file = null
+        this.#closeHtmlSites(record.handleId)
         this.#revokeHtmlTokens(record.handleId)
         void file.close().catch(() => undefined)
       }

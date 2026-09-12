@@ -183,6 +183,10 @@ export function parseHandleRequest(value: unknown): { handleId: string } {
   return { handleId: string(record(value).handleId, 128) }
 }
 
+export function parseHtmlSiteRequest(value: unknown): { previewId: string } {
+  return { previewId: string(record(value).previewId, 128) }
+}
+
 export function parseGenerationRequest(value: unknown): {
   handleId: string
   expectedGeneration: string

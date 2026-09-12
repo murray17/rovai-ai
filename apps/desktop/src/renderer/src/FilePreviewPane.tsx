@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
 import { FileFindScope } from './FilePreviewFind'
 import { FileFindDomAdapter } from './FileFindDomAdapter'
-import { useHtmlFileFind } from './file-find-html'
+import { HtmlViewer } from './HtmlFileViewer'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
 import { FilePreviewTabIcon, ResourceReferenceIcon } from './FilePreviewTabIcon'
@@ -190,88 +190,6 @@ function OpeningIndicator(): React.JSX.Element | null {
   )
 }
 
-function HtmlViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element | null {
-  const content = tab.content?.kind === 'html' ? tab.content : null
-  const iframeRef = useRef<HTMLIFrameElement>(null)
-  useHtmlFileFind(iframeRef, content)
-  const { open } = useFilePreview()
-  const [linkError, setLinkError] = useState<string | null>(null)
-  const fragment = tab.file?.target?.htmlFragment
-
-  const scrollToFragment = (): void => {
-    if (!content || !fragment) return
-    iframeRef.current?.contentWindow?.postMessage({
-      type: 'rovai-preview-fragment',
-      tabToken: content.tabToken,
-      fragment
-    }, '*')
-  }
-
-  useEffect(() => {
-    if (!content || !fragment) return undefined
-    const frame = window.requestAnimationFrame(scrollToFragment)
-    return () => window.cancelAnimationFrame(frame)
-  }, [content, fragment])
-
-  useEffect(() => {
-    if (!content) return undefined
-    const receive = (event: MessageEvent<unknown>): void => {
-      if (event.source !== iframeRef.current?.contentWindow) return
-      const data = event.data
-      if (!data || typeof data !== 'object' || Array.isArray(data)) return
-      const message = data as Record<string, unknown>
-      if (
-        message.type === 'rovai-preview-fragment-result'
-        && message.tabToken === content.tabToken
-        && message.bridgeToken === content.bridgeToken
-        && typeof message.found === 'boolean'
-      ) {
-        setLinkError(message.found ? null : '未找到指定的页内位置，已保持在文件顶部。')
-        return
-      }
-      if (
-        message.type !== 'rovai-preview-link'
-        || message.tabToken !== content.tabToken
-        || message.bridgeToken !== content.bridgeToken
-        || typeof message.href !== 'string'
-        || message.href.length === 0
-        || message.href.length > 4_096
-      ) return
-      if (/^[a-z][a-z0-9+.-]*:/iu.test(message.href) && !message.href.startsWith('file:')) {
-        setLinkError('预览中的外部链接已阻止。')
-        return
-      }
-      if (!tab.file) return
-      void open({
-        kind: 'child_of_handle',
-        parentHandleId: tab.file.handleId,
-        rawReference: message.href,
-        allowSystemOpen: true
-      }).then((outcome) => {
-        setLinkError(outcome.kind === 'error' ? outcome.error.message : null)
-      })
-    }
-    window.addEventListener('message', receive)
-    return () => window.removeEventListener('message', receive)
-  }, [content, open, tab.file])
-
-  if (!content || !tab.file) return null
-  return (
-    <div className="file-preview-html-stage">
-      <iframe
-        ref={iframeRef}
-        className="file-preview-html"
-        title={`${tab.presentation.fileName} HTML 预览`}
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        srcDoc={content.html}
-        onLoad={scrollToFragment}
-      />
-      {linkError && <p className="file-preview-html-error" role="alert">{linkError}</p>}
-    </div>
-  )
-}
-
 function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const text = tab.content && 'text' in tab.content ? tab.content.text : ''
@@ -412,7 +330,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 }
 
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
-  const { reload, changePage, revealInFolder } = useFilePreview()
+  const { reload, retry, changePage, revealInFolder } = useFilePreview()
   const [pathActionError, setPathActionError] = useState<string | null>(null)
   useEffect(() => setPathActionError(null), [tab.file?.handleId, tab.id])
   const page = tab.content?.kind === 'page' ? tab.content.page : null
@@ -460,6 +378,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
             <div className="file-preview-recovery" role="status" aria-live="polite">
               <ResourceReferenceIcon kind="file" className="file-preview-recovery-icon" />
               <p>{tab.error?.message ?? '暂时无法读取文件'}</p>
+              {tab.file?.kind === 'html' && <button type="button" onClick={() => void retry(tab.id)}>重试</button>}
             </div>
           </div>
         )}

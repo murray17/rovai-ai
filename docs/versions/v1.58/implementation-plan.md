@@ -303,3 +303,8 @@ slow integration 309 项、`cargo clippy --workspace --all-targets -- -D warning
 Migration 151 的升级、回滚与已有数据保留在同步渠道 Migration 150 后另以 15 项迁移测试复验。
 隔离 Electron 设置交互及真实 Core 草稿/保存/重启 RPC owner 已通过；测试不调用模型。
 本次 PR、CI、daily 安装包验收与本机非终止安装结果由关联交付 Task 记录，Issue #338 留待新版本发布后关闭。
+
+
+## HTML HTTP 交互预览
+
+实现、独立回归与原稿验收记录见 [HTML 预览验证](html-preview-http.md)；其余版本验收状态保持独立。

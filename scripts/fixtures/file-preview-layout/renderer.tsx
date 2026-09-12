@@ -99,9 +99,7 @@ let deferredReadStarted: (() => void) | null = null
 let deferredReadRelease: (() => void) | null = null
 let pendingToolOpen: ReturnType<FilePreviewContextValue['open']> | null = null
 let fileReads = 0
-const htmlHandles = new Set<string>()
 const patchHandles = new Set<string>()
-const htmlSource = '<h1>HTML 文件预览</h1><p>文件<strong>预览</strong> bridge</p><p hidden>隐藏词</p><p style="display:none">隐藏词</p><button>按钮可见词</button>'
 async function resolvePreview(request: OpenFilePreviewRequest) {
   if (request.kind === 'message_reference' && request.rawReference === missingReference) {
     return { ok: false as const, error: {
@@ -138,7 +136,6 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
       fileName: request.rawReference.split('/').at(-1)! }
   } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
   const handleId = crypto.randomUUID()
-  if (target.kind === 'html') htmlHandles.add(handleId)
   if (target.kind === 'patch') patchHandles.add(handleId)
   return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId } } }
 }
@@ -178,8 +175,10 @@ const api: FilePreviewApi = {
     contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
   } }),
   readBinary: async () => ({ ok: true, value: { bytes: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>'), mime: 'image/svg+xml', contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } }),
-  prepareHtml: async ({ handleId }) => ({ ok: true, value: {
-    html: htmlHandles.has(handleId) ? htmlSource : markdownSource,
+  prepareHtmlSite: async () => ({ ok: true, value: { ...await (window as unknown as {previewHtmlFixture:{prepare():Promise<import('@contracts').FilePreviewHtmlSite>}}).previewHtmlFixture.prepare(), contentGeneration: markdownFile.contentGeneration, contentVersion: markdownFile.contentVersion } }),
+  releaseHtmlSite: async () => { await (window as unknown as {previewHtmlFixture:{release():Promise<void>}}).previewHtmlFixture.release(); return {released:true} },
+  prepareHtml: async () => ({ ok: true, value: {
+    html: markdownSource,
     tabToken: 'markdown-tab-token',
     bridgeToken: 'markdown-bridge-token',
     assetBasePath: '',

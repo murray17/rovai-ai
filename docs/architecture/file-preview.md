@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-09-07
+last_updated: 2026-09-12
 ---
 
 # File Preview Architecture
@@ -35,7 +35,7 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v11](../contracts/file-preview-v11.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v12](../contracts/file-preview-v12.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
   入口；inline-code 和正文不进入文件识别，也不读取磁盘。Tab shell 不拥有文件能力或当前文件事实。
 
@@ -138,7 +138,7 @@ Preview handle，但不 reveal 目录、不打开系统格式、不显示确认�
 ## 读取与 generation
 
 全文源码、Markdown 和代码渲染上限为 4 MiB；HTML 网页预览使用独立的 32 MiB 文档上限，分类器与
-`prepareHtml` 读取入口执行同一 HTML 上限，不因超过源码阈值而降级。`readText` 仍限制为 4 MiB，
+`prepareHtmlSite` 的资源响应执行同一 HTML 上限，不因超过源码阈值而降级。`readText` 仍限制为 4 MiB，
 Markdown 经 `prepareHtml` 取得资源 token 时也不扩大该限制。超过相应上限的文本使用 generation-bound 分页。
 HTML 的 UTF-8 校验、来源与 generation 重验、隔离 iframe 和子资源保护保持原有边界。每个响应携带当前
 `contentGeneration`，旧 generation 的并发结果被拒绝。分页响应携带绝对 byte offset 与绝对起始行，Renderer
@@ -165,23 +165,33 @@ Root Grant 只服务“选择目录、打开文件夹、添加外部目录、浏
 事件不执行 read/stat，不改动 Viewer。最后一个订阅释放时关闭 watcher；Camp 切换、窗口销毁、来源撤销与退出
 分别清理自己的引用。watcher 失败后关闭 entry 并记录去路径诊断，不启动轮询。
 
-## HTML 资源
+## HTML 预览站点与 Markdown 资源
 
-`rovai-preview://asset/<tab-token>/<segments>` 在 `app.ready` 前注册为 secure standard scheme，并在实际窗口 Session
-安装 webRequest sender gate 与 protocol handler。token 绑定窗口、Camp、Tab、父句柄、generation 和
-`dirname(canonicalFile)`；handler 只接受 GET，逐段解码并每次执行文档目录 containment、文件类型、大小和 MIME 检查。
-HTML/Markdown 的公开 `assetBasePath` 为空，相对资源从当前文档目录开始；`..` 不得越过该目录。
+HTML 正式链路为：已有文件能力 → Electron-free 预览站点 → 实际 HTTP 文档 → 不同源 iframe。
+共享 `packages/html-preview` 拥有静态资源映射、实例、响应、注入位置映射、诊断和浏览器宿主通道；Desktop Main
+拥有 loopback 生命周期适配、文件来源与窗口绑定。Renderer 只接收 descriptor，不接收磁盘根或通用文件接口。
+共享接口可用于普通浏览器和未来 WebUI/MobileUI，远程部署与离线运行不在本次范围。
 
-HTML 通过无 `allow-same-origin` 的 sandbox iframe 执行；CSP 在用户文档之前注入，禁止网络、连接、表单、顶层
-导航和下载。宿主拦截主/子 frame 导航与新窗口。消息桥接受 ready、受限高度、本地链接选择与文件内查找的封闭有界消息，
-同时验证 `event.source`、token、字段长度和当前 iframe 实例。文件查找只传递当前可见正文快照（最多 8 MiB）、
-请求序号、匹配范围（最多 10,000 条）和可信键盘/点击事件；宿主 Worker 执行可取消匹配，iframe 仅投影高亮和阅读定位。
-这条链路不新增 Main IPC、文件能力、系统打开或网络权限。可信本地链接点击使用 `child_of_handle` 打开新的具体
-文件 handle；自动资源读取不创建子 handle，也不能启动系统应用。
+每实例使用独立 `.localhost` origin，并以入口 capability 兑换 HttpOnly partitioned cookie；Host、来源、cookie、
+现有 authority、generation、文件身份与路径范围共同验证，随机端口不是授权。资源保留原文、相对位置和查询参数，
+只在作者脚本前插入同步诊断加载标签；不使用 srcdoc、History shim、全局 API 替换或资源正则重写。
+
+HTML iframe 使用 allow-scripts + allow-same-origin；站点必须与宿主及其他实例不同源。CSP 允许作者脚本、样式、
+HTTP(S) 网络依赖和必要子页面，保留 CORS/证书/混合内容与第三方嵌入限制。无信任、交互或逐资源审批，加载失败
+保留真实状态。内部 iframe 可访问当前 HTML 的其他 query，也可按已有能力读取子页面；附件 self-only 能力不扩张。
+
+诊断按受校验的 source/origin/实例/generation/challenge/document 消息通道送回宿主，同源子页面仅经直属 frame
+窗口校验后转发。脚本错误、资源错误、文档加载和诊断连接分别管理；可见正文及用户路由保留，失败不伪造恢复。
+查找使用有界可见正文快照、现有 Worker 和高亮定位；源码独立读取未注入内容。完整 wire、限制和状态见
+[File Preview v12](../contracts/file-preview-v12.md)。
+
+Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.ready 前注册 secure standard scheme，
+实际窗口 Session 安装 sender gate 与 protocol handler。token 绑定窗口、Camp、句柄、generation 和文档目录；
+只接受 GET，逐段解码并检查文档目录 containment、类型、大小和 MIME。Markdown 资源 token 不用于 HTML URL 入口。
 
 ## 资源释放
 
-- Tab 关闭：handle、reopen token、asset/HTML token 与 watcher subscription；
+- Tab 关闭：handle、reopen token、asset token、HTML 站点的请求/诊断流/端口与 watcher subscription；
 - Pane 隐藏：保留 Tab 与阅读状态，句柄仍受 TTL；
 - Camp route commit：按 binding generation 释放旧 Camp 全部窗口能力、Grant、challenge 和订阅；Renderer 释放旧内容，
   但把无能力 Tab shell 保存到对应 Camp 的有界窗口 session；

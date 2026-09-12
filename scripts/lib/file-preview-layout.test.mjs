@@ -27,7 +27,10 @@ test('production file preview keeps split geometry, reading state and stable pre
     const shortcutModule = join(fixture, 'close-tab-shortcut.cjs')
     const shortcutPreload = join(fixture, 'close-tab-preload.cjs')
     await writeFile(shortcutModule, shortcutCode)
+    await build({ configFile: false, logLevel: 'error', ssr: { noExternal: ['parse5', 'entities'] }, build: { ssr: join(root, 'packages/html-preview/src/site.ts'), outDir: join(fixture, 'site'), minify: false, rollupOptions: { output: { format: 'cjs', entryFileNames: 'site.cjs' } } } })
+    await build({ configFile: false, logLevel: 'error', build: { ssr: join(root, 'packages/html-preview/src/file-source.ts'), outDir: join(fixture, 'source'), minify: false, rollupOptions: { output: { format: 'cjs', entryFileNames: 'source.cjs' } } } })
     await writeFile(shortcutPreload, `${shortcutCode}\nconst { contextBridge, ipcRenderer } = require('electron')
+contextBridge.exposeInMainWorld('previewHtmlFixture', { prepare: () => ipcRenderer.invoke('html-fixture-prepare'), release: () => ipcRenderer.invoke('html-fixture-release') })
 contextBridge.exposeInMainWorld('previewWindowControls', {
   onCloseTabRequested: exports.createCloseTabShortcutHandler(ipcRenderer)
 })`)
@@ -41,7 +44,7 @@ contextBridge.exposeInMainWorld('previewWindowControls', {
     process.stdout.write(`Isolated file preview userData: ${join(fixture, 'user-data')} (no Core/Runtime)\n`)
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
-      shortcutModule, shortcutPreload,
+      shortcutModule, shortcutPreload, join(fixture, 'site/site.cjs'), join(fixture, 'source/source.cjs'),
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
     ], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')

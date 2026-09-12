@@ -95,3 +95,21 @@ Runtime 权限限制。该路径仍不进入 Renderer、公共消息或历史 Vi
 
 拒绝保留旧复制兼容、delivery mode、Runtime capability 分流、external read-root 授权、snapshot/config 开关及
 materialize/upload fallback，因为它们会用新的策略系统替代本次删除，扩大 Source Attachment 的职责。
+
+
+<a id="v1-58-d07"></a>
+## V1.58-D07：交互 HTML 使用可撤销的不同源 HTTP 站点
+
+- 状态：accepted
+- 日期：2026-09-12
+- 当前权威：[File Preview v12](../../contracts/file-preview-v12.md)、[File Preview Architecture](../../architecture/file-preview.md)、[Camp 文件预览区](../../ui/components/file-preview.md)
+
+srcdoc 的不透明 origin 使 History 初始化抛出 SecurityError，且 query 子页面无法取得同一原稿。继续增加路径改写
+或 History shim 不能恢复浏览器文档语义；迁移 Electron 专有 webview 会增加未来 WebUI/MobileUI 复用成本。
+
+按用户确定方向保留 iframe，以已有文件能力生成不同源、可撤销 HTTP 站点。浏览器负责作者依赖、History 和子页面，
+共享核心负责范围检查与响应，Desktop 仅适配本机能力及窗口生命周期。默认运行并尝试网络依赖，失败按浏览器规则
+呈现，不增加信任或逐资源审批。
+
+代价是实例服务、访问凭据、诊断和清理的复杂度，以及普通网络错误/CORS/证书限制仍可能导致作者页面失败。
+不以放宽主应用同源、关闭 webSecurity、任意代理或覆盖作者 API 换取表面成功；脚本异常只报告，不伪装续跑。

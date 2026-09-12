@@ -459,3 +459,15 @@ Dialog 验收，专项结果不能替代默认全套结果。
 - 某个 Smoke 通过只证明该 suite 的范围，不代表全部 Product Runtime 的完整兼容性复核；TRAE managed Skill
   projection Verified 不会升级用户级 Skill 调用或 Compaction detector，后者继续按独立证据保持
   `Unverified` / `NotObserved`。
+
+## HTML 预览 HTTP 链路
+
+`pnpm test:html-preview` 使用共享 HTTP 核心、正式 FilePreviewProvider/Pane、桌面文件能力适配和普通 Chrome
+分别验证 History 初始化、query 内部画布、依赖加载及错误诊断。服务路径和访问矩阵由 `packages/html-preview`
+Vitest owner 负责，窗口/代际释放由 Main 既有 service owner 负责，文件布局与查找继续归 `test:file-preview-layout`。
+
+所有浏览器使用临时绝对 userData/profile，Electron 不启动 Core、Runtime 或日常 Skill Library。
+`ROVAI_TEST_CHROME` 指定普通 Chrome 路径；缺失时该项标记未运行，不能宣称跨端验收已通过。
+`ROVAI_HTML_HISTORY_SAMPLE` 和 `ROVAI_HTML_CANVAS_SAMPLE` 可提供两份独立原稿，测试仅复制、核验摘要并验证实际正文与
+子画布联动；`ROVAI_KEEP_HTML_PREVIEW_FIXTURE=1` 保留临时资源和截图。详见
+[v1.58 记录](../versions/v1.58/html-preview-http.md)。

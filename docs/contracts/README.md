@@ -128,7 +128,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Skill Content Preview v1（当前）](skill-content-preview-v1.md) | 已安装当前 Revision 或受检导入候选的有界、完整性绑定只读内容与文件列表 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
-| [File Preview v11（当前）](file-preview-v11.md) | 在 v10 基础上区分本地源附件与受管附件；源文件成功预览后显示实际路径，Managed/legacy 保持内部路径私有 |
+| [File Preview v12（当前）](file-preview-v12.md) | HTML 正式迁移至隔离 HTTP 站点；默认交互与依赖加载、诊断、源码及可撤销生命周期 |
+| [File Preview v11（历史）](file-preview-v11.md) | 在 v10 基础上区分本地源附件与受管附件；源文件成功预览后显示实际路径，Managed/legacy 保持内部路径私有 |
 | [File Preview v10（历史）](file-preview-v10.md) | v9 来源、Files Changed 路由与成功后提交不变；项目根与项目外普通文件显示实际路径，同名 Tab 使用最短唯一目录后缀，复制普通文件返回 canonical 绝对路径 |
 | [File Preview v9（历史）](file-preview-v9.md) | v8 来源、恢复与成功后提交不变；Files Changed 有可靠差异时进入不可变 Review，operation-only 直接预览当前文件且失败不切换导航 |
 | [File Preview v8（历史）](file-preview-v8.md) | v7 会话恢复与副作用边界不变；项目内 child 获得独立 `camp_workspace` 恢复来源；执行过程文件入口成功后才提交导航，失败只显示当前页 danger Toast |

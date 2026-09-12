@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Nested canvas</title></head><body>
+<script>
+if (new URLSearchParams(location.search).has('canvas')) {
+  document.body.innerHTML = '<main id="canvas">Canvas ready</main>';
+  addEventListener('message', event => {
+    if (event.source === parent && event.origin === location.origin && event.data === 'night') {
+      document.querySelector('#canvas').textContent = 'Canvas night';
+      parent.postMessage('changed', location.origin);
+    }
+  });
+} else {
+  document.body.innerHTML = '<button id="theme">切换主题</button><output id="result"></output><iframe title="Canvas" src="?canvas=1"></iframe>';
+  document.querySelector('#theme').onclick = () => document.querySelector('iframe').contentWindow.postMessage('night', location.origin);
+  addEventListener('message', event => {
+    if (event.source === document.querySelector('iframe').contentWindow && event.origin === location.origin && event.data === 'changed') document.querySelector('#result').textContent = 'Canvas linked';
+  });
+}
+</script></body></html>

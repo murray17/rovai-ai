@@ -13,6 +13,7 @@ import type {
   AgentRunFileChangesView,
   FileLocationTarget,
   FilePreviewErrorPayload,
+  FilePreviewHtmlSite,
   FilePreviewOperationResult,
   FilePreviewPageContent,
   OpenFilePreviewRequest,
@@ -20,7 +21,7 @@ import type {
   ResolvedFilePreview,
   ResolvedTheme
 } from '@contracts'
-import { secureFilePreviewHtml } from './file-preview-html-document'
+import { prepareHtmlPreviewSite } from './file-preview-html-site'
 import { FilePreviewLayoutProvider } from './FilePreviewLayout'
 import { FileFindProvider } from './FilePreviewFind'
 import { agentRunFileChangeHasReviewableDiff } from './file-changes-presentation'
@@ -42,7 +43,7 @@ import {
 export type FilePreviewContent =
   | { kind: 'markdown'; text: string; tabToken: string; assetBasePath: string }
   | { kind: 'code' | 'text' | 'patch'; text: string }
-  | { kind: 'html'; html: string; tabToken: string; bridgeToken: string }
+  | { kind: 'html'; preview: FilePreviewHtmlSite }
   | { kind: 'image'; url: string }
   | { kind: 'page'; page: FilePreviewPageContent }
 
@@ -141,6 +142,7 @@ function errorFromUnknown(): FilePreviewErrorPayload {
 
 export function filePreviewErrorMessage(error: Pick<FilePreviewErrorPayload, 'code'>): string {
   switch (error.code) {
+    case 'preview_timeout': return '未收到预览服务响应，请重试。'
     case 'file_not_found': return '找不到这个文件'
     case 'attachment_missing': return '找不到这个附件'
     case 'source_not_authorized':
@@ -253,6 +255,7 @@ export function FilePreviewProvider({
   }, [])
 
   const revokeContent = useCallback((content: FilePreviewContent | null) => {
+    if (content?.kind === 'html') void window.rovai.filePreview.releaseHtmlSite({ previewId: content.preview.previewId }).catch(() => undefined)
     if (content?.kind !== 'image') return
     URL.revokeObjectURL(content.url)
     objectUrls.current.delete(content.url)
@@ -304,15 +307,13 @@ export function FilePreviewProvider({
         return { ok: true, content: { kind: 'image', url }, pageOffsets: [], pageIndex: 0 }
       }
       if (file.kind === 'html') {
-        const result = await window.rovai.filePreview.prepareHtml(request)
+        const result = await prepareHtmlPreviewSite(window.rovai.filePreview, request)
         return result.ok
           ? {
               ok: true,
               content: {
                 kind: 'html',
-                html: secureFilePreviewHtml(result.value),
-                tabToken: result.value.tabToken,
-                bridgeToken: result.value.bridgeToken
+                preview: result.value
               },
               pageOffsets: [],
               pageIndex: 0

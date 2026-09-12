@@ -1569,6 +1569,7 @@ export type OpenFilePreviewResult =
   | { kind: 'opened_in_system'; fileName: string }
 
 export type FilePreviewErrorCode =
+  | 'preview_timeout'
   | 'source_not_authorized'
   | 'reference_not_clickable'
   | 'file_not_found'
@@ -1632,6 +1633,16 @@ export interface FilePreviewBinaryContent {
   contentVersion: FileContentVersion
 }
 
+export interface FilePreviewHtmlSite {
+  previewId: string
+  generation: string
+  origin: string
+  entryUrl: string
+  documentUrl: string
+  contentGeneration: string
+  contentVersion: FileContentVersion
+}
+
 export interface FilePreviewHtmlDocument {
   html: string
   tabToken: string
@@ -1655,6 +1666,8 @@ export interface FilePreviewApi {
   readPage(request: { handleId: string; expectedGeneration: string; offset: number; maxBytes?: number }): Promise<FilePreviewOperationResult<FilePreviewPageContent>>
   resolveLine(request: { handleId: string; expectedGeneration: string; line: number }): Promise<FilePreviewOperationResult<{ offset: number; line: number; contentGeneration: string }>>
   readBinary(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewBinaryContent>>
+  prepareHtmlSite(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewHtmlSite>>
+  releaseHtmlSite(request: { previewId: string }): Promise<{ released: true }>
   prepareHtml(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewHtmlDocument>>
   reload(request: { handleId: string; reopenToken: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<ResolvedFilePreview>>
   release(request: { handleId: string }): Promise<{ released: true }>

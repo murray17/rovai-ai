@@ -482,6 +482,12 @@ const api: RovaiApi = {
     readBinary(request) {
       return ipcRenderer.invoke('rovai:file-preview-read-binary', request)
     },
+    prepareHtmlSite(request) {
+      return ipcRenderer.invoke('rovai:file-preview-prepare-html-site', request)
+    },
+    releaseHtmlSite(request) {
+      return ipcRenderer.invoke('rovai:file-preview-release-html-site', request)
+    },
     prepareHtml(request) {
       return ipcRenderer.invoke('rovai:file-preview-prepare-html', request)
     },

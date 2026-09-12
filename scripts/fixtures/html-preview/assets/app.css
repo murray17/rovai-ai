@@ -1,0 +1,2 @@
+@import './imported.css';
+#styled { background-image: url('./logo.svg'); }

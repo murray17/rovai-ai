@@ -1,0 +1,9 @@
+<!doctype html><html><head><link rel="stylesheet" href="./assets/app.css"><script type="importmap">{"imports":{"sample":"./assets/module.js"}}</script></head><body>
+<div id="styled">styles</div><img id="logo" src="/assets/logo.svg"><div id="assets-result">loading assets</div>
+<script src="./assets/app.js"></script><script type="module">
+import { value } from 'sample';
+const dynamic = await import('./assets/dynamic.js');
+const response = await fetch('./assets/list.json');
+const data = await response.json();
+document.querySelector('#assets-result').textContent = `${value} ${dynamic.value} ${data.value} ${window.classic}`;
+</script></body></html>
