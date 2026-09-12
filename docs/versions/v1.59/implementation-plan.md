@@ -13,6 +13,44 @@ last_updated: 2026-09-12
 实现工作目录为仓库同级 `rovai-ai-unified-rust-host`，分支 `rovai/unified-rust-host`，
 起点 `a18425ec78ae2e1a0666b2c029564ff3f7bc8f78`。验收只使用隔离 data-dir、Skill Library 和 MCP config。
 
+## 当前收敛：阶段 1–3，先评审共同业务界面
+
+用户以 PR #345 / `077bf78e64c76e934c45675ddb55e05165a2c49f` 提交补充静态审阅后，已核对实际
+本地与远端提交一致。本轮先交付三项材料：[行为差异表](../../ui/host-web-parity.md#一张行为差异表)、
+生产 React 组件的宽屏可点击稿（同页说明构建与验收）、[一页复用/调用说明](frontend-reuse.md)。
+确认后再推进下表；不是一次重新设计，也不替换已有 Rust Host/Axum。
+
+| 当前检查点 | 可演示结果与放行证据 | 当前状态 |
+| --- | --- | --- |
+| 评审稿 | 同 fixture / 1440×920 / 日夜主题，Camp、新建、执行审批、附件预览、队员配置共用生产组件；模拟明确标识 | 三项材料与隔离 Chrome/Electron 检查已完成，待维护者评审；不是 A–D 放行 |
+| A 共享 Camp | 登录后实际 Web 挂载共享业务页面；Native 启动留 Desktop；旧 Desktop 无回归 | 尚未替换独立 Web Workspace |
+| B 真实写入闭环 | 独立 Host 从受信空目录初始化，经浏览器配置、创建、发送、审批、停止、文件读取；草稿/上传/幂等前置 | 未完成；fixture 不计入 |
+| C 双入口一致 | 同一 Web 产物分别连接 Desktop-managed 与独立 Host；双草稿、审批竞争、失效/迟到/断线与 Web 开关 | 未完成；保留已有 Host 生命周期回归 |
+| D 逐页业务能力 | 队员/Runtime、Task、Memory、Automation、Skills/MCP 与必要设置逐项原动作/失败/权限/刷新闭合 | 未完成；通用只读行不计入 |
+
+Mobile 新增、扩平台、容器与发布优化暂停，已有包/CI/原型保留。长期 Server 仍为 macOS、Windows、Linux。
+安全仅追踪下文 S1；安全等待不阻塞受控本机的共享 UI、模拟交互与非发布测试，也不允许把未通过保护的网络写入
+宣布为正式发布。以下原阶段表保留总体目标与未完成事实。
+
+### 本轮对照稿的实际证据
+
+[验证记录与源码/产物 SHA-256](evidence/desktop-web-parity-review.json)固定本轮内容与范围。
+`pnpm review:host-web-parity` 生成一个可离线打开的 HTML；`pnpm test:host-web-parity` 在独立 Chrome 与
+sandboxed Electron profile 运行相同生产组件、6 个场景及日夜主题。验证每个内容视口为 1440×920，
+导航宽度 270px，Camp 顶行与生产现状同为 38px，无产品横向溢出；不伪造 `window.rovai` 或 Node 运行依赖。
+审批提交中/已处理及各路径截图与完整观察写入指定输出目录，生成物不进入生产 Web 构建。
+
+实际点击走通了本页模拟发送与清空草稿、授权目录和队员选择/新建、结构化工具详情、原生选项提交/处理、
+Web 固定示例下载、Runtime 配置版本保存，以及独立 HTML 的入口/主题/场景切换和模拟连接状态隔离。
+修正了夹具遗漏的生产 `members-workspace` 容器和工具 evidence 结构；没有通过改生产样式来匹配截图。
+这些操作均由固定内存 fixture 驱动，没有启动 Core、真实 Runtime、访问日常数据或开放 HTTP 写入。
+
+本轮生产 TypeScript 与 fixture 类型检查、Desktop/Web 构建通过；现有 Vitest 175 文件/1759 测试通过。
+定向真实 Electron 回归 7 项通过、0 跳过，覆盖 Camp projection 刷新/阅读位置、稀疏执行正文与重试、
+产物/消息层级、文件 split/阅读状态与设置。通用文档门禁随最终提交运行。这些回归只证明本次组件提取范围，
+不能替代完整 Desktop 启停、Host 写入、并发客户端或 S1 安全验收。Rust/Host 生产实现与公开操作集合本轮未变；
+原有平台证据保留，未重新申报平台资格。
+
 ## 检查点与完成条件
 
 | 阶段 | 工作与放行条件 | 状态 |
@@ -24,14 +62,14 @@ last_updated: 2026-09-12
 | 2 Desktop 共用 | 受保护本机 IPC、同 Host Web 开关与会话管理；关闭 Web 不停 Core，bind 失败不毁 Desktop；保留退出与父进程异常语义 | 同 Host/匿名父管道/Web 开关已接入并做进程验证；完整隔离与 Desktop 交互验收待补 |
 | 3 宽屏完整性 | Camp/成员/Task/Runtime/Memory/Automation/Skills/MCP 与必要设置；声明能力矩阵；多端、私聊归属、审批竞争和迟到响应回归 | 只读资源与现状双主题已接入；完整写入与多端回归未完成 |
 | 4 三平台发布 | macOS arm64/x64、Windows x64、Linux x64 实际 CLI Server 闭环与匹配 Host/Web 包；平台/Runtime/部署方式分别留证 | 四个原生预览包与有限链路已验证；隔离未通过，未正式发布 |
-| 5 Mobile | 按 2026-09-12 用户追加要求先出沿用现有风格的交互稿；真实 Mobile 生产实现与设备验收留待后续 | 已有可交互 HTML 和状态检查，待用户评审 |
+| 5 Mobile | 按 2026-09-12 用户追加要求先出沿用现有风格的交互稿；真实 Mobile 生产实现与设备验收留待后续 | 已有可交互 HTML 和状态检查保留；新增工作暂停 |
 
 1C 的基础门禁不能后移：两标签页互不覆盖，伪造归属不能读/写/绑定/消费；陈旧 revision 不消费新内容；
 响应丢失按原 commandId 查回执；上传绑定结果未知不误删；源文件消失显示不可用；凭据不进入其他 origin、端口、
 重定向、URL 或日志；撤销关闭 SSE；快照与水位无缺口、慢订阅有界；匿名/越权/失效审批和路径逃逸被拒绝。
 
-三平台发布固定 OS 与库基线，Linux 首批实测 Codex CLI/Claude Code。Linux 原生通过后提供 systemd 示例，
-非 root 容器部署单独验证，不从原生或 Desktop 资格推导。缺一目标平台证据，阶段 4 保持未完成。
+后续三平台发布仍须固定 OS 与库基线，分别验收 Runtime；当前不继续扩平台、常驻部署或容器优化。
+已有原生构建不替代实际部署资格，阶段 4 保持未完成。
 
 ## Main 迁移表
 
@@ -195,30 +233,47 @@ Run 保持 failure。Windows console 事件的原生受控关闭仍未验收，�
 运行说明据此列出当前预览包的 Windows v14 Runtime 与 Linux glibc 基线；未把开发工具齐全的 CI 镜像
 等同于干净用户环境，不扩大成系统组件安装器。
 
-## 原型缺口的最小修正提案（待用户决定）
+<a id="host-protection-decision"></a>
+## S1：受管 Runtime 的 Host 控制面保护（唯一待确认安全项）
 
-本节是待确认提案，不是新授权或已实现隔离。macOS、Windows、Linux 当前文件隔离检查的失败事实见上文。
-哨兵证明“目录私有权限不足以隔离同一用户的 Runtime”，不证明本次新 Token
-已经泄漏：新令牌只经本机管道或显式 stdin 输入，服务端只留摘要。进程访问、IPC、句柄和环境仍须独立验证。
+状态：待维护者确认；本节只收敛此前修正提案，不增加生产隔离授权。UI 稿件确认与 S1 分开：
+稿件确认后可以继续受控本机的 A–D 实现/非发布测试，S1 未通过仍阻断正式安全发布。
 
-| 选项 | 最小范围 | 影响与门禁 |
-| --- | --- | --- |
-| 系统能力适配原型（建议） | 先只在 Windows/Linux 的 ManagedProcess 启动边界验证系统隔离；Host/Core/API 不分叉，不增加常驻服务 | 先验证两个原生 CLI 的登录、工作区、运行和回收，再决定生产接入；不通过就停止该平台资格 |
-| 由部署者提供分离的 OS 运行身份 | Host 控制身份与 Runtime 身份分开，授权工作区显式共享 | 产品改动可能更少，但部署需要账户/ACL/原生认证迁移与跨身份启动；当前普通 Desktop 无法据此自动通过 |
-| 保留只读开发预览 | 不新增隔离依赖，也不开放 Web 发送、上传、审批或宣称正式安全发布 | 可审阅和继续独立 UI 工作，但不满足用户要求的完整第二至四阶段，不能作为原目标的默认替代 |
+**保护目标。** 仅 Rovai 管理的 Runtime 与后代不能取得 Host 控制凭据、冒用本机管理 IPC 或调用管理恢复，
+同时能访问明确授权的工作区、保持原生 Runtime 登录/运行能力并被回收。不防御管理员/root，不把任意私有
+文件都等同于真实控制凭据。Host 身份和网络 Owner 授权仍来自服务端，不信任客户端自报。
+当前 `Managed Runtime Process v2` / `User Automation v5` 已取消外层 macOS sandbox 和原同 UID 防冒用承诺；
+这个新 Host 目标不能被当作旧承诺仍存在，也不能悄悄恢复旧 sandbox。维护者须确认是否将这个新目标用于
+三平台 Host 准入，再同步相应合同。
 
-建议原型限定为以下两条，各自通过才提出生产补丁：
+**可复现失败。** 本地临时哨兵与四个 CI 目标的事实见上文 JSON。可在目标原生机器运行：
 
-- Windows 使用系统 AppContainer 的进程启动能力，给明确的工作区和 Runtime 所需原生配置目录授予最小访问；
-  保留现有 Job 回收。需实测 CLI 的登录方式、网络、子进程和 MCP，不假设原生账户配置自动可用。
-  该选择依据 [Microsoft 的 AppContainer 启动与资源授权说明](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)，
-  不是对本项目兼容性的证明。
-- Linux 先检查可用内核能力，再验证文件读取、进程访问、路径/abstract Unix socket 与后代边界；
-  Landlock 可以限制文件与进程访问，但不同 ABI 的 IPC 覆盖不同，不能只限制文件就声明 IPC 安全。
-  见 [Linux 内核的能力与 ABI 说明](https://docs.kernel.org/userspace-api/landlock.html)。如果当前最低基线不足，
-  必须明确是提高基线、采用现有系统隔离工具，还是选择分离 OS 身份，不能静默降级。
-  单独新建 user namespace 也不足：文件访问仍按映射到初始 namespace 的身份检查，见
-  [user_namespaces(7)](https://man7.org/linux/man-pages/man7/user_namespaces.7.html)。
+```bash
+cargo run --quiet -p rovai-core --example host_runtime_boundary_probe
+```
 
-不恢复上游已移除的 macOS 外层沙箱，不添加通用策略编辑器、容器调度器或额外管理守护进程。
-macOS 同 UID 保护目标与已合入的 Runtime 合同也需用户决定如何一致，不能用 Windows/Linux 方案替它放行。
+探针只创建本次临时文件；当前自身和后代均可读 sentinel，`privateFileIsolationSatisfied=false`。
+它不证明真实 Token 泄漏，也未覆盖句柄/环境继承、IPC、进程内存、实际 Runtime。CI 的权限上下文不能
+替代普通非提升权限用户验收。现有探针和失败证据保留，不改文案/删测试绕过门槛。
+
+**最小修正提案。** 只在已有 ManagedProcess 启动和 Host 控制入口补系统能力适配，保留唯一 Host/Core、
+原 Job/进程树回收、现有命令与认证实现，不新增常驻服务或通用策略平台。先验证凭据/管理句柄不继承以及
+目标文件/进程/IPC 访问；Windows 以系统 AppContainer 为候选，Linux 按实际内核 ABI 验证可用的文件、进程
+和 IPC 限制，不能把只限制文件当作完整保护。macOS 不自动恢复外层 sandbox；先验证现合同下是否有满足
+目标且保持 Runtime 兼容的最小系统方案。若需要独立 OS 运行身份、提权安装或提高 OS/内核基线，先回到同一
+S1 说明实际必要性与较小替代，不自动实施。单纯依靠同用户目录权限已经不够；保留只读预览也不是阶段 1–3
+完整交付的替代方案。
+
+**Runtime 兼容影响。** 原生 CLI 的认证目录、网络、子进程、MCP、路径授权以及恢复/回收都可能受限。
+原型不迁移维护者的真实凭据、不改日常账户或全局安全配置；用独立测试实例验证。共享库代码不推导平台资格。
+
+**实际验收。** 在普通用户原生环境逐项验证：私有控制哨兵拒绝、授权工作区可读写；环境/管理句柄不泄漏；
+IPC 冒用及恢复入口拒绝；必要的进程访问拒绝；子孙进程保有相同边界且能回收；真实 CLI 登录、发送、审批、
+取消和恢复仍可运行。不能只看探针一项转绿。成功后保留版本/系统能力/Runtime/命令和结果关联，才开放对应资格。
+
+维护者待决定的问题是：**是否确认上述新 Host 保护目标，并授权这一范围内的最小系统能力原型？**
+不同时提交第二套隔离工程或把 macOS 的旧承诺恢复当成默认答案。
+
+候选能力参考：[Microsoft AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)、
+[Linux Landlock 能力与 ABI](https://docs.kernel.org/userspace-api/landlock.html)、
+[user namespace 的身份映射边界](https://man7.org/linux/man-pages/man7/user_namespaces.7.html)。这些资料不证明本项目已兼容。

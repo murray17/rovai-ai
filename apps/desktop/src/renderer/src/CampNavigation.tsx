@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import {
   useEffect,
   useMemo,
@@ -254,6 +255,7 @@ export function CampNavigation({
   onDelete(camp: NavigationCampItem): Promise<void>
   onError(error: unknown): void
 }): JSX.Element {
+  const client = useCampClient()
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
   const [paginationByGroup, setPaginationByGroup] = useState<Record<string, NavigationGroupPaginationState>>({})
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
@@ -339,7 +341,7 @@ export function CampNavigation({
     setLoadingGroups(new Set(loadingGroupsRef.current))
     try {
       const next = await revealMoreNavigationCamps(pagination, totalCount, (offset, limit) => (
-        window.rovai.request<NavigationCampPage>('navigation.groupCamps', { projectPath, offset, limit })
+        client.request<NavigationCampPage>('navigation.groupCamps', { projectPath, offset, limit })
       ))
       commitPagination(groupKey, next)
     } catch (error) {

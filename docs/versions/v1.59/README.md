@@ -22,7 +22,9 @@ Server 覆盖 macOS arm64/x64、Windows x64、Linux x64。交付依次为 Server
 Headless 执行，最后接入认证、上传和 WebUI。详见[实施计划](implementation-plan.md)。
 
 当前已抽取共享运行层，接入 Headless CLI、同 Host 的 Desktop/Web 管理和只读宽屏预览；
-第五阶段按用户追加要求先交付现状风格的交互稿。后端草稿归属、上传/发送、完整功能与平台安全资格仍待完成，
+第五阶段已有交互稿保留，按最新指令暂停新增 Mobile、扩平台、容器及发布优化，先收敛阶段 1–3。
+先提交 [Desktop/Web 行为差异与宽屏对照稿](../../ui/host-web-parity.md)及[组件/API 复用说明](frontend-reuse.md)，
+确认后按共享 Camp、真实写入闭环、双入口一致、逐页复用管理能力推进。后端草稿归属、上传/发送、完整功能与平台安全资格仍待完成，
 不将预览构建或交互稿宣称为第二、三、四阶段正式交付。
 架构由[统一 Host](../../architecture/unified-rust-host.md)拥有，取舍见[版本决定](decisions.md)。
 
@@ -39,7 +41,7 @@ Windows/Linux 前置隔离原型失败时，先提交事实、最小修正、替
 | Decisions | 已更新 | [V1.59-D01](decisions.md#v1-59-d01)解释唯一 Host 与分阶段迁移 |
 | Contracts | 已更新 | [Host Lifecycle v1](../../contracts/host-lifecycle-v1.md)拥有初始 CLI 适配；原 Core wire、领域命令和存储语义保持；网络与草稿合同随相应实现同步 |
 | Architecture | 已更新 | [统一 Rust Host](../../architecture/unified-rust-host.md)及架构导航记录已确认目标与当前实现的区分 |
-| UI | 已更新 | 共享现有日夜 tokens，新增 Desktop 开关、只读宽屏与 [Mobile 交互提案](../../ui/host-web-mobile.md) |
+| UI | 已更新 | 现有只读 Web 尚未替换；当前以[生产页面对照稿](../../ui/host-web-parity.md)收敛共享交互；Mobile 稿保留并暂停新增 |
 | Runtime Activity | 确认无需更新 | Runtime Adapter 语义与活动分类保持不变 |
 | Runtime compatibility | 已更新 | Linux x64 在同一矩阵中保持全部 not_qualified；原兼容证据保持不变，真实环境验证后才晋升 |
 | Documentation routing | 已更新 | 文档、架构与决定导航增加统一 Host 入口 |

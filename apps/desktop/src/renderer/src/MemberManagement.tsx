@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { CurrentUserProfileEditor, CurrentUserRosterEntry } from './CurrentUserProfileEditor'
 import { readErrorMessage } from './error-message'
 import {
@@ -441,6 +442,7 @@ const MemberEditor = forwardRef<
   },
   ref
 ) {
+  const client = useCampClient()
   const activeRef = useRef(active)
   activeRef.current = active
   const authoritative =
@@ -516,7 +518,7 @@ const MemberEditor = forwardRef<
     setBusy(busyKey)
     setError(null)
     try {
-      const result = await window.rovai.request<StoredCommandResult>(method, {
+      const result = await client.request<StoredCommandResult>(method, {
         commandId: crypto.randomUUID(),
         command
       })
@@ -614,7 +616,7 @@ const MemberEditor = forwardRef<
     setBusy('remove-preview')
     setError(null)
     try {
-      const preview = await window.rovai.request<MemberRemovalPreview>(
+      const preview = await client.request<MemberRemovalPreview>(
         'members.removalPreview',
         {
           agentId: selectedAgent.agentId
@@ -657,7 +659,7 @@ const MemberEditor = forwardRef<
         draft,
         avatarRef,
         request: (method, command) =>
-          window.rovai.request<StoredCommandResult>(method, {
+          client.request<StoredCommandResult>(method, {
             commandId: crypto.randomUUID(),
             command
           }),
@@ -1086,6 +1088,7 @@ export const MemberRuntimeForm = forwardRef<
   },
   ref
 ): React.JSX.Element {
+  const client = useCampClient()
   const runtimeSelectId = useId()
   const initialStateRef = useRef<MemberRuntimeEditorState | null>(null)
   if (!initialStateRef.current)
@@ -1330,7 +1333,7 @@ export const MemberRuntimeForm = forwardRef<
             installation={installation}
             draft={draft}
             disabled={busy !== null || !runtimeMutationAllowed}
-            onOpenModelCatalog={() => openRuntimeModelCatalog(selectedKind)}
+            onOpenModelCatalog={() => openRuntimeModelCatalog(selectedKind, client.request)}
             onChange={(nextDraft) => {
               setDraft(nextDraft)
               setSubmitError(null)
@@ -1419,6 +1422,7 @@ export function RuntimeInstallationsPanel({
   installations: AdapterInstallation[]
   onReload(): Promise<void>
 }): React.JSX.Element {
+  const client = useCampClient()
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<{ runtimeKind: AdapterKind; mode: 'install' | 'login' } | null>(null)
@@ -1439,7 +1443,7 @@ export function RuntimeInstallationsPanel({
     setCheckFeedback(null)
     try {
       try {
-        await requestProductRuntimeCheck(runtimeKind, rediscover)
+        await requestProductRuntimeCheck(runtimeKind, rediscover, client.request)
       } finally {
         await onReload()
       }
@@ -1455,7 +1459,7 @@ export function RuntimeInstallationsPanel({
     setBusy('rescan')
     setError(null)
     try {
-      await window.rovai.request('runtime.discovery.rescan', {
+      await client.request('runtime.discovery.rescan', {
         interactiveShell: true
       })
       await onReload()

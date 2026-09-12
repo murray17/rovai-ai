@@ -1,3 +1,5 @@
+import type { FilePreviewApi } from '@contracts'
+import { desktopFilePreviewApi } from './desktop-file-preview-api'
 import {
   createContext,
   useCallback,
@@ -221,10 +223,12 @@ type LoadedFilePreviewContent = {
 export function FilePreviewProvider({
   campId,
   resolvedTheme,
+  api = desktopFilePreviewApi,
   children
 }: {
   campId: string | null
   resolvedTheme: ResolvedTheme
+  api?: FilePreviewApi
   children: ReactNode
 }): React.JSX.Element {
   const [tabs, setTabsState] = useState<PreviewTabModel[]>([])
@@ -276,7 +280,7 @@ export function FilePreviewProvider({
     filePreviewSessionStore.set(targetCampId, snapshot)
   }, [])
 
-  useEffect(() => window.rovai.filePreview.onExternalUpdate((event) => {
+  useEffect(() => api.onExternalUpdate((event) => {
     if (event.campId !== campIdRef.current) return
     const changed = new Set(event.previewKeys)
     setTabs((current) => current.map((tab) => tab.kind === 'file' && tab.file
@@ -287,7 +291,7 @@ export function FilePreviewProvider({
           externalUpdateVersion: tab.externalUpdateVersion + 1
         }
       : tab))
-  }), [setTabs])
+  }), [api, setTabs])
 
   const loadContent = useCallback(async (file: ResolvedFilePreview): Promise<
     { ok: true; content: FilePreviewContent; pageOffsets: number[]; pageIndex: number }
@@ -296,7 +300,7 @@ export function FilePreviewProvider({
     const request = { handleId: file.handleId, expectedGeneration: file.contentGeneration }
     try {
       if (file.kind === 'image') {
-        const result = await window.rovai.filePreview.readBinary(request)
+        const result = await api.readBinary(request)
         if (!result.ok) return result
         const bytes = Uint8Array.from(result.value.bytes)
         const url = URL.createObjectURL(new Blob([bytes.buffer], { type: result.value.mime }))
@@ -304,7 +308,7 @@ export function FilePreviewProvider({
         return { ok: true, content: { kind: 'image', url }, pageOffsets: [], pageIndex: 0 }
       }
       if (file.kind === 'html') {
-        const result = await window.rovai.filePreview.prepareHtml(request)
+        const result = await api.prepareHtml(request)
         return result.ok
           ? {
               ok: true,
@@ -320,7 +324,7 @@ export function FilePreviewProvider({
           : result
       }
       if (file.kind === 'markdown') {
-        const result = await window.rovai.filePreview.prepareHtml(request)
+        const result = await api.prepareHtml(request)
         return result.ok
           ? {
               ok: true,
@@ -338,19 +342,19 @@ export function FilePreviewProvider({
       if (file.kind === 'paged_text') {
         let offset = 0
         if (file.target?.line && file.target.line > 1) {
-          const resolved = await window.rovai.filePreview.resolveLine({
+          const resolved = await api.resolveLine({
             ...request,
             line: file.target.line
           })
           if (!resolved.ok) return resolved
           offset = resolved.value.offset
         }
-        const result = await window.rovai.filePreview.readPage({ ...request, offset })
+        const result = await api.readPage({ ...request, offset })
         return result.ok
           ? { ok: true, content: { kind: 'page', page: result.value }, pageOffsets: [offset], pageIndex: 0 }
           : result
       }
-      const result = await window.rovai.filePreview.readText(request)
+      const result = await api.readText(request)
       if (!result.ok) return result
       if (file.kind === 'svg') {
         const url = URL.createObjectURL(new Blob([result.value.text], { type: 'image/svg+xml' }))
@@ -366,7 +370,7 @@ export function FilePreviewProvider({
     } catch {
       return { ok: false, error: errorFromUnknown() }
     }
-  }, [])
+  }, [api])
 
   const finishOpening = useCallback(async (
     tabId: string,
@@ -383,7 +387,7 @@ export function FilePreviewProvider({
       || current.file?.handleId !== file.handleId
     ) {
       if (loaded.ok) revokeContent(loaded.content)
-      void window.rovai.filePreview.release({ handleId: file.handleId })
+      void api.release({ handleId: file.handleId })
       return
     }
     setTabs((entries) => entries.map((tab) => tab.kind !== 'file' || tab.id !== tabId
@@ -402,7 +406,7 @@ export function FilePreviewProvider({
             loadState: errorLoadState(loaded.error),
             error: safeOpenError(loaded.error)
           }))
-  }, [loadContent, revokeContent, setTabs])
+  }, [api, loadContent, revokeContent, setTabs])
 
   const showOpenedTab = useCallback((tabId: string, isNew: boolean, focusTab = false) => {
     setActiveTabId(tabId)
@@ -452,7 +456,7 @@ export function FilePreviewProvider({
       || current.requestGeneration !== requestGeneration
     ) return error
     revokeContent(current.content)
-    if (current.file) void window.rovai.filePreview.release({ handleId: current.file.handleId })
+    if (current.file) void api.release({ handleId: current.file.handleId })
     setTabs((entries) => entries.map((tab) => tab.kind === 'file' && tab.id === tabId
       ? {
           ...tab,
@@ -468,7 +472,7 @@ export function FilePreviewProvider({
         }
       : tab))
     return error
-  }, [revokeContent, setTabs])
+  }, [api, revokeContent, setTabs])
 
   const installResolvedFile = useCallback((
     requestedTabId: string,
@@ -488,7 +492,7 @@ export function FilePreviewProvider({
       || requestedTab.requestGeneration !== requestGeneration
     ) {
       if (preloaded) revokeContent(preloaded.content)
-      void window.rovai.filePreview.release({ handleId: file.handleId })
+      void api.release({ handleId: file.handleId })
       return { kind: 'error', error: unavailableSourceError() }
     }
 
@@ -508,12 +512,12 @@ export function FilePreviewProvider({
       duplicate?.sourceRequest
     )
     if (replaced.file?.handleId !== file.handleId) {
-      if (replaced.file) void window.rovai.filePreview.release({ handleId: replaced.file.handleId })
+      if (replaced.file) void api.release({ handleId: replaced.file.handleId })
       revokeContent(replaced.content)
     }
     if (duplicate) {
       revokeContent(requestedTab.content)
-      if (requestedTab.file) void window.rovai.filePreview.release({ handleId: requestedTab.file.handleId })
+      if (requestedTab.file) void api.release({ handleId: requestedTab.file.handleId })
     }
 
     setTabs((entries) => entries
@@ -547,7 +551,7 @@ export function FilePreviewProvider({
       void finishOpening(targetTabId, file, scopeGeneration, targetRequestGeneration)
     }
     return { kind: 'preview', tabId: targetTabId }
-  }, [finishOpening, revokeContent, setTabs, showOpenedTab])
+  }, [api, finishOpening, revokeContent, setTabs, showOpenedTab])
 
   const beginFileTabRequest = useCallback((
     tabId: string,
@@ -622,9 +626,9 @@ export function FilePreviewProvider({
             error: failTabRequest(tabId, scopeGeneration, requestGeneration, unavailableSourceError())
           }
         }
-        result = await window.rovai.filePreview.restore(restoreRequest)
+        result = await api.restore(restoreRequest)
       } else {
-        result = await window.rovai.filePreview.open(request)
+        result = await api.open(request)
       }
       if (!result.ok) {
         return { kind: 'error', error: failTabRequest(tabId, scopeGeneration, requestGeneration, result.error) }
@@ -662,7 +666,7 @@ export function FilePreviewProvider({
       const error = failTabRequest(tabId, scopeGeneration, requestGeneration, errorFromUnknown())
       return { kind: 'error', error }
     }
-  }, [beginFileTabRequest, failTabRequest, installResolvedFile, removeProvisionalTab])
+  }, [api, beginFileTabRequest, failTabRequest, installResolvedFile, removeProvisionalTab])
 
   const performCommittedOpen = useCallback(async (
     request: OpenFilePreviewRequest,
@@ -680,9 +684,9 @@ export function FilePreviewProvider({
       if (previewOnly) {
         const restoreRequest = restorableFilePreviewRequest(request)
         if (!restoreRequest) return { kind: 'error', error: unavailableSourceError() }
-        result = await window.rovai.filePreview.restore(restoreRequest)
+        result = await api.restore(restoreRequest)
       } else {
-        result = await window.rovai.filePreview.open(request)
+        result = await api.open(request)
       }
       if (!result.ok) return { kind: 'error', error: safeOpenError(result.error) }
       if (result.value.kind === 'opened_in_system') return { kind: 'system' }
@@ -693,12 +697,12 @@ export function FilePreviewProvider({
       const file = target ? { ...result.value.file, target } : result.value.file
       const loaded = await loadContent(file)
       if (!loaded.ok) {
-        void window.rovai.filePreview.release({ handleId: file.handleId })
+        void api.release({ handleId: file.handleId })
         return { kind: 'error', error: safeOpenError(loaded.error) }
       }
       if (scopeGenerationRef.current !== scopeGeneration) {
         revokeContent(loaded.content)
-        void window.rovai.filePreview.release({ handleId: file.handleId })
+        void api.release({ handleId: file.handleId })
         return { kind: 'error', error: unavailableSourceError() }
       }
 
@@ -737,7 +741,7 @@ export function FilePreviewProvider({
     } catch {
       return { kind: 'error', error: errorFromUnknown() }
     }
-  }, [installResolvedFile, loadContent, revokeContent, setTabs])
+  }, [api, installResolvedFile, loadContent, revokeContent, setTabs])
 
   const open = useCallback(async (
     request: OpenFilePreviewRequest,
@@ -748,7 +752,7 @@ export function FilePreviewProvider({
     if (request.kind === 'run_evidence' && request.action === 'review') {
       try {
         await bindingPromiseRef.current
-        const result = await window.rovai.filePreview.open(request)
+        const result = await api.open(request)
         if (!result.ok) return { kind: 'error', error: safeOpenError(result.error) }
         if (result.value.kind === 'evidence_review') return { kind: 'evidence_review', result: result.value }
         return result.value.kind === 'opened_in_system'
@@ -799,7 +803,7 @@ export function FilePreviewProvider({
     const focusTab = Boolean(document.activeElement?.closest('.file-preview-pane'))
     showOpenedTab(tabId, isNew, focusTab)
     return performOpen(tabId, request, target, 'interactive', isNew, focusTab, true, rollback)
-  }, [performCommittedOpen, performOpen, setTabs, showOpenedTab])
+  }, [api, performCommittedOpen, performOpen, setTabs, showOpenedTab])
 
   const restoreTab = useCallback((tabId: string, automatic: boolean): void => {
     const tab = tabsRef.current.find((entry) => entry.id === tabId)
@@ -859,7 +863,7 @@ export function FilePreviewProvider({
     for (const tab of tabsRef.current) if (tab.kind === 'file') revokeContent(tab.content)
 
     campIdRef.current = campId
-    const binding = window.rovai.filePreview.bindCamp(campId)
+    const binding = api.bindCamp(campId)
     bindingPromiseRef.current = binding
     const snapshot = campId ? filePreviewSessionStore.get(campId) : null
     const nextTabs = snapshot?.tabs.map(restoredTab) ?? []
@@ -890,7 +894,7 @@ export function FilePreviewProvider({
         ? { ...tab, loadState: 'unavailable', error: unavailableSourceError() }
         : tab))
     })
-  }, [campId, restoreTab, revokeContent, saveSession, setActiveTabId, setPaneVisible, setTabs])
+  }, [api, campId, restoreTab, revokeContent, saveSession, setActiveTabId, setPaneVisible, setTabs])
 
   useEffect(() => () => {
     const currentCampId = campIdRef.current
@@ -899,8 +903,8 @@ export function FilePreviewProvider({
     for (const tab of tabsRef.current) if (tab.kind === 'file') revokeContent(tab.content)
     for (const url of objectUrls.current) URL.revokeObjectURL(url)
     objectUrls.current.clear()
-    void window.rovai.filePreview.bindCamp(null)
-  }, [revokeContent, saveSession])
+    void api.bindCamp(null)
+  }, [api, revokeContent, saveSession])
 
   const move = useCallback((tabId: string, direction: -1 | 1) => {
     setTabs((current) => {
@@ -939,10 +943,10 @@ export function FilePreviewProvider({
     }
     for (const tab of closing) {
       if (tab.kind === 'file' && tab.file) {
-        void window.rovai.filePreview.release({ handleId: tab.file.handleId })
+        void api.release({ handleId: tab.file.handleId })
       }
     }
-  }, [revokeContent, setActiveTabId, setPaneVisible, setTabs])
+  }, [api, revokeContent, setActiveTabId, setPaneVisible, setTabs])
 
   const close = useCallback((tabId: string) => closeMany([tabId]), [closeMany])
 
@@ -954,26 +958,26 @@ export function FilePreviewProvider({
   const openInSystem = useCallback(async (tabId: string) => {
     const file = fileForAction(tabId)
     return file
-      ? window.rovai.filePreview.openInSystem({ handleId: file.handleId })
+      ? api.openInSystem({ handleId: file.handleId })
       : { ok: false as const, error: errorFromUnknown() }
-  }, [fileForAction])
+  }, [api, fileForAction])
 
   const revealInFolder = useCallback(async (tabId: string) => {
     const file = fileForAction(tabId)
     return file
-      ? window.rovai.filePreview.revealInFolder({ handleId: file.handleId })
+      ? api.revealInFolder({ handleId: file.handleId })
       : { ok: false as const, error: errorFromUnknown() }
-  }, [fileForAction])
+  }, [api, fileForAction])
 
   const copyPath = useCallback(async (tabId: string) => {
     const file = fileForAction(tabId)
     return file
-      ? window.rovai.filePreview.copyPath({
+      ? api.copyPath({
           handleId: file.handleId,
           format: file.pathPresentation === 'file_name_only' ? 'display' : 'absolute'
         })
       : { ok: false as const, error: errorFromUnknown() }
-  }, [fileForAction])
+  }, [api, fileForAction])
 
   const retry = reopen
 
@@ -988,7 +992,7 @@ export function FilePreviewProvider({
       ? { ...entry, requestGeneration, isRefreshing: true, refreshError: null }
       : entry))
     try {
-      const result = await window.rovai.filePreview.reload({
+      const result = await api.reload({
         handleId: file.handleId,
         reopenToken: file.reopenToken,
         expectedGeneration: file.contentGeneration
@@ -1050,7 +1054,7 @@ export function FilePreviewProvider({
         ? { ...entry, isRefreshing: false, refreshError: '重新加载失败' }
         : entry))
     }
-  }, [loadContent, revokeContent, setTabs])
+  }, [api, loadContent, revokeContent, setTabs])
 
   const changePage = useCallback(async (tabId: string, direction: -1 | 1): Promise<void> => {
     const tab = tabsRef.current.find((entry) => entry.id === tabId)
@@ -1064,7 +1068,7 @@ export function FilePreviewProvider({
       ? tab.pageOffsets[nextIndex] ?? tab.content.page.endOffset
       : tab.pageOffsets[nextIndex]
     if (offset === undefined || offset < 0 || offset >= file.size) return
-    const result = await window.rovai.filePreview.readPage({
+    const result = await api.readPage({
       handleId: file.handleId,
       expectedGeneration: file.contentGeneration,
       offset
@@ -1085,7 +1089,7 @@ export function FilePreviewProvider({
         pageIndex: nextIndex
       }
     }))
-  }, [setTabs])
+  }, [api, setTabs])
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null
   const value = useMemo<FilePreviewContextValue>(() => ({

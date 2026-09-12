@@ -149,7 +149,9 @@
     "eval:gate": "node scripts/eval-gate.mjs",
     "build:web": "vite build --config web.vite.config.ts",
     "build:server": "node scripts/build-server.mjs",
-    "test:host-web": "node --test scripts/lib/host-web.test.mjs"
+    "test:host-web": "node --test scripts/lib/host-web.test.mjs",
+    "review:host-web-parity": "node scripts/review-host-web-parity.mjs",
+    "test:host-web-parity": "node --test scripts/lib/host-web-parity.test.mjs"
   },
   "dependencies": {
     "@codemirror/language": "6.12.4",

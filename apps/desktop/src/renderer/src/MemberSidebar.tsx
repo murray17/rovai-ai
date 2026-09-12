@@ -1,4 +1,5 @@
 import { readErrorMessage } from './error-message'
+import { useCampClient } from './camp-client'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import {
   useCallback,
@@ -84,6 +85,7 @@ export function MemberSidebar({
   onCreate(trigger: HTMLButtonElement): void
   onReload(): Promise<void>
 }): React.JSX.Element {
+  const client = useCampClient()
   const { id, collapsed, setCollapsed, sorting, setSorting } = useMemberRosterLayout()
   const members = useMemo(
     () => agents.filter((agent) => agent.presence !== 'removed' && agent.removedAt === null),
@@ -128,7 +130,7 @@ export function MemberSidebar({
     setBusy(focusAgentId)
     setError(null)
     try {
-      const result = await window.rovai.request<StoredCommandResult>('members.reorder', {
+      const result = await client.request<StoredCommandResult>('members.reorder', {
         commandId: crypto.randomUUID(),
         command: { orderedAgentIds }
       })

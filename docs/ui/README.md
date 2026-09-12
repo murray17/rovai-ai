@@ -51,7 +51,9 @@ MCP 与 Skills 的列表/详情、导入、启停和拖拽合同见 [Capability 
 
 ## Web 与 Mobile
 
+- [Desktop/Web 宽屏对照稿](host-web-parity.md)：阶段 1–3 当前收敛入口，行为差异表、生产组件 fixture 与实际验收边界。
 - [Host Web 与 Mobile 交互提案](host-web-mobile.md)：沿用现有视觉系统，第五阶段先供交互评审；不是生产 Mobile 能力。
+  Mobile 新增工作按当前用户指令暂停，已有稿保留。
 
 ## 平台差异
 

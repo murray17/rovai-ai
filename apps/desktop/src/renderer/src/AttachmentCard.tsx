@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -70,6 +71,7 @@ export function AttachmentCard({
   menuItems?: ReactNode
   presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
 }): JSX.Element {
+  const client = useCampClient()
   const filePreview = useOptionalFilePreview()
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
@@ -89,14 +91,14 @@ export function AttachmentCard({
   const displayClassification = classifyAttachmentDisplay(attachment)
   const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
   const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
-  const rendererPlatform = typeof window === 'undefined' ? 'darwin' : window.rovai.platform
+  const rendererPlatform = typeof window === 'undefined' ? 'darwin' : client.platform
   const locatorKey = localAttachmentLocatorKey(locator)
   useEffect(() => {
     if (attachment.previewKind !== 'image') return
     if (timeline && attachment.availability === 'unknown') return
     let active = true
     let objectUrl: string | null = null
-    void window.rovai.composerAttachments.preview(locatorRef.current)
+    void client.composerAttachments.preview(locatorRef.current)
       .then((result) => {
         if (active) setAvailability(result.availability)
         if (!active || !result.preview) {
@@ -117,7 +119,7 @@ export function AttachmentCard({
       active = false
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [attachment.availability, attachment.id, attachment.previewKind, locatorKey, timeline])
+  }, [client, attachment.availability, attachment.id, attachment.previewKind, locatorKey, timeline])
 
   const runAttachmentAction = async (
     action: 'open' | 'reveal',
@@ -141,12 +143,14 @@ export function AttachmentCard({
           } else setAvailability('available')
           return
         }
-        const result = await window.rovai.attachments.open(locator)
+        const result = client.attachments.kind === 'download'
+          ? await client.attachments.download(locator)
+          : await client.attachments.open(locator)
         setAvailability(result.availability)
         if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
-        else if (result.error) onNotify('无法使用系统应用打开此附件')
-      } else {
-        const result = await window.rovai.attachments.reveal(locator)
+        else if (result.error) onNotify(client.attachments.kind === 'download' ? '下载附件失败' : '无法使用系统应用打开此附件')
+      } else if (client.attachments.kind === 'native') {
+        const result = await client.attachments.reveal(locator)
         setAvailability(result.availability)
         if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
         else if (result.error) {
@@ -159,7 +163,7 @@ export function AttachmentCard({
       }
     } catch {
       onNotify(action === 'open'
-        ? '无法使用系统应用打开此附件'
+        ? (client.attachments.kind === 'download' ? '下载附件失败' : '无法使用系统应用打开此附件')
         : '无法显示此附件所在位置')
     } finally {
       setAttachmentAction(null)
@@ -167,7 +171,7 @@ export function AttachmentCard({
   }
 
   const revealLabel = attachmentRevealLabel(rendererPlatform)
-  const systemOpenLabel = attachment.kind === 'directory'
+  const systemOpenLabel = client.attachments.kind === 'download' ? '下载文件' : attachment.kind === 'directory'
     ? '打开文件夹'
     : '使用系统应用打开'
   const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null
@@ -309,6 +313,7 @@ export function AttachmentCard({
                         <AttachmentOpenGlyph kind={attachment.kind} />
                         <span>{systemOpenLabel}</span>
                       </DropdownMenu.Item>
+                      {client.attachments.kind === 'native' && <>
                       <DropdownMenu.Separator className="attachment-context-menu-separator" />
                       <DropdownMenu.Item
                         className="attachment-context-menu-item"
@@ -318,6 +323,7 @@ export function AttachmentCard({
                         <AttachmentRevealGlyph />
                         <span>{revealLabel}</span>
                       </DropdownMenu.Item>
+                      </>}
                       {menuItems && <>
                         <DropdownMenu.Separator className="attachment-context-menu-separator" />
                         {menuItems}

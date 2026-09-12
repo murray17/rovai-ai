@@ -1,3 +1,4 @@
+import { useCampClient, type CampClient } from './camp-client'
 import type { MessageQuoteSnapshot } from '@contracts'
 import { revealMessageQuote } from './message-quote-reveal'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
@@ -414,52 +415,53 @@ export function composerDraftNeedsContinuationRepair(
 }
 
 async function mutateComposerDraft(
+  client: CampClient,
   draft: CampComposerDraftView,
   mutation: DraftMutation
 ): Promise<CampComposerDraftView> {
   const common = { campId: draft.campId, expectedRevision: draft.revision }
   switch (mutation.kind) {
     case 'quote':
-      return window.rovai.request<CampComposerDraftView>('messageQuotes.mutateDraft', {
+      return client.request<CampComposerDraftView>('messageQuotes.mutateDraft', {
         commandId: mutation.commandId,
         command: { ...common, conversationId: null, action: mutation.action }
       })
     case 'save_content':
-      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+      return client.request<CampComposerDraftView>('camp.composerDraft.save', {
         ...common,
         content: mutation.content,
         continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
       })
     case 'add_source_attachment':
-      return window.rovai.composerAttachments.prepare(
+      return client.composerAttachments.prepare(
         draft.campId,
         draft.revision,
         mutation.file
       )
     case 'remove_source_attachment':
-      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.removeAttachment', {
+      return client.request<CampComposerDraftView>('camp.composerDraft.removeAttachment', {
         ...common,
         attachmentId: mutation.attachmentId
       })
     case 'start_reply':
-      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.startReply', {
+      return client.request<CampComposerDraftView>('camp.composerDraft.startReply', {
         ...common,
         replyToCampMessageId: mutation.replyToCampMessageId
       })
     case 'cancel_reply':
-      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.cancelReply', common)
+      return client.request<CampComposerDraftView>('camp.composerDraft.cancelReply', common)
     case 'resolve_reply_recipient':
-      return window.rovai.request<CampComposerDraftView>(
+      return client.request<CampComposerDraftView>(
         'camp.composerDraft.resolveReplyRecipient',
         { ...common, recipient: mutation.recipient }
       )
     case 'dismiss_continuation':
-      return window.rovai.request<CampComposerDraftView>(
+      return client.request<CampComposerDraftView>(
         'camp.composerDraft.dismissContinuation',
         { ...common, sourceCampMessageId: mutation.sourceCampMessageId }
       )
     case 'resolve_continuation_recipient':
-      return window.rovai.request<CampComposerDraftView>(
+      return client.request<CampComposerDraftView>(
         'camp.composerDraft.resolveContinuationRecipient',
         { ...common, agentId: mutation.agentId }
       )
@@ -1512,6 +1514,7 @@ export function CampWorkspace({
   onNotify?(message: string): void
   onNotifyError?(message: string): void
 }): JSX.Element {
+  const client = useCampClient()
   const { profile: currentUserProfile } = useCurrentUserProfile()
   const currentUserName = currentUserDisplayName(currentUserProfile)
   const filePreview = useOptionalFilePreview()
@@ -1580,12 +1583,12 @@ export function CampWorkspace({
   const draftCoordinatorRef = useRef<DraftMutationCoordinator | null>(null)
   if (!draftCoordinatorRef.current) {
     draftCoordinatorRef.current = new DraftMutationCoordinator({
-      load: (campId) => window.rovai.request<CampComposerDraftView>(
+      load: (campId) => client.request<CampComposerDraftView>(
         'camp.composerDraft.get',
         { campId }
       ),
       mutate: async (draft, mutation) => {
-        const next = await mutateComposerDraft(draft, mutation)
+        const next = await mutateComposerDraft(client, draft, mutation)
         if (
           activeCampIdRef.current === draft.campId
           && activationStateRef.current === 'pending'
@@ -1824,8 +1827,8 @@ export function CampWorkspace({
     const loadSkillCatalog = async (): Promise<void> => {
       try {
         const [skills, groups] = await Promise.all([
-          window.rovai.request<SkillView[]>('skills.list'),
-          window.rovai.request<SkillDeliveryGroupView[]>('skills.deliveryGroups.list')
+          client.request<SkillView[]>('skills.list'),
+          client.request<SkillDeliveryGroupView[]>('skills.deliveryGroups.list')
         ])
         if (!cancelled) setComposerSkillCatalog({ skills, groups, status: 'ready' })
       } catch {
@@ -1837,7 +1840,7 @@ export function CampWorkspace({
       }
     }
     void loadSkillCatalog()
-    const unsubscribe = window.rovai.onEvent((event) => {
+    const unsubscribe = client.onEvent((event) => {
       if (event.method !== 'runtime.state') return
       const params = event.params !== null && typeof event.params === 'object'
         ? event.params as Record<string, unknown>
@@ -1848,7 +1851,7 @@ export function CampWorkspace({
       cancelled = true
       unsubscribe()
     }
-  }, [])
+  }, [client])
   const closeMentionPopover = useCallback((returnFocus: boolean): void => {
     const trigger = mentionPopover?.trigger
     setMentionPopover(null)
@@ -2263,7 +2266,7 @@ export function CampWorkspace({
     const existing = replyAnchorLoads.current.get(messageId)
     if (existing) return existing
     const campId = snapshot.camp.id
-    const request = window.rovai.request<CampMessageAroundSnapshot>('camp.messages.around', {
+    const request = client.request<CampMessageAroundSnapshot>('camp.messages.around', {
       campId,
       messageId
     }).then((around) => {
@@ -2288,7 +2291,7 @@ export function CampWorkspace({
     })
     replyAnchorLoads.current.set(messageId, request)
     return request
-  }, [snapshot.camp.id])
+  }, [client, snapshot.camp.id])
 
   useEffect(() => {
     if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
@@ -2340,7 +2343,7 @@ export function CampWorkspace({
   ): Promise<void> => {
     const campId = snapshot.camp.id
     try {
-      const result = await window.rovai.request<CampMessageFindSnapshot>(
+      const result = await client.request<CampMessageFindSnapshot>(
         'camp.messages.find',
         {
           campId,
@@ -2379,7 +2382,7 @@ export function CampWorkspace({
         `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
       ) ?? null
       if (!target) {
-        const around = await window.rovai.request<CampMessageAroundSnapshot>(
+        const around = await client.request<CampMessageAroundSnapshot>(
           'camp.messages.around',
           { campId, messageId: selectedMatch.messageId }
         )
@@ -2455,7 +2458,7 @@ export function CampWorkspace({
           }
         : current)
     }
-  }, [focusConversationFindInput, snapshot.camp.id])
+  }, [client, focusConversationFindInput, snapshot.camp.id])
 
   const openConversationFind = useCallback((): void => {
     if (!conversationFind.open) {
@@ -8240,6 +8243,7 @@ function RunExecutionContent({
   resolvingRecoveryBlocker: boolean
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const client = useCampClient()
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const publicFailure = run.status === 'failed' ? run.failure : null
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
@@ -8257,7 +8261,7 @@ function RunExecutionContent({
     }
     setNarrationStatus('loading')
     void loadExecutionNarrationBodies(narrationEvidence, (evidenceId) =>
-      window.rovai.request('agentRunEvidence.getContent', { campId, evidenceId })
+      client.request('agentRunEvidence.getContent', { campId, evidenceId })
     ).then((bodies) => {
       if (disposed) return
       setNarrationBodies(bodies)
@@ -8266,7 +8270,7 @@ function RunExecutionContent({
       if (!disposed) setNarrationStatus('failed')
     })
     return () => { disposed = true }
-  }, [campId, narrationEvidence, narrationRetry])
+  }, [client, campId, narrationEvidence, narrationRetry])
   const historicalProgress = useMemo(() => historicalEvidence
     ? buildLiveExecutionProgress(
         historicalEvidence.map(liveRuntimeEventFromExecutionEvidence),
@@ -8509,6 +8513,7 @@ export function RunExecutionDisclosure({
   resolvingRecoveryBlocker?: boolean
   onFileOpenError?(message: string): void
 }): JSX.Element | null {
+  const client = useCampClient()
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
   const cancellingActive = nonTerminal && cancelling && focused
@@ -8552,7 +8557,7 @@ export function RunExecutionDisclosure({
     setHistoryStatus('loading')
     try {
       const evidence = await loadCompleteAgentRunExecutionEvidence(
-        (params) => window.rovai.request<AgentRunExecutionEvidencePage>(
+        (params) => client.request<AgentRunExecutionEvidencePage>(
           'agentRunEvidence.list',
           params
         ),
@@ -8751,6 +8756,7 @@ export function TaskPanel({
   onOpenAgent?(agentId: string, trigger?: HTMLButtonElement): void
   onCreateModeChange?(active: boolean): void
 }): JSX.Element {
+  const client = useCampClient()
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
   const [editorOpen, setEditorOpen] = useState(false)
@@ -8876,7 +8882,7 @@ export function TaskPanel({
     setSubmitting(true)
     setFormError(null)
     try {
-      const result = await window.rovai.request<StoredCommandResult>('tasks.create', {
+      const result = await client.request<StoredCommandResult>('tasks.create', {
         commandId: crypto.randomUUID(),
         campId: snapshot.camp.id,
         title: title.trim(),
@@ -8922,7 +8928,7 @@ export function TaskPanel({
         : { operation: 'clear' as const }
     const criteria = parseAcceptanceCriteria(acceptanceCriteriaText)
     try {
-      const result = await window.rovai.request<StoredCommandResult>('tasks.update', {
+      const result = await client.request<StoredCommandResult>('tasks.update', {
         commandId: crypto.randomUUID(),
         campId: snapshot.camp.id,
         taskId: selectedTask.taskId,
@@ -8939,7 +8945,7 @@ export function TaskPanel({
       })
       if (result.status === 'rejected') {
         if (result.code === 'task.version_conflict') {
-          const current = await window.rovai.request<TaskView | null>('tasks.get', {
+          const current = await client.request<TaskView | null>('tasks.get', {
             campId: snapshot.camp.id,
             taskId: selectedTask.taskId
           })
@@ -8966,7 +8972,7 @@ export function TaskPanel({
     setSubmitting(true)
     setFormError(null)
     try {
-      const result = await window.rovai.request<StoredCommandResult>('tasks.update', {
+      const result = await client.request<StoredCommandResult>('tasks.update', {
         commandId: crypto.randomUUID(),
         campId: snapshot.camp.id,
         taskId: selectedTask.taskId,

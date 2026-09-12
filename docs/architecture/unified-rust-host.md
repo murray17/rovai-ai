@@ -20,7 +20,10 @@ last_updated: 2026-09-12
 `rovai-host` 在进程内组装 `rovai-core` 应用运行层。Desktop 通过受保护本机 IPC 访问，独立 Server
 直接运行相同 Host。`rovai-web` 使用 Axum 0.8、HTTP JSON 与 Fetch SSE，只接受已有应用服务句柄，
 不创建数据库、第二份 Core 或调度器。`rovai-protocol` 拥有封闭公共 DTO，Rust Serde 为源生成 TS；
-不能把任意内部 Core RPC 转为网络能力。React/TS/Vite WebUI 和 Desktop 共用客户端接口、组件与 tokens。
+不能把任意内部 Core RPC 转为网络能力。React/TS/Vite WebUI 和 Desktop 共用业务页面、核心交互组件、
+客户端接口和状态处理代码，不能仅共享 tokens 而独立演进另一套业务页面。启动、认证与系统集成分别适配；
+草稿、缓存、订阅、连接代次和迟到响应仍按客户端隔离。当前独立只读 Web 尚未满足此目标；
+阶段 1–3 的收敛入口见[宽屏对照稿](../ui/host-web-parity.md)。
 
 Host 独占 data-dir lease、SQLite 准入、执行、恢复与后台驱动。普通业务命令保留串行入口和已有独立通道；
 HTTP 并发不改变领域调度，SSE 不占命令队列，取消与审批不等待长 Runtime 执行。

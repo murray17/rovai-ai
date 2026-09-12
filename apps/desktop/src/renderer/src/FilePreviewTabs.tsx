@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { prefersReducedMotion } from './reduced-motion'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -28,6 +29,7 @@ function revealTab(strip: HTMLDivElement, tab: HTMLElement): void {
 }
 
 export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
+  const client = useCampClient()
   const {
     tabs,
     activeTabId,
@@ -183,7 +185,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     else focusConversation()
   }
 
-  useEffect(() => window.rovai.windowControls.onCloseTabRequested(() => {
+  useEffect(() => client.onClosePreviewRequested?.(() => {
     if (!paneVisible) return false
     const index = tabs.findIndex((tab) => tab.id === activeTabId)
     if (index >= 0) closeAndRestoreFocus(index)
@@ -192,7 +194,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
       focusConversation()
     }
     return true
-  }), [tabs, activeTabId, paneVisible, close, hidePane])
+  }), [client, tabs, activeTabId, paneVisible, close, hidePane])
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
     if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
