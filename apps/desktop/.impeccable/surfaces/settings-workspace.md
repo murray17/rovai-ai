@@ -1,5 +1,5 @@
 ---
-version: 12
+version: 13
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -32,8 +32,8 @@ Reviewed settings controls use the existing neutral conversation-action tokens. 
 unchanged, selection uses a neutral fill without a left stripe, and status/provider colors keep their meaning.
 Off switches have a white thumb. Inputs and buttons preserve keyboard behavior and text carets without
 decorative focus rings. Member Runtime configuration selects retain their current styles. MCP/Skills follow the capability composition below.
-Appearance keeps its real reading previews; only the motion demo is removed. Zoom presets are exactly
-80, 90, 100, 110, 125, 150, 175 and 200%; existing nonpreset values and shortcut limits remain valid.
+Appearance keeps its real reading previews; only the motion demo is removed. Its zoom selector and
+shortcuts share the Chrome desktop presets defined by the theme contract below.
 
 All categories implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery while
 retaining the header and navigation. A save, import, repair or probe failure keeps inputs, selection,
@@ -87,8 +87,9 @@ empty/intermediate input is kept while editing and normalized on blur or Enter. 
 changes prose leading and paragraph spacing. Preview tabs use ArrowLeft/Right, Home/End and roving focus.
 Preview messages and files are synthetic examples, never user or Core data.
 
-The display section offers 80–200% zoom choices and follows the existing native Electron zoom shortcuts.
-The broader 10–500% shortcut range remains available and an out-of-list current value stays representable.
+The display section uses the shared 25–500% Chrome desktop presets from
+[`themes/README.md`](../../../../docs/ui/themes/README.md#外观与阅读偏好), including its exact fractional
+factors and shortcut limits. An existing out-of-list saved value stays representable and restorable.
 Reduced motion has exactly 跟随系统 and 始终减少; it suppresses motion in CSS, programmatic scrolling
 and the world map while preserving status and progress content. Its one-shot file-tab example can replay.
 

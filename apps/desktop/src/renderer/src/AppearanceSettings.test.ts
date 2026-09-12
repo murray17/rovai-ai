@@ -39,11 +39,11 @@ it('reports an unreadable preference source without claiming defaults were saved
   expect(markup).not.toContain('>已保存<')
 })
 
-it('keeps a shortcut zoom value outside the common choices representable', () => {
+it('keeps an existing nonpreset zoom value representable', () => {
   const markup = renderToStaticMarkup(createElement(AppearanceSettings, {
-    appearance: { ...DEFAULT_APPEARANCE, zoomPercentage: 250, resolvedTheme: 'day' },
+    appearance: { ...DEFAULT_APPEARANCE, zoomPercentage: 121, resolvedTheme: 'day' },
     disabled: false,
     onChange: async (preferences) => ({ ...preferences, resolvedTheme: 'day' })
   }))
-  expect(markup).toContain('<option value="250" selected="">250%</option>')
+  expect(markup).toContain('<option value="121" selected="">121%</option>')
 })
