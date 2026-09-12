@@ -10,7 +10,7 @@ last_updated: 2026-09-03
 
 渠道设置是 Owner 在 Rovai 本机维护当前开放渠道连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v15](../../contracts/feishu-channel-v15.md)与
+[Feishu Channel v16](../../contracts/feishu-channel-v16.md)与
 [DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)；本页只拥有信息层级、交互与可访问性。
 
 当前渠道页同时开放飞书和钉钉管理。两个 Provider 使用同一 Tab、连接、账号、队员 Bot 和管理信息层级；Renderer 只展示
@@ -42,12 +42,22 @@ Dialog、状态点和间距复用现有组件语法。
 有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
 
 飞书账号二维码使用 modal Dialog，标题“登录飞书开放平台”，并明确“本次不会创建应用、读取 App Secret 或发布 Bot”。
-它展示 preparing、awaiting scan、scan confirmed、identity inspection 和过期/错误；关闭必须取消 exact attempt，
-迟到状态不再打开或更新 UI。用户取消是成功的 no-op：Dialog 立即关闭，不形成 failed state、页面 alert 或 toast。账号登录
-是产品中唯一的扫码流程；队员发布没有兼容扫码或平台 registration 确认入口。
-账号登录在 preparing 前展示 `loading_local_session`（“正在读取 Rovai 本地渠道数据…”），identity inspection 后展示
-`saving_local_session`（“身份读取完成，正在保存开发者会话…”）。页面不得出现系统安全存储、钥匙串、加密授权或
-`system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
+主进程依次投影“正在准备二维码”“请使用飞书扫码”“已扫码，请在手机上确认”“正在建立登录会话”
+（`completing_login`）和“正在读取账号与企业信息”；允许跳过未观察到的阶段，不允许倒退。
+`onQrReady` 只更新图像，已扫码后收起二维码并展示确认进度。没有服务端明确有效期时，`expiresAt` 为空，
+只展示标明“本次等待”的 `waitUntil`，不得宣称它是二维码有效期。
+
+提交前关闭必须取消 exact attempt，迟到状态不再更新或打开 UI。普通取消为 quiet no-op，Dialog 立即关闭，
+不形成 failed state、页面 alert 或 toast；“关闭”、取消按钮和 Escape 都应可用。二维码过期提供“刷新二维码”，
+刷新创建新 attempt。请求超时、本地总等待超时、二维码过期、服务端拒绝、额外交互、身份解析和本地保存失败分别提示。
+账号登录是唯一的扫码流程；队员发布不增加兼容扫码或平台 registration 入口。
+
+账号登录在 preparing 前展示 `loading_local_session`（“正在读取 Rovai 本地渠道数据…”）。Main 开始本地事务时进入
+`saving_local_session`（“正在保存连接”）；该阶段在 Main 和 Renderer 同时锁定取消、关闭、Escape 和重复连接。
+只有本地提交及会话激活完成才显示“已连接”并关闭 Dialog。结果不明确时保持保护态，以 `commitUncertain` 展示具体原因
+和“核对保存结果”动作，核对原事务而非重新扫码；明确保存失败保留原连接。
+页面不得显示 Cookie、CSRF、flowKey、原始身份对象、系统安全存储或原始异常。登录错误在 Main 与 Renderer 使用同一份
+中文文案映射，不显示 `unknown` 或猜测服务器进度。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
 钉钉未连接时主动作是“连接钉钉”，Session 失效或已有历史账号时为“重新连接”，已连接时保留“断开”。登录复用内置
@@ -165,7 +175,7 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 卡片只在状态、按钮可用性或已展开最近输出窗口变化时更新。永久正文卡继续独立发布，执行卡仍是临时 surface；
 下一轮召回后不留下完成占位。钉钉真正排队时发送排队 AI Card，admission 后与旧执行卡都通过 Robot recall 删除，
 不更新成“已开始”“状态已结束”或“此执行记录已结束”。安全、固定 URL、Token、callback、双身份和串行更新边界由
-[Feishu Channel v15](../../contracts/feishu-channel-v15.md)和
+[Feishu Channel v16](../../contracts/feishu-channel-v16.md)和
 [DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)拥有。
 
 ## 局域网执行台设置
@@ -201,7 +211,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v15](../../contracts/feishu-channel-v15.md)
+- [Feishu Channel v16](../../contracts/feishu-channel-v16.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

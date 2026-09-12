@@ -75,3 +75,6 @@ formatter/profile/manifest 版本或其他附件类型。
 Claude Code 模型目录从 help 别名改为无 Prompt 控制初始化，原生元数据、统一缓存、失败保留和验证状态见
 [实施计划](implementation-plan.md#claude-code-动态模型目录)；当前合同为
 [Runtime Launch v39](../../contracts/runtime-launch-and-verification-v39.md)。此项不改变当前版本状态或 Runtime 平台资格。
+
+飞书接口扫码改造按 [Feishu Channel v16](../../contracts/feishu-channel-v16.md) 实施，替换隐藏浏览器扫码，
+统一身份解析、会话恢复、可信域和提交结果核对。该独立增量不改变模型上下文；验证边界见[实施计划](implementation-plan.md#飞书接口扫码登录)。

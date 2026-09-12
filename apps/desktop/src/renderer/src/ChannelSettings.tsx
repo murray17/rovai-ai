@@ -1,3 +1,4 @@
+import { feishuLoginFailureDetail } from '../../shared/feishu-login-progress'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
@@ -689,7 +690,7 @@ export function QrDialog({
   const attemptKind = attempt.kind ?? kind
   const providerName = attemptKind === 'dingtalk' ? '钉钉' : '飞书'
   const interaction = attemptKind === 'dingtalk' && attempt.stage === 'awaiting_interaction'
-  const committing = attemptKind === 'dingtalk' && attempt.stage === 'saving_local_session'
+  const committing = attempt.stage === 'saving_local_session'
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && !committing) onClose(attempt.attemptId) }}>
       <Dialog.Portal>
@@ -699,7 +700,7 @@ export function QrDialog({
             title={`登录${providerName}开放平台`}
             description="仅登录开发者平台，本次不会创建应用或发布 Bot。"
             icon="shield"
-            closeDisabled={committing || (attemptKind !== 'dingtalk' && busy && attempt.stage !== 'failed')}
+            closeDisabled={committing}
           />
           <AppDialogBody className="channel-qr-body">
             {interaction
@@ -712,12 +713,14 @@ export function QrDialog({
             <strong role="status" aria-live="polite">{attempt.detail}</strong>
             <small>{attempt.expiresAt
               ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
-              : '开发者会话保存在 Rovai 本地数据库，不会暴露给页面。'}</small>
+              : attempt.waitUntil
+                ? `本次等待至 ${formatLocalTime(attempt.waitUntil)}，二维码是否过期以飞书返回的状态为准。`
+                : '开发者会话保存在 Rovai 本地数据库，不会暴露给页面。'}</small>
           </AppDialogBody>
           <AppDialogFooter>
-            {attemptKind === 'dingtalk' && attempt.stage === 'expired' && <button
+            {(attempt.stage === 'expired' || attempt.commitUncertain) && <button
               className="primary-button" type="button" onClick={() => onRefresh(attempt.attemptId)}
-            >刷新二维码</button>}
+            >{attempt.commitUncertain ? '核对保存结果' : '刷新二维码'}</button>}
             <button className="quiet-button" type="button" disabled={committing} onClick={() => onClose(attempt.attemptId)}>
               {attempt.stage === 'failed' ? '关闭' : '取消'}
             </button>
@@ -965,6 +968,8 @@ export function channelErrorMessage(error: unknown): string | null {
     .replace(/^Error invoking remote method '[^']+': (?:[A-Za-z_$][\w$]*Error|Error):\s*/, '')
     .trim()
   if (message === 'feishu_login_cancelled') return null
+  const loginDetail = feishuLoginFailureDetail(message)
+  if (loginDetail) return loginDetail
   if (message === 'dingtalk_operation_cancelled') return null
   if (message === 'feishu_console_remote_app_unavailable') {
     return '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'

@@ -20,6 +20,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
+import { canAdvanceFeishuLoginStage, feishuLoginFailureDetail } from '../shared/feishu-login-progress'
 import type {
   ChannelCredentialStore,
   FeishuAppCredential,
@@ -289,6 +290,15 @@ export class ChannelSettingsService {
   readonly #hostPump: AdaptiveChannelHostPump | null
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
+  #connectionCommit: {
+    attemptId: string
+    commandId: string
+    command: object
+    previousAccount: CoreChannelSnapshot['account']
+    busy: boolean
+    retryAfter: number
+    applied: StoredCommandResult | null
+  } | null = null
   #activeProvisioning: ChannelSettingsSnapshot['activeProvisioning'] = null
   #activeProvisioningAbort: AbortController | null = null
   #started = false
@@ -380,6 +390,10 @@ export class ChannelSettingsService {
 
   async get(): Promise<ChannelSettingsSnapshot> {
     if (!this.#dependencies) return unavailableSnapshot()
+    const commit = this.#connectionCommit
+    if (commit && !commit.busy && this.#now() >= commit.retryAfter) {
+      await this.#resolveConnectionCommit()
+    }
     return this.#publicSnapshot(await this.#coreSnapshot())
   }
 
@@ -397,63 +411,113 @@ export class ChannelSettingsService {
     if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
     this.#sessionCheckGeneration += 1
     this.#activeProvisioningAbort?.abort()
-    const previous = (await this.#coreSnapshot()).account
     const attemptId = randomUUID()
     const abort = new AbortController()
     this.#activeQrAbort = abort
     this.#activeQrAttempt = {
-      attemptId,
-      purpose: 'account_login',
-      agentId: null,
-      stage: 'preparing',
-      qrDataUrl: null,
-      expiresAt: null,
-      detail: '正在读取 Rovai 本地渠道数据…'
+      attemptId, purpose: 'account_login', agentId: null, stage: 'loading_local_session',
+      qrDataUrl: null, expiresAt: null, detail: '正在读取 Rovai 本地渠道数据…'
     }
     void this.#emit()
     try {
+      const previous = (await this.#coreSnapshot()).account
+      if (abort.signal.aborted || this.#activeQrAttempt?.attemptId !== attemptId) {
+        throw new Error('feishu_login_cancelled')
+      }
       const identity = await this.#developerSession.beginLogin({
         forceFresh: true,
         signal: abort.signal,
-        onQrReady: ({ payload, expiresAt }) => {
-          if (this.#activeQrAttempt?.attemptId !== attemptId) return
-          this.#activeQrAttempt = {
-            ...this.#activeQrAttempt,
-            stage: 'awaiting_scan',
-            qrDataUrl: payload,
-            expiresAt,
-            detail: '请使用飞书扫码登录开放平台。'
-          }
+        onQrReady: ({ payload, expiresAt, waitUntil }) => {
+          if (abort.signal.aborted || this.#activeQrAttempt?.attemptId !== attemptId
+            || !['loading_local_session', 'preparing', 'awaiting_scan'].includes(this.#activeQrAttempt.stage)) return
+          this.#activeQrAttempt = { ...this.#activeQrAttempt, qrDataUrl: payload, expiresAt, waitUntil }
           void this.#emit()
         },
-        onStatus: (stage) => this.#updateLoginAttempt(attemptId, stage)
+        onStatus: (stage) => {
+          // Local commit/activation, not a remote login callback, owns these stages.
+          if (!['saving_local_session', 'connected'].includes(stage)) this.#updateLoginAttempt(attemptId, stage)
+        }
       })
-      if (this.#activeQrAttempt?.attemptId !== attemptId) {
+      if (abort.signal.aborted || this.#activeQrAttempt?.attemptId !== attemptId) {
         throw new Error('feishu_login_cancelled')
       }
       const pending = pendingFeishuConnection(this.#developerSession)
-      const result = await this.#command('channels.feishu.account.commitConnection', {
-        expectedPreviousAccountVersion: previous?.status === 'connected' ? previous.version : null,
-        account: feishuConnectionAccount(identity),
-        developerSession: pending
-      })
-      await activatePendingFeishuLogin(this.#developerSession, sessionRevisionFrom(result))
+      this.#connectionCommit = {
+        attemptId, commandId: randomUUID(), busy: false, retryAfter: Number.POSITIVE_INFINITY, applied: null,
+        previousAccount: previous,
+        command: {
+          expectedPreviousAccountVersion: previous?.status === 'connected' ? previous.version : null,
+          account: feishuConnectionAccount(identity), developerSession: pending
+        }
+      }
+      this.#activeQrAbort = null
+      this.#updateLoginAttempt(attemptId, 'saving_local_session')
+      await this.#resolveConnectionCommit()
     } catch (error) {
-      const failureCode = channelFailureCode(error)
+      // An old cancellation/failure cannot discard a newer pending replacement or its Dialog.
+      if (this.#activeQrAttempt?.attemptId !== attemptId) return this.#emit()
+      if (this.#connectionCommit) return this.#emit()
       await this.#developerSession.discardPendingLogin?.().catch(() => undefined)
-      if (failureCode === 'feishu_login_cancelled') {
+      if (channelFailureCode(error) === 'feishu_login_cancelled') {
         this.#finishQr()
         return this.#emit()
       }
       this.#failQr(error)
       throw error
     }
-    this.#finishQr()
     return this.#emit()
+  }
+
+  async #resolveConnectionCommit(): Promise<void> {
+    const commit = this.#connectionCommit
+    if (!commit || commit.busy) return
+    commit.busy = true
+    if (this.#activeQrAttempt?.attemptId === commit.attemptId) {
+      this.#activeQrAttempt = { ...this.#activeQrAttempt, commitUncertain: false,
+        detail: commit.retryAfter === Number.POSITIVE_INFINITY ? '正在保存连接' : '正在核对连接保存结果' }
+      void this.#emit()
+    }
+    try {
+      // Replaying the exact command ID recovers a lost acknowledgement without a second switch.
+      if (!commit.applied) {
+        let result: StoredCommandResult | undefined
+        for (let retry = 0; retry < 2; retry += 1) {
+          try {
+            result = await this.#commandWithId('channels.feishu.account.commitConnection',
+              commit.commandId, commit.command, false)
+            break
+          } catch { /* The transaction may already have committed. */ }
+        }
+        if (result?.status === 'rejected') {
+          this.#connectionCommit = null
+          await this.#developerSession.discardPendingLogin?.().catch(() => undefined)
+          this.#failQr(new Error('feishu_local_save_failed'))
+          return
+        }
+        if (!result || result.status !== 'applied') throw new Error('feishu_local_save_outcome_unknown')
+        // A truncated receipt is still uncertain: re-read it by command ID on recovery.
+        sessionRevisionFrom(result)
+        commit.applied = result
+      }
+      await activatePendingFeishuLogin(this.#developerSession, sessionRevisionFrom(commit.applied))
+      this.#updateLoginAttempt(commit.attemptId, 'connected')
+      this.#connectionCommit = null
+      if (this.#activeQrAttempt?.attemptId === commit.attemptId) this.#finishQr()
+    } catch {
+      commit.retryAfter = this.#now() + 2_000
+      if (this.#activeQrAttempt?.attemptId === commit.attemptId) {
+        this.#activeQrAttempt = { ...this.#activeQrAttempt,
+          commitUncertain: true,
+          detail: '连接保存结果暂时无法确认；恢复本地服务后可核对保存结果。' }
+      }
+    } finally {
+      commit.busy = false
+    }
   }
 
   async disconnect(): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
+    if (this.#connectionCommit) return this.#emit()
     this.#sessionCheckGeneration += 1
     const snapshot = await this.#coreSnapshot()
     this.#activeProvisioningAbort?.abort()
@@ -578,11 +642,23 @@ export class ChannelSettingsService {
   }
 
   async cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot> {
-    if (this.#activeQrAttempt?.attemptId === attemptId) {
+    if (this.#activeQrAttempt?.attemptId === attemptId && !this.#connectionCommit) {
       this.#activeQrAbort?.abort()
       this.#finishQr()
     }
     return this.#emit()
+  }
+
+  async refreshLoginQr(attemptId: string): Promise<boolean> {
+    if (this.#activeQrAttempt?.attemptId !== attemptId) return false
+    if (this.#connectionCommit) {
+      await this.#resolveConnectionCommit()
+      await this.#emit()
+    } else if (this.#activeQrAttempt.stage === 'expired') {
+      this.#finishQr()
+      await this.connect()
+    }
+    return true
   }
 
   async #publishNewMemberBot(
@@ -1185,15 +1261,17 @@ export class ChannelSettingsService {
   }
 
   #updateLoginAttempt(attemptId: string, stage: FeishuLoginStage): void {
-    if (this.#activeQrAttempt?.attemptId !== attemptId) return
+    if (this.#activeQrAttempt?.attemptId !== attemptId
+      || !canAdvanceFeishuLoginStage(this.#activeQrAttempt.stage as FeishuLoginStage, stage)) return
     const details: Partial<Record<FeishuLoginStage, string>> = {
       loading_local_session: '正在读取 Rovai 本地渠道数据…',
-      preparing: '正在准备飞书开放平台登录…',
-      awaiting_scan: '请使用飞书扫码登录开放平台。',
-      scan_confirmed: '已扫码，正在确认登录…',
-      inspecting_identity: '正在读取飞书账号与企业身份…',
-      saving_local_session: '身份读取完成，正在保存开发者会话…',
-      connected: '飞书账号已连接。',
+      preparing: '正在准备二维码',
+      awaiting_scan: '请使用飞书扫码',
+      scan_confirmed: '已扫码，请在手机上确认',
+      completing_login: '正在建立登录会话',
+      inspecting_identity: '正在读取账号与企业信息',
+      saving_local_session: '正在保存连接',
+      connected: '已连接',
       expired: '登录二维码已过期，请关闭后重试。',
       cancelled: '登录已取消。',
       failed: '飞书账号登录失败。'
@@ -1201,6 +1279,8 @@ export class ChannelSettingsService {
     this.#activeQrAttempt = {
       ...this.#activeQrAttempt,
       stage,
+      ...(!['loading_local_session', 'preparing', 'awaiting_scan'].includes(stage)
+        ? { qrDataUrl: null, expiresAt: null, waitUntil: null } : {}),
       detail: details[stage] ?? this.#activeQrAttempt.detail
     }
     void this.#emit()
@@ -2339,7 +2419,9 @@ export class ChannelSettingsService {
   }
 
   #publicSnapshot(snapshot: CoreChannelSnapshot): ChannelSettingsSnapshot {
-    const connected = snapshot.account?.status === 'connected'
+    // Core can publish its commit before the replacement Cookie Session is active.
+    const account = this.#connectionCommit ? this.#connectionCommit.previousAccount : snapshot.account
+    const connected = account?.status === 'connected'
     const bots = new Map<string, ChannelMemberBotView>()
     for (const bot of snapshot.memberBots) {
       bots.set(bot.agentId, {
@@ -2406,17 +2488,17 @@ export class ChannelSettingsService {
         connection: {
           status: connected
             ? 'connected'
-            : snapshot.account?.status === 'session_expired'
+            : account?.status === 'session_expired'
               ? 'session_expired'
               : 'not_connected',
-          account: snapshot.account?.status !== 'disconnected' && snapshot.account ? {
-            accountId: snapshot.account.accountId,
-            userName: snapshot.account.userName,
-            ...(snapshot.account.email ? { email: snapshot.account.email } : {}),
-            tenantName: snapshot.account.tenantName,
-            brand: snapshot.account.brand,
-            connectedAt: snapshot.account.connectedAt,
-            lastVerifiedAt: snapshot.account.lastVerifiedAt
+          account: account?.status !== 'disconnected' && account ? {
+            accountId: account.accountId,
+            userName: account.userName,
+            ...(account.email ? { email: account.email } : {}),
+            tenantName: account.tenantName,
+            brand: account.brand,
+            connectedAt: account.connectedAt,
+            lastVerifiedAt: account.lastVerifiedAt
           } : null
         },
         memberBots: [...bots.values()].sort((left, right) => left.agentId.localeCompare(right.agentId)),
@@ -2491,9 +2573,10 @@ export class ChannelSettingsService {
     if (!this.#activeQrAttempt) return
     this.#activeQrAttempt = {
       ...this.#activeQrAttempt,
-      stage: 'failed',
+      stage: channelFailureCode(error) === 'feishu_login_expired' ? 'expired' : 'failed',
       qrDataUrl: null,
       expiresAt: null,
+      waitUntil: null,
       detail: channelFailureDetail(error)
     }
     void this.#emit()
@@ -2658,11 +2741,9 @@ function recoverableProvisioningDetail(failureCode: string, hasRemoteApp: boolea
 
 function channelFailureDetail(error: unknown): string {
   const code = channelFailureCode(error)
+  const loginDetail = feishuLoginFailureDetail(code)
+  if (loginDetail) return loginDetail
   const details: Record<string, string> = {
-    feishu_developer_identity_incomplete:
-      '已登录飞书，但未能读取完整的账号与企业信息。请关闭后重试。',
-    feishu_login_failed: '无法打开飞书登录页面，请检查网络后重试。',
-    feishu_login_expired: '飞书登录已超时，请关闭后重试。',
     feishu_developer_session_expired: '飞书开发者会话已过期，请重新登录。',
     feishu_developer_identity_changed: '飞书账号或企业身份已变化，请重新连接。',
     feishu_connection_error: '飞书连接异常，请稍后重试。',

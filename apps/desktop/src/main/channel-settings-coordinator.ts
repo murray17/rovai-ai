@@ -143,7 +143,9 @@ export class ChannelSettingsCoordinator {
     this.#dingtalk.setLoginViewBounds(attemptId, bounds)
   }
 
-  refreshLoginQr(attemptId: string): void { this.#dingtalk.refreshLoginQr(attemptId) }
+  async refreshLoginQr(attemptId: string): Promise<void> {
+    if (!await this.#feishu.refreshLoginQr(attemptId)) this.#dingtalk.refreshLoginQr(attemptId)
+  }
 
   dispose(): void {
     for (const unsubscribe of this.#unsubscribeChildren) unsubscribe()

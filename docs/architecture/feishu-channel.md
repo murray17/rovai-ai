@@ -8,7 +8,7 @@ last_updated: 2026-09-02
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v15](../contracts/feishu-channel-v15.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v16](../contracts/feishu-channel-v16.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -53,15 +53,19 @@ Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事�
 
 ## 开发者会话与队员发布
 
-“连接飞书账号”只在一次性 Electron Session 中加载开放平台登录页，截取真实登录二维码，回读
-`userId + userName + tenantId + tenantName + brand` 并收集受限飞书/Lark 域 Cookie。它不创建 App、不产生 App
+“连接飞书账号”在一次性 Electron Session 中经独立协议适配器请求初始化与串行状态轮询，本地生成二维码，
+完成可信跨域交接后从开放平台 HTTP HTML 被动解析
+`userId + userName + tenantId + tenantName + brand` 与 CSRF，并收集受限飞书/Lark 域 Cookie。
+正常登录、恢复与管理前检查均不创建 BrowserWindow，不执行远端脚本，不观察画布、图片变化或页面文字。
+身份字段共享归一化器，优先级、必需字段和别名由 [Feishu Channel v16](../contracts/feishu-channel-v16.md) 拥有。它不创建 App、不产生 App
 ID/Secret，也不启动 Bot。身份与 Cookie 在登录期间只留在临时 Session；Main 随后调用
 `channels.feishu.account.commitConnection`，由 Core 在一个 SQLite 事务中同时写入 connected account 与
 `channel_developer_sessions`。缺少任一身份字段、identity mismatch、previous account version conflict 或 SQLite 失败都不能
 进入 connected。
 
-事务成功后临时 Session 才成为当前内存 Session 并清理旧 partition；失败只丢弃临时 Session，既有 SQLite row 和旧内存
-Session 均保持不变。持久层没有 confirm/rollback 文件，也不访问系统凭据库。启动与 refresh 从 SQLite 恢复 Cookie，并用
+事务成功后临时 Session 才成为当前内存 Session 并清理旧 partition；明确未提交或被拒绝时只丢弃临时 Session，既有 SQLite row 和旧内存
+Session 均保持不变。本地事务期间禁止扫码取消与重复连接；回执不明确时保留 pending，以同一 commandId 回放核对结果，
+不可把通信失败当作事务回滚。激活完成前界面不关闭。持久层没有 confirm/rollback 文件，也不访问系统凭据库。启动与 refresh 从 SQLite 恢复 Cookie，并用
 Developer Session revision CAS 保存远端刷新；断开/过期在 Core 同一事务删除 Session row 与更新账号状态。隔离验收只依赖
 不同 `userData`/SQLite，不改变 `app.setName(APP_NAME)`，也没有 Keychain namespace。
 
@@ -70,10 +74,16 @@ Developer Session revision CAS 保存远端刷新；断开/过期在 Core 同一
 才允许 Core expire。后台检查有 Host/账号代次与版本保护，不能用迟到结果覆盖或清理新登录态。
 
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
-`userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 从同一 Electron Session 的 Cookie jar 加载开放平台页，
-只在 Main 中读取 `csrfToken + apiOrigin`；后续请求使用该 Session 的 Chromium 网络栈和 Cookie policy，不组装、记录或
-返回 Cookie header。`apiOrigin` 必须精确匹配当前 brand 的 `https://open.feishu.cn | https://open.larksuite.com`，API
-路径只允许 `/developers/`，相似域、跨源 URL 和页面身份漂移均在创建前拒绝。
+`userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 通过统一 Session HTTP 层请求开放平台 HTML，
+只在 Main 中被动提取 `csrfToken + apiOrigin`；后续请求使用该 Session 的 Chromium 网络栈和 Cookie policy，不组装、记录或
+返回 Cookie header。`apiOrigin` 取每跳校验后的最终可信站点，支持 `open.feishu.cn`、`open.larkoffice.com`（均为 Feishu）和
+`open.larksuite.com`（Lark）；保存 origin 并在恢复与 API 中复用，不按名称包含 lark 判断品牌。API
+路径只允许 `/developers/`，相似域、跨源 URL 和身份漂移均在创建前拒绝。
+
+HTTP 层统一拥有手动重定向、显式 finalUrl、Session Cookie policy、正文读取上限与单请求期限；登录上下文另外拥有
+独立总期限和 attempt/generation fence。单请求默认 15 秒、总等待 180 秒、串行轮询间隔 1.5 秒，均可配置。
+不同站点之间只发导航 GET，不复制登录头或原始 Cookie；Cookie 的域、路径、有效期、host-only 与安全属性完整保存。
+本地等待超时、远端二维码过期、交互要求与协议变化分别返回明确错误；无隐藏浏览器或文字匹配 fallback。
 
 `OpenPlatformApiClient` 先上传受控队员头像，再以固定 `developer_console` 模板和 publication intent correlation 调用
 `manifest/upsert_by_template`。只有上游明确拒绝模板且能够证明没有创建应用，才调用一次 self-build create；transport、
@@ -92,7 +102,7 @@ version，先确认它 published。之后统一配置 tenant scopes、receive/ro
 Manifest。重启恢复或 App/requirements 不匹配时仍完整回读 scope/event/callback。Manifest 字段不能自证配置完成。在线配置验证通过后，
 Main 通过 `publicationIntent.storeCredential` 在同一 SQLite 事务写入独立 credential 并推进 intent，再由 Core upsert exact
 frozen Bot、建立并回读 Bot WebSocket identity，最后
-完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 / 立即创建”确认页，也不向 Renderer 产生二维码。
+完成 intent。普通发布流程经 Session HTTP 完成，不创建浏览器窗口或打开飞书“创建飞书智能体应用 / 立即创建”确认页，也不向 Renderer 产生二维码。
 Provisioner 与 Channel Host 共用单调时钟计时上下文，记录从 Session、创建、配置、发布、核验、Owner 解析到真实
 WebSocket handshake 的阶段与总耗时；日志只含白名单分类和 App digest，失败也记录，秘密与原始外部身份不进入样本。
 

@@ -137,3 +137,27 @@ fallback 接纳。最小命令为 `cargo test -p rovai-core --bin rovai-core hea
   `runtime.modelCatalog.open` 返回 fresh 原生目录及完整模型 metadata，未提交用户消息。
 - 首次 workspace 门禁发现兼容性登记文件属于既有平台资格摘要；撤回对该文件的编辑，把此次观测留在本文，
   原摘要绑定测试复核通过。浅发现版本测试该次失败后单独复跑和最终 workspace 复跑均通过。
+
+## 飞书接口扫码登录
+
+按用户确认的完整流程说明实现独立 Web 协议适配器、指定 Session 的请求/可信域层和共享身份归一化器。
+登录、恢复与后续开放平台 bootstrap 从 HTTP HTML 被动提取，不创建隐藏浏览器；单请求/正文期限与独立总期限、
+旧 attempt 隔离和原连接保留由服务测试覆盖。UI 增加 completing_login、本地等待期限和提交结果核对动作。
+先提交 Core 账号/Session、再激活的顺序不变；丢回执复用同一 commandId，明确拒绝才清理 pending。
+
+当前权威更新为 [Feishu Channel v16](../../contracts/feishu-channel-v16.md)、[飞书渠道架构](../../architecture/feishu-channel.md)和
+[渠道设置](../../ui/components/channel-settings.md)，同步 Contracts/CURRENT/开发与文档入口。无数据库 Migration、Runtime、
+模型上下文或新版本切换；按用户已指定的协议路线实现，不新增重复的 Version Decision。
+
+本轮验收（2026-09-12）：`pnpm test` 通过，Vitest 176 个文件、1804 项通过，Node 脚本 317 项通过、
+2 项平台限定跳过；随后补充绝对截止时间检查，飞书会话服务 31 项与 `pnpm typecheck` 通过。提交激活与
+回执不完整、请求域、HTML 解析、控制台 API 和渠道协调器的定向回归共 148 项通过。
+`pnpm test:feishu-login`、`pnpm test:desktop-bridge`、`pnpm test:dingtalk-login` 和 `pnpm build:desktop` 通过。
+`pnpm docs:test`、`pnpm docs:check` 及以任务起点 `4516ba39f0b2c6c15ec06e64792cef52da855182` 为 base 的
+`pnpm docs:check:ci` 通过，`git diff --check` 无错误。
+飞书 Electron 验收使用隔离 userData/sessionData，验证原生 Session、逐跳重定向、正文超时、Cookie 恢复、管理请求和
+生产 Dialog；截图检查覆盖日夜主题及 200% 缩放。钉钉首次与另一原生窗口验收并行时出现 child view 获取失败，
+随后顺序复跑通过；没有据此修改钉钉登录实现。
+
+`ROVAI_FEISHU_LIVE_PROBE=1 pnpm test:feishu-login` 的真实匿名初始化与待扫码查询通过，当前响应没有明确二维码有效期。
+该观察不证明真人确认、跨域账号交接、真实 Core 保存或实际 Bot 发布成功，这些仍需有账号的隔离验收。

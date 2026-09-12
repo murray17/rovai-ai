@@ -1,23 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  BrowserWindow,
+  type BrowserWindow,
   session as electronSession,
   type Cookie,
   type Session
 } from 'electron'
 import type { SqliteChannelDeveloperSessionStore } from './channel-credential-store'
+import QRCode from 'qrcode'
+import { normalizeFeishuIdentity, readOpenPlatformBootstrap } from './feishu-developer-identity'
+import { isFeishuCookieDomain, isFeishuLoginUrl, openPlatformOrigin, portalUrlForBrand } from './feishu-domains'
+import { FeishuLoginProtocol, type FeishuLoginProfile } from './feishu-login-protocol'
+import { requestInFeishuSession } from './feishu-electron-transport'
+import { abortable, FeishuSessionError, FeishuSessionHttp, loginDelay, throwIfAborted, type FeishuRequestDiagnostic } from './feishu-session-http'
 
-export type FeishuLoginStage =
-  | 'loading_local_session'
-  | 'preparing'
-  | 'awaiting_scan'
-  | 'scan_confirmed'
-  | 'inspecting_identity'
-  | 'saving_local_session'
-  | 'connected'
-  | 'expired'
-  | 'cancelled'
-  | 'failed'
+import { canAdvanceFeishuLoginStage, type FeishuLoginStage } from '../shared/feishu-login-progress'
+export type { FeishuLoginStage } from '../shared/feishu-login-progress'
 
 export interface FeishuDeveloperIdentity {
   brand: 'feishu' | 'lark'
@@ -37,7 +34,7 @@ export interface FeishuDeveloperSessionService {
   beginLogin(options?: {
     forceFresh?: boolean
     signal?: AbortSignal
-    onQrReady?(qr: { payload: string; expiresAt: string }): void
+    onQrReady?(qr: { payload: string; expiresAt: string | null; waitUntil?: string }): void
     onStatus?(status: FeishuLoginStage): void
   }): Promise<FeishuDeveloperIdentity>
   pendingConnection?(): PendingFeishuDeveloperConnection
@@ -70,12 +67,13 @@ export interface FeishuDeveloperPortalSession extends FeishuDeveloperSessionServ
 }
 
 export type StoredFeishuCookie = Pick<
-Cookie,
+  Cookie,
   'name' | 'value' | 'secure' | 'httpOnly' | 'sameSite' | 'session'
-> & { domain: string; path: string; expirationDate?: number }
+> & { domain: string; path: string; expirationDate?: number; hostOnly?: boolean }
 
 export type StoredFeishuDeveloperSession = {
   cookies: StoredFeishuCookie[]
+  portalOrigin?: string
 }
 
 export type PendingFeishuDeveloperConnection = {
@@ -83,395 +81,337 @@ export type PendingFeishuDeveloperConnection = {
   session: StoredFeishuDeveloperSession
 }
 
-type PortalIdentity = Partial<{
-  id: string
-  name: string
-  email: string
-  tenantId: string
-  tenantName: string
-}>
+type LoginOptions = NonNullable<Parameters<FeishuDeveloperSessionService['beginLogin']>[0]>
+type LoginAttempt = {
+  attemptId: string
+  generation: number
+  controller: AbortController
+  session: Session
+  flowKey: string | null
+  token: string | null
+  stage: FeishuLoginStage
+  deadline: number
+  options: LoginOptions
+}
 
-type OpenPlatformBootstrap = Partial<{
-  csrfToken: string
-  apiOrigin: string
-  userId: string
-  tenantId: string
-}>
-
-const FEISHU_PORTAL_URL = 'https://open.feishu.cn/app?lang=zh-CN'
-const SESSION_PARTITION = `rovai-feishu-developer-${randomUUID()}`
-const LOGIN_TIMEOUT_MS = 10 * 60_000
-const LOGIN_POLL_MS = 500
-const IDENTITY_INSPECTION_TIMEOUT_MS = 20_000
+type SessionOptions = {
+  request?: typeof requestInFeishuSession
+  profile?: Partial<FeishuLoginProfile>
+  qrDataUrl?: (payload: string) => Promise<string>
+  diagnostic?: (event: Partial<FeishuRequestDiagnostic> & {
+    attemptId: string
+    stage: FeishuLoginStage
+    missingFields?: string[]
+    httpStatus?: number
+    remoteCode?: string
+  }) => void
+}
 
 export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPortalSession {
   #browserSession: Session | null = null
   readonly #store: Pick<SqliteChannelDeveloperSessionStore, 'read' | 'replace'>
-  readonly #getParentWindow: () => BrowserWindow | null
+  readonly #protocol: FeishuLoginProtocol
+  readonly #qrDataUrl: (payload: string) => Promise<string>
+  readonly #diagnostic: NonNullable<SessionOptions['diagnostic']>
+  readonly #request: typeof requestInFeishuSession
   #restored = false
   #restoring: Promise<void> | null = null
   #sessionGeneration = 0
+  #sessionAbort = new AbortController()
   #storedIdentity: FeishuDeveloperIdentity | null = null
   #storedRevision: number | null = null
-  #activeLoginWindow: BrowserWindow | null = null
-  #activeOpenPlatformWindows = new Set<BrowserWindow>()
+  #portalOrigin: string | undefined
+  #loginGeneration = 0
+  #activeAttempt: LoginAttempt | null = null
   #pendingLoginReplacement: {
-    previousSession: Session | null
     replacementSession: Session
     identity: FeishuDeveloperIdentity
     session: StoredFeishuDeveloperSession
-    onStatus?: (status: FeishuLoginStage) => void
+    attempt: LoginAttempt
   } | null = null
 
   constructor(
     store: Pick<SqliteChannelDeveloperSessionStore, 'read' | 'replace'>,
-    getParentWindow: () => BrowserWindow | null = () => null
+    _getParentWindow: () => BrowserWindow | null = () => null,
+    options: SessionOptions = {}
   ) {
     this.#store = store
-    this.#getParentWindow = getParentWindow
+    this.#protocol = new FeishuLoginProtocol(options.profile)
+    this.#request = options.request ?? requestInFeishuSession
+    this.#qrDataUrl = options.qrDataUrl ?? ((payload) => QRCode.toDataURL(payload, {
+      type: 'image/png', width: 280, margin: 4, errorCorrectionLevel: 'M'
+    }))
+    this.#diagnostic = options.diagnostic ?? ((event) => console.info('[feishu-login]', event))
   }
 
-  async beginLogin(options: {
-    forceFresh?: boolean
-    signal?: AbortSignal
-    onQrReady?(qr: { payload: string; expiresAt: string }): void
-    onStatus?(status: FeishuLoginStage): void
-  } = {}): Promise<FeishuDeveloperIdentity> {
-    this.#closeActiveLogin()
-    options.onStatus?.('loading_local_session')
-    await this.#ensureRestored()
-    if (this.#pendingLoginReplacement) await this.discardPendingLogin()
-    if (options.signal?.aborted) throw sessionError('feishu_login_cancelled')
-
-    const previousSession = this.#browserSession
-    const loginSession = electronSession.fromPartition(
-      `${SESSION_PARTITION}-login-${randomUUID()}`,
-      { cache: false }
-    )
-    let replacementReady = false
-    options.onStatus?.('preparing')
-    const window = this.#createWindow(false, null, loginSession)
-    this.#activeLoginWindow = window
-    let terminal = false
-    let lastQrDataUrl = ''
-    let lastStage: FeishuLoginStage = 'preparing'
-
-    const emitStage = (stage: FeishuLoginStage): void => {
-      if (stage === lastStage) return
-      lastStage = stage
-      options.onStatus?.(stage)
+  async beginLogin(options: LoginOptions = {}): Promise<FeishuDeveloperIdentity> {
+    this.#activeAttempt?.controller.abort(new FeishuSessionError('feishu_login_cancelled'))
+    const attempt: LoginAttempt = {
+      attemptId: randomUUID(), generation: ++this.#loginGeneration,
+      controller: new AbortController(), session: freshSession('login'),
+      flowKey: null, token: null, stage: 'loading_local_session',
+      deadline: Date.now() + this.#protocol.profile.loginTimeoutMs, options
     }
-
+    this.#activeAttempt = attempt
+    const signal = attempt.controller.signal
+    const cancel = (): void => attempt.controller.abort(new FeishuSessionError('feishu_login_cancelled'))
+    options.signal?.addEventListener('abort', cancel, { once: true })
+    if (options.signal?.aborted) cancel()
+    const deadline = setTimeout(() => attempt.controller.abort(
+      new FeishuSessionError('feishu_login_timeout')
+    ), this.#protocol.profile.loginTimeoutMs)
+    let ready = false
     try {
-      return await new Promise<FeishuDeveloperIdentity>((resolve, reject) => {
-        const startedAt = Date.now()
-        let identityInspectionStartedAt: number | null = null
-        let pollTimer: ReturnType<typeof setInterval> | null = null
-        let pollInProgress = false
-
-        const cleanup = (): void => {
-          if (pollTimer) clearInterval(pollTimer)
-          pollTimer = null
-          options.signal?.removeEventListener('abort', onAbort)
+      this.#checkAttempt(attempt)
+      options.onStatus?.('loading_local_session')
+      await abortable(this.#ensureRestored(), signal)
+      this.#checkAttempt(attempt)
+      await abortable(this.discardPendingLogin(), signal)
+      this.#checkAttempt(attempt)
+      this.#stage(attempt, 'preparing')
+      const http = this.#http(attempt.session, (event) => this.#diagnostic({
+        attemptId: attempt.attemptId, stage: attempt.stage, ...event
+      }))
+      const initialized = await this.#protocol.initialize(http, signal)
+      this.#checkAttempt(attempt)
+      attempt.flowKey = initialized.flowKey
+      attempt.token = initialized.token
+      const payload = await abortable(this.#qrDataUrl(JSON.stringify({
+        qrlogin: { token: attempt.token }
+      })), signal)
+      this.#checkAttempt(attempt)
+      options.onQrReady?.({ payload, expiresAt: initialized.expiresAt,
+        waitUntil: new Date(attempt.deadline).toISOString() })
+      this.#stage(attempt, 'awaiting_scan')
+      for (;;) {
+        await loginDelay(this.#protocol.profile.pollIntervalMs, signal)
+        this.#checkAttempt(attempt)
+        const result = await this.#protocol.poll(http, attempt.flowKey, signal)
+        this.#checkAttempt(attempt)
+        if (result.kind === 'expired') throw new FeishuSessionError('feishu_login_expired')
+        if (result.kind === 'scanned') this.#stage(attempt, 'scan_confirmed')
+        if (result.kind !== 'complete') continue
+        this.#stage(attempt, 'completing_login')
+        await this.#protocol.complete(http, result.crossLoginUri, signal)
+        this.#checkAttempt(attempt)
+        // Navigation establishes the target Session before any identity is accepted.
+        const portal = await http.request(this.#protocol.profile.portalUrl, { kind: 'navigation' }, { signal })
+        this.#checkAttempt(attempt)
+        this.#stage(attempt, 'inspecting_identity')
+        if (isFeishuLoginUrl(portal.finalUrl)) {
+          throw new FeishuSessionError('feishu_login_interaction_required')
         }
-        const finish = (result: FeishuDeveloperIdentity | Error): void => {
-          if (terminal) return
-          terminal = true
-          cleanup()
-          if (result instanceof Error) reject(result)
-          else resolve(result)
+        requirePortalResponse(portal.response)
+        const html = await abortable(portal.response.text(), signal)
+        this.#checkAttempt(attempt)
+        const bootstrap = readOpenPlatformBootstrap(html, portal.finalUrl)
+        const stored = await abortable(this.#capture(attempt.session, bootstrap.apiOrigin), signal)
+        this.#checkAttempt(attempt)
+        this.#pendingLoginReplacement = {
+          replacementSession: attempt.session, identity: bootstrap.identity, session: stored, attempt
         }
-        const onAbort = (): void => {
-          emitStage('cancelled')
-          finish(sessionError('feishu_login_cancelled'))
-        }
-        options.signal?.addEventListener('abort', onAbort, { once: true })
-        window.once('closed', () => {
-          if (!terminal) onAbort()
-        })
-
-        const poll = async (): Promise<void> => {
-          if (
-            terminal
-            || pollInProgress
-            || window.isDestroyed()
-            || window.webContents.isDestroyed()
-          ) return
-          pollInProgress = true
-          try {
-            if (Date.now() - startedAt >= LOGIN_TIMEOUT_MS) {
-              emitStage('expired')
-              finish(sessionError('feishu_login_expired'))
-              return
-            }
-            const currentUrl = window.webContents.getURL()
-            if (isDeveloperPortalUrl(currentUrl)) {
-              emitStage('inspecting_identity')
-              identityInspectionStartedAt ??= Date.now()
-              const identity = await readDeveloperIdentity(window, currentUrl)
-              if (!identity) {
-                if (Date.now() - identityInspectionStartedAt >= IDENTITY_INSPECTION_TIMEOUT_MS) {
-                  emitStage('failed')
-                  finish(sessionError('feishu_developer_identity_incomplete'))
-                }
-                return
-              }
-              emitStage('saving_local_session')
-              this.#pendingLoginReplacement = {
-                previousSession,
-                replacementSession: loginSession,
-                identity,
-                session: await this.#capture(loginSession),
-                onStatus: options.onStatus
-              }
-              replacementReady = true
-              finish(identity)
-              return
-            }
-            identityInspectionStartedAt = null
-            if (!isFeishuLoginUrl(currentUrl)) return
-            const pageText = await window.webContents.executeJavaScript(
-              'document.body?.innerText?.slice(0, 4000) ?? ""',
-              true
-            ) as string
-            if (/scanned successfully|扫码成功|扫描成功/i.test(pageText)) {
-              emitStage('scan_confirmed')
-            }
-            const bounds = await qrCanvasBounds(window)
-            if (!bounds) return
-            const image = await window.webContents.capturePage(bounds)
-            const qrDataUrl = image.toDataURL()
-            if (!qrDataUrl || qrDataUrl === lastQrDataUrl) return
-            lastQrDataUrl = qrDataUrl
-            emitStage('awaiting_scan')
-            options.onQrReady?.({
-              payload: qrDataUrl,
-              expiresAt: new Date(startedAt + LOGIN_TIMEOUT_MS).toISOString()
-            })
-          } catch (error) {
-            emitStage('failed')
-            finish(normalizeSessionError(error, 'feishu_login_failed'))
-          } finally {
-            pollInProgress = false
-          }
-        }
-
-        pollTimer = setInterval(() => void poll(), LOGIN_POLL_MS)
-        pollTimer.unref?.()
-        void window.loadURL(FEISHU_PORTAL_URL)
-          .then(() => poll())
-          .catch((error) => {
-            if (isExpectedPortalRedirectAbort(error, window)) return
-            finish(normalizeSessionError(error, 'feishu_login_failed'))
-          })
-      })
-    } finally {
-      if (this.#activeLoginWindow === window) this.#activeLoginWindow = null
-      if (!window.isDestroyed()) window.destroy()
-      if (!replacementReady) {
-        await loginSession.clearStorageData().catch(() => undefined)
+        ready = true
+        return bootstrap.identity
       }
+    } catch (error) {
+      const failure = error instanceof Error && /^feishu_[a-z_]+$/.test(error.message)
+        ? error : new FeishuSessionError('feishu_login_failed')
+      // Cancellation may report its terminal state, but a replaced attempt never emits again.
+      if (this.#activeAttempt === attempt && attempt.generation === this.#loginGeneration) {
+        const stage = failure.message === 'feishu_login_expired' ? 'expired'
+          : failure.message === 'feishu_login_cancelled' ? 'cancelled' : 'failed'
+        attempt.stage = stage
+        options.onStatus?.(stage)
+        this.#diagnostic({ attemptId: attempt.attemptId, stage,
+          ...(failure instanceof FeishuSessionError ? failure.details : {}) })
+      }
+      throw failure
+    } finally {
+      clearTimeout(deadline)
+      options.signal?.removeEventListener('abort', cancel)
+      attempt.flowKey = null
+      attempt.token = null
+      if (this.#activeAttempt === attempt) this.#activeAttempt = null
+      if (!ready) void attempt.session.clearStorageData().catch(() => undefined)
     }
   }
 
   pendingConnection(): PendingFeishuDeveloperConnection {
     const pending = this.#pendingLoginReplacement
-    if (!pending) throw sessionError('feishu_login_pending_session_missing')
+    if (!pending) throw new FeishuSessionError('feishu_login_pending_session_missing')
     return { identity: pending.identity, session: pending.session }
   }
 
   async activatePendingLogin(sessionRevision: number): Promise<void> {
     const pending = this.#pendingLoginReplacement
-    if (!pending) throw sessionError('feishu_login_pending_session_missing')
+    if (!pending || !Number.isSafeInteger(sessionRevision) || sessionRevision < 1) {
+      throw new FeishuSessionError('feishu_login_pending_session_missing')
+    }
+    const previous = this.#browserSession
     this.#sessionGeneration += 1
+    this.#sessionAbort.abort(new FeishuSessionError('feishu_developer_session_replaced'))
+    this.#sessionAbort = new AbortController()
     this.#pendingLoginReplacement = null
     this.#browserSession = pending.replacementSession
     this.#storedIdentity = pending.identity
     this.#storedRevision = sessionRevision
+    this.#portalOrigin = pending.session.portalOrigin
     this.#restored = true
-    if (pending.previousSession && pending.previousSession !== pending.replacementSession) {
-      await pending.previousSession.clearStorageData().catch(() => undefined)
+    if (pending.attempt.generation === this.#loginGeneration) pending.attempt.options.onStatus?.('connected')
+    // Cleanup must not turn an already activated connection into a failed/uncertain commit.
+    if (previous && previous !== pending.replacementSession) {
+      void previous.clearStorageData().catch(() => undefined)
     }
-    pending.onStatus?.('connected')
   }
 
   async discardPendingLogin(): Promise<FeishuDeveloperIdentity | null> {
     const pending = this.#pendingLoginReplacement
-    if (!pending) return null
+    if (!pending) return this.#storedIdentity
     this.#pendingLoginReplacement = null
-    await pending.replacementSession.clearStorageData().catch(() => undefined)
+    void pending.replacementSession.clearStorageData().catch(() => undefined)
     return this.#storedIdentity
   }
 
   async inspect(): Promise<FeishuDeveloperSessionInspection> {
-    let window: BrowserWindow | null = null
     try {
       await this.#ensureRestored()
-      const restoredIdentity = this.#storedIdentity
-      if (!restoredIdentity) return { status: 'invalid', reason: 'missing' }
-      const browserSession = this.#session
-      const revision = this.#storedRevision
-      const isCurrent = (): boolean => this.#browserSession === browserSession
-        && this.#storedIdentity === restoredIdentity && this.#storedRevision === revision
-      window = this.#createWindow(false, null, browserSession)
-      try {
-        await window.loadURL(portalUrlForBrand(restoredIdentity.brand))
-      } catch (error) {
-        if (!isExpectedPortalRedirectAbort(error, window)) throw error
-      }
-      if (!isCurrent()) return { status: 'unavailable' }
-      const currentUrl = window.webContents.getURL()
-      if (isFeishuLoginUrl(currentUrl)) return { status: 'invalid', reason: 'expired' }
-      if (!isDeveloperPortalUrl(currentUrl)) return { status: 'unavailable' }
-      const identity = await readDeveloperIdentity(window, currentUrl)
-      if (!identity || !isCurrent()) return { status: 'unavailable' }
-      if (accountIdForStoredIdentity(identity) !== accountIdForStoredIdentity(restoredIdentity)) {
+      const identity = this.#storedIdentity
+      const browserSession = this.#browserSession
+      if (!identity || !browserSession) return { status: 'invalid', reason: 'missing' }
+      const generation = this.#sessionGeneration
+      const signal = this.#sessionAbort.signal
+      const bootstrap = await this.#bootstrap(browserSession, identity.brand, signal)
+      if (generation !== this.#sessionGeneration) return { status: 'unavailable' }
+      if (accountIdForStoredIdentity(bootstrap.identity) !== accountIdForStoredIdentity(identity)) {
         return { status: 'invalid', reason: 'identity_changed' }
       }
-      await this.#persist(identity, browserSession)
-      return { status: 'valid', identity }
-    } catch {
+      await this.#persist(bootstrap.identity, browserSession, bootstrap.apiOrigin)
+      return { status: 'valid', identity: bootstrap.identity }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'feishu_developer_session_expired') {
+        return { status: 'invalid', reason: 'expired' }
+      }
       // Failed observation or refresh storage is not proof that saved credentials expired.
       return { status: 'unavailable' }
-    } finally {
-      if (window && !window.isDestroyed()) window.destroy()
     }
   }
 
-  async requireExpectedIdentity(expected: {
-    userId: string
-    tenantId: string
-  }): Promise<FeishuDeveloperIdentity> {
+  async requireExpectedIdentity(expected: { userId: string; tenantId: string }): Promise<FeishuDeveloperIdentity> {
     const inspection = await this.inspect()
     if (inspection.status === 'unavailable') {
-      throw sessionError('feishu_developer_session_inspection_unavailable')
+      throw new FeishuSessionError('feishu_developer_session_inspection_unavailable')
     }
-    if (inspection.status === 'invalid') {
-      throw sessionError(inspection.reason === 'identity_changed'
-        ? 'feishu_developer_identity_changed' : 'feishu_developer_session_expired')
+    if (inspection.status === 'invalid') throw new FeishuSessionError(inspection.reason === 'identity_changed'
+      ? 'feishu_developer_identity_changed' : 'feishu_developer_session_expired')
+    if (inspection.identity.userId !== expected.userId || inspection.identity.tenantId !== expected.tenantId) {
+      throw new FeishuSessionError('feishu_developer_identity_changed')
     }
-    const { identity } = inspection
-    if (identity.userId !== expected.userId || identity.tenantId !== expected.tenantId) {
-      throw sessionError('feishu_developer_identity_changed')
-    }
-    return identity
+    return inspection.identity
   }
 
   async disconnect(): Promise<void> {
     this.#sessionGeneration += 1
-    this.#closeActiveLogin()
-    await this.discardPendingLogin().catch(() => undefined)
-    for (const window of this.#activeOpenPlatformWindows) {
-      if (!window.isDestroyed()) window.destroy()
-    }
-    this.#activeOpenPlatformWindows.clear()
-    await this.#session.clearStorageData()
+    this.#loginGeneration += 1
+    this.#activeAttempt?.controller.abort(new FeishuSessionError('feishu_login_cancelled'))
+    this.#activeAttempt = null
+    this.#sessionAbort.abort(new FeishuSessionError('feishu_developer_session_replaced'))
+    this.#sessionAbort = new AbortController()
+    await this.discardPendingLogin()
+    const previous = this.#browserSession
     this.#browserSession = null
     this.#storedIdentity = null
     this.#storedRevision = null
+    this.#portalOrigin = undefined
     this.#restored = true
+    await previous?.clearStorageData()
   }
 
   async openPlatformSession(input: {
-    expectedIdentity: {
-      userId: string
-      tenantId: string
-    }
+    expectedIdentity: { userId: string; tenantId: string }
     signal?: AbortSignal
   }): Promise<FeishuOpenPlatformSession> {
     await this.#ensureRestored()
-    if (input.signal?.aborted) throw sessionError('feishu_provisioning_cancelled')
+    if (input.signal?.aborted) throw new FeishuSessionError('feishu_provisioning_cancelled')
     const identity = this.#storedIdentity
-    if (!identity) throw sessionError('feishu_developer_session_expired')
-    const portalUrl = portalUrlForBrand(identity.brand)
-    const cookies = await this.#session.cookies.get({ url: portalUrl })
-    if (cookies.length === 0) throw sessionError('feishu_developer_session_expired')
-
-    const window = this.#createWindow(false)
-    this.#activeOpenPlatformWindows.add(window)
-    const onAbort = (): void => {
-      if (!window.isDestroyed()) window.destroy()
-    }
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    try {
-      await window.loadURL(portalUrl)
-      if (input.signal?.aborted) throw sessionError('feishu_provisioning_cancelled')
-      const currentUrl = window.webContents.getURL()
-      if (!isDeveloperPortalUrl(currentUrl)) {
-        throw sessionError('feishu_developer_session_expired')
-      }
-      const bootstrap = await readOpenPlatformBootstrap(window)
-      const csrfToken = normalizedRequired(bootstrap.csrfToken)
-      const userId = normalizedRequired(bootstrap.userId)
-      const tenantId = normalizedRequired(bootstrap.tenantId)
-      if (!csrfToken || !userId || !tenantId) {
-        throw sessionError('feishu_open_platform_bootstrap_incomplete')
-      }
-      if (
-        userId !== input.expectedIdentity.userId
-        || tenantId !== input.expectedIdentity.tenantId
-      ) throw sessionError('feishu_developer_identity_changed')
-      const apiOrigin = requireOpenPlatformOrigin(bootstrap.apiOrigin, identity.brand)
-      return {
-        brand: identity.brand,
-        apiOrigin,
-        csrfToken,
-        fetch: async (rawUrl, init = {}) => {
-          const url = requireOpenPlatformApiUrl(rawUrl, apiOrigin)
-          return this.#session.fetch(url, {
-            ...init,
-            credentials: 'include'
-          })
-        }
-      }
-    } catch (error) {
-      if (input.signal?.aborted) throw sessionError('feishu_provisioning_cancelled')
-      if (
-        !window.isDestroyed()
-        && !window.webContents.isDestroyed()
-        && isFeishuLoginUrl(window.webContents.getURL())
-      ) throw sessionError('feishu_developer_session_expired')
+    const browserSession = this.#browserSession
+    if (!identity || !browserSession) throw new FeishuSessionError('feishu_developer_session_expired')
+    const generation = this.#sessionGeneration
+    const lifetime = this.#sessionAbort.signal
+    const signal = input.signal ? AbortSignal.any([input.signal, lifetime]) : lifetime
+    const bootstrap = await this.#bootstrap(browserSession, identity.brand, signal).catch((error: unknown) => {
+      if (input.signal?.aborted) throw new FeishuSessionError('feishu_provisioning_cancelled')
       throw error
-    } finally {
-      input.signal?.removeEventListener('abort', onAbort)
-      this.#activeOpenPlatformWindows.delete(window)
-      if (!window.isDestroyed()) window.destroy()
+    })
+    const check = (): void => {
+      if (input.signal?.aborted) throw new FeishuSessionError('feishu_provisioning_cancelled')
+      if (generation !== this.#sessionGeneration) throw new FeishuSessionError('feishu_developer_session_replaced')
+      throwIfAborted(signal)
+    }
+    check()
+    if (accountIdForStoredIdentity(bootstrap.identity) !== accountIdForStoredIdentity(identity)
+      || bootstrap.identity.userId !== input.expectedIdentity.userId
+      || bootstrap.identity.tenantId !== input.expectedIdentity.tenantId) {
+      throw new FeishuSessionError('feishu_developer_identity_changed')
+    }
+    const http = this.#http(browserSession)
+    return {
+      brand: bootstrap.identity.brand, apiOrigin: bootstrap.apiOrigin, csrfToken: bootstrap.csrfToken,
+      fetch: async (rawUrl, init = {}) => {
+        check()
+        const requestSignal = init.signal ? AbortSignal.any([signal, init.signal]) : signal
+        const headers = new Headers(init.headers)
+        headers.set('referer', `${bootstrap.apiOrigin}/app`)
+        headers.set('origin', bootstrap.apiOrigin)
+        headers.set('x-csrf-token', bootstrap.csrfToken)
+        const result = await http.request(rawUrl, { kind: 'api', origin: bootstrap.apiOrigin }, {
+          ...init, headers, signal: requestSignal
+        })
+        check()
+        return result.response
+      }
     }
   }
 
   async persist(): Promise<void> {
-    if (!this.#storedIdentity) return
-    await this.#persist(this.#storedIdentity)
+    if (this.#storedIdentity && this.#browserSession) {
+      await this.#persist(this.#storedIdentity, this.#browserSession, this.#portalOrigin)
+    }
   }
 
-  #createWindow(
-    show: boolean,
-    parent: BrowserWindow | null = null,
-    browserSession: Session = this.#session
-  ): BrowserWindow {
-    const window = new BrowserWindow({
-      show,
-      parent: parent && !parent.isDestroyed() ? parent : undefined,
-      modal: show && Boolean(parent && !parent.isDestroyed()),
-      width: 760,
-      height: 780,
-      minWidth: 560,
-      minHeight: 620,
-      title: 'Rovai · 飞书开放平台',
-      autoHideMenuBar: true,
-      webPreferences: {
-        session: browserSession,
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-        devTools: false
-      }
-    })
-    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    window.webContents.on('will-navigate', (event, url) => {
-      if (!isAllowedFeishuTopLevelUrl(url)) event.preventDefault()
-    })
-    return window
+  #http(session: Session, diagnostic?: (event: FeishuRequestDiagnostic) => void): FeishuSessionHttp {
+    return new FeishuSessionHttp({ fetch: (url, init) => this.#request(session, String(url), init ?? {}) },
+      this.#protocol.profile.requestTimeoutMs, diagnostic)
+  }
+
+  async #bootstrap(session: Session, brand: FeishuDeveloperIdentity['brand'], signal: AbortSignal) {
+    const { response, finalUrl } = await this.#http(session).request(
+      portalUrlForBrand(brand, this.#portalOrigin), { kind: 'navigation' }, { signal }
+    )
+    throwIfAborted(signal)
+    if (isFeishuLoginUrl(finalUrl)) throw new FeishuSessionError('feishu_developer_session_expired')
+    requirePortalResponse(response)
+    const html = await abortable(response.text(), signal)
+    const bootstrap = readOpenPlatformBootstrap(html, finalUrl)
+    return bootstrap
+  }
+
+  #checkAttempt(attempt: LoginAttempt): void {
+    // A buffered response/microtask can settle before an overdue timer gets CPU time.
+    if (!attempt.controller.signal.aborted && Date.now() >= attempt.deadline) {
+      attempt.controller.abort(new FeishuSessionError('feishu_login_timeout'))
+    }
+    throwIfAborted(attempt.controller.signal)
+    if (this.#activeAttempt !== attempt || attempt.generation !== this.#loginGeneration) {
+      throw new FeishuSessionError('feishu_login_cancelled')
+    }
+  }
+
+  #stage(attempt: LoginAttempt, stage: FeishuLoginStage): void {
+    this.#checkAttempt(attempt)
+    if (!canAdvanceFeishuLoginStage(attempt.stage, stage)) return
+    attempt.stage = stage
+    attempt.options.onStatus?.(stage)
+    this.#diagnostic({ attemptId: attempt.attemptId, stage })
   }
 
   async #ensureRestored(): Promise<void> {
@@ -482,167 +422,79 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
 
   async #restore(): Promise<void> {
     const generation = this.#sessionGeneration
-    const stored = await this.#store.read<FeishuDeveloperIdentity, StoredFeishuDeveloperSession>(
-      'feishu'
-    )
+    const signal = this.#sessionAbort.signal
+    const stored = await abortable(this.#store.read<FeishuDeveloperIdentity, StoredFeishuDeveloperSession>('feishu'), signal)
     if (generation !== this.#sessionGeneration) return
-    if (!stored) {
+    if (!stored) { this.#restored = true; return }
+    const origin = openPlatformOrigin(portalUrlForBrand(stored.identity.brand, stored.session.portalOrigin), stored.identity.brand)
+    const identity = normalizeFeishuIdentity(stored.identity, origin)
+    const browserSession = freshSession('restored')
+    try {
+      for (const cookie of stored.session.cookies) {
+        throwIfAborted(signal)
+        if (!isFeishuCookieDomain(cookie.domain)) continue
+        if (!cookie.session && cookie.expirationDate !== undefined && cookie.expirationDate <= Date.now() / 1_000) continue
+        await abortable(browserSession.cookies.set({
+          url: cookieUrl(cookie), name: cookie.name, value: cookie.value,
+          // Omitting domain preserves host-only cookies. Legacy rows used Chromium's leading dot.
+          ...(!(cookie.hostOnly ?? !cookie.domain.startsWith('.')) ? { domain: cookie.domain } : {}),
+          path: cookie.path, secure: cookie.secure, httpOnly: cookie.httpOnly,
+          sameSite: cookie.sameSite, expirationDate: cookie.session ? undefined : cookie.expirationDate
+        }), signal)
+        if (generation !== this.#sessionGeneration) return
+      }
+      throwIfAborted(signal)
+      this.#browserSession = browserSession
+      this.#storedIdentity = identity
+      this.#storedRevision = stored.revision
+      this.#portalOrigin = origin
       this.#restored = true
-      return
+    } finally {
+      if (this.#browserSession !== browserSession) void browserSession.clearStorageData().catch(() => undefined)
     }
-    const browserSession = this.#session
-    for (const cookie of stored.session.cookies) {
-      if (!cookie.session && cookie.expirationDate !== undefined
-        && cookie.expirationDate <= Date.now() / 1_000) continue
-      // A local Cookie store failure is retryable; do not inspect a partially restored jar.
-      await browserSession.cookies.set({
-        url: cookieUrl(cookie),
-        name: cookie.name,
-        value: cookie.value,
-        domain: cookie.domain,
-        path: cookie.path,
-        secure: cookie.secure,
-        httpOnly: cookie.httpOnly,
-        sameSite: cookie.sameSite,
-        expirationDate: cookie.session ? undefined : cookie.expirationDate
-      })
-    }
-    if (generation !== this.#sessionGeneration) return
-    this.#storedIdentity = stored.identity
-    this.#storedRevision = stored.revision
-    this.#restored = true
   }
 
-  async #persist(
-    identity: FeishuDeveloperIdentity,
-    browserSession: Session = this.#session
-  ): Promise<void> {
+  async #persist(identity: FeishuDeveloperIdentity, browserSession: Session, origin?: string): Promise<void> {
     const expectedRevision = this.#storedRevision
+    const signal = this.#sessionAbort.signal
     if (expectedRevision === null) return
-    const session = await this.#capture(browserSession)
-    if (this.#browserSession !== browserSession || this.#storedRevision !== expectedRevision) {
-      throw sessionError('feishu_developer_session_inspection_unavailable')
+    const session = await abortable(this.#capture(browserSession, origin), signal)
+    const check = (): void => {
+      throwIfAborted(signal)
+      if (this.#browserSession !== browserSession || this.#storedRevision !== expectedRevision) {
+        throw new FeishuSessionError('feishu_developer_session_inspection_unavailable')
+      }
     }
-    const revision = await this.#store.replace({
-      provider: 'feishu',
-      accountId: accountIdForStoredIdentity(identity),
-      identity,
-      session,
-      expectedRevision
-    })
-    if (this.#browserSession !== browserSession || this.#storedRevision !== expectedRevision) {
-      throw sessionError('feishu_developer_session_inspection_unavailable')
-    }
+    check()
+    const revision = await abortable(this.#store.replace({
+      provider: 'feishu', accountId: accountIdForStoredIdentity(identity),
+      identity, session, expectedRevision
+    }), signal)
+    check()
     this.#storedRevision = revision
     this.#storedIdentity = identity
+    this.#portalOrigin = origin
   }
 
-  async #capture(browserSession: Session): Promise<StoredFeishuDeveloperSession> {
+  async #capture(browserSession: Session, portalOrigin?: string): Promise<StoredFeishuDeveloperSession> {
     const cookies = await browserSession.cookies.get({})
-    return {
-      cookies: cookies
-        .filter((cookie): cookie is Cookie & { domain: string } => (
-          typeof cookie.domain === 'string' && isFeishuCookieDomain(cookie.domain)
-        ))
-        .map((cookie) => ({
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path ?? '/',
-          secure: cookie.secure,
-          httpOnly: cookie.httpOnly,
-          sameSite: cookie.sameSite,
-          session: cookie.session,
-          expirationDate: cookie.expirationDate
-        }))
-    }
-  }
-
-  #closeActiveLogin(): void {
-    const window = this.#activeLoginWindow
-    this.#activeLoginWindow = null
-    if (window && !window.isDestroyed()) window.destroy()
-  }
-
-  get #session(): Session {
-    this.#browserSession ??= electronSession.fromPartition(SESSION_PARTITION, { cache: false })
-    return this.#browserSession
+    return { portalOrigin, cookies: cookies
+      .filter((cookie): cookie is Cookie & { domain: string } => typeof cookie.domain === 'string'
+        && isFeishuCookieDomain(cookie.domain))
+      .map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain,
+        path: cookie.path ?? '/', secure: cookie.secure, httpOnly: cookie.httpOnly,
+        sameSite: cookie.sameSite, session: cookie.session, expirationDate: cookie.expirationDate,
+        hostOnly: cookie.hostOnly })) }
   }
 }
 
-async function readDeveloperIdentity(
-  window: BrowserWindow,
-  currentUrl: string
-): Promise<FeishuDeveloperIdentity | null> {
-  const raw = await window.webContents.executeJavaScript(
-    `(() => {
-      const user = window.user ?? {}
-      return {
-        id: typeof user.id === 'string' ? user.id : '',
-        name: typeof user.name === 'string' ? user.name : '',
-        email: typeof user.email === 'string' ? user.email : '',
-        tenantId: typeof user.tenantId === 'string' ? user.tenantId : '',
-        tenantName: typeof user.tenantName === 'string' ? user.tenantName : ''
-      }
-    })()`,
-    true
-  ) as PortalIdentity
-  const userId = normalizedRequired(raw.id)
-  const userName = normalizedRequired(raw.name)
-  const tenantId = normalizedRequired(raw.tenantId)
-  const tenantName = normalizedRequired(raw.tenantName)
-  if (!userId || !userName || !tenantId || !tenantName) return null
-  const email = normalizedOptional(raw.email)
-  return {
-    brand: brandFromUrl(currentUrl),
-    userId,
-    userName,
-    ...(email ? { email } : {}),
-    tenantId,
-    tenantName
-  }
+function freshSession(purpose: string): Session {
+  return electronSession.fromPartition(`rovai-feishu-developer-${purpose}-${randomUUID()}`, { cache: false })
 }
 
-async function readOpenPlatformBootstrap(
-  window: BrowserWindow
-): Promise<OpenPlatformBootstrap> {
-  return await window.webContents.executeJavaScript(
-    `(() => {
-      const user = window.user ?? {}
-      const apiOrigin = window.outDomain?.larkOpen ?? window.location?.origin ?? ''
-      return {
-        csrfToken: typeof window.csrfToken === 'string' ? window.csrfToken : '',
-        apiOrigin: typeof apiOrigin === 'string' ? apiOrigin : '',
-        userId: typeof user.id === 'string' ? user.id : '',
-        tenantId: typeof user.tenantId === 'string' ? user.tenantId : ''
-      }
-    })()`,
-    true
-  ) as OpenPlatformBootstrap
-}
-
-async function qrCanvasBounds(window: BrowserWindow): Promise<{
-  x: number
-  y: number
-  width: number
-  height: number
-} | null> {
-  const value = await window.webContents.executeJavaScript(
-    `(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return null
-      const rect = canvas.getBoundingClientRect()
-      if (rect.width < 120 || rect.height < 120) return null
-      return {
-        x: Math.max(0, Math.floor(rect.x)),
-        y: Math.max(0, Math.floor(rect.y)),
-        width: Math.ceil(rect.width),
-        height: Math.ceil(rect.height)
-      }
-    })()`,
-    true
-  ) as { x: number; y: number; width: number; height: number } | null
-  return value
+function requirePortalResponse(response: Response): void {
+  if (response.status === 401) throw new FeishuSessionError('feishu_developer_session_expired')
+  if (!response.ok) throw new FeishuSessionError('feishu_open_platform_http_error', { httpStatus: response.status })
 }
 
 function cookieUrl(cookie: StoredFeishuCookie): string {
@@ -651,121 +503,6 @@ function cookieUrl(cookie: StoredFeishuCookie): string {
   return `${cookie.secure ? 'https' : 'http'}://${host}${path}`
 }
 
-function isFeishuCookieDomain(domain: string): boolean {
-  const normalized = domain.replace(/^\./, '').toLowerCase()
-  return normalized === 'feishu.cn'
-    || normalized.endsWith('.feishu.cn')
-    || normalized === 'larksuite.com'
-    || normalized.endsWith('.larksuite.com')
-}
-
-function isAllowedFeishuTopLevelUrl(value: string): boolean {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && isFeishuCookieDomain(url.hostname)
-  } catch {
-    return false
-  }
-}
-
-function isDeveloperPortalUrl(value: string): boolean {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.username && !url.password
-      && (url.hostname === 'open.feishu.cn' || url.hostname === 'open.larksuite.com')
-  } catch {
-    return false
-  }
-}
-
-function isFeishuLoginUrl(value: string): boolean {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.username && !url.password
-      && (url.hostname === 'accounts.feishu.cn' || url.hostname === 'accounts.larksuite.com')
-  } catch {
-    return false
-  }
-}
-
-function isExpectedPortalRedirectAbort(error: unknown, window: BrowserWindow): boolean {
-  if (!error || typeof error !== 'object') return false
-  const candidate = error as { code?: unknown; errno?: unknown }
-  if (candidate.code !== 'ERR_ABORTED' && candidate.errno !== -3) return false
-  if (window.isDestroyed() || window.webContents.isDestroyed()) return false
-  const currentUrl = window.webContents.getURL()
-  return isFeishuLoginUrl(currentUrl) || isDeveloperPortalUrl(currentUrl)
-}
-
-function brandFromUrl(value: string): 'feishu' | 'lark' {
-  return new URL(value).hostname.toLowerCase().endsWith('larksuite.com') ? 'lark' : 'feishu'
-}
-
-function portalUrlForBrand(brand: 'feishu' | 'lark'): string {
-  return brand === 'lark'
-    ? 'https://open.larksuite.com/app'
-    : FEISHU_PORTAL_URL
-}
-
-function requireOpenPlatformOrigin(
-  value: unknown,
-  brand: 'feishu' | 'lark'
-): string {
-  const expected = brand === 'lark'
-    ? 'https://open.larksuite.com'
-    : 'https://open.feishu.cn'
-  let url: URL
-  try {
-    url = new URL(String(value ?? ''))
-  } catch {
-    throw sessionError('feishu_open_platform_origin_rejected')
-  }
-  if (
-    url.origin !== expected
-    || url.pathname !== '/'
-    || url.search !== ''
-    || url.hash !== ''
-    || url.username !== ''
-    || url.password !== ''
-  ) throw sessionError('feishu_open_platform_origin_rejected')
-  return expected
-}
-
-function requireOpenPlatformApiUrl(value: string, apiOrigin: string): string {
-  let url: URL
-  try {
-    url = new URL(value, apiOrigin)
-  } catch {
-    throw sessionError('feishu_open_platform_api_url_rejected')
-  }
-  if (
-    url.origin !== apiOrigin
-    || !url.pathname.startsWith('/developers/')
-    || url.username !== ''
-    || url.password !== ''
-  ) throw sessionError('feishu_open_platform_api_url_rejected')
-  return url.toString()
-}
-
-function normalizedRequired(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
-}
-
-function normalizedOptional(value: unknown): string | undefined {
-  return normalizedRequired(value) ?? undefined
-}
-
 function accountIdForStoredIdentity(identity: FeishuDeveloperIdentity): `sha256:${string}` {
-  const value = `${identity.brand}\0${identity.tenantId}\0${identity.userId}`
-  return `sha256:${createHash('sha256').update(value).digest('hex')}`
-}
-
-function sessionError(code: string): Error {
-  return new Error(code)
-}
-
-function normalizeSessionError(error: unknown, fallback: string): Error {
-  return error instanceof Error ? error : sessionError(fallback)
+  return `sha256:${createHash('sha256').update(`${identity.brand}\0${identity.tenantId}\0${identity.userId}`).digest('hex')}`
 }

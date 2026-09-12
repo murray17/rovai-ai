@@ -2709,6 +2709,7 @@ export interface ChannelQrAttemptView {
     | 'preparing'
     | 'awaiting_scan'
     | 'scan_confirmed'
+    | 'completing_login'
     | 'awaiting_interaction'
     | 'inspecting_identity'
     | 'saving_local_session'
@@ -2717,7 +2718,12 @@ export interface ChannelQrAttemptView {
     | 'cancelled'
     | 'failed'
   qrDataUrl: string | null
+  /** Server-provided expiry only. */
   expiresAt: string | null
+  /** Local waiting deadline, not a guaranteed QR lifetime. */
+  waitUntil?: string | null
+  /** Local transaction acknowledgement is unknown; cancellation stays locked. */
+  commitUncertain?: boolean
   detail: string
 }
 

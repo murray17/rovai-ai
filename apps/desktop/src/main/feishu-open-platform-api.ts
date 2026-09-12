@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import type { FeishuOpenPlatformSession } from './feishu-developer-session'
+import { isFeishuLoginUrl } from './feishu-domains'
 import type { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
 import { FEISHU_MEMBER_BOT_LABEL } from '../shared/channel-member-bot-copy'
 
@@ -1173,7 +1174,7 @@ export class OpenPlatformApiClient {
     if (isRedirectStatus(response.status)) {
       const location = response.headers.get('location')
       const target = redirectTarget(location, url)
-      if (!target || isFeishuAccountLoginUrl(target)) {
+      if (!target || isFeishuLoginUrl(target.href)) {
         throw apiError('feishu_developer_session_expired', false)
       }
       if (
@@ -1681,11 +1682,6 @@ function redirectTarget(location: string | null, requestUrl: URL): URL | null {
   } catch {
     return null
   }
-}
-
-function isFeishuAccountLoginUrl(url: URL): boolean {
-  const host = url.hostname.toLowerCase()
-  return host === 'accounts.feishu.cn' || host === 'accounts.larksuite.com'
 }
 
 function isReconcilableReleaseFailure(error: unknown): error is FeishuOpenPlatformApiError {
