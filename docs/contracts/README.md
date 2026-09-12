@@ -359,7 +359,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v31（当前）](run-process-detail-surface-v31.md) | v30 公开指令不变；统一终态步骤摘要、子行状态形状、Tool 详情与文件入口，并收敛 Evidence 历史压缩及默认模型观察写入边界 |
+| [Run Process Detail Surface v32（当前）](run-process-detail-surface-v32.md) | v31 布局和普通工具结果不变；Built-in 使用 CLI 名称、仅显示公开入参，省略正文并折叠可靠关联的 Shell 载体 |
+| [Run Process Detail Surface v31（历史）](run-process-detail-surface-v31.md) | v30 公开指令不变；统一终态步骤摘要、子行状态形状、Tool 详情与文件入口，并收敛 Evidence 历史压缩及默认模型观察写入边界 |
 | [Run Process Detail Surface v30（历史）](run-process-detail-surface-v30.md) | v29 布局、Tool 行与 Compaction 不变；活动 Tool 组摘要优先展示已有公开证据中的具体当前指令 |
 | [Run Process Detail Surface v29（历史）](run-process-detail-surface-v29.md) | v28 布局与取消不变；增加 active AgentRun 的本地非 Tool Compaction 展示旁路 |
 | [Run Process Detail Surface v28（历史）](run-process-detail-surface-v28.md) | v27 布局不变；取消显示已取消并清除旧外部效果提示 |

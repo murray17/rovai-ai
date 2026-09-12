@@ -125,12 +125,13 @@ const runtimes = [
       toolName: 'Bash', title: 'Bash', input: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'", output: null
     }
   }),
-  runtime('antigravity', 'antigravity-app', 'Antigravity', 'camp.message.send', {
+  runtime('antigravity', 'antigravity-app', 'Antigravity', 'rovai send', {
     protocol: 'antigravity-log', domain: 'tool', semantic: 'tool.call',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', sourceAuthority: 'core',
     credibility: 'core_verified', payload: {
       toolCallId: 'op-antigravity', status: 'completed', kind: 'mcp_tool_call',
-      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'camp.message.send', output: 'delivered'
+      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'camp.message.send', output: 'delivered',
+      operationProjection: { operation: 'camp.message.send', canonicalInput: { recipientAgentIds: ['agent_101'] } }
     }
   })
 ]

@@ -100,7 +100,7 @@ export function executionPublicCommandTitle(step: ExecutionStep, redact: (text: 
   const title = step.toolName === 'apply_patch' ? 'apply_patch' : step.publicCommand ?? step.title
   if (RAW_PATCH.test(title)) return '命令内容已隐藏（含原始补丁）'
   const safeTitle = redact(title)
-  return ROVAI_SEND.test(title) ? safeTitle.replace(MESSAGE_BODY, `--body ${HIDDEN}`) : safeTitle
+  return ROVAI_SEND.test(title) ? safeTitle.replace(MESSAGE_BODY, '').replace(/\s+/gu, ' ').trim() : safeTitle
 }
 
 /** Compact provider-card label; the complete safe command remains available in the Web console. */

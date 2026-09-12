@@ -5728,7 +5728,7 @@ describe('task event projections', () => {
     expect(waitingMarkup).toContain('连接中断，等待恢复')
   })
 
-  it('keeps complete Built-in Camp public results behind nested lazy Tool rows', () => {
+  it('keeps Built-in Camp inputs behind nested Tool rows without exposing results', () => {
     const readResult = {
       mode: 'item',
       message: { messageId: 'message-1', body: '完整消息正文' }
@@ -5759,7 +5759,7 @@ describe('task event projections', () => {
         output: null,
         operationProjection: {
           operation,
-          canonicalInput: { mustNotAppear: 'private-input-projection' },
+          canonicalInput: { query: 'public-input-query' },
           canonicalResult: result
         },
         coreEnvelope: {
@@ -5791,14 +5791,14 @@ describe('task event projections', () => {
     })
     const readItem = progress.items[0]
     if (readItem.kind !== 'tool') throw new Error('Expected camp.read Tool progress')
-    expect(JSON.parse(readItem.step.detail)).toEqual(readResult)
+    expect(JSON.parse(readItem.step.detail)).toEqual({ query: 'public-input-query' })
     expect(readItem.step.detail).not.toContain('coreEnvelope')
     expect(readItem.step.detail).not.toContain('private-request-1')
 
     const resultText = executionEvidenceResultText('runtime.action', events[1].payload)
     expect(resultText).not.toBeNull()
-    expect(JSON.parse(resultText ?? 'null')).toEqual(searchResult)
-    expect(resultText).not.toContain('private-input-projection')
+    expect(JSON.parse(resultText ?? 'null')).toEqual({ query: 'public-input-query' })
+    expect(resultText).not.toContain('search-result-1')
     expect(resultText).not.toContain('private-request-2')
 
     const run: AgentRunView = {
@@ -5832,7 +5832,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('complete-evidence-control')
     expect(markup).not.toContain('complete-evidence-standalone')
     expect(markup).not.toContain('查看完整工具调用')
-    expect(markup).not.toContain('private-input-projection')
+    expect(markup).not.toContain('public-input-query')
     expect(markup).not.toContain('private-request-2')
   })
 
@@ -6375,7 +6375,7 @@ describe('task event projections', () => {
     })
     expect(executionActivityTitle(genericShell, codexPayload(
       `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
-    ))).toBe('rovai send --public-only --body [已隐藏]')
+    ))).toBe('rovai send --public-only')
     expect(executionActivityTitle(genericShell, codexPayload(
       `/bin/zsh -lc 'rovai --help'`
     ))).toBe('rovai --help')
@@ -6387,10 +6387,10 @@ describe('task event projections', () => {
     ))).toBe('rg --help /private/project/path')
     expect(executionActivityTitle(genericShell, codexPayload(
       `rovai send --body '--help'`
-    ))).toBe('rovai send --body [已隐藏]')
+    ))).toBe('rovai send')
     expect(executionActivityTitle(genericShell, codexPayload(
       `rovai send 'TOP_SECRET_POSITIONAL_BODY'`
-    ))).toBe('rovai send [已隐藏]')
+    ))).toBe('rovai send')
     expect(executionActivityTitle(genericShell, codexPayload(
       `rovai camp TOP_SECRET_UNKNOWN_ACTION`
     ))).toBe('rovai camp TOP_SECRET_UNKNOWN_ACTION')
