@@ -916,10 +916,18 @@ impl ReadModelService {
     }
 
     pub fn navigation_snapshot(&self, database: &mut Database) -> Result<NavigationSnapshot> {
+        self.navigation_snapshot_with_group_limits(database, &BTreeMap::new())
+    }
+
+    pub fn navigation_snapshot_with_group_limits(
+        &self,
+        database: &mut Database,
+        group_limits: &BTreeMap<String, usize>,
+    ) -> Result<NavigationSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camps = load_navigation_camps(&transaction)?;
-        let (quick_chat, projects) = group_navigation_camps(camps);
+        let (quick_chat, projects) = group_navigation_camps(camps, group_limits);
         transaction.commit()?;
         Ok(NavigationSnapshot {
             schema_version: NAVIGATION_SCHEMA_VERSION,
@@ -1776,7 +1784,16 @@ fn compare_navigation_camps(left: &NavigationCampItem, right: &NavigationCampIte
 
 fn group_navigation_camps(
     camps: Vec<NavigationCampItem>,
+    group_limits: &BTreeMap<String, usize>,
 ) -> (NavigationCampGroup, Vec<ProjectNavigationGroup>) {
+    // A request only selects a prefix of existing rows; it never determines an allocation size.
+    let limit = |key: &str| {
+        group_limits
+            .get(key)
+            .copied()
+            .unwrap_or(NAVIGATION_RECENT_CAMP_LIMIT)
+            .max(NAVIGATION_RECENT_CAMP_LIMIT)
+    };
     let mut quick_chat_camps = Vec::new();
     let mut project_camps = BTreeMap::<String, Vec<NavigationCampItem>>::new();
     for camp in camps {
@@ -1794,7 +1811,7 @@ fn group_navigation_camps(
         total_count: quick_chat_camps.len(),
         recent_camps: quick_chat_camps
             .into_iter()
-            .take(NAVIGATION_RECENT_CAMP_LIMIT)
+            .take(limit("quick-chat"))
             .collect(),
     };
 
@@ -1803,17 +1820,16 @@ fn group_navigation_camps(
         .filter_map(|(project_path, mut camps)| {
             camps.sort_by(compare_navigation_camps);
             let representative = camps.first()?.clone();
+            let project_key = format!("directory:{project_path}");
+            let recent_limit = limit(&project_key);
             Some(ProjectNavigationGroup {
-                project_key: format!("directory:{project_path}"),
+                project_key,
                 name: project_display_name(&project_path),
                 project_path,
                 last_activity_at: representative.last_activity_at.clone(),
                 last_activity_global_sequence: representative.last_activity_global_sequence,
                 total_count: camps.len(),
-                recent_camps: camps
-                    .into_iter()
-                    .take(NAVIGATION_RECENT_CAMP_LIMIT)
-                    .collect(),
+                recent_camps: camps.into_iter().take(recent_limit).collect(),
             })
         })
         .collect::<Vec<_>>();
@@ -4950,7 +4966,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn navigation_groups_camps_and_limits_each_recent_section_to_five() {
+    fn navigation_groups_camps_and_reads_requested_prefixes_with_default_five() {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-groups-test-{}", Uuid::new_v4()));
         let quick_chat_root = directory.join("quick-chat");
@@ -4967,7 +4983,7 @@ mod slow_tests {
                 &format!("快速对话 {index}"),
             );
         }
-        for index in 0..2 {
+        for index in 0..6 {
             create_navigation_camp(
                 &mut database,
                 &collaboration,
@@ -4985,8 +5001,8 @@ mod slow_tests {
         assert_eq!(snapshot.quick_chat.recent_camps.len(), 5);
         assert_eq!(snapshot.projects.len(), 1);
         assert_eq!(snapshot.projects[0].name, "rovai-ai");
-        assert_eq!(snapshot.projects[0].total_count, 2);
-        assert_eq!(snapshot.projects[0].recent_camps.len(), 2);
+        assert_eq!(snapshot.projects[0].total_count, 6);
+        assert_eq!(snapshot.projects[0].recent_camps.len(), 5);
         assert!(
             snapshot
                 .quick_chat
@@ -5020,6 +5036,39 @@ mod slow_tests {
             .unwrap();
         assert_eq!(final_page.camps.len(), 1);
         assert_eq!(final_page.next_offset, None);
+
+        // Existing transaction fixture owns default, independent group selection,
+        // minimum and oversized prefix contracts; no parallel database fixture.
+        for (quick_limit, project_limit, expected_quick, expected_project) in
+            [(0, 0, 5, 5), (15, 5, 6, 5), (5, 15, 5, 6), (25, 25, 6, 6)]
+        {
+            let expanded = read_model
+                .navigation_snapshot_with_group_limits(
+                    &mut database,
+                    &BTreeMap::from([
+                        ("quick-chat".to_string(), quick_limit),
+                        (snapshot.projects[0].project_key.clone(), project_limit),
+                        ("directory:/unknown".to_string(), usize::MAX),
+                    ]),
+                )
+                .unwrap();
+            assert_eq!(
+                expanded.through_global_sequence,
+                snapshot.through_global_sequence
+            );
+            assert_eq!(expanded.quick_chat.recent_camps.len(), expected_quick);
+            assert_eq!(expanded.projects[0].recent_camps.len(), expected_project);
+            assert_eq!(expanded.projects.len(), 1);
+            for (actual, expected) in expanded.quick_chat.recent_camps.iter().zip(
+                read_model
+                    .navigation_group_camps(&mut database, None, 0, 200)
+                    .unwrap()
+                    .camps,
+            ) {
+                assert_eq!(actual.id, expected.id);
+                assert_eq!(actual.marker, expected.marker);
+            }
+        }
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

@@ -956,6 +956,11 @@ export interface ProjectNavigationGroup {
   recentCamps: NavigationCampItem[]
 }
 
+export interface NavigationSnapshotRequest {
+  /** Full prefix sizes by canonical group key; omitted groups default to five. */
+  groupLimits?: Record<string, number>
+}
+
 export interface NavigationSnapshot {
   schemaVersion: 3
   throughGlobalSequence: number
