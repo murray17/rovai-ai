@@ -5,7 +5,7 @@ version: 11
 status: accepted
 authority: desktop-file-preview-wire
 source_version: v1.55
-last_updated: 2026-09-07
+last_updated: 2026-09-12
 ---
 
 # File Preview v11
@@ -52,6 +52,14 @@ Managed/legacy 附件保留“复制文件名”，Main 拒绝 absolute 复制�
 显示路径不改变附件的 `allowChildren = false`，不授予父目录、子文件或资源能力。Root Grant、Camp/workspace
 绑定、Runtime 权限、附件持久化和临时文件生命周期均不改变。切换 Camp 后按原 owner locator 重验源文件并重新
 签发路径；失败不查找替代文件。
+
+## 文档读取预算
+
+HTML 网页预览与全文源码处理分别限额：`.html`/`.htm` 在 32 MiB 以内分类为 `html`，`prepareHtml`
+以同一 32 MiB 上限读取；超过该上限分类为 `paged_text`，直接调用 `prepareHtml` 也返回
+`file_too_large`。HTML 超过 4 MiB 不再单独触发源码降级。
+`readText`、Markdown 和其他源码的全文处理仍限于 4 MiB，Markdown 复用 `prepareHtml` 时同样遵守
+4 MiB。响应 shape、来源校验、generation、token 生命周期、HTML 隔离和子资源访问保护均沿用现有合同。
 
 ## 验收
 

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -90,6 +90,38 @@ function request(rawReference: string): OpenFilePreviewRequest {
 }
 
 describe('FilePreviewService', () => {
+  it('prepares HTML above the source budget without relaxing source reads or document protection', async () => {
+    const { root, service } = await fixture()
+    const html = '<h1>大文件网页</h1>' + ' '.repeat(4 * 1024 * 1024)
+    await writeFile(join(root, 'large.html'), html)
+    const opened = await service.open(1, request('large.html'))
+    expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { kind: 'html' } } })
+    if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('expected file preview')
+    const readRequest = { handleId: opened.value.file.handleId, expectedGeneration: opened.value.file.contentGeneration }
+    const prepared = await service.prepareHtml(1, readRequest)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) throw new Error('expected HTML document')
+    expect(prepared.value.html).toBe(html)
+    const assetUrl = `rovai-preview://asset/${prepared.value.tabToken}/site.css`
+    expect(service.authorizeHtmlAsset(1, 'GET', assetUrl)).toBe(true)
+    expect(service.authorizeHtmlAsset(2, 'GET', assetUrl)).toBe(false)
+    expect(await service.readText(1, readRequest)).toMatchObject({ ok: false, error: { code: 'file_too_large' } })
+    await service.release(1, { handleId: readRequest.handleId })
+    expect(service.authorizeHtmlAsset(1, 'GET', assetUrl)).toBe(false)
+    expect(await service.prepareHtml(1, readRequest)).toMatchObject({ ok: false })
+
+    for (const [path, size] of [['oversized.html', 32 * 1024 * 1024 + 1], ['large.md', 4 * 1024 * 1024 + 1]] as const) {
+      await writeFile(join(root, path), '# oversized')
+      await truncate(join(root, path), size)
+      const oversized = await service.open(1, request(path))
+      expect(oversized).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { kind: 'paged_text' } } })
+      if (!oversized.ok || oversized.value.kind !== 'file_preview') throw new Error('expected paged preview')
+      expect(await service.prepareHtml(1, {
+        handleId: oversized.value.file.handleId, expectedGeneration: oversized.value.file.contentGeneration
+      })).toMatchObject({ ok: false, error: { code: 'file_too_large' } })
+    }
+  })
+
   it.each([
     ['README.md', 'project_relative', 'README.md', true],
     ['docs/guide.md', 'project_relative', 'docs/guide.md', true],

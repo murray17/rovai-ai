@@ -522,29 +522,41 @@ export class FilePreviewService {
     webContentsId: number,
     request: { handleId: string; expectedGeneration: string }
   ): Promise<FilePreviewOperationResult<FilePreviewHtmlDocument>> {
-    const result = await this.readText(webContentsId, request)
-    if (!result.ok) return result
-    const record = this.#record(webContentsId, request.handleId, request.expectedGeneration)
-    this.#revokeHtmlTokens(record.handleId)
-    const token: HtmlPreviewToken = {
-      token: randomUUID(),
-      bridgeToken: randomUUID(),
-      handleId: record.handleId,
-      webContentsId: record.webContentsId,
-      campId: record.campId,
-      generation: record.generation,
-      assetRoot: dirname(record.canonicalPath),
-      expiresAt: Date.now() + HTML_TOKEN_TTL_MS
+    try {
+      const record = this.#record(webContentsId, request.handleId, request.expectedGeneration)
+      // Markdown also uses this entry for local assets, retaining the source-text budget.
+      const limit = record.classification.mime === 'text/html'
+        ? filePreviewLimits.htmlDocumentBytes
+        : filePreviewLimits.wholeTextBytes
+      if (record.version.size > limit) {
+        return failed('file_too_large', '文件较大，请使用分页阅读。')
+      }
+      const html = strictDecode(await this.#readAt(record, 0, record.version.size))
+      // Recheck after reading: closing the Tab or switching Camps revokes this handle.
+      const current = this.#record(webContentsId, request.handleId, request.expectedGeneration)
+      this.#revokeHtmlTokens(current.handleId)
+      const token: HtmlPreviewToken = {
+        token: randomUUID(),
+        bridgeToken: randomUUID(),
+        handleId: current.handleId,
+        webContentsId: current.webContentsId,
+        campId: current.campId,
+        generation: current.generation,
+        assetRoot: dirname(current.canonicalPath),
+        expiresAt: Date.now() + HTML_TOKEN_TTL_MS
+      }
+      this.#htmlTokens.set(token.token, token)
+      return ok({
+        html,
+        tabToken: token.token,
+        bridgeToken: token.bridgeToken,
+        assetBasePath: '',
+        contentGeneration: current.generation,
+        contentVersion: current.version
+      })
+    } catch (error) {
+      return this.#errorResult(error, 'decode_failed')
     }
-    this.#htmlTokens.set(token.token, token)
-    return ok({
-      html: result.value.text,
-      tabToken: token.token,
-      bridgeToken: token.bridgeToken,
-      assetBasePath: '',
-      contentGeneration: result.value.contentGeneration,
-      contentVersion: result.value.contentVersion
-    })
   }
 
   authorizeHtmlAsset(webContentsId: number, method: string, url: string): boolean {

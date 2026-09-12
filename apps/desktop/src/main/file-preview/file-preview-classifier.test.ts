@@ -25,4 +25,19 @@ describe('classifyFilePreview', () => {
     expect(classifyFilePreview('/repo/install.exe', 10, Buffer.alloc(0)).openRisk).toBe('confirm')
     expect(classifyFilePreview('/repo/script.sh', 10, Buffer.from('#!/bin/sh')).openRisk).toBe('confirm')
   })
+
+  it('uses a separate HTML document budget from whole-source rendering', () => {
+    for (const path of ['/repo/index.html', '/repo/index.HTM']) {
+      for (const size of [4 * 1024 * 1024 + 1, 32 * 1024 * 1024]) {
+        expect(classifyFilePreview(path, size, Buffer.from('<h1>Preview</h1>')))
+          .toMatchObject({ kind: 'html', mime: 'text/html' })
+      }
+      expect(classifyFilePreview(path, 32 * 1024 * 1024 + 1, Buffer.alloc(0)).kind)
+        .toBe('paged_text')
+    }
+    for (const path of ['large.md', 'large.ts', 'large.txt']) {
+      expect(classifyFilePreview(path, 4 * 1024 * 1024 + 1, Buffer.from('text')).kind)
+        .toBe('paged_text')
+    }
+  })
 })
