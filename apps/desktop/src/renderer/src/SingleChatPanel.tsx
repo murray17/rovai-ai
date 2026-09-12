@@ -696,7 +696,7 @@ export function SingleChatPanel({
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
   const [returningPending, setReturningPending] = useState(false)
   const returningPendingRef = useRef(false)
-  const leavingRef = useRef(false)
+  const leaveLeaseCountRef = useRef(0)
   const [leaving, setLeaving] = useState(false)
   const returnRequestInFlightRef = useRef(false)
   const [pendingReturnRecovery, setPendingReturnRecovery] = useState<PendingReturnRecovery | null>(null)
@@ -705,10 +705,16 @@ export function SingleChatPanel({
       if (returningPendingRef.current) {
         throw new Error('单聊消息移回结果尚未确认，请先在单聊中重试恢复消息。')
       }
-      leavingRef.current = true
+      leaveLeaseCountRef.current += 1
       setLeaving(true)
+      let completed = false
       return { complete(didLeave) {
-        if (!didLeave) { leavingRef.current = false; setLeaving(false) }
+        if (completed) return
+        completed = true
+        if (!didLeave) {
+          leaveLeaseCountRef.current -= 1
+          setLeaving(leaveLeaseCountRef.current > 0)
+        }
       } }
     })
     return () => onLeaveGuardChange?.(null)
@@ -1079,7 +1085,7 @@ export function SingleChatPanel({
   }, [currentSnapshot, notificationFocus, onNotificationFocusPresented, visible])
 
   const performPendingReturn = async (transfer: PendingReturnRecovery): Promise<void> => {
-    if (leavingRef.current) throw new Error('正在离开当前会话，请稍后再编辑待发送消息。')
+    if (leaveLeaseCountRef.current > 0) throw new Error('正在离开当前会话，请稍后再编辑待发送消息。')
     if (returnRequestInFlightRef.current) return
     const { snapshot: current, item, editToken, commandId } = transfer
     returnRequestInFlightRef.current = true

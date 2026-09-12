@@ -190,7 +190,8 @@ let releasePendingReturn: (() => void) | null = null
 const pendingReturnReceipts = new Map<string, StoredCommandResult>()
 type LeavePreparation = { complete(didLeave: boolean): void }
 let leaveGuard: (() => LeavePreparation) | null = null
-let pendingLeave: LeavePreparation | null = null
+const pendingLeaves: LeavePreparation[] = []
+let lastCancelledLeave: LeavePreparation | undefined
 const bindLeaveGuard = (guard: (() => LeavePreparation) | null): void => { leaveGuard = guard }
 
 function setMode(phase: Phase, notify = true): void {
@@ -433,8 +434,9 @@ Object.assign(window, {
       if (!leaveGuard) throw new Error('Single Chat did not register its leave guard')
       try { leaveGuard().complete(false); return null } catch (error) { return (error as Error).message }
     },
-    beginLeave: () => { pendingLeave = leaveGuard!() },
-    cancelLeave: () => { pendingLeave?.complete(false); pendingLeave = null },
+    beginLeave: () => { pendingLeaves.push(leaveGuard!()) },
+    cancelLeave: () => { lastCancelledLeave = pendingLeaves.shift(); lastCancelledLeave?.complete(false) },
+    repeatLeaveCancellation: () => { lastCancelledLeave?.complete(false) },
     pendingState: () => ({
       commands: requests.filter(request => request.method === 'singleChat.pendingInputs.edit').map(request => request.params),
       queue: currentSnapshot.pendingInputs.items.map(item => item.id),

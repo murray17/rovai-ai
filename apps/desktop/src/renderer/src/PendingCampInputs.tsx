@@ -88,7 +88,7 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const busyRef = useRef(false)
-  const leavingRef = useRef(false)
+  const leaveLeaseCountRef = useRef(0)
   const [leaving, setLeaving] = useState(false)
   const mounted = useRef(false)
   const readerRef = useRef<ReturnType<typeof createPendingInputsRefresh> | null>(null)
@@ -101,10 +101,16 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
     clearError: () => setError(null),
     async prepareForLeave() {
       if (busyRef.current) throw new Error('待发送消息正在移回或删除，请稍后再离开。')
-      leavingRef.current = true
+      leaveLeaseCountRef.current += 1
       setLeaving(true)
+      let completed = false
       return { complete(didLeave) {
-        if (!didLeave) { leavingRef.current = false; setLeaving(false) }
+        if (completed) return
+        completed = true
+        if (!didLeave) {
+          leaveLeaseCountRef.current -= 1
+          setLeaving(leaveLeaseCountRef.current > 0)
+        }
       } }
     }
   }), [])
@@ -136,7 +142,7 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
   useEffect(() => { void refresh().catch(() => undefined) }, [refresh, refreshKey, executionActive, submittedKey])
 
   const perform = async (item: PendingCampInputView, remove: boolean): Promise<void> => {
-    if (busyRef.current || leavingRef.current || disabled) return
+    if (busyRef.current || leaveLeaseCountRef.current > 0 || disabled) return
     busyRef.current = true
     setBusy(true)
     setError(null)
