@@ -49,3 +49,4 @@
   .remote-title-row { gap: 6px; }
   .remote-section-heading { align-items: flex-start !important; flex-wrap: wrap; }
 }
+.remote-connection-page select.remote-address-select { width: 100%; }

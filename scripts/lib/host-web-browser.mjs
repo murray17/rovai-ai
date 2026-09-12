@@ -93,6 +93,10 @@ export async function launchAcceptanceBrowser({ executable, args, env = process.
       },
       async click(expression) {
         const point = await evaluate(`(() => { const e = ${expression}; if (!e) throw Error('Click target missing: ' + ${JSON.stringify(expression)}); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 } })()`)
+        // Native pointers enter the target before pressing. This also reveals
+        // production hover controls whose pointer-events are otherwise disabled.
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+        await evaluate('new Promise(resolve => requestAnimationFrame(() => resolve(true)))')
         await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
         await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
       },

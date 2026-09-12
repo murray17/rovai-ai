@@ -1,7 +1,7 @@
 ---
 document_type: ui-interaction-draft
 authority: host-remote-connection-settings-review
-status: draft
+status: implemented
 target_version: v1.59
 last_updated: 2026-09-12
 ---
@@ -9,8 +9,7 @@ last_updated: 2026-09-12
 # 设置 · 远程连接交互稿
 
 用户要求在拉取 main 后，以当前设置风格为基准新增“远程连接”菜单设计稿。本稿针对现有 Desktop
-浏览器访问入口与 Web 当前连接状态；不是更换 Host 的客户端、服务发现平台或新的 WebUI。菜单尚未接入
-正式产品。模拟数据与当前 Host 能力分开说明；阶段 1–3 的范围仍见[宽屏对照](host-web-parity.md)。
+浏览器访问入口与 Web 当前连接状态；不是更换 Host 的客户端、服务发现平台或新的 WebUI。菜单已接入正式 Desktop/Web；下方离线稿使用同一生产组件。模拟数据与当前 Host 能力分开说明；阶段 1–3 的范围仍见[宽屏对照](host-web-parity.md)。
 
 ## 可直接查看的稿件
 
@@ -21,7 +20,7 @@ last_updated: 2026-09-12
 
 [Renderer 入口](../../scripts/fixtures/remote-connection/renderer.tsx)和
 [构建脚本](../../scripts/review-remote-connection.mjs)沿用现有 Vite/React fixture 方式。
-开启、轮换、关闭、工作区选择与登录只修改该稿的内存。地址、路径、会话数、令牌均为固定示例；
+开启、轮换、关闭、登录只修改该稿的内存。地址、路径、会话数、令牌均为固定示例；
 不连接 Host、不打开监听端口、不读写工作区、不启动 Runtime。复制动作只复制稿中示例。
 
 ## 风格如何还原
@@ -42,54 +41,42 @@ last_updated: 2026-09-12
 | 图标与弹窗 | `NavigationIcon`、`AppDialogContent/Header/Body/Footer` | 在同一 1.7px 线条体系中增加设备图标；取消优先获焦点，Escape 可取消 |
 | 双主题 | `packages/ui/src/theme.css`、生产 `styles.css` | 同一组件树，全部颜色取语义 token；无按主题分叉的布局 |
 
-[新增 CSS](../../scripts/fixtures/remote-connection/review.css)只拥有连接状态、地址、目录与令牌行的局部组合，
-不复制侧栏、按钮、开关、Dialog 或主题实现。页面与样式处于 fixture 中，不进入正式 Web 构建。
+[新增 CSS](../../apps/desktop/src/renderer/src/remote-connection.css)只拥有连接状态、地址、目录与令牌行的局部组合，
+不复制侧栏、按钮、开关、Dialog 或主题实现。页面与样式由生产组件拥有，fixture 只注入模拟依赖。
 
 ## 页面与交互
 
-Desktop 以“浏览器访问”开关和明确的状态文字开头，后续按连接方式/地址、可访问工作区、登录与会话展开。
-关闭状态显示访问范围、端口；选择局域网才出现控制台地址与明文访问确认。默认仅此电脑。
-开启前验证输入，失败保留编辑；提交中阻止重复操作，成功后显示实际返回的连接地址。
+Desktop 的“应用”组在“提醒”之后提供“远程连接”。通用页不再重复管理入口。
+关闭时显示访问范围与端口；默认仅此电脑，明确选择局域网后显示 HTTP 明文说明，不要求手填唯一地址。
+开启后显示 Host 返回的实际接口地址列表、独立复制地址、会话数以及遮掩的令牌输入框。
+切换地址只更新页面选择；不调用 start/stop/rotate，不授予权限或改变 Host 状态。
+198.18/15 接口可展示和选择，但不标记为默认 LAN 推荐。实际网络可达性取决于设备网络和防火墙。
 
-已开启状态显示可复制的地址、已授权目录以及会话总数。不会从会话总数编造设备名称、IP 或活动时间。
-工作区由本机选择器授权，运行中不编辑；首次开启或轮换令牌后才出现遮掩的令牌输入与显式复制/显示操作。
-离开该页清除一次性令牌展示；再次需要时通过轮换获取新令牌。
+登录成功的 Owner 可直接使用 Host 有权访问的目录；设置中没有目录预授权名单。浏览器“选择工作目录”
+使用 `HostWorkspacePicker` 读取 Host 文件系统，支持主目录、根/盘符、上一级、子目录和绝对路径输入。
+提交当前目录前必须先成功读取；项目校验与 Camp 创建继续走同一 Core。失败保留输入并明确反馈。
 
-关闭浏览器访问和更换令牌均使用现有确认 Dialog，说明会话影响以及执行继续的语义。
-点击取消、按 Escape 或关闭 Dialog 都保留连接；提交后依据 Host 返回状态更新，不能以开关动画代替结果。
-原错误仍需按现有 `HostWebSettings` 逻辑重读状态后判断，不自动重试未知结果的开启请求。
+令牌可反复查看/复制，离开页面再返回会从本机 Host 管理入口重新读取；不会要求重新生成。
+重新生成是独立操作，和停止服务一样使用现有确认 Dialog，说明旧会话退出、执行继续。
+取消/Escape 不变更状态；提交中阻止重复操作。未知响应只重读状态与当前令牌，不自动重试变更。
 
-Web 页面显示固定 Host 地址与当前连接状态，提供本页退出/重新登录，不提供 Host 开关、授权目录编辑或令牌轮换。
-连接中断与认证失效分别呈现：前者等待重连、编辑保留；后者通过登录表单更新认证，保留当前编辑归属并核对原命令。
-这个“当前连接”设置页是稿件，实际入口目前仍使用既有登录覆盖层与侧栏连接提示。
+Web 的同一菜单显示当前 Host 地址及连接状态，可退出本页登录。认证过期使用实际入口的登录覆盖层；
+同页重新登录保留编辑身份、Composer 与原命令核对。Web 不需要本机管理密钥读取能力来访问业务页面。
+不构建多租户、强隔离执行或用户可配置的安全平台；范围见 [Host Web v2](../contracts/host-web-v2.md)。
 
-## 接入时复用什么，还缺什么
+## 生产组件与验收
 
-| 交互 | 现有能力 | 接入边界 |
-| --- | --- | --- |
-| 开启、读取状态、关闭、轮换 | `HostWebApi.status/start/stop/rotate`、`HostWebSettings` | 移动原生命周期协调逻辑，不能新建 Host 或公开本机管理 RPC |
-| 局域网配置 | `HostWebStartInput.listen/publicOrigin/allowInsecureLan` | “范围＋端口”仅组装既有参数，后端继续做最终校验；HTTPS 的外部配置由受信 Host 负责 |
-| 工作区选择 | `selectWorkspaceDirectory`、`authorizedWorkspaces` | 沿用本机目录授权，不允许 Web 任意提交路径 |
-| 已开启后回看配置 | `HostWebStatus` 当前只有 enabled/origin/sessions/sessionLifetimeSeconds | **缺口**：正式展示授权目录与监听配置需要受信本机 status 的安全读回，或同次启动的已确认内存快照。未读到时显示未取得信息，不能拿表单草稿冒充生效配置 |
-| 令牌展示 | start/rotate 才返回 administratorToken | 不扩展成“读取旧令牌”；不持久保存，不写 URL、日志或剪贴板以外的自动输出 |
-| Web 连接与登录 | `ConsoleClient` 的认证、SSE、logout、重新登录和命令核对 | 将现有状态适配给共享设置页；认证代次与编辑作用域继续独立，不因打开菜单而重建 client |
-| 设置菜单落地 | 当前正式设置 section 尚无 remote | 评审确认后接入路由与记忆的 section，同时从通用页移除原块；本稿没有提前改变持久导航合同 |
+- `HostWebSettings`：Desktop 的实际服务状态、地址选择、令牌读取及生命周期协调。
+- `RemoteConnectionStatus`：实际浏览器与离线稿共用的连接状态页面。
+- `SettingsSidebarNavigation`、`SettingsPageHeader`、General/Appearance：原生产导航和对照基准。
+- `HostWorkspacePicker`：浏览器文件系统适配，不复制 Core 的工作区业务规则。
 
-## 验证
+`pnpm test:remote-connection-review` 在隔离 Chrome profile 验证双主题、几何、键盘错误定位、
+开启/关闭/重新生成确认、页面返回后读取令牌、198.18/15 地址选择不改令牌和会话、窄宽屏及减少动效。
+该稿使用模拟 API，不能替代实际网络验收。真实 `pnpm test:host-web` 证明无预授权目录的 HTTP 项目操作、
+令牌重复读取不撤销登录，以及已有草稿/上传/回执/撤销/关闭边界。真实 Desktop/Web 页面验收由
+`pnpm test:host-web-live` 拥有；结果与剩余缺口见[当前实施计划](../versions/v1.59/implementation-plan.md)。
 
-`pnpm test:remote-connection-review` 先检查 fixture 类型，再使用独立 Chrome profile，检查生产通用页与新稿的侧栏宽度、顶行、
-标题字号/字重/位置、背景色，以及双主题状态矩阵。实际交互检查字段校验与焦点、局域网显式确认、
-提交中禁用、令牌遮掩/离页清除、轮换与关闭的取消/确认、Web 重新登录，以及不同窗口尺寸和 reduced motion。
-720×460 仅表示 1440×920 在 200% 时的等效 CSS 布局检查，不冒充浏览器原生缩放实测。
-缺少 Chrome 时明确跳过；没有通过就不写为已验收。结果写入环境变量 `ROVAI_REMOTE_REVIEW_OUTPUT` 指定的目录。
-
-2026-09-12 最终单文件交互稿已通过 14 个日夜主题状态以及上述交互检查，0 跳过。
-[检查记录与稿件 SHA-256](../versions/v1.59/evidence/remote-connection/remote-connection-review.json)固定交付内容。
-对照图：[生产通用页（日间）](../versions/v1.59/evidence/remote-connection/baseline-general-day.png)、
-[远程连接（日间）](../versions/v1.59/evidence/remote-connection/desktop-enabled-day.png)、
-[生产通用页（夜间）](../versions/v1.59/evidence/remote-connection/baseline-general-night.png)、
-[远程连接（夜间）](../versions/v1.59/evidence/remote-connection/desktop-enabled-night.png)。
-另有[开启前](../versions/v1.59/evidence/remote-connection/desktop-off-day.png)、
-[首次开启成功](../versions/v1.59/evidence/remote-connection/desktop-first-enable-day.png)、
-[关闭确认](../versions/v1.59/evidence/remote-connection/desktop-stop-confirm-day.png)与
-[Web 当前连接](../versions/v1.59/evidence/remote-connection/web-enabled-night.png)。这些图片均为模拟稿。
+本轮已验证的外观见[日间](../versions/v1.59/evidence/owner-host/remote-day.png)与
+[夜间](../versions/v1.59/evidence/owner-host/remote-night.png)；
+[交互/产物哈希记录](../versions/v1.59/evidence/owner-host/remote-connection-review.json)明确标记模拟 API。

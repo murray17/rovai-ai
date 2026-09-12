@@ -70,6 +70,9 @@ describe('DraftMutationCoordinator', () => {
   })
 
   it('returns a queued input after earlier saves and fences late results from another Camp', async () => {
+    const originalCrypto = globalThis.crypto
+    vi.stubGlobal('crypto', { getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto) })
+    try {
     let release!: () => void
     const waiting = new Promise<void>((resolve) => { release = resolve })
     const mutations: Array<{ draft: CampComposerDraftView; mutation: DraftMutation }> = []
@@ -92,6 +95,7 @@ describe('DraftMutationCoordinator', () => {
     release()
     await expect(returned).rejects.toBeInstanceOf(StaleDraftEpochError)
     expect(coordinator.getCurrentDraft()).toMatchObject({ campId: 'camp-b', content: document('keep this') })
+    } finally { vi.stubGlobal('crypto', originalCrypto) }
   })
 
   it('waits for earlier mutations before deciding that a content snapshot is unchanged', async () => {

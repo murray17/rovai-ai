@@ -51,6 +51,14 @@ impl HostControl for WebControl {
                     .as_ref()
                     .map(WebServer::status)
                     .unwrap_or_else(|| json!({"enabled":false,"sessions":0}))),
+                HostWebOperation::Token => {
+                    let server = self.server.lock().await;
+                    let server = server.as_ref().ok_or(HostControlError {
+                        code: "HOST_WEB_DISABLED",
+                        message: "请先开启远程连接。".into(),
+                    })?;
+                    Ok(json!({"administratorToken":server.administrator_token()}))
+                }
                 HostWebOperation::Start => {
                     let config: WebConfig =
                         serde_json::from_value(params).map_err(|_| invalid())?;

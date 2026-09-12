@@ -1080,7 +1080,7 @@ ipcMain.handle('rovai:host-web', async (event, operation: unknown, value: unknow
     || event.senderFrame !== event.sender.mainFrame) {
     throw new Error('Host controls require a local Desktop window')
   }
-  if (operation === 'status' || operation === 'stop' || operation === 'rotate') {
+  if (operation === 'token' || operation === 'status' || operation === 'stop' || operation === 'rotate') {
     return core.request(`host.web.${operation}`)
   }
   if (operation !== 'start' || !value || typeof value !== 'object') {
@@ -1089,9 +1089,7 @@ ipcMain.handle('rovai:host-web', async (event, operation: unknown, value: unknow
   const input = value as Record<string, unknown>
   if (typeof input.listen !== 'string' || typeof input.allowInsecureLan !== 'boolean'
     || (input.publicOrigin !== undefined && typeof input.publicOrigin !== 'string')
-    || (input.authorizedWorkspaces !== undefined && (!Array.isArray(input.authorizedWorkspaces)
-      || input.authorizedWorkspaces.length > 64 || input.authorizedWorkspaces.some(path => typeof path !== 'string')))
-    || Object.keys(input).some((key) => !['listen', 'publicOrigin', 'allowInsecureLan', 'authorizedWorkspaces'].includes(key))) {
+    || Object.keys(input).some((key) => !['listen', 'publicOrigin', 'allowInsecureLan'].includes(key))) {
     throw new Error('Invalid Host Web settings')
   }
   // Assets are selected by Main, never by a renderer-supplied filesystem path.

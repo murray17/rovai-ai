@@ -21,7 +21,7 @@ type CoreInternalMethod =
   | 'automations.schedulerControl'
   | 'automations.schedulerTick'
 
-export type HostWebMethod = 'host.web.status' | 'host.web.start' | 'host.web.stop' | 'host.web.rotate'
+export type HostWebMethod = 'host.web.token' | 'host.web.status' | 'host.web.start' | 'host.web.stop' | 'host.web.rotate'
 
 export type AutomationSchedulerControl = {
   epoch: number

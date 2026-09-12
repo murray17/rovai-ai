@@ -3,6 +3,7 @@ import { mkdir, writeFile, realpath, mkdtemp, rm, access } from 'node:fs/promise
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
+import { createServer } from 'node:net'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from './runtime-camp-files-root.mjs'
 import { DatabaseSync } from 'node:sqlite'
@@ -39,7 +40,9 @@ test('actual Desktop and browser share Camp geometry while three drafts and reau
     stage = 'seed shared Camp'
     await desktop.evaluate(`window.rovai.appearance.setPreference('day')`)
     const profiles = await request('members.list')
-    const created = await request('camps.create', { commandId: crypto.randomUUID(), name: 'Desktop and Web live parity', workspace: null, memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' })
+    const projectPath = join(fixture, 'owner-project'); await mkdir(projectPath)
+    const projectWorkspace = { projectPath, name: 'owner-project' } // Fixture path; actual browser inspection below uses HTTP/Core.
+    const created = await request('camps.create', { commandId: crypto.randomUUID(), name: 'Desktop and Web live parity', workspace: projectWorkspace, memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' })
     assert.equal(created.status, 'applied', JSON.stringify(created)); const campId = created.payload.campId
     for (let i = 1; i <= 8; i++) {
       const draft = await request('camp.composerDraft.get', { campId })
@@ -60,9 +63,36 @@ test('actual Desktop and browser share Camp geometry while three drafts and reau
     }
     await choose(desktop)
     stage = 'start Web and login'
-    const started = await desktop.evaluate(`window.rovai.hostWeb.start({listen:'127.0.0.1:0',allowInsecureLan:false})`)
+    const portProbe = createServer(); await new Promise(resolve => portProbe.listen(0, '127.0.0.1', resolve)); const port = portProbe.address().port; await new Promise(resolve => portProbe.close(resolve))
+    await desktop.click(`document.querySelector('.sidebar-settings-main')`)
+    await desktop.click(`[...document.querySelectorAll('.settings-sidebar-menu button')].find(e=>e.textContent.trim()==='远程连接')`)
+    await desktop.wait(`document.querySelector('.remote-start-row button:not(:disabled)')!==null`)
+    await desktop.click(`document.querySelector('#remote-port')`); await desktop.evaluate(`document.querySelector('#remote-port').select()`); await desktop.send('Input.insertText', { text: String(port) })
+    await desktop.evaluate(`(()=>{const e=document.querySelector('#remote-access');e.value='lan';e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+    await desktop.click(`document.querySelector('.remote-start-row button')`)
+    await desktop.wait(`document.querySelector('#remote-token')?.value.length===64`)
+    const started = { ...await desktop.evaluate(`window.rovai.hostWeb.status()`), ...await desktop.evaluate(`window.rovai.hostWeb.token()`) }
+    assert.ok(started.addresses.length > 0)
+    await desktop.click(`[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='复制地址')`)
+    await desktop.wait(`document.body.innerText.includes('连接地址已复制')`)
+    await desktop.click(`[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='复制令牌')`)
+    await desktop.wait(`document.body.innerText.includes('管理令牌已复制')`)
+    await desktop.capture(join(output, 'desktop-remote-enabled.png'))
+    await desktop.click(`document.querySelector('.settings-sidebar-back')`)
+    await choose(desktop)
     const login = async (browser, token) => { await browser.wait(`document.querySelector('#administrator-token') !== null`); await browser.click(`document.querySelector('#administrator-token')`); await browser.send('Input.insertText', { text: token }); await browser.click(`document.querySelector('.web-login button[type=submit]')`); await browser.wait(`document.querySelector('.web-login-overlay') === null`) }
-    web = await launchBrowser('web', join(fixture, 'chrome-a')); await web.send('Page.navigate', { url: started.origin }); await login(web, started.administratorToken); await choose(web)
+    web = await launchBrowser('web', join(fixture, 'chrome-a')); await web.send('Page.navigate', { url: started.origin }); await login(web, started.administratorToken)
+    stage = 'Owner opens a Host directory without preauthorization'
+    await web.wait(`document.querySelector('[aria-label="选择工作目录"]:not(:disabled)')!==null`)
+    await web.click(`document.querySelector('[aria-label="选择工作目录"]')`)
+    await web.wait(`document.querySelector('#host-workspace-path')!==null && !document.querySelector('.web-workspace-list[aria-busy=true]')`)
+    await web.click(`document.querySelector('#host-workspace-path')`); await web.evaluate(`document.querySelector('#host-workspace-path').select()`); await web.send('Input.insertText', { text: projectPath })
+    await web.click(`[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='前往')`)
+    await web.wait(`document.querySelector('[role=dialog] .primary-button:not(:disabled)')!==null`)
+    await web.capture(join(output, 'web-host-directory-picker.png'))
+    await web.click(`document.querySelector('[role=dialog] .primary-button')`)
+    await web.wait(`document.querySelector('#host-workspace-path')===null`)
+    await choose(web)
     stage = 'shared geometry and settings'
     await pause(1200)
     const geometry = async browser => browser.evaluate(`({viewport:[innerWidth,innerHeight],sidebar:document.querySelector('.unified-sidebar').getBoundingClientRect().width,header:document.querySelector('.camp-topbar')?.getBoundingClientRect().height,composer:document.querySelector('[contenteditable=true]').getBoundingClientRect().width})`)
@@ -174,6 +204,7 @@ test('actual Desktop and browser share Camp geometry while three drafts and reau
     assert.deepEqual(desktop.errors, []); assert.deepEqual(web.errors, []); assert.deepEqual(second.errors, [])
     await web.capture(join(output, 'web-after-reauth.png'))
     const evidence = { stage: 'managed-desktop-web-passed', simulation: false, realRuntime: false, desktopFocusEmulated: true, campId, geometry: await geometry(web), draftOwners: rows.map(r => r.client_id === 'desktop' ? 'desktop' : 'web'), sameComposerAfterReauth: true, nativeBridgeInBrowser: false,
+      ownerModel: { desktopSettingsStart: true, copiedAddressAndToken: true, actualInterfaceAddress: true, nonLoopbackOrigin: !started.origin.includes('127.0.0.1'), directoryPickerWithoutPreauthorization: true, sameMachineBrowsers: true, secondPhysicalDevice: false },
       mainSync: { browserGeneralPreferences: true, nativeWindowControlsAbsent: true, browserZoomExplicit: true, previewSelectAllScoped: true, finalLineQuoteAccepted: true, pendingReturnScopedToCurrentClient: true, pendingAttachmentsAddedInComposer: true, pendingFixture: 'one needs_repair row in isolated database; no Runtime' } }
     await desktop.evaluate(`window.rovai.hostWeb.stop()`)
     assert.ok((await request('app.info')).dataDir)

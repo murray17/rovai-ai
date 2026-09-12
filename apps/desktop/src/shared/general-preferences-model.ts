@@ -3,6 +3,7 @@ import type { ExecutionConsolePlacement, GeneralPreferencesSnapshot, NewConversa
 const STARTUP_LOCATION_MODES = new Set<StartupLocationMode>(['last_location', 'quick_chat'])
 const EXECUTION_CONSOLE_PLACEMENTS = new Set<ExecutionConsolePlacement>(['bottom', 'inspector'])
 const SETTINGS_SECTIONS = new Set<SettingsSection>([
+  'remote',
   'general',
   'skills',
   'mcp',

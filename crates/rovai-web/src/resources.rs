@@ -94,7 +94,6 @@ async fn resolve(
             .context("source_not_authorized")?,
     )
     .await?;
-    ensure!(state.workspaces.contains(&root), "outside_authorized_root");
     let raw = target["rawReference"]
         .as_str()
         .context("source_not_authorized")?;

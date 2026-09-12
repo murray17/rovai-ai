@@ -9,7 +9,8 @@ last_updated: 2026-09-12
 这是开发预览：提供同一个 Rust Host 的本机启动、显式 Web 开关和共享生产 Camp 页面。
 当前接通独立草稿、source 上传、发送、执行详情、审批和停止；私聊、完整管理页、后台 Automation 驱动与
 双入口全部验收仍未完成。每个检查点的实际证据见[当前实施计划](../versions/v1.59/implementation-plan.md)。
-不能将本包视为通过了受管 Runtime 控制面隔离的正式 Server。
+该包不是正式发布资格证明。当前产品为单 Owner、可信自托管 Host，不承诺同 UID 强隔离；
+历史哨兵失败保留，但不再作为本轮交付前置。
 
 ## 构建与包内容
 
@@ -44,7 +45,7 @@ CI 镜像已安装开发工具，不能据此推断干净 Windows 机器无需�
 rovai-host run --data-dir <dataDir> --skill-library-root <skillLibraryRoot>
   --mcp-config-path <mcpConfigPath> --runtime-camp-files-root <runtimeCampFilesRoot>
   --initialize --web-listen 127.0.0.1:4317 --web-ui <包内web-ui的绝对路径>
-  --web-token-stdin --web-workspace <明确授权给浏览器的工作区绝对路径>
+  --web-token-stdin
 ```
 
 参数须在同一条命令中传入。管理令牌由 `rovai-host token` 生成，是 64 位十六进制的 256-bit 随机值。
@@ -54,14 +55,13 @@ rovai-host run --data-dir <dataDir> --skill-library-root <skillLibraryRoot>
 
 管理者在控制台输入管理令牌后交换半小时 Session；页面刷新需要再次登录。当前页面只向固定控制台
 地址发送显式 Authorization，不使用认证 Cookie。应将完整控制台地址交给客户端，不能通过预览端口登录。
-`--web-workspace` 可重复指定；浏览器只能选择所列目录，不能自行授予 Host 文件访问。无授权目录时可使用
-快速对话。同页面重新登录保留当前编辑；完整刷新会创建新编辑身份，尚无跨页面草稿恢复服务。
+登录后的单一 Owner 可以在浏览器选择 Host 有权访问的工作目录，无须目录预授权。同页面重新登录保留当前编辑；完整刷新会创建新编辑身份，尚无跨页面草稿恢复服务。
 Web 与 Host 必须使用同一协议版本，当前为 [Host Web v2](../contracts/host-web-v2.md)。
 
 ## 网络与停止
 
-默认推荐 loopback。局域网监听必须同时显式设置 `--allow-insecure-lan` 和
-`--web-public-origin http://<Host在局域网中的地址>:<端口>`。明文网络可能暴露令牌和内容；不可信网络使用
+默认推荐 loopback。局域网监听显式设置 `--allow-insecure-lan`，Host 自动发现实际网络接口。
+反向代理可补充 `--web-public-origin https://<代理地址>`；不要求唯一手填 LAN 地址。198.18/15 不默认推荐但不禁止连接。明文网络可能暴露令牌和内容；不可信网络使用
 外部 HTTPS 或可信 VPN。本实现不创建域名、证书或预览代理，不信任任意代理转发头。
 
 Unix 用 SIGINT/SIGTERM；Windows 用 console Ctrl-C/Ctrl-Break。停止沿用 Core protocol 3；只有 durable

@@ -13,7 +13,7 @@ last_updated: 2026-09-12
 当前受控网络入口由[Host Web v2](../contracts/host-web-v2.md)拥有。
 
 当前已实现父进程匿名管道与进程内请求共用一个 Host/Core、共享生产 Camp 页面、客户端草稿、source 上传及
-逐项准入的 Camp 写入。以下 UDS/Named Pipe 身份握手、完整公共 DTO 生成与控制面隔离仍是后续目标，
+逐项准入的 Camp 写入。以下 UDS/Named Pipe 身份握手与完整公共 DTO 生成仍是后续目标，
 不由现有管道或一个真实执行闭环推断阶段 1–3 完成。
 
 ## 组件和唯一权威
@@ -44,20 +44,22 @@ Web 管理令牌交换短期可撤销 opaque Bearer Session；不使用认证 Co
 仅固定控制台 origin 的封闭 API 使用显式 Authorization；登录和认证 Fetch 拒绝重定向，SSE、图片、下载同样
 走认证 Fetch，必要时生成并释放 Blob URL。不把凭据写 URL、预览链接、日志或浏览器长期存储。
 
-管理令牌使用 256-bit 系统随机数，受保护本机入口初始化/轮换/恢复；只存带类型区分摘要、恒定时间比较。
+管理令牌使用 256-bit 系统随机数，本机入口初始化、重复查看/复制或独立轮换。Host 为重复查看保留进程内原值；
+认证使用带类型区分摘要、恒定时间比较。Session 仍只存摘要，凭据不进入状态、日志或公开网络投影。
 过期、撤销、轮换和关闭 Web 撤销已有订阅。登录限流，Host/Origin 封闭校验，请求/上传/并发/订阅有界；
-可信代理和外部 origin 必须显式配置。默认 loopback；LAN 明文必须显式开启并说明风险，不可信网络用
+实际网络接口自动展示并按同一 authority/origin 校验；外部代理 origin 可以显式补充。默认 loopback；LAN 明文必须显式开启并说明风险，不可信网络用
 HTTPS/VPN。二维码只含地址，既有执行台身份仍只读。不自建域名、证书、Relay 或预览代理。
 
-OS socket/文件权限不单独证明同 UID Runtime 隔离。Windows/Linux 阶段 1 内实测受管 Runtime 及后代无法
-读取控制凭据、冒用 IPC 或调用恢复入口，同时能访问授权工作区并被回收；覆盖文件、环境、句柄及必要进程
-访问边界。复用系统已有隔离，不承诺抵御宿主管理员/root。失败先交用户确认最小修正、替代与影响，
-未通过组合不声明安全发布；不自动扩大为通用沙箱或容器平台。
+本轮正式采用“单 Owner、可信自托管 Host”。登录成功的远程 Owner 与 Desktop 拥有同一业务能力目标；
+未接通的页面是实现缺口，不创建受限远程角色。不建设多租户或强隔离执行平台，不承诺防御任意恶意同 UID
+进程；该系统级隔离证明不再是阶段 1–3 或统一 Host/WebUI 的交付前置条件。既有哨兵失败证据和风险保留，
+不能改写成通过。[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md) 与
+[User Automation v5](../contracts/user-automation-v5.md) 的当前边界保持一致，不恢复外层 macOS 沙箱，
+不削弱 Runtime 原生权限、审批、生命周期或回收。
 
-当前 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md) 与
-[User Automation v5](../contracts/user-automation-v5.md) 已移除 Rovai 外层 macOS 沙箱及同 UID 防冒用承诺。
-本轮同步该实现，不重新引入旧沙箱；上述 Host 控制面保护仍是待验证的目标，不能从现有目录权限或 CLI
-误用防护推导成立。接入管理凭据、用户 IPC 与恢复入口前，需要明确该目标与当前 Runtime 合同的差距和最小修正。
+网络认证、凭据不自动附带到其他端口、跨站与主动内容保护、既有文件校验和基本限额仍由实现负责。
+新增限制须说明保护对象与必要性，不扩为用户配置的安全平台。实际接口中的 198.18/15 不作为默认 LAN
+推荐，但不禁止连接。用户选择展示地址不改变权限、令牌、监听或 Host 状态。
 
 ## 草稿与用户文件
 
@@ -74,7 +76,8 @@ Core 接受后由 OS 决定临时文件寿命；发送失败、退出或删除�
 Agent Managed 与 legacy 机制不变，不建对象存储、附件目录库或用户 Managed 资产。
 
 资源读取按精确身份、owner locator 与作用域授权；路径规范化、符号链接和读取时变化不能逃逸授权。
-Host 工作区由本机受信入口授权，Web 只选择已允许范围。静态服务只挂应用构建产物。
+远程 Owner 直接选择 Host 有权访问的工作目录，不需要本机预授权名单；Core 继续拥有原有项目和文件校验。
+静态服务只挂应用构建产物。
 首版用户 HTML/SVG 等主动内容只作为安全文本或下载；不执行上传 HTML，保留 CSP、清洗与安全图片格式。
 
 ## 命令、事件与兼容性

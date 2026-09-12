@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
-import { AppDialogContent, AppDialogHeader } from '../../desktop/src/renderer/src/AppDialog'
+import { RemoteConnectionStatus } from '../../desktop/src/renderer/src/RemoteConnectionStatus'
+import { HostWorkspacePicker } from './HostWorkspacePicker'
+import '../../desktop/src/renderer/src/remote-connection.css'
 import type { WorkspaceSelection } from '@contracts'
 import { createRoot } from 'react-dom/client'
 import { BusinessApp } from '../../desktop/src/renderer/src/BusinessApp'
@@ -16,12 +17,11 @@ const transport = new ConsoleClient(window.location.origin)
 document.documentElement.dataset.platform = browserPlatform()
 
 function WebEntry() {
-  const [workspaceChoice, setWorkspaceChoice] = useState<{ choices: WorkspaceSelection[]; resolve(value: WorkspaceSelection | null): void } | null>(null)
+  const [workspaceChoice, setWorkspaceChoice] = useState<{ resolve(value: WorkspaceSelection | null): void } | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
   useEffect(() => transport.onPendingCommandsChanged(() => setPendingCount(transport.pendingCommandCount)), [])
   const selectWorkspace = async (): Promise<WorkspaceSelection | null> => {
-    const choices = await transport.getWorkspaces()
-    return new Promise(resolve => setWorkspaceChoice({ choices, resolve }))
+    return new Promise(resolve => setWorkspaceChoice({ resolve }))
   }
   const finishWorkspace = (value: WorkspaceSelection | null): void => { workspaceChoice?.resolve(value); setWorkspaceChoice(null) }
   const [adapter, setAdapter] = useState<ReturnType<typeof createCampAdapter> | null>(null)
@@ -53,7 +53,7 @@ function WebEntry() {
   return <>
     {current && <CampClientProvider client={current.environment.client}>
       <CurrentUserProfileProvider api={current.profile}>
-        <BusinessApp environment={current.environment} sidebarFooter={authenticated ? <div className="web-connection" role="status">
+        <BusinessApp environment={current.environment} remoteConnection={<RemoteConnectionStatus origin={transport.origin} state={authenticated ? connection : 'expired'} onLogout={() => void transport.logout().catch(() => undefined)} />} sidebarFooter={authenticated ? <div className="web-connection" role="status">
           <span>{connection === 'live' ? '已连接 Host' : connection === 'offline' ? '连接中断，编辑保留' : '正在连接 Host'}</span>
           <button type="button" className="quiet-button compact" onClick={() => void transport.logout().catch(() => undefined)}>退出登录</button>
           {pendingCount > 0 && <>
@@ -63,15 +63,7 @@ function WebEntry() {
         </div> : undefined} />
       </CurrentUserProfileProvider>
     </CampClientProvider>}
-    <Dialog.Root open={workspaceChoice !== null} onOpenChange={open => { if (!open) finishWorkspace(null) }}>
-      <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><AppDialogContent>
-        <AppDialogHeader title="选择 Host 工作区" description="这里只列出在 Host 本机明确授权的目录。" />
-        <div className="dialog-body">
-          {workspaceChoice?.choices.length === 0 && <p>尚未授权工作区。可先使用快速对话，或在 Host 本机配置后重新打开此列表。</p>}
-          {workspaceChoice?.choices.map(choice => <button type="button" className="web-workspace-choice" key={choice.projectPath} onClick={() => finishWorkspace(choice)}><strong>{choice.name}</strong><span>{choice.projectPath}</span></button>)}
-        </div>
-      </AppDialogContent></Dialog.Portal>
-    </Dialog.Root>
+    {workspaceChoice && <HostWorkspacePicker transport={transport} onSelect={finishWorkspace} />}
     {!authenticated && <div className="web-login-overlay">
       <form className="web-login" onSubmit={event => { event.preventDefault(); void login() }}>
         <h1>{current ? '重新登录 Rovai AI' : '登录 Rovai AI'}</h1>

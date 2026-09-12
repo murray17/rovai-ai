@@ -21,6 +21,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
   const dataDir = process.platform === 'win32'
     ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
     : join(fixture, 'data')
+  console.log(JSON.stringify({ channel: 'automatic_acceptance', dataDir, skillLibraryRoot: join(dataDir, 'skills'), mcpConfigPath: join(dataDir, 'mcp.json'), runtime: false }))
   const host = launch([
     ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root', join(dataDir, 'skills'), '--mcp-config-path', join(dataDir, 'mcp.json')
@@ -39,13 +40,15 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     } finally {
       await new Promise((resolve) => occupied.close(resolve))
     }
-    const started = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory, authorizedWorkspaces: [workspace] })
+    const started = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory })
     assert.equal(started.enabled, true)
     const origin = started.origin
     const administrator = started.administratorToken
     const status = await host.request('host.web.status')
     assert.equal('administratorToken' in status, false)
     assert.equal(status.origin, origin)
+    assert.equal((await host.request('host.web.token')).administratorToken, administrator)
+    assert.ok(status.addresses.some(address => address.origin === origin))
     await assert.rejects(host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory }), { code: 'HOST_WEB_START_FAILED' })
     const request = (path, options = {}) => fetch(`${origin}/api/v1/${path}`, { ...options, redirect: 'error', signal: AbortSignal.timeout(10_000) })
     const login = async (editor) => {
@@ -56,6 +59,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     }
     for (const [path, options, expected] of [
       ['capabilities', {}, 401],
+      ['workspaces', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: workspace }) }, 401],
       ['capabilities', { headers: { Authorization: `Bearer ${administrator}` } }, 401],
       ['capabilities', { headers: { Origin: 'http://127.0.0.1:1' } }, 403],
       ['capabilities?token=not-a-real-token', {}, 400],
@@ -83,7 +87,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal('dataDir' in info, false)
     assert.equal(info.name, (await host.request('app.info')).name)
     assert.deepEqual(await call(second, 'navigation.snapshot'), await host.request('navigation.snapshot'))
-    for (const operation of ['host.web.rotate', 'core.shutdown', 'host.editor.resolve', 'host.upload.bind', 'camp.sourceAttachments.addFromPath', 'camp.attachments.desktopOpenTarget', 'filePreview.resolveSource']) {
+    for (const operation of ['host.web.token', 'host.web.rotate', 'core.shutdown', 'host.editor.resolve', 'host.upload.bind', 'camp.sourceAttachments.addFromPath', 'camp.attachments.desktopOpenTarget', 'filePreview.resolveSource']) {
       const response = await authorized(first, 'request', { method: 'POST', body: JSON.stringify({ operation, params: {} }) })
       assert.equal(response.status, 400, operation)
     }
@@ -94,8 +98,11 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(created.status, 'applied')
     const campId = created.payload.campId
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camps.create', params: createParams })).result, created)
-    const roots = await (await authorized(first, 'workspaces')).json()
-    const directoryParams = { ...createParams, commandId: crypto.randomUUID(), name: 'Workspace later moved', workspace: await call(first, 'workspaces.validate', { path: roots[0].projectPath }) }
+    const roots = await (await authorized(first, 'workspaces', { method: 'POST', body: JSON.stringify({ path: fixture }) })).json()
+    assert.ok(roots.directories.some(entry => entry.projectPath === workspace))
+    assert.equal((await host.request('host.web.token')).administratorToken, administrator)
+    assert.equal((await authorized(first, 'capabilities')).status, 200, 'viewing the token must not revoke sessions')
+    const directoryParams = { ...createParams, commandId: crypto.randomUUID(), name: 'Workspace later moved', workspace: await call(first, 'workspaces.validate', { path: workspace }) }
     const directoryCamp = await call(first, 'camps.create', directoryParams)
     assert.equal(directoryCamp.status, 'applied')
     await rename(workspace, `${workspace}-moved`)

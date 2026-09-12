@@ -15635,6 +15635,7 @@ async fn run_core(
             }
         }
         let host_operation = match request.method.as_str() {
+            "host.web.token" => Some(HostWebOperation::Token),
             "host.web.status" => Some(HostWebOperation::Status),
             "host.web.start" => Some(HostWebOperation::Start),
             "host.web.stop" => Some(HostWebOperation::Stop),

@@ -56,6 +56,7 @@ const savePreference = key => async value => {
 Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},
   hostWeb: {
+    token: async () => ({ administratorToken: `fixture-token-${hostTokenGeneration}` }),
     status: async () => {
       await request('hostWeb.status')
       const snapshot = clone(state.hostWeb)
@@ -148,7 +149,8 @@ function Fixture() {
       onRemoveProject={async () => {}} onRename={async () => {}} onDelete={async () => {}} onError={error => { throw error }} />
     <main className="content settings-content">
       <div className="settings-workbench"><div className={`settings-panel settings-panel-${page}`} key={`${page}-${generation}`}>
-        {page === 'general' && <GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} browserAccess={<HostWebSettings api={window.rovai.hostWeb} selectWorkspace={async () => null} />} agents={roster} initialPreferences={state.preferences} currentProjectLabel="rovai-ai" onPreferencesChange={ignore} />}
+        {page === 'general' && <GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} agents={roster} initialPreferences={state.preferences} currentProjectLabel="rovai-ai" onPreferencesChange={ignore} />}
+        {page === 'remote' && <HostWebSettings api={window.rovai.hostWeb} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}
         {page === 'runtime' && <RuntimeInstallationsPanel health={fixture.healthSnapshot()} installations={[]} onReload={async () => {}} />}

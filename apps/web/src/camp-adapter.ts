@@ -50,7 +50,7 @@ export function createCampAdapter(transport: ConsoleClient, selectWorkspaceDirec
       await navigator.clipboard.writeText(name)
       return { ok: true, value: { copied: true } }
     },
-    chooseAuthorizedRoot: async () => ({ ok: false, error: { code: 'authorization_required', message: '请在 Host 本机授权工作区。', retryable: true } }),
+    chooseAuthorizedRoot: async () => ({ ok: false, error: { code: 'authorization_required', message: '请选择文件所在的 Host 工作目录后重试。', retryable: true } }),
     onExternalUpdate: listener => { fileListeners.add(listener); return () => { fileListeners.delete(listener) } }
   }
   client.composerAttachments.preview = async locator => {

@@ -1,3 +1,4 @@
+import { RemoteConnectionStatus } from './RemoteConnectionStatus'
 import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 import { DEFAULT_APPEARANCE } from '../../shared/appearance'
 import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
@@ -3162,6 +3163,7 @@ describe('task event projections', () => {
       onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }
     const contentBySection: Record<NavigationSettingsSection, string> = {
+      remote: '远程连接',
       general: '通用',
       skills: 'Skills',
       mcp: 'MCP',
@@ -3174,7 +3176,7 @@ describe('task event projections', () => {
       about: '关于与更新'
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
-      const markup = renderToStaticMarkup(createElement(SettingsView, { preferencesApi: {} as import('@contracts').GeneralPreferencesApi, ...baseProps, section }))
+      const markup = renderToStaticMarkup(createElement(SettingsView, { remoteConnection: createElement(RemoteConnectionStatus, { origin: 'http://fixture.invalid', state: 'live', onLogout: () => undefined }), preferencesApi: {} as import('@contracts').GeneralPreferencesApi, ...baseProps, section }))
       if (section === 'skills' || section === 'mcp') {
         expect(markup).toContain(`<h1>${heading}<span>`)
         expect(markup.match(/class="capability-library-heading"/g)).toHaveLength(1)

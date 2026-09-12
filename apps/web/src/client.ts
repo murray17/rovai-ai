@@ -13,6 +13,8 @@ export class SessionRequired extends Error {
   constructor() { super('会话已失效，请重新登录。') }
 }
 
+export type WorkspaceListing = { name: string; projectPath: string; parentPath: string | null; roots: string[]; directories: { name: string; projectPath: string }[]; nextOffset: number | null }
+
 export const WEB_OPERATIONS = ["app.info", "navigation.snapshot", "navigation.groupCamps", "navigation.campViewed", "camps.exists", "camps.open", "camps.enter", "camp.messages.page", "camp.messages.around", "camp.messages.find", "members.list", "members.get", "tasks.list", "tasks.get", "memory.list", "memory.get", "memory.hearthReviewItems.list", "automations.list", "automations.get", "automations.runs.list", "runtime.installations.list", "runtime.subsystems.get", "monitoring.snapshot", "health.check", "skills.list", "skills.get", "skills.deliveryGroups.list", "mcp.config.get", "agentRunEvidence.list", "agentRunEvidence.getContent", "camp.composerDraft.get", "camp.composerDraft.save", "camp.composerDraft.discard", "camp.composerDraft.startReply", "camp.composerDraft.cancelReply", "camp.composerDraft.resolveReplyRecipient", "camp.composerDraft.dismissContinuation", "camp.composerDraft.resolveContinuationRecipient", "camp.composerDraft.removeAttachment", "messageQuotes.mutateDraft", "camp.pendingInputs.get", "camp.pendingInputs.edit", "camp.messages.send", "action.approvals.resolve", "agentRuns.cancel", "campTurns.cancel", "commands.reconcile", "camps.create", "camps.creationPreflight", "camps.members.add", "camps.members.remove", "camps.members.removalPreview", "camps.changeDefaultLead", "members.create", "members.update", "members.avatar.set", "members.runtime.set", "members.runtime.clear", "workspaces.inspect", "workspaces.validate", "agentRunImages.read", "agentRunFileChanges.get", "agentRuns.diagnostic.get", "runtime.product.ensure", "runtime.product.check", "runtime.modelCatalog.open", "runtime.discovery.rescan"] as const
 export type WebOperation = typeof WEB_OPERATIONS[number]
 
@@ -263,8 +265,8 @@ export class ConsoleClient {
     return body.result
   }
 
-  async getWorkspaces(): Promise<{ name: string; projectPath: string }[]> {
-    return this.#json('workspaces')
+  async getWorkspaces(path?: string, offset = 0): Promise<WorkspaceListing> {
+    return this.#json('workspaces', { method: 'POST', body: JSON.stringify({ path, offset }) })
   }
 
   async #json<T>(path: 'workspaces' | 'uploads' | 'uploads/reconcile' | 'files', options: RequestInit = {}): Promise<T> {

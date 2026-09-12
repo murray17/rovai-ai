@@ -9,3 +9,8 @@
 .web-workspace-choice { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
 .web-workspace-choice + .web-workspace-choice { margin-top: 8px; }
 .web-workspace-choice span { color: var(--muted); overflow-wrap: anywhere; }
+.web-workspace-path { display: grid; gap: 8px; }
+.web-workspace-path > div { display: flex; gap: 8px; }
+.web-workspace-path input { flex: 1; min-width: 0; color: var(--ink); background: var(--input); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+.web-workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.web-workspace-list { max-height: 320px; overflow: auto; }

@@ -766,7 +766,8 @@ export const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     items: [
       { key: 'general', icon: 'sliders-horizontal', label: '通用' },
       { key: 'appearance', icon: 'sun-moon', label: '外观' },
-      { key: 'notifications', icon: 'bell-ring', label: '提醒' }
+      { key: 'notifications', icon: 'bell-ring', label: '提醒' },
+      { key: 'remote', icon: 'monitor-smartphone', label: '远程连接' }
     ]
   },
   {

@@ -25,7 +25,7 @@ const administrator = randomBytes(32).toString('hex')
 const child = spawn(hostBinary, [
   'run', ...coreDataDirectoryArguments(data), '--skill-library-root', skills,
   '--mcp-config-path', join(data, 'mcp.json'), '--initialize', '--web-listen', '127.0.0.1:0',
-  '--web-ui', join(repository, 'out/web'), '--web-token-stdin', '--web-workspace', workspace
+  '--web-ui', join(repository, 'out/web'), '--web-token-stdin'
 ], { cwd: repository, stdio: ['pipe', 'pipe', 'pipe'] })
 child.stdin.end(administrator + '\n')
 let log = ''

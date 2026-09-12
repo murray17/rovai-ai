@@ -961,12 +961,14 @@ export function AppToast({
 export function BusinessApp({
   environment,
   sidebarFooter,
+  remoteConnection,
   initialStartupSnapshot,
   startupStartedAtMs,
   startupFeedbackDelayElapsed
 }: {
   environment: BusinessEnvironment
   sidebarFooter?: React.ReactNode
+  remoteConnection?: React.ReactNode
   initialStartupSnapshot?: DesktopStartupSnapshot
   startupStartedAtMs?: number
   startupFeedbackDelayElapsed?: boolean
@@ -3992,8 +3994,8 @@ export function BusinessApp({
         {!startupGateVisible && view === 'settings' && (
           <SettingsView
             preferencesApi={uiPreferences.generalPreferences}
-            nativeSettings={environment.desktop && { windowControls: environment.desktop.windowControls,
-              browserAccess: environment.desktop.hostWeb && <HostWebSettings api={environment.desktop.hostWeb} selectWorkspace={environment.selectWorkspaceDirectory} /> }}
+            nativeSettings={environment.desktop && { windowControls: environment.desktop.windowControls }}
+            remoteConnection={environment.desktop?.hostWeb ? <HostWebSettings api={environment.desktop.hostWeb} /> : remoteConnection}
             zoomManagedBy={environment.desktop ? 'desktop' : 'browser'}
             platform={client.platform}
             appearance={appearance}
@@ -4230,6 +4232,7 @@ export function StartupRouteLoading({
 
 export function SettingsView({
   preferencesApi,
+  remoteConnection,
   nativeSettings,
   zoomManagedBy = 'desktop',
   platform = 'darwin',
@@ -4247,6 +4250,7 @@ export function SettingsView({
   onReload,
   onAppearanceChange
 }: {
+  remoteConnection?: React.ReactNode
   preferencesApi: import('@contracts').GeneralPreferencesApi
   nativeSettings?: { windowControls: import('@contracts').WindowControlsApi; browserAccess?: React.ReactNode }
   zoomManagedBy?: 'desktop' | 'browser'
@@ -4268,6 +4272,7 @@ export function SettingsView({
   return (
     <div className="settings-workbench">
       <div className={`settings-panel settings-panel-${section}`}>
+        {section === 'remote' && remoteConnection}
         {section === 'general' && (
           <GeneralSettings
             api={preferencesApi}

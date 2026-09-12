@@ -2669,6 +2669,7 @@ export type StartupLocationMode = 'last_location' | 'quick_chat'
 export type ExecutionConsolePlacement = 'bottom' | 'inspector'
 
 export type SettingsSection =
+  | 'remote'
   | 'general'
   | 'skills'
   | 'mcp'
@@ -3764,6 +3765,8 @@ export type CoreMethod =
   | 'diagnostics.export'
 
 export type HostWebStatus = {
+  addresses?: { origin: string; interface: string; recommended: boolean }[]
+  listen?: string
   enabled: boolean
   origin?: string
   sessions?: number
@@ -3774,10 +3777,10 @@ export type HostWebStartInput = {
   listen: string
   publicOrigin?: string
   allowInsecureLan: boolean
-  authorizedWorkspaces?: string[]
 }
 
 export interface HostWebApi {
+  token(): Promise<{ administratorToken: string }>
   status(): Promise<HostWebStatus>
   start(input: HostWebStartInput): Promise<HostWebStatus & { administratorToken: string }>
   stop(): Promise<HostWebStatus>

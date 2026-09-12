@@ -14,6 +14,9 @@ last_updated: 2026-09-12
 草稿、上传、真实 Runtime 或三平台安全资格已完成。目标结构与隔离前置条件见
 [统一 Host](../architecture/unified-rust-host.md)，实际完成范围见[版本计划](../versions/v1.59/implementation-plan.md)。
 
+本文件为被 v2 替代的历史协议。一次性令牌、唯一公开地址与同 UID 隔离前置均不再属于当前模型；
+以 [Host Web v2](host-web-v2.md) 的明确替代条款为准，原证据不改写为通过。
+
 ## 进程与管理
 
 `rovai-web` 只接收既有 `CoreService`，不打开数据库、不创建 runner、不驱动业务调度。

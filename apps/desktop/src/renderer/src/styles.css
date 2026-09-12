@@ -4925,10 +4925,11 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .skill-eyebrow { margin: 0; color: var(--brand-ink); font-size: 9px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; }
 .settings-page-note, .skill-section-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .settings-page-note { border-color: color-mix(in srgb, var(--brand) 32%, var(--line)); color: var(--brand-ink); background: var(--brand-soft); }
-.settings-content .settings-panel:is(.settings-panel-general, .settings-panel-appearance, .settings-panel-notifications, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-channels, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) {
+.settings-content .settings-panel:is(.settings-panel-remote, .settings-panel-general, .settings-panel-appearance, .settings-panel-notifications, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-channels, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) {
   border-top: 0;
   background: var(--home-surface);
 }
+.settings-panel-remote > .general-settings,
 .settings-panel-general > .general-settings,
 .settings-panel-skills > .skill-settings,
 .settings-panel-mcp > .mcp-settings,
@@ -4940,6 +4941,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   width: min(1040px, 100%);
   max-width: 1040px;
 }
+.settings-panel-remote > .general-settings > .settings-page-heading,
 .settings-panel-general > .general-settings > .settings-page-heading,
 .settings-panel-skills > .skill-settings > .settings-page-heading,
 .settings-panel-mcp > .mcp-settings > .settings-page-heading,
@@ -4953,6 +4955,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   padding-bottom: 24px;
   border-bottom: 0;
 }
+.settings-panel-remote > .general-settings > .settings-page-heading .settings-page-heading-copy,
 .settings-panel-general > .general-settings > .settings-page-heading .settings-page-heading-copy,
 .settings-panel-skills > .skill-settings > .settings-page-heading .settings-page-heading-copy,
 .settings-panel-mcp > .mcp-settings > .settings-page-heading .settings-page-heading-copy,
@@ -4965,6 +4968,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-notifications > .settings-page-heading .settings-page-heading-copy {
   padding-left: 0;
 }
+.settings-panel-remote > .general-settings > .settings-page-heading .settings-page-heading-copy::before,
 .settings-panel-general > .general-settings > .settings-page-heading .settings-page-heading-copy::before,
 .settings-panel-skills > .skill-settings > .settings-page-heading .settings-page-heading-copy::before,
 .settings-panel-mcp > .mcp-settings > .settings-page-heading .settings-page-heading-copy::before,
@@ -4977,6 +4981,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-notifications > .settings-page-heading .settings-page-heading-copy::before {
   content: none;
 }
+.settings-panel-remote > .general-settings > .settings-page-heading h1,
 .settings-panel-general > .general-settings > .settings-page-heading h1,
 .settings-panel-skills > .skill-settings > .settings-page-heading h1,
 .settings-panel-mcp > .mcp-settings > .settings-page-heading h1,
@@ -4989,13 +4994,13 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-notifications > .settings-page-heading h1 {
   font-weight: 620;
 }
-.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading) {
+.settings-panel:is(.settings-panel-remote, .settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading) {
   padding-left: 0;
 }
-.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading)::before {
+.settings-panel:is(.settings-panel-remote, .settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading)::before {
   content: none;
 }
-.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading) h2 {
+.settings-panel:is(.settings-panel-remote, .settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading) h2 {
   color: var(--ink);
   font-weight: 620;
 }

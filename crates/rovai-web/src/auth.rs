@@ -14,11 +14,12 @@ const LOGIN_ATTEMPTS: usize = 12;
 const LOGIN_WINDOW: Duration = Duration::from_secs(60);
 
 /// Plaintext credentials have no Debug/Serialize implementation and are never
-/// retained in this store. The process owner alone receives freshly made tokens.
+/// serialized. Only the trusted local management API can reread the administrator token.
 pub struct Sessions(Mutex<SessionState>);
 struct SessionState {
     enabled: bool,
     administrator: [u8; 32],
+    administrator_plaintext: String,
     sessions: HashMap<[u8; 32], Arc<Session>>,
     attempts: VecDeque<Instant>,
     generation: u64,
@@ -63,6 +64,7 @@ impl Sessions {
         Ok(Self(Mutex::new(SessionState {
             enabled: true,
             administrator: digest(b"rovai-administrator-v1\0", administrator),
+            administrator_plaintext: administrator.to_owned(),
             sessions: HashMap::new(),
             attempts: VecDeque::new(),
             generation: 0,
@@ -141,6 +143,14 @@ impl Sessions {
         Ok((token, session))
     }
 
+    pub fn administrator_token(&self) -> String {
+        self.0
+            .lock()
+            .expect("session registry poisoned")
+            .administrator_plaintext
+            .clone()
+    }
+
     pub fn authenticate(&self, token: &str) -> Option<Arc<Session>> {
         if !valid_token(token) {
             return None;
@@ -173,6 +183,7 @@ impl Sessions {
         let mut state = self.0.lock().expect("session registry poisoned");
         state.generation += 1;
         state.administrator = digest(b"rovai-administrator-v1\0", administrator);
+        state.administrator_plaintext = administrator.to_owned();
         for session in state.sessions.values() {
             session.revoked.send_replace(true);
         }
@@ -185,6 +196,7 @@ impl Sessions {
         let mut state = self.0.lock().expect("session registry poisoned");
         state.generation += 1;
         state.enabled = false;
+        state.administrator_plaintext.clear();
         for session in state.sessions.values() {
             session.revoked.send_replace(true);
         }

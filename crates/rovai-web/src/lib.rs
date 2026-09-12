@@ -1,7 +1,9 @@
 mod auth;
+mod network;
 mod operations;
 mod resources;
 mod uploads;
+mod workspaces;
 
 use anyhow::{Context, Result, ensure};
 pub use auth::new_token;
@@ -37,22 +39,16 @@ pub struct WebConfig {
     #[serde(default)]
     pub allow_insecure_lan: bool,
     pub ui_directory: PathBuf,
-    /// Explicit local-operator grants. Browsers select these roots, never grant
-    /// new Host paths by submitting a string.
-    #[serde(default)]
-    pub authorized_workspaces: Vec<PathBuf>,
 }
 
 #[derive(Clone)]
 struct WebState {
     core: CoreService,
     sessions: Arc<Sessions>,
-    origin: String,
-    authority: String,
+    network: Arc<network::Network>,
     assets: PathBuf,
     epoch: String,
     requests: Arc<Semaphore>,
-    workspaces: Arc<Vec<PathBuf>>,
     uploads: Arc<Semaphore>,
     files: Arc<resources::Handles>,
 }
@@ -61,6 +57,7 @@ struct WebState {
 /// never stops, replaces, or creates a Core runner.
 pub struct WebServer {
     pub origin: String,
+    network: Arc<network::Network>,
     sessions: Arc<Sessions>,
     shutdown: Option<oneshot::Sender<()>>,
     task: JoinHandle<std::io::Result<()>>,
@@ -84,59 +81,24 @@ impl WebServer {
             "Web UI build is missing index.html"
         );
         let sessions = Arc::new(Sessions::new(administrator)?);
-        let mut workspaces = Vec::new();
-        ensure!(
-            config.authorized_workspaces.len() <= 64,
-            "too many workspace grants"
-        );
-        for root in &config.authorized_workspaces {
-            ensure!(root.is_absolute(), "workspace grants must be absolute");
-            let root = tokio::fs::canonicalize(root).await?;
-            ensure!(root.is_dir(), "workspace grant must be a directory");
-            if !workspaces.contains(&root) {
-                workspaces.push(root);
-            }
-        }
         let listener = TcpListener::bind(config.listen)
             .await
             .context("Web address could not be bound")?;
         let address = listener.local_addr()?;
-        let origin = match config.public_origin {
-            Some(origin) => origin,
-            None => {
-                ensure!(
-                    address.ip().is_loopback(),
-                    "LAN requires an explicit publicOrigin"
-                );
-                format!("http://{address}")
-            }
-        };
-        let url = url::Url::parse(&origin).context("invalid console origin")?;
-        ensure!(
-            matches!(url.scheme(), "http" | "https")
-                && url.host_str().is_some()
-                && url.username().is_empty()
-                && url.password().is_none()
-                && url.query().is_none()
-                && url.fragment().is_none()
-                && url.path() == "/",
-            "console origin must have no credentials, path, query or fragment"
-        );
-        let origin = url.origin().ascii_serialization();
-        let authority = origin
-            .split_once("://")
-            .expect("validated HTTP origin")
-            .1
-            .to_owned();
+        let network = Arc::new(network::Network::new(address, config.public_origin)?);
+        let origin = network
+            .addresses()?
+            .first()
+            .context("no usable console address")?
+            .origin
+            .clone();
         let state = WebState {
             core,
             sessions: sessions.clone(),
-            origin: origin.clone(),
-            authority,
+            network: network.clone(),
             assets,
             epoch: new_token()?,
             requests: Arc::new(Semaphore::new(64)),
-            workspaces: Arc::new(workspaces),
             uploads: Arc::new(Semaphore::new(4)),
             files: Arc::new(resources::Handles::default()),
         };
@@ -151,6 +113,7 @@ impl WebServer {
         });
         Ok(Self {
             origin,
+            network,
             sessions,
             shutdown: Some(shutdown),
             task,
@@ -158,7 +121,10 @@ impl WebServer {
     }
 
     pub fn status(&self) -> Value {
-        json!({"enabled":!self.task.is_finished(), "origin":self.origin, "sessions":self.sessions.count(), "sessionLifetimeSeconds":SESSION_LIFETIME.as_secs()})
+        json!({"enabled":!self.task.is_finished(), "origin":self.origin, "addresses":self.network.addresses().unwrap_or_default(), "listen":self.network.listen.to_string(), "sessions":self.sessions.count(), "sessionLifetimeSeconds":SESSION_LIFETIME.as_secs()})
+    }
+    pub fn administrator_token(&self) -> String {
+        self.sessions.administrator_token()
     }
     pub fn rotate(&self) -> Result<String> {
         let token = new_token()?;
@@ -195,7 +161,7 @@ fn routes(state: WebState) -> Router {
         .route("/request", post(request))
         .route("/events", get(events))
         .route("/logout", post(logout))
-        .route("/workspaces", get(workspaces))
+        .route("/workspaces", post(workspaces::browse))
         .route(
             "/uploads",
             post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_BYTES + 16384)),
@@ -224,8 +190,10 @@ async fn boundary(State(state): State<WebState>, req: Request, next: Next) -> Re
         .get(header::HOST)
         .and_then(|value| value.to_str().ok());
     let origin = req.headers().get(header::ORIGIN);
-    let mut response = if host != Some(&state.authority)
-        || origin.is_some_and(|value| value.to_str().ok() != Some(&state.origin))
+    let mut response = if !state
+        .network
+        .allows(host, origin.and_then(|value| value.to_str().ok()))
+        || origin.is_some_and(|value| value.to_str().is_err())
     {
         error(StatusCode::FORBIDDEN, "origin_not_allowed")
     } else if req.uri().query().is_some() {
@@ -337,10 +305,6 @@ async fn capabilities(State(state): State<WebState>) -> Json<Value> {
     )
 }
 
-async fn workspaces(State(state): State<WebState>) -> Json<Value> {
-    Json(json!(state.workspaces.iter().map(|path| json!({"projectPath":path, "name":path.file_name().and_then(|name| name.to_str()).unwrap_or("工作区")})).collect::<Vec<_>>()))
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OperationRequest {
@@ -357,12 +321,6 @@ async fn request(
     let Ok(Json(body)) = body else {
         return error(StatusCode::BAD_REQUEST, "operation_not_admitted");
     };
-    if !body
-        .operation
-        .paths_allowed(&body.params, &state.workspaces)
-    {
-        return error(StatusCode::FORBIDDEN, "workspace_not_authorized");
-    }
     let Ok(_permit) = state.requests.clone().try_acquire_owned() else {
         return error(StatusCode::TOO_MANY_REQUESTS, "request_capacity");
     };

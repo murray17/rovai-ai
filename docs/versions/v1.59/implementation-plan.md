@@ -13,7 +13,32 @@ last_updated: 2026-09-12
 实现工作目录为仓库同级 `rovai-ai-unified-rust-host`，分支 `rovai/unified-rust-host`，
 起点 `a18425ec78ae2e1a0666b2c029564ff3f7bc8f78`。验收只使用隔离 data-dir、Skill Library 和 MCP config。
 
-## 当前收敛：阶段 1–3，方向通过后接通真实 Camp
+## 当前收敛：阶段 1–3，单 Owner 的真实业务闭环
+
+本轮变更：正式“远程连接”菜单复用现有设置风格，自动展示实际 Host 接口并独立选择复制地址；
+管理令牌可重新查看/复制，重新生成独立确认。取消工作目录预授权，登录后的浏览器可浏览 Host 目录、
+输入绝对路径，再进入现有 Core 项目校验与共享新建会话流程。交互稿直接挂载生产远程连接组件。
+本增量 [真实 Desktop/双浏览器记录](evidence/owner-host/desktop-web-live.json)已通过：从正式设置开启服务，
+复制地址与令牌，通过实际非 loopback 接口登录，使用[浏览器 Host 目录选择器](evidence/owner-host/web-host-directory-picker.png)
+打开已存在项目，再继续共享 Camp 编辑、上传、Pending 移回和重新登录；同一 Composer 保留，关闭 Web 后 Core 继续。
+测试先在隔离目录创建一个已有项目 Camp；它不冒充新建配置 UI 或第二台实体设备验收。未调用模型。
+
+[日间](evidence/owner-host/remote-day.png)/[夜间](evidence/owner-host/remote-night.png)设计稿使用生产组件，
+[14 状态记录与离线产物哈希](evidence/owner-host/remote-connection-review.json)已通过。新增网络纯测试拥有
+接口推荐与 authority/origin 配对，覆盖 198.18/15 不默认推荐但不禁用；既有 Host HTTP owner 扩展验证无目录
+预授权的项目创建和重复读取令牌不退出会话，未新增 SQLite fixture。
+
+真实 LAN 回归发现 main 的 Pending 草稿协调器残留 `crypto.randomUUID()`（HTTP LAN 不提供该方法），
+已改用项目既有 `newCommandId` / `getRandomValues`，既有协调器测试在无 randomUUID 环境运行同一撤回用例。
+另修正验收鼠标先移动再按下；原样式的悬停加号保留，临时就绪状态改动和诊断计数已撤掉。
+旧证据保留原提交边界，不因当前模型变化而转为通过。
+
+本轮最终门禁通过：TypeScript、Desktop/Web build、`pnpm test`（Vitest 175 文件/1798 项，Node 317 通过/2 既有平台跳过），
+后续受影响的 App/client/draft coordinator 定向 185 项；Rust Web 4 项，Rust PR library 795 通过/6 既有忽略、
+CLI 35、slow 309；workspace all-target check、Clippy、fmt 和固定 main base 文档治理。
+重建 Host 的 HTTP、真实 Electron/双浏览器、最终原生设置与离线稿验证均通过，未跳过。
+未验收第二台实体设备、Windows/Linux 新增量或本增量的真实模型执行；阶段 1–3 整体仍在进行。
+
 
 用户以 PR #345 / `077bf78e64c76e934c45675ddb55e05165a2c49f` 提交补充静态审阅后，已核对实际
 本地与远端提交一致。已交付三项材料：[行为差异表](../../ui/host-web-parity.md#一张行为差异表)、
@@ -29,8 +54,8 @@ last_updated: 2026-09-12
 | D 逐页业务能力 | 队员/Runtime、Task、Memory、Automation、Skills/MCP 与必要设置逐项原动作/失败/权限/刷新闭合 | 未完成；通用只读行不计入 |
 
 Mobile 新增、扩平台、容器与发布优化暂停，已有包/CI/原型保留。长期 Server 仍为 macOS、Windows、Linux。
-安全仅追踪下文 S1；安全等待不阻塞受控本机的共享 UI、模拟交互与非发布测试，也不允许把未通过保护的网络写入
-宣布为正式发布。以下原阶段表保留总体目标与未完成事实。
+安全边界按用户最新确认的单 Owner 模型执行；原 S1 已从交付前置移除，失败记录保留。
+网络认证、跨站/内容防护及业务正确性仍需验证；不把变更范围视为正式发布完成。以下原阶段表保留历史目标和证据。
 
 ### 首个真实 Camp 增量
 
@@ -81,7 +106,7 @@ macOS `O_SEARCH` / Linux `O_PATH` 的目录句柄，最终文件仍只读且逐�
 没有因此改生产时限或关闭门禁。文档门禁在最终证据入库后再执行。
 
 未完成项保持可见：浏览器完整新建/配置路径、私聊独立草稿、头像编辑、相对资源/大文件分页、
-共同管理页动作、无 Desktop/浏览器的 Automation 时钟、两种 Host 的完整相同运行场景、第二台设备及 S1。
+共同管理页动作、无 Desktop/浏览器的 Automation 时钟、两种 Host 的完整相同运行场景及第二台设备。
 首个真实 Camp 增量不等于 B/C/D 或阶段 1–3 整体完成。
 
 ### 本次 main 同步与远程连接设计稿
@@ -108,9 +133,8 @@ Host/Owner 的浏览器偏好，不再访问 Electron 桥；主题/字号仍共�
 菜单或快捷键保存，外观页给出实际可用的操作说明，Desktop 继续使用 main 的原生 Chrome 档位。
 
 用户本次单独要求的[远程连接设计稿](../../ui/host-remote-connection.md)在现有设置“应用”分组追加菜单，
-直接复用正式侧栏、页头、控件和日夜主题；同稿的通用/外观页面提供直接对照。该新增菜单仍只在可点击稿中，
-未改变正式设置 section 或把原 Host 管理块重复接入产品。正式接入前必须解决已生效授权目录/监听配置的
-受信读回缺口，不能把表单草稿当成 Host 当前配置。该稿不扩大 Mobile、平台或发布范围。
+直接复用正式侧栏、页头、控件和日夜主题；同稿的通用/外观页面提供直接对照。在 `fe7fc8cd` 时该菜单仅在稿中；本轮已接入正式设置，读取 Host 实际接口和令牌，取消目录预授权。
+表单草稿不代表运行配置；该增量不扩大 Mobile、平台或发布范围。
 
 本次真实 Electron/双浏览器回归增加了 Web 通用偏好保存且不改 Desktop、原生窗口能力隔离、浏览器缩放
 说明、预览内全选和准确的消息末行引用；仍保留三份草稿、同页重新认证、关闭 Web 后 Core 响应的原断言。第二次 main 合入后增加实际 Web 撤回
@@ -345,46 +369,16 @@ Run 保持 failure。Windows console 事件的原生受控关闭仍未验收，�
 等同于干净用户环境，不扩大成系统组件安装器。
 
 <a id="host-protection-decision"></a>
-## S1：受管 Runtime 的 Host 控制面保护（唯一待确认安全项）
+## S1：同 UID 控制面隔离（已从本轮交付前置移除）
 
-状态：待维护者确认；本节只收敛此前修正提案，不增加生产隔离授权。UI 稿件确认与 S1 分开：
-稿件确认后可以继续受控本机的 A–D 实现/非发布测试，S1 未通过仍阻断正式安全发布。
+2026-09-12 用户明确采用“单 Owner、可信自托管 Host”，不建设多租户或强隔离执行平台。
+原 AppContainer、Landlock、独立 OS 身份等候选方案不再作为本轮待批准工作，不实施通用沙箱工程。
+不承诺抵御任意恶意同 UID 进程；不削弱已有 Runtime 权限、审批或进程回收。当前规范已同步到
+[Host Web v2](../../contracts/host-web-v2.md)和[统一 Host](../../architecture/unified-rust-host.md)。
 
-**保护目标。** 仅 Rovai 管理的 Runtime 与后代不能取得 Host 控制凭据、冒用本机管理 IPC 或调用管理恢复，
-同时能访问明确授权的工作区、保持原生 Runtime 登录/运行能力并被回收。不防御管理员/root，不把任意私有
-文件都等同于真实控制凭据。Host 身份和网络 Owner 授权仍来自服务端，不信任客户端自报。
-当前 `Managed Runtime Process v2` / `User Automation v5` 已取消外层 macOS sandbox 和原同 UID 防冒用承诺；
-这个新 Host 目标不能被当作旧承诺仍存在，也不能悄悄恢复旧 sandbox。维护者须确认是否将这个新目标用于
-三平台 Host 准入，再同步相应合同。
+历史哨兵证据保留：本地与四个 CI 目标均观测到进程和后代能读取测试私有 sentinel，
+`privateFileIsolationSatisfied=false`。该事实没有变成通过；它也不证明真实令牌泄漏，未覆盖进程内存、
+句柄/环境继承、IPC 或真实 Runtime。可复现命令仍是 `cargo run --quiet -p rovai-core --example host_runtime_boundary_probe`。
 
-**可复现失败。** 本地临时哨兵与四个 CI 目标的事实见上文 JSON。可在目标原生机器运行：
-
-```bash
-cargo run --quiet -p rovai-core --example host_runtime_boundary_probe
-```
-
-探针只创建本次临时文件；当前自身和后代均可读 sentinel，`privateFileIsolationSatisfied=false`。
-它不证明真实 Token 泄漏，也未覆盖句柄/环境继承、IPC、进程内存、实际 Runtime。CI 的权限上下文不能
-替代普通非提升权限用户验收。现有探针和失败证据保留，不改文案/删测试绕过门槛。
-
-**最小修正提案。** 只在已有 ManagedProcess 启动和 Host 控制入口补系统能力适配，保留唯一 Host/Core、
-原 Job/进程树回收、现有命令与认证实现，不新增常驻服务或通用策略平台。先验证凭据/管理句柄不继承以及
-目标文件/进程/IPC 访问；Windows 以系统 AppContainer 为候选，Linux 按实际内核 ABI 验证可用的文件、进程
-和 IPC 限制，不能把只限制文件当作完整保护。macOS 不自动恢复外层 sandbox；先验证现合同下是否有满足
-目标且保持 Runtime 兼容的最小系统方案。若需要独立 OS 运行身份、提权安装或提高 OS/内核基线，先回到同一
-S1 说明实际必要性与较小替代，不自动实施。单纯依靠同用户目录权限已经不够；保留只读预览也不是阶段 1–3
-完整交付的替代方案。
-
-**Runtime 兼容影响。** 原生 CLI 的认证目录、网络、子进程、MCP、路径授权以及恢复/回收都可能受限。
-原型不迁移维护者的真实凭据、不改日常账户或全局安全配置；用独立测试实例验证。共享库代码不推导平台资格。
-
-**实际验收。** 在普通用户原生环境逐项验证：私有控制哨兵拒绝、授权工作区可读写；环境/管理句柄不泄漏；
-IPC 冒用及恢复入口拒绝；必要的进程访问拒绝；子孙进程保有相同边界且能回收；真实 CLI 登录、发送、审批、
-取消和恢复仍可运行。不能只看探针一项转绿。成功后保留版本/系统能力/Runtime/命令和结果关联，才开放对应资格。
-
-维护者待决定的问题是：**是否确认上述新 Host 保护目标，并授权这一范围内的最小系统能力原型？**
-不同时提交第二套隔离工程或把 macOS 的旧承诺恢复当成默认答案。
-
-候选能力参考：[Microsoft AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)、
-[Linux Landlock 能力与 ABI](https://docs.kernel.org/userspace-api/landlock.html)、
-[user namespace 的身份映射边界](https://man7.org/linux/man-pages/man7/user_namespaces.7.html)。这些资料不证明本项目已兼容。
+新增限制需要明确保护对象和必要性。保留网络认证、Bearer 凭据不自动跨端口泄漏、浏览器内容及跨站请求保护、
+文件操作校验、基本限额；继续验证客户端草稿、原命令回执、审批一致性与生命周期。

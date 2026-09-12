@@ -18,6 +18,7 @@ pub struct CoreReply {
 /// requests never enter this seam; its operations are deliberately closed.
 #[derive(Clone, Copy)]
 pub enum HostWebOperation {
+    Token,
     Status,
     Start,
     Stop,

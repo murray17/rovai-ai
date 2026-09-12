@@ -25,7 +25,7 @@ export async function buildRemoteConnectionReview(output = join(root, 'out/revie
   .review-note{margin:0;padding:10px 24px;color:var(--muted);font-size:12px;line-height:1.6}.review-stage{padding:8px 24px 24px;width:max-content;min-width:100%}iframe{display:block;border:1px solid var(--line);margin:auto;background:var(--home-surface)}
   </style></head><body><div class="review-toolbar"><strong>远程连接 · 设置页设计稿</strong>
   <label>入口 <select id="surface"><option value="desktop">Desktop · 管理访问</option><option value="web">Web · 当前连接</option></select></label>
-  <label>状态 <select id="state"><option value="enabled">已开启 / 已连接</option><option value="off">尚未开启</option><option value="loading">读取中</option><option value="error">开启失败</option><option value="offline">连接中断 · Web</option><option value="expired">登录失效 · Web</option></select></label>
+  <label>状态 <select id="state"><option value="enabled">已开启 / 已连接</option><option value="off">尚未开启</option><option value="loading">读取中</option><option value="error">读取失败</option><option value="offline">连接中断 · Web</option><option value="expired">登录失效 · Web</option></select></label>
   <label>主题 <select id="theme"><option value="day">Porcelain Day</option><option value="night">Steel Night</option></select></label>
   <label>视口 <select id="viewport"><option value="1440x920">1440 × 920</option><option value="1040x700">1040 × 700</option><option value="2560x1440">2560 × 1440</option></select></label>
   <button id="reset" type="button">重置交互</button></div>

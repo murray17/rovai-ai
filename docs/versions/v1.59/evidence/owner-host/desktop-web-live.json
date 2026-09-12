@@ -1,0 +1,43 @@
+{
+  "stage": "managed-desktop-web-passed",
+  "simulation": false,
+  "realRuntime": false,
+  "desktopFocusEmulated": true,
+  "campId": "rvcamp_01m2b55eageh98neexc16pzcpe",
+  "geometry": {
+    "viewport": [
+      1440,
+      920
+    ],
+    "sidebar": 270,
+    "header": 38,
+    "composer": 1022
+  },
+  "draftOwners": [
+    "web",
+    "web",
+    "desktop"
+  ],
+  "sameComposerAfterReauth": true,
+  "nativeBridgeInBrowser": false,
+  "ownerModel": {
+    "desktopSettingsStart": true,
+    "copiedAddressAndToken": true,
+    "actualInterfaceAddress": true,
+    "nonLoopbackOrigin": true,
+    "directoryPickerWithoutPreauthorization": true,
+    "sameMachineBrowsers": true,
+    "secondPhysicalDevice": false
+  },
+  "mainSync": {
+    "browserGeneralPreferences": true,
+    "nativeWindowControlsAbsent": true,
+    "browserZoomExplicit": true,
+    "previewSelectAllScoped": true,
+    "finalLineQuoteAccepted": true,
+    "pendingReturnScopedToCurrentClient": true,
+    "pendingAttachmentsAddedInComposer": true,
+    "pendingFixture": "one needs_repair row in isolated database; no Runtime"
+  },
+  "coreAliveAfterWebStop": true
+}

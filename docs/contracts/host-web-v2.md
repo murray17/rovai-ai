@@ -10,10 +10,34 @@ last_updated: 2026-09-12
 
 # Host Web v2
 
-v2 replaces [v1](host-web-v1.md) for new Web sessions. One Core, local management, authority/origin checks,
-memory-only Bearer credentials, bounded admission, CSP and invalidation SSE retain v1 semantics.
+v2 replaces [v1](host-web-v1.md) for new Web sessions. One Core, local management, memory-only browser Bearer credentials, bounded admission, CSP and invalidation SSE remain.
+The single-Owner model, directory access, local token rereading and multiple interface origins below supersede v1 restrictions.
 This contract admits the shared Camp write path; it does **not** qualify a platform for secure network release.
 Implementation and remaining acceptance evidence belong to the [version plan](../versions/v1.59/implementation-plan.md).
+
+## Product and network trust model
+
+One Owner operates a trusted self-hosted Host. An authenticated remote Owner has the same intended business capabilities
+as Desktop; incomplete adapters are implementation gaps, not a restricted remote role. This release does not build a
+multi-tenant or strongly isolated execution platform and does not promise to defend arbitrary malicious same-UID processes.
+The former S1 isolation proof is not a delivery gate. Existing Runtime permission modes, approval, process cleanup and
+file-operation validation remain unchanged. Known sentinel failures remain evidence; they are not relabeled as passes.
+
+Local `host.web.status` returns `enabled`, `listen`, `origin`, `addresses` and session counts, never credentials.
+Each address contains `origin`, `interface` and `recommended`. Rust enumerates actual interfaces compatible with the
+listener, including 198.18/15 interfaces; that range is not a default LAN recommendation. IPv6 link-local URLs requiring
+browser-unsupported scope IDs are not advertised. Selecting an address is local presentation state only: it cannot
+change the listener, Owner, permissions or credentials. Interface discovery does not guarantee remote reachability.
+The listener accepts its actual interface authorities and optional explicit reverse-proxy `publicOrigin`; an Origin
+header must match the same authority's complete origin. Arbitrary Host, cross-origin requests and query parameters are
+rejected; there is no credentialed CORS. LAN HTTP requires an explicit enable choice, with HTTPS/VPN for untrusted networks.
+
+Trusted local `host.web.token` returns `{administratorToken}` repeatedly without rotation or session revocation.
+Start and rotate still return the new token. The Host retains the administrator token in private process memory solely
+for this readback, with no Debug/Serialize on the credential store; authentication continues to use a typed digest and
+constant-time comparison. Status, public HTTP operations, diagnostics and logs never include it. Rotation is a separate
+explicit operation that changes the token and revokes sessions; Web stop clears it. Standalone startup accepts the Owner's
+token on stdin as before. Browser authentication still keeps only a short-lived session and editing proof in page memory.
 
 ## Authentication and editor ownership
 
@@ -40,7 +64,8 @@ origin/Owner-scoped browser storage; business state, credentials and Drafts must
 The Rust `operations::Operation` enum remains a closed network allowlist. It now admits the existing Core operations for
 Camp creation/preflight/membership, member configuration, Runtime discovery/check/catalog, scoped Camp Draft mutations,
 pending editing, send, cancellation, approval, execution detail and read-only command reconciliation. It does not admit
-arbitrary internal RPC, local management, raw paths, source binding or editor-resolution methods.
+arbitrary internal RPC, local management, source binding or editor-resolution methods. Host workspace paths are admitted
+for browsing and existing Core workspace operations after Owner authentication.
 
 HTTP stamps the verified editor on the trusted Core request; JSON cannot select that field. Core applies the same
 domain services and command gateway as Desktop. [Camp Draft v13](camp-composer-draft-v13.md) and
@@ -62,10 +87,14 @@ the new write allowance is not permission to expose every internal action.
 
 ## Workspaces, uploads and resources
 
-Trusted local startup supplies up to 64 absolute `authorizedWorkspaces`; standalone CLI uses repeatable
-`--web-workspace`. Host canonicalizes existing roots. `GET /workspaces` lists those choices. Workspace inspection,
-validation and Camp creation only accept an exact grant, rechecked against the current filesystem. Browser path strings
-cannot create a grant. A granted workspace is separate from browser-device native file selection.
+There is no local directory preauthorization list and no `authorizedWorkspaces` / `--web-workspace` grant.
+Authenticated `POST /api/v1/workspaces` accepts `{path?, offset?}`. Omitted path starts at the Host account's home;
+absolute paths are canonicalized and must be readable directories. The response includes `projectPath`, `name`,
+`parentPath`, filesystem `roots`, `directories: [{name, projectPath}]` and `nextOffset`. A page scans at most 4096 entries
+and returns at most 256 directories, with a 15-second timeout and shared request capacity. Unavailable paths fail explicitly.
+The picker can browse parents, drives and subdirectories or enter an absolute path. Core's existing workspace inspect,
+validate and create operations determine project validity; an OS denial remains an error. Selecting a Host directory is
+separate from uploading a file chosen on the browser device. Directory listing is discovery, not a permission grant.
 
 `POST /uploads` accepts multipart `intent` JSON and exactly one `file`. Intent contains an original UUID command ID,
 Camp, exact Draft revision, display name, byte count and SHA-256. The file limit is 20 MiB, with four uploads in flight.
@@ -78,7 +107,7 @@ accepts a reference, deleting a reference, failed send, logout or shutdown does 
 Message transfers use the existing Core transactions. OS cleanup can make history unavailable. No permanent user asset
 store is introduced; [Camp Attachment v9](camp-attachment-v9.md) and Agent Managed artifacts keep their lifetimes.
 
-`POST /files` and `POST /attachments` use exact Core owner locators or authorized workspace/evidence sources. Every
+`POST /files` and `POST /attachments` use exact Core owner locators or Core-resolved workspace/evidence sources. Every
 read revalidates source ownership; opaque handles/reopen tokens are scoped to the editor and Web instance. Canonical
 containment plus handle-based no-follow opening prevents path replacement from becoming an arbitrary Host read.
 There are at most 128 handles per server and 32 per editor. Reads have byte and generation bounds. Download uses an
@@ -100,4 +129,5 @@ the connection revision is not a database watermark, and refresh must not remoun
 
 Verification owners remain v1's auth/operation/client/real-Host tests, extended for ownership, source binding, receipts,
 revocation and protocol rejection. Real Runtime execution and real Desktop/browser UI evidence are separate from
-component fixtures and no-model HTTP tests. S1 remains a distinct release blocker.
+component fixtures and no-model HTTP tests. The removed S1 promise does not turn historical failures into passing evidence; release qualification still requires the
+remaining business, network and platform checks recorded in the version plan.

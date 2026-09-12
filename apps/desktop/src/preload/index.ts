@@ -52,6 +52,7 @@ ipcRenderer.on(APP_PREPARE_QUIT_CHANNEL, (event) => {
 
 const api: RovaiApi = {
   hostWeb: {
+    token: () => ipcRenderer.invoke('rovai:host-web', 'token'),
     status: () => ipcRenderer.invoke('rovai:host-web', 'status'),
     start: (input) => ipcRenderer.invoke('rovai:host-web', 'start', input),
     stop: () => ipcRenderer.invoke('rovai:host-web', 'stop'),

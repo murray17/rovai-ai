@@ -1,5 +1,5 @@
 ---
-version: 14
+version: 15
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -49,8 +49,8 @@ launch, default Project, recovery or update policy.
 
 The shared General page receives its preference API explicitly from either entry. Web stores only client
 presentation preferences; window reset and Host browser-access administration remain injected Desktop
-capabilities. Web does not fall back to a native global. The proposed separate Remote Connection menu is
-still a [design draft](../../../../docs/ui/host-remote-connection.md), not a production navigation item.
+capabilities. Web does not fall back to a native global. The separate Remote Connection menu is now the production Host-management/current-browser-connection surface;
+its [interactive review](../../../../docs/ui/host-remote-connection.md) uses the same components.
 
 New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fewer selectable teammates
 remain directly visible in a four-column chooser (two columns at narrower desktop widths); only counts above
