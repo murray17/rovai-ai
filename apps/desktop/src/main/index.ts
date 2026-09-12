@@ -1345,7 +1345,7 @@ ipcMain.handle('rovai:channels-login-view-bounds', (event, attemptId: unknown, b
 ipcMain.handle('rovai:channels-refresh-login-qr', (event, attemptId: unknown) => {
   requireMainWindow(event.sender)
   if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
-  channelSettings.refreshLoginQr(attemptId)
+  return channelSettings.refreshLoginQr(attemptId)
 })
 
 ipcMain.handle('rovai:onboarding-get', async () => {

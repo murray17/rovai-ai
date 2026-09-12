@@ -3,12 +3,12 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-12
 ---
 
 # 钉钉渠道架构
 
-字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v12](../contracts/dingtalk-channel-v12.md)，credential 与 Developer Session 持久化见
+字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v13](../contracts/dingtalk-channel-v13.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
@@ -60,15 +60,21 @@ membership 与 Outbox。DingTalk Host 不直接创建 CampMessage、CampTurn 或
 
 ## Developer Web Session 与控制台 API
 
-Main 在隐藏、隔离的原生页面加载官方开放平台，把当前可信 QR PNG 投影到 Rovai 登录 Dialog；需要确认/选择组织时，
-同一个无 preload/Node 的 sandbox `WebContentsView` 嵌入 Dialog 内容区，Renderer 只传可见矩形，不获得页面或 Session 控制权。
+Main 的 `DingTalkLoginProtocol` 从后台入口获取本次认证上下文，经独立 Login Transport 初始化二维码、串行查询结构化状态，
+本地生成 QR PNG 并完成平台 SSO。普通扫码不创建浏览器页面、不导出 Canvas 或匹配文案/CSS；请求与 Cookie 共用非持久 Session。
+协议调查与实测限制见[登录协议调查](../research/dingtalk-login-protocol.md)。
+只有结构化结果要求额外交互时，同 Session、无 preload/Node 的 sandbox `WebContentsView` 嵌入 Dialog 内容区；
+Renderer 只传可见矩形，不获得页面或 Session 控制权，不自动替用户选择企业。
 不打开系统浏览器或独立可见登录窗口。取消、完成和父窗口退出会清理页面及隐藏 host；取消是无告警的 no-op。
 `/baseInfo` 的 `corpId + staffId` 仍是 Owner 身份。
 Rovai 不需要预注册 OAuth Client、loopback、设备授权、token broker、第三方 Client Secret 或用户 Chrome Profile。
 平台 SSO 的 OAuth 页面只是平台自身的登录实现，不是 Rovai 的另一条授权链。
 
 `ElectronDingTalkDeveloperSessionService` 拥有非 persist Cookie jar、staged 账号切换、身份串行校验和 SQLite revision/CAS。
-登录/SSO 后将经过允许字段/域名校验的 Snapshot 恢复到 API-only jar，并核验相同身份后接管。Cookie schema 2 保存
+接口扫码使用同一个 API jar 完成身份确认；额外交互/浏览器续接后将允许字段/域名校验的 Snapshot 恢复到 API-only jar，
+核验身份后接管。每个异步步骤受当前 attempt/generation 和独立请求、扫码、交接、身份、整体期限约束；
+先投影 inspecting_identity，再查询 `/baseInfo`。corpId/staffId 必填，名称取首个有效展示别名，可为空但不放宽绑定归属。
+Cookie schema 2 保存
 session、host-only 与原始安全/过期属性，不延长有效期。旧 schema-1 OAuth Profile 保留到显式重连成功后原子替换，
 不能伪造为 Cookie，也不再参与 OAuth 请求。
 
@@ -181,7 +187,8 @@ AI Card 投递同时产生两种身份：稳定 `outTrackId` 只用于卡片更�
 ## Core 复用与入站准入
 
 Migration 122 为钉钉增加 account/publication/Bot/Owner identity 表，同时建立 provider-neutral directory view；Migration
-123 把旧发布意图的 helper 模式无损迁移为 `direct_open_platform`。共享渠道
+123 把旧发布意图的 helper 模式无损迁移为 `direct_open_platform`；Migration 150 允许账号展示名为 NULL，
+保持身份约束、已有关系、触发器及原子回滚。共享渠道
 对象始终携带 `provider=dingtalk`，因此不会与飞书的 app、tenant、conversation 或 roster namespace 相撞。
 
 入站顺序固定为：
@@ -262,7 +269,7 @@ DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card crea
 
 ## References
 
-- [DingTalk Channel v12](../contracts/dingtalk-channel-v12.md)
+- [DingTalk Channel v13](../contracts/dingtalk-channel-v13.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)

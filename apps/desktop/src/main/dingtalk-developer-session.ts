@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { BrowserWindow } from 'electron'
 import type { ChannelLoginViewBounds } from '@contracts'
 import type { SqliteChannelDeveloperSessionStore } from './channel-credential-store'
+import { dingTalkAbortable, dingTalkDeadline, requireDingTalkActive } from './dingtalk-session-error'
 import {
   DingTalkConsoleError,
   ElectronDingTalkWebSession,
@@ -38,6 +39,7 @@ export interface DingTalkDeveloperSessionService {
   inspect(signal?: AbortSignal): Promise<DingTalkDeveloperIdentity | null>
   beginLogin(options: {
     signal: AbortSignal
+    attemptId?: string
     onStage?(stage: DingTalkLoginStage): void
     onQrReady?: DingTalkWebLoginOptions['onQrReady']
   }): Promise<DingTalkDeveloperIdentity>
@@ -90,29 +92,36 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
 
   beginLogin(options: {
     signal: AbortSignal
+    attemptId?: string
     onStage?(stage: DingTalkLoginStage): void
     onQrReady?: DingTalkWebLoginOptions['onQrReady']
   }): Promise<DingTalkDeveloperIdentity> {
     return this.#exclusive(async () => {
       requireActive(options.signal)
-      options.onStage?.('preparing')
-      await this.#pending?.web.close().catch(() => undefined)
-      this.#pending = null
-      const web = this.#newSession()
-      this.#loggingIn = web
+      const deadline = dingTalkDeadline(options.signal, 10 * 60_000, 'dingtalk_login_timeout')
+      const signal = deadline.signal
+      let web: DingTalkWebSession | null = null
       try {
-        const identity = await web.login(options)
+        options.onStage?.('preparing')
+        const previousPending = this.#pending
+        this.#pending = null
+        void previousPending?.web.close().catch(() => undefined)
+        web = this.#newSession()
+        this.#loggingIn = web
+        const identity = await dingTalkAbortable(web.login({ ...options, signal }), signal)
         requireIdentity(identity)
-        requireActive(options.signal)
-        const session = await web.snapshot()
+        requireActive(signal)
+        const session = await dingTalkAbortable(web.snapshot(signal), signal)
         requireDingTalkWebSession(session)
-        requireActive(options.signal)
+        requireActive(signal)
         this.#pending = { web, identity, session }
         return projectIdentity(this.#pending)
       } catch (error) {
-        await web.close().catch(() => undefined)
+        // The discarded jar has no authority. Native cleanup must not hold the cancellation reply.
+        void web?.close().catch(() => undefined)
         throw safeSessionError(error)
       } finally {
+        deadline.dispose()
         if (this.#loggingIn === web) this.#loggingIn = null
       }
     })
@@ -314,8 +323,9 @@ function requireIdentity(value: unknown): asserts value is DingTalkWebIdentity {
     throw sessionError('dingtalk_login_identity_unavailable')
   }
   const record = value as Record<string, unknown>
-  for (const key of ['corpId', 'corpName', 'userId', 'userName']) {
+  for (const key of ['corpId', 'userId', 'corpName', 'userName']) {
     const field = record[key]
+    if ((key === 'corpName' || key === 'userName') && field == null) continue
     if (typeof field !== 'string' || !field.trim() || field.length > 512 || field.includes('\0')) {
       throw sessionError('dingtalk_login_identity_unavailable')
     }
@@ -335,7 +345,7 @@ function isLegacySession(value: unknown): boolean {
 }
 
 function requireActive(signal?: AbortSignal): void {
-  if (signal?.aborted) throw sessionError('dingtalk_operation_cancelled')
+  if (signal) requireDingTalkActive(signal)
 }
 
 function safeSessionError(error: unknown): Error {

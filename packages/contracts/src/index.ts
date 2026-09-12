@@ -2730,7 +2730,9 @@ export interface ChannelQrAttemptView {
     | 'loading_local_session'
     | 'preparing'
     | 'awaiting_scan'
+    | 'awaiting_refresh'
     | 'scan_confirmed'
+    | 'completing_login'
     | 'awaiting_interaction'
     | 'inspecting_identity'
     | 'saving_local_session'
@@ -2739,15 +2741,20 @@ export interface ChannelQrAttemptView {
     | 'cancelled'
     | 'failed'
   qrDataUrl: string | null
+  /** Server-provided expiry only. */
   expiresAt: string | null
+  /** Legacy local deadline metadata; the login dialog does not display it. */
+  waitUntil?: string | null
+  /** Local transaction acknowledgement is unknown; cancellation stays locked. */
+  commitUncertain?: boolean
   detail: string
 }
 
 export interface ChannelAccountView {
   accountId: string
-  userName: string
+  userName: string | null
   email?: string
-  tenantName: string
+  tenantName: string | null
   brand: 'feishu' | 'lark' | 'dingtalk'
   connectedAt: string
   lastVerifiedAt: string

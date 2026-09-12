@@ -1,3 +1,4 @@
+import { feishuLoginFailureDetail } from '../../shared/feishu-login-progress'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -551,15 +552,15 @@ export function ChannelConnectionRow({
       </div>
       {account ? (
         <div className="channel-account-summary">
-          <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.userName)}</span>
+          <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.userName ?? `${providerName}用户`)}</span>
           <span>
             <span className="channel-account-heading">
-              <strong>{account.userName}</strong>
+              <strong>{account.userName ?? `${providerName}用户`}</strong>
               <span className={`channel-connection-status${connected ? ' is-connected' : ''}${expired ? ' is-expired' : ''}`} role="status">
                 {disconnectBusy ? '断开中…' : connected ? '已连接' : expired ? '登录已失效' : '未连接'}
               </span>
             </span>
-            <small>{account.email ? `${account.email} · ` : ''}{account.tenantName} · {account.brand === 'lark' ? 'Lark' : providerName}</small>
+            <small>{account.email ? `${account.email} · ` : ''}{account.tenantName ?? '当前企业'} · {account.brand === 'lark' ? 'Lark' : providerName}</small>
           </span>
         </div>
       ) : (
@@ -738,7 +739,11 @@ export function QrDialog({
   const attemptKind = attempt.kind ?? kind
   const providerName = attemptKind === 'dingtalk' ? '钉钉' : '飞书'
   const interaction = attemptKind === 'dingtalk' && attempt.stage === 'awaiting_interaction'
-  const committing = attemptKind === 'dingtalk' && attempt.stage === 'saving_local_session'
+  const committing = attempt.stage === 'saving_local_session'
+  const refreshable = attempt.stage === 'expired' || attempt.stage === 'awaiting_refresh'
+  const deadlineDetail = attempt.expiresAt
+    ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
+    : null
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && !committing) onClose(attempt.attemptId) }}>
       <Dialog.Portal>
@@ -748,25 +753,34 @@ export function QrDialog({
             title={`登录${providerName}开放平台`}
             description="仅登录开发者平台，本次不会创建应用或发布 Bot。"
             icon="shield"
-            closeDisabled={committing || (attemptKind !== 'dingtalk' && busy && attempt.stage !== 'failed')}
+            closeDisabled={committing}
           />
           <AppDialogBody className="channel-qr-body">
             {interaction
               ? <ChannelLoginViewport key={attempt.attemptId} attemptId={attempt.attemptId} />
+              : refreshable
+                ? <button
+                    className={`channel-qr-frame channel-qr-refresh is-${attempt.stage}`}
+                    type="button"
+                    aria-label="刷新二维码"
+                    onClick={() => onRefresh(attempt.attemptId)}
+                  >
+                    <DialogControlIcon name="refresh" />
+                    {attempt.stage === 'expired' && <span>二维码已过期</span>}
+                    <strong>点击刷新</strong>
+                  </button>
               : <div className={`channel-qr-frame is-${attempt.stage}`}>
                   {attempt.qrDataUrl
                     ? <img src={attempt.qrDataUrl} alt={`${providerName}连接二维码`} />
                     : <span aria-hidden="true"><ChannelMark kind={attemptKind} /></span>}
                 </div>}
             <strong role="status" aria-live="polite">{attempt.detail}</strong>
-            <small>{attempt.expiresAt
-              ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
-              : '开发者会话保存在 Rovai 本地数据库，不会暴露给页面。'}</small>
+            {!refreshable && deadlineDetail && <small>{deadlineDetail}</small>}
           </AppDialogBody>
           <AppDialogFooter>
-            {attemptKind === 'dingtalk' && attempt.stage === 'expired' && <button
+            {attempt.commitUncertain && <button
               className="primary-button" type="button" onClick={() => onRefresh(attempt.attemptId)}
-            >刷新二维码</button>}
+            >核对保存结果</button>}
             <button className="quiet-button" type="button" disabled={committing} onClick={() => onClose(attempt.attemptId)}>
               {attempt.stage === 'failed' ? '关闭' : '取消'}
             </button>
@@ -848,8 +862,8 @@ function PublishBotDialog({
               <ChannelMark kind={kind} />
               <span><strong>独立{providerName} Bot</strong><small>权限、事件与长连接彼此隔离</small></span>
             </div>
-            <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName}</strong></div>
-            <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName}</strong></div>
+            <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName ?? `${providerName}用户`}</strong></div>
+            <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName ?? '当前企业'}</strong></div>
             {effectiveAppId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{effectiveAppId}</code></div>}
             <div className="channel-dialog-fact"><span>应用说明</span><strong>{memberBotAppDescription(kind, agent.teamRole)}</strong></div>
             {error && <div className="channel-dialog-error" role="alert">{error}</div>}
@@ -1014,7 +1028,13 @@ export function channelErrorMessage(error: unknown): string | null {
     .replace(/^Error invoking remote method '[^']+': (?:[A-Za-z_$][\w$]*Error|Error):\s*/, '')
     .trim()
   if (message === 'feishu_login_cancelled') return null
+  const loginDetail = feishuLoginFailureDetail(message)
+  if (loginDetail) return loginDetail
   if (message === 'dingtalk_operation_cancelled') return null
+  const loginHttp = /^dingtalk_login_http_(\d{3})$/u.exec(message)
+  if (loginHttp) return `钉钉登录服务暂时无法完成请求（HTTP ${loginHttp[1]}），请稍后重试。`
+  const loginBusiness = /^dingtalk_login_business_(\d{1,9})$/u.exec(message)
+  if (loginBusiness) return `钉钉未接受本次登录（错误码 ${loginBusiness[1]}），请重新连接。`
   if (message === 'feishu_console_remote_app_unavailable') {
     return '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
   }
@@ -1045,7 +1065,18 @@ export function channelErrorMessage(error: unknown): string | null {
     dingtalk_legacy_session_requires_reconnect: '钉钉已改用网页登录，请重新连接一次；已有 Bot 和应用绑定会保留。',
     dingtalk_web_session_store_invalid: '暂时无法读取本机钉钉登录态，数据已保留，请稍后重试。',
     dingtalk_web_session_store_unavailable: '暂时无法保存钉钉登录态，请稍后重试；已有会话和应用绑定会保留。',
-    dingtalk_login_timeout: '本次钉钉登录等待超时，请重新连接；已有登录态会保留。',
+    dingtalk_login_timeout: '请刷新二维码后继续扫码。',
+    dingtalk_login_scan_timeout: '请刷新二维码后继续扫码。',
+    dingtalk_login_request_timeout: '钉钉登录请求超时，请检查网络后重试。',
+    dingtalk_login_handoff_timeout: '建立钉钉后台会话超时，请重新连接。',
+    dingtalk_login_identity_timeout: '读取钉钉账号与企业身份超时，请稍后重试。',
+    dingtalk_login_protocol_incompatible: '钉钉登录接口返回了暂不支持的结果，无法继续本次连接。',
+    dingtalk_login_response_invalid: '暂时无法解析钉钉登录响应，请稍后重试。',
+    dingtalk_login_response_too_large: '钉钉登录响应超出处理范围，请稍后重试。',
+    dingtalk_login_unavailable: '暂时无法访问钉钉登录服务，请检查网络后重试。',
+    dingtalk_login_redirect_rejected: '钉钉登录要求跳转到暂不支持的认证页面，无法继续本次连接。',
+    dingtalk_login_redirect_limit: '钉钉登录跳转次数过多，请稍后重试。',
+    dingtalk_login_rejected: '本次钉钉登录已被拒绝或取消，请重新连接。',
     dingtalk_login_view_unavailable: '暂时无法显示钉钉登录页，请关闭后重新连接。',
     dingtalk_login_identity_mismatch: '当前登录的钉钉账号或企业与原账号不一致，请重新连接。',
     dingtalk_console_protocol_unverified: '当前版本尚未完成钉钉后台此步骤的验证，操作已停止；已有应用身份会保留。',

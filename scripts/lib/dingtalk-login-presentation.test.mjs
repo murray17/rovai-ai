@@ -53,7 +53,7 @@ test('DingTalk login uses the production Rovai dialog and a separate sandboxed n
     assert.equal(code, 0, `DingTalk login presentation failed:\n${stdout}\n${stderr}`)
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
-    assert.ok(report.cases.includes('QR is readable before slow page resources finish'))
+    assert.ok(report.cases.includes('QR is generated locally without loading the official page'))
     assert.ok(report.cases.includes('native page has no Rovai bridge or Node'))
     assert.ok(report.cases.includes('200% zoom clips the native view inside the dialog'))
     assert.ok(report.cases.length >= 10)
