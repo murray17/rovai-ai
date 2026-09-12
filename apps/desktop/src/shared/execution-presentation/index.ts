@@ -9,6 +9,7 @@ import type {
 } from '@contracts'
 import { safeMarkdownHasRenderableContent } from './safe-markdown-model'
 import { createExecutionPublicResultProjector } from './public-result'
+import { BUILTIN_CLI_NAMES, builtinInputText, builtinOperation, supportingBuiltinShells } from './builtin-tools'
 
 export const RAIL_COLLAPSED_WIDTH = 52
 export const RAIL_EXPANDED_WIDTH = 176
@@ -110,6 +111,8 @@ export type ExecutionStep = {
   /** Redacted, bounded result-only preview. Never a fallback to tool input or local detail. */
   publicResult: string | null
   detail: string
+  /** Core-owned built-in input presentation; never requests a result blob. */
+  builtinOperation?: string
   status: ActivityStatus
   activityDomain: string
   iconKind: ActivityIconKind
@@ -152,11 +155,13 @@ export type RuntimeCompactionDisplayItem = {
 }
 
 export function executionStepPublicTitle(step: ExecutionStep): string {
-  return step.shellReadSummary?.title ?? step.publicCommand ?? step.title
+  return (step.builtinOperation ? BUILTIN_CLI_NAMES[step.builtinOperation] : null)
+    ?? step.shellReadSummary?.title ?? step.publicCommand ?? step.title
 }
 
 export function executionStepCurrentInstructionTitle(step: ExecutionStep): string {
-  return step.shellReadSummary?.title ?? step.publicCommand ?? step.currentInstruction ?? step.title
+  return (step.builtinOperation ? BUILTIN_CLI_NAMES[step.builtinOperation] : null)
+    ?? step.shellReadSummary?.title ?? step.publicCommand ?? step.currentInstruction ?? step.title
 }
 
 export type RuntimeDiagnostic = {
@@ -771,6 +776,7 @@ export function buildLiveExecutionProgress(
           ? publicShellCommandPresentation(payload)
           : null,
         publicResult: null,
+        builtinOperation: builtinOperation(payload) ?? undefined,
         detail: fileOperation?.operationKind === 'read' && readSummary === null
           ? ''
           : runtimeActionEvidenceText(payload, canonical) ?? '',
@@ -792,7 +798,9 @@ export function buildLiveExecutionProgress(
   }
 
   const publicResult = createExecutionPublicResultProjector(events, agentRunId)
-  const stepById = new Map(steps.map((step) => [step.id, { ...step, publicResult: publicResult(step) }]))
+  const supportingShells = supportingBuiltinShells(events, agentRunId, pureBuiltinShellOperation, publicShellCommand)
+  const stepById = new Map(steps.filter(step => !supportingShells.has(step.id))
+    .map((step) => [step.id, { ...step, publicResult: publicResult(step) }]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'plan') {
       const explanation = options.textMode === 'live_tail'
@@ -1015,23 +1023,8 @@ function runtimeActionEvidenceText(
   payload: Record<string, unknown>,
   canonical: CanonicalRuntimeActivityView | null | undefined
 ): string | null {
+  if (builtinOperation(payload)) return builtinInputText(payload)
   let evidenceText: string | null = null
-  const coreOwnedBuiltIn = stringField(payload, 'sourceAuthority') === 'core'
-    && stringField(payload, 'canonicalTool') !== null
-  if (coreOwnedBuiltIn) {
-    const coreEnvelope = asRecord(payload.coreEnvelope)
-    if (Object.prototype.hasOwnProperty.call(coreEnvelope, 'result') && coreEnvelope.result != null) {
-      evidenceText = fullEvidenceValue(coreEnvelope.result)
-    } else if (Object.prototype.hasOwnProperty.call(coreEnvelope, 'error') && coreEnvelope.error != null) {
-      evidenceText = fullEvidenceValue(coreEnvelope.error)
-    } else {
-      const operationProjection = asRecord(payload.operationProjection)
-      if (Object.prototype.hasOwnProperty.call(operationProjection, 'canonicalResult')
-        && operationProjection.canonicalResult != null) {
-        evidenceText = fullEvidenceValue(operationProjection.canonicalResult)
-      }
-    }
-  }
   if (evidenceText === null) {
     const output = fullEvidenceValue(payload.output)
     const command = runtimeActionShellCommand(payload)
@@ -1395,6 +1388,7 @@ const ROVAI_SEND_VALUE_FLAGS = new Set([
   '--file',
   '--format',
   '--idempotency-key',
+  '--input-file',
   '--member',
   '--reply-to',
   '--task-id',
@@ -1421,7 +1415,8 @@ function normalizePublicShellCommand(
 ): string | null {
   const unwrapped = unwrapShellCommand(stripAnsi(command).trim())
   if (!unwrapped) return null
-  const presentable = inlineNodeHeredoc ? unwrapNodeHeredoc(unwrapped) : unwrapped
+  const withoutInput = omitBuiltinStdin(unwrapped).command
+  const presentable = inlineNodeHeredoc ? unwrapNodeHeredoc(withoutInput) : withoutInput
   const tokens = tokenizeShellPreview(presentable)
   if (tokens.length === 0) return null
   const redacted = redactShellPreviewTokens(tokens)
@@ -1449,6 +1444,116 @@ function unwrapShellCommand(command: string): string {
     current = tokens[commandIndex + 1].value.trim()
   }
   return current
+}
+
+function rovaiCommandCursor(tokens: ShellPreviewToken[]): number | null {
+  let cursor = 0
+  if (shellExecutable(tokens[cursor]?.value ?? '') === 'env') cursor += 1
+  while (cursor < tokens.length && shellAssignment(tokens[cursor].value)) cursor += 1
+  if (['npx', 'bunx'].includes(shellExecutable(tokens[cursor]?.value ?? '') ?? '')) {
+    cursor += 1
+    if (['--yes', '-y'].includes(tokens[cursor]?.value)) cursor += 1
+  }
+  return shellExecutable(tokens[cursor]?.value ?? '') === 'rovai' ? cursor : null
+}
+
+/** Omit Rovai stdin before the one-line tokenizer can expose its JSON as commands.
+ * Preserve every independent command and non-Rovai heredoc, including mixed Shells. */
+function omitBuiltinStdin(command: string): { command: string; complete: boolean; hasExpansion: boolean } {
+  const lines = command.split(/\r?\n/u)
+  const output: string[] = []
+  let complete = true
+  let hasExpansion = false
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex]
+    let offset = 0
+    const tokens = tokenizeShellPreview(line).map(token => {
+      const start = line.indexOf(token.raw, offset)
+      offset = start + token.raw.length
+      return { ...token, start, end: offset }
+    })
+    const omitted: { start: number; end: number }[] = []
+    const retainedBodies: string[] = []
+    let segmentStart = 0
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index]
+      if (token.operator) { segmentStart = index + 1; continue }
+      // Quoted occurrences are ordinary values, not redirects.
+      const redirect = token.raw.match(/^((?:0)?<<<|(?:0)?<<-?)/u)?.[1]
+      if (!redirect) continue
+      const attached = token.value.slice(redirect.length)
+      const valueToken = attached ? token : tokens[index + 1]
+      const value = attached || valueToken?.value
+      if (!valueToken || valueToken.operator || !value) continue
+      const segment = tokens.slice(segmentStart, index)
+      const cursor = rovaiCommandCursor(segment)
+      const words = cursor === null ? [] : segment.slice(cursor + 1).map(part => part.value)
+      const builtin = cursor !== null && Object.values(BUILTIN_CLI_NAMES).some(name =>
+        name.split(' ').slice(1).every((part, position) => words[position] === part))
+      if (redirect.endsWith('<<<')) {
+        if (builtin) {
+          omitted.push({ start: token.start, end: valueToken.end })
+          hasExpansion ||= activeShellSyntax(valueToken.raw.slice(attached ? redirect.length : 0))
+        }
+      } else if (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)) {
+        let end = lineIndex + 1
+        while (end < lines.length && (redirect.endsWith('-') ? lines[end].replace(/^\t+/u, '') : lines[end]) !== value) end += 1
+        if (builtin) {
+          omitted.push({ start: token.start, end: valueToken.end })
+          const quotedMarker = /['"\\]/u.test(valueToken.raw.slice(attached ? redirect.length : 0))
+          if (!quotedMarker) hasExpansion ||= activeHeredocSubstitution(lines.slice(lineIndex + 1, end).join('\n'))
+        } else retainedBodies.push(...lines.slice(lineIndex + 1, Math.min(end + 1, lines.length)))
+        if (end === lines.length) complete = false
+        lineIndex = end
+      }
+      if (!attached) index += 1
+    }
+    let rendered = line
+    for (const span of omitted.reverse()) rendered = rendered.slice(0, span.start) + rendered.slice(span.end)
+    output.push(rendered.trimEnd(), ...retainedBodies)
+  }
+  return { command: output.join('\n').trim(), complete, hasExpansion }
+}
+
+function activeHeredocSubstitution(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '\\') { index += 1; continue }
+    if (value[index] === '`' || (value[index] === '$' && value[index + 1] === '(')) return true
+  }
+  return false
+}
+
+function activeShellSyntax(value: string): boolean {
+  let quote: 'single' | 'double' | null = null
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote === 'single') {
+      if (character === "'") quote = null
+      continue
+    }
+    if (character === '\\') { index += 1; continue }
+    if (character === '`' || (character === '$' && value[index + 1] === '(')) return true
+    if (character === '"') { quote = quote === 'double' ? null : 'double'; continue }
+    if (quote === null && (character === '<' || character === '>')) return true
+    if (quote === null && character === "'") quote = 'single'
+  }
+  return quote !== null
+}
+
+function pureBuiltinShellOperation(command: string): string | null {
+  const source = unwrapShellCommand(stripAnsi(command).trim())
+  const stdin = omitBuiltinStdin(source)
+  if (!stdin.complete || stdin.hasExpansion) return null
+  const tokens = tokenizeShellPreview(stdin.command)
+  // Dynamic commands, redirection and additional work cannot be hidden as a CLI carrier.
+  if (tokens.some(token => token.operator || activeShellSyntax(token.raw))) return null
+  const cursor = rovaiCommandCursor(tokens)
+  if (cursor === null) return null
+  const words = tokens.slice(cursor + 1).map(token => token.value)
+  if (words.some(word => ['--help', '-h', '--version', '-V'].includes(word))) return null
+  return Object.entries(BUILTIN_CLI_NAMES).find(([, name]) =>
+    name.split(' ').slice(1).every((part, index) => words[index] === part)
+  )?.[0] ?? null
 }
 
 function unwrapNodeHeredoc(command: string): string {
@@ -1629,10 +1734,10 @@ function redactRovaiSendSegment(
   start: number,
   end: number
 ): void {
-  let cursor = start
-  while (cursor < end && shellAssignment(tokens[cursor].value)) cursor += 1
-  if (cursor + 1 >= end || shellExecutable(tokens[cursor].value) !== 'rovai') return
-  if (tokens[cursor + 1].value !== 'send') return
+  const relative = rovaiCommandCursor(tokens.slice(start, end))
+  if (relative === null) return
+  let cursor = start + relative
+  if (!['send', 'gather'].includes(tokens[cursor + 1]?.value)) return
 
   cursor += 2
   let positionalBodyRedacted = false
@@ -1640,12 +1745,13 @@ function redactRovaiSendSegment(
     const token = tokens[cursor]
     if (token.value === '--body') {
       const valueIndex = cursor + 1 < end ? cursor + 1 : null
-      if (valueIndex !== null) redactToken(tokens[valueIndex], REDACTED_COMMAND_VALUE)
+      redactToken(token, '')
+      if (valueIndex !== null) redactToken(tokens[valueIndex], '')
       cursor += 2
       continue
     }
     if (token.value.startsWith('--body=')) {
-      redactToken(token, `--body=${REDACTED_COMMAND_VALUE}`)
+      redactToken(token, '')
       cursor += 1
       continue
     }
@@ -1663,7 +1769,7 @@ function redactRovaiSendSegment(
       continue
     }
     if (!positionalBodyRedacted) {
-      redactToken(token, REDACTED_COMMAND_VALUE)
+      redactToken(token, '')
       positionalBodyRedacted = true
     }
     cursor += 1

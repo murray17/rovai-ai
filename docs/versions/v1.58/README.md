@@ -75,3 +75,12 @@ formatter/profile/manifest 版本或其他附件类型。
 Claude Code 模型目录从 help 别名改为无 Prompt 控制初始化，原生元数据、统一缓存、失败保留和验证状态见
 [实施计划](implementation-plan.md#claude-code-动态模型目录)；当前合同为
 [Runtime Launch v39](../../contracts/runtime-launch-and-verification-v39.md)。此项不改变当前版本状态或 Runtime 平台资格。
+
+
+## Built-in 工具入参展示
+
+按用户确认的设计，本地执行台与单聊只调整 UI：23 项 Built-in 显示对应 CLI 名称，七种状态只显示现有公共入参，
+省略正文参数与占位，并将可靠关联的纯 Shell 载体折叠为一次操作。内部操作身份和历史数据保持不变。
+当前合同为 [Run Process Detail Surface v32](../../contracts/run-process-detail-surface-v32.md)，UI 与开发验收入口同步；
+没有架构数据流、模型上下文、Runtime classifier、兼容性或版本指针变更，其他 v1.58 验收缺口保持独立。
+实施与验证见[工具入参展示记录](builtin-tool-input-presentation.md)。
