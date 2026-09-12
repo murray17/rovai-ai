@@ -13876,6 +13876,14 @@ mod tests {
             .unwrap();
         assert_eq!(item.title, title);
         assert_eq!(serde_json::to_value(item).unwrap()["channelSource"], source);
+        if name_origin == "generated" {
+            // Both providers' real admission fixtures must publish a human message
+            // that advances navigation, even though its author is not local_user.
+            assert!(
+                item.last_activity_global_sequence > 0,
+                "{provider}/{conversation_kind}"
+            );
+        }
         let opened = read_model.camp_open_projection(database, camp_id).unwrap();
         assert_eq!(opened.camp.title, title);
         assert_eq!(

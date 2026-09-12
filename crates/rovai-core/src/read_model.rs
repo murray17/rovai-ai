@@ -1657,17 +1657,8 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
             SELECT
                 event_log.camp_id,
                 MAX(CASE
-                    WHEN (
-                        {publication_predicate}
-                        AND camp_message.author_type IN ('user', 'agent', 'external_principal')
-                    ) OR event_log.event_type IN (
-                        'agent_run.succeeded',
-                        'agent_run.failed',
-                        'agent_run.cancelled'
-                    ) OR (
-                        event_log.event_type = 'camp_turn.status_changed'
-                        AND json_extract(event_log.payload_json, '$.status') = 'cancelled'
-                    )
+                    WHEN {publication_predicate}
+                        AND camp_message.author_type IN ('user', 'external_principal')
                     THEN event_log.global_sequence
                 END) AS last_activity_sequence,
                 MAX(CASE
@@ -1701,11 +1692,7 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
             lead.id,
             lead.display_name,
             COALESCE(navigation_activity.last_activity_sequence, 0),
-            CASE
-                WHEN camp.activation_state = 'pending'
-                THEN COALESCE(camp_composer_draft.updated_at, camp.updated_at)
-                ELSE COALESCE(activity_event.created_at, camp.created_at)
-            END,
+            COALESCE(activity_event.created_at, camp.created_at),
             COALESCE(navigation_activity.latest_completion_sequence, 0),
             COALESCE(camp_view_state.last_seen_global_sequence, 0),
             EXISTS(
@@ -5075,6 +5062,112 @@ mod slow_tests {
     }
 
     #[test]
+    fn navigation_order_advances_only_for_published_human_messages() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-navigation-human-order-test-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        // Exercise the persisted author/publication join and creation-time fallback,
+        // without launching a Runtime or duplicating channel admission fixtures.
+        database.connection().execute_batch(
+            r#"
+            INSERT INTO camp(id, title, project_binding_kind, project_path, created_at, updated_at)
+            VALUES ('order-a', 'A', 'quick_chat', '/quick-chat', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+                   ('order-b', 'B', 'quick_chat', '/quick-chat', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+            "#,
+        ).unwrap();
+        let mut previous = ReadModelService.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(previous.quick_chat.recent_camps[0].id, "order-b");
+        for (index, (event_type, author, advances)) in [
+            ("camp_message.sent", Some("agent"), false),
+            ("camp_message.public_a2a_sent", Some("agent"), false),
+            ("camp_message.sent", Some("system"), false),
+            ("agent_run.queued", None, false),
+            ("agent_run.started", None, false),
+            ("agent_run.succeeded", None, false),
+            ("agent_run.failed", None, false),
+            ("agent_run.cancelled", None, false),
+            ("camp_turn.status_changed", None, false),
+            ("camp_message.created", Some("user"), false),
+            ("camp_message.sent", Some("user"), true),
+            ("camp_message.sent", Some("external_principal"), true),
+            ("camp_message.public_a2a_sent", Some("agent"), false),
+            ("agent_run.succeeded", None, false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let target = previous.quick_chat.recent_camps.last().unwrap();
+            let camp_id = target.id.clone();
+            let entity_id = format!("order-event-{index}");
+            // Equal timestamps on successive human messages also exercise the sequence tie-break.
+            let timestamp = "2026-02-01T00:00:00Z";
+            if let Some(author) = author {
+                database
+                    .connection()
+                    .execute(
+                        r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id, body,
+                        structured_content_json, content_digest, address_mode,
+                        addressed_agent_ids_json, version, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, 'order-author', 'message', '[]', ?1,
+                              'default', '[]', 1, ?5, ?5)
+                    "#,
+                        params![entity_id, camp_id, index as i64 + 1, author, timestamp],
+                    )
+                    .unwrap();
+            }
+            database
+                .connection()
+                .execute(
+                    r#"
+                INSERT INTO event_log(event_id, event_type, payload_json, camp_id,
+                                      entity_type, entity_id, actor_type, actor_id, created_at)
+                VALUES (?1, ?2, '{"status":"cancelled"}', ?3, ?4, ?1, 'system', 'order-test', ?5)
+                "#,
+                    params![
+                        entity_id,
+                        event_type,
+                        camp_id,
+                        if author.is_some() {
+                            "camp_message"
+                        } else {
+                            "agent_run"
+                        },
+                        timestamp
+                    ],
+                )
+                .unwrap();
+            let next = ReadModelService.navigation_snapshot(&mut database).unwrap();
+            if advances {
+                let first = &next.quick_chat.recent_camps[0];
+                assert_eq!(first.id, camp_id, "{event_type}/{author:?}");
+                assert_eq!(first.last_activity_at, timestamp);
+                assert!(first.last_activity_global_sequence > target.last_activity_global_sequence);
+            } else {
+                for (actual, expected) in next
+                    .quick_chat
+                    .recent_camps
+                    .iter()
+                    .zip(&previous.quick_chat.recent_camps)
+                {
+                    assert_eq!(actual.id, expected.id, "{event_type}/{author:?}");
+                    assert_eq!(actual.last_activity_at, expected.last_activity_at);
+                    assert_eq!(
+                        actual.last_activity_global_sequence,
+                        expected.last_activity_global_sequence
+                    );
+                }
+            }
+            previous = next;
+        }
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn navigation_completion_marker_is_persistent_and_view_ack_is_monotonic() {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-marker-test-{}", Uuid::new_v4()));
@@ -5151,6 +5244,14 @@ mod slow_tests {
         let item = &completed.projects[0].recent_camps[0];
         assert_eq!(item.marker, "unread_completed");
         assert!(item.latest_completion_global_sequence > 0);
+        assert_eq!(
+            item.last_activity_at,
+            running.projects[0].recent_camps[0].last_activity_at
+        );
+        assert_eq!(
+            item.last_activity_global_sequence,
+            running.projects[0].recent_camps[0].last_activity_global_sequence
+        );
         let activity_at = item.last_activity_at.clone();
         let acknowledged = read_model
             .acknowledge_camp_viewed(&mut database, &camp_id, completed.through_global_sequence)
