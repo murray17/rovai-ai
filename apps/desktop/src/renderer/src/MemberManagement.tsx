@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { useCampClient } from './camp-client'
 import { CurrentUserProfileEditor, CurrentUserRosterEntry } from './CurrentUserProfileEditor'
 import { readErrorMessage } from './error-message'
@@ -519,7 +520,7 @@ const MemberEditor = forwardRef<
     setError(null)
     try {
       const result = await client.request<StoredCommandResult>(method, {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command
       })
       assertApplied(result)
@@ -660,7 +661,7 @@ const MemberEditor = forwardRef<
         avatarRef,
         request: (method, command) =>
           client.request<StoredCommandResult>(method, {
-            commandId: crypto.randomUUID(),
+            commandId: newCommandId(),
             command
           }),
         onCommitted: (profile) => {

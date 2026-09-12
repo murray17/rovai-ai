@@ -7,8 +7,11 @@ import { desktopCampClient } from './desktop-camp-client'
  * Native startup, credentials, window controls and supervisor are intentionally absent.
  */
 export type CampClient = Pick<RovaiApi,
-  'request' | 'onEvent' | 'composerAttachments' | 'platform'
+  'request' | 'composerAttachments' | 'platform'
 > & {
+  onEvent?: RovaiApi['onEvent']
+  /** Authorized invalidation signal; it is deliberately not a CoreEvent. */
+  onInvalidated?: (listener: () => void) => () => void
   /** Optional host shortcut; browsers retain their own tab/window shortcuts. */
   onClosePreviewRequested?: RovaiApi['windowControls']['onCloseTabRequested']
   attachments: (RovaiApi['attachments'] & { kind: 'native' }) | {
@@ -20,9 +23,8 @@ export type CampClient = Pick<RovaiApi,
 const CampClientContext = createContext<CampClient | null>(null)
 
 export function CampClientProvider({ client, children }: {
-  // Keep this object stable for one mounted client scope. Switching Host/session
-  // must remount the business subtree; draft coordinators and UI state are scoped
-  // to that mount. Remote connection generations/caches are implemented separately.
+  // Stable for one Host/Owner/editor scope. Authentication renewal changes the
+  // transport generation, not this object or the mounted Composer.
   client: CampClient
   children: ReactNode
 }): React.JSX.Element {
@@ -32,5 +34,8 @@ export function CampClientProvider({ client, children }: {
 export function useCampClient(): CampClient {
   // Existing Desktop mounts retain their real bridge. Browser/review mounts must
   // inject a client; no global window.rovai shim or empty-result fallback is created.
-  return useContext(CampClientContext) ?? desktopCampClient
+  const client = useContext(CampClientContext)
+  if (client) return client
+  if (typeof window === 'undefined' || window.rovai) return desktopCampClient
+  throw new Error('共享页面缺少 CampClientProvider；浏览器不能使用 Desktop 默认适配。')
 }

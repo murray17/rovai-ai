@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import { useCampClient, type CampClient } from './camp-client'
 import type {
   AgentRunImageContent,
   AgentRunImageView,
@@ -89,8 +90,16 @@ export class ImagePayloadCache {
   }
 }
 
-const imagePayloadCache = new ImagePayloadCache(MAX_IMAGE_PAYLOAD_CACHE_BYTES)
-const imageLoadCache = new Map<string, Promise<ImagePayload | null>>()
+type ClientImageState = { payloads: ImagePayloadCache; loading: Map<string, Promise<ImagePayload | null>> }
+let clientImageStates = new WeakMap<CampClient, ClientImageState>()
+function clientImages(client: CampClient): ClientImageState {
+  let state = clientImageStates.get(client)
+  if (!state) {
+    state = { payloads: new ImagePayloadCache(MAX_IMAGE_PAYLOAD_CACHE_BYTES), loading: new Map() }
+    clientImageStates.set(client, state)
+  }
+  return state
+}
 
 export function imageCacheKey(source: GalleryImage): string {
   return source.kind === 'runtime'
@@ -133,11 +142,12 @@ export async function decodeImageUrl(bytes: Uint8Array, mediaType: string): Prom
 
 async function readImagePayload(
   source: GalleryImage,
+  client: CampClient,
   onAttachmentAvailability?: (availability: CampMessageAttachmentView['availability']) => void
 ): Promise<ImagePayload | null> {
   let blob: Blob
   if (source.kind === 'attachment') {
-    const result = await window.rovai.composerAttachments.preview(source.locator)
+    const result = await client.composerAttachments.preview(source.locator)
     onAttachmentAvailability?.(result.availability)
     if (!result.preview) return null
     blob = new Blob(
@@ -145,7 +155,7 @@ async function readImagePayload(
       { type: result.preview.mediaType }
     )
   } else {
-    const content = await window.rovai.request<AgentRunImageContent | null>('agentRunImages.read', {
+    const content = await client.request<AgentRunImageContent | null>('agentRunImages.read', {
       campId: source.campId, imageId: source.image.id
     })
     if (!content) return null
@@ -162,12 +172,14 @@ async function readImagePayload(
 /** Always reaches the real source, while sharing an already-running read for the same image. */
 export function fetchImagePayload(
   source: GalleryImage,
+  client: CampClient,
   onAttachmentAvailability?: (availability: CampMessageAttachmentView['availability']) => void
 ): Promise<ImagePayload | null> {
   const key = imageCacheKey(source)
+  const imageLoadCache = clientImages(client).loading
   const loading = imageLoadCache.get(key)
   if (loading) return loading
-  const promise = readImagePayload(source, onAttachmentAvailability).finally(() => {
+  const promise = readImagePayload(source, client, onAttachmentAvailability).finally(() => {
     if (imageLoadCache.get(key) === promise) imageLoadCache.delete(key)
   })
   imageLoadCache.set(key, promise)
@@ -177,19 +189,19 @@ export function fetchImagePayload(
 /** Uses a completed payload when available; cold callers otherwise share the real source read. */
 export function getOrLoadImagePayload(
   source: GalleryImage,
+  client: CampClient,
   onAttachmentAvailability?: (availability: CampMessageAttachmentView['availability']) => void
 ): Promise<ImagePayload | null> {
-  const cached = imagePayloadCache.get(imageCacheKey(source))
-  return cached ? Promise.resolve(cached) : fetchImagePayload(source, onAttachmentAvailability)
+  const cached = clientImages(client).payloads.get(imageCacheKey(source))
+  return cached ? Promise.resolve(cached) : fetchImagePayload(source, client, onAttachmentAvailability)
 }
 
-export function cacheDecodedImagePayload(source: GalleryImage, payload: ImagePayload): void {
-  imagePayloadCache.put(imageCacheKey(source), payload)
+export function cacheDecodedImagePayload(source: GalleryImage, payload: ImagePayload, client: CampClient): void {
+  clientImages(client).payloads.put(imageCacheKey(source), payload)
 }
 
 export function clearImagePayloadState(): void {
-  imagePayloadCache.clear()
-  imageLoadCache.clear()
+  clientImageStates = new WeakMap()
 }
 
 export function ImageGallery({
@@ -213,6 +225,8 @@ export function ImageGallery({
 }
 
 function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
+  const client = useCampClient()
+  const imagePayloadCache = clientImages(client).payloads
   const cacheKey = imageCacheKey(source)
   const requiresExplicitLoad = source.kind === 'attachment' && source.image.availability === 'unknown'
   const initialAvailability: CampMessageAttachmentView['availability'] = source.kind === 'attachment'
@@ -252,7 +266,7 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
     const cached = imagePayloadCache.get(cacheKey)
     hadCachedPayload.current = Boolean(cached)
     setUrl(cached ? createOwnedUrl(cached.blob) : null)
-  }, [cacheKey, createOwnedUrl, initialAvailability])
+  }, [cacheKey, createOwnedUrl, initialAvailability, imagePayloadCache])
 
   useLayoutEffect(() => {
     const previousUrl = committedUrl.current
@@ -293,8 +307,8 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
       if (started) return
       started = true
       const request = refresh
-        ? fetchImagePayload(source, (next) => { if (active) setAvailability(next) })
-        : getOrLoadImagePayload(source, (next) => { if (active) setAvailability(next) })
+        ? fetchImagePayload(source, client, (next) => { if (active) setAvailability(next) })
+        : getOrLoadImagePayload(source, client, (next) => { if (active) setAvailability(next) })
       void request.then((payload) => {
         if (!active) return
         if (!payload) { markUnavailable(); return }
@@ -326,7 +340,7 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
     if (observer && tile.current) observer.observe(tile.current)
     else load(false)
     return () => { active = false; observer?.disconnect() }
-  }, [cacheKey, createOwnedUrl, loadRequested, releaseOwnedUrl, requiresExplicitLoad, source.kind])
+  }, [cacheKey, createOwnedUrl, loadRequested, releaseOwnedUrl, requiresExplicitLoad, source.kind, client, imagePayloadCache])
 
   const unavailableLabel = availability === 'missing'
     ? '图片已丢失'

@@ -70,6 +70,9 @@ struct RunArgs {
     /// Read one 64-character token from stdin. Never put it in args or environment.
     #[arg(long, requires = "web_listen")]
     web_token_stdin: bool,
+    /// Grant this existing Host workspace to the browser (repeatable).
+    #[arg(long, requires = "web_listen")]
+    web_workspace: Vec<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -157,6 +160,7 @@ fn main() -> Result<()> {
                             public_origin: args.web_public_origin,
                             allow_insecure_lan: args.allow_insecure_lan,
                             ui_directory: args.web_ui.context("Web UI directory is required")?,
+                            authorized_workspaces: args.web_workspace,
                         },
                         token,
                     ));

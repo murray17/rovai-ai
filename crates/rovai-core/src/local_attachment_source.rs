@@ -423,12 +423,33 @@ pub fn load_source_attachment(
     database: &Database,
     locator: &LocalAttachmentOwnerLocator,
 ) -> Result<Option<LocalAttachmentSourceRef>> {
+    load_source_attachment_for_client(
+        database,
+        locator,
+        &crate::draft_client::DraftClient::default(),
+    )
+}
+
+pub fn load_source_attachment_for_client(
+    database: &Database,
+    locator: &LocalAttachmentOwnerLocator,
+    client: &crate::draft_client::DraftClient,
+) -> Result<Option<LocalAttachmentSourceRef>> {
     let connection = database.connection();
+    if !client.is_desktop()
+        && matches!(
+            locator,
+            LocalAttachmentOwnerLocator::SingleChatComposer { .. }
+                | LocalAttachmentOwnerLocator::SingleChatPendingEdit { .. }
+        )
+    {
+        anyhow::bail!("Private Draft client scope is not admitted yet");
+    }
     let json = match locator {
         LocalAttachmentOwnerLocator::Composer { camp_id, .. } => connection
             .query_row(
-                "SELECT source_attachments_json FROM camp_composer_draft WHERE camp_id = ?1",
-                [camp_id],
+                "SELECT source_attachments_json FROM camp_composer_draft WHERE camp_id = ?1 AND client_id = ?2",
+                params![camp_id, client.id()],
                 |row| row.get::<_, String>(0),
             )
             .optional()?,
@@ -450,8 +471,8 @@ pub fn load_source_attachment(
             ..
         } => connection
             .query_row(
-                "SELECT working_source_attachments_json FROM pending_input_edit_session WHERE camp_id = ?1 AND pending_input_id = ?2 AND edit_token = ?3",
-                params![camp_id, pending_input_id, edit_token],
+                "SELECT working_source_attachments_json FROM pending_input_edit_session WHERE camp_id = ?1 AND pending_input_id = ?2 AND edit_token = ?3 AND client_id = ?4",
+                params![camp_id, pending_input_id, edit_token, client.id()],
                 |row| row.get::<_, String>(0),
             )
             .optional()?,

@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import type {
   CampComposerDraftView,
   CampComposerReplyRecipient,
@@ -161,7 +162,7 @@ export class DraftMutationCoordinator {
   }
 
   mutateQuote(action: MessageQuoteAction): Promise<CampComposerDraftView> {
-    const commandId = crypto.randomUUID()
+    const commandId = newCommandId()
     return this.enqueue('quote', (current) => this.bindings.mutate(current, { kind: 'quote', action, commandId }))
   }
 

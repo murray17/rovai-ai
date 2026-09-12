@@ -1,5 +1,6 @@
 mod config;
 mod transport;
+mod web_commands;
 pub use config::{CoreConfig, RemovedSkillProjectRoots};
 use transport::{CoreInput, OutputTarget};
 pub use transport::{
@@ -173,7 +174,7 @@ use rovai_core::{
     git,
     local_attachment_source::{
         LocalAttachmentFailure, LocalAttachmentOwnerLocator, load_agent_run_source_attachments,
-        load_source_attachment, observe_source_attachment, resolve_source_attachments_for_run,
+        observe_source_attachment, resolve_source_attachments_for_run,
     },
     managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
@@ -424,6 +425,8 @@ async fn run_with_cancellation_deadline<T>(
 
 #[derive(Debug, Deserialize)]
 struct Request {
+    #[serde(skip)]
+    client: rovai_core::draft_client::DraftClient,
     id: Value,
     method: String,
     #[serde(default)]
@@ -1224,10 +1227,36 @@ struct AcknowledgeCampViewedParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SendCampMessageParams {
+    #[serde(
+        default,
+        skip_serializing_if = "rovai_core::draft_client::DraftClient::is_desktop"
+    )]
+    draft_client: rovai_core::draft_client::DraftClient,
     command_id: String,
     camp_id: CampId,
     draft_revision: i64,
     execution: Option<ExecutionRequest>,
+}
+
+impl SendCampMessageParams {
+    fn envelope(&self) -> CommandEnvelope<SendUserCampDraftCommand> {
+        let params = self;
+        CommandEnvelope {
+            command_id: params.command_id.clone(),
+            actor: ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            camp_id: Some(params.camp_id.to_string()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: SendUserCampDraftCommand {
+                draft_client: params.draft_client.clone(),
+                camp_id: params.camp_id.to_string(),
+                draft_revision: params.draft_revision,
+                execution: params.execution.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1586,6 +1615,27 @@ struct ResolveActionApprovalParams {
     expected_version: i64,
     option_id: String,
     reason: Option<String>,
+}
+
+impl ResolveActionApprovalParams {
+    fn envelope(self) -> CommandEnvelope<ResolveActionApprovalCommand> {
+        let params = self;
+        CommandEnvelope {
+            command_id: params.command_id,
+            actor: ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            camp_id: Some(params.camp_id.to_string()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: ResolveActionApprovalCommand {
+                approval_id: params.approval_id,
+                option_id: params.option_id,
+                expected_version: params.expected_version,
+                reason: params.reason,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -5683,6 +5733,49 @@ impl Core {
         }
         let _ = &request.params;
         match request.method.as_str() {
+            "commands.reconcile" => {
+                let database = self.database.lock().await;
+                web_commands::reconcile(
+                    &database,
+                    &self.data_dir,
+                    &request.client,
+                    request.params.clone(),
+                )
+            }
+            "host.editor.resolve" => {
+                let resume: Option<rovai_core::draft_client::EditorResume> =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    rovai_core::draft_client::resolve_editor(&database, resume)?,
+                )?)
+            }
+            "host.upload.bind" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Bind {
+                    intent: rovai_core::web_upload::UploadIntent,
+                    source: rovai_core::local_attachment_source::LocalAttachmentSourceRef,
+                }
+                let params: Bind = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::web_upload::bind(
+                    &mut database,
+                    &self.data_dir,
+                    &request.client,
+                    params.intent.clone(),
+                    params.source,
+                )?;
+                Ok(
+                    json!({"receipt":execution.result, "replayed":execution.replayed, "draft":CampAttachmentStore::for_client(&self.data_dir, request.client.clone()).load_draft(&database, &params.intent.camp_id)?}),
+                )
+            }
+            "host.upload.reconcile" => {
+                let intent = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let result = rovai_core::web_upload::reconcile(&database, &request.client, intent)?;
+                Ok(json!({"receipt":result.map(|execution| execution.result)}))
+            }
             "runtime.networkRecovery.wake" => {
                 let woken = self
                     .network_recovery
@@ -7301,7 +7394,8 @@ impl Core {
             "navigation.snapshot" => {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.navigation_snapshot(&mut database)?,
+                    ReadModelService
+                        .navigation_snapshot_for_client(&mut database, &request.client)?,
                 )?)
             }
             "navigation.groupCamps" => {
@@ -7309,11 +7403,12 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.navigation_group_camps(
+                    ReadModelService.navigation_group_camps_for_client(
                         &mut database,
                         params.project_path.as_deref(),
                         params.offset.unwrap_or(0),
                         params.limit.unwrap_or(100),
+                        &request.client,
                     )?,
                 )?)
             }
@@ -7356,6 +7451,14 @@ impl Core {
                     &self.data_dir,
                     project_binding_kind == ProjectBindingKind::QuickChat,
                 )?;
+                if !request.client.is_desktop()
+                    && project_binding_kind == ProjectBindingKind::Directory
+                {
+                    anyhow::ensure!(
+                        selection.project_path == requested_path,
+                        "Authorized workspace changed before Camp creation"
+                    );
+                }
                 let command = CreateCampCommand {
                     name: params.name,
                     project_binding_kind,
@@ -7810,7 +7913,8 @@ impl Core {
                         );
                     }
                     if let Err(error) =
-                        CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)
+                        CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                            .remove_camp(&camp_id)
                     {
                         eprintln!(
                             "Camp {camp_id} was deleted but managed attachment cleanup failed: {error:#}"
@@ -7877,7 +7981,8 @@ impl Core {
                 if discarded && let Some(camp_id) = discarded_camp_id {
                     self.finish_camp_attachment_cleanup(cleanup.as_ref())
                         .await?;
-                    CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        .remove_camp(&camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -8108,8 +8213,11 @@ impl Core {
                 let params: PendingCampInputsParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let mut queue =
-                    rovai_core::pending_camp_input::read_queue(&database, params.camp_id.as_str())?;
+                let mut queue = rovai_core::pending_camp_input::read_queue_for_client(
+                    &database,
+                    params.camp_id.as_str(),
+                    &request.client,
+                )?;
                 queue.submission_outcomes =
                     rovai_core::pending_camp_input::read_submission_outcomes(
                         &database,
@@ -8119,9 +8227,10 @@ impl Core {
                 Ok(serde_json::to_value(queue)?)
             }
             "camp.pendingInputs.edit" => {
-                let params: UserCommandParams<
+                let mut params: UserCommandParams<
                     rovai_core::pending_camp_input::EditPendingCampInputCommand,
                 > = serde_json::from_value(request.params.clone())?;
+                params.command.draft_client = request.client.clone();
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = rovai_core::pending_camp_input::edit_input(
@@ -8135,8 +8244,14 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "messageQuotes.mutateDraft" => {
-                let params: UserCommandParams<rovai_core::message_quote::MutateQuoteDraftCommand> =
-                    serde_json::from_value(request.params.clone())?;
+                let mut params: UserCommandParams<
+                    rovai_core::message_quote::MutateQuoteDraftCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                params.command.draft_client = request.client.clone();
+                anyhow::ensure!(
+                    request.client.is_desktop() || params.command.conversation_id.is_none(),
+                    "Private Draft client scope is not admitted yet"
+                );
                 let camp_id = params.command.camp_id.clone();
                 let conversation_id = params.command.conversation_id.clone();
                 let mut database = self.database.lock().await;
@@ -8158,7 +8273,8 @@ impl Core {
                     Ok(serde_json::to_value(snapshot)?)
                 } else {
                     Ok(serde_json::to_value(
-                        CampAttachmentStore::new(&self.data_dir).load_draft(&database, &camp_id)?,
+                        CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                            .load_draft(&database, &camp_id)?,
                     )?)
                 }
             }
@@ -8167,7 +8283,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir)
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
                         .load_draft(&database, params.camp_id.as_str())?,
                 )?)
             }
@@ -8176,13 +8292,14 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).save_content_with_continuation(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                        params.content,
-                        params.continuation_source_message_id.as_deref(),
-                    )?,
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        .save_content_with_continuation(
+                            &mut database,
+                            params.camp_id.as_str(),
+                            params.expected_revision,
+                            params.content,
+                            params.continuation_source_message_id.as_deref(),
+                        )?,
                 )?)
             }
             "camp.composerDraft.startReply" => {
@@ -8190,12 +8307,13 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).start_reply(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                        &params.reply_to_camp_message_id,
-                    )?,
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        .start_reply(
+                            &mut database,
+                            params.camp_id.as_str(),
+                            params.expected_revision,
+                            &params.reply_to_camp_message_id,
+                        )?,
                 )?)
             }
             "camp.composerDraft.cancelReply" => {
@@ -8203,11 +8321,12 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).cancel_reply(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                    )?,
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        .cancel_reply(
+                            &mut database,
+                            params.camp_id.as_str(),
+                            params.expected_revision,
+                        )?,
                 )?)
             }
             "camp.composerDraft.resolveReplyRecipient" => {
@@ -8215,12 +8334,13 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).resolve_reply_recipient(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                        params.recipient,
-                    )?,
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        .resolve_reply_recipient(
+                            &mut database,
+                            params.camp_id.as_str(),
+                            params.expected_revision,
+                            params.recipient,
+                        )?,
                 )?)
             }
             "camp.composerDraft.dismissContinuation" => {
@@ -8228,12 +8348,13 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).dismiss_continuation(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                        &params.source_camp_message_id,
-                    )?,
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        .dismiss_continuation(
+                            &mut database,
+                            params.camp_id.as_str(),
+                            params.expected_revision,
+                            &params.source_camp_message_id,
+                        )?,
                 )?)
             }
             "camp.composerDraft.resolveContinuationRecipient" => {
@@ -8241,18 +8362,19 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).resolve_continuation_recipient(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                        &params.agent_id,
-                    )?,
+                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        .resolve_continuation_recipient(
+                            &mut database,
+                            params.camp_id.as_str(),
+                            params.expected_revision,
+                            &params.agent_id,
+                        )?,
                 )?)
             }
             "camp.composerDraft.removeAttachment" => {
                 let params: RemovePreparedAttachmentParams =
                     serde_json::from_value(request.params.clone())?;
-                let store = CampAttachmentStore::new(&self.data_dir);
+                let store = CampAttachmentStore::for_client(&self.data_dir, request.client.clone());
                 let (draft, cleanup) = {
                     let mut database = self.database.lock().await;
                     store.remove_prepared_from_database(
@@ -8286,7 +8408,7 @@ impl Core {
             "camp.composerDraft.discard" => {
                 let params: CampComposerDraftParams =
                     serde_json::from_value(request.params.clone())?;
-                let store = CampAttachmentStore::new(&self.data_dir);
+                let store = CampAttachmentStore::for_client(&self.data_dir, request.client.clone());
                 let cleanup = {
                     let mut database = self.database.lock().await;
                     store.discard_draft_from_database(&mut database, params.camp_id.as_str())?
@@ -8322,12 +8444,17 @@ impl Core {
             "camp.attachments.previewSource" => {
                 let locator: LocalAttachmentOwnerLocator =
                     serde_json::from_value(request.params.clone())?;
-                let store = CampAttachmentStore::new(&self.data_dir);
+                let store = CampAttachmentStore::for_client(&self.data_dir, request.client.clone());
                 let (source_ref, legacy_allowed) = {
                     let database = self.database.lock().await;
                     (
-                        load_source_attachment(&database, &locator)?,
-                        legacy_attachment_belongs_to_owner(&database, &locator)?,
+                        rovai_core::local_attachment_source::load_source_attachment_for_client(
+                            &database,
+                            &locator,
+                            &request.client,
+                        )?,
+                        request.client.is_desktop()
+                            && legacy_attachment_belongs_to_owner(&database, &locator)?,
                     )
                 };
                 let source = if let Some(source_ref) = source_ref {
@@ -8361,16 +8488,30 @@ impl Core {
                     None => Value::Null,
                 })
             }
-            "camp.attachments.desktopOpenTarget" => {
+            "camp.attachments.desktopOpenTarget" | "host.attachment.resolve" => {
                 let params: DesktopAttachmentTargetParams =
                     serde_json::from_value(request.params.clone())?;
-                let store = CampAttachmentStore::new(&self.data_dir);
+                anyhow::ensure!(
+                    request.client.is_desktop()
+                        || matches!(params, DesktopAttachmentTargetParams::Owner(_)),
+                    "Web file access requires an exact owner locator"
+                );
+                let store = CampAttachmentStore::for_client(&self.data_dir, request.client.clone());
                 if let DesktopAttachmentTargetParams::Owner(locator) = &params {
                     let (source_ref, legacy_allowed) = {
                         let database = self.database.lock().await;
                         (
-                            load_source_attachment(&database, locator)?,
-                            legacy_attachment_belongs_to_owner(&database, locator)?,
+                            rovai_core::local_attachment_source::load_source_attachment_for_client(
+                                &database,
+                                locator,
+                                &request.client,
+                            )?,
+                            (request.client.is_desktop()
+                                || !matches!(
+                                    locator,
+                                    LocalAttachmentOwnerLocator::Composer { .. }
+                                ))
+                                && legacy_attachment_belongs_to_owner(&database, locator)?,
                         )
                     };
                     if let Some(source_ref) = source_ref {
@@ -8418,7 +8559,9 @@ impl Core {
                 )?)?)
             }
             "camp.messages.send" => {
-                let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
+                let mut params: SendCampMessageParams =
+                    serde_json::from_value(request.params.clone())?;
+                params.draft_client = request.client.clone();
                 self.send_test_camp_message_request(params).await
             }
             "userAutomation.camp.send" => {
@@ -8446,24 +8589,8 @@ impl Core {
                 let params: ResolveActionApprovalParams =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = ActionSafetyService::default().resolve_approval(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: params.command_id,
-                        actor: ActorRef::User {
-                            user_id: CURRENT_USER_ID.to_string(),
-                        },
-                        camp_id: Some(params.camp_id.to_string()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: ResolveActionApprovalCommand {
-                            approval_id: params.approval_id,
-                            option_id: params.option_id,
-                            expected_version: params.expected_version,
-                            reason: params.reason,
-                        },
-                    },
-                )?;
+                let execution = ActionSafetyService::default()
+                    .resolve_approval(&mut database, &params.envelope())?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "notifications.inbox" => {
@@ -8717,20 +8844,7 @@ impl Core {
     }
 
     async fn send_test_camp_message_request(&self, params: SendCampMessageParams) -> Result<Value> {
-        let envelope = CommandEnvelope {
-            command_id: params.command_id.clone(),
-            actor: ActorRef::User {
-                user_id: CURRENT_USER_ID.to_string(),
-            },
-            camp_id: Some(params.camp_id.to_string()),
-            expected_versions: Vec::new(),
-            execution_epoch: None,
-            payload: SendUserCampDraftCommand {
-                camp_id: params.camp_id.to_string(),
-                draft_revision: params.draft_revision,
-                execution: params.execution.clone(),
-            },
-        };
+        let envelope = params.envelope();
         CollaborationService::validate_send_message_input(&envelope.payload)?;
         if let Some(replay) = {
             let database = self.database.lock().await;
@@ -8771,12 +8885,16 @@ impl Core {
         let (managed_store, ingest_plan) = {
             let mut database = self.database.lock().await;
             let managed_store = ManagedAttachmentStore::for_database(&database);
-            let plan = managed_store.begin_current_composer_ingest(
-                &mut database,
-                params.camp_id.as_str(),
-                &params.command_id,
-                params.draft_revision,
-            )?;
+            let plan = if params.draft_client.is_desktop() {
+                managed_store.begin_current_composer_ingest(
+                    &mut database,
+                    params.camp_id.as_str(),
+                    &params.command_id,
+                    params.draft_revision,
+                )?
+            } else {
+                None
+            };
             (managed_store, plan)
         };
         let prepared_ingest = if let Some(plan) = ingest_plan {
@@ -23189,6 +23307,7 @@ while IFS= read -r _ignored; do :; done
             .to_string();
         let sent = core
             .send_test_camp_message_request(SendCampMessageParams {
+                draft_client: crate::draft_client::DraftClient::default(),
                 command_id: uuid::Uuid::new_v4().to_string(),
                 camp_id: CampId::parse(&camp_id).unwrap(),
                 draft_revision,
@@ -23231,7 +23350,7 @@ while IFS= read -r _ignored; do :; done
                     "Source Attachment unexpectedly wrote {table}"
                 );
             }
-            load_source_attachment(&database, &locator)
+            rovai_core::local_attachment_source::load_source_attachment(&database, &locator)
                 .unwrap()
                 .unwrap()
         };
@@ -23347,6 +23466,7 @@ while IFS= read -r _ignored; do :; done
         let draft_revision = prepared.revision;
         let attachment_id = prepared.attachments[0].id.clone();
         core.send_test_camp_message_request(SendCampMessageParams {
+            draft_client: crate::draft_client::DraftClient::default(),
             command_id: uuid::Uuid::new_v4().to_string(),
             camp_id: CampId::parse(&camp_id).unwrap(),
             draft_revision,
@@ -24880,6 +25000,7 @@ while IFS= read -r _ignored; do :; done
         };
         let sent = core
             .send_test_camp_message_request(SendCampMessageParams {
+                draft_client: crate::draft_client::DraftClient::default(),
                 command_id: uuid::Uuid::new_v4().to_string(),
                 camp_id: CampId::parse(&camp_id).unwrap(),
                 draft_revision,

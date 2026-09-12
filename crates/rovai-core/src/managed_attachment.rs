@@ -794,7 +794,7 @@ impl ManagedAttachmentService {
             let expected_revision = draft_revision
                 .context("Composer Managed Attachment intent has no Draft revision")?;
             let actual_revision: i64 = transaction.query_row(
-                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                "SELECT revision FROM camp_composer_draft WHERE client_id = 'desktop' AND camp_id = ?1",
                 [camp_id],
                 |row| row.get(0),
             )?;
@@ -1220,7 +1220,7 @@ fn load_composer_sources(
     requested_attachment_ids: &[String],
 ) -> Result<Vec<ComposerSource>> {
     let actual_revision: i64 = connection.query_row(
-        "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+        "SELECT revision FROM camp_composer_draft WHERE client_id = 'desktop' AND camp_id = ?1",
         [camp_id],
         |row| row.get(0),
     )?;
@@ -1755,7 +1755,7 @@ mod tests {
             database
                 .connection()
                 .query_row(
-                    "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                    "SELECT revision FROM camp_composer_draft WHERE client_id = 'desktop' AND camp_id = ?1",
                     [&camp_id],
                     |row| row.get::<_, i64>(0),
                 )

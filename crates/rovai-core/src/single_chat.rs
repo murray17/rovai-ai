@@ -3494,6 +3494,7 @@ mod tests {
                 "private-quote-add",
                 Some(&camp_id),
                 crate::message_quote::MutateQuoteDraftCommand {
+                    draft_client: Default::default(),
                     camp_id: camp_id.clone(),
                     conversation_id: Some(conversation_id.clone()),
                     expected_revision: 2,

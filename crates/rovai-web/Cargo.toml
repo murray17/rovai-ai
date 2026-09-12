@@ -8,6 +8,7 @@ license.workspace = true
 anyhow = "1"
 async-stream = "0.3"
 axum = { version = "0.8", features = ["json", "multipart"] }
+base64 = "0.22"
 getrandom = "0.3"
 rovai-core = { path = "../rovai-core" }
 serde = { version = "1", features = ["derive"] }

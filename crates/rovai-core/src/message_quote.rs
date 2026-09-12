@@ -154,7 +154,8 @@ pub fn quote_scalar_count(quotes: &[MessageQuoteSnapshot]) -> usize {
 
 /// SQL identifiers are closed internal variants; caller-controlled IDs are always bound parameters.
 #[derive(Debug, Clone, Copy)]
-pub enum QuoteStorage {
+pub enum QuoteStorage<'a> {
+    ClientCampDraft(&'a crate::draft_client::DraftClient),
     CampDraft,
     CampPending,
     CampEdit,
@@ -164,10 +165,17 @@ pub enum QuoteStorage {
     PrivateEdit,
     PrivateMessage,
 }
-impl QuoteStorage {
+impl QuoteStorage<'_> {
+    fn client_filter(self) -> String {
+        match self {
+            Self::CampDraft => " AND client_id = 'desktop'".to_owned(),
+            Self::ClientCampDraft(client) => format!(" AND client_id = '{}'", client.sql_key()),
+            _ => String::new(),
+        }
+    }
     fn table(self) -> &'static str {
         match self {
-            Self::CampDraft => "camp_composer_draft",
+            Self::CampDraft | Self::ClientCampDraft(_) => "camp_composer_draft",
             Self::CampPending => "pending_camp_input",
             Self::CampEdit => "pending_input_edit_session",
             Self::CampMessage => "camp_message",
@@ -179,7 +187,7 @@ impl QuoteStorage {
     }
     fn key(self) -> &'static str {
         match self {
-            Self::CampDraft | Self::CampEdit => "camp_id",
+            Self::CampDraft | Self::ClientCampDraft(_) | Self::CampEdit => "camp_id",
             Self::PrivateDraft | Self::PrivateEdit => "conversation_id",
             _ => "id",
         }
@@ -194,9 +202,10 @@ pub fn load_quotes(
     let value = connection
         .query_row(
             &format!(
-                "SELECT quotes_json FROM {} WHERE {}=?1",
+                "SELECT quotes_json FROM {} WHERE {}=?1{}",
                 storage.table(),
-                storage.key()
+                storage.key(),
+                storage.client_filter()
             ),
             [id],
             |row| row.get::<_, String>(0),
@@ -215,9 +224,10 @@ pub fn store_quotes(
     parse_quotes(&value)?;
     let changed = connection.execute(
         &format!(
-            "UPDATE {} SET quotes_json=?2 WHERE {}=?1",
+            "UPDATE {} SET quotes_json=?2 WHERE {}=?1{}",
             storage.table(),
-            storage.key()
+            storage.key(),
+            storage.client_filter()
         ),
         params![id, value],
     )?;
@@ -593,9 +603,10 @@ pub fn mutate_quotes(
     let mut quotes = load_quotes(transaction, storage, id)?;
     let trash_json: String = transaction.query_row(
         &format!(
-            "SELECT quote_trash_json FROM {} WHERE {}=?1",
+            "SELECT quote_trash_json FROM {} WHERE {}=?1{}",
             storage.table(),
-            storage.key()
+            storage.key(),
+            storage.client_filter()
         ),
         [id],
         |row| row.get(0),
@@ -634,9 +645,10 @@ pub fn mutate_quotes(
     store_quotes(transaction, storage, id, &quotes)?;
     transaction.execute(
         &format!(
-            "UPDATE {} SET quote_trash_json=?2 WHERE {}=?1",
+            "UPDATE {} SET quote_trash_json=?2 WHERE {}=?1{}",
             storage.table(),
-            storage.key()
+            storage.key(),
+            storage.client_filter()
         ),
         params![id, serde_json::to_string(&trash)?],
     )?;
@@ -646,6 +658,11 @@ pub fn mutate_quotes(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MutateQuoteDraftCommand {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::draft_client::DraftClient::is_desktop"
+    )]
+    pub draft_client: crate::draft_client::DraftClient,
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub conversation_id: Option<String>,
@@ -675,24 +692,24 @@ pub fn mutate_draft(
             None => {
                 let valid: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM camp WHERE id=?1)", [&command.camp_id], |row| row.get(0))?;
                 ensure!(valid, "quote.owner_unavailable");
-                (QuoteStorage::CampDraft, command.camp_id.as_str())
+                (QuoteStorage::ClientCampDraft(&command.draft_client), command.camp_id.as_str())
             }
         };
-        let revision: i64 = transaction.query_row(&format!("SELECT revision FROM {} WHERE {}=?1", storage.table(), storage.key()), [owner_id], |row| row.get(0)).optional()?.unwrap_or(0);
+        let revision: i64 = transaction.query_row(&format!("SELECT revision FROM {} WHERE {}=?1{}", storage.table(), storage.key(), storage.client_filter()), [owner_id], |row| row.get(0)).optional()?.unwrap_or(0);
         if revision != command.expected_revision {
             return Ok(CommandHandlerResult::rejected("draft_changed", json!({"currentRevision":revision})));
         }
         let now = chrono::Utc::now();
-        if matches!(storage, QuoteStorage::CampDraft) {
-            transaction.execute("INSERT INTO camp_composer_draft(camp_id, body, structured_content_json, revision, created_at, updated_at, expires_at) VALUES(?1,'',?2,1,?3,?3,?4) ON CONFLICT(camp_id) DO NOTHING",
-                params![owner_id, crate::camp_content::EMPTY_COMPOSER_DOCUMENT_JSON, now.to_rfc3339(), (now + chrono::Duration::days(crate::camp_attachment::DRAFT_RETENTION_DAYS)).to_rfc3339()])?;
+        if matches!(storage, QuoteStorage::CampDraft | QuoteStorage::ClientCampDraft(_)) {
+            transaction.execute("INSERT INTO camp_composer_draft(camp_id, body, structured_content_json, revision, created_at, updated_at, expires_at, client_id) VALUES(?1,'',?2,1,?3,?3,?4,?5) ON CONFLICT(camp_id, client_id) DO NOTHING",
+                params![owner_id, crate::camp_content::EMPTY_COMPOSER_DOCUMENT_JSON, now.to_rfc3339(), (now + chrono::Duration::days(crate::camp_attachment::DRAFT_RETENTION_DAYS)).to_rfc3339(), command.draft_client.id()])?;
         } else {
             transaction.execute("INSERT OR IGNORE INTO single_chat_composer_draft(conversation_id, revision, source_attachments_json, updated_at) VALUES(?1,0,'[]',?2)", params![owner_id, now.to_rfc3339()])?;
         }
         mutate_quotes(transaction, storage, owner_id, &command.camp_id, command.conversation_id.as_deref(), &command.action)?;
-        transaction.execute(&format!("UPDATE {} SET revision=?3, updated_at=?2 WHERE {}=?1", storage.table(), storage.key()), params![owner_id, now.to_rfc3339(), revision + 1])?;
-        if matches!(storage, QuoteStorage::CampDraft) {
-            transaction.execute("UPDATE camp_composer_draft SET expires_at=?2 WHERE camp_id=?1", params![owner_id, (now + chrono::Duration::days(crate::camp_attachment::DRAFT_RETENTION_DAYS)).to_rfc3339()])?;
+        transaction.execute(&format!("UPDATE {} SET revision=?3, updated_at=?2 WHERE {}=?1{}", storage.table(), storage.key(), storage.client_filter()), params![owner_id, now.to_rfc3339(), revision + 1])?;
+        if matches!(storage, QuoteStorage::CampDraft | QuoteStorage::ClientCampDraft(_)) {
+            transaction.execute("UPDATE camp_composer_draft SET expires_at=?2 WHERE camp_id=?1 AND client_id=?3", params![owner_id, (now + chrono::Duration::days(crate::camp_attachment::DRAFT_RETENTION_DAYS)).to_rfc3339(), command.draft_client.id()])?;
         }
         Ok(CommandHandlerResult::applied("quote.draft_updated", json!({"revision":revision+1}), None))
     })

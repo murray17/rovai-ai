@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { useCampClient } from './camp-client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AdapterInstallation, AgentProfile, CampMemberFastView, CampSnapshot, StoredCommandResult } from '@contracts'
@@ -109,7 +110,7 @@ export function useCampMemberFast(
     changed()
     try {
       const result = await client.request<StoredCommandResult>('camps.members.fast.set', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
       })
       if (!mounted.current || entries.current.get(agentId) !== entry) return

@@ -1300,6 +1300,8 @@ export type MessageQuoteAction =
   | { type: 'remove' | 'restore'; quoteId: string }
 
 export interface CampComposerDraftView {
+  /** Host-owned editor identity; independent of a short-lived authentication Session. */
+  draftId?: string
   quotes: MessageQuoteSnapshot[]
   campId: string
   body: string
@@ -1328,6 +1330,8 @@ export interface PendingCampInputView {
 }
 
 export interface PendingInputEditSession {
+  /** Same Owner may explicitly take over this lease; no foreign working state is exposed. */
+  foreignClient?: boolean
   workingQuotes: MessageQuoteSnapshot[]
   pendingInputId: string
   editToken: string
@@ -3768,6 +3772,7 @@ export type HostWebStartInput = {
   listen: string
   publicOrigin?: string
   allowInsecureLan: boolean
+  authorizedWorkspaces?: string[]
 }
 
 export interface HostWebApi {

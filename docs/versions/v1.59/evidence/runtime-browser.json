@@ -1,0 +1,62 @@
+{
+  "verifiedAt": "2026-09-12T12:26:55.779Z",
+  "simulation": false,
+  "realRuntime": true,
+  "setup": "Empty standalone Host with explicit local initialization; Runtime/member/Camp configuration uses authorized HTTP.",
+  "checks": {
+    "browserUploadAndMarkdownRead": true,
+    "browserSend": true,
+    "browserNativeApproval": true,
+    "secondApprovalRejected": true,
+    "composerPreservedDuringExecution": true,
+    "browserArtifactRead": true,
+    "browserStopBeforeHostShutdown": true,
+    "noElectronBridgeOrRuntimeExceptions": true
+  },
+  "screenshots": {
+    "web-native-approval.png": "d133b3783e7e95bb712018e5dcde216db1fa4b4854161d230e07d9b567c85125",
+    "web-runtime-artifact.png": "a20e8796d9f23cef84cddac85e8e9503bc4d497d00efa013b62282f57975693c",
+    "web-runtime-complete.png": "adaf0068ff86d1b0183aecb2f2a2e180de58b004a557b2f6af7d84cb2c0563bb",
+    "web-source-upload.png": "d936e70d55477c444b27ee7b4e27e13f50362b3dae62cd9f2771d10511b289d0",
+    "web-stop-active.png": "ccecb65e76d224fd71e47dbe949745f7f2d5f46adb1f49c62f9b97e3b4b4594e",
+    "web-stop-complete.png": "a092c8032a214fb2420c2f44664ef729861c14754448eb8ad1b53d4b92bf8be3"
+  },
+  "notVerified": [
+    "Administration setup through UI",
+    "Desktop-managed Runtime execution",
+    "Second physical device/LAN",
+    "Other platforms",
+    "Headless Automation clock",
+    "Control-plane isolation"
+  ],
+  "campId": "rvcamp_01m2asbrxje2gvrfxv7jbwwd77",
+  "approvalId": "0c9dba1d-79d9-42a9-8616-f382efaee5c1",
+  "runId": "19543fc9-0da1-4b93-b96d-0c346aff3797",
+  "messageId": "074b99ea-3799-4a42-b1ff-8a79483d2275",
+  "attachmentId": "153ba6ca-44e4-40f2-a8df-971a7862e5c0",
+  "stopRunId": "00a5e5ef-85ad-4b60-bfd7-6d06b9e7534d",
+  "hostBinarySha256": "b179f52674c085052a471aa8b21b7b6548f538852db44182be4e894952b7fe33",
+  "status": "passed",
+  "command": "pnpm smoke:host-web-runtime",
+  "sourceHead": "9c7c9afd1f6e4881ce3db7aa17bbc268dc595208",
+  "sourceDirty": true,
+  "sourceDigests": {
+    "apps/desktop/src/renderer/src/BusinessApp.tsx": "655fa4d244df70df72c8fdf1033ee8c5816b32865b1b6abd4c4211bddf623196",
+    "apps/desktop/src/renderer/src/CampWorkspace.tsx": "c678e5aa46d89253a4faf859904c3ff5883f8e6e81e924107862763fdfc4de94",
+    "apps/desktop/src/renderer/src/ImageGallery.tsx": "3e22073d3eea8227097a2861300694c6a3079e72f4b99b8cf81fc48e29b3b843",
+    "apps/desktop/src/renderer/src/FilePreviewContext.tsx": "0ea882d53b1f54b42d56f2f2a157e1bc29ce9545865547265eff344a9db1a572",
+    "apps/desktop/src/renderer/src/business-environment.ts": "9f4adee17ebd1fe784ad2d39718df169af0e72d6fd86d3ce7db2ab146ce6fd57",
+    "apps/desktop/src/renderer/src/desktop-business-environment.ts": "5c71d02c9d704529b462c8f3799e784200012bb680b1a7dcedb6567852ad80aa",
+    "apps/web/src/main.tsx": "72314e3efd8c59b97392db243fa5d8e9cd9fd6096bd081ccb214c65dab95a821",
+    "apps/web/src/client.ts": "3ebea8c06330dfe644be2c9ad4dbba4a248e8cc7c55dbbd7013ae71e92c948a3",
+    "apps/web/src/camp-adapter.ts": "c2185eca2c4ad45e2bf7fc462297ca400067a0bb9acccdf7310b2f680771ea65",
+    "crates/rovai-core/src/application/web_commands.rs": "b88dbd06230e4384e7c9f0bd07a0327d26fdc9faaa1934917ad039b26ee3502d",
+    "crates/rovai-core/src/local_attachment_snapshot.rs": "dbd4eb00007067885a1bd8585e2deed0bf77743e7c1db34e906d318d0607b1fb",
+    "crates/rovai-core/src/draft_client.rs": "651d61c4788d6205f11abbe5979dd21f9a08c4e3378d2cb889ee2598dac2ed1e",
+    "crates/rovai-web/src/resources.rs": "8ad76fa5b8b627ea9cc6771825708d12f7ac86ee6e9558bad9c13532e39fb541",
+    "scripts/lib/host-web-browser.mjs": "7a90fef3c13d602f0db6427b3ef573d2394e1950c375f50b45731a6e78285fbb",
+    "scripts/smoke-host-web-runtime.mjs": "132860b3081bb38e788ccaea2e93a7dd310393ab578c827d71b1f83c0d58360f"
+  },
+  "sourceDiffSha256": "991af704444ae6cb97a965cbd2beb051d94dd4976a9f0e8000f65ffa133a3cae",
+  "sourceDiffCommand": "git diff HEAD --binary -- apps crates packages scripts Cargo.toml Cargo.lock package.json pnpm-lock.yaml web.vite.config.ts tsconfig.json"
+}

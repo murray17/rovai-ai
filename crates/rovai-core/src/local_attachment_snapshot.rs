@@ -623,6 +623,68 @@ pub(crate) fn open_source_without_following(path: &Path) -> Result<File> {
     }
 }
 
+/// Opens an already resolved, absolute file capability without following a
+/// replacement symlink at any component. Uses the existing native handle walk
+/// on Unix and Windows; it does not grant or discover an authorized path.
+pub fn open_resolved_file_without_following(path: &Path) -> Result<File> {
+    use std::path::Component;
+    anyhow::ensure!(path.is_absolute(), "resolved file path must be absolute");
+    let mut root = std::path::PathBuf::new();
+    let mut names = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => root.push(prefix.as_os_str()),
+            Component::RootDir => root.push(component.as_os_str()),
+            Component::Normal(name) => names.push(name.to_os_string()),
+            Component::CurDir | Component::ParentDir => {
+                anyhow::bail!("resolved file path is not canonical")
+            }
+        }
+    }
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(directory_traversal_flags())
+            .open(&root)?
+    };
+    #[cfg(windows)]
+    let mut file = open_source_without_following(&root)?;
+    let (leaf, parents) = names.split_last().context("resolved file has no leaf")?;
+    for name in parents {
+        anyhow::ensure!(
+            file.metadata()?.is_dir(),
+            "resolved file parent is not a directory"
+        );
+        #[cfg(unix)]
+        {
+            file = open_child_with_flags(&file, name, directory_traversal_flags())?;
+        }
+        #[cfg(windows)]
+        {
+            file = open_child_without_following(&file, name)?;
+        }
+    }
+    file = open_child_without_following(&file, leaf)?;
+    anyhow::ensure!(file.metadata()?.is_file(), "resolved file is not regular");
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn directory_traversal_flags() -> libc::c_int {
+    // Published artifact ancestors intentionally allow traversal but not listing.
+    // O_RDONLY would require directory-read permission and reject a valid exact
+    // source. Search/path handles keep every component fenced against symlinks.
+    #[cfg(target_os = "macos")]
+    let access = libc::O_SEARCH;
+    #[cfg(target_os = "linux")]
+    let access = libc::O_PATH;
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let access = libc::O_RDONLY;
+    access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC
+}
+
 #[cfg(windows)]
 pub(crate) fn open_source_without_following(path: &Path) -> Result<File> {
     crate::platform::windows_file_tree::open_path_without_following(path)
@@ -630,15 +692,18 @@ pub(crate) fn open_source_without_following(path: &Path) -> Result<File> {
 
 #[cfg(unix)]
 fn open_child_without_following(directory: &File, name: &OsString) -> Result<File> {
+    open_child_with_flags(
+        directory,
+        name,
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+    )
+}
+
+#[cfg(unix)]
+fn open_child_with_flags(directory: &File, name: &OsString, flags: libc::c_int) -> Result<File> {
     let name_bytes = name.as_os_str().as_bytes();
     let c_name = CString::new(name_bytes).context("Attachment name contains a NUL byte")?;
-    let descriptor = unsafe {
-        libc::openat(
-            directory.as_raw_fd(),
-            c_name.as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
-        )
-    };
+    let descriptor = unsafe { libc::openat(directory.as_raw_fd(), c_name.as_ptr(), flags) };
     if descriptor < 0 {
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == Some(libc::ELOOP) {

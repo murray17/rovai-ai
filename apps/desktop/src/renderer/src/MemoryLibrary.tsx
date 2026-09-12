@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -323,13 +324,13 @@ export function MemoryLibrary({
       let result: StoredCommandResult
       if (editor.kind === 'create') {
         result = await window.rovai.request('memory.create', {
-          commandId: crypto.randomUUID(),
+          commandId: newCommandId(),
           command: createCommand()
         })
       } else if (editor.kind === 'revise') {
         if (!editor.memory.currentRevisionId) throw new Error('当前记忆没有可修订的版本。')
         result = await window.rovai.request('memory.revise', {
-          commandId: crypto.randomUUID(),
+          commandId: newCommandId(),
           command: {
             memoryId: editor.memory.id,
             expectedVersion: editor.memory.version,
@@ -347,7 +348,7 @@ export function MemoryLibrary({
           finalRetrievalKeys: retrievalKeys()
         }
         result = await window.rovai.request('memory.hearthReviewItems.accept', {
-          commandId: crypto.randomUUID(),
+          commandId: newCommandId(),
           command
         })
       }
@@ -362,7 +363,7 @@ export function MemoryLibrary({
   const acceptReview = (reviewItem: HearthReviewItem): Promise<void> =>
     run(`accept-${reviewItem.reviewItemId}`, async () => {
       const result = await window.rovai.request<StoredCommandResult>('memory.hearthReviewItems.accept', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: {
           reviewItemId: reviewItem.reviewItemId,
           expectedReviewItemVersion: reviewItem.version
@@ -375,7 +376,7 @@ export function MemoryLibrary({
   const rejectReview = (reviewItem: HearthReviewItem): Promise<void> =>
     run(`reject-${reviewItem.reviewItemId}`, async () => {
       const result = await window.rovai.request<StoredCommandResult>('memory.hearthReviewItems.reject', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: {
           reviewItemId: reviewItem.reviewItemId,
           expectedReviewItemVersion: reviewItem.version
@@ -390,7 +391,7 @@ export function MemoryLibrary({
     memory: MemoryRecord
   ): Promise<void> => run(`${method}-${memory.id}`, async () => {
     const result = await window.rovai.request<StoredCommandResult>(method, {
-      commandId: crypto.randomUUID(),
+      commandId: newCommandId(),
       command: { memoryId: memory.id, expectedVersion: memory.version }
     })
     assertApplied(result)
@@ -398,7 +399,7 @@ export function MemoryLibrary({
 
   const forget = (memory: MemoryRecord): Promise<void> => run(`forget-${memory.id}`, async () => {
     const result = await window.rovai.request<StoredCommandResult>('memory.forget', {
-      commandId: crypto.randomUUID(),
+      commandId: newCommandId(),
       command: { memoryId: memory.id, expectedVersion: memory.version }
     })
     assertApplied(result)
@@ -444,7 +445,7 @@ export function MemoryLibrary({
 
     try {
       const result = await window.rovai.request<StoredCommandResult>('memory.review.schedule', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: {
           memoryId: current.memory.id,
           expectedVersion: current.memory.version,

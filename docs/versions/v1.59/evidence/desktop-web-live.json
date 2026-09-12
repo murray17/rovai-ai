@@ -1,0 +1,62 @@
+{
+  "stage": "managed-desktop-web-passed",
+  "simulation": false,
+  "realRuntime": false,
+  "campId": "rvcamp_01m2asahpke9gb3cyffef38zsx",
+  "geometry": {
+    "viewport": [
+      1440,
+      920
+    ],
+    "sidebar": 270,
+    "header": 38,
+    "composer": 1022
+  },
+  "draftOwners": [
+    "web",
+    "web",
+    "desktop"
+  ],
+  "sameComposerAfterReauth": true,
+  "nativeBridgeInBrowser": false,
+  "coreAliveAfterWebStop": true,
+  "command": "ROVAI_REQUIRE_ELECTRON_INTEGRATION=1 ROVAI_KEEP_HOST_WEB_LIVE_FIXTURE=1 pnpm test:host-web-live",
+  "sourceHead": "9c7c9afd1f6e4881ce3db7aa17bbc268dc595208",
+  "sourceDirty": true,
+  "sourceDigests": {
+    "apps/desktop/src/renderer/src/BusinessApp.tsx": "655fa4d244df70df72c8fdf1033ee8c5816b32865b1b6abd4c4211bddf623196",
+    "apps/desktop/src/renderer/src/CampWorkspace.tsx": "c678e5aa46d89253a4faf859904c3ff5883f8e6e81e924107862763fdfc4de94",
+    "apps/desktop/src/renderer/src/ImageGallery.tsx": "3e22073d3eea8227097a2861300694c6a3079e72f4b99b8cf81fc48e29b3b843",
+    "apps/desktop/src/renderer/src/FilePreviewContext.tsx": "0ea882d53b1f54b42d56f2f2a157e1bc29ce9545865547265eff344a9db1a572",
+    "apps/desktop/src/renderer/src/business-environment.ts": "9f4adee17ebd1fe784ad2d39718df169af0e72d6fd86d3ce7db2ab146ce6fd57",
+    "apps/desktop/src/renderer/src/desktop-business-environment.ts": "5c71d02c9d704529b462c8f3799e784200012bb680b1a7dcedb6567852ad80aa",
+    "apps/web/src/main.tsx": "72314e3efd8c59b97392db243fa5d8e9cd9fd6096bd081ccb214c65dab95a821",
+    "apps/web/src/client.ts": "3ebea8c06330dfe644be2c9ad4dbba4a248e8cc7c55dbbd7013ae71e92c948a3",
+    "apps/web/src/camp-adapter.ts": "c2185eca2c4ad45e2bf7fc462297ca400067a0bb9acccdf7310b2f680771ea65",
+    "crates/rovai-core/src/application/web_commands.rs": "b88dbd06230e4384e7c9f0bd07a0327d26fdc9faaa1934917ad039b26ee3502d",
+    "crates/rovai-core/src/local_attachment_snapshot.rs": "dbd4eb00007067885a1bd8585e2deed0bf77743e7c1db34e906d318d0607b1fb",
+    "crates/rovai-core/src/draft_client.rs": "651d61c4788d6205f11abbe5979dd21f9a08c4e3378d2cb889ee2598dac2ed1e",
+    "crates/rovai-web/src/resources.rs": "8ad76fa5b8b627ea9cc6771825708d12f7ac86ee6e9558bad9c13532e39fb541",
+    "scripts/lib/host-web-browser.mjs": "7a90fef3c13d602f0db6427b3ef573d2394e1950c375f50b45731a6e78285fbb",
+    "scripts/lib/host-web-live.test.mjs": "3878211a5fbba557e5fa1180a44a70ef0809fa04b97c7fa0b6ac037bc1b3dafc"
+  },
+  "sourceDiffSha256": "991af704444ae6cb97a965cbd2beb051d94dd4976a9f0e8000f65ffa133a3cae",
+  "sourceDiffCommand": "git diff HEAD --binary -- apps crates packages scripts Cargo.toml Cargo.lock package.json pnpm-lock.yaml web.vite.config.ts tsconfig.json",
+  "hostBinarySha256": "b179f52674c085052a471aa8b21b7b6548f538852db44182be4e894952b7fe33",
+  "verifiedAt": "2026-09-12",
+  "scope": "Actual isolated Electron Desktop and two Chrome profiles connect to the same Desktop-managed Rust Host; controlled Core messages use execution:null.",
+  "notVerified": [
+    "Real Runtime in this test",
+    "Second physical device/LAN",
+    "Other platforms",
+    "Full administration pages",
+    "Control-plane isolation"
+  ],
+  "screenshots": {
+    "desktop-day.png": "fbde7120136255576fbe333a6a167f21448519b9f8b77c6f58eadcfa11784c55",
+    "desktop-night.png": "8995732a4916127a1a46195e5a2506cf83693556e866e91ae06c7e3f2f4333d5",
+    "web-after-reauth.png": "cad9cd017d347cc464eb62d71d19073ebc3d60ba263a469c4cdc812f23c06391",
+    "web-day.png": "3bc3291f9016ebf43265ef55485dd98a5da994c442ba3918752cf70505fb7d20",
+    "web-night.png": "7ef2ffde53e664e872390378fbece11d84ec51aebe5865acffc9cf313df554f9"
+  }
+}

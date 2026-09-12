@@ -916,9 +916,17 @@ impl ReadModelService {
     }
 
     pub fn navigation_snapshot(&self, database: &mut Database) -> Result<NavigationSnapshot> {
+        self.navigation_snapshot_for_client(database, &crate::draft_client::DraftClient::default())
+    }
+
+    pub fn navigation_snapshot_for_client(
+        &self,
+        database: &mut Database,
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<NavigationSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let camps = load_navigation_camps(&transaction)?;
+        let camps = load_navigation_camps(&transaction, client)?;
         let (quick_chat, projects) = group_navigation_camps(camps);
         transaction.commit()?;
         Ok(NavigationSnapshot {
@@ -936,10 +944,27 @@ impl ReadModelService {
         offset: usize,
         limit: usize,
     ) -> Result<NavigationCampPage> {
+        self.navigation_group_camps_for_client(
+            database,
+            project_path,
+            offset,
+            limit,
+            &crate::draft_client::DraftClient::default(),
+        )
+    }
+
+    pub fn navigation_group_camps_for_client(
+        &self,
+        database: &mut Database,
+        project_path: Option<&str>,
+        offset: usize,
+        limit: usize,
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<NavigationCampPage> {
         let limit = limit.clamp(1, 200);
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let camps = load_navigation_camps(&transaction)?
+        let camps = load_navigation_camps(&transaction, client)?
             .into_iter()
             .filter(|camp| match project_path {
                 Some(path) => camp.project_binding_kind == "directory" && camp.project_path == path,
@@ -1641,7 +1666,10 @@ impl ReadModelService {
     }
 }
 
-fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<NavigationCampItem>> {
+fn load_navigation_camps(
+    transaction: &Transaction<'_>,
+    client: &crate::draft_client::DraftClient,
+) -> Result<Vec<NavigationCampItem>> {
     let publication_predicate = public_camp_message_event_predicate("event_log.event_type");
     let sql = format!(
         r#"
@@ -1719,14 +1747,15 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         LEFT JOIN event_log AS activity_event
           ON activity_event.global_sequence = navigation_activity.last_activity_sequence
         LEFT JOIN camp_view_state ON camp_view_state.camp_id = camp.id
-        LEFT JOIN camp_composer_draft ON camp_composer_draft.camp_id = camp.id
+        LEFT JOIN camp_composer_draft ON camp_composer_draft.camp_id = camp.id AND camp_composer_draft.client_id = ?1
         WHERE camp.activation_state = 'active'
            OR length(trim(COALESCE(camp_composer_draft.body, ''))) > 0
-           OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id)
+           OR (camp_composer_draft.source_attachments_json IS NOT NULL AND camp_composer_draft.source_attachments_json <> '[]')
+           OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id AND client_id = ?1)
         "#
     );
     let mut statement = transaction.prepare(&sql)?;
-    let rows = statement.query_map([], |row| {
+    let rows = statement.query_map([client.id()], |row| {
         let default_lead_agent_id = row.get::<_, Option<String>>(4)?;
         let default_lead_display_name = row.get::<_, Option<String>>(5)?;
         let latest_completion_global_sequence = row.get::<_, i64>(8)?;

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import type { HostWebApi, HostWebStatus } from '@contracts'
+import type { HostWebApi, HostWebStatus, WorkspaceSelection } from '@contracts'
 import { readErrorMessage } from './error-message'
 
-export function HostWebSettings({ api }: { api: HostWebApi }): React.JSX.Element {
+export function HostWebSettings({ api, selectWorkspace }: { api: HostWebApi; selectWorkspace: () => Promise<WorkspaceSelection | null> }): React.JSX.Element {
   const [status, setStatus] = useState<HostWebStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -11,6 +11,7 @@ export function HostWebSettings({ api }: { api: HostWebApi }): React.JSX.Element
   const [lan, setLan] = useState(false)
   const [token, setToken] = useState('')
   const [visible, setVisible] = useState(false)
+  const [workspaces, setWorkspaces] = useState<WorkspaceSelection[]>([])
   const generation = useRef(0)
   const changing = useRef(false)
 
@@ -43,7 +44,7 @@ export function HostWebSettings({ api }: { api: HostWebApi }): React.JSX.Element
     setVisible(false)
     try {
       const next = operation === 'start'
-        ? await api.start({ listen, ...(origin.trim() ? { publicOrigin: origin.trim() } : {}), allowInsecureLan: lan })
+        ? await api.start({ listen, ...(origin.trim() ? { publicOrigin: origin.trim() } : {}), allowInsecureLan: lan, authorizedWorkspaces: workspaces.map(workspace => workspace.projectPath) })
         : await api[operation]()
       if (current !== generation.current) return
       setStatus(next)
@@ -66,13 +67,23 @@ export function HostWebSettings({ api }: { api: HostWebApi }): React.JSX.Element
     <div className="section-heading"><div><h2 id="host-web-heading">浏览器访问</h2><p>从浏览器连接当前工作区</p></div></div>
     <div className="general-section-body host-web-settings">
       <p role="status">{status ? (status.enabled ? '已开启' : '已关闭') : '正在读取服务状态…'}{busy ? ' · 正在更新…' : ''}</p>
-      <p className="general-inline-status">预览版当前支持浏览记录。发送、上传和审批尚未开放。</p>
+      <p className="general-inline-status">开发预览已接通对话、附件和审批；安全发布验收尚未完成。</p>
       {!status?.enabled && <fieldset disabled={busy} className="host-web-fields">
         <legend>访问地址</legend>
         <label>监听地址<input value={listen} onChange={(event) => setListen(event.target.value)} spellCheck={false} placeholder="127.0.0.1:4317" /></label>
         <label>控制台地址（局域网必填）<input value={origin} onChange={(event) => setOrigin(event.target.value)} spellCheck={false} placeholder="http://192.168.1.10:4317" /></label>
         <label className="host-web-lan"><input type="checkbox" checked={lan} onChange={(event) => setLan(event.target.checked)} />允许明文局域网访问</label>
         {lan && <p role="note">同一网络上的人可能截获令牌和内容。只在可信网络开启；跨不可信网络请使用 HTTPS 或 VPN。</p>}
+        <div>
+          <p>浏览器可使用的工作区</p>
+          <p className="general-inline-status">浏览器可以选择这些目录创建对话，并读取其中的文件。未添加目录时仍可使用快速对话。</p>
+          {workspaces.map(workspace => <p key={workspace.projectPath}>{workspace.projectPath} <button type="button" className="quiet-button compact" onClick={() => setWorkspaces(current => current.filter(item => item.projectPath !== workspace.projectPath))}>移除</button></p>)}
+          <button type="button" className="quiet-button compact" disabled={workspaces.length >= 64} onClick={() => {
+            void selectWorkspace().then(selected => {
+              if (selected) setWorkspaces(current => current.some(item => item.projectPath === selected.projectPath) ? current : [...current, selected])
+            }).catch(failure => setError(readErrorMessage(failure)))
+          }}>添加工作区</button>
+        </div>
       </fieldset>}
       {status?.enabled && <p>控制台：<a href={status.origin} target="_blank" rel="noreferrer">{status.origin}</a> · {status.sessions ?? 0} 个会话</p>}
       {token && <div className="host-web-fields">

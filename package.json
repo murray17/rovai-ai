@@ -150,6 +150,8 @@
     "build:web": "vite build --config web.vite.config.ts",
     "build:server": "node scripts/build-server.mjs",
     "test:host-web": "node --test scripts/lib/host-web.test.mjs",
+    "test:host-web-live": "node --test scripts/lib/host-web-live.test.mjs",
+    "smoke:host-web-runtime": "node scripts/smoke-host-web-runtime.mjs",
     "review:host-web-parity": "node scripts/review-host-web-parity.mjs",
     "test:host-web-parity": "node --test scripts/lib/host-web-parity.test.mjs"
   },
@@ -165,6 +167,7 @@
     "@lexical/plain-text": "0.50.0",
     "@lexical/react": "0.50.0",
     "@lezer/highlight": "1.2.3",
+    "@noble/hashes": "2.2.0",
     "@radix-ui/react-dialog": "1.1.19",
     "@radix-ui/react-dropdown-menu": "2.1.20",
     "@radix-ui/react-popover": "1.1.23",

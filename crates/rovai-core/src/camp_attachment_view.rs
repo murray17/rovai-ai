@@ -621,7 +621,7 @@ impl CampAttachmentViewStore {
             anyhow::bail!("camp_attachment_view_busy");
         }
         let current_revision: i64 = transaction.query_row(
-            "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+            "SELECT revision FROM camp_composer_draft WHERE client_id = 'desktop' AND camp_id = ?1",
             [camp_id],
             |row| row.get(0),
         )?;
@@ -812,7 +812,7 @@ impl CampAttachmentViewStore {
         }
         if operation.4 == "legacy" {
             let current_revision: i64 = transaction.query_row(
-                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                "SELECT revision FROM camp_composer_draft WHERE client_id = 'desktop' AND camp_id = ?1",
                 [&plan.camp_id],
                 |row| row.get(0),
             )?;
@@ -1029,7 +1029,7 @@ impl CampAttachmentViewStore {
             .context("camp_attachment_view_recovery_required: publish operation has no Draft revision")?;
         let current_revision = connection
             .query_row(
-                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                "SELECT revision FROM camp_composer_draft WHERE client_id = 'desktop' AND camp_id = ?1",
                 [&publication.camp_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -6022,6 +6022,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SendUserCampDraftCommand {
+                        draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.to_string(),
                         draft_revision,
                         execution: None,
@@ -6083,6 +6084,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SendUserCampDraftCommand {
+                        draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.to_string(),
                         draft_revision: draft.revision,
                         execution: None,
@@ -6791,6 +6793,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SendUserCampDraftCommand {
+                        draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: None,
@@ -6827,6 +6830,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SendUserCampDraftCommand {
+                        draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: None,
@@ -7304,6 +7308,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SendUserCampDraftCommand {
+                        draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: None,
@@ -7525,6 +7530,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SendUserCampDraftCommand {
+                        draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: None,

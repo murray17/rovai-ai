@@ -697,7 +697,8 @@ describe('cold startup route presentation', () => {
       kind: 'camp',
       waiting: true,
       error: 'Core unavailable',
-      onRetry: () => undefined
+      onRetry: () => undefined,
+      onExportDiagnostics: async () => null
     }))
     expect(loading).toContain('data-startup-route="camp"')
     expect(loading).toContain('正在打开会话')
@@ -707,6 +708,11 @@ describe('cold startup route presentation', () => {
     expect(waiting).toContain('暂时无法打开会话')
     expect(waiting).toContain('重新打开')
     expect(waiting).toContain('导出诊断')
+    const browserWaiting = renderToStaticMarkup(createElement(StartupRouteLoading, {
+      kind: 'camp', waiting: true, error: 'Host unavailable', onRetry: () => undefined
+    }))
+    expect(browserWaiting).toContain('重新打开')
+    expect(browserWaiting).not.toContain('导出诊断')
   })
 })
 

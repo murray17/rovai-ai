@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile } from '@contracts'
+import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile, type CurrentUserProfileApi } from '@contracts'
 import './current-user-profile.css'
 import { readErrorMessage } from './error-message'
 
@@ -19,7 +19,9 @@ export const CurrentUserProfileContext = createContext<ProfileState>({
   save: async () => { throw new Error('个人资料尚未加载。') }
 })
 
-export function CurrentUserProfileProvider({ children }: { children: ReactNode }): React.JSX.Element {
+export function CurrentUserProfileProvider({ children, api: providedApi }: { children: ReactNode; api?: CurrentUserProfileApi }): React.JSX.Element {
+  const api = providedApi ?? (typeof window !== 'undefined' ? window.rovai?.currentUserProfile : undefined)
+  if (!api) throw new Error('共享个人资料缺少显式适配。')
   const [profile, setProfile] = useState(DEFAULT_CURRENT_USER_PROFILE)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -28,7 +30,6 @@ export function CurrentUserProfileProvider({ children }: { children: ReactNode }
     let active = true
     setReady(false)
     setError(null)
-    const api = window.rovai.currentUserProfile
     if (!api) {
       setError('当前版本的个人资料服务不可用。')
       return
@@ -41,13 +42,13 @@ export function CurrentUserProfileProvider({ children }: { children: ReactNode }
       if (active) setError(readErrorMessage(failure))
     })
     return () => { active = false }
-  }, [attempt])
+  }, [attempt, api])
   const reload = useCallback(() => setAttempt((value) => value + 1), [])
   const save = useCallback(async (draft: CurrentUserProfile): Promise<CurrentUserProfile> => {
-    const saved = await window.rovai.currentUserProfile.save(draft)
+    const saved = await api.save(draft)
     setProfile(saved)
     return saved
-  }, [])
+  }, [api])
   const value = useMemo(() => ({ profile, ready, error, reload, save }), [profile, ready, error, reload, save])
   return <CurrentUserProfileContext.Provider value={value}>{children}</CurrentUserProfileContext.Provider>
 }

@@ -1,3 +1,4 @@
+import { desktopCampClient } from './desktop-camp-client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -127,8 +128,8 @@ describe('shared image presentation', () => {
       }
     }
 
-    const first = fetchImagePayload(source)
-    const concurrent = fetchImagePayload(source)
+    const first = fetchImagePayload(source, desktopCampClient)
+    const concurrent = fetchImagePayload(source, desktopCampClient)
     expect(concurrent).toBe(first)
     expect(request).toHaveBeenCalledOnce()
     resolveRead({ mediaType: 'image/png', data: 'AQID' })
@@ -136,14 +137,19 @@ describe('shared image presentation', () => {
     expect(payload?.byteSize).toBe(3)
     if (!payload) throw new Error('expected image payload')
 
-    cacheDecodedImagePayload(source, payload)
-    const cached = await getOrLoadImagePayload(source)
+    cacheDecodedImagePayload(source, payload, desktopCampClient)
+    const cached = await getOrLoadImagePayload(source, desktopCampClient)
     expect(cached?.blob).toBe(payload.blob)
     expect(cached?.byteSize).toBe(3)
     expect(request).toHaveBeenCalledOnce()
 
-    expect((await fetchImagePayload(source))?.byteSize).toBe(3)
+    expect((await fetchImagePayload(source, desktopCampClient))?.byteSize).toBe(3)
     expect(request).toHaveBeenCalledTimes(2)
+
+    const otherRequest = vi.fn().mockResolvedValue(null)
+    const otherClient = { ...desktopCampClient, request: otherRequest }
+    expect(await getOrLoadImagePayload(source, otherClient)).toBeNull()
+    expect(otherRequest).toHaveBeenCalledOnce()
   })
 
   it('serves a completed attachment payload from cache until the tile performs its refresh', async () => {
@@ -154,8 +160,8 @@ describe('shared image presentation', () => {
     }
     const payload = { blob: new Blob([new Uint8Array([1, 2, 3])]), byteSize: 3 }
 
-    cacheDecodedImagePayload(source, payload)
-    const cached = await getOrLoadImagePayload(source)
+    cacheDecodedImagePayload(source, payload, desktopCampClient)
+    const cached = await getOrLoadImagePayload(source, desktopCampClient)
     expect(cached?.blob).toBe(payload.blob)
     expect(cached?.byteSize).toBe(3)
     expect(preview).not.toHaveBeenCalled()
@@ -172,7 +178,7 @@ describe('shared image presentation', () => {
       }
     }
 
-    await expect(fetchImagePayload(source)).resolves.toBeNull()
-    await expect(fetchImagePayload(source)).rejects.toThrow('core_temporarily_unavailable')
+    await expect(fetchImagePayload(source, desktopCampClient)).resolves.toBeNull()
+    await expect(fetchImagePayload(source, desktopCampClient)).rejects.toThrow('core_temporarily_unavailable')
   })
 })

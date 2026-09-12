@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -255,7 +256,7 @@ export function visibleAcknowledgementIntent(
   admittedThrough: number,
   observedThroughChangeSequence: number,
   previous: VisibleAcknowledgementIntent | null,
-  newId: () => string = () => crypto.randomUUID()
+  newId: () => string = () => newCommandId()
 ): VisibleAcknowledgementIntent {
   // Both cursors are global fences, not changes to this Camp's visible sources.
   const key = JSON.stringify({ campId: sources.campId, admittedThrough,
@@ -394,7 +395,7 @@ export function NotificationAttentionController({
     const result = await window.rovai.request<StoredCommandResult>(
       'notifications.acknowledge',
       {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: {
           episodeId: episode.id,
           observedEpisodeVersion: action.observedEpisodeVersion,

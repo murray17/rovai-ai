@@ -336,7 +336,7 @@ export function GeneralSettings({
       />
 
       <div className="general-settings-body">
-        {typeof window !== 'undefined' && window.rovai?.hostWeb && <HostWebSettings api={window.rovai.hostWeb} />}
+        {typeof window !== 'undefined' && window.rovai?.hostWeb && <HostWebSettings api={window.rovai.hostWeb} selectWorkspace={window.rovai.selectWorkspaceDirectory} />}
         <section className="section-block general-settings-section" aria-labelledby="general-startup-heading">
           <div className="section-heading"><div><h2 id="general-startup-heading">启动后打开</h2><p>稳定位置偏好</p></div></div>
           <div className="general-section-body">

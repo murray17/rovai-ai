@@ -10,8 +10,8 @@ last_updated: 2026-09-11
 
 Camp Composer 有三个互不替代的权威层：输入期间的 Lexical `EditorState`、稳定业务语义的
 `ComposerDocument` V2，以及持久化与 exact revision 的 Core Draft。已提交但尚未公开的下一轮输入由私有
-Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)、
-[Pending Camp Input v3](../contracts/pending-camp-input-v3.md)，附件生命周期见
+Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v13](../contracts/camp-composer-draft-v13.md)、
+[Pending Camp Input v4](../contracts/pending-camp-input-v4.md)，附件生命周期见
 [Camp Attachment v9](../contracts/camp-attachment-v9.md)。
 
 ## Component authority
@@ -99,6 +99,10 @@ clipboard 与 Draft Sync；统一 React Typeahead Plugin 负责有界匹配、�
 不重新创建 Editor。
 
 ## Draft synchronization
+
+Draft 的持久作用域现在包括 Host 验证的编辑客户端。Desktop 兼容原保留身份；Web 在同页面内将编辑身份与
+短期 Session 分开，重登更新认证代次但不卸载编辑器。Web 清空/消费只推进本客户端 revision，避免旧 revision
+在删除重建后重新有效。一个 Camp 仍有同一 Pending FIFO；跨客户端显式接管编辑会轮换 lease，不传输未提交文本。
 
 ```text
 committed EditorState
@@ -216,8 +220,8 @@ initial snapshot 与原 edit token/revision；不在普通按键或组件 cleanu
 
 ## References
 
-- [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)
-- [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)
+- [Camp Composer Draft v13](../contracts/camp-composer-draft-v13.md)
+- [Pending Camp Input v4](../contracts/pending-camp-input-v4.md)
 - [Camp Attachment v9](../contracts/camp-attachment-v9.md)
 - [结构化 Mention 与 Atom](../ui/components/structured-mentions.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)

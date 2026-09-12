@@ -15,7 +15,7 @@ export interface AppUpdatesController {
 }
 
 export function useAppUpdates(api?: AppUpdatesApi | null): AppUpdatesController {
-  const resolvedApi = api ?? (typeof window === 'undefined' ? null : window.rovai.appUpdates)
+  const resolvedApi = api === undefined ? (typeof window === 'undefined' ? null : window.rovai?.appUpdates) : api
   const [snapshot, setSnapshot] = useState<AppUpdateSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)

@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import type { FilePreviewApi } from '@contracts'
 import { desktopFilePreviewApi } from './desktop-file-preview-api'
 import {
@@ -223,7 +224,7 @@ type LoadedFilePreviewContent = {
 export function FilePreviewProvider({
   campId,
   resolvedTheme,
-  api = desktopFilePreviewApi,
+  api: providedApi,
   children
 }: {
   campId: string | null
@@ -231,6 +232,8 @@ export function FilePreviewProvider({
   api?: FilePreviewApi
   children: ReactNode
 }): React.JSX.Element {
+  const api = providedApi ?? (typeof window === 'undefined' || window.rovai ? desktopFilePreviewApi : null)
+  if (!api) throw new Error('共享文件页面缺少显式资源适配。')
   const [tabs, setTabsState] = useState<PreviewTabModel[]>([])
   const [activeTabId, setActiveTabIdState] = useState<string | null>(null)
   const [openFeedback, setOpenFeedback] = useState<FilePreviewOpenFeedback | null>(null)
@@ -324,6 +327,12 @@ export function FilePreviewProvider({
           : result
       }
       if (file.kind === 'markdown') {
+        if (!file.capabilities.includes('preview_asset')) {
+          const result = await api.readText(request)
+          return result.ok
+            ? { ok: true, content: { kind: 'markdown', text: result.value.text, tabToken: '', assetBasePath: '' }, pageOffsets: [], pageIndex: 0 }
+            : result
+        }
         const result = await api.prepareHtml(request)
         return result.ok
           ? {
@@ -706,7 +715,7 @@ export function FilePreviewProvider({
         return { kind: 'error', error: unavailableSourceError() }
       }
 
-      const tabId = `file-preview-${crypto.randomUUID()}`
+      const tabId = `file-preview-${newCommandId()}`
       const tab: FilePreviewTabModel = {
         kind: 'file',
         id: tabId,
@@ -773,7 +782,7 @@ export function FilePreviewProvider({
     const sourceKey = filePreviewSourceKey(request)
     const existing = tabsRef.current.find((tab) => tab.kind === 'file' && tab.sourceKey === sourceKey)
     const isNew = !existing
-    const tabId = existing?.id ?? `file-preview-${crypto.randomUUID()}`
+    const tabId = existing?.id ?? `file-preview-${newCommandId()}`
     const rollback = isNew
       ? { activeTabId: activeTabIdRef.current, paneVisible: paneVisibleRef.current }
       : undefined

@@ -5,6 +5,22 @@ use serde::{Deserialize, Serialize};
 /// and the legacy shared draft remain outside the network capability.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub enum Operation {
+    #[serde(rename = "camps.open")]
+    CampOpen,
+    #[serde(rename = "camps.enter")]
+    CampEnter,
+    #[serde(rename = "navigation.campViewed")]
+    CampViewed,
+    #[serde(rename = "memory.hearthReviewItems.list")]
+    MemoryReviews,
+    #[serde(rename = "health.check")]
+    Health,
+    #[serde(rename = "skills.deliveryGroups.list")]
+    SkillGroups,
+    #[serde(rename = "agentRunEvidence.list")]
+    RunEvidence,
+    #[serde(rename = "agentRunEvidence.getContent")]
+    RunEvidenceContent,
     #[serde(rename = "app.info")]
     AppInfo,
     #[serde(rename = "members.list")]
@@ -49,9 +65,110 @@ pub enum Operation {
     Skill,
     #[serde(rename = "mcp.config.get")]
     Mcp,
+    #[serde(rename = "camp.composerDraft.get")]
+    DraftGet,
+    #[serde(rename = "camp.composerDraft.save")]
+    DraftSave,
+    #[serde(rename = "camp.composerDraft.discard")]
+    DraftDiscard,
+    #[serde(rename = "camp.composerDraft.startReply")]
+    DraftReply,
+    #[serde(rename = "camp.composerDraft.cancelReply")]
+    DraftCancelReply,
+    #[serde(rename = "camp.composerDraft.resolveReplyRecipient")]
+    DraftReplyRecipient,
+    #[serde(rename = "camp.composerDraft.dismissContinuation")]
+    DraftDismissContinuation,
+    #[serde(rename = "camp.composerDraft.resolveContinuationRecipient")]
+    DraftContinuationRecipient,
+    #[serde(rename = "camp.composerDraft.removeAttachment")]
+    DraftRemoveAttachment,
+    #[serde(rename = "messageQuotes.mutateDraft")]
+    DraftQuote,
+    #[serde(rename = "camp.pendingInputs.get")]
+    PendingInputs,
+    #[serde(rename = "camp.pendingInputs.edit")]
+    PendingEdit,
+    #[serde(rename = "camp.messages.send")]
+    Send,
+    #[serde(rename = "action.approvals.resolve")]
+    Approval,
+    #[serde(rename = "agentRuns.cancel")]
+    CancelRun,
+    #[serde(rename = "campTurns.cancel")]
+    CancelTurn,
+    #[serde(rename = "commands.reconcile")]
+    Reconcile,
+    #[serde(rename = "camps.create")]
+    CampCreate,
+    #[serde(rename = "camps.creationPreflight")]
+    CampCreationDefaults,
+    #[serde(rename = "camps.members.add")]
+    CampAddMember,
+    #[serde(rename = "camps.members.remove")]
+    CampRemoveMember,
+    #[serde(rename = "camps.members.removalPreview")]
+    CampRemovalPreview,
+    #[serde(rename = "camps.changeDefaultLead")]
+    CampLead,
+    #[serde(rename = "members.create")]
+    MemberCreate,
+    #[serde(rename = "members.update")]
+    MemberUpdate,
+    #[serde(rename = "members.avatar.set")]
+    MemberAvatar,
+    #[serde(rename = "members.runtime.set")]
+    MemberRuntime,
+    #[serde(rename = "members.runtime.clear")]
+    MemberClearRuntime,
+    #[serde(rename = "workspaces.inspect")]
+    WorkspaceInspect,
+    #[serde(rename = "workspaces.validate")]
+    WorkspaceValidate,
+    #[serde(rename = "agentRunImages.read")]
+    RunImages,
+    #[serde(rename = "agentRunFileChanges.get")]
+    RunFiles,
+    #[serde(rename = "agentRuns.diagnostic.get")]
+    RunDiagnostic,
+    #[serde(rename = "runtime.product.ensure")]
+    RuntimeEnsure,
+    #[serde(rename = "runtime.product.check")]
+    RuntimeCheck,
+    #[serde(rename = "runtime.modelCatalog.open")]
+    RuntimeCatalog,
+    #[serde(rename = "runtime.discovery.rescan")]
+    RuntimeDiscover,
 }
 
 impl Operation {
+    pub fn paths_allowed(self, params: &serde_json::Value, roots: &[std::path::PathBuf]) -> bool {
+        let path = match self {
+            Self::CampCreate => {
+                if params
+                    .get("workspace")
+                    .is_none_or(serde_json::Value::is_null)
+                {
+                    return true;
+                }
+                params["workspace"]["projectPath"].as_str()
+            }
+            Self::WorkspaceInspect | Self::WorkspaceValidate => params["path"].as_str(),
+            _ => return true,
+        };
+        path.is_some_and(|path| {
+            roots.iter().any(|root| {
+                root.as_os_str() == std::ffi::OsStr::new(path)
+                    && std::fs::canonicalize(path).is_ok_and(|current| &current == root)
+            })
+        })
+    }
+    pub fn timeout(self) -> std::time::Duration {
+        std::time::Duration::from_secs(match self {
+            Self::RuntimeCheck | Self::RuntimeCatalog | Self::RuntimeDiscover => 120,
+            _ => 15,
+        })
+    }
     pub fn project(self, mut value: serde_json::Value) -> serde_json::Value {
         use serde_json::json;
         match self {
@@ -73,6 +190,51 @@ impl Operation {
 
     pub fn method(self) -> &'static str {
         match self {
+            Self::RuntimeEnsure => "runtime.product.ensure",
+            Self::RuntimeCheck => "runtime.product.check",
+            Self::RuntimeCatalog => "runtime.modelCatalog.open",
+            Self::RuntimeDiscover => "runtime.discovery.rescan",
+            Self::DraftGet => "camp.composerDraft.get",
+            Self::DraftSave => "camp.composerDraft.save",
+            Self::DraftDiscard => "camp.composerDraft.discard",
+            Self::DraftReply => "camp.composerDraft.startReply",
+            Self::DraftCancelReply => "camp.composerDraft.cancelReply",
+            Self::DraftReplyRecipient => "camp.composerDraft.resolveReplyRecipient",
+            Self::DraftDismissContinuation => "camp.composerDraft.dismissContinuation",
+            Self::DraftContinuationRecipient => "camp.composerDraft.resolveContinuationRecipient",
+            Self::DraftRemoveAttachment => "camp.composerDraft.removeAttachment",
+            Self::DraftQuote => "messageQuotes.mutateDraft",
+            Self::PendingInputs => "camp.pendingInputs.get",
+            Self::PendingEdit => "camp.pendingInputs.edit",
+            Self::Send => "camp.messages.send",
+            Self::Approval => "action.approvals.resolve",
+            Self::CancelRun => "agentRuns.cancel",
+            Self::CancelTurn => "campTurns.cancel",
+            Self::Reconcile => "commands.reconcile",
+            Self::CampCreate => "camps.create",
+            Self::CampCreationDefaults => "camps.creationPreflight",
+            Self::CampAddMember => "camps.members.add",
+            Self::CampRemoveMember => "camps.members.remove",
+            Self::CampRemovalPreview => "camps.members.removalPreview",
+            Self::CampLead => "camps.changeDefaultLead",
+            Self::MemberCreate => "members.create",
+            Self::MemberUpdate => "members.update",
+            Self::MemberAvatar => "members.avatar.set",
+            Self::MemberRuntime => "members.runtime.set",
+            Self::MemberClearRuntime => "members.runtime.clear",
+            Self::WorkspaceInspect => "workspaces.inspect",
+            Self::WorkspaceValidate => "workspaces.validate",
+            Self::RunImages => "agentRunImages.read",
+            Self::RunFiles => "agentRunFileChanges.get",
+            Self::RunDiagnostic => "agentRuns.diagnostic.get",
+            Self::CampOpen => "camps.open",
+            Self::CampEnter => "camps.enter",
+            Self::CampViewed => "navigation.campViewed",
+            Self::MemoryReviews => "memory.hearthReviewItems.list",
+            Self::Health => "health.check",
+            Self::SkillGroups => "skills.deliveryGroups.list",
+            Self::RunEvidence => "agentRunEvidence.list",
+            Self::RunEvidenceContent => "agentRunEvidence.getContent",
             Self::AppInfo => "app.info",
             Self::Members => "members.list",
             Self::Member => "members.get",

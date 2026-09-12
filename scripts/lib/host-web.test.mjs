@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, mkdir, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -16,6 +16,8 @@ const uiDirectory = process.env.ROVAI_WEB_UI ?? join(repository, 'out/web')
 // isolated directories and public record mutations, never a model or daily data.
 test('Desktop and Web share one Core while listener failure, revocation and stop stay local', { timeout: 90_000 }, async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-host-web-')))
+  const workspace = join(fixture, 'workspace')
+  await mkdir(workspace)
   const dataDir = process.platform === 'win32'
     ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
     : join(fixture, 'data')
@@ -37,7 +39,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     } finally {
       await new Promise((resolve) => occupied.close(resolve))
     }
-    const started = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory })
+    const started = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory, authorizedWorkspaces: [workspace] })
     assert.equal(started.enabled, true)
     const origin = started.origin
     const administrator = started.administratorToken
@@ -46,8 +48,8 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(status.origin, origin)
     await assert.rejects(host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory }), { code: 'HOST_WEB_START_FAILED' })
     const request = (path, options = {}) => fetch(`${origin}/api/v1/${path}`, { ...options, redirect: 'error', signal: AbortSignal.timeout(10_000) })
-    const login = async () => {
-      const response = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ administratorToken: administrator }) })
+    const login = async (editor) => {
+      const response = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 2, administratorToken: administrator, ...(editor ? { editor } : {}) }) })
       assert.equal(response.status, 200)
       assert.equal(response.headers.get('set-cookie'), null)
       return response.json()
@@ -57,6 +59,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       ['capabilities', { headers: { Authorization: `Bearer ${administrator}` } }, 401],
       ['capabilities', { headers: { Origin: 'http://127.0.0.1:1' } }, 403],
       ['capabilities?token=not-a-real-token', {}, 400],
+      ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 1, administratorToken: administrator }) }, 409],
       ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, 400]
     ]) {
       const response = await request(path, options)
@@ -65,6 +68,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(response.headers.get('set-cookie'), null)
     }
     const first = await login()
+    assert.equal(first.protocolVersion, 2)
     const second = await login()
     assert.notEqual(first.clientId, second.clientId)
     const authorized = (session, path, options = {}) => request(path, { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` } })
@@ -79,10 +83,73 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal('dataDir' in info, false)
     assert.equal(info.name, (await host.request('app.info')).name)
     assert.deepEqual(await call(second, 'navigation.snapshot'), await host.request('navigation.snapshot'))
-    for (const operation of ['host.web.rotate', 'core.shutdown', 'camp.composerDraft.get', 'camp.composerDraft.save', 'camp.messages.send', 'camp.sourceAttachments.addFromPath', 'action.approvals.resolve']) {
+    for (const operation of ['host.web.rotate', 'core.shutdown', 'host.editor.resolve', 'host.upload.bind', 'camp.sourceAttachments.addFromPath', 'camp.attachments.desktopOpenTarget', 'filePreview.resolveSource']) {
       const response = await authorized(first, 'request', { method: 'POST', body: JSON.stringify({ operation, params: {} }) })
       assert.equal(response.status, 400, operation)
     }
+    // Writes use real Core services and independent, proof-bound editing scopes.
+    const profiles = await call(first, 'members.list')
+    const createParams = { commandId: crypto.randomUUID(), name: 'Web owned draft', workspace: null, memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' }
+    const created = await call(first, 'camps.create', createParams)
+    assert.equal(created.status, 'applied')
+    const campId = created.payload.campId
+    assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camps.create', params: createParams })).result, created)
+    const roots = await (await authorized(first, 'workspaces')).json()
+    const directoryParams = { ...createParams, commandId: crypto.randomUUID(), name: 'Workspace later moved', workspace: await call(first, 'workspaces.validate', { path: roots[0].projectPath }) }
+    const directoryCamp = await call(first, 'camps.create', directoryParams)
+    assert.equal(directoryCamp.status, 'applied')
+    await rename(workspace, `${workspace}-moved`)
+    assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camps.create', params: directoryParams })).result, directoryCamp)
+    const save = (session, text, expectedRevision = 0) => call(session, 'camp.composerDraft.save', { campId, expectedRevision, content: { version: 2, segments: [{ kind: 'text', text }] } })
+    const draftA = await save(first, 'tab A')
+    const draftB = await save(second, 'tab B')
+    assert.notEqual(draftA.draftId, draftB.draftId)
+    assert.equal((await host.request('camp.composerDraft.get', { campId })).body, '')
+    const forged = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 2, administratorToken: administrator, editor: { clientId: first.clientId, proof: second.editorProof } }) })
+    assert.equal(forged.status, 401)
+    const resumed = await login({ clientId: first.clientId, proof: first.editorProof })
+    assert.equal(resumed.clientId, first.clientId)
+    assert.equal((await authorized(first, 'capabilities')).status, 401)
+    Object.assign(first, resumed)
+    assert.deepEqual(await call(first, 'camp.composerDraft.get', { campId }), draftA)
+    const rejectedQuote = { commandId: crypto.randomUUID(), command: { campId, conversationId: null, expectedRevision: draftA.revision + 1, action: { type: 'remove', quoteId: crypto.randomUUID() } } }
+    const quoteResponse = await authorized(first, 'request', { method: 'POST', body: JSON.stringify({ operation: 'messageQuotes.mutateDraft', params: rejectedQuote }) })
+    assert.ok((await quoteResponse.json()).error, 'A stale quote mutation must reject')
+    const quoteReceipt = await call(first, 'commands.reconcile', { operation: 'messageQuotes.mutateDraft', params: rejectedQuote })
+    assert.deepEqual(quoteReceipt, { state: 'recorded', error: { code: 'draft_changed', message: 'draft_changed' } })
+    assert.deepEqual(await call(first, 'camp.composerDraft.get', { campId }), draftA)
+    const input = new TextEncoder().encode('source ref from real HTTP upload')
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', input))].map(value => value.toString(16).padStart(2, '0')).join('')
+    const intent = { commandId: crypto.randomUUID(), campId, expectedRevision: draftA.revision, displayName: '浏览器 source.txt', byteSize: input.length, sha256 }
+    const upload = new FormData(); upload.append('intent', JSON.stringify(intent)); upload.append('file', new Blob([input]), 'web-source.txt')
+    const uploadResponse = await request('uploads', { method: 'POST', headers: { Authorization: `Bearer ${first.token}` }, body: upload })
+    assert.equal(uploadResponse.status, 200, await uploadResponse.clone().text())
+    const bound = (await uploadResponse.json()).draft
+    assert.equal(bound.attachments[0].id, intent.commandId)
+    const locator = { owner: 'composer', campId, attachmentRefId: intent.commandId }
+    const ownFile = await authorized(first, 'attachments', { method: 'POST', body: JSON.stringify(locator) })
+    assert.match(ownFile.headers.get('content-disposition'), /filename\*=UTF-8''/)
+    assert.equal(decodeURIComponent(ownFile.headers.get('content-disposition').split("filename*=UTF-8''")[1]), intent.displayName)
+    assert.equal(await ownFile.text(), new TextDecoder().decode(input))
+    assert.equal((await authorized(second, 'attachments', { method: 'POST', body: JSON.stringify(locator) })).status, 404)
+    const previewResponse = await authorized(first, 'files', { method: 'POST', body: JSON.stringify({ action: 'open', request: { kind: 'attachment', campId, locator } }) })
+    const preview = await previewResponse.json()
+    assert.equal(preview.ok, true, JSON.stringify(preview))
+    const file = preview.value.file
+    const readFile = session => authorized(session, 'files', { method: 'POST', body: JSON.stringify({ action: 'readText', request: { handleId: file.handleId, expectedGeneration: file.contentGeneration } }) }).then(response => response.json())
+    assert.equal((await readFile(first)).value.text, new TextDecoder().decode(input))
+    assert.equal((await readFile(second)).ok, false)
+    const sentParams = { commandId: crypto.randomUUID(), campId, draftRevision: bound.revision, execution: null }
+    const sent = await call(first, 'camp.messages.send', sentParams)
+    assert.notEqual(sent.commandResult.status, 'rejected', JSON.stringify(sent))
+    assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camp.messages.send', params: sentParams })).result.commandResult, sent.commandResult)
+    assert.equal((await call(first, 'camp.composerDraft.get', { campId })).body, '')
+    assert.deepEqual(await call(second, 'camp.composerDraft.get', { campId }), draftB)
+    assert.equal((await readFile(first)).ok, false, 'consumed Composer source no longer authorizes its old handle')
+    const messageLocator = { owner: 'message', campId, messageId: sent.commandResult.payload.campMessageId, attachmentRefId: intent.commandId }
+    const historyFile = await authorized(first, 'attachments', { method: 'POST', body: JSON.stringify(messageLocator) })
+    assert.equal(historyFile.status, 200)
+    assert.equal(await historyFile.text(), new TextDecoder().decode(input))
     const html = await fetch(origin, { redirect: 'error' })
     assert.equal(html.status, 200)
     assert.match(html.headers.get('content-security-policy'), /frame-ancestors 'none'/)

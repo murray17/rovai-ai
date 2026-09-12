@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ResolvedTheme,
@@ -142,7 +143,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
     if (!candidate || !inspection) return
     void run('import', async () => {
       const result = await window.rovai.request<StoredCommandResult>('skills.import.commit', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: {
           stagingToken: inspection.stagingToken,
           candidateName: candidate.name,
@@ -171,7 +172,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
   const toggle = (skill: SkillView): void => {
     void run('toggle', async () => {
       const result = await window.rovai.request<StoredCommandResult>('skills.setEnabled', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: {
           skillId: skill.id,
           expectedVersion: skill.version,
@@ -185,7 +186,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
   const assign = (skill: SkillView, keys: SkillDeliveryGroupKey[]): void => {
     void run('groups', async () => {
       const result = await window.rovai.request<StoredCommandResult>('skills.setGroupAssignments', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: {
           skillId: skill.id,
           expectedVersion: skill.version,
@@ -204,7 +205,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
     const skill = deleteTarget
     void run('delete', async () => {
       const result = await window.rovai.request<StoredCommandResult>('skills.delete', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: { skillId: skill.id, expectedVersion: skill.version }
       })
       assertCommandApplied(result)

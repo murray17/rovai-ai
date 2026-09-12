@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import { useEffect, useMemo, useState } from 'react'
 import type {
@@ -147,7 +148,7 @@ export function DiagnosticsCenter({
     try {
       if (action.kind === 'repair_skill') {
         const result = await window.rovai.request<StoredCommandResult>('skills.reconcile', {
-          commandId: crypto.randomUUID(),
+          commandId: newCommandId(),
           command: {}
         })
         assertApplied(result)

@@ -1,3 +1,4 @@
+use crate::draft_client::DraftClient;
 use crate::message_quote::{QuoteStorage, load_quotes, store_quotes};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -318,6 +319,11 @@ fn required_completion_role() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendUserCampDraftCommand {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::draft_client::DraftClient::is_desktop"
+    )]
+    pub draft_client: DraftClient,
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub draft_revision: i64,
@@ -590,7 +596,7 @@ impl CollaborationService {
                     reply_to_camp_message_id, recipient_selection_required,
                     created_at, updated_at, expires_at
                 ) VALUES (?1, ?2, ?3, 1, ?4, 0, ?5, ?5, ?6)
-                ON CONFLICT(camp_id) DO UPDATE SET
+                ON CONFLICT(camp_id, client_id) DO UPDATE SET
                     body = excluded.body,
                     structured_content_json = excluded.structured_content_json,
                     reply_to_camp_message_id = excluded.reply_to_camp_message_id,
@@ -609,7 +615,7 @@ impl CollaborationService {
                 ],
             )?;
             database.connection().query_row(
-                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1 AND client_id = 'desktop'",
                 [&envelope.payload.camp_id],
                 |row| row.get(0),
             )?
@@ -621,6 +627,7 @@ impl CollaborationService {
             expected_versions: envelope.expected_versions.clone(),
             execution_epoch: envelope.execution_epoch,
             payload: SendUserCampDraftCommand {
+                draft_client: DraftClient::default(),
                 camp_id: envelope.payload.camp_id.clone(),
                 draft_revision,
                 execution: envelope.payload.execution.clone(),
@@ -640,6 +647,7 @@ impl CollaborationService {
             },
             |transaction| {
                 load_structured_draft_submission(
+                    &command.payload.draft_client,
                     transaction,
                     &command.payload.camp_id,
                     command.payload.draft_revision,
@@ -2599,6 +2607,7 @@ impl CollaborationService {
             },
             |transaction| {
                 load_structured_draft_submission(
+                    &envelope.payload.draft_client,
                     transaction,
                     &envelope.payload.camp_id,
                     envelope.payload.draft_revision,
@@ -2625,6 +2634,7 @@ impl CollaborationService {
             },
             |transaction| {
                 load_structured_draft_submission(
+                    &envelope.payload.draft_client,
                     transaction,
                     &envelope.payload.camp_id,
                     envelope.payload.draft_revision,
@@ -2656,6 +2666,7 @@ impl CollaborationService {
         ]);
         validate_user_authored_content(&content)?;
         let command = SendUserCampDraftCommand {
+            draft_client: DraftClient::default(),
             camp_id: camp_id.clone(),
             // Automation does not consume Composer authority or attachments.
             // The revision is therefore only a validated inert placeholder.
@@ -2869,6 +2880,7 @@ impl CollaborationService {
                 managed_attachment_ingest_intent_id: None,
                 legacy_attachment_publication_operation_id: None,
                 consume_composer_draft: false,
+                draft_client: &DraftClient::default(),
                 draft_revision: 1,
                 address_mode: address.mode(),
                 reply_to_camp_message_id: None,
@@ -3025,6 +3037,7 @@ impl CollaborationService {
                 legacy_attachment_publication_operation_id: None,
                 managed_attachment_ingest_intent_id: None,
                 consume_composer_draft: false,
+                draft_client: &DraftClient::default(),
                 draft_revision: 1,
                 address_mode: address.mode(),
                 reply_to_camp_message_id: None,
@@ -3077,6 +3090,7 @@ impl CollaborationService {
                 anyhow::bail!("Pending input must publish as its original user");
             }
             let command = SendUserCampDraftCommand {
+                draft_client: DraftClient::default(),
                 camp_id: envelope.payload.camp_id.clone(),
                 draft_revision: envelope.payload.expected_revision,
                 execution: pending.execution,
@@ -3169,7 +3183,7 @@ impl CollaborationService {
                     ));
                 }
                 let has_legacy_attachments: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)",
+                    &format!("SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1 AND client_id = '{}')", command.draft_client.sql_key()),
                     [&command.camp_id],
                     |row| row.get(0),
                 )?;
@@ -3182,11 +3196,10 @@ impl CollaborationService {
                 return match prepare(transaction)? {
                     Ok(submission) => pending_camp_input::insert_input(
                         transaction,
-                        &command.camp_id,
+                        command,
                         &submission.structured_content,
                         &submission.source_attachments,
                         submission.reply_to_camp_message_id.as_deref(),
-                        &command.execution,
                         user_id,
                     ),
                     Err(rejection) => Ok(rejection),
@@ -3333,7 +3346,7 @@ impl CollaborationService {
                     };
 
                     let input_quotes = match attachment_commit.source {
-                        UserCampMessageSource::Composer => load_quotes(transaction, QuoteStorage::CampDraft, &command.camp_id)?,
+                        UserCampMessageSource::Composer => load_quotes(transaction, QuoteStorage::ClientCampDraft(&command.draft_client), &command.camp_id)?,
                         UserCampMessageSource::Pending(pending) => load_quotes(transaction, QuoteStorage::CampPending, &pending.pending_input_id)?,
                         _ => Vec::new(),
                     };
@@ -3354,6 +3367,7 @@ impl CollaborationService {
                             managed_attachment_ingest_intent_id: attachment_commit
                                 .managed_ingest_intent_id,
                             consume_composer_draft: attachment_commit.source.consumes_composer(),
+                            draft_client: &command.draft_client,
                             draft_revision: command.draft_revision,
                             address_mode: submission.address.mode(),
                             reply_to_camp_message_id: submission
@@ -3558,21 +3572,25 @@ fn materialize_leading_member_mention(
 }
 
 fn load_structured_draft_submission(
+    client: &DraftClient,
     transaction: &Transaction<'_>,
     camp_id: &str,
     expected_revision: i64,
 ) -> Result<std::result::Result<CampMessageSubmission, CommandHandlerResult>> {
     let stored = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT structured_content_json, revision,
                    reply_to_camp_message_id, recipient_selection_required,
                    continuation_source_message_id,
                    continuation_suppressed_source_message_id,
                    recipient_selection_touched, source_attachments_json
             FROM camp_composer_draft
-            WHERE camp_id = ?1
+            WHERE client_id = '{client}' AND camp_id = ?1
             "#,
+                client = client.sql_key()
+            ),
             [camp_id],
             |row| {
                 Ok((
@@ -3659,20 +3677,21 @@ fn load_structured_draft_submission(
         materialize_leading_member_mention(&mut content, continuation_agent_id);
     }
     let prepared_attachment_ids = {
-        let mut statement = transaction.prepare(
+        let mut statement = transaction.prepare(&format!(
             r#"
             SELECT id
             FROM prepared_attachment
-            WHERE camp_id = ?1 AND state = 'ready'
+            WHERE camp_id = ?1 AND client_id = '{client}' AND state = 'ready'
             ORDER BY ordinal, id
             "#,
-        )?;
+            client = client.sql_key()
+        ))?;
         statement
             .query_map([camp_id], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let source_attachments = parse_source_attachments(&source_attachments_json)?;
-    if !load_quotes(transaction, QuoteStorage::CampDraft, camp_id)?.is_empty() {
+    if !load_quotes(transaction, QuoteStorage::ClientCampDraft(client), camp_id)?.is_empty() {
         let body = crate::camp_content::render_current_plain_text(transaction, &content)?;
         anyhow::ensure!(!body.trim().is_empty(), "quote.question_required");
     }
@@ -3790,6 +3809,7 @@ struct QueueCampMessageInput<'a> {
     legacy_attachment_publication_operation_id: Option<&'a str>,
     managed_attachment_ingest_intent_id: Option<&'a str>,
     consume_composer_draft: bool,
+    draft_client: &'a DraftClient,
     draft_revision: i64,
     address_mode: &'a str,
     reply_to_camp_message_id: Option<&'a str>,
@@ -3971,7 +3991,8 @@ fn queue_camp_message_and_runs(
     {
         anyhow::bail!("Camp message cannot commit legacy and Managed attachments together");
     }
-    let attachment_publication = if input.consume_composer_draft
+    let attachment_publication = if input.draft_client.is_desktop()
+        && input.consume_composer_draft
         && input.source_attachments.is_empty()
         && input.legacy_attachment_publication_operation_id.is_none()
         && input.managed_attachment_ingest_intent_id.is_none()
@@ -4004,6 +4025,16 @@ fn queue_camp_message_and_runs(
             transaction,
             input.camp_id,
             input.prepared_attachment_ids,
+        )?;
+    } else if input.consume_composer_draft && !input.draft_client.is_desktop() {
+        anyhow::ensure!(
+            input.prepared_attachment_ids.is_empty(),
+            "Web Draft cannot consume legacy Prepared attachments"
+        );
+        crate::camp_attachment::consume_client_draft(
+            transaction,
+            input.camp_id,
+            input.draft_client,
         )?;
     } else if input.consume_composer_draft {
         consume_prepared_attachments(
@@ -9439,6 +9470,7 @@ mod slow_tests {
                     "empty-draft-with-non-ready-attachment",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: not_ready.revision,
                         execution: None,
@@ -9502,6 +9534,7 @@ mod slow_tests {
                     &command_id,
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: Some(ExecutionRequest {
@@ -9612,6 +9645,7 @@ mod slow_tests {
                     &command_id,
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: Some(ExecutionRequest {
@@ -9705,6 +9739,7 @@ mod slow_tests {
                     "reply-draft-only-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: None,
@@ -9789,6 +9824,7 @@ mod slow_tests {
                     "continuation-materialized-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: None,
@@ -9862,6 +9898,7 @@ mod slow_tests {
                     "continuation-unavailable-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: blocked_draft.revision,
                         execution: None,
@@ -9888,6 +9925,7 @@ mod slow_tests {
                     "continuation-repaired-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: repaired.revision,
                         execution: None,
@@ -9996,6 +10034,7 @@ mod slow_tests {
                     "unresolved-reply-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
                         execution: None,
@@ -10031,6 +10070,7 @@ mod slow_tests {
                     "resolved-reply-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: resolved.revision,
                         execution: None,
@@ -10077,6 +10117,7 @@ mod slow_tests {
                     "reply-author-race-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: race_draft.revision,
                         execution: None,
@@ -10102,6 +10143,7 @@ mod slow_tests {
                     "reply-parent-tombstoned-send",
                     Some(&camp_id),
                     SendUserCampDraftCommand {
+                        draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: race_draft.revision,
                         execution: None,

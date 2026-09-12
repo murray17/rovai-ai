@@ -375,11 +375,11 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
           theme={resolvedTheme}
           headingTarget={file.target?.heading}
           onHeadingTargetResult={(found) => setLinkError(found ? null : '未找到指定的标题，已保持在文件顶部。')}
-          localImageUrl={(rawReference) => filePreviewAssetUrl(
+          localImageUrl={file.capabilities.includes('preview_asset') ? (rawReference) => filePreviewAssetUrl(
             rawReference,
             tab.content?.kind === 'markdown' ? tab.content.tabToken : '',
             tab.content?.kind === 'markdown' ? tab.content.assetBasePath : ''
-          )}
+          ) : undefined}
           onFileReference={(rawReference, _source, target) => {
             void open({
               kind: 'child_of_handle',

@@ -185,6 +185,7 @@ export async function revealMoreNavigationCamps(
 }
 
 export function CampNavigation({
+  footer,
   view,
   state,
   disabled = false,
@@ -220,6 +221,7 @@ export function CampNavigation({
   onDelete,
   onError
 }: {
+  footer?: React.ReactNode
   view: 'compose' | 'camp' | 'members' | 'automations' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
   disabled?: boolean
@@ -638,6 +640,7 @@ export function CampNavigation({
         </section>
           </div>
       <div className="unified-sidebar-footer">
+        {footer}
         <div className="sidebar-settings-entry" role="group" aria-label="设置与应用更新">
           <button
             className="rail-button sidebar-settings-main"

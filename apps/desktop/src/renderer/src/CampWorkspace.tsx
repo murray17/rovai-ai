@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { useCampClient, type CampClient } from './camp-client'
 import type { MessageQuoteSnapshot } from '@contracts'
 import { revealMessageQuote } from './message-quote-reveal'
@@ -1840,7 +1841,8 @@ export function CampWorkspace({
       }
     }
     void loadSkillCatalog()
-    const unsubscribe = client.onEvent((event) => {
+    const unsubscribeInvalidation = client.onInvalidated?.(() => void loadSkillCatalog())
+    const unsubscribe = client.onEvent?.((event) => {
       if (event.method !== 'runtime.state') return
       const params = event.params !== null && typeof event.params === 'object'
         ? event.params as Record<string, unknown>
@@ -1849,7 +1851,8 @@ export function CampWorkspace({
     })
     return () => {
       cancelled = true
-      unsubscribe()
+      unsubscribe?.()
+      unsubscribeInvalidation?.()
     }
   }, [client])
   const closeMentionPopover = useCallback((returnFocus: boolean): void => {
@@ -3464,7 +3467,7 @@ export function CampWorkspace({
     ) return
     const campId = snapshot.camp.id
     const pending = inputs.map(({ file, kindHint }, index) => ({
-      id: crypto.randomUUID(),
+      id: newCommandId(),
       kind: kindHint,
       file: file.name
         ? file
@@ -8883,7 +8886,7 @@ export function TaskPanel({
     setFormError(null)
     try {
       const result = await client.request<StoredCommandResult>('tasks.create', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         campId: snapshot.camp.id,
         title: title.trim(),
         description: description.trim(),
@@ -8929,7 +8932,7 @@ export function TaskPanel({
     const criteria = parseAcceptanceCriteria(acceptanceCriteriaText)
     try {
       const result = await client.request<StoredCommandResult>('tasks.update', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         campId: snapshot.camp.id,
         taskId: selectedTask.taskId,
         expectedVersion,
@@ -8973,7 +8976,7 @@ export function TaskPanel({
     setFormError(null)
     try {
       const result = await client.request<StoredCommandResult>('tasks.update', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         campId: snapshot.camp.id,
         taskId: selectedTask.taskId,
         expectedVersion,

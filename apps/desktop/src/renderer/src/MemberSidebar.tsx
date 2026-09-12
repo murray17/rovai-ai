@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import { useCampClient } from './camp-client'
 import * as Menu from '@radix-ui/react-dropdown-menu'
@@ -131,7 +132,7 @@ export function MemberSidebar({
     setError(null)
     try {
       const result = await client.request<StoredCommandResult>('members.reorder', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: { orderedAgentIds }
       })
       assertApplied(result)

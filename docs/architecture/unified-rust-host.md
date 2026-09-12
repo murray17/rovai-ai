@@ -10,10 +10,11 @@ last_updated: 2026-09-12
 [Runtime 兼容性](../runtime-compatibility.md)，不能由目标结构推断完成。
 现有准入、事务、Runtime 与关闭合同继续有效；新增 wire 合同随对应实现明确发布。
 初始 CLI 的精确路径、初始化准入和停止适配由[Host Lifecycle v1](../contracts/host-lifecycle-v1.md)拥有；
-当前只读网络入口由[Host Web v1](../contracts/host-web-v1.md)拥有。
+当前受控网络入口由[Host Web v2](../contracts/host-web-v2.md)拥有。
 
-当前已实现父进程匿名管道与进程内请求共用一个 Host/Core，以及只读 Axum 入口。以下 UDS/Named Pipe 身份握手、
-完整公共 DTO 生成、客户端草稿/上传与控制面隔离均是后续目标，不由现有管道推断完成。
+当前已实现父进程匿名管道与进程内请求共用一个 Host/Core、共享生产 Camp 页面、客户端草稿、source 上传及
+逐项准入的 Camp 写入。以下 UDS/Named Pipe 身份握手、完整公共 DTO 生成与控制面隔离仍是后续目标，
+不由现有管道或一个真实执行闭环推断阶段 1–3 完成。
 
 ## 组件和唯一权威
 
@@ -22,7 +23,7 @@ last_updated: 2026-09-12
 不创建数据库、第二份 Core 或调度器。`rovai-protocol` 拥有封闭公共 DTO，Rust Serde 为源生成 TS；
 不能把任意内部 Core RPC 转为网络能力。React/TS/Vite WebUI 和 Desktop 共用业务页面、核心交互组件、
 客户端接口和状态处理代码，不能仅共享 tokens 而独立演进另一套业务页面。启动、认证与系统集成分别适配；
-草稿、缓存、订阅、连接代次和迟到响应仍按客户端隔离。当前独立只读 Web 尚未满足此目标；
+草稿、缓存、订阅、连接代次和迟到响应仍按客户端隔离。当前实际 Web 已挂载从 Desktop 提取的业务壳层，管理页仍逐项接线；
 阶段 1–3 的收敛入口见[宽屏对照稿](../ui/host-web-parity.md)。
 
 Host 独占 data-dir lease、SQLite 准入、执行、恢复与后台驱动。普通业务命令保留串行入口和已有独立通道；
@@ -63,6 +64,8 @@ OS socket/文件权限不单独证明同 UID Runtime 隔离。Windows/Linux 阶�
 每个客户端草稿有独立身份与后端验证的归属，贯穿读取、保存、附件、队列与发送消费。
 作用域含 Host/Owner/client/Camp，私聊再含 Conversation。客户端提交 ID 不是授权；保留 revision、
 原子消费、命令幂等与 Core FIFO，不做跨端同步、实时合并或多人共编。
+短期认证 Session 与编辑身份分离；同页面同 Owner 重登保留编辑、原命令及 Core 验证的恢复证明。
+两个标签页各建独立编辑身份；细节见[Draft v13](../contracts/camp-composer-draft-v13.md)。
 
 Web 上传写 Host 临时文件后绑定当前客户端草稿，复用现行 source reference。
 失败或可确认未绑定文件由入口清理；绑定结果未知按原命令查询回执，不能证明未绑定就不删除。

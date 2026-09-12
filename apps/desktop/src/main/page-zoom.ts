@@ -11,8 +11,8 @@ export interface PageZoomKeyboardInput {
 export type PageZoomAction = 'in' | 'out' | 'reset'
 
 export const PAGE_ZOOM_STEP_PERCENTAGE = 10
-export const MIN_PAGE_ZOOM_PERCENTAGE = 10
-export const MAX_PAGE_ZOOM_PERCENTAGE = 500
+import { MIN_PAGE_ZOOM_PERCENTAGE, MAX_PAGE_ZOOM_PERCENTAGE } from '../shared/appearance'
+export { MIN_PAGE_ZOOM_PERCENTAGE, MAX_PAGE_ZOOM_PERCENTAGE } from '../shared/appearance'
 
 export function pageZoomAction(
   input: PageZoomKeyboardInput,

@@ -78,6 +78,20 @@ impl CoreService {
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<CoreReply> {
+        self.request_for_editor(
+            method,
+            params,
+            rovai_core::draft_client::DraftClient::default(),
+        )
+        .await
+    }
+
+    pub async fn request_for_editor(
+        &self,
+        method: &str,
+        params: Value,
+        client: rovai_core::draft_client::DraftClient,
+    ) -> Result<CoreReply> {
         let (ingress, capacity) = if is_control_request(method) {
             (&self.control, &self.control_capacity)
         } else {
@@ -118,6 +132,7 @@ impl CoreService {
         };
         ingress
             .send(Request {
+                client,
                 id: Value::String(id),
                 method: method.to_string(),
                 params,

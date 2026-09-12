@@ -3,35 +3,9 @@ import { readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AppearancePreferences, ResolvedTheme, StructuredError, ThemePreference } from '@contracts'
-import { DEFAULT_APPEARANCE, MIN_READING_FONT_SIZE, MAX_READING_FONT_SIZE } from '../shared/appearance'
-import { MIN_PAGE_ZOOM_PERCENTAGE, MAX_PAGE_ZOOM_PERCENTAGE } from './page-zoom'
-
-export function isThemePreference(value: unknown): value is ThemePreference {
-  return value === 'system' || value === 'day' || value === 'night'
-}
-
-export function parseAppearancePatch(value: unknown): Partial<AppearancePreferences> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid appearance preferences')
-  }
-  const patch = value as Record<string, unknown>
-  for (const [key, field] of Object.entries(patch)) {
-    let valid = false
-    if (key === 'preference') valid = isThemePreference(field)
-    if (key === 'readingDensity') valid = field === 'standard' || field === 'relaxed'
-    if (key === 'motionPreference') valid = field === 'system' || field === 'reduce'
-    if (['chatFontSize', 'documentFontSize', 'codeFontSize'].includes(key)) {
-      valid = typeof field === 'number' && Number.isInteger(field)
-        && field >= MIN_READING_FONT_SIZE && field <= MAX_READING_FONT_SIZE
-    }
-    if (key === 'zoomPercentage') {
-      valid = typeof field === 'number' && Number.isInteger(field)
-        && field >= MIN_PAGE_ZOOM_PERCENTAGE && field <= MAX_PAGE_ZOOM_PERCENTAGE
-    }
-    if (!valid) throw new Error('Invalid appearance preference value')
-  }
-  return { ...patch } as Partial<AppearancePreferences>
-}
+import { DEFAULT_APPEARANCE } from '../shared/appearance'
+import { parseAppearancePatch, isThemePreference } from '../shared/appearance'
+export { parseAppearancePatch, isThemePreference } from '../shared/appearance'
 
 export function readAppearancePreferences(filePath: string): {
   preferences: AppearancePreferences

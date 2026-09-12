@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
@@ -221,7 +222,7 @@ export function AutomationWorkspace({
       }
       try {
         const result = await window.rovai.request<StoredCommandResult>('automations.update', {
-          commandId: crypto.randomUUID(),
+          commandId: newCommandId(),
           command: {
             automationId,
             expectedVersion: savedVersions.current.get(automationId) ?? current.version,
@@ -362,7 +363,7 @@ export function AutomationWorkspace({
     setIssue(null)
     try {
       const result = await window.rovai.request<StoredCommandResult>('automations.create', {
-        commandId: crypto.randomUUID(), command: draft
+        commandId: newCommandId(), command: draft
       })
       const created = automationFromResult(result)
       replaceAutomation(created)
@@ -385,7 +386,7 @@ export function AutomationWorkspace({
     setIssue(null)
     try {
       const result = await window.rovai.request<StoredCommandResult>('automations.run', {
-        commandId: crypto.randomUUID(), command: { automationId: current.automationId }
+        commandId: newCommandId(), command: { automationId: current.automationId }
       })
       if (result.status === 'rejected') throw new Error(String(result.payload.message ?? '任务未能开始。'))
       const status = String(result.payload.status ?? '')
@@ -411,7 +412,7 @@ export function AutomationWorkspace({
         ? { automationId: current.automationId, expectedVersion: current.version, enabled: true }
         : { automationId: current.automationId, expectedVersion: current.version }
       const result = await window.rovai.request<StoredCommandResult>(method, {
-        commandId: crypto.randomUUID(), command
+        commandId: newCommandId(), command
       })
       const updated = automationFromResult(result)
       replaceAutomation(updated)
@@ -430,7 +431,7 @@ export function AutomationWorkspace({
     setIssue(null)
     try {
       const result = await window.rovai.request<StoredCommandResult>('automations.delete', {
-        commandId: crypto.randomUUID(),
+        commandId: newCommandId(),
         command: { automationId: current.automationId, expectedVersion: current.version }
       })
       if (result.status === 'rejected') throw new Error(String(result.payload.message ?? '任务删除失败。'))

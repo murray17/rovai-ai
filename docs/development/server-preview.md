@@ -6,8 +6,9 @@ last_updated: 2026-09-12
 
 # 独立 Server 开发预览
 
-这是开发预览：提供同一个 Rust Host 的本机启动、显式 Web 开关和只读浏览器工作区。
-发送、上传、审批、私聊、后台 Automation 驱动与完整三平台 Runtime 验收尚未交付。
+这是开发预览：提供同一个 Rust Host 的本机启动、显式 Web 开关和共享生产 Camp 页面。
+当前接通独立草稿、source 上传、发送、执行详情、审批和停止；私聊、完整管理页、后台 Automation 驱动与
+双入口全部验收仍未完成。每个检查点的实际证据见[当前实施计划](../versions/v1.59/implementation-plan.md)。
 不能将本包视为通过了受管 Runtime 控制面隔离的正式 Server。
 
 ## 构建与包内容
@@ -43,7 +44,7 @@ CI 镜像已安装开发工具，不能据此推断干净 Windows 机器无需�
 rovai-host run --data-dir <dataDir> --skill-library-root <skillLibraryRoot>
   --mcp-config-path <mcpConfigPath> --runtime-camp-files-root <runtimeCampFilesRoot>
   --initialize --web-listen 127.0.0.1:4317 --web-ui <包内web-ui的绝对路径>
-  --web-token-stdin
+  --web-token-stdin --web-workspace <明确授权给浏览器的工作区绝对路径>
 ```
 
 参数须在同一条命令中传入。管理令牌由 `rovai-host token` 生成，是 64 位十六进制的 256-bit 随机值。
@@ -53,6 +54,9 @@ rovai-host run --data-dir <dataDir> --skill-library-root <skillLibraryRoot>
 
 管理者在控制台输入管理令牌后交换半小时 Session；页面刷新需要再次登录。当前页面只向固定控制台
 地址发送显式 Authorization，不使用认证 Cookie。应将完整控制台地址交给客户端，不能通过预览端口登录。
+`--web-workspace` 可重复指定；浏览器只能选择所列目录，不能自行授予 Host 文件访问。无授权目录时可使用
+快速对话。同页面重新登录保留当前编辑；完整刷新会创建新编辑身份，尚无跨页面草稿恢复服务。
+Web 与 Host 必须使用同一协议版本，当前为 [Host Web v2](../contracts/host-web-v2.md)。
 
 ## 网络与停止
 
@@ -66,3 +70,23 @@ Unix 用 SIGINT/SIGTERM；Windows 用 console Ctrl-C/Ctrl-Break。停止沿用 C
 Desktop「设置 → 通用 → 浏览器访问」控制当前 Host，Web 默认关闭。关闭 Web 只撤销网络会话与订阅，
 当前 Core 和任务继续；重启 Desktop 后默认关闭。开发 Desktop 开启前运行 `pnpm build:web`，打包时则
 随包携带同一 WebUI 构建产物。
+
+## 首个真实 Camp 复验
+
+使用源码构建产物进行自动验收，不启动日常 App：
+
+```bash
+cargo build -p rovai-host -p rovai-core --bin rovai-host --bin rovai
+pnpm build:desktop
+ROVAI_REQUIRE_ELECTRON_INTEGRATION=1 pnpm test:host-web-live
+pnpm smoke:host-web-runtime
+```
+
+两条验收命令目前在 macOS 使用独立 Chrome profile；`ROVAI_REVIEW_CHROME` 可指定 Chrome 可执行文件。
+第一条启动隔离 Electron，与实际浏览器对照同一 Camp、日夜主题和三个客户端草稿，不调用模型。
+`ROVAI_KEEP_HOST_WEB_LIVE_FIXTURE=1` 保留其截图与隔离目录。
+
+第二条会调用本机已认证的 Codex，在空目录初始化的独立 Host 中，通过真实 HTTP 配置队员/Runtime/Camp，
+随后从正式浏览器页面上传、发送、选择 Host 提供的一次审批、阅读产物与停止另一个运行。
+只审批脚本中精确限定的夹具发布命令，不修改用户级 Runtime 权限。命令打印隔离路径并保留脱敏报告和截图；
+原始目录可能包含 Runtime 会话材料，不得整体上传。它不证明配置页面、其他 Runtime/平台或 S1 隔离已通过。

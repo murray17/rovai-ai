@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { useCampClient } from './camp-client'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import type { CampMessageView, MessageQuoteSnapshot, MessageQuoteAction } from '@contracts'
@@ -154,9 +155,10 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
     refreshReader.current = reader
     const invalidate = (): void => { void reader.refresh().catch(() => undefined) }
     const foreground = (): void => { if (document.visibilityState !== 'hidden') invalidate() }
-    const unsubscribe = client.onEvent((event) => {
+    const unsubscribe = client.onEvent?.((event) => {
       if (shouldRefreshPendingInputs(event, campId)) invalidate()
     })
+    const unsubscribeInvalidation = client.onInvalidated?.(invalidate)
     window.addEventListener('focus', foreground)
     document.addEventListener('visibilitychange', foreground)
     invalidate()
@@ -164,7 +166,8 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
       mounted.current = false
       reader.dispose()
       if (refreshReader.current === reader) refreshReader.current = null
-      unsubscribe()
+      unsubscribe?.()
+      unsubscribeInvalidation?.()
       window.removeEventListener('focus', foreground)
       document.removeEventListener('visibilitychange', foreground)
       // Navigation snapshots are captured by the leave guard, never async cleanup.
@@ -224,7 +227,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
 
   const mutate = async (item: PendingCampInputView, action: PendingInputEditAction, token: string | null): Promise<StoredCommandResult> => {
     const result = await client.request<StoredCommandResult>('camp.pendingInputs.edit', {
-      commandId: crypto.randomUUID(),
+      commandId: newCommandId(),
       command: { campId, pendingInputId: item.id, expectedRevision: item.revision, editToken: token, action }
     })
     if (result.status === 'rejected') throw new Error(pendingError(result.code))
@@ -364,6 +367,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
           const openSession = queue.editSession?.pendingInputId === item.id
           const selected = edit?.item.id === item.id
           const recovery = openSession && !selected
+          const foreign = openSession && queue.editSession?.foreignClient === true
           const itemLabel = item.body.trim()
           const actionLabel = itemLabel || `第 ${item.enqueueSequence} 条消息`
           return <li className={`pending-input-row${selected ? ' is-editing' : ''}`} key={item.id}>
@@ -372,19 +376,19 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
               <span className="pending-input-copy">{itemLabel}</span>
               {(item.quotes?.length ?? 0) > 0 && <small>引用 {item.quotes.length} 段</small>}
               {(selected || recovery || item.state === 'needs_repair') && <small>
-                {selected ? '正在编辑' : recovery ? '未完成的编辑 · 重新编辑' : '需要处理'}
+                {selected ? '正在编辑' : foreign ? '另一客户端正在编辑 · 可接管' : recovery ? '未完成的编辑 · 重新编辑' : '需要处理'}
               </small>}
             </div>
-            {recovery && <button type="button" className="quiet-button compact" disabled={busy} onClick={() => void perform(async () => {
+            {recovery && !foreign && <button type="button" className="quiet-button compact" disabled={busy} onClick={() => void perform(async () => {
               await mutate(item, { type: 'cancel' }, queue.editSession?.editToken ?? null)
             })}>放弃未保存修改</button>}
             <span className="pending-input-actions">
               <button type="button" className="pending-input-edit" disabled={busy} onClick={() => requestEdit(item)}
-                aria-label={`${recovery ? '重新编辑' : '编辑待发送消息'}：${actionLabel}`} aria-pressed={selected}
-                title={selected ? '正在输入框中编辑' : recovery ? '重新编辑' : '编辑'}>
+                aria-label={`${foreign ? '接管编辑' : recovery ? '重新编辑' : '编辑待发送消息'}：${actionLabel}`} aria-pressed={selected}
+                title={foreign ? '接管后从已提交内容重新编辑；原客户端的未提交修改不会带入。' : selected ? '正在输入框中编辑' : recovery ? '重新编辑' : '编辑'}>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.2 11.9.7-3.2 6.8-6.8a1.25 1.25 0 0 1 1.8 0l1.6 1.6a1.25 1.25 0 0 1 0 1.8L6.3 12l-3.1.7Z" /><path d="m9.8 2.8 3.4 3.4" /></svg>
               </button>
-              <button type="button" className="pending-input-delete" aria-label={`删除待发送消息：${actionLabel}`} title="删除" disabled={busy} onClick={() => deleteItem(item)}>
+              <button type="button" className="pending-input-delete" aria-label={`删除待发送消息：${actionLabel}`} title="删除" disabled={busy || foreign} onClick={() => deleteItem(item)}>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
               </button>
             </span>

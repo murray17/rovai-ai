@@ -1,88 +1,11 @@
-@import '../../../packages/ui/src/theme.css';
-* { box-sizing: border-box; }
-body { margin: 0; font-size: 14px; background: var(--surface); color: var(--ink); }
-button, input { font: inherit; }
-button, a { -webkit-tap-highlight-color: transparent; }
-button { cursor: pointer; }
-button:disabled { cursor: default; opacity: .5; }
-button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-input { background: var(--input); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 7px; padding: 10px 12px; min-width: 0; }
-a { color: var(--resource-link); }
-p { line-height: 1.75; }
-.web-muted { color: var(--muted); font-size: 12px; }
-.web-quiet { border: 0; border-radius: 6px; color: var(--muted); background: transparent; padding: 9px 12px; min-height: 38px; }
-.web-quiet:hover { background: var(--surface-hover); color: var(--ink); }
-.web-primary { min-height: 42px; background: var(--conversation-action); color: var(--conversation-action-contrast); border: 0; border-radius: 7px; padding: 10px 16px; }
-.web-error { color: var(--danger); }
-.web-login { min-height: 100dvh; background: var(--surface); padding: 28px 36px; }
-.web-login-top { display: flex; align-items: center; justify-content: space-between; }
-.web-login-top strong { font-size: 16px; letter-spacing: -.4px; }
-.web-login-form { width: min(420px, 100%); margin: clamp(40px, 14vh, 150px) auto 0; display: grid; gap: 18px; }
-.web-login-form h1 { font-size: 28px; font-weight: 600; letter-spacing: -.8px; margin: 0; }
-.web-login-form p { margin: 0; color: var(--muted); }
-.web-login-form label { display: grid; gap: 9px; }
-.web-eyebrow { color: var(--muted); font-size: 12px; }
-.web-login-form .web-origin { font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
-.web-shell { display: grid; grid-template-columns: 244px minmax(0, 1fr); height: 100dvh; min-height: 420px; }
-.web-rail { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--rail-line); padding: 22px 12px 12px; background: var(--rail); }
-.web-brand { display: flex; gap: 10px; align-items: baseline; padding: 0 12px 24px; }
-.web-brand strong { font-size: 17px; letter-spacing: -.5px; }
-.web-brand span { font-size: 11px; color: var(--muted); }
-.web-rail nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; padding-bottom: 18px; }
-.web-rail nav button { border: 0; background: transparent; color: var(--rail-ink); text-align: left; border-radius: 6px; padding: 9px 12px; }
-.web-rail nav button[aria-current='page'] { background: var(--surface-selected); color: var(--ink); }
-.web-rail button:hover { background: var(--surface-hover); }
-.web-camp-list { flex: 1; min-height: 0; overflow-y: auto; }
-.web-camp-list h2 { color: var(--muted); font-size: 11px; font-weight: 500; margin: 18px 12px 6px; }
-.web-camp-list button { display: flex; justify-content: space-between; gap: 5px; width: 100%; padding: 10px 12px; border-radius: 6px; border: 0; color: var(--ink); text-align: left; background: transparent; }
-.web-camp-list button span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.web-camp-list button.selected { background: var(--surface-selected); }
-.web-rail-bottom { display: flex; justify-content: space-between; border-top: 1px solid var(--rail-line); padding-top: 10px; }
-.web-workspace { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--conversation-surface); }
-.web-topbar { min-height: 77px; padding: 17px 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
-.web-topbar h1 { font-size: 15px; font-weight: 600; margin: 0 0 5px; overflow-wrap: anywhere; }
-.web-topbar p { font-size: 11px; color: var(--muted); margin: 0; }
-.web-preview-note { padding: 10px 28px; color: var(--muted); background: var(--surface-subtle); font-size: 11px; }
-.web-banner { padding: 10px 28px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.web-conversation, .web-resource { flex: 1; overflow: auto; min-height: 0; padding: 28px max(28px, calc((100% - 820px) / 2)); }
-.web-empty { padding: 72px 24px; text-align: center; color: var(--muted); }
-.web-empty h2 { color: var(--ink); font-size: 18px; font-weight: 500; }
-.web-empty p { font-size: 13px; }
-.web-message { padding-bottom: 30px; }
-.web-message-meta { display: flex; gap: 12px; align-items: baseline; font-size: 12px; margin-bottom: 10px; }
-.web-message-meta time { color: var(--faint); font-size: 10px; }
-.web-message-body { line-height: 1.8; overflow-wrap: anywhere; }
-.web-message-body > :first-child { margin-top: 0; }
-.web-message-body > :last-child { margin-bottom: 0; }
-.web-message.is-user .web-message-body { display: inline-block; max-width: 100%; border-radius: 10px; padding: 12px 16px; background: var(--conversation-user-message-surface); }
-.web-message p, .web-resource-row p { margin: 6px 0; }
-.web-message pre, .web-resource pre { overflow-x: auto; max-width: 100%; padding: 14px; border: 1px solid var(--conversation-code-line); border-radius: 8px; background: var(--conversation-code-block-canvas); font-size: 12px; }
-.web-message code, .web-resource code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.web-message :not(pre) > code, .web-resource :not(pre) > code { background: var(--conversation-inline-code-canvas); border-radius: 4px; padding: 2px 4px; }
-.web-message table, .web-resource table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-.web-message :is(th, td), .web-resource :is(th, td) { border: 1px solid var(--line); padding: 6px 10px; }
-.web-older { display: block; margin: 0 auto 24px; }
-.web-search { display: flex; gap: 12px; align-items: center; margin-bottom: 22px; color: var(--muted); font-size: 12px; }
-.web-search input { width: min(320px, 100%); }
-.web-resource-row { border-bottom: 1px solid var(--line); padding: 20px 0; overflow-wrap: anywhere; }
-.web-resource-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
-.web-resource-heading h2 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
-.web-resource-heading span { color: var(--muted); font-size: 11px; white-space: nowrap; }
-@media (max-width: 800px) {
- .web-shell { grid-template-columns: 190px minmax(0, 1fr); }
- .web-topbar, .web-preview-note, .web-banner { padding-left: 18px; padding-right: 18px; }
- .web-conversation, .web-resource { padding: 24px 18px; }
-}
-@media (max-width: 520px) {
- .web-shell { grid-template-columns: 132px minmax(0, 1fr); }
- .web-rail { padding-left: 6px; padding-right: 6px; }
- .web-rail nav { grid-template-columns: 1fr; }
- .web-brand { flex-direction: column; gap: 3px; padding-left: 10px; }
- .web-rail-bottom { flex-direction: column; }
- .web-topbar { padding: 14px 12px; }
- .web-conversation, .web-resource { padding: 20px 12px; }
- .web-message-meta { flex-wrap: wrap; gap: 4px; }
- .web-login { padding: 20px; }
- .web-resource-heading { align-items: start; flex-direction: column; gap: 2px; }
-}
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+/* Web owns authentication/connection chrome; all business geometry is production Desktop CSS. */
+.web-login-overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: var(--surface); }
+.web-login { display: flex; flex-direction: column; gap: 12px; width: min(380px, calc(100vw - 48px)); }
+.web-login h1 { margin: 0; font-size: 20px; font-weight: 500; }
+.web-login p { margin: 0 0 8px; color: var(--muted); }
+.web-login label { color: var(--muted); }
+.web-login input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.web-connection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 6px; color: var(--muted); font-size: 11px; }
+.web-workspace-choice { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.web-workspace-choice + .web-workspace-choice { margin-top: 8px; }
+.web-workspace-choice span { color: var(--muted); overflow-wrap: anywhere; }

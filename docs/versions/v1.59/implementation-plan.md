@@ -13,26 +13,78 @@ last_updated: 2026-09-12
 实现工作目录为仓库同级 `rovai-ai-unified-rust-host`，分支 `rovai/unified-rust-host`，
 起点 `a18425ec78ae2e1a0666b2c029564ff3f7bc8f78`。验收只使用隔离 data-dir、Skill Library 和 MCP config。
 
-## 当前收敛：阶段 1–3，先评审共同业务界面
+## 当前收敛：阶段 1–3，方向通过后接通真实 Camp
 
 用户以 PR #345 / `077bf78e64c76e934c45675ddb55e05165a2c49f` 提交补充静态审阅后，已核对实际
-本地与远端提交一致。本轮先交付三项材料：[行为差异表](../../ui/host-web-parity.md#一张行为差异表)、
+本地与远端提交一致。已交付三项材料：[行为差异表](../../ui/host-web-parity.md#一张行为差异表)、
 生产 React 组件的宽屏可点击稿（同页说明构建与验收）、[一页复用/调用说明](frontend-reuse.md)。
-确认后再推进下表；不是一次重新设计，也不替换已有 Rust Host/Axum。
+用户已通过方向评审，直接推进下表，不再扩展模拟稿或替换已有 Rust Host/Axum。
 
 | 当前检查点 | 可演示结果与放行证据 | 当前状态 |
 | --- | --- | --- |
-| 评审稿 | 同 fixture / 1440×920 / 日夜主题，Camp、新建、执行审批、附件预览、队员配置共用生产组件；模拟明确标识 | 三项材料与隔离 Chrome/Electron 检查已完成，待维护者评审；不是 A–D 放行 |
-| A 共享 Camp | 登录后实际 Web 挂载共享业务页面；Native 启动留 Desktop；旧 Desktop 无回归 | 尚未替换独立 Web Workspace |
-| B 真实写入闭环 | 独立 Host 从受信空目录初始化，经浏览器配置、创建、发送、审批、停止、文件读取；草稿/上传/幂等前置 | 未完成；fixture 不计入 |
-| C 双入口一致 | 同一 Web 产物分别连接 Desktop-managed 与独立 Host；双草稿、审批竞争、失效/迟到/断线与 Web 开关 | 未完成；保留已有 Host 生命周期回归 |
+| 评审稿 | 同 fixture / 1440×920 / 日夜主题，Camp、新建、执行审批、附件预览、队员配置共用生产组件；模拟明确标识 | 用户已确认方向；模拟证据不代替 A–D |
+| A 共享 Camp | 登录后实际 Web 挂载共享业务页面；Native 启动留 Desktop；旧 Desktop 无回归 | 实际 Web 已挂载共享 BusinessApp/导航/Camp；真实 Desktop/Chrome 同数据、1440×920、日夜主题对照及 Camp/文件页面回归通过 |
+| B 真实写入闭环 | 独立 Host 从受信空目录初始化，经浏览器配置、创建、发送、审批、停止、文件读取；草稿/上传/幂等前置 | 浏览器生产 Composer 发送、真实 Codex 执行/原生审批、产物阅读与停止已通过；初始化后配置/建 Camp 仍由真实 HTTP 验证，完整配置 UI 和私聊/待发送附件等未闭合 |
+| C 双入口一致 | 同一 Web 产物分别连接 Desktop-managed 与独立 Host；双草稿、审批竞争、失效/迟到/断线与 Web 开关 | 两种 Host 挂载同一 Web 产物；真实 Desktop/双浏览器草稿独立，同页重新认证保留 Composer；第二客户端处理已决审批被拒；两入口完整相同执行场景、运行中关闭 Web 仍待补 |
 | D 逐页业务能力 | 队员/Runtime、Task、Memory、Automation、Skills/MCP 与必要设置逐项原动作/失败/权限/刷新闭合 | 未完成；通用只读行不计入 |
 
 Mobile 新增、扩平台、容器与发布优化暂停，已有包/CI/原型保留。长期 Server 仍为 macOS、Windows、Linux。
 安全仅追踪下文 S1；安全等待不阻塞受控本机的共享 UI、模拟交互与非发布测试，也不允许把未通过保护的网络写入
 宣布为正式发布。以下原阶段表保留总体目标与未完成事实。
 
-### 本轮对照稿的实际证据
+### 首个真实 Camp 增量
+
+`App.tsx` 的生产业务协调器提取为 `BusinessApp.tsx`，两个入口显式注入 IPC/Remote 与资源适配。
+实际 Web 的旧独立 Workspace 已删除。消息、导航、发送、审批与活动 Camp 的刷新只有这一份生产协调代码，
+没有复制 Review fixture；`window.rovai` 不存在于实际浏览器。Host OS 来自 health，快捷键平台来自浏览器设备。
+
+Core Migration 150 把 Camp 草稿、附件和 pending 编辑归属接到独立编辑客户端，保留 Desktop 默认草稿。
+Web 认证协议 2 用独立恢复证明关联 Core 持久身份，同页面重新登录只更换认证代次；Web 消费后递增草稿 revision，
+避免删除重建造成旧请求可再次生效。命令结果不明时保留原 ID，先读回执；只有用户显式重试才发送原命令。
+提交参数在客户端入队时复制；旧退出登录响应不清除新会话。引用操作的持久拒绝有明确的 `recorded.error`，
+不能因业务拒绝而永远停在 unknown；目录 Camp 创建回执不依赖原工作区仍然存在，也不通过任意路径探测来查回执。
+上传沿用 source reference，未知绑定不删除源文件，已经接受的源文件不因发送/退出/移除引用被上传服务清理。
+
+`pnpm test:host-web-live` 启动隔离的真实 Electron root 和两个 Chrome profile，使用 Core 的真实持久消息
+（`execution:null`）对照同一 Camp。验证 270px 侧栏、38px Camp 顶行、日夜主题、三个独立草稿、令牌轮换后
+同页重新登录保留同一 Composer DOM/内容，以及关闭 Web 后 Core 仍响应。它不启动模型；
+[脱敏记录](evidence/desktop-web-live.json)与真实 Runtime 证据分别记录。
+
+`pnpm smoke:host-web-runtime` 从空目录启动独立 Host，复用本机已认证 Codex，在实际浏览器执行上传/阅读、
+发送、Host 权威原生审批、产物读取、运行中停止，并拒绝第二客户端重复处理已决审批。Runtime/队员/工作区/Camp
+配置先走真实授权 HTTP，因此该证据不能替代配置页面验收。执行和 SSE 更新期间保留下一条草稿及 Composer DOM。
+脚本与截图只使用一次性 data-dir、Skill Library、MCP config、Chrome profile，不访问日常 Rovai 数据。
+
+2026-09-12 两个上述入口已实际通过。[独立 Host 报告](evidence/runtime-browser.json)记录真实 Run、审批、
+消息、产物、停止 Run 和逐项断言；[Desktop 日间](evidence/desktop-web-live/desktop-day.png) /
+[Web 日间](evidence/desktop-web-live/web-day.png)、[Desktop 夜间](evidence/desktop-web-live/desktop-night.png) /
+[Web 夜间](evidence/desktop-web-live/web-night.png)用于同视口对照。
+浏览器的[上传阅读](evidence/runtime-browser/web-source-upload.png)、[原生审批](evidence/runtime-browser/web-native-approval.png)、
+[产物阅读](evidence/runtime-browser/web-runtime-artifact.png)和[停止终态](evidence/runtime-browser/web-stop-complete.png)
+均来自实际生产入口；不含登录凭据。Desktop 的短暂缩放反馈属于原生适配，未为截图改变其行为。
+
+实际诊断暴露的两个边界保持记录：Codex 0.153.4 的 `workspace-write` 原生限制阻止未审批的 Unix socket
+CLI 调用，已通过精确命令的原生 `allow_once` 验证发布；未更改用户级权限，也不据此宣称 S1 通过。
+Managed 产物的祖先目录为只允许穿越的目录，原 `O_RDONLY` 逐层打开错误要求列目录权限；精确文件读取改用
+macOS `O_SEARCH` / Linux `O_PATH` 的目录句柄，最终文件仍只读且逐段拒绝 symlink，不扩大目录权限。
+过早点击停止曾收到版本冲突；UI 保留已有错误/刷新语义，最终在真实工具运行中点击停止并在 Host 退出前确认取消。
+
+全量回归曾复现既有 Claude 无 Prompt 目录测试的 1 秒成功路径超时。该既有 owner 的正常协议路径改用独立
+10 秒夹具预算，专门的 timeout case 仍为 1 秒；同时逐项断言 missing/rejected/interaction/malformed/EOF/timeout
+的真实失败原因，防止超时冒充协议分支通过。生产探测超时和进程回收断言保持原合同，未禁用或删除任何 case。
+
+提交前已通过类型检查、前端 175 文件/1765 测试、脚本 317 通过/2 既有平台跳过；Rust 默认工作区与 PR 门禁
+通过（Core 793/6 既有忽略、CLI 35、slow 309），以及 Clippy `-D warnings`、格式检查。
+最终新二进制/同一 Web 构建上的 HTTP owner、真实 Desktop/双浏览器与原生 Runtime smoke 均通过，无测试跳过。
+既有真实 Electron 启动恢复回归另行通过，验证 Desktop 仍提供诊断导出；共享失败页面的诊断能力改为显式注入，
+浏览器保留连接恢复而不访问桌面桥。并行重负载曾导致进程启动和定时测试超时，最终上述验收按组串行复跑通过；
+没有因此改生产时限或关闭门禁。文档门禁在最终证据入库后再执行。
+
+未完成项保持可见：浏览器完整新建/配置路径、私聊独立草稿、待发送附件上传、头像编辑、相对资源/大文件分页、
+共同管理页动作、无 Desktop/浏览器的 Automation 时钟、两种 Host 的完整相同运行场景、第二台设备及 S1。
+首个真实 Camp 增量不等于 B/C/D 或阶段 1–3 整体完成。
+
+### 已确认对照稿的历史证据（不含本次真实接线）
 
 [验证记录与源码/产物 SHA-256](evidence/desktop-web-parity-review.json)固定本轮内容与范围。
 `pnpm review:host-web-parity` 生成一个可离线打开的 HTML；`pnpm test:host-web-parity` 在独立 Chrome 与
@@ -45,10 +97,10 @@ Web 固定示例下载、Runtime 配置版本保存，以及独立 HTML 的入�
 修正了夹具遗漏的生产 `members-workspace` 容器和工具 evidence 结构；没有通过改生产样式来匹配截图。
 这些操作均由固定内存 fixture 驱动，没有启动 Core、真实 Runtime、访问日常数据或开放 HTTP 写入。
 
-本轮生产 TypeScript 与 fixture 类型检查、Desktop/Web 构建通过；现有 Vitest 175 文件/1759 测试通过。
+评审稿提交时生产 TypeScript 与 fixture 类型检查、Desktop/Web 构建通过；当时 Vitest 175 文件/1759 测试通过。
 定向真实 Electron 回归 7 项通过、0 跳过，覆盖 Camp projection 刷新/阅读位置、稀疏执行正文与重试、
 产物/消息层级、文件 split/阅读状态与设置。通用文档门禁随最终提交运行。这些回归只证明本次组件提取范围，
-不能替代完整 Desktop 启停、Host 写入、并发客户端或 S1 安全验收。Rust/Host 生产实现与公开操作集合本轮未变；
+不能替代完整 Desktop 启停、Host 写入、并发客户端或 S1 安全验收。Rust/Host 生产实现与公开操作集合在评审稿提交时未变；
 原有平台证据保留，未重新申报平台资格。
 
 ## 检查点与完成条件
@@ -57,10 +109,10 @@ Web 固定示例下载、Runtime 配置版本保存，以及独立 HTML 的入�
 | --- | --- | --- |
 | 1A 共享 Core | 抽取应用运行层，普通串行入口与必要独立通道不变；旧 Desktop 准入、重复实例、执行、关闭回归；补齐 Main 迁移表及窄接口 | 实施中 |
 | 1A 平台原型 | Windows/Linux 实测文件、环境/句柄、必要进程访问、IPC 冒用、管理恢复、授权工作区与后代回收；失败先由用户确认最小修正 | 四个目标的文件边界均未通过；其余边界未验收 |
-| 1B Headless | 空目录初始化与原生 Runtime 认证；真实发送、产物、审批、取消、受控关闭、强杀恢复；无 Electron/基础 Node 依赖 | 初始 CLI 在 macOS 验证；真实执行未验收 |
-| 1C Web 闭环 | 同一 Axum 模块、内存 Bearer、受限 Fetch、上传 source ref、草稿归属、SSE 与宽屏闭环；第二台 LAN 电脑使用 | 只读入口与浏览器验证已接入；草稿、上传与发送未开放 |
+| 1B Headless | 空目录初始化与原生 Runtime 认证；真实发送、产物、审批、取消、受控关闭、强杀恢复；无 Electron/基础 Node 依赖 | macOS 独立 Host 的浏览器发送/原生审批/产物/取消已验证；配置页面、恢复和全部场景尚未验收 |
+| 1C Web 闭环 | 同一 Axum 模块、内存 Bearer、受限 Fetch、上传 source ref、草稿归属、SSE 与宽屏闭环；第二台 LAN 电脑使用 | 共享生产 Camp、独立草稿、上传与发送已接通；完整闭环与 LAN 第二设备尚未全部验收 |
 | 2 Desktop 共用 | 受保护本机 IPC、同 Host Web 开关与会话管理；关闭 Web 不停 Core，bind 失败不毁 Desktop；保留退出与父进程异常语义 | 同 Host/匿名父管道/Web 开关已接入并做进程验证；完整隔离与 Desktop 交互验收待补 |
-| 3 宽屏完整性 | Camp/成员/Task/Runtime/Memory/Automation/Skills/MCP 与必要设置；声明能力矩阵；多端、私聊归属、审批竞争和迟到响应回归 | 只读资源与现状双主题已接入；完整写入与多端回归未完成 |
+| 3 宽屏完整性 | Camp/成员/Task/Runtime/Memory/Automation/Skills/MCP 与必要设置；声明能力矩阵；多端、私聊归属、审批竞争和迟到响应回归 | 独立通用资源页已移除；共享业务页面逐项适配中，私聊、管理动作和无浏览器 Automation 等尚未完成 |
 | 4 三平台发布 | macOS arm64/x64、Windows x64、Linux x64 实际 CLI Server 闭环与匹配 Host/Web 包；平台/Runtime/部署方式分别留证 | 四个原生预览包与有限链路已验证；隔离未通过，未正式发布 |
 | 5 Mobile | 按 2026-09-12 用户追加要求先出沿用现有风格的交互稿；真实 Mobile 生产实现与设备验收留待后续 | 已有可交互 HTML 和状态检查保留；新增工作暂停 |
 

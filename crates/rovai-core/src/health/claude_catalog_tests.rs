@@ -42,7 +42,12 @@ while IFS= read -r request; do printf '%s\n' "$request" >> "$root/requests"; don
         "timeout",
     ] {
         fs::write(root.join("case"), case).unwrap();
-        let result = claude_code_model_catalog(&executable, Duration::from_secs(1)).await;
+        // Normal protocol cases must not accidentally test OS scheduling under
+        // parallel migration/process load. Keep the intentional deadline case
+        // short, and require every other failure to reach its actual protocol
+        // branch instead of accepting a timeout as an equivalent error.
+        let deadline = Duration::from_secs(if case == "timeout" { 1 } else { 10 });
+        let result = claude_code_model_catalog(&executable, deadline).await;
         if case == "success" {
             let models = result.unwrap();
             assert_eq!(models.len(), 2);
@@ -50,10 +55,17 @@ while IFS= read -r request; do printf '%s\n' "$request" >> "$root/requests"; don
             assert_eq!(models[1].display_name, "Native model");
             assert_eq!(models[1].description.as_deref(), Some("Native description"));
         } else {
-            assert!(
-                result.is_err(),
-                "{case} must never synthesize a model catalog"
-            );
+            let expected = match case {
+                "missing" => "initialize did not return a non-empty models array",
+                "rejected" => "Claude Code initialize rejected",
+                "interaction" => "initialization requires interactive control",
+                "malformed" => "invalid initialization frame",
+                "eof" => "exited before returning the initialization model catalog",
+                "timeout" => "model initialization timed out",
+                _ => unreachable!(),
+            };
+            let error = result.expect_err("must never synthesize a model catalog");
+            assert!(format!("{error:#}").contains(expected), "{case}: {error:#}");
         }
         let requests: Vec<Value> = fs::read_to_string(root.join("requests"))
             .unwrap()

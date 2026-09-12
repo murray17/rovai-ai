@@ -1,5 +1,7 @@
 mod auth;
 mod operations;
+mod resources;
+mod uploads;
 
 use anyhow::{Context, Result, ensure};
 pub use auth::new_token;
@@ -35,6 +37,10 @@ pub struct WebConfig {
     #[serde(default)]
     pub allow_insecure_lan: bool,
     pub ui_directory: PathBuf,
+    /// Explicit local-operator grants. Browsers select these roots, never grant
+    /// new Host paths by submitting a string.
+    #[serde(default)]
+    pub authorized_workspaces: Vec<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -46,6 +52,9 @@ struct WebState {
     assets: PathBuf,
     epoch: String,
     requests: Arc<Semaphore>,
+    workspaces: Arc<Vec<PathBuf>>,
+    uploads: Arc<Semaphore>,
+    files: Arc<resources::Handles>,
 }
 
 /// Owns only a network listener and its credentials. Stopping or dropping it
@@ -75,6 +84,19 @@ impl WebServer {
             "Web UI build is missing index.html"
         );
         let sessions = Arc::new(Sessions::new(administrator)?);
+        let mut workspaces = Vec::new();
+        ensure!(
+            config.authorized_workspaces.len() <= 64,
+            "too many workspace grants"
+        );
+        for root in &config.authorized_workspaces {
+            ensure!(root.is_absolute(), "workspace grants must be absolute");
+            let root = tokio::fs::canonicalize(root).await?;
+            ensure!(root.is_dir(), "workspace grant must be a directory");
+            if !workspaces.contains(&root) {
+                workspaces.push(root);
+            }
+        }
         let listener = TcpListener::bind(config.listen)
             .await
             .context("Web address could not be bound")?;
@@ -114,6 +136,9 @@ impl WebServer {
             assets,
             epoch: new_token()?,
             requests: Arc::new(Semaphore::new(64)),
+            workspaces: Arc::new(workspaces),
+            uploads: Arc::new(Semaphore::new(4)),
+            files: Arc::new(resources::Handles::default()),
         };
         let app = routes(state);
         let (shutdown, stopped) = oneshot::channel();
@@ -170,6 +195,14 @@ fn routes(state: WebState) -> Router {
         .route("/request", post(request))
         .route("/events", get(events))
         .route("/logout", post(logout))
+        .route("/workspaces", get(workspaces))
+        .route(
+            "/uploads",
+            post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_BYTES + 16384)),
+        )
+        .route("/uploads/reconcile", post(uploads::reconcile))
+        .route("/files", post(resources::files))
+        .route("/attachments", post(resources::attachment))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     Router::new()
         .nest("/api/v1", api)
@@ -235,7 +268,17 @@ async fn authenticate(State(state): State<WebState>, mut req: Request, next: Nex
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Login {
+    protocol_version: u32,
     administrator_token: String,
+    #[serde(default)]
+    editor: Option<EditorResume>,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditorResume {
+    client_id: String,
+    proof: String,
 }
 
 async fn login(
@@ -245,10 +288,38 @@ async fn login(
     let Ok(Json(body)) = body else {
         return error(StatusCode::BAD_REQUEST, "invalid_login");
     };
-    match state.sessions.login(&body.administrator_token) {
-        Ok((token, session)) => Json(json!({"token":token,"clientId":session.client_id,"expiresInSeconds":SESSION_LIFETIME.as_secs(),"epoch":state.epoch})).into_response(),
-        Err(LoginFailure::Unauthorized) => error(StatusCode::UNAUTHORIZED, "invalid_administrator_token"),
-        Err(LoginFailure::Throttled | LoginFailure::Capacity) => error(StatusCode::TOO_MANY_REQUESTS, "login_limited"),
+    if body.protocol_version != 2 {
+        return error(StatusCode::CONFLICT, "protocol_incompatible");
+    }
+    let generation = match state.sessions.authorize_login(&body.administrator_token) {
+        Ok(generation) => generation,
+        Err(failure) => return login_failure(failure),
+    };
+    let identity = match state
+        .core
+        .request("host.editor.resolve", json!(body.editor))
+        .await
+    {
+        Ok(reply) if reply.error.is_none() => reply.result.unwrap_or(Value::Null),
+        _ => return error(StatusCode::UNAUTHORIZED, "editor_resume_denied"),
+    };
+    let Some(client_id) = identity["clientId"].as_str() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "editor_unavailable");
+    };
+    match state.sessions.issue(generation, client_id.to_owned()) {
+        Ok((token, session)) => Json(json!({"protocolVersion":2,"token":token,"clientId":session.client_id,"editorProof":identity["proof"],"ownerId":identity["ownerId"],"expiresInSeconds":SESSION_LIFETIME.as_secs(),"epoch":state.epoch})).into_response(),
+        Err(failure) => login_failure(failure),
+    }
+}
+
+fn login_failure(failure: LoginFailure) -> Response {
+    match failure {
+        LoginFailure::Unauthorized => {
+            error(StatusCode::UNAUTHORIZED, "invalid_administrator_token")
+        }
+        LoginFailure::Throttled | LoginFailure::Capacity => {
+            error(StatusCode::TOO_MANY_REQUESTS, "login_limited")
+        }
     }
 }
 
@@ -262,8 +333,12 @@ async fn logout(
 
 async fn capabilities(State(state): State<WebState>) -> Json<Value> {
     Json(
-        json!({"protocolVersion":1,"epoch":state.epoch,"read":true,"composer":false,"uploads":false,"approval":false,"nativeFilePicker":false,"desktopWindow":false,"releaseQualified":false}),
+        json!({"protocolVersion":2,"epoch":state.epoch,"read":true,"composer":true,"uploads":true,"approval":true,"nativeFilePicker":false,"desktopWindow":false,"releaseQualified":false}),
     )
+}
+
+async fn workspaces(State(state): State<WebState>) -> Json<Value> {
+    Json(json!(state.workspaces.iter().map(|path| json!({"projectPath":path, "name":path.file_name().and_then(|name| name.to_str()).unwrap_or("工作区")})).collect::<Vec<_>>()))
 }
 
 #[derive(Deserialize)]
@@ -276,17 +351,24 @@ struct OperationRequest {
 
 async fn request(
     State(state): State<WebState>,
+    Extension(session): Extension<Arc<Session>>,
     body: std::result::Result<Json<OperationRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let Ok(Json(body)) = body else {
         return error(StatusCode::BAD_REQUEST, "operation_not_admitted");
     };
+    if !body
+        .operation
+        .paths_allowed(&body.params, &state.workspaces)
+    {
+        return error(StatusCode::FORBIDDEN, "workspace_not_authorized");
+    }
     let Ok(_permit) = state.requests.clone().try_acquire_owned() else {
         return error(StatusCode::TOO_MANY_REQUESTS, "request_capacity");
     };
     match tokio::time::timeout(
-        Duration::from_secs(15),
-        state.core.request(body.operation.method(), body.params),
+        body.operation.timeout(),
+        state.core.request_for_editor(body.operation.method(), body.params, rovai_core::draft_client::DraftClient::verified_web(&session.client_id).expect("Host-created editor identity")),
     )
     .await
     {

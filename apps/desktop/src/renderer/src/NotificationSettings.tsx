@@ -1,3 +1,4 @@
+import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NotificationPreference, StoredCommandResult } from '@contracts'
@@ -142,7 +143,7 @@ export function NotificationSettings(): React.JSX.Element {
       const result = await window.rovai.request<StoredCommandResult>(
         'notifications.preference.update',
         {
-          commandId: crypto.randomUUID(),
+          commandId: newCommandId(),
           command: {
             expectedVersion: preference.version,
             headsUpEnabled: next.headsUpEnabled,
