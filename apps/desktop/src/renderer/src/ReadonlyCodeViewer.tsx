@@ -4,6 +4,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
 import { useFileFindAdapter } from './FilePreviewFind'
 import { codeFileFindAdapter } from './file-find-code'
+import { isPreviewSelectAll } from './file-preview-selection'
 import type { FileLocationTarget, ResolvedTheme } from '@contracts'
 import {
   loadSourceLanguageForFilename,
@@ -137,6 +138,14 @@ export function ReadonlyCodeViewer({
       role="region"
       aria-label={`${fileName} 内容`}
       tabIndex={0}
+      onKeyDown={(event) => {
+        const view = viewRef.current
+        if (!view || !isPreviewSelectAll(event)) return
+        event.preventDefault()
+        event.stopPropagation()
+        view.focus()
+        view.dispatch({ selection: { anchor: 0, head: view.state.doc.length }, userEvent: 'select' })
+      }}
     >
       <CodeMirror
         className="file-preview-code-mirror"
