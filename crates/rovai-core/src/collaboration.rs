@@ -6796,6 +6796,13 @@ mod slow_tests {
         let service = CollaborationService::default();
         let camp_id =
             create_pending_camp(&service, &mut database, &directory, "pending-camp-create");
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?1",
+                [&camp_id],
+            )
+            .unwrap();
         let state: String = database
             .connection()
             .query_row(
@@ -6846,6 +6853,14 @@ mod slow_tests {
         assert_eq!(
             draft_navigation.projects[0].recent_camps[0].activation_state,
             "pending"
+        );
+        assert_eq!(
+            draft_navigation.projects[0].recent_camps[0].last_activity_at, "2026-01-01T00:00:00Z",
+            "saving an unsent draft must not advance navigation order"
+        );
+        assert_eq!(
+            draft_navigation.projects[0].recent_camps[0].last_activity_global_sequence,
+            0
         );
 
         let rejected = service
@@ -6905,6 +6920,8 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(state, "active");
+        let active_navigation = ReadModelService.navigation_snapshot(&mut database).unwrap();
+        assert!(active_navigation.projects[0].recent_camps[0].last_activity_global_sequence > 0);
         let event_types = database
             .connection()
             .prepare(
