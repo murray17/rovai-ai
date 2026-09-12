@@ -283,4 +283,9 @@ Main/Core/Renderer 支持缺失展示名称，Migration 150 放宽两个名称�
 保存、失败重试、放弃、登录结果以及双主题/缩放验证，不创建第二套模拟 UI。
 
 最小检查：`cargo test -p rovai-core --lib startup`、`pnpm test:core-startup` 和 `pnpm test:settings-workspace`。
-全量验证和交付状态待实际运行结果补充。
+本地验证已通过：`pnpm typecheck`、`pnpm test`（1,912 项前端测试、317 项脚本测试；2 项 Windows 专属脚本跳过）、
+`pnpm test:rust:staged`（559 项 Library）、CLI 35 项、Core 237 项（6 项显式手动 Smoke 忽略）、
+slow integration 309 项、`cargo clippy --workspace --all-targets -- -D warnings` 与以 main `decdedda` 为基线的文档门禁。
+Migration 151 的升级、回滚与已有数据保留在同步渠道 Migration 150 后另以 15 项迁移测试复验。
+隔离 Electron 设置交互及真实 Core 草稿/保存/重启 RPC owner 已通过；测试不调用模型。
+本次 PR、CI、daily 安装包验收与本机非终止安装结果由关联交付 Task 记录，Issue #338 留待新版本发布后关闭。
