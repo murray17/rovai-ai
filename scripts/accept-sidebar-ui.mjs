@@ -40,6 +40,7 @@ try {
   await assertLongTitleIsTruncated(desktopApp.cdp, fixture.longTitleCampId)
   await assertProjectRowAndPagination(desktopApp.cdp)
   await assertQuickChatPagination(desktopApp.cdp)
+  await assertExpandedWindowFreshness(desktopApp.cdp)
 
   const desktopCapture = join(outputDir, 'sidebar-day-1440x920.png')
   await capture(desktopApp.cdp, desktopCapture)
@@ -178,7 +179,8 @@ try {
       projectAndPaginationCountsHidden: true,
       projectRowSelectsAndTogglesDisclosure: true,
       fiveThenTenCampPagination: true,
-      paginationCacheSurvivesCollapseAndPinMigration: true,
+      paginationWindowSurvivesCollapseAndPinMigration: true,
+      expandedWindowRenameDeleteAndReopenFreshness: true,
       projectAndCampActionsHiddenUntilHoverOrFocus: true,
       hoverFocusOpenAndCoarsePointerVisibility: true,
       questionMarkHelpIsHoverOnly: true,
@@ -737,6 +739,44 @@ async function assertQuickChatPagination(cdp) {
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
   await clickProjectControl(cdp, selector, '.show-more-camps')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+}
+
+async function assertExpandedWindowFreshness(cdp) {
+  const selector = '.navigation-projects .camp-nav-group:not([data-group="quick-chat"])'
+  const projectKey = await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.dataset.group`)
+  const latest = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
+  const group = latest.projects.find(project => project.projectKey === projectKey)
+  assert(group?.recentCamps.length === 15, 'Core did not return the requested authoritative prefix')
+  const target = group.recentCamps[7]
+  const targetSelector = `[data-sidebar-menu-target="camp:${target.id}"]`
+  const titleIs = title => `document.querySelector(${JSON.stringify(targetSelector)})?.closest('.camp-nav-row')?.textContent.includes(${JSON.stringify(title)})`
+  const rename = async (title, version) => {
+    const result = await request(cdp, 'camps.rename', {
+      commandId: crypto.randomUUID(),
+      command: { campId: target.id, title, expectedVersion: version }
+    })
+    assert(result.status === 'applied', `Fixture rename failed: ${JSON.stringify(result)}`)
+  }
+  // This mutation runs through Core IPC, not the App's explicit rename follow-up.
+  // The normal invalidation reader must refresh the eighth visible row.
+  await rename('已展开窗口的最新标题', target.version)
+  await waitForExpression(cdp, titleIs('已展开窗口的最新标题'))
+  await clickProjectControl(cdp, selector, '.collapse-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
+  const refreshed = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
+  const renamed = refreshed.projects.find(project => project.projectKey === projectKey).recentCamps.find(camp => camp.id === target.id)
+  await rename('收起期间更新后重新展开', renamed.version)
+  await clickProjectControl(cdp, selector, '.show-more-camps')
+  await waitForExpression(cdp, titleIs('收起期间更新后重新展开'))
+  const beforeDelete = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
+  const current = beforeDelete.projects.find(project => project.projectKey === projectKey).recentCamps.find(camp => camp.id === target.id)
+  const deleted = await request(cdp, 'camps.delete', {
+    commandId: crypto.randomUUID(),
+    command: { campId: target.id, expectedVersion: current.version, force: true }
+  })
+  assert(deleted.status === 'applied', `Fixture delete failed: ${JSON.stringify(deleted)}`)
+  await waitForExpression(cdp, `!document.querySelector(${JSON.stringify(targetSelector)})
+    && document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
 }
 
 async function projectPaginationState(cdp, selector) {

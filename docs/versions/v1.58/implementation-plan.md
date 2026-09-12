@@ -87,6 +87,22 @@ last_updated: 2026-09-12
 
 后续增量见[宿主接入与失败复核](evaluation-host-integration.md)。已完成真实 Rovai 定时触发、宿主回归、报告和分析 Agent 交付，以及每日统计到真实分析登记的链路。周回归保留 degraded，缺 Judge 与预算未运行项不算通过；开发版 Electron 的 owner CLI 提交／取消也已实测。旧回归记录保持原样，新增 Case 111 v2 和 ledger 1.1 的版本、修正依据、定向补验与重放在该记录单列。当前权威合同为 [Execution Evaluation v14](../../contracts/execution-evaluation-v14.md) 与 [User Automation v5](../../contracts/user-automation-v5.md)。
 
+## 侧栏可见窗口新鲜度修复
+
+- `navigation.snapshot` 增加按 canonical group key 指定前缀数量的可选输入；默认仍为 5 条，Core 在同一
+  读事务内返回整个窗口。Renderer 删除 offset 分页对象缓存，只保留展示数量和展开状态。
+- 查看更多立即重读完整前缀；通知、轮询与 focus 继续刷新该窗口。失败保留已确认数量，旧范围响应由
+  window reader 隔离，收起再展开不复用旧 Camp 状态。当前边界见
+  [Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md#visible-camp-windows)。
+- Rust 沿用 `read_model::slow_tests` 的分组事务 owner，扩展默认、分组独立范围、最小值与超出总数矩阵，
+  不新增或删除独立 Rust 测试。旧测试改名反映新合同；最小命令为
+  `cargo test -p rovai-core --features slow-tests --lib navigation_groups_camps_and_reads_requested_prefixes_with_default_five`。
+- Renderer 原分页测试中的“保留旧对象、offset 递增、缓存命中免读取”随该生产路径退出；有意义的初始 5 条、
+  每次增加 10 条、短尾页、失败保留、收起、分组共享与控件行为，由同一文件的新窗口 reader 测试承接。
+  新增覆盖第六条状态变化、终态移出前五条、丢事件轮询、已读/改名/删除/排序、过时响应和在途收起。
+- `accept:sidebar-ui` 的现有隔离 packaged App fixture 增加真实 Core IPC 的第八条改名、收起期间改名、
+  重新展开及删除补位断言；不发送模型消息，不使用日常数据。
+
 ## 明确限制
 
 精确 Memory 计数、全来源 provenance、历史 Run build 和完整 native Tool 错误不可用。共用主机上的隔离目录不等于独立主机 Formal qualification。小样本回归不证明统计上的非劣性；用户确认、测试通过与报告生成均不证明实际能力提升。首批独立验收保留集未运行；不会把公开回归 Case 改名冒充保留样本。

@@ -1209,6 +1209,13 @@ struct NavigationGroupCampsParams {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NavigationSnapshotParams {
+    #[serde(default)]
+    group_limits: BTreeMap<String, usize>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AcknowledgeCampViewedParams {
@@ -7293,9 +7300,14 @@ impl Core {
                 Ok(serde_json::to_value(selection)?)
             }
             "navigation.snapshot" => {
+                let params: NavigationSnapshotParams =
+                    serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.navigation_snapshot(&mut database)?,
+                    ReadModelService.navigation_snapshot_with_group_limits(
+                        &mut database,
+                        &params.group_limits,
+                    )?,
                 )?)
             }
             "navigation.groupCamps" => {

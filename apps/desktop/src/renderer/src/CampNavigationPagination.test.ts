@@ -1,164 +1,214 @@
-import { describe, expect, it } from 'vitest'
-import type { NavigationCampItem, NavigationCampPage } from '@contracts'
-import {
-  NAVIGATION_INITIAL_VISIBLE_CAMPS,
-  activateProjectNavigationRow,
-  appendUniqueNavigationCamps,
-  collapseNavigationGroupPagination,
-  navigationGroupPagination,
-  navigationPaginationControls,
-  removeNavigationCampFromPagination,
-  revealMoreNavigationCamps
-} from './CampNavigation'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { NavigationCampItem, NavigationSnapshot, NavigationSnapshotRequest } from '@contracts'
+import { CampNavigation, activateProjectNavigationRow, navigationPaginationControls } from './CampNavigation'
+import { createNavigationWindowReader, type NavigationGroupLimits } from './navigation-window-reader'
 
-function camp(index: number): NavigationCampItem {
+function camp(index: number, marker: NavigationCampItem['marker'] = 'none'): NavigationCampItem {
   return {
-    id: `camp-${index}`,
-    title: `对话 ${index}`,
-    activationState: 'active',
-    projectBindingKind: 'directory',
-    projectPath: '/repo',
-    defaultLead: null,
-    marker: 'none',
-    lastActivityAt: `2026-08-09T00:00:${String(index).padStart(2, '0')}Z`,
-    lastActivityGlobalSequence: index,
-    latestCompletionGlobalSequence: 0,
-    version: 1
+    id: `camp-${index}`, title: `对话 ${index}`, activationState: 'active',
+    projectBindingKind: 'directory', projectPath: '/repo', defaultLead: null, marker,
+    lastActivityAt: '2026-09-12T00:00:00Z', lastActivityGlobalSequence: index,
+    latestCompletionGlobalSequence: 0, version: 1
   }
 }
 
-function page(camps: NavigationCampItem[], totalCount: number, nextOffset: number | null): NavigationCampPage {
+function snapshot(rows: NavigationCampItem[], limits: NavigationGroupLimits = {}): NavigationSnapshot {
   return {
-    schemaVersion: 3,
-    throughGlobalSequence: 1,
-    projectPath: '/repo',
-    totalCount,
-    nextOffset,
-    camps
+    schemaVersion: 3, throughGlobalSequence: 1,
+    quickChat: {
+      totalCount: rows.length,
+      recentCamps: rows.slice(0, limits['quick-chat'] ?? 5).map(row => ({
+        ...row, id: `quick-${row.id}`, projectBindingKind: 'quick_chat', projectPath: ''
+      }))
+    },
+    projects: [{
+      projectKey: 'directory:/repo', projectPath: '/repo', name: 'repo',
+      lastActivityAt: '', lastActivityGlobalSequence: 1, totalCount: rows.length,
+      recentCamps: rows.slice(0, limits['directory:/repo'] ?? 5)
+    }]
   }
 }
 
-describe('Camp navigation pagination', () => {
-  it('starts from the five Camps supplied by the Navigation Snapshot', () => {
-    const state = navigationGroupPagination(Array.from({ length: 5 }, (_, index) => camp(index + 1)), 18)
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
 
-    expect(state.visibleCount).toBe(NAVIGATION_INITIAL_VISIBLE_CAMPS)
-    expect(state.serverOffset).toBe(5)
-    expect(state.camps).toHaveLength(5)
-    expect(navigationPaginationControls(state.visibleCount, 18)).toEqual({
-      showMore: true,
-      showCollapse: false
-    })
+function harness() {
+  let rows = Array.from({ length: 18 }, (_, index) => camp(index + 1))
+  let current: NavigationSnapshot | null = null
+  let limits: NavigationGroupLimits = {}
+  const read = vi.fn(async (request: NavigationSnapshotRequest) => snapshot(rows, request.groupLimits))
+  const commit = vi.fn((next: NavigationSnapshot, nextLimits: NavigationGroupLimits) => {
+    current = next
+    limits = nextLimits
+  })
+  const reader = createNavigationWindowReader(read, commit)
+  return {
+    reader, read, commit,
+    visibleRows: () => current?.projects[0].recentCamps.slice(0, limits['directory:/repo'] ?? 5) ?? [],
+    setRows: (next: NavigationCampItem[]) => { rows = next },
+    rows: () => rows,
+    markup: (pinned = false) => renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'compose', state: 'ready', navigation: current, groupLimits: limits,
+      activeCampId: null, pendingMemoryCount: 0,
+      pins: pinned ? [{ kind: 'project', targetKey: 'directory:/repo', pinnedAt: '' }] : [],
+      onGroupLimitChange: reader.resizeGroup,
+      onNewConversation() {}, onMembers() {}, onMemory() {}, onSettings() {}, onOpenProject() {},
+      onCamp() {}, onError() {}, async onRemoveProject() {}, async onRename() {}, async onDelete() {}
+    }))
+  }
+}
+
+afterEach(() => vi.useRealTimers())
+
+describe('authoritative Camp navigation windows', () => {
+  it('immediately reads the full prefix, keeping five visible until the sixth Camp is fresh', async () => {
+    const h = harness()
+    h.setRows(h.rows().map(row => ({ ...row, marker: 'loading' })))
+    await h.reader.refresh('explicit')
+    const next = deferred<NavigationSnapshot>()
+    h.read.mockImplementationOnce(() => next.promise)
+    h.setRows(h.rows().map(row => ({ ...row, marker: 'none' })))
+    const expanding = h.reader.resizeGroup('directory:/repo', 15)
+    expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 15 } })
+    expect(h.visibleRows()).toHaveLength(5)
+    next.resolve(snapshot(h.rows(), { 'directory:/repo': 15 }))
+    await expanding
+    expect(h.visibleRows()).toHaveLength(15)
+    expect(h.visibleRows()[5].marker).toBe('none')
+    expect(h.markup()).not.toContain('camp-marker-loading')
+    expect(h.markup(true)).toContain('对话 15')
+    h.reader.dispose()
   })
 
-  it('loads ten Camps at a time with monotonically increasing server offsets', async () => {
-    const requests: Array<{ offset: number; limit: number }> = []
-    let state = navigationGroupPagination(Array.from({ length: 5 }, (_, index) => camp(index + 1)), 18)
+  it('never resurrects loading when a notified terminal falls out of the recent five; polls replace all fields', async () => {
+    vi.useFakeTimers()
+    const h = harness()
+    h.setRows([camp(1, 'loading'), ...h.rows().slice(1)])
+    await h.reader.resizeGroup('directory:/repo', 15)
+    h.setRows(h.rows().map(row => ({ ...row, marker: 'unread_completed' })))
+    const notified = h.reader.refresh('invalidation')
+    await vi.advanceTimersByTimeAsync(80)
+    await notified
+    expect(h.visibleRows()[0].marker).toBe('unread_completed')
+    // Missed events: completion/read acknowledgements, rename, deletion and reorder.
+    h.setRows([
+      ...h.rows().slice(2, 8), { ...camp(1), title: '新的名称' }, ...h.rows().slice(8)
+    ].map(row => ({ ...row, marker: 'none' })))
+    const polled = h.reader.refresh('poll')
+    await vi.advanceTimersByTimeAsync(80)
+    await polled
+    expect(h.visibleRows()).toEqual(h.rows().slice(0, 15))
+    expect(h.visibleRows()[6]).toMatchObject({ id: 'camp-1', title: '新的名称', marker: 'none' })
+    expect(h.visibleRows().map(row => row.id)).not.toContain('camp-2')
+    expect(h.markup()).not.toMatch(/camp-marker-(loading|unread_completed)/)
+    h.reader.dispose()
+  })
 
-    state = await revealMoreNavigationCamps(state, 18, async (offset, limit) => {
-      requests.push({ offset, limit })
-      return page(Array.from({ length: 10 }, (_, index) => camp(index + 6)), 18, 15)
-    })
-    expect(requests).toEqual([{ offset: 5, limit: 10 }])
-    expect(state.visibleCount).toBe(15)
-    expect(state.camps).toHaveLength(15)
-    expect(navigationPaginationControls(state.visibleCount, 18)).toEqual({
-      showMore: true,
-      showCollapse: true
-    })
+  it('collapses immediately and re-reads every expansion, including Quick Chat and a short final window', async () => {
+    const h = harness()
+    await h.reader.resizeGroup('directory:/repo', 15)
+    await h.reader.resizeGroup('quick-chat', 15)
+    expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 15, 'quick-chat': 15 } })
+    const shrinking = h.reader.resizeGroup('directory:/repo', 5)
+    expect(h.visibleRows()).toHaveLength(5)
+    await shrinking
+    h.setRows(h.rows().map(row => ({ ...row, title: `新 ${row.title}` })))
+    const before = h.read.mock.calls.length
+    await h.reader.resizeGroup('directory:/repo', 15)
+    expect(h.read).toHaveBeenCalledTimes(before + 1)
+    expect(h.visibleRows()[5].title).toBe('新 对话 6')
+    await h.reader.resizeGroup('directory:/repo', 25)
+    expect(h.visibleRows()).toHaveLength(18)
+    expect(navigationPaginationControls(18, 18)).toEqual({ showMore: false, showCollapse: true })
+    h.reader.dispose()
+  })
 
-    state = await revealMoreNavigationCamps(state, 18, async (offset, limit) => {
-      requests.push({ offset, limit })
-      return page(Array.from({ length: 3 }, (_, index) => camp(index + 16)), 18, null)
-    })
-    expect(requests).toEqual([
-      { offset: 5, limit: 10 },
-      { offset: 15, limit: 10 }
+  it('fences an in-flight five-row response and drains the newest window before resolving', async () => {
+    const h = harness()
+    await h.reader.refresh('explicit')
+    const old = deferred<NavigationSnapshot>()
+    h.read.mockImplementationOnce(() => old.promise)
+    const refresh = h.reader.refresh('explicit')
+    const expanding = h.reader.resizeGroup('directory:/repo', 15)
+    expect(h.read).toHaveBeenCalledTimes(2)
+    old.resolve(snapshot(h.rows().map(row => ({ ...row, marker: 'loading' }))))
+    await Promise.all([refresh, expanding])
+    expect(h.commit).toHaveBeenCalledTimes(2)
+    expect(h.visibleRows()).toHaveLength(15)
+    expect(h.visibleRows().every(row => row.marker === 'none')).toBe(true)
+    h.reader.dispose()
+  })
+
+  it('fences a pending expansion after collapse, including obsolete failures', async () => {
+    for (const fail of [false, true]) {
+      const h = harness()
+      await h.reader.resizeGroup('directory:/repo', 15)
+      const old = deferred<NavigationSnapshot>()
+      h.read.mockImplementationOnce(() => old.promise)
+      const expanding = h.reader.resizeGroup('directory:/repo', 25)
+      const collapsing = h.reader.resizeGroup('directory:/repo', 5)
+      expect(h.visibleRows()).toHaveLength(5)
+      if (fail) old.reject(new Error('obsolete request failed'))
+      else old.resolve(snapshot(h.rows(), { 'directory:/repo': 25 }))
+      await Promise.all([expanding, collapsing])
+      expect(h.visibleRows()).toHaveLength(5)
+      expect(h.commit.mock.calls.every(([, limits]) => limits['directory:/repo'] !== 25)).toBe(true)
+      h.reader.dispose()
+    }
+  })
+
+  it('keeps the visible window on failure, retries freshness without surprise expansion, and allows manual retry', async () => {
+    vi.useFakeTimers()
+    const h = harness()
+    await h.reader.refresh('explicit')
+    h.read.mockRejectedValueOnce(new Error('temporary Core failure'))
+    await expect(h.reader.resizeGroup('directory:/repo', 15)).rejects.toThrow('temporary Core failure')
+    expect(h.visibleRows()).toHaveLength(5)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 5 } })
+    expect(h.visibleRows()).toHaveLength(5)
+    await h.reader.resizeGroup('directory:/repo', 15)
+    expect(h.visibleRows()).toHaveLength(15)
+    h.reader.dispose()
+  })
+
+  it('coalesces simultaneous groups and preserves their canonical windows on foreground refresh', async () => {
+    const h = harness()
+    await Promise.all([
+      h.reader.resizeGroup('directory:/repo', 15),
+      h.reader.resizeGroup('quick-chat', 15)
     ])
-    expect(state.visibleCount).toBe(18)
-    expect(navigationPaginationControls(state.visibleCount, 18)).toEqual({
-      showMore: false,
-      showCollapse: true
-    })
+    await h.reader.refresh('foreground')
+    expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 15, 'quick-chat': 15 } })
+    expect(h.markup(true)).toContain('对话 15')
+    expect(h.markup()).toContain('对话 15')
+    h.reader.dispose()
   })
 
-  it('deduplicates appended pages by Camp ID without disturbing the existing order', () => {
-    const merged = appendUniqueNavigationCamps(
-      [camp(1), camp(2), camp(3)],
-      [camp(3), camp(4), camp(2), camp(5)]
-    )
-    expect(merged.map((item) => item.id)).toEqual(['camp-1', 'camp-2', 'camp-3', 'camp-4', 'camp-5'])
+  it('does not commit a late response after disposal', async () => {
+    const h = harness()
+    const late = deferred<NavigationSnapshot>()
+    h.read.mockImplementationOnce(() => late.promise)
+    const loading = h.reader.refresh('explicit')
+    h.reader.dispose()
+    late.resolve(snapshot(h.rows()))
+    await loading
+    await Promise.resolve()
+    expect(h.commit).not.toHaveBeenCalled()
   })
 
-  it('collapses to five while retaining the cache and restores from it without another request', async () => {
-    const expanded = {
-      camps: Array.from({ length: 15 }, (_, index) => camp(index + 1)),
-      visibleCount: 15,
-      serverOffset: 15
-    }
-    const collapsed = collapseNavigationGroupPagination(expanded, 18)
-    let requested = false
-    const restored = await revealMoreNavigationCamps(collapsed, 18, async () => {
-      requested = true
-      throw new Error('The retained cache should satisfy this expansion')
-    })
-
-    expect(collapsed.visibleCount).toBe(5)
-    expect(collapsed.camps).toHaveLength(15)
-    expect(restored.visibleCount).toBe(15)
-    expect(requested).toBe(false)
-  })
-
-  it('leaves the existing state untouched when the next page request fails', async () => {
-    const state = navigationGroupPagination(Array.from({ length: 5 }, (_, index) => camp(index + 1)), 18)
-
-    await expect(revealMoreNavigationCamps(state, 18, async () => {
-      throw new Error('temporary Core failure')
-    })).rejects.toThrow('temporary Core failure')
-    expect(state).toEqual({
-      camps: Array.from({ length: 5 }, (_, index) => camp(index + 1)),
-      visibleCount: 5,
-      serverOffset: 5
-    })
-  })
-
-  it('evicts a deleted Camp from retained pages and rewinds the server offset', () => {
-    const state = {
-      camps: Array.from({ length: 15 }, (_, index) => camp(index + 1)),
-      visibleCount: 15,
-      serverOffset: 15
-    }
-    const next = removeNavigationCampFromPagination(state, 'camp-7')
-
-    expect(next.camps.map((item) => item.id)).not.toContain('camp-7')
-    expect(next.camps).toHaveLength(14)
-    expect(next.visibleCount).toBe(14)
-    expect(next.serverOffset).toBe(14)
-    expect(removeNavigationCampFromPagination(next, 'missing')).toBe(next)
-  })
-
-  it('uses the same pagination state shape for ordinary, pinned, and Quick Chat groups', () => {
-    const sharedState = navigationGroupPagination(Array.from({ length: 5 }, (_, index) => camp(index + 1)), 18)
-    const byCanonicalGroupKey = {
-      'directory:/repo': sharedState,
-      'quick-chat': sharedState
-    }
-
-    expect(byCanonicalGroupKey['directory:/repo']).toBe(sharedState)
-    expect(byCanonicalGroupKey['quick-chat']).toBe(sharedState)
-    expect(Object.keys(byCanonicalGroupKey)).not.toContain('pinned-directory:/repo')
-  })
-
-  it('selects the project before toggling the whole-row disclosure', () => {
+  it('selects before disclosure and shows only applicable pagination controls', () => {
     const calls: string[] = []
-    activateProjectNavigationRow(
-      () => calls.push('select'),
-      () => calls.push('toggle')
-    )
+    activateProjectNavigationRow(() => calls.push('select'), () => calls.push('toggle'))
     expect(calls).toEqual(['select', 'toggle'])
-  })
-
-  it('hides both controls when no more than five Camps exist', () => {
+    expect(navigationPaginationControls(5, 18)).toEqual({ showMore: true, showCollapse: false })
+    expect(navigationPaginationControls(15, 18)).toEqual({ showMore: true, showCollapse: true })
     expect(navigationPaginationControls(5, 5)).toEqual({ showMore: false, showCollapse: false })
     expect(navigationPaginationControls(0, 0)).toEqual({ showMore: false, showCollapse: false })
   })
