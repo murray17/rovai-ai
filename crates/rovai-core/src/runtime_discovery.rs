@@ -1868,7 +1868,10 @@ mod tests {
         let selected = configured.candidates(AdapterKind::CodexCli, [directory.join("override")]);
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].source, InstallationSource::Manual);
-        assert_eq!(selected[0].path, directory.join("manual/codex"));
+        assert_eq!(
+            selected[0].path,
+            directory.join("manual/codex").canonicalize().unwrap()
+        );
         fs::remove_file(directory.join("manual/codex")).unwrap();
         assert!(
             configured
