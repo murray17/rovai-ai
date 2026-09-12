@@ -1,5 +1,6 @@
 import { searchFileDocuments } from '../../../apps/desktop/src/renderer/src/file-find-client'
 import { EMPTY_FILE_FIND } from '../../../apps/desktop/src/renderer/src/file-find'
+import { EditorView } from '@codemirror/view'
 import { isFileFindTarget } from '../../../apps/desktop/src/renderer/src/FilePreviewFind'
 import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -663,6 +664,18 @@ Object.assign(window, { previewTest: {
     const scroller = element('.file-preview-tab-panel:not([hidden]) .cm-scroller')
     if (scroller) scroller.scrollTop = 480
     await settle()
+  },
+  sourceSelectionSnapshot() {
+    const content = element('.file-preview-tab-panel:not([hidden]) .cm-content')!
+    const view = EditorView.findFromDOM(content)!
+    const clipboard = new DataTransfer()
+    content.dispatchEvent(new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: clipboard }))
+    return {
+      complete: view.state.selection.main.from === 0 && view.state.selection.main.to === view.state.doc.length,
+      copied: clipboard.getData('text/plain'),
+      document: view.state.doc.toString(),
+      renderedLines: content.querySelectorAll('.cm-line').length
+    }
   },
   async sourceSnapshot(requireTarget = false) {
     const deadline = performance.now() + 3_000
