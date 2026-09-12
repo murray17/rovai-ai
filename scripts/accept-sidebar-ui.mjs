@@ -6,6 +6,8 @@ import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
+const acceptanceScope = process.env.ROVAI_SIDEBAR_ACCEPT_SCOPE ?? 'all'
+if (!['all', 'navigation-windows'].includes(acceptanceScope)) throw new Error('Unknown sidebar acceptance scope')
 const fixtureRoot = process.env.ROVAI_SIDEBAR_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-sidebar-ui-accept-'))
 const dataDir = join(fixtureRoot, 'user-data')
@@ -40,6 +42,7 @@ try {
   await assertLongTitleIsTruncated(desktopApp.cdp, fixture.longTitleCampId)
   await assertProjectRowAndPagination(desktopApp.cdp)
   await assertQuickChatPagination(desktopApp.cdp)
+  await assertExpandedWindowFreshness(desktopApp.cdp)
 
   const desktopCapture = join(outputDir, 'sidebar-day-1440x920.png')
   await capture(desktopApp.cdp, desktopCapture)
@@ -62,150 +65,172 @@ try {
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.navigation-projects')
   await assertProjectPaginationCount(desktopApp.cdp, '.navigation-projects', 15)
 
-  const campTarget = `camp:${fixture.actionCampId}`
-  await openMenuByKeyboard(desktopApp.cdp, campTarget)
-  await assertOpenMenu(desktopApp.cdp, campTarget, ['置顶', '重命名', '复制会话 ID', '删除'], 1, '置顶')
-  await pressKey(desktopApp.cdp, 'End')
-  await assertHighlightedItem(desktopApp.cdp, '删除')
-  await pressKey(desktopApp.cdp, 'Home')
-  await assertHighlightedItem(desktopApp.cdp, '置顶')
-  await pressKey(desktopApp.cdp, 'ArrowDown')
-  await assertHighlightedItem(desktopApp.cdp, '重命名')
-  await pressKey(desktopApp.cdp, 'ArrowDown')
-  await assertHighlightedItem(desktopApp.cdp, '复制会话 ID')
-  await pressKey(desktopApp.cdp, 'ArrowDown')
-  await assertHighlightedItem(desktopApp.cdp, '删除')
-  await pressKey(desktopApp.cdp, 'Escape')
-  await assertMenuClosedWithoutRefocus(desktopApp.cdp, campTarget)
-  await assertCampIdCopy(desktopApp.cdp, campTarget, fixture.actionCampId)
+  if (acceptanceScope === 'navigation-windows') {
+    await setTheme(desktopApp.cdp, 'night')
+    await capture(desktopApp.cdp, join(outputDir, 'navigation-windows-night.png'))
+    await closeApp(desktopApp)
+    desktopApp = null
+    compactApp = await launchApp(firstPort + 1, 1040, 700, true)
+    await setTheme(compactApp.cdp, 'night')
+    await assertSidebarContract(compactApp.cdp, '1040×700')
+    await assertProjectPaginationCount(compactApp.cdp, '.navigation-projects', 5)
+    await assertProjectRowAndPagination(compactApp.cdp)
+    await assertQuickChatPagination(compactApp.cdp)
+    await assertExpandedWindowFreshness(compactApp.cdp)
+    await capture(compactApp.cdp, join(outputDir, 'navigation-windows-compact.png'))
+    console.log(JSON.stringify({
+      ok: true, scope: acceptanceScope, fixtureRoot, outputDir,
+      verified: ['Core IPC full-prefix reads', 'five then fifteen rows', 'collapse and fresh reopen',
+        'eighth-row rename and delete replacement', 'Quick Chat', 'pinned Project migration',
+        'restart resets window to five', 'day/night and 1040×700', 'keyboard disclosure']
+    }, null, 2))
+  } else {
+    const campTarget = `camp:${fixture.actionCampId}`
+    await openMenuByKeyboard(desktopApp.cdp, campTarget)
+    await assertOpenMenu(desktopApp.cdp, campTarget, ['置顶', '重命名', '复制会话 ID', '删除'], 1, '置顶')
+    await pressKey(desktopApp.cdp, 'End')
+    await assertHighlightedItem(desktopApp.cdp, '删除')
+    await pressKey(desktopApp.cdp, 'Home')
+    await assertHighlightedItem(desktopApp.cdp, '置顶')
+    await pressKey(desktopApp.cdp, 'ArrowDown')
+    await assertHighlightedItem(desktopApp.cdp, '重命名')
+    await pressKey(desktopApp.cdp, 'ArrowDown')
+    await assertHighlightedItem(desktopApp.cdp, '复制会话 ID')
+    await pressKey(desktopApp.cdp, 'ArrowDown')
+    await assertHighlightedItem(desktopApp.cdp, '删除')
+    await pressKey(desktopApp.cdp, 'Escape')
+    await assertMenuClosedWithoutRefocus(desktopApp.cdp, campTarget)
+    await assertCampIdCopy(desktopApp.cdp, campTarget, fixture.actionCampId)
 
-  await openMenuByKeyboard(desktopApp.cdp, campTarget)
-  await pressKey(desktopApp.cdp, 'Enter')
-  await assertTargetMoved(desktopApp.cdp, campTarget, '.pinned-navigation')
-  await openMenuByKeyboard(desktopApp.cdp, campTarget)
-  await assertOpenMenu(desktopApp.cdp, campTarget, ['取消置顶', '重命名', '复制会话 ID', '删除'], 1, '取消置顶')
-  const pinnedCampMenuCapture = join(outputDir, 'camp-menu-pinned-day-1440x920.png')
-  await capture(desktopApp.cdp, pinnedCampMenuCapture)
-  await pressKey(desktopApp.cdp, 'Enter')
-  await assertTargetMoved(desktopApp.cdp, campTarget, '.navigation-projects')
+    await openMenuByKeyboard(desktopApp.cdp, campTarget)
+    await pressKey(desktopApp.cdp, 'Enter')
+    await assertTargetMoved(desktopApp.cdp, campTarget, '.pinned-navigation')
+    await openMenuByKeyboard(desktopApp.cdp, campTarget)
+    await assertOpenMenu(desktopApp.cdp, campTarget, ['取消置顶', '重命名', '复制会话 ID', '删除'], 1, '取消置顶')
+    const pinnedCampMenuCapture = join(outputDir, 'camp-menu-pinned-day-1440x920.png')
+    await capture(desktopApp.cdp, pinnedCampMenuCapture)
+    await pressKey(desktopApp.cdp, 'Enter')
+    await assertTargetMoved(desktopApp.cdp, campTarget, '.navigation-projects')
 
-  await renameCampFromMenu(desktopApp.cdp, campTarget)
-  await assertClickOutsideClosesMenu(desktopApp.cdp, campTarget)
+    await renameCampFromMenu(desktopApp.cdp, campTarget)
+    await assertClickOutsideClosesMenu(desktopApp.cdp, campTarget)
 
-  const deleteTarget = `camp:${fixture.deleteCampId}`
-  await openDeleteDialog(desktopApp.cdp, deleteTarget)
-  const deleteDialogCapture = join(outputDir, 'delete-dialog-day-1440x920.png')
-  await wait(200)
-  await capture(desktopApp.cdp, deleteDialogCapture)
-  await pressKey(desktopApp.cdp, 'Escape')
-  await waitForExpression(desktopApp.cdp, `!document.querySelector('.camp-action-dialog')`)
-  await assertNoTargetRefocus(desktopApp.cdp, deleteTarget)
-  await openDeleteDialog(desktopApp.cdp, deleteTarget)
-  await clickButton(desktopApp.cdp, '.camp-action-dialog .danger-button', '永久删除对话')
-  await waitForExpression(desktopApp.cdp, `(() => {
-    const target = ${JSON.stringify(deleteTarget)}
-    return ![...document.querySelectorAll('[data-sidebar-menu-target]')]
-      .some((element) => element.dataset.sidebarMenuTarget === target)
-      && !document.querySelector('.camp-action-dialog')
-  })()`, 15_000)
-  await assertHoverAndFocusVisibility(desktopApp.cdp, campTarget)
-  await assertQuestionMarkHelpHoverOnly(desktopApp.cdp)
+    const deleteTarget = `camp:${fixture.deleteCampId}`
+    await openDeleteDialog(desktopApp.cdp, deleteTarget)
+    const deleteDialogCapture = join(outputDir, 'delete-dialog-day-1440x920.png')
+    await wait(200)
+    await capture(desktopApp.cdp, deleteDialogCapture)
+    await pressKey(desktopApp.cdp, 'Escape')
+    await waitForExpression(desktopApp.cdp, `!document.querySelector('.camp-action-dialog')`)
+    await assertNoTargetRefocus(desktopApp.cdp, deleteTarget)
+    await openDeleteDialog(desktopApp.cdp, deleteTarget)
+    await clickButton(desktopApp.cdp, '.camp-action-dialog .danger-button', '永久删除对话')
+    await waitForExpression(desktopApp.cdp, `(() => {
+      const target = ${JSON.stringify(deleteTarget)}
+      return ![...document.querySelectorAll('[data-sidebar-menu-target]')]
+        .some((element) => element.dataset.sidebarMenuTarget === target)
+        && !document.querySelector('.camp-action-dialog')
+    })()`, 15_000)
+    await assertHoverAndFocusVisibility(desktopApp.cdp, campTarget)
+    await assertQuestionMarkHelpHoverOnly(desktopApp.cdp)
 
-  // Exercise removal only after all ordinary project/camp actions have run. Pin
-  // both the Project and a Camp first so the acceptance also proves removal
-  // clears local pins without touching Core-owned navigation data.
-  await openMenuByKeyboard(desktopApp.cdp, projectTarget)
-  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '重命名', '移除项目'], 1, '置顶项目')
-  await pressKey(desktopApp.cdp, 'Enter')
-  await assertTargetMoved(desktopApp.cdp, projectTarget, '.pinned-navigation')
-  await openMenuByKeyboard(desktopApp.cdp, campTarget)
-  await pressKey(desktopApp.cdp, 'Enter')
-  await assertTargetMoved(desktopApp.cdp, campTarget, '.pinned-navigation')
-  const projectRemoval = await removeAndRestoreProject(desktopApp.cdp, projectTarget, campTarget)
+    // Exercise removal only after all ordinary project/camp actions have run. Pin
+    // both the Project and a Camp first so the acceptance also proves removal
+    // clears local pins without touching Core-owned navigation data.
+    await openMenuByKeyboard(desktopApp.cdp, projectTarget)
+    await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '重命名', '移除项目'], 1, '置顶项目')
+    await pressKey(desktopApp.cdp, 'Enter')
+    await assertTargetMoved(desktopApp.cdp, projectTarget, '.pinned-navigation')
+    await openMenuByKeyboard(desktopApp.cdp, campTarget)
+    await pressKey(desktopApp.cdp, 'Enter')
+    await assertTargetMoved(desktopApp.cdp, campTarget, '.pinned-navigation')
+    const projectRemoval = await removeAndRestoreProject(desktopApp.cdp, projectTarget, campTarget)
 
-  await closeApp(desktopApp)
-  desktopApp = null
-  await wait(500)
+    await closeApp(desktopApp)
+    desktopApp = null
+    await wait(500)
 
-  compactApp = await launchApp(firstPort + 1, 1040, 700, true)
-  await setTheme(compactApp.cdp, 'night')
-  await compactApp.cdp.send('Emulation.setTouchEmulationEnabled', {
-    enabled: true,
-    maxTouchPoints: 1
-  })
-  await wait(100)
-  await assertRemovedProjectPersists(compactApp.cdp, projectRemoval.projectTarget)
-  await restoreRemovedProject(compactApp.cdp, projectRemoval.projectTarget)
-  await waitForExpression(compactApp.cdp, `(() => [...document.querySelectorAll('[data-sidebar-menu-target]')]
-    .some((element) => element.dataset.sidebarMenuTarget === ${JSON.stringify(projectRemoval.projectTarget)}))()`, 15_000)
-  await assertSidebarContract(compactApp.cdp, '1040×700')
-  await wait(2_500)
-  await assertCompactPointerAndMotion(compactApp.cdp)
-  await assertLongTitleIsTruncated(compactApp.cdp, fixture.longTitleCampId)
+    compactApp = await launchApp(firstPort + 1, 1040, 700, true)
+    await setTheme(compactApp.cdp, 'night')
+    await compactApp.cdp.send('Emulation.setTouchEmulationEnabled', {
+      enabled: true,
+      maxTouchPoints: 1
+    })
+    await wait(100)
+    await assertRemovedProjectPersists(compactApp.cdp, projectRemoval.projectTarget)
+    await restoreRemovedProject(compactApp.cdp, projectRemoval.projectTarget)
+    await waitForExpression(compactApp.cdp, `(() => [...document.querySelectorAll('[data-sidebar-menu-target]')]
+      .some((element) => element.dataset.sidebarMenuTarget === ${JSON.stringify(projectRemoval.projectTarget)}))()`, 15_000)
+    await assertSidebarContract(compactApp.cdp, '1040×700')
+    await wait(2_500)
+    await assertCompactPointerAndMotion(compactApp.cdp)
+    await assertLongTitleIsTruncated(compactApp.cdp, fixture.longTitleCampId)
 
-  const compactTarget = `camp:${fixture.compactCampId}`
-  await evaluate(compactApp.cdp, `(() => {
-    const target = ${JSON.stringify(compactTarget)}
-    const trigger = [...document.querySelectorAll('[data-sidebar-menu-target]')]
-      .find((element) => element.dataset.sidebarMenuTarget === target)
-    trigger?.scrollIntoView({ block: 'end' })
-    return Boolean(trigger)
-  })()`)
-  await openMenuByKeyboard(compactApp.cdp, compactTarget)
-  await assertOpenMenu(compactApp.cdp, compactTarget, ['置顶', '重命名', '复制会话 ID', '删除'], 1, '置顶')
-  const compactMenuCapture = join(outputDir, 'camp-menu-compact-1040x700-reduced-motion.png')
-  await capture(compactApp.cdp, compactMenuCapture)
-  await pressKey(compactApp.cdp, 'Escape')
-  await assertMenuClosedWithoutRefocus(compactApp.cdp, compactTarget)
+    const compactTarget = `camp:${fixture.compactCampId}`
+    await evaluate(compactApp.cdp, `(() => {
+      const target = ${JSON.stringify(compactTarget)}
+      const trigger = [...document.querySelectorAll('[data-sidebar-menu-target]')]
+        .find((element) => element.dataset.sidebarMenuTarget === target)
+      trigger?.scrollIntoView({ block: 'end' })
+      return Boolean(trigger)
+    })()`)
+    await openMenuByKeyboard(compactApp.cdp, compactTarget)
+    await assertOpenMenu(compactApp.cdp, compactTarget, ['置顶', '重命名', '复制会话 ID', '删除'], 1, '置顶')
+    const compactMenuCapture = join(outputDir, 'camp-menu-compact-1040x700-reduced-motion.png')
+    await capture(compactApp.cdp, compactMenuCapture)
+    await pressKey(compactApp.cdp, 'Escape')
+    await assertMenuClosedWithoutRefocus(compactApp.cdp, compactTarget)
 
-  const persistedPins = await evaluate(
-    compactApp.cdp,
-    'window.rovai.navigationPreferences.get()',
-    true
-  )
-  assert(persistedPins.pins.length === 0,
-    `Pin/unpin acceptance left unexpected persisted pins: ${JSON.stringify(persistedPins)}`)
+    const persistedPins = await evaluate(
+      compactApp.cdp,
+      'window.rovai.navigationPreferences.get()',
+      true
+    )
+    assert(persistedPins.pins.length === 0,
+      `Pin/unpin acceptance left unexpected persisted pins: ${JSON.stringify(persistedPins)}`)
 
-  console.log(JSON.stringify({
-    ok: true,
-    app: basename(appPath),
-    fixtureRoot,
-    outputDir,
-    verified: {
-      packagedRendererToCoreIpc: true,
-      campAndProjectMenus: true,
-      quickChatProjectMenuAbsent: true,
-      projectAndPaginationCountsHidden: true,
-      projectRowSelectsAndTogglesDisclosure: true,
-      fiveThenTenCampPagination: true,
-      paginationCacheSurvivesCollapseAndPinMigration: true,
-      projectAndCampActionsHiddenUntilHoverOrFocus: true,
-      hoverFocusOpenAndCoarsePointerVisibility: true,
-      questionMarkHelpIsHoverOnly: true,
-      arrowHomeEndEscapeAndOutsideClick: true,
-      copiesExactCampId: true,
-      projectAndCampPinMigrationWithFocus: true,
-      projectRemoveConfirmationAndRestore: true,
-      projectRemovalPreservesCoreData: projectRemoval.coreDataPreserved,
-      projectRemovalPersistsAcrossRestart: true,
-      renameAndDeleteDialogs: true,
-      permanentDelete: true,
-      restartPersistence: true,
-      menuViewportCollision: true,
-      longTitleTruncation: true,
-      reducedMotion: true,
-      dayAndNightPreferencesResolveWithoutLayoutDrift: true,
-      desktopAndCompactHorizontalOverflow: false
-    },
-    captures: {
-      desktop: desktopCapture,
-      projectMenu: projectMenuCapture,
-      pinnedCampMenu: pinnedCampMenuCapture,
-      deleteDialog: deleteDialogCapture,
-      projectRemovalDialog: projectRemoval.dialogCapture,
-      compactMenu: compactMenuCapture
-    }
-  }, null, 2))
+    console.log(JSON.stringify({
+      ok: true,
+      app: basename(appPath),
+      fixtureRoot,
+      outputDir,
+      verified: {
+        packagedRendererToCoreIpc: true,
+        campAndProjectMenus: true,
+        quickChatProjectMenuAbsent: true,
+        projectAndPaginationCountsHidden: true,
+        projectRowSelectsAndTogglesDisclosure: true,
+        fiveThenTenCampPagination: true,
+        paginationWindowSurvivesCollapseAndPinMigration: true,
+        expandedWindowRenameDeleteAndReopenFreshness: true,
+        projectAndCampActionsHiddenUntilHoverOrFocus: true,
+        hoverFocusOpenAndCoarsePointerVisibility: true,
+        questionMarkHelpIsHoverOnly: true,
+        arrowHomeEndEscapeAndOutsideClick: true,
+        copiesExactCampId: true,
+        projectAndCampPinMigrationWithFocus: true,
+        projectRemoveConfirmationAndRestore: true,
+        projectRemovalPreservesCoreData: projectRemoval.coreDataPreserved,
+        projectRemovalPersistsAcrossRestart: true,
+        renameAndDeleteDialogs: true,
+        permanentDelete: true,
+        restartPersistence: true,
+        menuViewportCollision: true,
+        longTitleTruncation: true,
+        reducedMotion: true,
+        dayAndNightPreferencesResolveWithoutLayoutDrift: true,
+        desktopAndCompactHorizontalOverflow: false
+      },
+      captures: {
+        desktop: desktopCapture,
+        projectMenu: projectMenuCapture,
+        pinnedCampMenu: pinnedCampMenuCapture,
+        deleteDialog: deleteDialogCapture,
+        projectRemovalDialog: projectRemoval.dialogCapture,
+        compactMenu: compactMenuCapture
+      }
+    }, null, 2))
+  }
 } finally {
   if (desktopApp) await closeApp(desktopApp)
   if (compactApp) await closeApp(compactApp)
@@ -705,10 +730,18 @@ async function assertProjectRowAndPagination(cdp) {
   await pressKey(cdp, 'Escape')
   await waitForExpression(cdp, `!document.querySelector('.new-camp-dialog')`)
 
+  await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-select-row')?.focus()`)
+  await pressKey(cdp, 'ArrowDown')
   const keyboardFocused = await evaluate(cdp, `(() => {
     const row = document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-select-row')
-    row?.focus()
-    return document.activeElement === row && getComputedStyle(row).outlineStyle !== 'none'
+    const heading = row?.closest('.project-heading-row')
+    const menu = heading?.querySelector('.group-menu-trigger')
+    const create = heading?.querySelector('.group-create-button')
+    // Current rail feedback is :focus-visible action reveal; global CSS intentionally
+    // removes the browser outline. Assert the actual visible keyboard affordance.
+    return document.activeElement === row && row.matches(':focus-visible')
+      && menu && Number(getComputedStyle(menu).opacity) > 0.95
+      && create && Number(getComputedStyle(create).opacity) > 0.95
   })()`)
   assert(keyboardFocused, 'Project select control did not expose a visible keyboard focus target')
   await pressKey(cdp, 'Enter')
@@ -737,6 +770,44 @@ async function assertQuickChatPagination(cdp) {
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
   await clickProjectControl(cdp, selector, '.show-more-camps')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+}
+
+async function assertExpandedWindowFreshness(cdp) {
+  const selector = '.navigation-projects .camp-nav-group:not([data-group="quick-chat"])'
+  const projectKey = await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.dataset.group`)
+  const latest = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
+  const group = latest.projects.find(project => project.projectKey === projectKey)
+  assert(group?.recentCamps.length === 15, 'Core did not return the requested authoritative prefix')
+  const target = group.recentCamps[7]
+  const targetSelector = `[data-sidebar-menu-target="camp:${target.id}"]`
+  const titleIs = title => `document.querySelector(${JSON.stringify(targetSelector)})?.closest('.camp-nav-row')?.textContent.includes(${JSON.stringify(title)})`
+  const rename = async (title, version) => {
+    const result = await request(cdp, 'camps.rename', {
+      commandId: crypto.randomUUID(),
+      command: { campId: target.id, title, expectedVersion: version }
+    })
+    assert(result.status === 'applied', `Fixture rename failed: ${JSON.stringify(result)}`)
+  }
+  // This mutation runs through Core IPC, not the App's explicit rename follow-up.
+  // The normal invalidation reader must refresh the eighth visible row.
+  await rename('已展开窗口的最新标题', target.version)
+  await waitForExpression(cdp, titleIs('已展开窗口的最新标题'))
+  await clickProjectControl(cdp, selector, '.collapse-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
+  const refreshed = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
+  const renamed = refreshed.projects.find(project => project.projectKey === projectKey).recentCamps.find(camp => camp.id === target.id)
+  await rename('收起期间更新后重新展开', renamed.version)
+  await clickProjectControl(cdp, selector, '.show-more-camps')
+  await waitForExpression(cdp, titleIs('收起期间更新后重新展开'))
+  const beforeDelete = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
+  const current = beforeDelete.projects.find(project => project.projectKey === projectKey).recentCamps.find(camp => camp.id === target.id)
+  const deleted = await request(cdp, 'camps.delete', {
+    commandId: crypto.randomUUID(),
+    command: { campId: target.id, expectedVersion: current.version, force: true }
+  })
+  assert(deleted.status === 'applied', `Fixture delete failed: ${JSON.stringify(deleted)}`)
+  await waitForExpression(cdp, `!document.querySelector(${JSON.stringify(targetSelector)})
+    && document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
 }
 
 async function projectPaginationState(cdp, selector) {
@@ -1313,6 +1384,7 @@ async function launchApp(port, width, height, reducedMotion) {
     cdp = await connectCdp(target.webSocketDebuggerUrl)
     await cdp.send('Page.enable')
     await cdp.send('Page.bringToFront')
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width,
       height,
@@ -1327,6 +1399,11 @@ async function launchApp(port, width, height, reducedMotion) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    // The first app-shell is intentionally visible before authoritative Core admission.
+    // Do not issue fixture RPCs against the bootstrap-only shell.
+    await waitForExpression(cdp,
+      `window.rovai.supervisor.getSnapshot().then(snapshot => snapshot.fullCoreState === 'ready')`,
+      45_000, true)
     await evaluate(cdp, `(() => {
       const style = document.createElement('style')
       style.dataset.sidebarAcceptance = 'deterministic-hover'

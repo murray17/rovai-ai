@@ -33,7 +33,7 @@ pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
-pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 6;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 7;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -916,10 +916,18 @@ impl ReadModelService {
     }
 
     pub fn navigation_snapshot(&self, database: &mut Database) -> Result<NavigationSnapshot> {
+        self.navigation_snapshot_with_group_limits(database, &BTreeMap::new())
+    }
+
+    pub fn navigation_snapshot_with_group_limits(
+        &self,
+        database: &mut Database,
+        group_limits: &BTreeMap<String, usize>,
+    ) -> Result<NavigationSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camps = load_navigation_camps(&transaction)?;
-        let (quick_chat, projects) = group_navigation_camps(camps);
+        let (quick_chat, projects) = group_navigation_camps(camps, group_limits);
         transaction.commit()?;
         Ok(NavigationSnapshot {
             schema_version: NAVIGATION_SCHEMA_VERSION,
@@ -1086,7 +1094,8 @@ impl ReadModelService {
             load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
         let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
         let agent_runs = load_agent_runs(&transaction, camp_id, Some(CAMP_OPEN_AGENT_RUN_LIMIT))?;
-        let mut execution_evidence = load_execution_evidence(&transaction, camp_id, None, true)?;
+        // Execution content is requested only by an opened, visible Run surface.
+        let execution_evidence = Vec::new();
         let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
         let agent_run_images = list_camp_images(&transaction, camp_id)?;
         let approvals =
@@ -1107,7 +1116,6 @@ impl ReadModelService {
             approvals: collection_coverage(approvals.len(), counts.pending_approvals),
         };
         transaction.commit()?;
-        crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(CampOpenProjection {
             schema_version: CAMP_OPEN_SCHEMA_VERSION,
             through_global_sequence,
@@ -1776,7 +1784,16 @@ fn compare_navigation_camps(left: &NavigationCampItem, right: &NavigationCampIte
 
 fn group_navigation_camps(
     camps: Vec<NavigationCampItem>,
+    group_limits: &BTreeMap<String, usize>,
 ) -> (NavigationCampGroup, Vec<ProjectNavigationGroup>) {
+    // A request only selects a prefix of existing rows; it never determines an allocation size.
+    let limit = |key: &str| {
+        group_limits
+            .get(key)
+            .copied()
+            .unwrap_or(NAVIGATION_RECENT_CAMP_LIMIT)
+            .max(NAVIGATION_RECENT_CAMP_LIMIT)
+    };
     let mut quick_chat_camps = Vec::new();
     let mut project_camps = BTreeMap::<String, Vec<NavigationCampItem>>::new();
     for camp in camps {
@@ -1794,7 +1811,7 @@ fn group_navigation_camps(
         total_count: quick_chat_camps.len(),
         recent_camps: quick_chat_camps
             .into_iter()
-            .take(NAVIGATION_RECENT_CAMP_LIMIT)
+            .take(limit("quick-chat"))
             .collect(),
     };
 
@@ -1803,17 +1820,16 @@ fn group_navigation_camps(
         .filter_map(|(project_path, mut camps)| {
             camps.sort_by(compare_navigation_camps);
             let representative = camps.first()?.clone();
+            let project_key = format!("directory:{project_path}");
+            let recent_limit = limit(&project_key);
             Some(ProjectNavigationGroup {
-                project_key: format!("directory:{project_path}"),
+                project_key,
                 name: project_display_name(&project_path),
                 project_path,
                 last_activity_at: representative.last_activity_at.clone(),
                 last_activity_global_sequence: representative.last_activity_global_sequence,
                 total_count: camps.len(),
-                recent_camps: camps
-                    .into_iter()
-                    .take(NAVIGATION_RECENT_CAMP_LIMIT)
-                    .collect(),
+                recent_camps: camps.into_iter().take(recent_limit).collect(),
             })
         })
         .collect::<Vec<_>>();
@@ -3164,7 +3180,7 @@ pub(crate) fn public_execution_evidence_for_agent_run(
     Ok(evidence)
 }
 
-type ExecutionEvidenceRow = (
+pub(crate) type ExecutionEvidenceRow = (
     String,
     String,
     i64,
@@ -3179,7 +3195,9 @@ type ExecutionEvidenceRow = (
     String,
 );
 
-fn execution_evidence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExecutionEvidenceRow> {
+pub(crate) fn execution_evidence_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ExecutionEvidenceRow> {
     Ok((
         row.get(0)?,
         row.get(1)?,
@@ -3196,7 +3214,9 @@ fn execution_evidence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Execution
     ))
 }
 
-fn execution_evidence_view(row: ExecutionEvidenceRow) -> Result<AgentRunExecutionEvidenceView> {
+pub(crate) fn execution_evidence_view(
+    row: ExecutionEvidenceRow,
+) -> Result<AgentRunExecutionEvidenceView> {
     let (
         id,
         agent_run_id,
@@ -3229,7 +3249,7 @@ fn execution_evidence_view(row: ExecutionEvidenceRow) -> Result<AgentRunExecutio
     })
 }
 
-fn attach_canonical_activity(
+pub(crate) fn attach_canonical_activity(
     connection: &Connection,
     evidence: &mut [AgentRunExecutionEvidenceView],
 ) -> Result<()> {
@@ -3243,12 +3263,20 @@ fn attach_canonical_activity(
     let requested_json = serde_json::to_string(&requested)?;
     let mut statement = connection.prepare(
         r#"
-        WITH requested AS (
+        WITH requested AS MATERIALIZED (
             SELECT
                 CAST(json_extract(value, '$[0]') AS TEXT) AS evidence_id,
                 CAST(json_extract(value, '$[1]') AS TEXT) AS agent_run_id,
                 CAST(json_extract(value, '$[2]') AS INTEGER) AS execution_epoch
             FROM json_each(?1)
+        ), candidates AS MATERIALIZED (
+            SELECT source.value AS requested_evidence_id, activity.*
+            FROM (SELECT DISTINCT agent_run_id, execution_epoch FROM requested) AS target
+            JOIN canonical_runtime_activity AS activity
+              ON activity.agent_run_id = target.agent_run_id
+             AND activity.execution_epoch = target.execution_epoch
+            JOIN json_each(activity.source_evidence_ids_json) AS source
+            WHERE activity.classifier_version IN (?2, ?3, ?4, ?5)
         )
         SELECT requested.evidence_id,
                activity.operation_id, activity.classifier_version,
@@ -3261,15 +3289,10 @@ fn attach_canonical_activity(
                activity.first_evidence_sequence,
                activity.last_evidence_sequence, activity.revision
         FROM requested
-        JOIN canonical_runtime_activity AS activity
+        JOIN candidates AS activity
           ON activity.agent_run_id = requested.agent_run_id
          AND activity.execution_epoch = requested.execution_epoch
-         AND activity.classifier_version IN (?2, ?3, ?4, ?5)
-        WHERE EXISTS (
-            SELECT 1
-            FROM json_each(activity.source_evidence_ids_json) AS source_evidence
-            WHERE source_evidence.value = requested.evidence_id
-        )
+         AND activity.requested_evidence_id = requested.evidence_id
         ORDER BY requested.evidence_id,
                  CASE activity.classifier_version
                    WHEN ?2 THEN 0
@@ -4943,7 +4966,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn navigation_groups_camps_and_limits_each_recent_section_to_five() {
+    fn navigation_groups_camps_and_reads_requested_prefixes_with_default_five() {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-groups-test-{}", Uuid::new_v4()));
         let quick_chat_root = directory.join("quick-chat");
@@ -4960,7 +4983,7 @@ mod slow_tests {
                 &format!("快速对话 {index}"),
             );
         }
-        for index in 0..2 {
+        for index in 0..6 {
             create_navigation_camp(
                 &mut database,
                 &collaboration,
@@ -4978,8 +5001,8 @@ mod slow_tests {
         assert_eq!(snapshot.quick_chat.recent_camps.len(), 5);
         assert_eq!(snapshot.projects.len(), 1);
         assert_eq!(snapshot.projects[0].name, "rovai-ai");
-        assert_eq!(snapshot.projects[0].total_count, 2);
-        assert_eq!(snapshot.projects[0].recent_camps.len(), 2);
+        assert_eq!(snapshot.projects[0].total_count, 6);
+        assert_eq!(snapshot.projects[0].recent_camps.len(), 5);
         assert!(
             snapshot
                 .quick_chat
@@ -5013,6 +5036,39 @@ mod slow_tests {
             .unwrap();
         assert_eq!(final_page.camps.len(), 1);
         assert_eq!(final_page.next_offset, None);
+
+        // Existing transaction fixture owns default, independent group selection,
+        // minimum and oversized prefix contracts; no parallel database fixture.
+        for (quick_limit, project_limit, expected_quick, expected_project) in
+            [(0, 0, 5, 5), (15, 5, 6, 5), (5, 15, 5, 6), (25, 25, 6, 6)]
+        {
+            let expanded = read_model
+                .navigation_snapshot_with_group_limits(
+                    &mut database,
+                    &BTreeMap::from([
+                        ("quick-chat".to_string(), quick_limit),
+                        (snapshot.projects[0].project_key.clone(), project_limit),
+                        ("directory:/unknown".to_string(), usize::MAX),
+                    ]),
+                )
+                .unwrap();
+            assert_eq!(
+                expanded.through_global_sequence,
+                snapshot.through_global_sequence
+            );
+            assert_eq!(expanded.quick_chat.recent_camps.len(), expected_quick);
+            assert_eq!(expanded.projects[0].recent_camps.len(), expected_project);
+            assert_eq!(expanded.projects.len(), 1);
+            for (actual, expected) in expanded.quick_chat.recent_camps.iter().zip(
+                read_model
+                    .navigation_group_camps(&mut database, None, 0, 200)
+                    .unwrap()
+                    .camps,
+            ) {
+                assert_eq!(actual.id, expected.id);
+                assert_eq!(actual.marker, expected.marker);
+            }
+        }
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -5327,6 +5383,10 @@ mod slow_tests {
                 )
                 .unwrap();
         }
+        database.connection().execute(
+            "UPDATE agent_run_execution_evidence SET event_type = 'activity.started', kind = 'command', phase = 'started', payload_preview_json = ?1 WHERE id = 'evidence-3'",
+            [json!({"item": {"id": "command-1", "type": "commandExecution", "command": "TOKEN=fixture-value cargo test", "status": "inProgress"}}).to_string()],
+        ).unwrap();
         database
             .connection()
             .execute(
@@ -5348,7 +5408,8 @@ mod slow_tests {
                         "item": {
                             "id": "command-1",
                             "type": "commandExecution",
-                            "status": "completed"
+                            "status": "completed",
+                            "aggregatedOutput": "fixture output must load only on expansion"
                         }
                     })
                     .to_string(),
@@ -5428,7 +5489,10 @@ mod slow_tests {
         assert!(!second.has_more);
         assert_eq!(second.next_after_sequence, 4);
         assert_eq!(second.evidence.len(), 2);
-        assert_eq!(second.evidence[0].payload["delta"], "片段3");
+        assert_eq!(
+            second.evidence[0].payload["item"]["command"],
+            "TOKEN=fixture-value cargo test"
+        );
         assert_eq!(
             second.evidence[0]
                 .canonical
@@ -5452,6 +5516,55 @@ mod slow_tests {
                     0,
                     2,
                 )
+                .is_err()
+        );
+
+        let latest =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, None, 1)
+                .unwrap();
+        assert_eq!(latest.evidence.len(), 1);
+        assert_eq!(latest.evidence[0].sequence, 3);
+        assert_eq!(latest.evidence[0].id, "evidence-4");
+        assert_eq!(
+            latest.evidence[0].payload["item"]["command"],
+            "TOKEN=fixture-value cargo test"
+        );
+        assert!(
+            latest.evidence[0].payload["item"]
+                .get("aggregatedOutput")
+                .is_none()
+        );
+        assert!(latest.evidence[0].is_truncated);
+        assert_eq!(latest.next_before_sequence, Some(3));
+        let older = crate::execution_window::read_page(
+            &mut database,
+            camp_id,
+            agent_run_id,
+            latest.next_before_sequence,
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            older
+                .evidence
+                .iter()
+                .map(|item| item.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(!older.has_more);
+        assert!(
+            crate::execution_window::read_page(
+                &mut database,
+                "another-camp",
+                agent_run_id,
+                None,
+                1
+            )
+            .is_err()
+        );
+        assert!(
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(0), 1)
                 .is_err()
         );
 
@@ -5489,12 +5602,30 @@ mod slow_tests {
         let open = read_model
             .camp_open_projection(&mut database, camp_id)
             .unwrap();
-        assert_eq!(open.execution_evidence.len(), 85);
-        assert_eq!(open.execution_evidence.first().unwrap().sequence, 1);
-        assert_eq!(open.execution_evidence.last().unwrap().sequence, 85);
-        assert_eq!(open.coverage.execution_evidence.loaded_count, 85);
+        assert!(open.execution_evidence.is_empty());
+        assert_eq!(open.coverage.execution_evidence.loaded_count, 0);
         assert_eq!(open.coverage.execution_evidence.total_count, 85);
-        assert!(open.coverage.execution_evidence.complete);
+        assert!(!open.coverage.execution_evidence.complete);
+        database.connection().execute("UPDATE canonical_runtime_activity SET phase = 'started', outcome = 'unsettled' WHERE operation_id = 'operation-command-1'", []).unwrap();
+        let pinned =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, None, 2)
+                .unwrap();
+        assert_eq!(
+            pinned
+                .evidence
+                .iter()
+                .map(|item| item.sequence)
+                .collect::<Vec<_>>(),
+            vec![84, 85]
+        );
+        assert_eq!(pinned.next_before_sequence, Some(84));
+        assert_eq!(pinned.active_evidence.len(), 1);
+        assert_eq!(pinned.active_evidence[0].sequence, 3);
+        database.connection().execute("UPDATE canonical_runtime_activity SET phase = 'terminal', outcome = 'succeeded' WHERE operation_id = 'operation-command-1'", []).unwrap();
+        let settled =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, None, 2)
+                .unwrap();
+        assert!(settled.active_evidence.is_empty());
 
         database
             .connection()
@@ -5537,6 +5668,85 @@ mod slow_tests {
                 .all(|evidence| evidence.event_type != "runtime.compaction.display")
         );
         transaction.commit().unwrap();
+
+        // A CLI carrier and its Core operation may straddle a page boundary.
+        // Exact result association travels as metadata, without either output body.
+        let response = json!({"taskId": "fixture-task", "title": "fixture"});
+        for (id, sequence, event_type, payload) in [
+            (
+                "carrier-start",
+                90,
+                "activity.started",
+                json!({"item": {"id": "carrier", "type": "commandExecution", "command": "rovai task get --task-id fixture-task --json", "status": "inProgress"}}),
+            ),
+            (
+                "core-get",
+                91,
+                "runtime.action",
+                json!({"canonicalTool": "team.get_task", "sourceAuthority": "core", "coreEnvelope": {"ok": true, "operation": "team.get_task", "result": response}}),
+            ),
+            (
+                "carrier-end",
+                94,
+                "activity.completed",
+                json!({"item": {"id": "carrier", "type": "commandExecution", "status": "completed", "aggregatedOutput": response.to_string()}}),
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, ?4, 'command', 'completed', ?5, 100, 0, ?6)",
+                params![id, agent_run_id, sequence, event_type, payload.to_string(), now],
+            ).unwrap();
+        }
+        for (id, domain, authority, credibility, sources, first, last) in [
+            (
+                "carrier",
+                "shell",
+                "runtime",
+                "runtime_structured",
+                "[\"carrier-start\",\"carrier-end\"]",
+                90,
+                94,
+            ),
+            (
+                "core-get",
+                "tool",
+                "core",
+                "core_verified",
+                "[\"core-get\"]",
+                91,
+                91,
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?8, 1, ?9, ?9)",
+                params![agent_run_id, id, domain, credibility, authority, sources, first, last, now],
+            ).unwrap();
+        }
+        let carrier =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(91), 1)
+                .unwrap();
+        assert_eq!(carrier.evidence[0].sequence, 90);
+        assert_eq!(
+            carrier.evidence[0].payload["executionWindowBuiltinOperation"],
+            "team.get_task"
+        );
+        assert!(
+            carrier.evidence[0].payload["item"]
+                .get("aggregatedOutput")
+                .is_none()
+        );
+        database.connection().execute("UPDATE agent_run_execution_evidence SET payload_preview_json = json_set(payload_preview_json, '$.coreEnvelope.result.title', 'different') WHERE id = 'core-get'", []).unwrap();
+        let distinct =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(91), 1)
+                .unwrap();
+        assert!(
+            distinct.evidence[0]
+                .payload
+                .get("executionWindowBuiltinOperation")
+                .is_none()
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

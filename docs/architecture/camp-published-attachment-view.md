@@ -127,7 +127,7 @@ security/redaction framework.
 - [Camp Attachment v9](../contracts/camp-attachment-v9.md)
 - [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)
 - [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)
-- [Camp Open Projection v17](../contracts/camp-open-projection-v17.md)
+- [Camp Open Projection v18](../contracts/camp-open-projection-v18.md)
 - [File Preview v5](../contracts/file-preview-v5.md)
 - [Camp Published Attachment View v4](../contracts/camp-published-attachment-view-v4.md)
 - [V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)

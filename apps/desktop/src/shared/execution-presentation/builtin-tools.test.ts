@@ -112,19 +112,19 @@ describe('Built-in input presentation', () => {
 
 describe('Rovai Shell carrier presentation', () => {
   it.each([
-    ["rovai send --public-only --body 'message with spaces'", 'rovai send --public-only'],
-    ['rovai send --body="message" --to agent-5', 'rovai send --to agent-5'],
-    ["env KEY=value npx --yes rovai gather --body 'message' --to agent-5", 'env KEY=value npx --yes rovai gather --to agent-5'],
-    ["rovai send 'message' --input-file /tmp/request.json", 'rovai send --input-file /tmp/request.json'],
-    ["rovai send --body 'line one\nline two' && git status", 'rovai send && git status'],
-    ["rovai send <<'JSON'\n{\"body\":\"message\",\"publicOnly\":true}\nJSON", 'rovai send'],
-    ["git status && rovai send <<'JSON'\n{\"body\":\"message\"}\nJSON\npwd", 'git status && rovai send ; pwd'],
-    ["rovai task get <<JSON && git status\n{\"taskId\":\"task-1\"}\nJSON", 'rovai task get && git status'],
-    ["rovai send <<-'JSON'\n\t{\"body\":\"message\"}\n\tJSON", 'rovai send'],
-    ["rovai send <<'JSON'\n{\"body\":\"unfinished\"}", 'rovai send'],
-    ["rovai send <<< '{\"body\":\"message\"}' && pwd", 'rovai send && pwd'],
-    ["printf '%s' 'independent' && rovai send --body 'message'", "printf '%s' 'independent' && rovai send"]
-  ])('omits the complete message/input carrier: %s', (command, expected) => {
+    ["rovai send --public-only --body 'message with spaces'", "rovai send --public-only --body 'message with spaces'"],
+    ['rovai send --body="message" --to agent-5', 'rovai send --body="message" --to agent-5'],
+    ["env KEY=value npx --yes rovai gather --body 'message' --to agent-5", "env KEY=value npx --yes rovai gather --body 'message' --to agent-5"],
+    ["rovai send 'message' --input-file /tmp/request.json", "rovai send 'message' --input-file /tmp/request.json"],
+    ["rovai send --body 'line one\nline two' && git status", "rovai send --body 'line one line two' && git status"],
+    ["rovai send <<'JSON'\n{\"body\":\"message\",\"publicOnly\":true}\nJSON", "rovai send <<'JSON' ; {\"body\":\"message\",\"publicOnly\":true} ; JSON"],
+    ["git status && rovai send <<'JSON'\n{\"body\":\"message\"}\nJSON\npwd", "git status && rovai send <<'JSON' ; {\"body\":\"message\"} ; JSON ; pwd"],
+    ["rovai task get <<JSON && git status\n{\"taskId\":\"task-1\"}\nJSON", "rovai task get <<JSON && git status ; {\"taskId\":\"task-1\"} ; JSON"],
+    ["rovai send <<-'JSON'\n\t{\"body\":\"message\"}\n\tJSON", "rovai send <<-'JSON' ; {\"body\":\"message\"} ; JSON"],
+    ["rovai send <<'JSON'\n{\"body\":\"unfinished\"}", "rovai send <<'JSON' ; {\"body\":\"unfinished\"}"],
+    ["rovai send <<< '{\"body\":\"message\"}' && pwd", "rovai send <<< '{\"body\":\"message\"}' && pwd"],
+    ["printf '%s' 'independent' && rovai send --body 'message'", "printf '%s' 'independent' && rovai send --body 'message'"]
+  ])('preserves the complete message/input carrier: %s', (command, expected) => {
     const [step] = steps([shell(command)])
     expect(executionStepPublicTitle(step)).toBe(expected)
     expect(step.detail.split('\n')[0]).toBe(`$ ${expected}`)
@@ -143,6 +143,11 @@ describe('Rovai Shell carrier presentation', () => {
     const task = { taskId: 'task-1', title: 'Task', status: 'open', assigneeAgentId: null, version: 1, availableActions: [], internalFact: true }
     const { internalFact: _, ...cliTask } = task
     expect(steps([builtin('team.create_task', { title: 'Task' }, task), shell("rovai task create --title Task", cliTask)])).toHaveLength(1)
+    const pagedShell = shell()
+    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message', status: 'completed' }, executionWindowBuiltinOperation: 'camp.message.send' }
+    expect(steps([pagedShell])).toEqual([])
+    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message && git status', status: 'completed' }, executionWindowBuiltinOperation: 'camp.message.send' }
+    expect(steps([pagedShell])).toHaveLength(1)
   })
 
   it.each(['rovai send --help', 'rovai --version', "rovai send --body 'message' && git status",

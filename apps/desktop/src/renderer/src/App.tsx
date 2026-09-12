@@ -137,10 +137,8 @@ import {
   shouldInvalidateNewConversationDefaults,
   type CurrentProject
 } from './new-conversation-preferences'
-import {
-  createNavigationRefreshCoordinator,
-  type NavigationRefreshTrigger
-} from './navigation-refresh-coordinator'
+import { type NavigationRefreshTrigger } from './navigation-refresh-coordinator'
+import { createNavigationWindowReader, type NavigationGroupLimits } from './navigation-window-reader'
 import { appendLiveRuntimeEventBatch, createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
 
 export { allNavigationCamps }
@@ -1114,6 +1112,7 @@ function AuthoritativeApp({
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [installations, setInstallations] = useState<AdapterInstallation[]>([])
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
+  const [navigationGroupLimits, setNavigationGroupLimits] = useState<NavigationGroupLimits>({})
   const [navigationState, setNavigationState] = useState<LoadState>('loading')
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
@@ -1384,7 +1383,7 @@ function AuthoritativeApp({
           command: { campId }
         })
       : await requestAuthoritativeCampOpenProjection(window.rovai, campId, traceId)
-    if (projection.schemaVersion !== 6) throw new Error('会话打开数据版本不兼容。')
+    if (projection.schemaVersion !== 7) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
       + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)} `
@@ -1438,28 +1437,26 @@ function AuthoritativeApp({
     return request
   }, [])
 
-  const commitNavigation = useCallback((nextNavigation: NavigationSnapshot): void => {
+  const commitNavigation = useCallback((
+    nextNavigation: NavigationSnapshot,
+    groupLimits: NavigationGroupLimits
+  ): void => {
     navigationSnapshotRef.current = nextNavigation
     setNavigation(nextNavigation)
+    setNavigationGroupLimits(groupLimits)
+    setNavigationState('ready')
   }, [])
 
-  const readAndCommitNavigation = useCallback(async (): Promise<void> => {
-    if (navigationSnapshotRef.current === null) setNavigationState('loading')
-    try {
-      const nextNavigation = await window.rovai.request<NavigationSnapshot>('navigation.snapshot')
-      commitNavigation(nextNavigation)
-      setNavigationState('ready')
-    } catch (nextError) {
-      setNavigationState('error')
-      throw nextError
-    }
-  }, [commitNavigation])
-
   const navigationRefreshCoordinator = useMemo(
-    () => createNavigationRefreshCoordinator(readAndCommitNavigation, {
-      initiallyVisible: document.visibilityState !== 'hidden'
-    }),
-    [readAndCommitNavigation]
+    () => createNavigationWindowReader(
+      (request) => window.rovai.request<NavigationSnapshot>('navigation.snapshot', request),
+      commitNavigation,
+      {
+        initiallyVisible: document.visibilityState !== 'hidden',
+        onError: () => setNavigationState('error')
+      }
+    ),
+    [commitNavigation]
   )
 
   const loadNavigation = useCallback(async (
@@ -3916,6 +3913,8 @@ function AuthoritativeApp({
         view={view}
         state={startupGateVisible ? 'loading' : navigationState}
         navigation={displayNavigation}
+        groupLimits={navigationGroupLimits}
+        onGroupLimitChange={navigationRefreshCoordinator.resizeGroup}
         activeCampId={activeCampId}
         openingCampId={openingCampId}
         currentProjectKey={currentProjectKey}

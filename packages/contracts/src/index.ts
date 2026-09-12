@@ -975,6 +975,11 @@ export interface ProjectNavigationGroup {
   recentCamps: NavigationCampItem[]
 }
 
+export interface NavigationSnapshotRequest {
+  /** Full prefix sizes by canonical group key; omitted groups default to five. */
+  groupLimits?: Record<string, number>
+}
+
 export interface NavigationSnapshot {
   schemaVersion: 3
   throughGlobalSequence: number
@@ -1882,6 +1887,21 @@ export interface AgentRunExecutionEvidencePage {
   evidence: AgentRunExecutionEvidenceView[]
 }
 
+/** Logical execution items, ordered by their stable first evidence sequence. */
+export interface AgentRunExecutionWindowPage {
+  schemaVersion: 1
+  campId: string
+  agentRunId: string
+  requestedBeforeSequence: number | null
+  nextBeforeSequence: number | null
+  throughSequence: number
+  hasMore: boolean
+  /** Unfinished operations older than the first page remain visible, outside the cursor. */
+  activeEvidence?: AgentRunExecutionEvidenceView[]
+  /** Commands contain display metadata; isTruncated also marks deferred output/diff. */
+  evidence: AgentRunExecutionEvidenceView[]
+}
+
 export interface ExecutionConsolePage {
   pageIndex: number
   pageCount: number
@@ -2214,7 +2234,7 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 6
+  schemaVersion: 7
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
@@ -3752,6 +3772,7 @@ export type CoreMethod =
   | 'camp.messages.find'
   | 'agentRunEvidence.getContent'
   | 'agentRunEvidence.list'
+  | 'agentRunExecution.page'
   | 'tasks.create'
   | 'tasks.update'
   | 'tasks.list'

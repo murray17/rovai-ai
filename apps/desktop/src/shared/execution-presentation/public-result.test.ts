@@ -75,13 +75,13 @@ describe('ExecutionStep publicResult boundary', () => {
     expect(buildLiveExecutionProgress([started, delta, complete], 'run-1').items.filter((item) => item.kind === 'tool')).toHaveLength(1)
   })
 
-  it('normalizes ANSI before detecting raw patches and JSON result envelopes', () => {
+  it('normalizes ANSI while preserving patch and JSON output', () => {
     const projected = step([event({ kind: 'tool', status: 'completed', output: '\u001b[32m*** Begin Patch\u001b[0m\n+private-patch\n*** End Patch' })])
-    expect(projected.publicResult).toBe('（原始补丁已隐藏）')
-    expect(step([event({ kind: 'tool', status: 'completed', output: '\u001b[32m{"input":"private-json"}\u001b[0m' })]).publicResult).toBe('（结构化工具结果已隐藏）')
+    expect(projected.publicResult).toBe('*** Begin Patch\n+private-patch\n*** End Patch')
+    expect(step([event({ kind: 'tool', status: 'completed', output: '\u001b[32m{"input":"private-json"}\u001b[0m' })]).publicResult).toBe('{"input":"private-json"}')
   })
 
-  it('redacts all Run evidence before truncation and retains both ends of dense lines', () => {
+  it('bounds output and retains both ends of dense lines', () => {
     const output = Array.from({ length: 210 }, (_, index) => `line ${index + 1}: ${'项目😀'.repeat(80)} tail-${index + 1}`).join('\n')
     const projected = step([event({ item: { type: 'commandExecution', command: 'check', status: 'completed', aggregatedOutput: output } }, 'activity.completed')])
     expect(projected.publicResult?.split('\n')).toHaveLength(20)
@@ -93,10 +93,10 @@ describe('ExecutionStep publicResult boundary', () => {
     expect(projected.detail).toContain('line 100:') // Local full evidence is not truncated by the channel preview.
   })
 
-  it('does not expose send body echoes, even in an otherwise textual result', () => {
+  it('preserves message arguments and echoed result text', () => {
     const projected = step([event({ item: { type: 'commandExecution', command: 'rovai send --public-only --body "private-message"', status: 'completed', aggregatedOutput: 'private-message' } }, 'activity.completed')])
-    expect(projected.publicResult).toBe('（消息内容不在执行结果中重复展示）')
-    expect(projected.publicCommand).not.toContain('private-message')
+    expect(projected.publicResult).toBe('private-message')
+    expect(projected.publicCommand).toContain('private-message')
   })
 })
 
@@ -109,7 +109,7 @@ describe('compact channel execution previews', () => {
         status: 'completed'
       }
     }, 'activity.completed')])
-    const preview = executionPublicCommandPreview(projected, (value) => value)
+    const preview = executionPublicCommandPreview(projected)
 
     expect(preview).toMatch(/^\$ pnpm vitest /u)
     expect(preview).toContain('…')
@@ -124,7 +124,7 @@ describe('compact channel execution previews', () => {
       publicResult: null, detail: '', status: 'completed', activityDomain: 'file',
       iconKind: 'file', toolName: 'apply_patch', credibility: 'runtime_structured'
     }
-    expect(executionPublicCommandPreview(patchStep, (value) => value)).toBe('apply_patch')
+    expect(executionPublicCommandPreview(patchStep)).toBe('apply_patch')
   })
 
   it('limits Feishu folded results to two compact logical lines', () => {

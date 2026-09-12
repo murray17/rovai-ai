@@ -4,6 +4,7 @@ import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import { dismissMessageQuoteSelection } from './message-quote-selection'
 import { currentUserDisplayName } from '@contracts'
 import { CurrentUserAvatar, useCurrentUserProfile } from './CurrentUserProfile'
+import { ExecutionReadingContext, useExecutionWindow } from './useExecutionWindow'
 import { prefersReducedMotion } from './reduced-motion'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
@@ -17,7 +18,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CampDetailPopover } from './CampDetailPopover'
 import { SingleChatPanel } from './SingleChatPanel'
 import {
-  CompactionEventRow, FileOperationRow, ModifiedFileRow, RuntimeRetryNotice,
+  CompactionEventRow, ExecutionToolGroupStateContext, FileOperationRow, ModifiedFileRow, RuntimeRetryNotice,
   ToolActivityGroup, ToolCallRow, isPresentableExecutionEvidence, type ToolCallStep
 } from './ExecutionToolGroup'
 import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
@@ -2154,9 +2155,9 @@ export function CampWorkspace({
   const executionProgressByRunId = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [
       run.id,
-      buildLiveExecutionProgress(executionEventsByRunId.get(run.id) ?? [], run.id)
+      buildLiveExecutionProgress(openCoverage ? (executionEventsByRunId.get(run.id) ?? []).slice(-48) : executionEventsByRunId.get(run.id) ?? [], run.id, { includePublicResults: false })
     ])),
-    [executionEventsByRunId, snapshot.agentRuns]
+    [executionEventsByRunId, snapshot.agentRuns, openCoverage]
   )
   const worldMapProjection = useMemo(
     () => projectCampWorldMap(snapshot.members, snapshot.agentRuns, executionProgressByRunId),
@@ -3966,6 +3967,8 @@ export function CampWorkspace({
       deliveries={snapshot.messageDeliveries}
       turns={snapshot.turns}
       progressByRunId={executionProgressByRunId}
+      windowedEvidence={openCoverage !== null}
+      executionEventsByRunId={executionEventsByRunId}
       campId={snapshot.camp.id}
       truncatedEvidenceByRunId={truncatedEvidenceByRunId}
       loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
@@ -5475,6 +5478,8 @@ function ExecutionDrawer({
   deliveries,
   turns,
   progressByRunId,
+  windowedEvidence,
+  executionEventsByRunId,
   campId,
   truncatedEvidenceByRunId,
   loadedEvidenceCountByRunId,
@@ -5500,6 +5505,8 @@ function ExecutionDrawer({
   deliveries: MessageDeliveryView[]
   turns: CampSnapshot['turns']
   progressByRunId: Map<string, LiveExecutionProgress>
+  windowedEvidence: boolean
+  executionEventsByRunId: Map<string, LiveRuntimeEvent[]>
   campId: string
   truncatedEvidenceByRunId: Map<string, AgentRunExecutionEvidenceView[]>
   loadedEvidenceCountByRunId: Map<string, number>
@@ -5516,6 +5523,18 @@ function ExecutionDrawer({
   memberById: Map<string, CampSnapshot['members'][number]>
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => setExpandedGroups(new Set()), [campId])
+  const groupState = useMemo(() => ({
+    expanded: expandedGroups,
+    change(keys: string[], expanded: boolean): void {
+      setExpandedGroups(previous => {
+        const next = new Set(previous)
+        for (const key of keys) { if (expanded) next.add(key); else next.delete(key) }
+        return next
+      })
+    }
+  }), [expandedGroups])
   const fastControl = memberFast.get(process.agentId)
   const drawerRef = useRef<HTMLElement>(null)
   const drawerBodyRef = useRef<HTMLDivElement>(null)
@@ -5567,7 +5586,7 @@ function ExecutionDrawer({
   const progressFollowKey = JSON.stringify([
     resolvedFocusedRun?.status ?? null,
     resolvedFocusedRun?.waitReason ?? null,
-    focusedProgress?.items ?? []
+    windowedEvidence ? resolvedFocusedRun?.executionEvidenceCount : focusedProgress?.items ?? []
   ])
   const followingLatestRef = useRef(false)
   const [followingLatest, setFollowingLatestState] = useState(false)
@@ -5928,6 +5947,8 @@ function ExecutionDrawer({
             ))
           }}
         >
+          <ExecutionReadingContext.Provider value={setFollowingLatest}>
+          <ExecutionToolGroupStateContext.Provider value={groupState}>
           <ol className="execution-process-timeline">
             {process.runs.map((run) => {
               const cancelling = cancellingTurnIds.has(run.campTurnId)
@@ -5965,6 +5986,8 @@ function ExecutionDrawer({
                     <AgentRunDeliveryRecipients sourceAgentRunId={run.id} deliveries={deliveries} memberById={memberById} />
                     <RunExecutionDisclosure
                       run={run}
+                      windowedEvidence={windowedEvidence}
+                      liveRevision={executionEventsByRunId.get(run.id)}
                       progress={progressByRunId.get(run.id)}
                       campId={campId}
                       truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
@@ -5980,6 +6003,8 @@ function ExecutionDrawer({
               )
             })}
           </ol>
+          </ExecutionToolGroupStateContext.Provider>
+          </ExecutionReadingContext.Provider>
         </div>
     </section>
   )
@@ -8251,6 +8276,8 @@ type RunExecutionHistoryStatus = 'idle' | 'loading' | 'ready' | 'failed'
 
 function RunExecutionContent({
   run,
+  windowedEvidence = false,
+  liveRevision,
   progress,
   campId,
   truncatedEvidence,
@@ -8264,6 +8291,8 @@ function RunExecutionContent({
   onFileOpenError
 }: {
   run: AgentRunView
+  windowedEvidence?: boolean
+  liveRevision?: unknown
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence: AgentRunExecutionEvidenceView[]
@@ -8279,37 +8308,50 @@ function RunExecutionContent({
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const publicFailure = run.status === 'failed' ? run.failure : null
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
-  const narrationEvidence = historicalEvidence ?? truncatedEvidence
+  const windowPage = useExecutionWindow(windowedEvidence, campId, run, liveRevision)
+  const displayedEvidence = windowedEvidence ? windowPage.evidence : historicalEvidence
+  const narrationEvidence = displayedEvidence ?? truncatedEvidence
   const [narrationBodies, setNarrationBodies] = useState<Map<string, string>>(new Map())
+  const narrationCache = useRef(new Map<string, { stamp: string; body: string }>())
   const [narrationStatus, setNarrationStatus] = useState<RunExecutionHistoryStatus>('idle')
   const [narrationRetry, setNarrationRetry] = useState(0)
   useEffect(() => {
     let disposed = false
-    setNarrationBodies(new Map())
-    if (!narrationEvidence.some((item) => item.eventType === 'agent.text.block'
-      && item.isTruncated && item.contentBlobId)) {
+    const needed = narrationEvidence.filter(item => item.eventType === 'agent.text.block'
+      && item.isTruncated && item.contentBlobId)
+    const stamps = new Map(needed.map(item => [item.id, `${item.contentBlobId}:${item.contentByteCount}`]))
+    const cache = narrationCache.current
+    for (const [id, cached] of cache) if (stamps.get(id) !== cached.stamp) cache.delete(id)
+    const cachedBodies = (): Map<string, string> => new Map([...cache].map(([id, value]) => [`narration:${id}`, value.body]))
+    setNarrationBodies(cachedBodies())
+    const missing = needed.filter(item => !cache.has(item.id))
+    if (missing.length === 0) {
       setNarrationStatus('ready')
       return undefined
     }
     setNarrationStatus('loading')
-    void loadExecutionNarrationBodies(narrationEvidence, (evidenceId) =>
+    void loadExecutionNarrationBodies(missing, (evidenceId) =>
       window.rovai.request('agentRunEvidence.getContent', { campId, evidenceId })
     ).then((bodies) => {
       if (disposed) return
-      setNarrationBodies(bodies)
+      for (const item of missing) {
+        const body = bodies.get(`narration:${item.id}`)
+        if (body !== undefined) cache.set(item.id, { stamp: stamps.get(item.id)!, body })
+      }
+      setNarrationBodies(cachedBodies())
       setNarrationStatus('ready')
     }).catch(() => {
       if (!disposed) setNarrationStatus('failed')
     })
     return () => { disposed = true }
   }, [campId, narrationEvidence, narrationRetry])
-  const historicalProgress = useMemo(() => historicalEvidence
+  const historicalProgress = useMemo(() => displayedEvidence
     ? buildLiveExecutionProgress(
-        historicalEvidence.map(liveRuntimeEventFromExecutionEvidence),
-        run.id
+        displayedEvidence.map(liveRuntimeEventFromExecutionEvidence),
+        run.id, { includePublicResults: false }
       )
-    : null, [historicalEvidence, run.id])
-  const effectiveTruncatedEvidence = (historicalEvidence ?? truncatedEvidence)
+    : null, [displayedEvidence, run.id])
+  const effectiveTruncatedEvidence = (displayedEvidence ?? truncatedEvidence)
     .filter((evidence) => evidence.isTruncated)
     .filter(isPresentableExecutionEvidence)
   const effectiveProgress = historicalProgress ?? progress
@@ -8321,10 +8363,24 @@ function RunExecutionContent({
   ).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   ), [effectiveProgress?.items, finalKey, narrationBodies])
-  const groupedProcessItems = useMemo(
-    () => groupConsecutiveToolItems(processItems),
-    [processItems]
-  )
+  const windowGroupKeys = useRef({ next: 0, byItem: new Map<string, string>() })
+  const groupedProcessItems = useMemo(() => {
+    const groups = groupConsecutiveToolItems(processItems)
+    if (!windowedEvidence) return groups
+    const identities = windowGroupKeys.current
+    const used = new Set<string>()
+    return groups.map(group => {
+      if (group.kind !== 'toolGroup') return group
+      // A page can prepend the first operation of an existing group. Keep its
+      // React identity so expanded child results and keyboard focus survive.
+      const key = group.items.map(item => identities.byItem.get(item.key))
+        .find((key): key is string => key !== undefined && !used.has(key))
+        ?? `window-tool-group:${identities.next++}`
+      used.add(key)
+      for (const item of group.items) identities.byItem.set(item.key, key)
+      return { ...group, key }
+    })
+  }, [processItems, windowedEvidence])
   const activeToolItems = useMemo(
     () => processItems.filter((item): item is ToolProgressItem => item.kind === 'tool'),
     [processItems]
@@ -8349,7 +8405,15 @@ function RunExecutionContent({
         : executionInitialFeedback(run.status, processItems, Boolean(finalBody))
 
   return (
-    <div className="process-content">
+    <div className="process-content" ref={windowPage.root}>
+      {windowedEvidence && (windowPage.hasEarlier || windowPage.error || windowPage.loading) && (
+        <div className="execution-window-navigation" role="status">
+          <button className="quiet-button compact" type="button" disabled={windowPage.loading} onClick={() => {
+            void windowPage.move(windowPage.error ? 'retry' : windowPage.evidence.length ? 'earlier' : 'latest')
+          }}>{windowPage.loading ? '正在读取执行记录…' : windowPage.error ? '重试' : '载入更早记录'}</button>
+          {windowPage.error && <span>执行记录读取失败。</span>}
+        </div>
+      )}
       {publicFailure && <RuntimeFailureNotice failure={publicFailure} presentation="agent-run" />}
       {showUnsettledWarning && (
         <p className="execution-uncertain" role="status">
@@ -8362,6 +8426,7 @@ function RunExecutionContent({
             <ToolActivityGroup
               key={item.key}
               campId={campId}
+              partial={windowedEvidence}
               items={item.items}
               liveTail={item.key === liveTailToolGroupKey}
               cancelling={cancelling}
@@ -8391,14 +8456,14 @@ function RunExecutionContent({
         }
         if (item.kind === 'narration') {
           return (
-            <div className={`process-copy stream-${item.kind}`} key={item.key}>
+            <div className={`process-copy stream-${item.kind}`} key={item.key} data-execution-item-key={item.key}>
               <SafeMarkdown>{item.body}</SafeMarkdown>
             </div>
           )
         }
         if (item.kind === 'plan') {
           return (
-            <div className="process-plan live-progress-plan" key={item.key}>
+            <div className="process-plan live-progress-plan" key={item.key} data-execution-item-key={item.key}>
               {item.explanation && <SafeMarkdown>{item.explanation}</SafeMarkdown>}
               {item.plan.length > 0 && (
                 <ol>
@@ -8419,6 +8484,8 @@ function RunExecutionContent({
           return step.fileChanges.map((change, index) => (
             <ModifiedFileRow
               change={change}
+              itemKey={`${item.key}:file:${index}`}
+              completeEvidence={completeEvidence.byToolId.get(step.id)}
               campId={campId}
               key={`${item.key}:file:${index}:${change.path}`}
               onFileOpenError={onFileOpenError}
@@ -8450,6 +8517,10 @@ function RunExecutionContent({
           />
         )
       })}
+      {windowedEvidence && windowPage.hasNewer && <div className="execution-window-navigation">
+        <button className="quiet-button compact" type="button" disabled={windowPage.loading} onClick={() => void windowPage.move('newer')}>载入较新记录</button>
+        <button className="quiet-button compact" type="button" disabled={windowPage.loading} onClick={() => void windowPage.move('latest')}>回到最新</button>
+      </div>}
       {(historyStatus === 'loading' || narrationStatus === 'loading') && (
         <div className="process-action current" role="status">
           <span className="process-spinner" aria-hidden="true" />
@@ -8522,6 +8593,8 @@ function RunExecutionContent({
 
 export function RunExecutionDisclosure({
   run,
+  windowedEvidence = false,
+  liveRevision,
   progress,
   campId,
   truncatedEvidence = [],
@@ -8534,6 +8607,8 @@ export function RunExecutionDisclosure({
   onFileOpenError = () => undefined
 }: {
   run: AgentRunView
+  windowedEvidence?: boolean
+  liveRevision?: unknown
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence?: AgentRunExecutionEvidenceView[]
@@ -8554,7 +8629,9 @@ export function RunExecutionDisclosure({
   const previousNonTerminal = useRef(nonTerminal)
   const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
   const [historyStatus, setHistoryStatus] = useState<RunExecutionHistoryStatus>('idle')
-  const shouldActivateContent = open || focused || nonTerminal
+  const shouldActivateContent = windowedEvidence
+    ? open || active || cancellingActive
+    : open || focused || nonTerminal
   const [contentMounted, setContentMounted] = useState(() => shouldActivateContent)
   useEffect(() => {
     const completed = previousNonTerminal.current && !nonTerminal
@@ -8568,7 +8645,7 @@ export function RunExecutionDisclosure({
   }, [shouldActivateContent])
 
   const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
-  const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
+  const historyNeeded = !windowedEvidence && !nonTerminal && loadedEvidenceCount < durableEvidenceCount
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
   const hasDisclosureWithoutProgress = nonTerminal
     || durableEvidenceCount > 0
@@ -8602,10 +8679,12 @@ export function RunExecutionDisclosure({
     }
   }
 
-  const shouldMountContent = contentMounted || shouldActivateContent
+  const shouldMountContent = windowedEvidence ? shouldActivateContent : contentMounted || shouldActivateContent
   const content = shouldMountContent ? (
     <RunExecutionContent
       run={run}
+      windowedEvidence={windowedEvidence}
+      liveRevision={liveRevision}
       progress={progress}
       campId={campId}
       truncatedEvidence={truncatedEvidence}

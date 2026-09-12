@@ -254,15 +254,16 @@ describe('Feishu execution console card', () => {
     expect(JSON.stringify(card)).not.toContain(cmd)
   })
 
-  it('redacts current text and commands using secrets from evidence outside the live window', () => {
+  it('preserves current text and commands without scanning historical values', () => {
     const card = executionConsoleCard(snapshot('running', { evidence: [
       command(1, 'read-config', 'SERVICE_TOKEN=old-evidence-secret'),
       ...Array.from({ length: 20 }, (_, index) => command(index + 2, `inspect-${index}`)),
       narration(22, '正在检查 old-evidence-secret 的响应。'),
       runningCommand(23, 'inspect --value old-evidence-secret --password private-password')
     ] }))
-    expect(bodyText(card)).toContain('[已隐藏]')
-    expect(JSON.stringify(card)).not.toMatch(/old-evidence-secret|private-password|read-config/)
+    expect(bodyText(card)).toContain('old-evidence-secret')
+    expect(JSON.stringify(card)).toContain('private-password')
+    expect(JSON.stringify(card)).not.toContain('read-config')
   })
 
   it('interleaves public text and individual native command panels in real order', () => {
@@ -325,7 +326,7 @@ describe('Feishu execution console card', () => {
     }
   })
 
-  it('redacts before truncation, including secrets declared in the omitted middle', () => {
+  it('preserves parameter values and result text across head/tail truncation', () => {
     const lines = Array.from({ length: 210 }, (_, index) => `line ${index + 1}`)
     lines[0] = 'Authorization: Bearer header-secret'
     lines[1] = 'echoed flag-secret and api-flag-secret'
@@ -333,10 +334,10 @@ describe('Feishu execution console card', () => {
     lines[200] = 'echoed middle-secret and header-secret'
     lines[209] = 'Password: "password with spaces"'
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [command(1, 'API_TOKEN=environment-secret cargo test --all --authorization "flag-secret" --api_key "api-flag-secret"', lines.join('\n'))] }))
-    expect(header(panels(card)[0])).toBe('✓ API_TOKEN=[已隐藏] cargo test --all --authorization=[已隐藏] --api_key=[已隐藏]')
+    expect(header(panels(card)[0])).toBe('✓ API_TOKEN=environment-secret cargo test --all --authorization "flag-secret" --api_key "api-flag-secret"')
     expect(result(panels(card)[0]).split('\n')).toHaveLength(20)
     expect(result(panels(card)[0])).toContain('… 已截断 191 行 …')
-    for (const secret of ['header-secret', 'middle-secret', 'password with spaces', 'environment-secret', 'flag-secret', 'api-flag-secret']) expect(JSON.stringify(card)).not.toContain(secret)
+    for (const secret of ['header-secret', 'middle-secret', 'password with spaces', 'environment-secret', 'flag-secret', 'api-flag-secret']) expect(JSON.stringify(card)).toContain(secret)
   })
 
   it('preserves result indentation and does not count a final line terminator as an extra line', () => {
@@ -359,14 +360,13 @@ describe('Feishu execution console card', () => {
   })
 
   it.each(['data:image/png;base64,aGVsbG8=', 'VGhpcy1pcy1hLXByaXZhdGUtZW5jb2RlZC1yZXN1bHQ='.repeat(8).replace(/=/gu, '')])(
-    'hides encoded results before line and byte truncation', (encoded) => {
+    'keeps encoded text within the ordinary result budget', (encoded) => {
       const card = executionConsoleCard(snapshot('succeeded', { evidence: [command(1, 'read-artifact', `before\n${encoded}\nafter`)] }))
-      expect(result(panels(card)[0])).toBe('（二进制或编码结果已隐藏）')
-      expect(JSON.stringify(card)).not.toContain(encoded)
+      expect(result(panels(card)[0])).toBe(`before\n${encoded}\nafter`)
     }
   )
 
-  it('never projects stdin, send bodies, raw input/output envelopes or reasoning', () => {
+  it('retains textual results and command bodies without treating input envelopes or reasoning as output', () => {
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [
       command(1, "TOKEN=top-secret rovai send --public-only --body 'private message' && curl -H 'Cookie: session=private-cookie' https://example.test", 'private message'),
       evidence(2, 'runtime.action', 'tool_result', 'completed', { kind: 'tool', input: { token: 'private-input', stdin: 'typed-password' }, output: { body: 'private-output', token: 'private-token' } }),
@@ -377,13 +377,15 @@ describe('Feishu execution console card', () => {
       { ...evidence(7, 'runtime.action', 'tool_result', 'completed', { kind: 'shell', input: { cmd: 'verify-cli', stdin: ['typed-password', 'nested-private-stdin'] }, output: { stdout: 'ok', stderr: 'echoed typed-password and private-input; nested-private-stdin' } }), canonical: canonical('op-7') }
     ] }))
     expect(header(panels(card)[0])).toContain('rovai send --public-only')
-    expect(JSON.stringify(card)).toContain('结构化工具结果已隐藏')
-    for (const secret of ['top-secret', 'private message', 'private-cookie', 'private-input', 'private-output', 'private-token', 'typed-password', 'private reasoning', 'json-private-input', 'json-private-output', 'wrapped-private-body', 'windows-private-body', 'nested-private-stdin']) expect(JSON.stringify(card)).not.toContain(secret)
+    expect(result(panels(card)[2])).toContain('json-private-input')
+    for (const value of ['top-secret', 'private message', 'private-cookie', 'private-input', 'typed-password', 'json-private-input', 'json-private-output', 'wrapped-private-body', 'windows-private-body', 'nested-private-stdin']) expect(JSON.stringify(card)).toContain(value)
+    expect(result(panels(card)[1])).toBe('（无可展示结果）')
+    expect(JSON.stringify(card)).not.toContain('private reasoning')
     expect(result(panels(card).at(-1)!)).toContain('ok')
-    expect(result(panels(card).at(-1)!)).toContain('echoed [已隐藏] and [已隐藏]')
+    expect(result(panels(card).at(-1)!)).toContain('echoed typed-password and private-input')
   })
 
-  it('updates a canonical operation in place, retains its safe command and only extracts textual results', () => {
+  it('updates a canonical operation in place, retains its command and only extracts textual results', () => {
     const started = { ...evidence(2, 'runtime.action', 'tool_call', 'started', { kind: 'shell', input: { cmd: 'cargo test -p rovai-core' }, status: 'inProgress' }), canonical: canonical('op-1') }
     const finished = { ...evidence(4, 'runtime.action', 'tool_result', 'completed', { kind: 'shell', output: { content: [{ type: 'text', text: '27 tests passed' }] }, status: 'completed' }), canonical: canonical('op-1') }
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [narration(1, '现在检查。'), started, narration(3, '检查仍在运行。'), finished] }))
@@ -408,9 +410,9 @@ describe('Feishu execution console card', () => {
     expect(JSON.stringify(card)).not.toMatch(/secret patch body|private patch line|Begin Patch/)
   })
 
-  it('suppresses raw patch output and prevents embedded fences from escaping the result frame', () => {
+  it('retains patch output and prevents embedded fences from escaping the result frame', () => {
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [command(1, 'patch-command', '*** Begin Patch\n+private-patch\n*** End Patch'), command(2, 'read-file', 'before\n```\n<at id=all></at>\nafter')] }))
-    expect(JSON.stringify(card)).not.toContain('private-patch')
+    expect(result(panels(card)[0])).toContain('private-patch')
     const frame = ((panels(card)[1].elements as Element[])[0].content as string)
     expect(frame.match(/```/gu)).toHaveLength(2)
     expect(result(panels(card)[1]).split('\n')).toHaveLength(4)
@@ -516,13 +518,14 @@ describe('Feishu execution console card', () => {
     expect(buttons(card)).toEqual([])
   })
 
-  it.each(['failed', 'cancelled'] as const)('preserves %s status with sanitized stderr and initially closed commands', (status) => {
+  it.each(['failed', 'cancelled'] as const)('preserves %s status with original stderr and initially closed commands', (status) => {
     const card = executionConsoleCard(snapshot(status, { evidence: [command(1, 'pnpm typecheck'), command(2, 'cargo test -p rovai-core', '2 tests failed\nAPI_KEY=private-failure-token', 'failed')] }))
     expect(card.header).toMatchObject({ template: status === 'failed' ? 'red' : 'grey' })
     expect(panels(card).every((panel) => panel.expanded === false)).toBe(true)
     expect(header(panels(card)[1])).toBe('✕ cargo test -p rovai-core')
     expect(result(panels(card)[1])).toContain('2 tests failed')
-    expect(JSON.stringify(card)).not.toMatch(/private-failure-token|命令执行失败/)
+    expect(result(panels(card)[1])).toContain('API_KEY=private-failure-token')
+    expect(JSON.stringify(card)).not.toContain('命令执行失败')
   })
 
   it('provides honest empty states with no pagination for a single page', () => {

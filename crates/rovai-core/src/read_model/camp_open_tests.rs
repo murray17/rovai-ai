@@ -274,7 +274,7 @@ fn camp_open_preserves_business_state_without_reading_event_history() {
     let (open, _, _) = read_metered(&mut database, &camp_id);
     let open_json = serde_json::to_value(&open).unwrap();
     let snapshot_json = serde_json::to_value(&snapshot).unwrap();
-    assert_eq!(open.schema_version, 6);
+    assert_eq!(open.schema_version, 7);
     assert_eq!(open_json["camp"], snapshot_json["camp"]);
     for collection in [
         "members",
@@ -284,7 +284,6 @@ fn camp_open_preserves_business_state_without_reading_event_history() {
         "approvals",
         "messageDeliveries",
         "agentRunFileChanges",
-        "executionEvidence",
     ] {
         let mut actual = open_json[collection].as_array().unwrap().clone();
         let mut expected = snapshot_json[collection].as_array().unwrap().clone();
@@ -297,6 +296,8 @@ fn camp_open_preserves_business_state_without_reading_event_history() {
         }
         assert_eq!(actual, expected, "changed {collection}");
     }
+    assert!(open.execution_evidence.is_empty());
+    assert!(!open.coverage.execution_evidence.complete);
     let mut expected_messages = snapshot_json["messages"].clone();
     for message in expected_messages.as_array_mut().unwrap() {
         message["timelineGlobalSequence"] = Value::Null;

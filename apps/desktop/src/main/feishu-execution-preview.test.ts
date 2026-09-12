@@ -81,7 +81,10 @@ describe('opt-in Feishu execution-card previews', () => {
       expect(panels).toHaveLength(Math.min(15, count - pageIndex * 15))
       expect(flatten(items).length).toBeLessThanOrEqual(50)
       expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(24000)
-      expect(JSON.stringify(card)).not.toMatch(/preview-only-|这段测试正文必须隐藏/u)
+      if (pageIndex === 0) {
+        expect(JSON.stringify(card)).toContain('preview-only-token-009')
+        expect(JSON.stringify(card)).toContain('这段测试正文保留原值')
+      }
       expect(timeline).toContainEqual({ tag: 'markdown', content: `第 ${pageIndex + 1} / ${expectedPages} 页`, text_align: 'center' })
       expect(items.findIndex(item => item.tag === 'markdown')).toBeLessThan(items.findIndex(item => item.tag === 'collapsible_panel'))
       for (const panel of panels) {
