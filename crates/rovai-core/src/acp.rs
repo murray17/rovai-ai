@@ -44,9 +44,7 @@ use rovai_core::{
         RuntimeCompactionDisplayPhase, RuntimeCompactionMessageSnapshot,
         RuntimeCompactionTokenSnapshot,
     },
-    runtime_discovery::{
-        RuntimeLaunchPurpose, configure_active_runtime_command, runtime_launch_allowed,
-    },
+    runtime_discovery::{RuntimeLaunchPurpose, runtime_launch_allowed},
     runtime_search_operation,
 };
 use serde_json::{Value, json};
@@ -1280,7 +1278,10 @@ impl AcpHost {
         } else {
             Command::new(&frozen_runtime.executable_path)
         };
-        configure_active_runtime_command(&mut command);
+        rovai_core::runtime_discovery::configure_runtime_command(
+            frozen_runtime.adapter_kind,
+            &mut command,
+        );
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
         }
@@ -4974,12 +4975,19 @@ struct GrokNativeConfiguration {
 }
 
 fn grok_home_path() -> Result<PathBuf> {
-    if let Some(home) = std::env::var_os("GROK_HOME").filter(|value| !value.is_empty()) {
+    if let Some(home) = rovai_core::runtime_discovery::runtime_environment_variable(
+        AdapterKind::GrokBuild,
+        "GROK_HOME",
+    )
+    .filter(|value| !value.is_empty())
+    {
         return Ok(PathBuf::from(home));
     }
-    Ok(dirs::home_dir()
-        .context("could not determine the user home directory for Grok Build configuration")?
-        .join(".grok"))
+    Ok(
+        rovai_core::runtime_discovery::runtime_home_directory(AdapterKind::GrokBuild)
+            .context("could not determine the user home directory for Grok Build configuration")?
+            .join(".grok"),
+    )
 }
 
 fn grok_native_config_path() -> Result<PathBuf> {
@@ -5539,28 +5547,43 @@ fn prepare_qwen_private_home(
 ) -> Result<(PathBuf, PathBuf, Value)> {
     use std::os::unix::fs::symlink;
 
-    let source_home = match std::env::var_os("QWEN_HOME") {
+    let source_home = match rovai_core::runtime_discovery::runtime_environment_variable(
+        AdapterKind::QwenCode,
+        "QWEN_HOME",
+    ) {
         Some(configured) => {
             let configured = PathBuf::from(configured);
             if configured.is_absolute() {
                 configured
             } else if configured == Path::new("~") {
                 PathBuf::from(
-                    std::env::var_os("HOME").context("Qwen Runtime has no home directory")?,
+                    rovai_core::runtime_discovery::runtime_environment_variable(
+                        AdapterKind::QwenCode,
+                        "HOME",
+                    )
+                    .context("Qwen Runtime has no home directory")?,
                 )
             } else if let Ok(relative_to_home) = configured.strip_prefix("~/") {
                 PathBuf::from(
-                    std::env::var_os("HOME").context("Qwen Runtime has no home directory")?,
+                    rovai_core::runtime_discovery::runtime_environment_variable(
+                        AdapterKind::QwenCode,
+                        "HOME",
+                    )
+                    .context("Qwen Runtime has no home directory")?,
                 )
                 .join(relative_to_home)
             } else {
                 runtime_cwd.join(configured)
             }
         }
-        None => {
-            PathBuf::from(std::env::var_os("HOME").context("Qwen Runtime has no home directory")?)
-                .join(".qwen")
-        }
+        None => PathBuf::from(
+            rovai_core::runtime_discovery::runtime_environment_variable(
+                AdapterKind::QwenCode,
+                "HOME",
+            )
+            .context("Qwen Runtime has no home directory")?,
+        )
+        .join(".qwen"),
     };
     let private_home = detector_root.join("qwen-home");
     std::fs::create_dir_all(&private_home)?;

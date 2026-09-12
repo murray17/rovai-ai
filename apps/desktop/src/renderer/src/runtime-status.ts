@@ -41,7 +41,7 @@ const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
   checking: '正在检查…',
   available: '可用',
   authentication_required: '需要登录',
-  not_installed: '未安装',
+  not_installed: '未检测到',
   version_unsupported: '版本不支持',
   unavailable: '不可用',
   not_qualified: '当前平台尚未验证',
@@ -83,7 +83,7 @@ export function runtimeAvailabilityPresentation(
     case 'installed_unverified':
       return presentation(
         'unknown',
-        '旧安装尚未形成轻度启动证据；请重新检测或检查可用性。'
+        '旧安装尚未形成轻度启动证据；请重新检测或检查状态。'
       )
     case 'ready':
       if (availability.runtimeKind === 'zcode-app') {
@@ -260,7 +260,7 @@ export function memberRuntimePresentation(
     }
     return presentation(
       'unknown',
-      '旧安装尚未形成轻度启动证据；请重新检测或检查可用性。'
+      '旧安装尚未形成轻度启动证据；请重新检测或检查状态。'
     )
   }
   if (blockerCodes.has('runtime_authentication_required')) {

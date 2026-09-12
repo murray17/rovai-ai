@@ -4436,9 +4436,9 @@ export function SettingsView({
         )}
         <Activity mode={section === 'skills' ? 'visible' : 'hidden'}><SkillSettings theme={appearance.resolvedTheme} /></Activity>
         <Activity mode={section === 'mcp' ? 'visible' : 'hidden'}><McpSettings agents={agents} platform={platform} /></Activity>
-        {section === 'runtime' && (
+        <Activity mode={section === 'runtime' ? 'visible' : 'hidden'}>
           <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
-        )}
+        </Activity>
         {section === 'channels' && <ChannelSettings agents={agents} />}
         {section === 'appearance' && (
           <AppearanceSettings

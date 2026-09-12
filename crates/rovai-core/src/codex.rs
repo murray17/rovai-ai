@@ -34,7 +34,6 @@ use rovai_core::{
         RUNTIME_COMPACTION_DISPLAY_EVENT, RuntimeCompactionCompletionEvidence,
         RuntimeCompactionDisplayEvent, RuntimeCompactionDisplayPhase,
     },
-    runtime_discovery::configure_active_runtime_command,
     runtime_search_operation,
 };
 use serde_json::{Value, json};
@@ -361,7 +360,10 @@ impl CodexHost {
         builtin_tools: Option<BuiltinToolProcessConfig>,
     ) -> Result<Arc<Self>> {
         let mut command = Command::new(codex_path);
-        configure_active_runtime_command(&mut command);
+        rovai_core::runtime_discovery::configure_runtime_command(
+            rovai_core::agent_profile::AdapterKind::CodexCli,
+            &mut command,
+        );
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
         }

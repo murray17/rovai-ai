@@ -25,8 +25,8 @@ describe('Runtime user status projection', () => {
     ['ready', '可用'],
     ['authentication_required', '需要登录'],
     ['needs_attention', '需要处理'],
-    ['missing', '未安装'],
-    ['path_missing', '未安装'],
+    ['missing', '未检测到'],
+    ['path_missing', '未检测到'],
     ['incompatible', '版本不支持'],
     ['disabled', '不可用'],
     ['refresh_failed_using_last_success', '可用']
@@ -149,7 +149,7 @@ describe('Runtime user status projection', () => {
     )
     expect(result.status).toBe('unknown')
     expect(result.label).toBe('暂时无法确认')
-    expect(result.detail).toContain('请重新检测或检查可用性')
+    expect(result.detail).toContain('请重新检测或检查状态')
   })
 
   it('keeps Windows not-qualified distinct from machine availability', () => {

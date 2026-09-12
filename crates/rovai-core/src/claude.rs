@@ -19,7 +19,7 @@ use rovai_core::{
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
-    runtime_discovery::{configure_active_runtime_command, is_runtime_entrypoint_file},
+    runtime_discovery::is_runtime_entrypoint_file,
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
         public_runtime_failure_from_output,
@@ -373,7 +373,10 @@ impl ClaudeCodeCliRuntimeAdapter {
         let mut inline_settings = serde_json::json!({});
         rovai_core::camp_fast::merge_claude_inline_settings(&mut inline_settings, fast_override)?;
         let mut command = Command::new(executable);
-        configure_active_runtime_command(&mut command);
+        rovai_core::runtime_discovery::configure_runtime_command(
+            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+            &mut command,
+        );
         if let Some(config) = &request.builtin_tools {
             config.configure_command(&mut command)?;
         }

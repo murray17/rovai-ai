@@ -305,6 +305,44 @@ app.whenReady().then(async () => {
       connection: { status: 'connected', account: { ...${JSON.stringify(savedAccount)}, accountId: 'sample-' + channel.kind, brand: channel.kind } }
     }))`)
 
+    // Runtime editor regression: valid variable addition saves directly, failure
+    // preserves the draft, and clean/dirty transitions keep both actions visible.
+    window.webContents.setZoomFactor(1); window.setContentSize(1280, 850)
+    await navigate('runtime')
+    await click('.runtime-product-settings[aria-label="Codex CLI 启动设置"]')
+    await waitFor("document.querySelector('.runtime-startup-form') && !document.querySelector('.runtime-startup-page').getAttribute('aria-busy').includes('true')")
+    assert.equal(await run("[...document.querySelectorAll('.runtime-startup-actions button')].filter(b => b.disabled).length"), 2)
+    assert.equal(await run("getComputedStyle(document.querySelector('.runtime-startup-actions')).display"), 'flex')
+    await click('.runtime-startup-section:nth-of-type(2) .quiet-button')
+    await click('input[aria-label="变量名 1"]')
+    await run("document.execCommand('insertText',false,'HTTP_PROXY')"); await settle()
+    await click('input[aria-label="变量值 1"]')
+    await run("document.execCommand('insertText',false,'http://localhost:8080')"); await settle()
+    assert.equal(await run("document.querySelector('.runtime-startup-actions button[type=submit]').disabled"), false)
+    assert.equal(await run("document.querySelector('input[aria-label=\"变量值 1\"]').type"), 'password')
+    await run("window.settingsTest.state.failure='runtime.startup.save'")
+    await click('.runtime-startup-actions button[type=submit]')
+    await waitFor("document.querySelector('.runtime-startup-form .inline-error')")
+    assert.equal(await run("document.querySelector('input[aria-label=\"变量名 1\"]').value"), 'HTTP_PROXY')
+    assert.equal(await run("document.querySelector('.runtime-startup-actions button[type=submit]').disabled"), false)
+    await click('.runtime-startup-actions button[type=submit]')
+    await waitFor("document.querySelector('.runtime-startup-actions button[type=submit]').disabled")
+    assert.equal(await run("window.settingsTest.requests.filter(r => r.method==='runtime.startup.check').length"), 0)
+    assert.equal(await run("window.settingsTest.state.startup['codex-cli'].configuration.environment[0].name"), 'HTTP_PROXY')
+    await click('.runtime-startup-section:nth-of-type(2) .quiet-button')
+    await click('.runtime-startup-actions button[type=button]')
+    assert.equal(await run("document.querySelectorAll('.runtime-environment-row').length"), 1)
+    assert.equal(await run("document.querySelector('.runtime-startup-actions button[type=submit]').disabled"), true)
+    await click('.runtime-startup-inspection .quiet-button')
+    await waitFor("document.querySelector('.runtime-startup-result').textContent.includes('需要登录')")
+    for (const theme of ['day', 'night']) {
+      await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+      await noOverflow(`startup/${theme}/1280`); await capture(`runtime-startup-${theme}`)
+      window.webContents.setZoomFactor(2)
+      await noOverflow(`startup/${theme}/200%`); await capture(`runtime-startup-${theme}-200`)
+      window.webContents.setZoomFactor(1)
+    }
+
     for (const theme of ['day', 'night']) {
       await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
       window.setContentSize(1040, 700); window.webContents.setZoomFactor(1)
