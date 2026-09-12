@@ -1,0 +1,12 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "./renderer.tsx",
+    "../../../apps/desktop/src/preload/global.d.ts",
+    "../../../apps/desktop/src/renderer/src/vite-env.d.ts"
+  ]
+}

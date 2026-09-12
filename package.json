@@ -153,6 +153,8 @@
     "test:host-web-live": "node --test scripts/lib/host-web-live.test.mjs",
     "smoke:host-web-runtime": "node scripts/smoke-host-web-runtime.mjs",
     "review:host-web-parity": "node scripts/review-host-web-parity.mjs",
+    "review:remote-connection": "node scripts/review-remote-connection.mjs",
+    "test:remote-connection-review": "tsc --noEmit -p scripts/fixtures/remote-connection/tsconfig.json && node --test scripts/lib/remote-connection-review.test.mjs",
     "test:host-web-parity": "node --test scripts/lib/host-web-parity.test.mjs"
   },
   "dependencies": {

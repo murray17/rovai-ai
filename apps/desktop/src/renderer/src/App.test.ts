@@ -3174,7 +3174,7 @@ describe('task event projections', () => {
       about: '关于与更新'
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
-      const markup = renderToStaticMarkup(createElement(SettingsView, { ...baseProps, section }))
+      const markup = renderToStaticMarkup(createElement(SettingsView, { preferencesApi: {} as import('@contracts').GeneralPreferencesApi, ...baseProps, section }))
       if (section === 'skills' || section === 'mcp') {
         expect(markup).toContain(`<h1>${heading}<span>`)
         expect(markup.match(/class="capability-library-heading"/g)).toHaveLength(1)
@@ -3187,7 +3187,7 @@ describe('task event projections', () => {
   })
 
   it('keeps only lightweight in-app reminder settings', () => {
-    const markup = renderToStaticMarkup(createElement(SettingsView, {
+    const markup = renderToStaticMarkup(createElement(SettingsView, { preferencesApi: {} as import('@contracts').GeneralPreferencesApi,
       appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],
@@ -3210,7 +3210,7 @@ describe('task event projections', () => {
   })
 
   it('describes theme and reading controls in the shared Appearance header', () => {
-    const markup = renderToStaticMarkup(createElement(SettingsView, {
+    const markup = renderToStaticMarkup(createElement(SettingsView, { preferencesApi: {} as import('@contracts').GeneralPreferencesApi,
       appearance: { ...DEFAULT_APPEARANCE, preference: 'night', resolvedTheme: 'night' },
       health: null,
       agents: [],
@@ -3231,7 +3231,7 @@ describe('task event projections', () => {
   })
 
   it('places the real Runtime rescan action in the shared page header', () => {
-    const markup = renderToStaticMarkup(createElement(SettingsView, {
+    const markup = renderToStaticMarkup(createElement(SettingsView, { preferencesApi: {} as import('@contracts').GeneralPreferencesApi,
       appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],
@@ -7061,7 +7061,7 @@ describe('task event projections', () => {
     expect(markup).toContain('新增队员')
   })
   it('does not expose a standalone context destination in settings navigation', () => {
-    const markup = renderToStaticMarkup(createElement(SettingsView, {
+    const markup = renderToStaticMarkup(createElement(SettingsView, { preferencesApi: {} as import('@contracts').GeneralPreferencesApi,
       appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],
@@ -7079,7 +7079,7 @@ describe('task event projections', () => {
   })
 
   it('renders the formal diagnostics center without prototype-only controls', () => {
-    const markup = renderToStaticMarkup(createElement(SettingsView, {
+    const markup = renderToStaticMarkup(createElement(SettingsView, { preferencesApi: {} as import('@contracts').GeneralPreferencesApi,
       appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],

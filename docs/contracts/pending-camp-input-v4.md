@@ -77,6 +77,7 @@ shared Desktop/Web page does not begin them. A remaining old session is presente
 entry. A foreign session instead labels the action “接管并移回输入框” and disables direct deletion. It keeps
 its existing publication fence until explicitly resolved.
 
+<a id="desktop-submission-outcomes"></a>
 ## Submission outcomes
 
 The [v3 durable outcome lookup](pending-camp-input-v3.md#desktop-submission-outcomes) is unchanged. A returned

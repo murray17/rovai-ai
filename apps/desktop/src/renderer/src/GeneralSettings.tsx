@@ -1,14 +1,15 @@
-import { HostWebSettings } from './HostWebSettings'
 import { GeneralLeadSelect } from './GeneralLeadSelect'
 import { readErrorMessage } from './error-message'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
   GeneralPreferencesSnapshot,
+  GeneralPreferencesApi,
   NewConversationDefaults,
   StartupLocationMode,
-  WindowResetCapability
+  WindowResetCapability,
+  WindowControlsApi
 } from '@contracts'
 import {
   AppDialogBody,
@@ -33,18 +34,26 @@ export const ONE_CLICK_ENTRY_DESCRIPTIONS = [
 
 export const ONE_CLICK_PROJECT_HELP = '左上角“新对话”使用当前选中的项目；已有项目文件夹后的 ＋ 使用对应项目；快速对话文件夹后的 ＋ 使用快速对话；“项目”标题后的 ＋ 使用新选择的工作目录。'
 export const DEFAULT_MEMBER_COLLAPSE_THRESHOLD = 10
+const ignorePreferencesChange = (): void => undefined
 
 export function GeneralSettings({
+  api,
+  windowControls,
+  browserAccess,
   agents = [],
   initialPreferences = null,
   currentProjectLabel = '快速对话',
-  onPreferencesChange = () => undefined
+  onPreferencesChange = ignorePreferencesChange
 }: {
+  api: GeneralPreferencesApi
+  windowControls?: WindowControlsApi
+  browserAccess?: ReactNode
   agents?: AgentProfile[]
   initialPreferences?: GeneralPreferencesSnapshot | null
   currentProjectLabel?: string
   onPreferencesChange?(preferences: GeneralPreferencesSnapshot): void
 }): React.JSX.Element {
+  if (!api) throw new Error('通用设置缺少客户端偏好适配。')
   const [preferences, setPreferences] = useState<GeneralPreferencesSnapshot | null>(initialPreferences)
   const [preferenceBusy, setPreferenceBusy] = useState(false)
   const [preferenceError, setPreferenceError] = useState<string | null>(null)
@@ -76,20 +85,21 @@ export function GeneralSettings({
     setPreferenceError(null)
     setWorldMapError(null)
     try {
-      acceptPreferences(await window.rovai.generalPreferences.get())
+      acceptPreferences(await api.get())
     } catch (error) {
       setPreferenceError(errorMessage(error))
     }
-  }, [acceptPreferences])
+  }, [acceptPreferences, api])
 
   const loadResetCapability = useCallback(async (): Promise<void> => {
+    if (!windowControls) return
     try {
-      setResetCapability(await window.rovai.windowControls.getResetCapability())
+      setResetCapability(await windowControls.getResetCapability())
       setResetError(null)
     } catch (error) {
       setResetError(errorMessage(error))
     }
-  }, [])
+  }, [windowControls])
 
   useEffect(() => {
     void Promise.all([loadPreferences(), loadResetCapability()])
@@ -107,6 +117,7 @@ export function GeneralSettings({
   }, [defaultsDirty, preferences])
 
   useEffect(() => {
+    if (!windowControls) return
     const refreshWindowState = (): void => {
       void loadResetCapability()
     }
@@ -116,7 +127,7 @@ export function GeneralSettings({
       window.removeEventListener('focus', refreshWindowState)
       window.removeEventListener('resize', loadResetCapability)
     }
-  }, [loadResetCapability])
+  }, [loadResetCapability, windowControls])
 
   useEffect(() => {
     if (!feedback) return undefined
@@ -131,7 +142,7 @@ export function GeneralSettings({
     setPreferenceBusy(true)
     setPreferenceError(null)
     try {
-      acceptPreferences(await window.rovai.generalPreferences.setStartupLocationMode(mode))
+      acceptPreferences(await api.setStartupLocationMode(mode))
       setFeedback('启动位置偏好已保存。')
     } catch (error) {
       setPreferences(previous)
@@ -165,7 +176,7 @@ export function GeneralSettings({
     setDefaultsBusy(true)
     setDefaultsError(null)
     try {
-      const saved = await window.rovai.generalPreferences.setNewConversationDefaults(draft)
+      const saved = await api.setNewConversationDefaults(draft)
       acceptPreferences(saved)
       setDefaultMemberIds(saved.newConversationDefaults?.memberAgentIds ?? [])
       setDefaultLeadId(saved.newConversationDefaults?.defaultLeadAgentId ?? '')
@@ -188,7 +199,7 @@ export function GeneralSettings({
     setOneClickBusy(true)
     setPreferenceError(null)
     try {
-      acceptPreferences(await window.rovai.generalPreferences.setOneClickNewConversationEnabled(false))
+      acceptPreferences(await api.setOneClickNewConversationEnabled(false))
     } catch (error) {
       setPreferenceError(errorMessage(error))
     } finally {
@@ -201,7 +212,7 @@ export function GeneralSettings({
     setOneClickBusy(true)
     setPreferenceError(null)
     try {
-      acceptPreferences(await window.rovai.generalPreferences.setOneClickNewConversationEnabled(true))
+      acceptPreferences(await api.setOneClickNewConversationEnabled(true))
       setOneClickConfirmOpen(false)
     } catch (error) {
       setPreferenceError(errorMessage(error))
@@ -217,7 +228,7 @@ export function GeneralSettings({
     setWorldMapBusy(true)
     setWorldMapError(null)
     try {
-      acceptPreferences(await window.rovai.generalPreferences.setWorldMapEnabled(enabled))
+      acceptPreferences(await api.setWorldMapEnabled(enabled))
       setFeedback(enabled
         ? '世界地图已开启。'
         : '世界地图已关闭，会话将保留在时间线。')
@@ -230,10 +241,11 @@ export function GeneralSettings({
   }
 
   const resetWindow = async (): Promise<void> => {
+    if (!windowControls) return
     setResetBusy(true)
     setResetError(null)
     try {
-      const result = await window.rovai.windowControls.resetBounds()
+      const result = await windowControls.resetBounds()
       if (!result.performed) {
         setResetCapability({ canReset: false, reason: result.reason })
         return
@@ -332,11 +344,11 @@ export function GeneralSettings({
       <SettingsPageHeader
         eyebrow="Settings / General"
         title="通用"
-        description="设置启动位置、新对话和窗口行为。"
+        description={windowControls ? '设置启动位置、新对话和窗口行为。' : '设置启动位置、新对话和会话偏好。'}
       />
 
       <div className="general-settings-body">
-        {typeof window !== 'undefined' && window.rovai?.hostWeb && <HostWebSettings api={window.rovai.hostWeb} selectWorkspace={window.rovai.selectWorkspaceDirectory} />}
+        {browserAccess}
         <section className="section-block general-settings-section" aria-labelledby="general-startup-heading">
           <div className="section-heading"><div><h2 id="general-startup-heading">启动后打开</h2><p>稳定位置偏好</p></div></div>
           <div className="general-section-body">
@@ -508,7 +520,7 @@ export function GeneralSettings({
           </div>
         </section>
 
-        <section className="section-block general-settings-section" aria-labelledby="general-window-heading">
+        {windowControls && <section className="section-block general-settings-section" aria-labelledby="general-window-heading">
           <div className="section-heading"><div><h2 id="general-window-heading">窗口</h2><p>本机显示位置</p></div></div>
           <div className="general-section-body general-window-row">
             <p className="general-window-description">
@@ -530,7 +542,7 @@ export function GeneralSettings({
               </div>
             )}
           </div>
-        </section>
+        </section>}
       </div>
       <div className="sr-only" aria-live="polite">{feedback}</div>
     </div>

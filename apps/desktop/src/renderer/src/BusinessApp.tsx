@@ -98,6 +98,7 @@ import { McpSettings } from './McpSettings'
 import { ChannelSettings } from './ChannelSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { GeneralSettings } from './GeneralSettings'
+import { HostWebSettings } from './HostWebSettings'
 import { MemoryLibrary } from './MemoryLibrary'
 import {
   AutomationWorkspace,
@@ -3990,6 +3991,10 @@ export function BusinessApp({
 
         {!startupGateVisible && view === 'settings' && (
           <SettingsView
+            preferencesApi={uiPreferences.generalPreferences}
+            nativeSettings={environment.desktop && { windowControls: environment.desktop.windowControls,
+              browserAccess: environment.desktop.hostWeb && <HostWebSettings api={environment.desktop.hostWeb} selectWorkspace={environment.selectWorkspaceDirectory} /> }}
+            zoomManagedBy={environment.desktop ? 'desktop' : 'browser'}
             platform={client.platform}
             appearance={appearance}
             health={health}
@@ -4224,6 +4229,9 @@ export function StartupRouteLoading({
 
 
 export function SettingsView({
+  preferencesApi,
+  nativeSettings,
+  zoomManagedBy = 'desktop',
   platform = 'darwin',
   appearance,
   health,
@@ -4239,6 +4247,9 @@ export function SettingsView({
   onReload,
   onAppearanceChange
 }: {
+  preferencesApi: import('@contracts').GeneralPreferencesApi
+  nativeSettings?: { windowControls: import('@contracts').WindowControlsApi; browserAccess?: React.ReactNode }
+  zoomManagedBy?: 'desktop' | 'browser'
   platform?: NodeJS.Platform
   appearance: AppearanceSnapshot
   health: HealthStatus | null
@@ -4259,6 +4270,9 @@ export function SettingsView({
       <div className={`settings-panel settings-panel-${section}`}>
         {section === 'general' && (
           <GeneralSettings
+            api={preferencesApi}
+            windowControls={nativeSettings?.windowControls}
+            browserAccess={nativeSettings?.browserAccess}
             agents={agents}
             initialPreferences={generalPreferences}
             currentProjectLabel={currentProjectLabel}
@@ -4273,6 +4287,7 @@ export function SettingsView({
         {section === 'channels' && <ChannelSettings agents={agents} />}
         {section === 'appearance' && (
           <AppearanceSettings
+            zoomManagedBy={zoomManagedBy}
             appearance={appearance}
             platform={platform}
             disabled={busy === 'appearance'}

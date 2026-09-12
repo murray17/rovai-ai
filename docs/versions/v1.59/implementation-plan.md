@@ -80,9 +80,68 @@ macOS `O_SEARCH` / Linux `O_PATH` 的目录句柄，最终文件仍只读且逐�
 浏览器保留连接恢复而不访问桌面桥。并行重负载曾导致进程启动和定时测试超时，最终上述验收按组串行复跑通过；
 没有因此改生产时限或关闭门禁。文档门禁在最终证据入库后再执行。
 
-未完成项保持可见：浏览器完整新建/配置路径、私聊独立草稿、待发送附件上传、头像编辑、相对资源/大文件分页、
+未完成项保持可见：浏览器完整新建/配置路径、私聊独立草稿、头像编辑、相对资源/大文件分页、
 共同管理页动作、无 Desktop/浏览器的 Automation 时钟、两种 Host 的完整相同运行场景、第二台设备及 S1。
 首个真实 Camp 增量不等于 B/C/D 或阶段 1–3 整体完成。
+
+### 本次 main 同步与远程连接设计稿
+
+按用户新指令，将 `origin/main` 的 `afd01d1010639a99ad4862774d1d17c03e1dd19b` 合入原任务分支，
+合并提交为 `fa136899`。保留 main 的预览全选、末行引用、HTML 预览独立上限、图片延迟加载、内置工具
+输入展示/匹配 shell 折叠、压缩行间距与 Chrome 缩放档位。图片加载继续使用当前客户端的资源适配与缓存；
+两端共用的生产组件直接获得这些逻辑，没有再次复制到独立 Web 页面。
+
+随后响应“再 pull”补入 `f30024ae76bdeb3534e10a56d0da6a6a8bd56e13`，合并提交 `27d1c348`。
+同步普通 Composer 的 Pending 撤回、导航/未知结果围栏及渠道账号菜单；渠道的网络管理准入仍是原有缺口，
+未借合并公开桌面专用 API。撤回通过共享 CampClient/已有 HTTP 操作进入同一个 Core 事务，目标限定为
+Host 校验的调用客户端；正文、附件 source refs 与引用一起移回，其他 Desktop/标签页草稿不变。
+legacy foreign 编辑显式“接管并移回输入框”，令牌本身不能冒用归属，直接删除保持禁用。原生清理逻辑迁入
+共享 application，Web 不触及 Desktop 的 legacy Prepared 文件。待发送附件修改随新流程回到普通 Composer，复用已接入的
+浏览器上传；不再需要新建 Web 专用 Pending 编辑器或公开 legacy working-file 上传。
+
+Rust 复用上游唯一 withdrawal 事务 owner，将相同 CAS、重放、释放 FIFO、阻止重复发布用例表驱动扩展到
+Desktop/Web，并保留另外两份草稿的正文、source refs、引用和 revision；既有 recovery owner 增加 foreign
+return/delete 拒绝输入。没有新增平行 SQLite fixture；定向 `pending_camp_input::` 11 项通过。
+
+通用设置改为由两端入口显式注入偏好 API。Desktop 注入窗口能力与原浏览器访问管理块，Web 使用当前
+Host/Owner 的浏览器偏好，不再访问 Electron 桥；主题/字号仍共用正式外观页。浏览器整页缩放由浏览器
+菜单或快捷键保存，外观页给出实际可用的操作说明，Desktop 继续使用 main 的原生 Chrome 档位。
+
+用户本次单独要求的[远程连接设计稿](../../ui/host-remote-connection.md)在现有设置“应用”分组追加菜单，
+直接复用正式侧栏、页头、控件和日夜主题；同稿的通用/外观页面提供直接对照。该新增菜单仍只在可点击稿中，
+未改变正式设置 section 或把原 Host 管理块重复接入产品。正式接入前必须解决已生效授权目录/监听配置的
+受信读回缺口，不能把表单草稿当成 Host 当前配置。该稿不扩大 Mobile、平台或发布范围。
+
+本次真实 Electron/双浏览器回归增加了 Web 通用偏好保存且不改 Desktop、原生窗口能力隔离、浏览器缩放
+说明、预览内全选和准确的消息末行引用；仍保留三份草稿、同页重新认证、关闭 Web 后 Core 响应的原断言。第二次 main 合入后增加实际 Web 撤回
+及继续添加附件：仅在隔离数据库种入一条 needs_repair canonical Pending 记录，真实页面通过 HTTP 进入
+Core，再读回自己完整草稿；验证另两个客户端不变。该 fixture 不启动模型，也不冒充真实 Run 自动排队证据。
+[实际 Host 报告](evidence/main-web-sync/desktop-web-live.json)、[通用设置](evidence/main-web-sync/web-general-night.png)、
+[外观设置](evidence/main-web-sync/web-appearance-night.png)、[预览全选](evidence/main-web-sync/web-preview-select-all.png)、
+[末行引用](evidence/main-web-sync/web-last-line-quote.png)及[待发送移回](evidence/main-web-sync/web-pending-return.png)记录此次真实生产入口结果，不启动模型 Runtime。
+原流程对照与补充后的完整流程均通过；脚本明确等待新文档、按已知正文选取最后一行并在继续编辑前关闭引用浮层。
+排查时发生过 CDP 命令超时，最终完整流程未复现；未修改生产时限或删减验收断言。
+
+最终交互稿的 [14 个双主题状态记录](evidence/remote-connection/remote-connection-review.json)包含精确交付 HTML
+的 SHA-256，页头位置、字号、侧栏宽度和背景色与同一构建的生产通用页一致。稿件验证不代替真实 Host 操作。
+
+第二次 main 合并后的最终验证：
+
+| 检查 | 结果 |
+| --- | --- |
+| TypeScript、Desktop/Web 生产构建 | 通过 |
+| `pnpm test` | Vitest 175 文件 / 1798 项；Node 聚合 317 通过 / 2 项既有平台跳过；文档及 Skill 门禁通过 |
+| `RUST_TEST_THREADS=1 pnpm test:rust:pr` | Library 795 通过 / 6 项既有忽略，CLI 35 通过，slow 309 通过 |
+| Workspace all-target check、Clippy `-D warnings`、fmt | 通过 |
+| 真实 Host HTTP 与 Desktop/双浏览器 | 均通过，0 跳过；本增量不启动模型 Runtime |
+| 原生设置、Camp/单聊 Pending 撤回、文件预览、消息选文 | 均通过，0 跳过 |
+| 单文件远程连接交互稿 | 14 状态及交互/响应式检查通过，0 跳过 |
+
+验收夹具修正保留原断言与时限：选文的“清空后再引用”现在模拟一次新的 pointer down/up 选择手势；
+原先仅修改 Range，被生产的已关闭选区抑制规则挡住。失败报告补具体点击步骤，复制后滚动不复活选区
+和末行原生三击断言均保留。Desktop 联调确实观测到窗口为 `hidden`，复用仓库已有 CDP focus emulation，
+并记录 `desktopFocusEmulated: true`；不将其当作 OS 前台/遮挡行为验收。Pending 移回期间普通 Composer
+会同步取消 contenteditable，等待断言因此按元素重新可编辑后才读取正文，不跳过状态围栏。
 
 ### 已确认对照稿的历史证据（不含本次真实接线）
 

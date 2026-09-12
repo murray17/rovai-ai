@@ -10,9 +10,13 @@ import {
   newConversationDefaultsDraftError
 } from './GeneralSettings'
 
+// Static rendering does not invoke preference effects or native actions.
+const api = {} as import('@contracts').GeneralPreferencesApi
+const windowControls = {} as import('@contracts').WindowControlsApi
+
 describe('General settings', () => {
   it('renders the complete General information architecture and native control semantics', () => {
-    const markup = renderToStaticMarkup(createElement(GeneralSettings, {}))
+    const markup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls,}))
     expect(markup).toContain('Settings / General')
     expect(markup).toContain('<h1>通用</h1>')
     expect(markup).not.toContain('登录时启动 Rovai AI')
@@ -72,7 +76,7 @@ describe('General settings', () => {
       oneClickNewConversationEnabled: true,
       worldMapEnabled: true
     }
-    const markup = renderToStaticMarkup(createElement(GeneralSettings, {
+    const markup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls,
       agents,
       initialPreferences: preferences,
       currentProjectLabel: 'rovai-ai'
@@ -112,8 +116,8 @@ describe('General settings', () => {
       profile(`agent-${DEFAULT_MEMBER_COLLAPSE_THRESHOLD}`, `队员 ${DEFAULT_MEMBER_COLLAPSE_THRESHOLD + 1}`)
     ]
 
-    const directMarkup = renderToStaticMarkup(createElement(GeneralSettings, { agents: directMembers }))
-    const collapsedMarkup = renderToStaticMarkup(createElement(GeneralSettings, { agents: collapsedMembers }))
+    const directMarkup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls, agents: directMembers }))
+    const collapsedMarkup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls, agents: collapsedMembers }))
 
     expect(directMarkup).not.toContain('class="general-default-member-picker"')
     expect(directMarkup).not.toContain('aria-label="搜索默认队员"')

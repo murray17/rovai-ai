@@ -107,6 +107,10 @@ network/removable/non-NTFS 目标。验收覆盖 unpacked App 与 installed App�
 
 ## 独立 UI 验收
 
+`pnpm review:remote-connection` 构建可离线打开的设置交互稿；`pnpm test:remote-connection-review`
+使用独立 Chrome profile 对照生产设置页的几何与主题、检查状态和键盘交互，不启动 Core/Runtime。
+该命令验证设计稿，不替代实际 Web 接入验收。范围和复验说明见[远程连接设置稿](../ui/host-remote-connection.md)。
+
 以下 package scripts 自行创建或要求隔离 fixture，不调用模型：
 
 ```bash

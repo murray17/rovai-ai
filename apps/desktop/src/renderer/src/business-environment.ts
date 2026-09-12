@@ -9,5 +9,5 @@ export interface BusinessEnvironment {
   preferences: Pick<RovaiApi, 'appearance' | 'generalPreferences' | 'navigationPreferences'>
   selectWorkspaceDirectory: RovaiApi['selectWorkspaceDirectory']
   /** Native startup, updates, lifecycle and notification integration are absent on Web. */
-  desktop?: Pick<RovaiApi, 'desktopSession' | 'onboarding' | 'appLifecycle' | 'userAutomation' | 'appUpdates' | 'exportDiagnostics'>
+  desktop?: Pick<RovaiApi, 'desktopSession' | 'onboarding' | 'appLifecycle' | 'userAutomation' | 'appUpdates' | 'exportDiagnostics' | 'windowControls' | 'hostWeb'>
 }

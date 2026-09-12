@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { CampNavigation } from '@renderer/CampNavigation'
 import { WindowDragStrip } from '@renderer/App'
+import { HostWebSettings } from '@renderer/HostWebSettings'
 import { GeneralSettings } from '@renderer/GeneralSettings'
 import { AppearanceSettings } from '@renderer/AppearanceSettings'
 import { NotificationSettings } from '@renderer/NotificationSettings'
@@ -147,7 +148,7 @@ function Fixture() {
       onRemoveProject={async () => {}} onRename={async () => {}} onDelete={async () => {}} onError={error => { throw error }} />
     <main className="content settings-content">
       <div className="settings-workbench"><div className={`settings-panel settings-panel-${page}`} key={`${page}-${generation}`}>
-        {page === 'general' && <GeneralSettings agents={roster} initialPreferences={state.preferences} currentProjectLabel="rovai-ai" onPreferencesChange={ignore} />}
+        {page === 'general' && <GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} browserAccess={<HostWebSettings api={window.rovai.hostWeb} selectWorkspace={async () => null} />} agents={roster} initialPreferences={state.preferences} currentProjectLabel="rovai-ai" onPreferencesChange={ignore} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}
         {page === 'runtime' && <RuntimeInstallationsPanel health={fixture.healthSnapshot()} installations={[]} onReload={async () => {}} />}

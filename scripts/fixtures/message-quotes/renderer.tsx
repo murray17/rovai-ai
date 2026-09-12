@@ -29,6 +29,11 @@ const focus = (element: HTMLElement) => {
 }
 const check = (value: unknown, reason: string) => { if (!value) throw new Error(reason) }
 const root = (index: number) => document.querySelector<HTMLElement>(`[data-message-quote-body="source-${index}"]`)!
+function click(selector: string, step: string) {
+  const button = document.querySelector<HTMLButtonElement>(selector)
+  check(button, `${step}: missing ${selector}`)
+  button!.click()
+}
 function select(index: number, start = 0, end?: number) {
   const projection = projectQuoteBody(root(index))
   const first = projection.positions.find(position => position.end > start)!
@@ -118,7 +123,7 @@ Object.assign(window, { quoteTest: {
     check(document.querySelector('textarea')!.value === '这几处如何一起调整？', 'question preserved')
     check(document.querySelector('.message-quotes-row')!.getBoundingClientRect().height <= 36, 'compact height')
     fail = true; select(0, 0, 12); await frames()
-    document.querySelector<HTMLButtonElement>('.message-quote-selection-toolbar button')!.click(); await pause(30); await frames()
+    click('.message-quote-selection-toolbar button', 'quote error retention'); await pause(30); await frames()
     check(latest.length === 3 && !!document.querySelector('[role="alert"]') && !window.getSelection()!.isCollapsed, 'failure retains quotes and selection')
     check(document.querySelector('[role="alert"]')?.textContent?.includes('12,000'), 'contextBridge failure objects retain actionable quote errors')
     document.dispatchEvent(new Event('copy')); await frames()
@@ -135,15 +140,15 @@ Object.assign(window, { quoteTest: {
     check(document.activeElement === trigger && !document.querySelector('.message-quotes-popover'), 'escape dismisses and restores trigger')
     trigger.click(); await frames()
     failRemoval = true
-    document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await pause(30); await frames()
+    click('.message-quote-remove', 'failed individual removal'); await pause(30); await frames()
     check(latest.length === 3 && document.querySelector('[role="alert"]')?.textContent?.includes('草稿已更新'), 'failed removal keeps quotes and reports the failure')
     failRemoval = false
     const remainingIds = latest.slice(1).map(quote => quote.quoteId)
-    document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await pause(30); await frames()
+    click('.message-quote-remove', 'successful individual removal'); await pause(30); await frames()
     check(latest.length === 2 && latest.every((quote, index) => quote.quoteId === remainingIds[index]), 'individual removal preserves remaining order')
     check(document.activeElement?.classList.contains('message-quote-jump') && trigger.textContent === '引用 2 段叮叮', 'keyboard removal focuses the remaining row and updates the count')
     check(!document.querySelector('.message-quotes-undo') && !document.body.textContent?.includes('撤销移除'), 'no undo control in the bubble or composer')
-    document.querySelector<HTMLButtonElement>('.message-quote-jump')!.click(); await pause(35); await frames()
+    click('.message-quote-jump', 'reveal quote source'); await pause(35); await frames()
     check(!document.querySelector('.message-quotes-popover') && root(0).dataset.quoteLocated === 'true', 'whole row jumps to source')
     const history = document.querySelector<HTMLButtonElement>('.is-history .message-quotes-trigger')!
     focus(history); history.click(); await frames()
@@ -156,7 +161,7 @@ Object.assign(window, { quoteTest: {
     const start = Array.from(codeText.slice(0, codeText.indexOf('second') + 3)).length
     const end = Array.from(codeText.slice(0, codeText.indexOf('third') + 3)).length
     root(lineSourceIndex).scrollIntoView(); select(lineSourceIndex, start, end); await frames()
-    document.querySelector<HTMLButtonElement>('.message-quote-selection-toolbar button')!.click(); await pause(30); await frames()
+    click('.message-quote-selection-toolbar button', 'capture code-line excerpt'); await pause(30); await frames()
     const saved: MessageQuoteSnapshot = JSON.parse(JSON.stringify(latest.at(-1)))
     await revealMessageQuote(saved, root(lineSourceIndex)); await frames()
     const band = root(lineSourceIndex).querySelector<HTMLElement>('.message-quote-line-band')!
@@ -200,14 +205,19 @@ Object.assign(window, { quoteTest: {
     viewport.className = 'conversation-timeline'
     trigger.click(); await frames()
     while (latest.length) {
-      document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await pause(30); await frames()
+      click('.message-quote-remove', 'clear remaining quotes'); await pause(30); await frames()
     }
     await pause(250)
     check(!document.querySelector('.message-quotes') && !document.querySelector('.message-quotes-popover'), 'last removal closes the bubble and leaves no empty metadata row')
     check(document.activeElement === document.querySelector('textarea') && document.querySelector('textarea')!.value === '这几处如何一起调整？', 'last keyboard removal returns to the unchanged question')
-    // Adding another excerpt after clearing starts collapsed and remains available to native hover QA.
-    root(lineSourceIndex).scrollIntoView(); select(lineSourceIndex, start, end); await frames()
-    document.querySelector<HTMLButtonElement>('.message-quote-selection-toolbar button')!.click(); await pause(30); await frames()
+    // A new drag starts a fresh selection, including an excerpt dismissed earlier.
+    // Selectionchange alone must not revive the old selection after copy/focus.
+    root(lineSourceIndex).scrollIntoView()
+    root(lineSourceIndex).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', button: 0 }))
+    select(lineSourceIndex, start, end)
+    root(lineSourceIndex).dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'mouse', button: 0 }))
+    await frames()
+    click('.message-quote-selection-toolbar button', 'add excerpt after clearing'); await pause(30); await frames()
     check(latest.length === 1 && !document.querySelector('.message-quotes-popover'), 'new selection after clearing starts with a collapsed label')
     check(!errors.length, errors.join('\n'))
     return { ok: true, verified: ['shared projection', 'Unicode and code', 'cross message and cards', 'multiple compact quotes', 'failure retention', 'stale copy selection', 'hover and keyboard disclosure', 'full row navigation and direct removal', 'last removal closes and returns focus', 'persisted code-line anchors', 'duplicate and stale source', 'reflow and multi-block highlights'] }

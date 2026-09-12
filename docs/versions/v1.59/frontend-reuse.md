@@ -25,6 +25,8 @@ last_updated: 2026-09-12
 `CampClientProvider` 与 `FilePreviewProvider` 不接受浏览器缺省桥接。主题、导航与一般展示偏好解析从 Main 提取为纯共享模型，
 两端沿用相同校验规则；浏览器持久存储只保留展示偏好，不保存 Draft、命令、Token 或编辑恢复证明。
 私聊、头像编辑及部分管理页内部仍有原生依赖，属于后续 B/D 缺口；不能把它们写成永久平台差异。
+通用页已要求两端显式传入 `GeneralPreferencesApi`，不读取 `window.rovai`；原生窗口控制和浏览器访问管理
+由 Desktop 入口单独提供。外观继续共享页面与阅读偏好，Web 缩放由浏览器管理，页面不再显示不能生效的缩放选择器。
 一次 Host/Owner/编辑客户端作用域内保持 client/API 稳定。网络重连与同页面同 Owner 重新登录只更新认证和连接代次，
 保留业务子树、未提交编辑与原命令 ID；Host/Owner 改变才更换编辑与缓存作用域。后端验证页面恢复证明，
 不能仅凭 clientId/draftId 访问另一标签页草稿。认证 Token、恢复证明均只在页面内存，不落 URL、日志或浏览器持久存储。

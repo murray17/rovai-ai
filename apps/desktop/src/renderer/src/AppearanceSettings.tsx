@@ -61,10 +61,11 @@ function SizeSetting({ kind, value, disabled, onChange }: {
   </div>
 }
 
-export function AppearanceSettings({ appearance, disabled, platform = 'darwin', onChange }: {
+export function AppearanceSettings({ appearance, disabled, platform = 'darwin', zoomManagedBy = 'desktop', onChange }: {
   appearance: AppearanceSnapshot
   disabled: boolean
   platform?: NodeJS.Platform
+  zoomManagedBy?: 'desktop' | 'browser'
   onChange(preferences: AppearancePreferences): Promise<AppearanceSnapshot>
 }): React.JSX.Element {
   const [draft, setDraft] = useState<AppearancePreferences>(appearance)
@@ -173,7 +174,7 @@ export function AppearanceSettings({ appearance, disabled, platform = 'darwin', 
     </section>
     <section className="settings-section display-section" aria-labelledby="appearance-display-heading">
       <div className="section-heading"><h2 id="appearance-display-heading">显示与动效</h2></div>
-      <div className="setting-row"><div className="setting-copy"><label htmlFor="appearance-zoom">界面缩放</label><p id="appearance-zoom-hint">按比例调整整个应用，包括导航、按钮与文字。</p></div><div className="setting-action"><span className="shortcut" aria-hidden="true"><kbd>{shortcut} −</kbd><kbd>{shortcut} +</kbd><kbd>{shortcut} 0</kbd></span><select className="setting-select" id="appearance-zoom" aria-describedby="appearance-zoom-hint" value={draft.zoomPercentage} disabled={disabled} onChange={(event) => void change({ zoomPercentage: Number(event.target.value) })}>{zoomOptions.map((zoom) => <option key={zoom} value={zoom}>{zoom === 100 ? '100%（默认）' : `${zoom}%`}</option>)}</select></div></div>
+      <div className="setting-row"><div className="setting-copy"><label htmlFor={zoomManagedBy === 'desktop' ? 'appearance-zoom' : undefined}>界面缩放</label><p id="appearance-zoom-hint">{zoomManagedBy === 'browser' ? '使用浏览器菜单或快捷键调整缩放，由当前浏览器保存。恢复外观默认值不会重置浏览器缩放。' : '按比例调整整个应用，包括导航、按钮与文字。'}</p></div><div className="setting-action"><span className="shortcut" aria-label="缩小、放大、恢复默认缩放"><kbd>{shortcut} −</kbd><kbd>{shortcut} +</kbd><kbd>{shortcut} 0</kbd></span>{zoomManagedBy === 'desktop' && <select className="setting-select" id="appearance-zoom" aria-describedby="appearance-zoom-hint" value={draft.zoomPercentage} disabled={disabled} onChange={(event) => void change({ zoomPercentage: Number(event.target.value) })}>{zoomOptions.map((zoom) => <option key={zoom} value={zoom}>{zoom === 100 ? '100%（默认）' : `${zoom}%`}</option>)}</select>}</div></div>
       <div className="setting-row"><div className="setting-copy motion-copy"><label htmlFor="appearance-motion">减少动态效果</label><p id="appearance-motion-hint">减少弹窗位移、标签动画和平滑滚动，保留状态与进度提示。</p></div><select className="setting-select" id="appearance-motion" aria-describedby="appearance-motion-hint" disabled={disabled} value={draft.motionPreference} onChange={(event) => void change({ motionPreference: event.target.value as AppearancePreferences['motionPreference'] })}><option value="system">跟随系统</option><option value="reduce">始终减少</option></select></div>
     </section>
   </div>

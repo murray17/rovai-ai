@@ -185,6 +185,7 @@ export async function revealMoreNavigationCamps(
 }
 
 export function CampNavigation({
+  settingsNavigation,
   footer,
   view,
   state,
@@ -221,6 +222,7 @@ export function CampNavigation({
   onDelete,
   onError
 }: {
+  settingsNavigation?: React.ReactNode
   footer?: React.ReactNode
   view: 'compose' | 'camp' | 'members' | 'automations' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
@@ -474,7 +476,8 @@ export function CampNavigation({
         </div>
         {view === 'settings'
           ? (
-              <SettingsSidebarNavigation
+              settingsNavigation ?? <SettingsSidebarNavigation
+                groups={SETTINGS_SIDEBAR_GROUPS}
                 section={settingsSection}
                 updateBadge={updateBadge}
                 onSectionChange={onSettingsSectionChange}
@@ -744,19 +747,19 @@ export function CampNavigation({
   )
 }
 
-type SettingsSidebarItem = {
-  key: NavigationSettingsSection
+type SettingsSidebarItem<Section extends string> = {
+  key: Section
   icon: NavigationIconName
   label: string
 }
 
-type SettingsSidebarGroup = {
+export type SettingsSidebarGroup<Section extends string = NavigationSettingsSection> = {
   key: string
   label: string
-  items: SettingsSidebarItem[]
+  items: SettingsSidebarItem<Section>[]
 }
 
-const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
+export const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
   {
     key: 'application',
     label: '应用',
@@ -787,15 +790,17 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
   }
 ]
 
-function SettingsSidebarNavigation({
+export function SettingsSidebarNavigation<Section extends string>({
+  groups,
   section,
   updateBadge,
   onSectionChange,
   onBack
 }: {
-  section: NavigationSettingsSection
+  groups: SettingsSidebarGroup<Section>[]
+  section: Section
   updateBadge: AppUpdateBadgePresentation | null
-  onSectionChange(section: NavigationSettingsSection): void
+  onSectionChange(section: Section): void
   onBack(): void
 }): JSX.Element {
   return (
@@ -811,7 +816,7 @@ function SettingsSidebarNavigation({
         </div>
       </div>
       <nav className="settings-sidebar-menu" aria-label="设置页面">
-        {SETTINGS_SIDEBAR_GROUPS.map((group) => {
+        {groups.map((group) => {
           const headingId = `settings-sidebar-group-${group.key}`
           return (
             <section className="settings-sidebar-group" aria-labelledby={headingId} key={group.key}>

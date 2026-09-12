@@ -1,5 +1,5 @@
 ---
-version: 13
+version: 14
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -47,6 +47,11 @@ platform; packaged macOS startup only makes a best-effort removal of any retired
 the first Windows release creates no Startup task or Run-key entry. General does not add hidden/background
 launch, default Project, recovery or update policy.
 
+The shared General page receives its preference API explicitly from either entry. Web stores only client
+presentation preferences; window reset and Host browser-access administration remain injected Desktop
+capabilities. Web does not fall back to a native global. The proposed separate Remote Connection menu is
+still a [design draft](../../../../docs/ui/host-remote-connection.md), not a production navigation item.
+
 New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fewer selectable teammates
 remain directly visible in a four-column chooser (two columns at narrower desktop widths); only counts above
 ten collapse behind a searchable disclosure whose expanded chooser stays two-column and scrolls within 280px.
@@ -90,6 +95,9 @@ Preview messages and files are synthetic examples, never user or Core data.
 The display section uses the shared 25–500% Chrome desktop presets from
 [`themes/README.md`](../../../../docs/ui/themes/README.md#外观与阅读偏好), including its exact fractional
 factors and shortcut limits. An existing out-of-list saved value stays representable and restorable.
+Web delegates page zoom to the browser's own menu and shortcuts, showing this local capability difference
+in the same Appearance row instead of saving an ineffective percentage. Resetting appearance defaults in
+Web does not reset browser-managed zoom.
 Reduced motion has exactly 跟随系统 and 始终减少; it suppresses motion in CSS, programmatic scrolling
 and the world map while preserving status and progress content. Its one-shot file-tab example can replay.
 
