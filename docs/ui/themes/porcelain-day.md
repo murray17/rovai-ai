@@ -139,6 +139,7 @@ Rail and selected surfaces stay unchanged; status, identity and evidence keep th
 | `--conversation-focus-soft` | `rgba(43, 43, 44, 0.12)` |
 | `--conversation-route-accent` | `#7a7d80` |
 | `--conversation-unread` | `#1683ff` |
+| `--file-update-marker` | `#b7791f` |
 
 ### Semantic state
 

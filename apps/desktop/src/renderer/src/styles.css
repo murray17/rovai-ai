@@ -1578,7 +1578,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
     mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
   }
 }
-.file-preview-tab-update { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: var(--attention); }
+.file-preview-tab-update { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--file-update-marker); }
 .file-preview-tab-close {
   display: grid;
   width: 24px;

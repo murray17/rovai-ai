@@ -31,6 +31,7 @@ const requiredTokens = [
   '--conversation-focus-soft',
   '--conversation-route-accent',
   '--conversation-unread',
+  '--file-update-marker',
   '--execution-running-surface',
   '--inspector-surface',
   '--conversation-inspector-line',
@@ -203,11 +204,15 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
         ['--conversation-focus', '--input'],
         ['--conversation-focus', '--rail'],
         ['--conversation-unread', '--rail'],
-        ['--conversation-unread', '--surface-selected']
+        ['--conversation-unread', '--surface-selected'],
+        ['--file-update-marker', '--conversation-surface'],
+        ['--file-update-marker', '--surface-muted']
       ]) {
         expect(contrast(tokens[foreground], tokens[background]), `${foreground} on ${background}`).toBeGreaterThanOrEqual(3)
       }
     }
+    expect(day['--file-update-marker']).toBe('#b7791f')
+    expect(night['--file-update-marker']).toBe('#d2ac70')
   })
 
   it('scopes the approved porcelain surfaces and Steel emphasis', () => {
