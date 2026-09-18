@@ -2793,6 +2793,8 @@ describe('task event projections', () => {
       ],
       onNewConversation: () => undefined,
       onMembers: () => undefined,
+      onMissions: () => undefined,
+      pendingMissionCount: 3,
       onMemory: () => undefined,
       pendingMemoryCount: 2,
       onSettings: () => undefined,
@@ -2814,6 +2816,7 @@ describe('task event projections', () => {
     expect(markup).toContain('<strong>Rovai AI</strong>')
     expect(markup).toContain('队员')
     expect(markup).toContain('记忆，2 条普通提案待确认')
+    expect(markup).not.toContain('使命板')
     expect(markup).toContain('data-navigation-icon="square-pen"')
     expect(markup).toContain('data-navigation-icon="users"')
     expect(markup).toContain('data-navigation-icon="brain"')
@@ -3120,6 +3123,7 @@ describe('task event projections', () => {
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
     expect(capabilitiesGroup).toContain('<strong>运行时</strong>')
     expect(capabilitiesGroup).toContain('<strong>渠道</strong>')
+    expect(capabilitiesGroup).not.toContain('<strong>远程连接</strong>')
     expect(capabilitiesGroup).toContain('data-navigation-icon="sparkles"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="blocks"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="cpu"')

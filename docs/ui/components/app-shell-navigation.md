@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-09-17
+last_updated: 2026-09-18
 ---
 
 # App Shell 与统一侧栏
@@ -206,7 +206,7 @@ App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；
 设置侧栏分三组：
 
 - 应用：通用、外观、提醒；
-- 能力：Skills、MCP、运行时、远程连接、渠道；Desktop 与 Web 共用此顺序，独立 Server 隐藏渠道。
+- 能力：Skills、MCP、运行时、渠道；Desktop 与 Web 共用此顺序。当前发布只隐藏“远程连接”菜单，页面、Host 能力和独立 Server 入口保留。
 - 支持：运行监控、诊断与修复、关于与更新。
 
 返回 App 后恢复原一级页面；当前 Main Window Session 内记住最后设置分类，全新安装默认“通用”。更新

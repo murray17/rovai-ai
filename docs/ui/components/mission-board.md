@@ -2,14 +2,15 @@
 document_type: ui-contract
 authority: mission-renderer-presentation
 status: accepted
-last_updated: 2026-09-17
+last_updated: 2026-09-18
 ---
 
 # Mission board
 
-Desktop and wide Web add a 使命板 entry using the existing shell and theme. Its badge counts `needs_you`
-Missions, independently of unread messages and running Agents. Ordinary project/recent/pin navigation does
-not duplicate Mission Camps. Mobile has no Mission entry; a Mission deep link directs the user to desktop.
+Desktop and wide Web retain the Mission board surface, route and interaction model, but the current release
+hides its 使命板 navigation menu entry. The hidden entry's badge would count `needs_you` Missions independently
+of unread messages and running Agents. Ordinary project/recent/pin navigation does not duplicate Mission Camps.
+Mobile has no Mission entry; a Mission deep link directs the user to desktop.
 
 Cards open from their entire surface, including keyboard activation. Card actions have no visible ellipsis;
 right click or Shift+F10 opens the same accessible menu. The metadata label uses the stable public number

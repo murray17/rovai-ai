@@ -146,7 +146,8 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  return model.client.request(method as any,p)
 }}
 const preferences:any={appearance:{get:async()=>appearance,onChanged:()=>()=>{}},generalPreferences:new Proxy({}, {get:(_,key)=>async(...args:any[])=>{if(key==='setNewConversationDefaults')prefs.newConversationDefaults=args[0];return prefs}}),navigationPreferences:new Proxy({}, {get:()=>async()=>navigationPrefs})}
-const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{calls.push({method:"fixture.file.open",p:req});return model.fileApi.open({...req,...(req.campId?{campId:initial.camp.id}:{})} as any)}},preferences,selectWorkspaceDirectory:async()=>({name:'rovai-ai',projectPath:'/workspace/rovai-ai'})}
+const navigationHistory={initial:{entries:[{kind:'missions' as const}],index:0},write:(state:any)=>state,go:async()=>false,listen:()=>()=>{}}
+const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{calls.push({method:"fixture.file.open",p:req});return model.fileApi.open({...req,...(req.campId?{campId:initial.camp.id}:{})} as any)}},preferences,navigationHistory,selectWorkspaceDirectory:async()=>({name:'rovai-ai',projectPath:'/workspace/rovai-ai'})}
 ;(window as any).missionQA={items,calls,errors:[],run:runMissionAcceptance,admitMissionNotification,
  sourceMessageId:(missionId:string)=>snapshot(items.find(item=>item.missionId===missionId)!).messages[1].id,
  invalidateMissionDetails:()=>changed(),

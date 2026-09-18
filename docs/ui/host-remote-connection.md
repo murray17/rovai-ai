@@ -3,13 +3,13 @@ document_type: ui-interaction-draft
 authority: host-remote-connection-settings-review
 status: implemented
 target_version: v1.59
-last_updated: 2026-09-13
+last_updated: 2026-09-18
 ---
 
 # 设置 · 远程连接交互稿
 
 用户要求在拉取 main 后，以当前设置风格为基准新增“远程连接”菜单设计稿。本稿针对现有 Desktop
-浏览器访问入口与 Web 当前连接状态；不是更换 Host 的客户端、服务发现平台或新的 WebUI。菜单已接入正式 Desktop/Web；下方离线稿使用同一生产组件。模拟数据与当前 Host 能力分开说明；阶段 1–3 的范围仍见[宽屏对照](host-web-parity.md)。
+浏览器访问入口与 Web 当前连接状态；不是更换 Host 的客户端、服务发现平台或新的 WebUI。生产组件、路由、Host 能力和独立 `rovai-server` 入口保留，当前发布仅隐藏 Desktop/Web 设置菜单中的“远程连接”；下方离线稿使用同一生产组件。模拟数据与当前 Host 能力分开说明；阶段 1–3 的范围仍见[宽屏对照](host-web-parity.md)。
 
 ## 可直接查看的稿件
 
@@ -46,8 +46,8 @@ last_updated: 2026-09-13
 
 ## 页面与交互
 
-Desktop 和 Web 的“能力”组在“运行时”之后、“渠道”之前提供“远程连接”；Mobile 稿保持相同顺序。
-独立 Server 隐藏渠道时仍保留远程连接。通用页不再重复管理入口。
+当前发布从 Desktop 和 Web 的“能力”组隐藏“远程连接”菜单，Mobile 同样不显示；页面组件与内部路由保留。
+独立 Server 的入口与运行方式不变。通用页不再重复管理入口。
 端口始终显示且可编辑；修改只是下一次开启服务的输入，不重启当前监听、不刷新当前地址或令牌。
 未应用的端口保存在当前业务窗口的页面状态中，切换设置菜单后仍保留。初次读取以实际监听端口为准，未启动时默认 `8766`；独立 Server 默认 `8767`，显式端口设置优先。
 “远程访问”开关直接开启本机与远程访问，不再选择访问范围；页面保留简短的 HTTP 明文说明。

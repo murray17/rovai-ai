@@ -125,8 +125,6 @@ export function CampNavigation({
   onNewConversation,
   onMembers,
   onAutomations = () => undefined,
-  onMissions,
-  pendingMissionCount = 0,
   onMemory,
   pendingMemoryCount,
   onSettings,
@@ -394,9 +392,6 @@ export function CampNavigation({
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="brain" /></span><span className="rail-label">记忆</span>
                     {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
                   </button>
-                  {onMissions && <button className={`rail-button ${view === 'missions' ? 'active' : ''}`} type="button" aria-current={view === 'missions' ? 'page' : undefined} aria-label={pendingMissionCount ? `使命板，${pendingMissionCount} 项需要你` : '使命板'} title="使命板" onClick={onMissions}>
-                    <span className="rail-glyph" aria-hidden="true"><svg className="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path strokeLinecap="round" strokeLinejoin="round" d="M5 21V4m0 0c5-4 9 4 14 0v11c-5 4-9-4-14 0"/></svg></span><span className="rail-label">使命板</span>{pendingMissionCount > 0 && <span className="mission-nav-count">{pendingMissionCount}</span>}
-                  </button>}
                   <button className={`rail-button ${view === 'automations' ? 'active' : ''}`} type="button" aria-current={view === 'automations' ? 'page' : undefined} aria-label="定时任务" title="定时任务" onClick={onAutomations}>
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="calendar-clock" /></span><span className="rail-label">定时任务</span>
                   </button>
@@ -661,7 +656,6 @@ export const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
       { key: 'skills', icon: 'sparkles', label: 'Skills' },
       { key: 'mcp', icon: 'blocks', label: 'MCP' },
       { key: 'runtime', icon: 'cpu', label: '运行时' },
-      { key: 'remote', icon: 'monitor-smartphone', label: '远程连接' },
       { key: 'channels', icon: 'radio-tower', label: '渠道' }
     ]
   },
