@@ -1,0 +1,113 @@
+---
+document_type: model-context-change-proposal
+runtime: command-code
+target_version: v1.67
+revision: 1
+confirmation_status: pending
+authority: proposal-only
+implementation_status: not_started
+last_updated: 2026-09-23
+---
+
+# Command Code 普通 Prompt 引导：模型输入变更提案（revision 1）
+
+开发者已选择将 Command Code 改为“普通 Prompt 引导”的接入。本文件把该选择落实为可审阅的模型输入合同。它是实施前提案，不修改当前 Context Contract 或 Product Runtime Catalog。根据[核心模型上下文变更治理](../../development/model-context-change-governance.md)，开发者读过完整 revision 并二次确认后，才把它纳入当时唯一 current 版本并实施。
+
+## 变更前
+
+仓库只有内部 [`command_code.rs`](../../../crates/rovai-core/src/command_code.rs) headless 传输：`request.prompt` 原样写入 `--print --output-format json` 的 stdin，没有 Command Code Product Adapter、ContextManifest、Native Binding 或正式 Bootstrap 投递。隔离 fixture 中的 `--mod` 仅用于验证 1.64.0 能以 `appendSystemPrompt` 注入，以及 Mod 缺失或回调抛错后仍会请求模型；正式执行路径没有生成或传递 Mod。
+
+此前研究候选的输入等价于：
+
+```text
+system = commandCodeBaseSystemPrompt + "\n\n" + B
+user   = P
+```
+
+其中 `B` 是既有 Bootstrap Formatter 3 的完整字节，`P` 是当前 Run 的既有冻结 Dynamic Context。该候选未进入正式 Adapter，也没有可恢复的生产数据。
+
+## 变更后
+
+### 1. 精确模型输入
+
+Command Code 使用新增的 `prompt_guidance` Charter delivery mode。定义：
+
+```text
+B = render_session_bootstrap(
+      frozenSessionCharter,
+      currentMemberIdentityPrettyJson,
+      frozenMemoryEntrypoint
+    )
+P = exact frozen Dynamic Context payload for this AgentRun
+G = "[ROVAI_PROMPT_GUIDANCE level=\"ordinary_user_prompt\"]\n" +
+    B +
+    "\n[/ROVAI_PROMPT_GUIDANCE]\n\n"
+U = G + P
+```
+
+`B` 沿用当前 Bootstrap Formatter 3 的完整结构，不修改其中任何标题或正文：
+
+```text
+[SESSION_CHARTER]
+{frozenSessionCharter.trim()}
+[/SESSION_CHARTER]
+
+[MEMBER_IDENTITY]
+{existing six-field Member Identity pretty JSON}
+[/MEMBER_IDENTITY]
+
+[MEMORY_ENTRYPOINT]
+{frozenMemoryEntrypoint.trim()}
+[/MEMORY_ENTRYPOINT]
+```
+
+最后一个 section 仍遵守既有规则：Memory Entrypoint 为空时整段省略。`P` 原样沿用当前 public Formatter 27 / Manifest 27 / Profile 8，或 Single Chat Formatter 25 / Manifest 25 / Profile 6 的 section、字段、顺序、选择、截断和遗漏规则。当前 public 的完整 section 顺序仍为：
+
+```text
+[COLLABORATION_STATE]?
+[SELF_ACTIVE_TASKS]?
+[SHARED_CONVERSATION]?
+[RUN_FACTS]
+[WORKSPACE]?
+[RUN_INPUT]
+```
+
+Core 在每个 Command Code AgentRun（包括按完整 UUID 恢复的 Run）把 `U` 作为**一个普通用户 Prompt**通过 stdin 传给 `--print --output-format json`。Rovai 不生成 Bootstrap Mod、不传 `--mod`、不为成员改写项目或用户 `AGENTS.md`。Command Code 自身的原生配置和 Mod 仍按其原生规则加载，但不作为 Rovai Bootstrap 的投递或证明。
+
+### 2. 权限与连续性边界
+
+`ROVAI_PROMPT_GUIDANCE` 标签只标识来源和投递层级，不伪称 System/Developer 权限。`B` 虽然仍包含 Session Charter 字样，但在 Command Code 中属于普通用户消息，可被更高权限的原生指令覆盖，也可能受到同层后续输入影响。Core 的身份、授权、CLI operation、文件和附件门禁继续在 Core 执行，不能仅依赖模型遵守 `B`。产品资料和可执行资格必须如实标记这项差异；不得宣称高权限 Bootstrap parity。
+
+每个新 AgentRun 只组合一次 `G`，不在同一 stdin 消息中重复。按完整 UUID 恢复时重新附上本 Run 的 `G`，因此恢复后的下一次用户输入无需依赖历史会话保留旧引导。原生多轮 Tool 循环发生在同一 `--print` 进程内；若 Command Code 在该进程内压缩上下文且丢失用户层引导，Rovai 暂无可靠的逐模型调用重注入点，必须作为未验证能力记录，不能宣称压缩连续性已通过。
+
+### 3. 冻结、预算与恢复证据
+
+- `rendered_payload` 和其摘要仍只指 `P`；`runtime_payload` 和其摘要改为包含完整 `U`。`prompt_guidance` 是独立的 delivery mode 值，不伪装成既有的 `first_payload`、`native_append` 或 `managed_system_prompt`。
+- `B` 使用本次 Run 已验证的 Native Binding/generation 和 Bootstrap evidence。组合发生在 Runtime Input Delivery 的冻结、预算、digest 计算之前。超出既有 payload 上限时在启动 CLI 前拒绝，不裁剪 `B`。
+- 失败恢复只能重用冻结的 `U` 或为新的 Run 重新物化；不根据已接受但结果未知的输入自动重发。Native Session 仍只用完整 UUID 精确恢复。
+- 新 mode 与 Command Code Prompt Guidance revision 进入该 Adapter 的 compatibility identity。因为此前不存在正式 Command Code Binding/Manifest/Delivery，旧数据无需迁移；既有 Runtime 的冻结输入和 mode 不改变。
+
+## 明确不变
+
+- `SESSION_CHARTER`、六字段 `MEMBER_IDENTITY` 和 `MEMORY_ENTRYPOINT` 的现有内容、来源与 Formatter 3 字节不变。
+- Public / Single Chat Dynamic Context 的 section、字段、选择、预算、formatter、manifest 和 profile 版本不变；其他 Adapter 的交付模式与模型输入不变。
+- `NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION = native_session_bootstrap_v3` 不变；新 Adapter 专用 mode/revision 是额外兼容轴。
+- Built-in `rovai` CLI 的权限由 Core 逐次验证；Prompt 不代替授权或审批。
+- 本提案只解决 Bootstrap 投递选择。Skills、External MCP、权限、Usage、真实认证 Smoke 与逐平台准入仍按 [Parity Matrix](parity-matrix.md) 单独验收。没有完成前不把 Command Code 宣称为 First-Class。
+
+## 版本、迁移与兼容
+
+确认后建立下一 current 版本的 `model-context-change-command-code-prompt-guidance.md`、版本概览与实施计划，并按[版本切换清单](../../versions/README.md#版本切换清单)更新索引与影响表。同步当前 Context Contract、Runtime Catalog Architecture 和必要的产品说明；若实现发现上述输入 shape、发送频率、预算或恢复语义必须改变，递增本 revision 并重新取得二次确认。
+
+`prompt_guidance` 不用于既有 Adapter 或历史数据。生产接入只生成新 Command Code Binding/Delivery；旧 staged transport 测试没有持久化的产品状态。这个提案不授权把未经真实验证的平台标成 `qualified`。
+
+## 验证
+
+1. 在 Context 既有 owner 中检查 `B` 的完整字节、`G + P` 顺序、空 Memory section、省略规则、每个 Run 恰好一次、预算和双摘要；既有 Adapter 的模型输入字节保持不变。
+2. 在隔离 Command Code 1.64.0 fixture 中检查首次与精确 UUID 恢复的实际模型请求：`ROVAI_PROMPT_GUIDANCE` 和 marker 只在 user message 中，不在 system prompt、argv、公开 Activity 或 stderr；启动不传 `--mod`。
+3. 检查缺失/损坏 Bootstrap evidence、超限、Session ID 错误和 stdin/进程失败均不会在缺少 `U` 时启动模型；已接受或未知结果不自动重发。
+4. 完成真实账号、Tool、权限、MCP、Skill、取消、Usage、压缩和目标平台 Golden Flows 前维持 Research 或明确的受限 Preview，不将 fixture 当作正式资格。
+
+## 二次确认
+
+当前为 `revision: 1 / confirmation_status: pending`。用户最初选择了普通 Prompt 路线；该选择发生在本完整输入合同可见之前，不算治理规则要求的二次确认。实施此模型输入变更前，需要开发者在看过本文件后明确确认 revision 1。

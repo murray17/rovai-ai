@@ -18,9 +18,11 @@ last_updated: 2026-09-23
 
 ## 当前判断
 
-候选路线是独立的 `command-code-cli` Adapter，采用 `one_shot_resumable` 进程策略，读取 Command Code 原生 `-p --output-format json` NDJSON，并按完整原生 Session ID 恢复。进程与输入收敛最接近 Claude Code；受管 `--mod` 可借鉴 Pi 的扩展投递思想；两者的协议、权限和配置结论都不能直接沿用。
+候选路线是独立的 `command-code-cli` Adapter，采用 `one_shot_resumable` 进程策略，读取 Command Code 原生 `-p --output-format json` NDJSON，并按完整原生 Session ID 恢复。进程与输入收敛最接近 Claude Code；两者的协议、权限和配置结论不能直接沿用。
 
-这仍是 **Research**。目前没有目标 Runtime 的认证、模型、Tool、Session、MCP、权限或取消的真实 Smoke，所有平台的 qualification evidence 都为空。先验证权限失败语义、成员级 MCP 隔离、高权限 Bootstrap 连续性，之后再写正式 Adapter。若其中某项只能形成上游差异，需要当前版本决定明确接受，不能由研究文档宣称已支持。
+**接入方向更新（2026-09-23）：**开发者选择普通 Prompt 引导。Rovai 将完整 Bootstrap 作为普通用户 Prompt 的前缀投递，每个新 AgentRun（包括精确恢复）重新附上；不再以受管 `--mod` 或可变 `AGENTS.md` 承担 Bootstrap。精确字节、预算、恢复与权限边界见[模型输入变更提案 revision 1](prompt-guidance-proposal.md)。该提案尚待按[核心模型上下文变更治理](../../development/model-context-change-governance.md)二次确认，当前代码尚未实现 Prompt 引导。此前 Mod 失败实测继续保留为选择此路线的证据。
+
+这仍是 **Research**。目前没有目标 Runtime 的真实账号认证、模型、Tool、Session、MCP、权限或取消 Smoke，所有平台的 qualification evidence 都为空。普通 Prompt 引导明确低于 System/Developer 指令，且同一次 Command Code 多轮执行期间的原生压缩仍可能丢失引导；它是开发者选择的产品差异，不等于高权限 Bootstrap parity。成员级 MCP 隔离、权限失败语义与其他能力轴仍须分别闭合。正式 Product Runtime 准入不能由本研究文档单独宣称。
 
 ## 2026-09-23 本机检查
 
@@ -34,7 +36,7 @@ last_updated: 2026-09-23
 
 Tool fixture 还观察到：默认 headless 的 `shell_command` 产生 `tool_queued → tool_hook_blocked`；`--yolo --permission-mode dont-ask` 下无副作用的 `printf` 产生 `tool_queued → tool_running → tool_update → tool_completed`，`result` 文本含 `COMMAND_CODE_TOOL_MARKER`；同一参数组合下 `touch ./mutation-probe` 产生 `tool_queued → tool_denied` 且文件未创建。这些仅验证此隔离 fixture 的权限结果，不证明正式的每 Run Approval。**Tool 被拒绝后顶层仍可返回 `result.success`**，Action 必须按 Tool 终态独立归约。`run_end.result.nextState` 含完整会话内容，不能直接进入公开事件。
 
-**Bootstrap 阻断证据：**在同一隔离 fixture 中，简单 `--mod` 的 `appendSystemPrompt` 正常加载时，首轮及按完整 ID 恢复后的模型请求都含 `BOOTSTRAP_MARKER`。把 hook 改为抛错时，CLI 发出 `mod_error`，但仍向模型发请求、返回 `result.success`，且请求不含 Bootstrap。`--mod` 指向不存在的文件时甚至没有 `mod_error`，同样继续发请求并返回成功。故仅靠受管 Mod 无法满足 Rovai 的高权限 Bootstrap 必达合同；启动前检查文件也不能覆盖运行中 hook 异常。需要找到可在模型请求前失败关闭的上游入口或明确新的受控架构，不能把现有路径列为已实现。
+**Mod 路线的阻断证据：**在同一隔离 fixture 中，简单 `--mod` 的 `appendSystemPrompt` 正常加载时，首轮及按完整 ID 恢复后的模型请求都含 `BOOTSTRAP_MARKER`。把 hook 改为抛错时，CLI 发出 `mod_error`，但仍向模型发请求、返回 `result.success`，且请求不含 Bootstrap。`--mod` 指向不存在的文件时甚至没有 `mod_error`，同样继续发请求并返回成功。故仅靠受管 Mod 无法满足 Rovai 的高权限 Bootstrap 必达合同；启动前检查文件也不能覆盖运行中 hook 异常。开发者已选择改用普通 Prompt 引导，不把现有 Mod 路径列为已实现。
 
 补充试验：隔离 Home 下的 `~/.commandcode/AGENTS.md` 也会进入模型的 system prompt，恢复后重新读取；删除该文件再恢复同一 Session 时，CLI 仍成功发送缺少该内容的请求。每 Run 私有 Home 因而是隔离上下文、MCP 配置的候选架构，但单独使用 Memory 文件仍没有失败关闭保证，并会引入官方认证配置、Session 存储、原生用户设置与多平台路径的迁移问题，当前不能替代正式方案。
 
@@ -81,7 +83,7 @@ python3 docs/research/command-code-runtime/fixtures/local_headless_probe.py --cl
 
 候选的 `--resume <完整 sessionId>` 必须和当前 Conversation 的 Native Binding 一一对应；不能使用 `--continue`、Session 名称或 ID 前缀。`--session <path|id>` 是否能提供 Rovai 私有的持久路径以及其 cwd、模型和恢复失败语义，都需真实验证。对 `result.sessionId` 为空、进程失败和恢复失败必须区分 input 未接受、可能已接受和 continuity lost，不能把再次启动误作安全重试。
 
-`--mod <path>` 与 `appendSystemPrompt` 可以把内容放进高权限层，但上述实测已证明加载缺失和 hook 异常均继续请求模型；它不能单独承担必达 Bootstrap。[Mods](https://commandcode.ai/docs/mods) 的 API 仍为 Experimental。`SessionStart` Hook 只提供上下文且不阻止启动，不能替代。压缩策略可候选 `native_system_prompt_preserved`，仍须在找到失败关闭入口后覆盖手动压缩、自动压缩、错误重试、cold resume 和跨成员无泄漏。
+`--mod <path>` 与 `appendSystemPrompt` 可以把内容放进高权限层，但上述实测已证明加载缺失和 hook 异常均继续请求模型；它不能单独承担必达 Bootstrap。[Mods](https://commandcode.ai/docs/mods) 的 API 仍为 Experimental。`SessionStart` Hook 只提供上下文且不阻止启动，不能替代。新的普通 Prompt 方案在每个 AgentRun 开始时重投引导，但原生多轮执行内部的手动压缩、自动压缩、错误重试仍未证明连续性；cold resume 与跨成员无泄漏同样要单独验收。
 
 ### MCP、Skills 与 Taste
 
@@ -97,31 +99,14 @@ Command Code 的 [Taste](https://commandcode.ai/docs/taste) 默认学习，项�
 
 发现时建议首选跨平台 `command-code`，不用 macOS/Linux 的 `cmd` 别名作为 canonical identity；Windows 的 `cmd` 是系统解释器，Command Code 使用 `cmdc`。[CLI Reference](https://commandcode.ai/docs/reference/cli) 已说明此冲突。运行 `--no-auto-update` 可减少执行中版本漂移，但本机 `--version` 试验表明禁用更新不等于零本机写入；浅检要单独设计隔离。仍须以 executable fingerprint、reported version 和目标平台证据对 Ready 与 Qualification 分层；Node `>=22` 是额外的启动前置条件。
 
-## 初始 Parity Matrix
+## Parity Matrix
 
-下表将本次官方文档/本地帮助观察与 Rovai 实现分开；`DocumentationOnly` 不代表已通过真实行为验证。本机包启动至帮助页只验证入口，不能把任一功能轴标为 `Verified + Implemented`。
-
-| Checklist 能力轴 | 上游证据 | Rovai 实现 | 最先要证明的事项 |
-| --- | --- | --- | --- |
-| Auth / Provider / Model | DocumentationOnly | NotImplemented | 原生认证、默认/显式模型、配置变化后的 Session fence |
-| Host / Fleet / LRU | DocumentationOnly | NotImplemented | one-shot 退出、公共进程树清理和并发独立性 |
-| Native Session / Continuation | DocumentationOnly | NotImplemented | 完整 ID warm/cold resume、错误 ID、模型恢复、唯一替代 Session |
-| Bootstrap / Context | DocumentationOnly | NotImplemented | `--mod` 加载失败、逐轮注入、跨成员/恢复绑定 |
-| Compaction continuity | DocumentationOnly | NotImplemented | 压缩与自动重试后 system prompt、Skill/MCP 和绑定连续性 |
-| Skills | DocumentationOnly | NotImplemented | `--skill` 调用、覆盖/撤销和同名优先级 |
-| External MCP | DocumentationOnly | NotImplemented | per-Run/Session 投递、相邻成员隔离、Server 清理 |
-| Tool / Action / Command Output | DocumentationOnly | NotImplemented | 稳定 Tool ID、六类命令输出、重复/迟到归约 |
-| Narration / Final / Missing-Send | DocumentationOnly | NotImplemented | authoritative result、stream 去重、zero-send/accepted-send |
-| Permission / Approval / Workspace | DocumentationOnly | NotImplemented | 唯一权限权威、拒绝零副作用、异常 fail-closed |
-| Built-in `rovai` CLI | NotObserved | NotImplemented | bundled CLI、当前操作集与每 Run lease |
-| Usage / Cache / Cost | DocumentationOnly | NotImplemented | `result.usage` 字段、scope、retry/compact 归属 |
-| Retry / Queue / Cancel / Cleanup | DocumentationOnly | NotImplemented | accepted 证据、SIGINT/TERM、迟到副作用与 descendant 清理 |
-| Ready / Version / Platform | 本机仅验证 version/help，并观察到 `--version` 落盘 | NotImplemented | 无副作用浅检、auth Ready 与行为资格分层；每平台独立 Golden Flow |
+当前 14 项能力轴、上游证据、实现状态与待接受差异统一维护在 [Parity Matrix](parity-matrix.md)。`DocumentationOnly` 不代表通过真实行为验证；本机包启动至帮助页只验证入口，不能把任一功能轴标为 `Verified + Implemented`。
 
 ## 建议的验证顺序
 
 1. 固定 Command Code 版本与隔离测试账户/工作区，在 `-p --output-format json` 下采集一轮正常、认证失败、Tool 失败、取消的原生 wire；明确 result、exit code 与 Input accepted 证据。
-2. 用两个成员共享同一 workspace，验证独立完整 Session ID、跨进程恢复、Bootstrap 与 Taste 边界；对 Mod 缺失/抛错做失败注入。
+2. 在模型输入提案二次确认后，用两个成员共享同一 workspace，验证普通 Prompt 引导只进入目标成员本轮输入、独立完整 Session ID、跨进程恢复与 Taste 边界；Mod 缺失/抛错证据已记录，不作为正式注入路径。
 3. 证明 `PreparedMcpProjection` 可以只进入目标 Run/Session；如走 Mod bridge，先完成 Tool 权限、Server 生命周期和无泄漏最小闭环。
 4. 再实现独立 Adapter 与 Core 映射，运行 Checklist 的所有 Golden Flows，并按 Runtime 版本和平台形成资格证据。
 
