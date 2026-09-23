@@ -12,7 +12,9 @@ last_updated: 2026-09-23
 
 # Command Code Runtime 接入研究
 
-本文记录实现前的本地检查与候选设计。它不增加 Product Runtime identity、平台准入或机器 Ready 证据。正式接入必须遵循 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)；产品目录与平台资格分别由 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md) 和 [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md) 决定。
+本文记录实现前的本地检查与候选设计，以及隔离的 headless 传输层实现。它不增加 Product Runtime identity、平台准入或机器 Ready 证据。正式接入必须遵循 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)；产品目录与平台资格分别由 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md) 和 [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md) 决定。
+
+实现前六列评估见 [Parity Matrix](parity-matrix.md)。
 
 ## 当前判断
 
@@ -25,6 +27,26 @@ last_updated: 2026-09-23
 本机为 macOS arm64，Node `v26.9.0`。PATH 中没有 `command-code`、`commandcode`、`cmdc` 或 `cmd`，探测前也没有 `~/.commandcode` 目录。把 npm 官方 `command-code@1.64.0` 安装到一次性临时目录，跳过 install scripts，仅执行 `--version`、`--help` 与 `mcp --help`，没有发送模型 Prompt 或使用认证。临时安装不属于 Rovai Product Runtime Installation。
 
 **浅检测副作用：**即使设置 `COMMANDCODE_SKIP_UPDATES=1`，单独执行 `--version` 也会创建 `~/.commandcode/telemetry-install-id`。复核时先确认该目录此前不存在，再重跑一次 `--version` 并观察同一文件；两次均只出现这个 37 字节文件。探测后精确移除本轮新建文件与空目录。没有监测网络请求，不能从文件名推断实际遥测发送。Rovai 的 light probe 不能直接假设 `--version` 无落盘副作用；需要验证隔离配置根或其他无副作用身份读取办法，且正式认证运行仍须保留用户原生配置。
+
+**本轮新增验证：**以 `DO_NOT_TRACK=1 COMMANDCODE_SKIP_UPDATES=1` 再运行 `--version`，本次未创建此前的 `~/.commandcode` 目录；这只证明这一次本机落盘观察，不能替代跨平台浅检。用隔离 `HOME`、临时 `providers.json` 和本机 OpenAI-compatible fixture 服务验证 BYOK：`--list-models --local-only` 列出了 `probe/fixture`；但 `-p --output-format json --model probe/fixture --local-only --permission-mode dont-ask` 在发起模型调用前以退出码 `3` 和无 `sessionId` 的 `result.subtype=error` 返回 `Not authenticated`。移除 `--skip-onboarding`、改用发布包 bin 入口后结果仍相同。隔离目录没有新增认证文件。发布包的 `runPrintMode` 在创建 Harness 前检查 `getCommandAuthKey()` 是否非空，解释了本次 BYOK 也被拦截的行为；这不证明已登录环境或其他版本的结果。
+
+为检查后续协议，仅在隔离 `HOME`、`CMD_LOCAL_ONLY=1`、`DO_NOT_TRACK=1` 和本机 fixture 端点下设置占位 `COMMAND_CODE_API_KEY=local-fixture`。这是**本地测试绕过存在性检查**，不是有效账号认证，也不是 Rovai 的正式配置。该条件下，官方 1.64.0 CLI 确实输出 `run_start → turn_start → model_request_* → text_delta → message_end → run_end → result.success`，`result.sessionId` 是完整 UUID；用同一 ID 启动下一轮成功恢复，`run_end.nextState.messages` 从 2 条增至 4 条。使用不存在的完整 ID 时退出码 `1`、无事件、无 `sessionId` 的 `result.error` 明确表示找不到 Session，不能自动改用最近一次。
+
+Tool fixture 还观察到：默认 headless 的 `shell_command` 产生 `tool_queued → tool_hook_blocked`；`--yolo --permission-mode dont-ask` 下无副作用的 `printf` 产生 `tool_queued → tool_running → tool_update → tool_completed`，`result` 文本含 `COMMAND_CODE_TOOL_MARKER`；同一参数组合下 `touch ./mutation-probe` 产生 `tool_queued → tool_denied` 且文件未创建。这些仅验证此隔离 fixture 的权限结果，不证明正式的每 Run Approval。**Tool 被拒绝后顶层仍可返回 `result.success`**，Action 必须按 Tool 终态独立归约。`run_end.result.nextState` 含完整会话内容，不能直接进入公开事件。
+
+**Bootstrap 阻断证据：**在同一隔离 fixture 中，简单 `--mod` 的 `appendSystemPrompt` 正常加载时，首轮及按完整 ID 恢复后的模型请求都含 `BOOTSTRAP_MARKER`。把 hook 改为抛错时，CLI 发出 `mod_error`，但仍向模型发请求、返回 `result.success`，且请求不含 Bootstrap。`--mod` 指向不存在的文件时甚至没有 `mod_error`，同样继续发请求并返回成功。故仅靠受管 Mod 无法满足 Rovai 的高权限 Bootstrap 必达合同；启动前检查文件也不能覆盖运行中 hook 异常。需要找到可在模型请求前失败关闭的上游入口或明确新的受控架构，不能把现有路径列为已实现。
+
+补充试验：隔离 Home 下的 `~/.commandcode/AGENTS.md` 也会进入模型的 system prompt，恢复后重新读取；删除该文件再恢复同一 Session 时，CLI 仍成功发送缺少该内容的请求。每 Run 私有 Home 因而是隔离上下文、MCP 配置的候选架构，但单独使用 Memory 文件仍没有失败关闭保证，并会引入官方认证配置、Session 存储、原生用户设置与多平台路径的迁移问题，当前不能替代正式方案。
+
+可复现实验脚本为 [`fixtures/local_headless_probe.py`](fixtures/local_headless_probe.py)。传入已安装的 1.64.0 `command-code` bin 绝对路径：
+
+```sh
+python3 docs/research/command-code-runtime/fixtures/local_headless_probe.py --cli /absolute/path/to/command-code
+```
+
+脚本自建临时 Home、workspace 和 `127.0.0.1` 模型 fixture，只打印事件类型/结果摘要，不输出 Prompt、原生 transcript 或配置密钥。本机运行上述脚本已通过，包括 Mod 与 Home Memory 的正常、恢复和缺失路径；它验证的是 CLI 协议与隔离条件，不是正式认证或真实模型行为。
+
+已在 [`command_code.rs`](../../../crates/rovai-core/src/command_code.rs) 建立内部 headless 传输层：受管 one-shot 进程、stdin 投递、逐行 NDJSON、完整 Session ID fence、最终 `result` 裁定以及取消后的进程树清理。[`command_code_activity.rs`](../../../crates/rovai-core/src/command_code_activity.rs) 只将公开文本、模型和 Tool 生命周期投影成 Core 事件，并剔除私有 thinking 与含完整会话的 `run_end`。Parser、事件归约和假 CLI 进程边界测试已通过。它尚未映射 Bootstrap、Skills、MCP、权限审批和 Product Catalog；真实认证/模型 Smoke 与各平台准入仍在后续阶段。
 
 | 本地证据 | 观察 | 能证明的范围 |
 | --- | --- | --- |
@@ -59,7 +81,7 @@ last_updated: 2026-09-23
 
 候选的 `--resume <完整 sessionId>` 必须和当前 Conversation 的 Native Binding 一一对应；不能使用 `--continue`、Session 名称或 ID 前缀。`--session <path|id>` 是否能提供 Rovai 私有的持久路径以及其 cwd、模型和恢复失败语义，都需真实验证。对 `result.sessionId` 为空、进程失败和恢复失败必须区分 input 未接受、可能已接受和 continuity lost，不能把再次启动误作安全重试。
 
-`--mod <path>` 与 `appendSystemPrompt` 是高权限 Bootstrap 的候选入口。[Mods](https://commandcode.ai/docs/mods) 说明它每轮构造 system prompt 时追加内容，但 API 为 Experimental，Mod 加载、hook 异常和后续 Mod 改写都需要固定版本实测。`SessionStart` Hook 只提供上下文且不阻止启动，不能用它承担必达 Bootstrap。压缩策略可候选 `native_system_prompt_preserved`，需要覆盖手动压缩、自动压缩、错误重试、cold resume 和跨成员无泄漏后才确定。
+`--mod <path>` 与 `appendSystemPrompt` 可以把内容放进高权限层，但上述实测已证明加载缺失和 hook 异常均继续请求模型；它不能单独承担必达 Bootstrap。[Mods](https://commandcode.ai/docs/mods) 的 API 仍为 Experimental。`SessionStart` Hook 只提供上下文且不阻止启动，不能替代。压缩策略可候选 `native_system_prompt_preserved`，仍须在找到失败关闭入口后覆盖手动压缩、自动压缩、错误重试、cold resume 和跨成员无泄漏。
 
 ### MCP、Skills 与 Taste
 

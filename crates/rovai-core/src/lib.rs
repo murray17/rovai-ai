@@ -7,6 +7,8 @@ pub mod application;
 mod builtin_tool_runtime;
 mod claude;
 mod codex;
+pub(crate) mod command_code;
+mod command_code_activity;
 mod health;
 mod pi;
 mod runtime_fleet;
