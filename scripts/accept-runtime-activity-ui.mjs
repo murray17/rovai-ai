@@ -3557,12 +3557,16 @@ async function verifyClaudeToolResults(cdp) {
       const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
         .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
           === ${JSON.stringify(toolName)})
+      const emptyState = disclosure?.querySelector('.tool-result-state[role="status"]')
+      const shellResult = document.querySelector('.execution-drawer .tool-call-result-scroll')
       return {
         toolName: ${JSON.stringify(toolName)},
         open: disclosure?.open ?? false,
         executionStatus: disclosure?.querySelector('.tool-call-state[role="img"]')?.getAttribute('aria-label') ?? null,
         result: disclosure?.querySelector('.tool-call-detail pre')?.textContent ?? null,
-        emptyState: disclosure?.querySelector('.tool-result-state[role="status"]')?.textContent?.trim() ?? null,
+        emptyState: emptyState?.textContent?.trim() ?? null,
+        emptyStateBackground: emptyState ? getComputedStyle(emptyState).backgroundColor : null,
+        shellResultBackground: shellResult ? getComputedStyle(shellResult).backgroundColor : null,
         error: disclosure?.querySelector('.tool-result-state[role="alert"]')?.textContent?.trim() ?? null,
         retryCount: disclosure?.querySelectorAll('.tool-result-retry').length ?? 0
       }
@@ -3572,7 +3576,10 @@ async function verifyClaudeToolResults(cdp) {
       && presentation.retryCount === 0
       && presentation.executionStatus === (toolName === 'TaskStop' ? '失败' : '成功')
       && (marker === null
-        ? presentation.result === null && presentation.emptyState === '没有可展示的公开结果。'
+        ? presentation.result === null
+          && presentation.emptyState === '没有可展示的公开结果。'
+          && presentation.emptyStateBackground !== null
+          && presentation.emptyStateBackground === presentation.shellResultBackground
         : presentation.result?.includes(marker)),
     `Claude ${toolName} result detail mismatch: ${JSON.stringify(presentation)}`)
     presentations.push(presentation)
