@@ -16153,6 +16153,15 @@ async fn run_core(
         database_started_at.elapsed().as_millis(),
         startup_started_at.elapsed().as_millis(),
     );
+    match ClaudeCodeCliRuntimeAdapter::recover_stale_launch_files(&data_dir_lease) {
+        Ok(removed) if removed > 0 => {
+            eprintln!("[startup] recovered {removed} stale Claude Code launch owner records")
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!(
+            "[startup] Claude Code launch file recovery could not inspect private storage; files retained: {error:#}"
+        ),
+    }
     let runtime_search_environment = Arc::new(
         runtime_search_environment
             .as_ref()

@@ -66,6 +66,14 @@ spawn 前失败可以立即删除文件；spawn 后由 Claude Adapter 登记的�
 Windows 还须通过所属 Job 的 `tree_is_empty()` 确认后代全部退出，才删除文件并撤销登记。
 终止请求成功或根进程退出均不能单独证明进程树已空；超时、状态未知或删除失败时保留剩余文件和登记并记录诊断。
 新建与精确恢复 Session 使用相同交付方式，用户消息继续经 stdin 传递。
+Claude 每轮启动先在私有 `claude-inputs` 中持久写入仅含随机轮次 ID 和 Core 进程 PID 的归属记录，
+再写入该 ID 对应的 bootstrap/settings 文件；Unix 在 spawn 后另持久记录新进程组 ID。
+正常收尾先删输入文件，最后删归属记录，使部分删除可在下一次启动重试。Core 已取得数据目录独占锁、
+打开数据库且尚未启动新 Runtime 时，逐条核对旧归属：旧 Core 进程仍存活或状态未知时保留文件；
+Windows 仅在旧 Core 确已退出后，依赖其不可继承 Job 句柄关闭时终止全部所属进程的保证回收；
+Unix 还要求已记录的进程组确已不存在。记录缺失、损坏、spawn 标记不完整、进程组仍存活、
+路径类型异常或删除失败都保留文件并报告，不按文件年龄或目录通配清扫；旧版无归属记录的文件也不自动删除。
+Unix 已脱离受管进程组的后代不由进程组不存在这一证据覆盖，须保留该平台边界的诊断和后续治理。
 参数语义见 [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)。
 
 Discovery 可以把已知 npm/pnpm 生成的 Codex `codex.cmd` 作为只读 locator：有界验证精确模板、

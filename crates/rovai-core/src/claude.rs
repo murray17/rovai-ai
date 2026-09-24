@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     error::Error as StdError,
     fmt,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex as StdMutex,
@@ -26,7 +27,7 @@ use rovai_core::{
     },
     runtime_search_operation,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -44,6 +45,11 @@ use crate::{
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 const CLAUDE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
+const CLAUDE_LAUNCH_OWNER_SUFFIX: &str = ".owner.json";
+const CLAUDE_LAUNCH_BOOTSTRAP_SUFFIX: &str = ".bootstrap.txt";
+const CLAUDE_LAUNCH_SETTINGS_SUFFIX: &str = ".settings.txt";
+const CLAUDE_LAUNCH_SPAWNED_SUFFIX: &str = ".spawned.json";
+const CLAUDE_LAUNCH_RECORD_MAX_BYTES: u64 = 4096;
 
 // Keep prompt/settings bytes out of argv, including for Windows command shims.
 // Only a pre-spawn guard removes a file on drop. After spawn the registered run
@@ -51,17 +57,21 @@ const CLAUDE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 struct ClaudeLaunchFile(PathBuf);
 
 impl ClaudeLaunchFile {
+    #[cfg(all(test, feature = "extended-tests", windows))]
     fn write(directory: &Path, contents: &[u8]) -> Result<Self> {
-        use rovai_core::platform::private_storage::{
-            create_private_new_file, prepare_private_directory,
-        };
-        use std::io::Write;
+        use rovai_core::platform::private_storage::prepare_private_directory;
 
         let directory = prepare_private_directory(&directory.join("claude-inputs"))?;
         let path = directory.join(format!("{}.txt", uuid::Uuid::new_v4()));
+        Self::write_at(path, contents)
+    }
+
+    fn write_at(path: PathBuf, contents: &[u8]) -> Result<Self> {
+        use rovai_core::platform::private_storage::create_private_new_file;
+
         let mut file = create_private_new_file(&path)?;
         let guard = Self(path);
-        let written = file.write_all(contents).and_then(|()| file.flush());
+        let written = file.write_all(contents).and_then(|()| file.sync_all());
         drop(file);
         written?;
         Ok(guard)
@@ -70,6 +80,268 @@ impl ClaudeLaunchFile {
     fn into_managed_path(mut self) -> PathBuf {
         std::mem::take(&mut self.0)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ClaudeLaunchOwnerRecord {
+    schema_version: u32,
+    launch_id: uuid::Uuid,
+    owner_pid: u32,
+}
+
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ClaudeLaunchSpawnedRecord {
+    process_group_id: i32,
+}
+
+struct ClaudePreparedLaunch {
+    launch_id: uuid::Uuid,
+    bootstrap: Option<PathBuf>,
+    settings: Option<PathBuf>,
+    owner: Option<PathBuf>,
+}
+
+impl ClaudePreparedLaunch {
+    fn prepare(
+        private_runtime_dir: &Path,
+        bootstrap: Option<&[u8]>,
+        settings: Option<&[u8]>,
+    ) -> Result<Self> {
+        use rovai_core::platform::private_storage::prepare_private_directory;
+
+        let launch_id = uuid::Uuid::new_v4();
+        if bootstrap.is_none() && settings.is_none() {
+            return Ok(Self {
+                launch_id,
+                bootstrap: None,
+                settings: None,
+                owner: None,
+            });
+        }
+        let directory = prepare_private_directory(&private_runtime_dir.join("claude-inputs"))?;
+        let base = launch_id.to_string();
+        // Commit the owner before writing sensitive bytes. A crash anywhere
+        // after this point leaves an exact, bounded recovery target.
+        let owner = ClaudeLaunchFile::write_at(
+            directory.join(format!("{base}{CLAUDE_LAUNCH_OWNER_SUFFIX}")),
+            &serde_json::to_vec(&ClaudeLaunchOwnerRecord {
+                schema_version: 1,
+                launch_id,
+                owner_pid: std::process::id(),
+            })?,
+        )?
+        .into_managed_path();
+        let mut prepared = Self {
+            launch_id,
+            owner: Some(owner),
+            bootstrap: None,
+            settings: None,
+        };
+        if let Some(bytes) = bootstrap {
+            prepared.bootstrap = Some(
+                ClaudeLaunchFile::write_at(
+                    directory.join(format!("{base}{CLAUDE_LAUNCH_BOOTSTRAP_SUFFIX}")),
+                    bytes,
+                )?
+                .into_managed_path(),
+            );
+        }
+        if let Some(bytes) = settings {
+            prepared.settings = Some(
+                ClaudeLaunchFile::write_at(
+                    directory.join(format!("{base}{CLAUDE_LAUNCH_SETTINGS_SUFFIX}")),
+                    bytes,
+                )?
+                .into_managed_path(),
+            );
+        }
+        Ok(prepared)
+    }
+
+    fn into_resources(mut self, child: ManagedProcess) -> ClaudeCodeRunResources {
+        ClaudeCodeRunResources {
+            child,
+            bootstrap_file: self.bootstrap.take(),
+            settings_file: self.settings.take(),
+            owner_file: self.owner.take(),
+            spawned_file: None,
+            #[cfg(unix)]
+            launch_id: self.launch_id,
+        }
+    }
+}
+
+impl Drop for ClaudePreparedLaunch {
+    fn drop(&mut self) {
+        let Some(owner) = self.owner.as_deref() else {
+            return;
+        };
+        let Some(directory) = owner.parent() else {
+            eprintln!("Claude Code pre-spawn cleanup retained an owner without a parent");
+            return;
+        };
+        let base = self.launch_id.to_string();
+        for suffix in [
+            CLAUDE_LAUNCH_BOOTSTRAP_SUFFIX,
+            CLAUDE_LAUNCH_SETTINGS_SUFFIX,
+        ] {
+            let path = directory.join(format!("{base}{suffix}"));
+            if let Err(error) = remove_recorded_claude_file(&path) {
+                eprintln!(
+                    "Claude Code pre-spawn cleanup retained launch {base} and its owner record: {error:#}"
+                );
+                return;
+            }
+        }
+        if let Err(error) = remove_recorded_claude_file(owner) {
+            eprintln!("Claude Code pre-spawn owner record cleanup failed for {base}: {error:#}");
+        }
+    }
+}
+
+fn read_claude_launch_record<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    use rovai_core::platform::private_storage::open_private_read_file;
+
+    let mut file = open_private_read_file(path)?;
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(CLAUDE_LAUNCH_RECORD_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= CLAUDE_LAUNCH_RECORD_MAX_BYTES,
+        "Claude Code launch ownership record is oversized"
+    );
+    serde_json::from_slice(&bytes).context("invalid Claude Code launch ownership record")
+}
+
+#[cfg(windows)]
+fn claude_owner_has_exited(pid: u32) -> io::Result<bool> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::{
+        Foundation::{ERROR_INVALID_PARAMETER, WAIT_OBJECT_0, WAIT_TIMEOUT},
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+    };
+
+    let process = unsafe {
+        // SAFETY: a non-inheritable synchronization handle is requested only
+        // to determine whether the recorded owner still exists.
+        OpenProcess(PROCESS_SYNCHRONIZE, 0, pid)
+    };
+    if process.is_null() {
+        let error = io::Error::last_os_error();
+        return if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+            Ok(true)
+        } else {
+            Err(error)
+        };
+    }
+    let process = unsafe { OwnedHandle::from_raw_handle(process) };
+    match unsafe { WaitForSingleObject(process.as_raw_handle(), 0) } {
+        WAIT_OBJECT_0 => Ok(true),
+        WAIT_TIMEOUT => Ok(false),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+#[cfg(unix)]
+fn claude_owner_has_exited(pid: u32) -> io::Result<bool> {
+    let pid = i32::try_from(pid)
+        .ok()
+        .filter(|pid| *pid > 1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid Claude owner PID"))?;
+    let result = unsafe { libc::kill(pid, 0) };
+    if result == 0 {
+        return Ok(false);
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(true)
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(unix)]
+fn claude_process_group_is_empty(group: i32) -> io::Result<bool> {
+    if group <= 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid Claude process group",
+        ));
+    }
+    let result = unsafe { libc::killpg(group, 0) };
+    if result == 0 {
+        return Ok(false);
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(true)
+    } else {
+        Err(error)
+    }
+}
+
+fn remove_recorded_claude_file(path: &Path) -> Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        metadata.file_type().is_file(),
+        "Claude Code launch recovery found a non-file at {}",
+        path.display()
+    );
+    #[cfg(windows)]
+    rovai_core::core_data_dir_lock::FilesystemObjectIdentity::observe(path)?;
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn recover_one_claude_launch(directory: &Path, launch_id: uuid::Uuid) -> Result<bool> {
+    let base = launch_id.to_string();
+    let owner_path = directory.join(format!("{base}{CLAUDE_LAUNCH_OWNER_SUFFIX}"));
+    let owner: ClaudeLaunchOwnerRecord = read_claude_launch_record(&owner_path)?;
+    anyhow::ensure!(
+        owner.schema_version == 1 && owner.launch_id == launch_id && owner.owner_pid > 1,
+        "Claude Code launch ownership does not match its filename"
+    );
+    if !claude_owner_has_exited(owner.owner_pid)? {
+        eprintln!("Claude Code launch recovery retained {launch_id}: owner process is still live");
+        return Ok(false);
+    }
+
+    #[cfg(unix)]
+    {
+        let spawned_path = directory.join(format!("{base}{CLAUDE_LAUNCH_SPAWNED_SUFFIX}"));
+        let spawned: ClaudeLaunchSpawnedRecord = read_claude_launch_record(&spawned_path)
+            .context("Claude Code launch has no complete process-group proof")?;
+        if !claude_process_group_is_empty(spawned.process_group_id)? {
+            eprintln!(
+                "Claude Code launch recovery retained {launch_id}: process group is still live"
+            );
+            return Ok(false);
+        }
+    }
+
+    // Only the fixed paths tied to a validated owner record are candidates.
+    // Keep the owner record until all other deletion steps have succeeded, so
+    // a later Core can retry a partial cleanup.
+    for suffix in [
+        CLAUDE_LAUNCH_BOOTSTRAP_SUFFIX,
+        CLAUDE_LAUNCH_SETTINGS_SUFFIX,
+        CLAUDE_LAUNCH_SPAWNED_SUFFIX,
+    ] {
+        remove_recorded_claude_file(&directory.join(format!("{base}{suffix}")))?;
+    }
+    remove_recorded_claude_file(&owner_path)?;
+    Ok(true)
 }
 
 impl Drop for ClaudeLaunchFile {
@@ -150,6 +422,10 @@ struct ClaudeCodeRunResources {
     child: ManagedProcess,
     bootstrap_file: Option<PathBuf>,
     settings_file: Option<PathBuf>,
+    owner_file: Option<PathBuf>,
+    spawned_file: Option<PathBuf>,
+    #[cfg(unix)]
+    launch_id: uuid::Uuid,
 }
 
 type ActiveClaudeRuns = StdMutex<HashMap<(String, i64), Arc<ClaudeCodeProcessControl>>>;
@@ -167,6 +443,32 @@ impl Drop for ClaudeOutputTasks {
 }
 
 impl ClaudeCodeRunResources {
+    #[cfg(unix)]
+    fn record_spawned_process_group(&mut self) -> Result<()> {
+        let Some(owner) = self.owner_file.as_deref() else {
+            return Ok(());
+        };
+        let pid = self
+            .child
+            .id()
+            .and_then(|pid| i32::try_from(pid).ok())
+            .filter(|pid| *pid > 1)
+            .context("Claude Code process group identity is unavailable")?;
+        let directory = owner.parent().context("Claude Code owner has no parent")?;
+        let path = directory.join(format!(
+            "{}{}",
+            self.launch_id, CLAUDE_LAUNCH_SPAWNED_SUFFIX
+        ));
+        let marker = ClaudeLaunchFile::write_at(
+            path,
+            &serde_json::to_vec(&ClaudeLaunchSpawnedRecord {
+                process_group_id: pid,
+            })?,
+        )?;
+        self.spawned_file = Some(marker.into_managed_path());
+        Ok(())
+    }
+
     async fn finish(&mut self, terminate: bool) -> Result<()> {
         let deadline = Instant::now() + CLAUDE_CLEANUP_TIMEOUT;
         if terminate && let Err(error) = self.child.force_terminate_tree() {
@@ -197,6 +499,8 @@ impl ClaudeCodeRunResources {
         for (name, file) in [
             ("bootstrap", &mut self.bootstrap_file),
             ("settings", &mut self.settings_file),
+            ("spawned marker", &mut self.spawned_file),
+            ("owner record", &mut self.owner_file),
         ] {
             if let Some(path) = file.as_ref() {
                 match std::fs::remove_file(path) {
@@ -220,6 +524,83 @@ pub struct ClaudeCodeCliRuntimeAdapter {
 }
 
 impl ClaudeCodeCliRuntimeAdapter {
+    pub(crate) fn recover_stale_launch_files(
+        data_dir_lease: &rovai_core::core_data_dir_lock::CoreDataDirLease,
+    ) -> Result<usize> {
+        use rovai_core::platform::private_storage::prepare_private_directory;
+
+        // The caller must own the Core data-directory lease. A prior owner
+        // may release that lease shortly before its process exits, so every
+        // record also checks the exact recorded owner process before cleanup.
+        anyhow::ensure!(
+            data_dir_lease.revalidate_identity()?,
+            "Core data-directory identity changed before Claude Code recovery"
+        );
+        let directory = prepare_private_directory(
+            &data_dir_lease
+                .data_dir()
+                .join("runtime-private/claude-inputs"),
+        )?;
+        let mut removed = 0usize;
+        for entry in std::fs::read_dir(&directory)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some(id) = name
+                .strip_suffix(CLAUDE_LAUNCH_OWNER_SUFFIX)
+                .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            else {
+                continue;
+            };
+            if !entry.file_type()?.is_file() {
+                eprintln!("Claude Code launch recovery retained non-file owner record {name}");
+                continue;
+            }
+            match recover_one_claude_launch(&directory, id) {
+                Ok(true) => removed += 1,
+                Ok(false) => {}
+                Err(error) => {
+                    eprintln!("Claude Code launch recovery retained files for {id}: {error:#}")
+                }
+            }
+        }
+        let mut unowned = 0usize;
+        for entry in std::fs::read_dir(&directory)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let legacy = name
+                .strip_suffix(".txt")
+                .and_then(|value| uuid::Uuid::parse_str(value).ok())
+                .is_some();
+            let missing_owner = [
+                CLAUDE_LAUNCH_BOOTSTRAP_SUFFIX,
+                CLAUDE_LAUNCH_SETTINGS_SUFFIX,
+            ]
+            .iter()
+            .filter_map(|suffix| name.strip_suffix(suffix))
+            .filter(|base| uuid::Uuid::parse_str(base).is_ok())
+            .any(|base| {
+                !directory
+                    .join(format!("{base}{CLAUDE_LAUNCH_OWNER_SUFFIX}"))
+                    .exists()
+            });
+            if legacy || missing_owner {
+                unowned += 1;
+            }
+        }
+        if unowned > 0 {
+            eprintln!(
+                "Claude Code launch recovery retained {unowned} input files without a verifiable owner record"
+            );
+        }
+        Ok(removed)
+    }
+
     #[cfg(all(test, feature = "extended-tests"))]
     pub fn new(data_dir: &Path) -> Result<Self> {
         let adapter = Self::deferred(data_dir);
@@ -547,27 +928,24 @@ impl ClaudeCodeCliRuntimeAdapter {
             // Core already validated this value against the Runtime's model catalog.
             command.args(["--effort", effort]);
         }
-        let bootstrap_file = request
-            .session_bootstrap
-            .as_deref()
-            .map(|bootstrap| ClaudeLaunchFile::write(private_runtime_dir, bootstrap.as_bytes()))
-            .transpose()?;
-        let settings_file = if inline_settings
+        let settings_bytes = if inline_settings
             .as_object()
             .is_some_and(|settings| !settings.is_empty())
         {
-            Some(ClaudeLaunchFile::write(
-                private_runtime_dir,
-                &serde_json::to_vec(&inline_settings)?,
-            )?)
+            Some(serde_json::to_vec(&inline_settings)?)
         } else {
             None
         };
+        let prepared = ClaudePreparedLaunch::prepare(
+            private_runtime_dir,
+            request.session_bootstrap.as_deref().map(str::as_bytes),
+            settings_bytes.as_deref(),
+        )?;
         command.args(launch_session_arguments(
             request.resumable_native_session_id.as_deref(),
             &native_session_id,
-            bootstrap_file.as_ref().map(|file| file.0.as_path()),
-            settings_file.as_ref().map(|file| file.0.as_path()),
+            prepared.bootstrap.as_deref(),
+            prepared.settings.as_deref(),
         )?);
         if !request.persist_session {
             command.arg("--no-session-persistence").arg("--tools=");
@@ -626,21 +1004,26 @@ impl ClaudeCodeCliRuntimeAdapter {
             .resources
             .try_lock()
             .expect("new Claude Code run has no competing resource owner");
-        *owned = Some(ClaudeCodeRunResources {
-            child,
-            bootstrap_file: bootstrap_file.map(ClaudeLaunchFile::into_managed_path),
-            settings_file: settings_file.map(ClaudeLaunchFile::into_managed_path),
-        });
+        *owned = Some(prepared.into_resources(child));
         let resources = owned.as_mut().expect("Claude Code run was just installed");
-        let result = Self::execute_spawned(
-            private_runtime_dir,
-            request,
-            resources,
-            interrupted,
-            launch_handoff,
-            native_session_id,
-        )
-        .await;
+        #[cfg(unix)]
+        let spawn_recorded = resources.record_spawned_process_group();
+        #[cfg(not(unix))]
+        let spawn_recorded: Result<()> = Ok(());
+        let result = match spawn_recorded {
+            Ok(()) => {
+                Self::execute_spawned(
+                    private_runtime_dir,
+                    request,
+                    resources,
+                    interrupted,
+                    launch_handoff,
+                    native_session_id,
+                )
+                .await
+            }
+            Err(error) => Err(error.context("failed to record Claude Code launch ownership")),
+        };
         let cleanup = resources.finish(result.is_err()).await;
         match cleanup {
             Ok(()) => {
@@ -2265,10 +2648,28 @@ mod tests {
             return Vec::new();
         };
         entries
-            .map(|entry| {
+            .filter_map(|entry| {
                 let path = entry.unwrap().path();
+                if path.extension().is_none_or(|extension| extension != "txt") {
+                    return None;
+                }
                 let bytes = std::fs::read(&path).unwrap();
-                (path, bytes)
+                Some((path, bytes))
+            })
+            .collect()
+    }
+
+    fn claude_owner_records(root: &Path) -> Vec<PathBuf> {
+        let directory = root.join("runtime-private").join("claude-inputs");
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return Vec::new();
+        };
+        entries
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.ends_with(CLAUDE_LAUNCH_OWNER_SUFFIX))
             })
             .collect()
     }
@@ -2330,20 +2731,21 @@ mod tests {
         for bootstrap in ["single line", "中文\nline \"two\"", "中文\r\n100% complete"] {
             for resume in [None, Some("resume-id")] {
                 for fast in [None, Some(true), Some(false)] {
-                    let bootstrap_file =
-                        ClaudeLaunchFile::write(&root, bootstrap.as_bytes()).unwrap();
                     let mut settings = json!({});
                     rovai_core::camp_fast::merge_claude_inline_settings(&mut settings, fast)
                         .unwrap();
-                    let settings_file = fast.map(|_| {
-                        ClaudeLaunchFile::write(&root, &serde_json::to_vec(&settings).unwrap())
-                            .unwrap()
-                    });
+                    let settings_bytes = fast.map(|_| serde_json::to_vec(&settings).unwrap());
+                    let prepared = ClaudePreparedLaunch::prepare(
+                        &root,
+                        Some(bootstrap.as_bytes()),
+                        settings_bytes.as_deref(),
+                    )
+                    .unwrap();
                     let args = launch_session_arguments(
                         resume,
                         "new-id",
-                        Some(&bootstrap_file.0),
-                        settings_file.as_ref().map(|file| file.0.as_path()),
+                        prepared.bootstrap.as_deref(),
+                        prepared.settings.as_deref(),
                     )
                     .unwrap();
                     assert_eq!(
@@ -2391,12 +2793,13 @@ mod tests {
                     } else {
                         assert_eq!(args.len(), 4);
                     }
-                    let bootstrap_path = bootstrap_file.0.clone();
-                    let settings_path = settings_file.as_ref().map(|file| file.0.clone());
-                    drop(bootstrap_file);
-                    drop(settings_file);
+                    let bootstrap_path = prepared.bootstrap.clone().unwrap();
+                    let settings_path = prepared.settings.clone();
+                    let owner_path = prepared.owner.clone().unwrap();
+                    drop(prepared);
                     assert!(!bootstrap_path.exists());
                     assert!(settings_path.is_none_or(|path| !path.exists()));
+                    assert!(!owner_path.exists());
                 }
             }
         }
@@ -2423,6 +2826,7 @@ mod tests {
         let result = adapter.run(request).await.unwrap();
         assert_eq!(result.final_output, "ok");
         assert!(claude_launch_files(&root).is_empty());
+        assert!(claude_owner_records(&root).is_empty());
         assert!(adapter.active.lock().unwrap().is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -2442,7 +2846,43 @@ mod tests {
         request.session_bootstrap = Some("pre-spawn failure".to_string());
         assert!(adapter.run(request).await.is_err());
         assert!(claude_launch_files(&root).is_empty());
+        assert!(claude_owner_records(&root).is_empty());
         assert!(adapter.active.lock().unwrap().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pre_spawn_delete_failure_preserves_the_owner_record() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+        let (root, _workspace) = claude_fixture();
+        let prepared = ClaudePreparedLaunch::prepare(
+            &root.join("runtime-private"),
+            Some(b"bootstrap"),
+            Some(br#"{"fastMode":true}"#),
+        )
+        .unwrap();
+        let owner = prepared.owner.clone().unwrap();
+        let bootstrap = prepared.bootstrap.clone().unwrap();
+        let settings = prepared.settings.clone().unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&bootstrap)
+            .unwrap();
+        drop(prepared);
+        assert!(bootstrap.exists());
+        assert!(settings.exists());
+        assert!(
+            owner.exists(),
+            "partial cleanup must retain its durable owner"
+        );
+        drop(held);
+        for path in [bootstrap, settings, owner] {
+            std::fs::remove_file(path).unwrap();
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2783,6 +3223,125 @@ mod tests {
     }
 
     #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture run only by the Claude launch recovery test"]
+    fn restart_recovery_owner_helper() {
+        let root = PathBuf::from(std::env::var_os("ROVAI_CLAUDE_RECOVERY_ROOT").unwrap());
+        let _lease = rovai_core::core_data_dir_lock::CoreDataDirLease::acquire(&root).unwrap();
+        let script = root.join("held.cmd");
+        std::fs::write(&script, "@echo off\r\nping -n 31 127.0.0.1 >nul\r\n").unwrap();
+        let mut command = Command::new(&script);
+        command.current_dir(&root);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeOneShot,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "claude-recovery-owner".to_string(),
+        )
+        .unwrap();
+        let prepared = ClaudePreparedLaunch::prepare(
+            &root.join("runtime-private"),
+            Some(b"private bootstrap"),
+            Some(br#"{"fastMode":true}"#),
+        )
+        .unwrap();
+        let resources = prepared.into_resources(ManagedProcess::spawn(spec).unwrap());
+        assert!(!resources.child.tree_is_empty().unwrap());
+        std::fs::write(root.join("owner.ready"), b"ready").unwrap();
+        let _resources = resources;
+        loop {
+            std::thread::park();
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn restart_recovery_waits_for_owner_exit_and_removes_only_recorded_files() {
+        use std::process::Stdio;
+
+        let (root, _workspace) = claude_fixture();
+        let test_exe = std::env::current_exe().unwrap();
+        let mut owner = std::process::Command::new(test_exe)
+            .args([
+                "--exact",
+                "claude::tests::restart_recovery_owner_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("ROVAI_CLAUDE_RECOVERY_ROOT", &root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        wait_for_claude_fixture(|| {
+            root.join("owner.ready").exists()
+                && claude_launch_files(&root).len() == 2
+                && claude_owner_records(&root).len() == 1
+        })
+        .await;
+        let record = claude_owner_records(&root).pop().unwrap();
+        let id = record
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(CLAUDE_LAUNCH_OWNER_SUFFIX))
+            .and_then(|name| uuid::Uuid::parse_str(name).ok())
+            .unwrap();
+        assert!(!recover_one_claude_launch(record.parent().unwrap(), id).unwrap());
+        assert_eq!(claude_launch_files(&root).len(), 2);
+
+        let legacy = ClaudeLaunchFile::write(&root.join("runtime-private"), b"unowned old file")
+            .unwrap()
+            .into_managed_path();
+        let corrupt_id = uuid::Uuid::new_v4();
+        let directory = record.parent().unwrap();
+        let corrupt_owner = ClaudeLaunchFile::write_at(
+            directory.join(format!("{corrupt_id}{CLAUDE_LAUNCH_OWNER_SUFFIX}")),
+            b"invalid record",
+        )
+        .unwrap()
+        .into_managed_path();
+        let corrupt_bootstrap = ClaudeLaunchFile::write_at(
+            directory.join(format!("{corrupt_id}{CLAUDE_LAUNCH_BOOTSTRAP_SUFFIX}")),
+            b"must remain",
+        )
+        .unwrap()
+        .into_managed_path();
+        owner.kill().unwrap();
+        owner.wait().unwrap();
+        let lease = rovai_core::core_data_dir_lock::CoreDataDirLease::acquire(&root).unwrap();
+        assert_eq!(
+            ClaudeCodeCliRuntimeAdapter::recover_stale_launch_files(&lease).unwrap(),
+            1
+        );
+        assert!(!record.exists());
+        assert_eq!(claude_launch_files(&root).len(), 2);
+        assert_eq!(std::fs::read(&legacy).unwrap(), b"unowned old file");
+        assert_eq!(std::fs::read(&corrupt_bootstrap).unwrap(), b"must remain");
+        assert!(corrupt_owner.exists());
+        assert_eq!(
+            ClaudeCodeCliRuntimeAdapter::recover_stale_launch_files(&lease).unwrap(),
+            0,
+            "recovery must be idempotent"
+        );
+        drop(lease);
+        std::fs::remove_file(legacy).unwrap();
+        std::fs::remove_file(corrupt_bootstrap).unwrap();
+        std::fs::remove_file(corrupt_owner).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match std::fs::remove_dir_all(&root) {
+                Ok(()) => break,
+                Err(_) if Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("Windows recovery fixture directory remained locked: {error}"),
+            }
+        }
+    }
+
+    #[cfg(windows)]
     #[tokio::test]
     async fn cmd_and_native_roots_keep_both_files_until_the_job_descendants_exit() {
         // The shared managed-process helper starts a grandchild and lets its
@@ -2822,13 +3381,13 @@ mod tests {
                 format!("claude-cleanup-{entrypoint}"),
             )
             .unwrap();
-            let bootstrap = ClaudeLaunchFile::write(&root, b"bootstrap").unwrap();
-            let settings = ClaudeLaunchFile::write(&root, br#"{"fastMode":true}"#).unwrap();
-            let mut resources = ClaudeCodeRunResources {
-                child: ManagedProcess::spawn(spec).unwrap(),
-                bootstrap_file: Some(bootstrap.into_managed_path()),
-                settings_file: Some(settings.into_managed_path()),
-            };
+            let prepared = ClaudePreparedLaunch::prepare(
+                &root.join("runtime-private"),
+                Some(b"bootstrap"),
+                Some(br#"{"fastMode":true}"#),
+            )
+            .unwrap();
+            let mut resources = prepared.into_resources(ManagedProcess::spawn(spec).unwrap());
             tokio::time::timeout(Duration::from_secs(10), resources.child.wait())
                 .await
                 .unwrap()
@@ -2841,8 +3400,10 @@ mod tests {
             resources.child.force_terminate_tree().unwrap();
             assert!(resources.bootstrap_file.as_ref().unwrap().exists());
             assert!(resources.settings_file.as_ref().unwrap().exists());
+            assert!(resources.owner_file.as_ref().unwrap().exists());
             resources.finish(false).await.unwrap();
             assert!(claude_launch_files(&root).is_empty());
+            assert!(claude_owner_records(&root).is_empty());
             drop(resources);
             let deadline = Instant::now() + Duration::from_secs(2);
             loop {
