@@ -1375,7 +1375,7 @@ fn root_help_text(managed_runtime: bool) -> String {
 }
 
 fn task_family_help_text() -> &'static str {
-    "rovai task\n\n  create  Create a durable task.\n  get     Read task details and version.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
+    "rovai task\n\n  create  Create a durable task.\n  get     Read task details.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
 }
 
 fn user_automation_available_in_current_process() -> bool {
@@ -1865,9 +1865,7 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
         }
         "team.get_task" => &["rovai task get --task-id task_123"],
         "team.list_tasks" => &["rovai task list --limit 10"],
-        "team.update_task" => {
-            &["rovai task update --task-id task_123 --expected-version 1 --status in_progress"]
-        }
+        "team.update_task" => &["rovai task update --task-id task_123 --status in_progress"],
         "camp.list" => &["rovai camp list --limit 10"],
         "camp.search" => &[
             "rovai camp search --query 'amount'",
@@ -2109,7 +2107,7 @@ mod tests {
         assert!(!is_family_help(&task_help));
         assert_eq!(
             task_family_help_text(),
-            "rovai task\n\n  create  Create a durable task.\n  get     Read task details and version.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
+            "rovai task\n\n  create  Create a durable task.\n  get     Read task details.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
         );
     }
 

@@ -316,12 +316,11 @@ try {
     if (invalidEnvelopeEvidence) {
       throw new Error(`${specification.adapterKind} Evidence did not retain a valid Core Envelope: ${JSON.stringify(invalidEnvelopeEvidence)}`)
     }
-    const staleConflict = terminalEvidence.find((entry) =>
+    const taskPatch = terminalEvidence.find((entry) =>
       entry.payload?.canonicalTool === 'team.update_task'
-        && entry.payload?.status === 'failed'
-        && entry.payload?.errorCode === 'task.version_conflict'
+        && entry.payload?.status === 'completed'
     )
-    if (!staleConflict || terminalEvidence.some((entry) => entry.payload?.sourceAuthority !== 'core')) {
+    if (!taskPatch || terminalEvidence.some((entry) => entry.payload?.sourceAuthority !== 'core')) {
       throw new Error(`${specification.adapterKind} evidence did not prove the Core Router boundary`)
     }
 
@@ -397,6 +396,12 @@ try {
     if (sourceStart?.params?.adapterKind !== specification.adapterKind
         || resumedStart?.params?.adapterKind !== specification.adapterKind) {
       throw new Error(`${specification.adapterKind} emitted the wrong Adapter identity`)
+    }
+    const createdMemberNotifications = core.events.filter((event) =>
+      event.method === 'members.invalidated' && event.params?.reason === 'member.create'
+    )
+    if (createdMemberNotifications.length !== results.length + 1) {
+      throw new Error(`${specification.adapterKind} did not emit one committed member roster notification`)
     }
     const firstRun = sourceSnapshot.agentRuns.find((run) => run.id === source.agentRunId)
     const secondRun = resumedSnapshot.agentRuns.find((run) => run.id === resumed.agentRunId)
@@ -1009,9 +1014,21 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'member.create':
       return envelope.result
     case 'team.create_task':
-      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId', 'version', 'availableActions'])
+      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId'])
     case 'team.update_task':
-      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId', 'version', 'availableActions', 'changed'])
+      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId', 'changed'])
+    case 'team.get_task': {
+      const fields = ['taskId', 'title', 'description', 'status', 'assigneeAgentId']
+      const note = { blocked: 'blockedReason', completed: 'completionSummary', cancelled: 'cancelReason' }[envelope.result.status]
+      if (note) fields.push(note)
+      return selectFields(envelope.result, fields)
+    }
+    case 'team.list_tasks':
+      return {
+        tasks: envelope.result.tasks.map((task) => selectFields(task, ['taskId', 'title', 'status', 'assigneeAgentId'])),
+        nextCursor: envelope.result.nextCursor,
+        truncated: envelope.result.truncated
+      }
     case 'camp.list':
     case 'camp.read':
     case 'camp.search':
@@ -1019,8 +1036,6 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'memory.view':
     case 'memory.read':
     case 'memory.search':
-    case 'team.get_task':
-    case 'team.list_tasks':
     case 'automation.list':
     case 'automation.get':
     case 'automation.create':
@@ -1344,7 +1359,7 @@ done
 test "$task_create_status" -eq 0
 assert_success "$task_create" 'team.create_task'
 task_id="$(printf '%s\n' "$task_create" | "$JQ" -er '.taskId')"
-task_version="$(printf '%s\n' "$task_create" | "$JQ" -er '.version')"
+printf '%s\n' "$task_create" | "$JQ" -e 'has("version") | not' >/dev/null
 
 STEP=task_get
 task_get="$("$CLI" task get --task-id "$task_id")"
@@ -1360,25 +1375,15 @@ assert_success "$task_list" 'team.list_tasks'
 printf '%s\n' "$task_list" | "$JQ" -e --arg taskId "$task_id" '.tasks | any(.taskId == $taskId)' >/dev/null
 
 STEP=task_update
-task_update="$("$CLI" task update --task-id "$task_id" --expected-version "$task_version" --status in_progress)"
+task_update="$("$CLI" task update --task-id "$task_id" --status in_progress)"
 assert_success "$task_update" 'team.update_task'
-current_version="$(printf '%s\n' "$task_update" | "$JQ" -er '.version')"
+printf '%s\n' "$task_update" | "$JQ" -e 'has("version") | not' >/dev/null
 
-STEP=task_conflict
-set +e
-stale_update="$("$CLI" task update --task-id "$task_id" --expected-version "$task_version" --title stale-overwrite 2>"$RUN_TMP/stale.err")"
-stale_status=$?
-set -e
-test "$stale_status" -eq 1
-printf '%s\n' "$stale_update" | "$JQ" -e --arg taskId "$task_id" --argjson currentVersion "$current_version" '
-  .error.code == "task.version_conflict"
-  and .error.recovery == "refresh_then_decide"
-  and .error.details.taskId == $taskId
-  and .error.details.currentVersion == $currentVersion
-  and (has("contractVersion") | not)
-  and (has("requestId") | not)
-  and (has("receipt") | not)
-' >/dev/null
+STEP=task_field_patch
+title_update="$("$CLI" task update --task-id "$task_id" --title field-patch-title)"
+assert_success "$title_update" 'team.update_task'
+patched_task="$("$CLI" task get --task-id "$task_id")"
+printf '%s\n' "$patched_task" | "$JQ" -e '.title == "field-patch-title" and .status == "in_progress" and (has("version") | not) and (has("availableActions") | not)' >/dev/null
 
 STEP=camp_list
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
@@ -1599,7 +1604,7 @@ printf '%s\n' ${shellQuote(JSON.stringify({
     ok: true,
     marker: input.successMarker,
     operationCount: 23,
-    versionConflict: 'refresh_then_decide'
+    taskFieldPatch: 'last_successful_field_write'
   }))}
 `
 }

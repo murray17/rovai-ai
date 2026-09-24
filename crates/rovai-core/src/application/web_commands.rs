@@ -163,7 +163,6 @@ pub(super) fn reconcile(
                     params.camp_id.to_string(),
                     UpdateTaskCommand {
                         task_id: params.task_id,
-                        expected_version: params.expected_version,
                         title: params.title,
                         description: params.description,
                         status: params.status,

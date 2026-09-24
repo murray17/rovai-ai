@@ -64,11 +64,11 @@ describe('Built-in input presentation', () => {
 
   it.each(['running', 'completed', 'failed', 'waiting', 'stopped', 'skipped', 'recorded'] as const)(
     'shows only public input for %s, including when result/error evidence exists', status => {
-      const event = builtin('team.update_task', { taskId: 'task-1', requestedStatus: 'completed', expectedVersion: 0,
+      const event = builtin('team.update_task', { taskId: 'task-1', requestedStatus: 'completed',
         clearAssignee: false, changedFields: ['status'], titleRedacted: true, title: null })
       const [projected] = steps([event])
       const step = { ...projected, status }
-      expect(JSON.parse(step.detail)).toEqual({ taskId: 'task-1', status: 'completed', expectedVersion: 0, clearAssignee: false })
+      expect(JSON.parse(step.detail)).toEqual({ taskId: 'task-1', status: 'completed', clearAssignee: false })
       expect(executionEvidenceResultText('runtime.action', { ...(event.payload as object),
         status, coreEnvelope: { ok: false, error: { message: 'DO_NOT_SHOW_ERROR' } } })).toBe(step.detail)
       const markup = renderToStaticMarkup(createElement(ToolCallRow, {
@@ -145,7 +145,7 @@ describe('Rovai Shell carrier presentation', () => {
     expect(steps([builtin(), shell("rovai send --body '正文中的 `code`、$(literal) 与 <tag> 只是文本'")])).toHaveLength(1)
     expect(steps([builtin(), shell("rovai send <<'JSON'\n{\"body\":\"`code` 与 $(literal)\"}\nJSON")])).toHaveLength(1)
     expect(steps([builtin(), shell("rovai send <<<'{\"body\":\"`code`\"}'")])).toHaveLength(1)
-    const task = { taskId: 'task-1', title: 'Task', status: 'open', assigneeAgentId: null, version: 1, availableActions: [], internalFact: true }
+    const task = { taskId: 'task-1', title: 'Task', status: 'open', assigneeAgentId: null, internalFact: true }
     const { internalFact: _, ...cliTask } = task
     expect(steps([builtin('team.create_task', { title: 'Task' }, task), shell("rovai task create --title Task", cliTask)])).toHaveLength(1)
     const pagedShell = shell()

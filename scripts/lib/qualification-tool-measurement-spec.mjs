@@ -203,7 +203,6 @@ export async function materializeToolMeasurementFixtures({
       entityType: 'task',
       entityId: taskId,
       revisionId: null,
-      version: Number.isSafeInteger(result.payload?.version) ? result.payload.version : 1,
       contentDigest: withDigest(digestJson({
         title: task.title,
         description: task.description,

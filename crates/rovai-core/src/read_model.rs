@@ -253,7 +253,6 @@ pub struct TaskView {
     pub closed_by_type: Option<String>,
     pub closed_by_id: Option<String>,
     pub closed_by_agent_run_id: Option<String>,
-    pub version: i64,
     pub created_at: String,
     pub updated_at: String,
     pub closed_at: Option<String>,
@@ -2159,7 +2158,7 @@ fn load_tasks(
                status, assignee_agent_id, blocked_reason, completion_summary, cancel_reason,
                created_by_type, created_by_id, source_agent_run_id,
                closed_by_type, closed_by_id, closed_by_agent_run_id,
-               version, created_at, updated_at, closed_at
+               created_at, updated_at, closed_at
         FROM task
         WHERE camp_id = ?1
         ORDER BY
@@ -2190,10 +2189,9 @@ fn load_tasks(
             row.get::<_, Option<String>>(13)?,
             row.get::<_, Option<String>>(14)?,
             row.get::<_, Option<String>>(15)?,
-            row.get::<_, i64>(16)?,
+            row.get::<_, String>(16)?,
             row.get::<_, String>(17)?,
-            row.get::<_, String>(18)?,
-            row.get::<_, Option<String>>(19)?,
+            row.get::<_, Option<String>>(18)?,
         ))
     })?;
     let mut result = Vec::new();
@@ -2215,7 +2213,6 @@ fn load_tasks(
             closed_by_type,
             closed_by_id,
             closed_by_agent_run_id,
-            version,
             created_at,
             updated_at,
             closed_at,
@@ -2247,7 +2244,6 @@ fn load_tasks(
             closed_by_type,
             closed_by_id,
             closed_by_agent_run_id,
-            version,
             created_at,
             updated_at,
             closed_at,

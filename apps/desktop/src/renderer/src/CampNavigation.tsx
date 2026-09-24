@@ -105,6 +105,7 @@ export function navigationPaginationControls(
 }
 
 export function CampNavigation({
+  navigationId = 'global-navigation',
   settingsNavigation,
   footer,
   view,
@@ -147,6 +148,7 @@ export function CampNavigation({
   onDeleteError,
   onError
 }: {
+  navigationId?: string
   settingsNavigation?: React.ReactNode
   footer?: React.ReactNode
   view: 'compose' | 'camp' | 'members' | 'automations' | 'missions' | 'memory' | 'settings'
@@ -342,7 +344,7 @@ export function CampNavigation({
 
   return (
     <>
-      <aside id="global-navigation" className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
+      <aside id={navigationId} className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
         {mobile && view !== 'settings' && <header className="mobile-page-heading"><h1>对话</h1><div>
           <button className="mobile-icon-button" type="button" aria-label="选择工作目录" disabled={state !== 'ready'} onClick={onOpenProject}><NavigationIcon name="folder-open" /></button>
           <button className="mobile-icon-button" type="button" aria-label="搜索对话" onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
@@ -700,6 +702,13 @@ export function SettingsSidebarNavigation<Section extends string>({
   onSectionChange(section: Section): void
   onBack(): void
 }): JSX.Element {
+  const mobile = useMobileLayout()
+  const [query, setQuery] = useState('')
+  const search = query.trim().toLocaleLowerCase()
+  const visibleGroups = search
+    ? groups.map((group) => ({ ...group, items: group.items.filter((item) => item.label.toLocaleLowerCase().includes(search)) }))
+      .filter((group) => group.items.length > 0)
+    : groups
   return (
     <div className="settings-sidebar-navigation">
       <div className="settings-sidebar-heading">
@@ -712,8 +721,13 @@ export function SettingsSidebarNavigation<Section extends string>({
           <span>应用级偏好与本机能力</span>
         </div>
       </div>
+      {mobile && <label className="mobile-settings-search">
+        <NavigationIcon name="search" />
+        <span className="sr-only">搜索设置</span>
+        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索设置" />
+      </label>}
       <nav className="settings-sidebar-menu" aria-label="设置页面">
-        {groups.map((group) => {
+        {visibleGroups.map((group) => {
           const headingId = `settings-sidebar-group-${group.key}`
           return (
             <section className="settings-sidebar-group" aria-labelledby={headingId} key={group.key}>
@@ -746,6 +760,7 @@ export function SettingsSidebarNavigation<Section extends string>({
           )
         })}
       </nav>
+      {mobile && visibleGroups.length === 0 && <p className="mobile-settings-search-empty" role="status">没有匹配的设置</p>}
     </div>
   )
 }

@@ -18,7 +18,7 @@ it('loads a command after an initially empty Web Run and refreshes its completio
   let changeSequence = 0
   const operations: string[] = []
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     const { operation, params } = JSON.parse(String(options?.body))
     operations.push(operation)
     const common = {
@@ -80,7 +80,7 @@ it('polls changes only while files are open and resumes after reopening', async 
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const actions: string[] = []
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     const { action } = JSON.parse(String(options?.body)); actions.push(action)
     if (action === 'open' || action === 'restore') return Response.json({ ok: true, value: { kind: 'file_preview', file: { handleId: action === 'restore' ? 'candidate' : 'file', displayPath: 'file.txt' } } })
     return Response.json(action === 'release' ? { released: true } : { ok: true, value: [] })
@@ -122,7 +122,7 @@ it('confirms uploaded image bindings before reusing local bytes and falls back f
   let digest = '', changed = false, missing = false
   const actions: string[] = []
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     if (String(url).endsWith('/uploads')) {
       digest = JSON.parse(String((options!.body as FormData).get('intent'))).sha256
       return Response.json({ draft: { attachments: [{ id: 'attachment' }] } })

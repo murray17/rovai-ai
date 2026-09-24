@@ -14,7 +14,7 @@ completion-frame 扩展以 [v1.27](../versions/v1.27/README.md)为准；目标 R
 [v0.50](../versions/v0.50/README.md)为准。
 Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
 [成员投影不变量](foundational-invariants.md#member-projection)与
-[Collaboration State v2](../contracts/collaboration-state-v2.md)。Redelivery Envelope/Formatter v2 和
+[Collaboration State v3](../contracts/collaboration-state-v3.md)。Redelivery Envelope/Formatter v2 和
 模型投影/Evidence 分层见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)。
 
@@ -201,12 +201,12 @@ redelivery selection 的 payload。prepared 后提交的 observation 留给下�
 
 补发组装在每次 eligible redelivery 时读取最新完整六字段 `MEMBER_IDENTITY`，但不把这些字段写入
 ContextManifest、Delivery digest 或 Collaboration State。`MEMBER_IDENTITY` 始终是 Session 唯一
-self identity；Dynamic Context 的 Collaboration State v2 只含 peers。身份编辑本身不创建
+self identity；Dynamic Context 的 Collaboration State v3 只含 peers。身份编辑本身不创建
 Requirement、Input、Run 或新 Session，也不改变这里的 eligible delivery matrix。
 
 同一 Runtime Input Delivery 可以同时冻结 Bootstrap redelivery revision 和完整
 `collaboration_state_digest`，但两条水位相互独立：前者消费该 Delivery 选择的 Requirement revision，
-后者推进到 ContextManifest 的完整 Collaboration State v2 projection digest；
+后者推进到 ContextManifest 的完整 Collaboration State v3 projection digest；
 `collaborationStateIncluded` 只说明本轮是否渲染 peer section。只有同一个 accepted ACK 才能分别推进
 这两条冻结水位，send failure、`delivery_unknown`、process loss 和未 accepted 输入对两者都不推进。
 

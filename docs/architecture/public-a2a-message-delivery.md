@@ -9,8 +9,8 @@ last_updated: 2026-09-22
 # Public Camp Message、Delivery 与 AgentRun
 
 本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v23](../contracts/camp-message-send-v23.md)、
-[Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 27](../contracts/context-manifest-evidence-v27.md)
-与 [Camp History v8](../contracts/camp-history-v8.md)。Single Chat 不使用本主链。
+[Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 29](../contracts/context-manifest-evidence-v29.md)
+与 [Camp History v9](../contracts/camp-history-v9.md)。Single Chat 不使用本主链。
 
 ## 三类事实
 
@@ -43,9 +43,9 @@ Anchor 只表达默认回复展示关系，不能推导目标、caller return、
 self-send 继续拒绝。显示名兼容解析若仍存在，只在发送事务内解析为 canonical Agent ID，后续队列不重新解析正文。
 
 自动上下文投影不会改变这条路由权威。`addressMode = default` 且只有一个冻结接收者时，Core 在新 public
-AgentRun 的 `RUN_INPUT` 与 `SHARED_CONVERSATION` 正文前派生该接收者的 Member Mention，并随 Manifest
+AgentRun 的 `RUN_INPUT` 正文前派生该接收者的 Member Mention，并随 Manifest
 evidence 冻结显示名和精确 bytes；claim 事务把当时的显示名保存到对应 AgentRunInput，避免 claim 后改名造成
-两处投影漂移，并同时冻结该 RunInput 的 context version。用户保存正文、Structured Content、实时 Camp Read/Search、Quote、FTS、
+投影漂移，并同时冻结该 RunInput 的 context version。用户保存正文、Structured Content、实时 Camp Read/Search、Quote、FTS、
 Channel 与 Renderer 均保持原样；显式目标不重复添加，public-only 不添加，非法默认目标状态 fail closed。
 
 ## Delivery-first 调度
@@ -78,8 +78,8 @@ Single Chat 与维护职责，但不再扫描普通 batch 队列，也不能领�
 且不重叠的维护任务中；慢 Single Chat/non-batch Runtime preparation 不得占住普通 batch wake、fallback 或 worker
 completion 的协调循环。
 
-必要 `RUN_INPUT` 优先于可选历史。队首单条也超过当前 Runtime profile 时，Core 创建明确的 preflight-failed Run，
-不向 Runtime 发送截断内容，并让队列随后继续。完整选择规则见 [Profile 8](../contracts/context-delivery-profile-v8.md)。
+必要 `RUN_INPUT` 优先于可选 Self Active Tasks。`RUN_FACTS.historyHint` 计入完整 payload 预算。队首单条也超过当前 Runtime profile 时，Core 创建明确的 preflight-failed Run，
+不向 Runtime 发送截断内容，并让队列随后继续。完整选择规则见 [Profile 9](../contracts/context-delivery-profile-v9.md)。
 
 ## 可见性与撤回
 
@@ -93,9 +93,9 @@ completion 的协调循环。
 [Camp Open Projection v23](../contracts/camp-open-projection-v23.md)，展示见
 [Run Process Detail Surface v42](../contracts/run-process-detail-surface-v42.md)。
 
-自动上下文、`camp.read`、搜索、线程、reply 展开和结构化引用共享同一消息可见性服务。公共 Camp 历史对所有受认证
+`RUN_INPUT`、`camp.read`、搜索、线程、reply 展开和结构化引用共享同一消息可见性服务。公共 Camp 历史对所有受认证
 队员可读；目标 Camp membership 只控制参与、寻址与执行，不是历史 ACL。外层消息可见不代表它引用的 source 可见；
-每条 quote snapshot 在投影时按查看 Agent 和边界重新校验 source。ContextManifest 冻结自动上下文和 discovery
+每条 quote snapshot 在投影时按查看 Agent 和边界重新校验 source。ContextManifest 冻结当前输入和 discovery
 时序证据，但 Run 内的 `camp.read` 始终按调用时最新状态直接解析存续 Camp，不受 Manifest 上下界限制。
 
 ## 终态、停止与恢复
@@ -122,3 +122,7 @@ context version 与 nullable 的 claim-time 接收者显示名快照；既有 Ru
 尚未 materialize 的 Run 也保持 Profile 7。消息表不回写，冻结 v26/Profile 7 Run exact replay。历史 Run、
 CampTurn、Gather、Manifest 与 evidence 原样只读；冻结或
 outcome-unknown 输入绝不重新入队。
+
+Migration 172/schema 122 只扩展新公开 Formatter/Manifest 29、Profile 9 与 Run Facts 7 的写入约束，
+保留旧业务行及审计原字节。旧格式执行不再继续派发或恢复，也不转换、双读或自动重播；需要继续工作时
+建立新执行，必要时使用新 Session。新格式 Run 的 `historyHint` 和输入保持冻结。

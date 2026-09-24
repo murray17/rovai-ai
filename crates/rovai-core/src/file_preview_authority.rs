@@ -422,10 +422,11 @@ fn evidence_review(
     }))
 }
 
-fn is_safe_run_evidence_relative_path(path: &str) -> bool {
+fn is_supported_run_evidence_path(path: &str) -> bool {
+    // Callers bind the path to exact Run evidence before Main grants one file.
     let path = Path::new(path);
-    !path.is_absolute()
-        && !path.components().any(|component| {
+    path.is_absolute()
+        || !path.components().any(|component| {
             matches!(
                 component,
                 Component::ParentDir | Component::RootDir | Component::Prefix(_)
@@ -512,7 +513,7 @@ fn run_activity_file(
     evidence_id: &str,
     raw_reference: &str,
 ) -> Result<Option<ResolvedFilePreviewSource>> {
-    if !is_safe_run_evidence_relative_path(raw_reference)
+    if !is_supported_run_evidence_path(raw_reference)
         || !run_activity_authorizes_file(
             database,
             camp_id,
@@ -580,7 +581,7 @@ fn evidence_current_file(
     if detail_file.path != summary.path {
         return Ok(Some(unavailable()));
     }
-    if !is_safe_run_evidence_relative_path(&summary.path) {
+    if !is_supported_run_evidence_path(&summary.path) {
         return Ok(Some(unavailable()));
     }
     let Some(root_path) = run_evidence_root(database, camp_id, agent_run_id, execution_epoch)?
@@ -674,9 +675,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        ResolveFilePreviewSourceParams, ResolvedFilePreviewSource,
-        is_safe_run_evidence_relative_path, message_authorizes_reference,
-        resolve_file_preview_source, run_evidence_root,
+        ResolveFilePreviewSourceParams, ResolvedFilePreviewSource, is_supported_run_evidence_path,
+        message_authorizes_reference, resolve_file_preview_source, run_evidence_root,
     };
     use crate::{
         agent_run_file_change::AgentRunFileChangeProjector, db::Database,
@@ -1016,8 +1016,10 @@ mod tests {
     }
 
     #[test]
-    fn open_current_resolves_new_and_same_named_files_from_the_mission_worktree() {
+    fn open_current_resolves_run_relative_and_external_absolute_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
+        let external_file = root.join("external-worktree/src/shared.ts");
+        let external_path = external_file.to_string_lossy().into_owned();
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1029,12 +1031,17 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(project_root.join("src")).unwrap();
         std::fs::create_dir_all(execution_root.join("src")).unwrap();
+        std::fs::create_dir_all(external_file.parent().unwrap()).unwrap();
         std::fs::write(project_root.join("src/shared.ts"), "project\n").unwrap();
         std::fs::write(execution_root.join("src/shared.ts"), "mission\n").unwrap();
+        std::fs::write(&external_file, "external\n").unwrap();
         std::fs::write(execution_root.join("src/new.ts"), "new mission file\n").unwrap();
-        let evidence =
-            project_run_file_operations(&mut database, &data_dir, &["src/shared.ts", "src/new.ts"]);
-        for expected_path in ["src/shared.ts", "src/new.ts"] {
+        let evidence = project_run_file_operations(
+            &mut database,
+            &data_dir,
+            &["src/shared.ts", "src/new.ts", &external_path],
+        );
+        for expected_path in ["src/shared.ts", "src/new.ts", &external_path] {
             let evidence_file_id = evidence
                 .iter()
                 .find_map(|(path, id)| (path == expected_path).then_some(id))
@@ -1056,6 +1063,10 @@ mod tests {
             "the original project's same-named file must not be selected"
         );
         assert!(!project_root.join("src/new.ts").exists());
+        assert_eq!(
+            std::fs::read_to_string(&external_file).unwrap(),
+            "external\n"
+        );
         clean_run_workspace_fixture(database, data_dir, root);
     }
 
@@ -1118,8 +1129,10 @@ mod tests {
     }
 
     #[test]
-    fn direct_camp_run_activity_file_uses_exact_evidence_and_mission_worktree() {
+    fn direct_camp_run_activity_file_uses_exact_evidence_for_run_and_external_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
+        let external_file = root.join("external-worktree/src/shared.ts");
+        let external_path = external_file.to_string_lossy().into_owned();
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1131,8 +1144,10 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(project_root.join("src")).unwrap();
         std::fs::create_dir_all(execution_root.join("src")).unwrap();
+        std::fs::create_dir_all(external_file.parent().unwrap()).unwrap();
         std::fs::write(project_root.join("src/shared.ts"), "project\n").unwrap();
         std::fs::write(execution_root.join("src/shared.ts"), "mission\n").unwrap();
+        std::fs::write(&external_file, "external\n").unwrap();
         std::fs::write(
             execution_root.join("src/worktree-only.ts"),
             "mission only\n",
@@ -1142,7 +1157,7 @@ mod tests {
             &mut database,
             &data_dir,
             &execution_root,
-            &["src/shared.ts", "src/worktree-only.ts"],
+            &["src/shared.ts", "src/worktree-only.ts", &external_path],
         );
         database
             .connection()
@@ -1170,7 +1185,7 @@ mod tests {
             )
             .unwrap();
 
-        for path in ["src/shared.ts", "src/worktree-only.ts"] {
+        for path in ["src/shared.ts", "src/worktree-only.ts", &external_path] {
             let ResolvedFilePreviewSource::FileTarget {
                 root_path,
                 raw_reference,
@@ -1196,6 +1211,10 @@ mod tests {
             "the same-named file must stay rooted in the Mission worktree"
         );
         assert!(!project_root.join("src/worktree-only.ts").exists());
+        assert_eq!(
+            std::fs::read_to_string(&external_file).unwrap(),
+            "external\n"
+        );
 
         assert!(
             resolve_run_activity_file_for_camp(
@@ -1248,7 +1267,7 @@ mod tests {
                     .as_ref(),
             )
             .is_none(),
-            "an absolute diff path must not be accepted"
+            "an absolute spelling not present in the canonical diff must not be accepted"
         );
         clean_run_workspace_fixture(database, data_dir, root);
     }
@@ -1348,13 +1367,11 @@ mod tests {
     }
 
     #[test]
-    fn run_evidence_paths_keep_the_existing_relative_containment_gate() {
-        assert!(is_safe_run_evidence_relative_path("src/generated.txt"));
-        assert!(is_safe_run_evidence_relative_path("generated.txt"));
-        assert!(!is_safe_run_evidence_relative_path("../generated.txt"));
-        assert!(!is_safe_run_evidence_relative_path(
-            "src/../../generated.txt"
-        ));
-        assert!(!is_safe_run_evidence_relative_path("/tmp/generated.txt"));
+    fn run_evidence_paths_allow_absolute_files_but_reject_relative_parent_traversal() {
+        assert!(is_supported_run_evidence_path("src/generated.txt"));
+        assert!(is_supported_run_evidence_path("generated.txt"));
+        assert!(!is_supported_run_evidence_path("../generated.txt"));
+        assert!(!is_supported_run_evidence_path("src/../../generated.txt"));
+        assert!(is_supported_run_evidence_path("/tmp/generated.txt"));
     }
 }

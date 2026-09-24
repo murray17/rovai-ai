@@ -465,15 +465,18 @@ describe('FilePreviewService', () => {
     await service.closeAll()
   })
 
-  it.each(['attachment', 'run_evidence'] as const)('does not reveal a directory from %s', async (kind) => {
+  it.each(['attachment', 'run_evidence', 'run_activity_file'] as const)('does not reveal a directory from %s', async (kind) => {
     const { root, service, authority, native } = await fixture()
     vi.spyOn(authority, 'resolve').mockResolvedValue({
       kind: 'file_target', campId: 'camp-1', sourceKind: kind, sourceIdentity: 'source-1',
-      rootPath: root, basePath: root, candidatePath: root, allowChildren: kind !== 'attachment'
+      rootPath: root, basePath: root, allowChildren: kind !== 'attachment',
+      ...(kind === 'attachment' ? { candidatePath: root } : { rawReference: root })
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
       ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
-      : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
+      : kind === 'run_evidence'
+        ? { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
+        : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceId: 'evidence-1', rawReference: root }
     expect(await service.open(1, input)).toMatchObject({ ok: false, error: { code: 'not_regular_file' } })
     expect(native.revealPath).not.toHaveBeenCalled()
   })
@@ -786,19 +789,23 @@ describe('FilePreviewService', () => {
     expect(native.selectRoot).not.toHaveBeenCalled()
   })
 
-  it.each(['attachment', 'run_evidence'] as const)('opens an exact external file resolved by %s authority', async (kind) => {
+  it.each(['attachment', 'run_evidence', 'run_activity_file'] as const)('opens an exact external file resolved by %s authority', async (kind) => {
     const { root, service, authority, native } = await fixture()
     const outside = await mkdtemp(join(tmpdir(), `rovai-file-preview-${kind}-`))
     directories.push(outside)
     const outsideFile = join(outside, 'notes.txt')
+    await writeFile(join(root, 'notes.txt'), 'wrong root')
     await writeFile(outsideFile, kind)
     vi.spyOn(authority, 'resolve').mockResolvedValue({
       kind: 'file_target', campId: 'camp-1', sourceKind: kind, sourceIdentity: `${kind}-source`,
-      rootPath: root, basePath: root, candidatePath: outsideFile, allowChildren: kind !== 'attachment'
+      rootPath: root, basePath: root, allowChildren: kind !== 'attachment',
+      ...(kind === 'attachment' ? { candidatePath: outsideFile } : { rawReference: outsideFile })
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
       ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
-      : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
+      : kind === 'run_evidence'
+        ? { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
+        : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceId: 'evidence-1', rawReference: outsideFile }
 
     const opened = await service.open(1, input)
     const expectedDisplayPath = kind === 'attachment' ? 'notes.txt' : await realpath(outsideFile)

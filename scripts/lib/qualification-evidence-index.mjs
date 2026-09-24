@@ -696,7 +696,6 @@ export function buildTaskStateContent(task) {
     taskId: task?.taskId ?? task?.id ?? null,
     status: task?.status ?? null,
     assigneeAgentId: task?.assigneeAgentId ?? null,
-    version: task?.version ?? null,
     titleDigest: task?.titleDigest
       ?? (typeof task?.title === 'string' ? sha256(task.title) : null),
     descriptionDigest: task?.descriptionDigest

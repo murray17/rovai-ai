@@ -325,7 +325,6 @@
       "closedByType": null,
       "closedById": null,
       "closedByAgentRunId": null,
-      "version": 1,
       "createdAt": "2026-01-01T00:00:00Z",
       "updatedAt": "2026-01-01T00:00:00Z",
       "closedAt": null,
@@ -337,11 +336,7 @@
       "taskId": "task_123",
       "title": "Prepare release",
       "status": "pending",
-      "assigneeAgentId": "agent_27",
-      "version": 1,
-      "availableActions": [
-        "update"
-      ]
+      "assigneeAgentId": "agent_27"
     }
   },
   "team.get_task": {
@@ -361,7 +356,6 @@
       "closedByType": null,
       "closedById": null,
       "closedByAgentRunId": null,
-      "version": 1,
       "createdAt": "2026-01-01T00:00:00Z",
       "updatedAt": "2026-01-01T00:00:00Z",
       "closedAt": null,
@@ -374,11 +368,7 @@
       "title": "Prepare release",
       "description": "",
       "status": "pending",
-      "assigneeAgentId": "agent_27",
-      "version": 1,
-      "availableActions": [
-        "update"
-      ]
+      "assigneeAgentId": "agent_27"
     }
   },
   "team.list_tasks": {
@@ -403,10 +393,7 @@
           "taskId": "task_123",
           "title": "Prepare release",
           "status": "pending",
-          "assigneeAgentId": "agent_27",
-          "availableActions": [
-            "update"
-          ]
+          "assigneeAgentId": "agent_27"
         }
       ],
       "nextCursor": null,
@@ -430,7 +417,6 @@
       "closedByType": null,
       "closedById": null,
       "closedByAgentRunId": null,
-      "version": 1,
       "createdAt": "2026-01-01T00:00:00Z",
       "updatedAt": "2026-01-01T00:00:00Z",
       "closedAt": null,
@@ -444,10 +430,6 @@
       "title": "Prepare release",
       "status": "pending",
       "assigneeAgentId": "agent_27",
-      "version": 1,
-      "availableActions": [
-        "update"
-      ],
       "changed": false
     }
   },

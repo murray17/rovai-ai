@@ -388,7 +388,7 @@ transcript 采用对话式双轨：用户正文与附件居右，队员回复居
 `--execution-running-surface` token，队员消息容器不使用背景、边框或气泡，只以开放排版承载执行过程与 final。队员一次回复由“执行过程 +
 final message”组成。运行中过程复用当前执行台的 narration、plan、command/tool 与状态视觉；连续 Command 聚合为一个
 可展开的工具组；组件、列表组图标、命令类型图标、28px / 11.5px 四轨工具行、精确结果展开与步骤计数直接复用执行台。
-发送确认前与 Run 排队立即显示“连接中”，开始处理但尚未输出时显示“思考中”。正文、计划、工具或 final 首次出现时，
+发送确认前与 Run 排队立即显示“连接中”；开始处理但尚未输出时，未收到明确 phase 显示“执行中”，收到 `thinking` phase 显示“思考中”。正文、计划、工具或 final 首次出现时，
 同一次渲染移除普通等待提示，不在后续正文尾部追加，也不等待计时器或 Run 终态。存在活动工具或尚未收口的尾组时，用“执行中 · 当前指令”表达进度。组收口才显示“已完成 x 个步骤”，统计全部已结算逻辑操作；摘要不追加各终态数量，具体结果由展开后的 Tool 行表达。
 运行中直接展开过程，不提供含耗时的外层 summary；用户仍可独立展开/收起工具组和命令结果。Run 进入 terminal 后
 过程自动折叠，才出现耗时 summary，使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
@@ -426,13 +426,13 @@ Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即�
 “结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
 并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
 同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
-[Single Chat v7](../../contracts/single-chat-v7.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
+[Single Chat v8](../../contracts/single-chat-v8.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
 
 panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
 结束和发送均需可键盘到达，不添加额外焦点框；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
 不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
 
-领域、权限与输出路由见 [Single Chat v7](../../contracts/single-chat-v7.md)，组件数据流见
+领域、权限与输出路由见 [Single Chat v8](../../contracts/single-chat-v8.md)，组件数据流见
 [Single Chat Architecture](../../architecture/single-chat.md)。
 
 ## Camp 执行过程
@@ -561,7 +561,7 @@ Renderer 以公开消息和 Delivery ID 跟踪刚提交输入；Scheduler claim 
 不创建 pending-input 占位，也不夺走 Composer 焦点。
 删除待发送消息、无执行发布或离开 Camp 会消费或丢弃意图；其他窗口的发送和后台新 Run 不触发该行为。
 
-单聊与执行台的发送确认前和排队显示“连接中”，开始处理但尚未输出时显示“思考中”；正文、计划、工具或 final 到达即移除普通等待提示，后续正文不追加提示。
+单聊与执行台的发送确认前和排队显示“连接中”；开始处理但尚未输出时，未收到明确 phase 显示“执行中”，收到 `thinking` phase 显示“思考中”。正文、计划、工具或 final 到达即移除初始等待提示。执行台在最新阅读窗口的已结算尾部 Tool 组若再次收到 `thinking` phase，且 Run 仍运行、没有活动 Tool／压缩或后续正文、计划、final，则组收口并在尾部显示一条瞬时“思考中”；新正文、计划、Tool、等待／停止或 Run 终态到来时撤下，不留下历史思考条目。单聊仍不在后续正文尾部追加普通等待提示。
 Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、缓存或 disclosure；仅消费不含正文的
 `thinking | executing` phase 来切换上述等待反馈，并把 phase edge 作为匿名公开正文的分段边界。
 Camp 执行卡片的普通等待提示与正文共用字号、行高和文字起点，加载图标放在提示文字后；底部、桌面浮层和手机端切入首行正文时不改变卡片位置或单行高度。
@@ -617,9 +617,9 @@ elapsed、Runtime/事件/Session identity、trigger 与 phase 单独存在时保
 非终态 Run 的 `started` 显示 running 状态并暂停重复的底部进行中提示，`completed` 使用完成状态。
 
 当已投影的最后一个 process item 是 Tool 组且父 Run 仍为 running 时，该尾组在当前 Tool 已结算后继续保持
-provisional 活动态，显示“<最近一条指令>”，也不在下方追加普通等待提示。此处活动态表达父 Run
+provisional 活动态，显示“<最近一条指令>”，也不在下方追加普通等待提示；唯一例外是收到 `thinking` phase 且 Run 内已无活动 Tool 时，组显示“已完成 x 个步骤”，下方由瞬时“思考中”接替。此处活动态表达父 Run
 仍在运行，不改写上一条 Tool 的真实终态；下一条连续 Tool 到达后只在同一组原位替换为新指令。
-narration、plan、diagnostic、waiting/cancelling 或 Run 终态才构成真实收口边界。该规则按 process/Run 事实
+narration、plan、diagnostic、`thinking` phase、waiting/cancelling 或 Run 终态才构成真实收口边界。该规则按 process/Run 事实
 判断，不使用时间防抖。
 组 summary 的左侧 16px 图标与摘要文字共享中心线；活动组的图标与文字从同一条当前操作选择，使用已有
 Terminal、File Read、File Write、Web 等图标。运行时最右端只有状态 icon；收起组在悬停或键盘聚焦时，
@@ -744,7 +744,8 @@ Runtime 明确报告的 root 外文件使用规范化绝对路径。卡片默认
 卡片含可靠差异时，header 右侧是无内边框、非品牌色且没有箭头的轻量“查看变化”文字入口，hover 提升文字对比；点击 header
 进入[文件预览区](file-preview.md#file-change-标签页)的 `File Change·文件名` 标签页，并优先保留仍可审查的历史选择，
 否则选择第一个可审查文件。点击有可靠差异的文件行进入同一 Review 并预选该文件。点击 operation-only 文件行直接以
-既有 `run_evidence / open_current` 来源打开普通当前文件 Tab。整张卡片都没有可靠差异时，header 文案改为“查看文件”
+既有 `run_evidence / open_current` 来源打开普通当前文件 Tab；根外绝对路径仍指向证据报告的文件，而非 Camp 项目内同名文件。
+整张卡片都没有可靠差异时，header 文案改为“查看文件”
 并打开第一项当前文件；具体文件仍由对应行精确选择。当前文件只有在来源校验和首屏读取成功后才提交导航，失败只显示
 danger Toast“无法打开该文件”，不切换预览或启动系统应用。
 卡片不显示时间、“已保存”、Git 状态、参与运行或
@@ -1067,12 +1068,12 @@ Mobile 的执行标签由用户主动打开；发送或排队后发布 Run 不�
 浮层承载时只保留浮层顶部收起。历史计数保持紧凑，coverage 不完整时仍明确标注当前载入范围
 并保留历史未加载提示；Run 卡片、连接线、带圆圈的完成图标与执行过程保持独立。
 
-任务区的创建入口为“新建”，使用中性主操作；详情入口缩为“返回 / 编辑”，版本放入“更多信息”。
+任务区的创建入口为“新建”，使用中性主操作；详情入口缩为“返回 / 编辑”，不展示 Task 对象版本。
 任务区使用状态筛选和紧凑列表：标题、状态、负责人，以及必要的阻塞原因。点击列表或时间线
 任务卡打开只读详情；“责任范围与要求”使用合成后的单一 `description`，历史结构化要求也只在这里并入正文；
 阻塞/完成/取消原因、关联执行与可展开审计均保留。新建和编辑
 使用标准 Dialog；在当前 Camp 工作区内关闭 Dialog、切换详情或收起浮层保留各任务独立草稿，重新打开继续
-编辑。草稿不跨 Camp 卸载或应用重启持久化。版本冲突刷新权威版本，保留草稿并要求用户再次提交；已结束任务
+编辑。草稿不跨 Camp 卸载或应用重启持久化。提交时只发送相对打开时实际改动的字段，未编辑字段保留 Core 当前值，同字段以后成功提交覆盖；已结束任务
 只读。取消任务使用填写原因的独立确认 Dialog，仍不取消已接受或运行中的执行。
 
 队员区读取当前 CampMember 与 AgentProfile。队长以队员行徽标表达，“设为队长 / 模型信息 / 移出当前

@@ -1097,7 +1097,6 @@ export interface TaskView {
   closedByType: 'user' | 'agent' | null
   closedById: string | null
   closedByAgentRunId: string | null
-  version: number
   createdAt: string
   updatedAt: string
   closedAt: string | null

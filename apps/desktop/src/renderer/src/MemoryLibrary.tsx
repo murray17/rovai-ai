@@ -134,6 +134,7 @@ export function MemoryLibrary({
   useEffect(() => () => { libraryGeneration.current++; reviewGeneration.current++ }, [client])
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
   const mobile = useMobileLayout()
+  const [mobileOverviewOpen, setMobileOverviewOpen] = useState(false)
   const [reviewItems, setReviewItems] = useState<HearthReviewItem[]>([])
   const [localScope, setLocalScope] = useState<MemoryScopeKind>('hearth')
   const [localGovernance, setLocalGovernance] = useState<GovernanceFilter>('all')
@@ -628,6 +629,7 @@ export function MemoryLibrary({
     <section
       className={`memory-library${startupContentVisible ? '' : ' startup-feedback-suppressed'}`}
       data-mobile-detail={mobile && selectedMemory !== null || undefined}
+      data-mobile-overview={mobile && mobileOverviewOpen || undefined}
       aria-labelledby="memory-library-title"
       aria-busy={loading}
       aria-hidden={startupContentVisible ? undefined : true}
@@ -641,6 +643,9 @@ export function MemoryLibrary({
           <p>查看、搜索和管理长期记忆。</p>
         </div>
         <div className="memory-header-actions">
+          {mobile && <button className="quiet-button mobile-memory-overview" type="button" aria-expanded={mobileOverviewOpen} onClick={() => setMobileOverviewOpen((open) => !open)}>
+            概览 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          </button>}
           <button className="primary-button" type="button" onClick={openCreate} disabled={!library}>新增记忆</button>
         </div>
       </header>

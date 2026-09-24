@@ -1,7 +1,7 @@
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import {
   coreDataDirectoryArguments,
@@ -9,7 +9,14 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const dataDir = await realpath(await mkdtemp(join(tmpdir(), 'rovai-member-config-smoke-')))
+const dataFixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-member-config-smoke-')))
+const dataDir = process.platform === 'win32'
+  ? await realpath(JSON.parse(execFileSync(
+    join(root, 'target', 'debug', 'rovai-core.exe'),
+    ['--prepare-windows-data-root', join(dataFixtureRoot, 'formal')],
+    { encoding: 'utf8' }
+  )).core)
+  : dataFixtureRoot
 const runtimeHome = await realpath(await mkdtemp(join(tmpdir(), 'rovai-member-config-home-')))
 let first
 let reopened
@@ -50,6 +57,10 @@ try {
       growthTopic: ''
     }
   })
+  if (first.memberEvents().length !== 1
+      || first.memberEvents()[0].params?.reason !== 'members.create') {
+    throw new Error(`Committed member creation did not notify the roster: ${JSON.stringify(first.memberEvents())}`)
+  }
   const replay = await first.request('members.create', {
     commandId: createCommandId,
     command: {
@@ -63,7 +74,8 @@ try {
   })
   if (createResult.code !== 'agent_profile.created'
       || replay.commandId !== createResult.commandId
-      || replay.resultEntity?.entityId !== createResult.resultEntity?.entityId) {
+      || replay.resultEntity?.entityId !== createResult.resultEntity?.entityId
+      || first.memberEvents().length !== 1) {
     throw new Error(`AgentProfile command did not replay: ${JSON.stringify({ createResult, replay })}`)
   }
   const agentId = createResult.resultEntity.entityId
@@ -79,9 +91,7 @@ try {
       permissions: { adapterKind: 'qoder-cli', schemaVersion: 1, values: {} }
     }
   })
-  const expectedUnavailableCode = process.platform === 'win32'
-    ? 'runtime_platform_not_qualified'
-    : 'runtime_configuration_unavailable'
+  const expectedUnavailableCode = 'runtime_configuration_unavailable'
   if (selectedRuntime.status !== 'rejected'
       || selectedRuntime.code !== expectedUnavailableCode) {
     throw new Error(`Unavailable Runtime configuration was not rejected atomically: ${JSON.stringify(selectedRuntime)}`)
@@ -121,6 +131,9 @@ try {
   if (unavailableKimi.status !== 'rejected'
       || unavailableKimi.code !== 'runtime_configuration_unavailable') {
     throw new Error(`Missing Kimi configuration was not rejected atomically: ${JSON.stringify(unavailableKimi)}`)
+  }
+  if (first.memberEvents().length !== 1) {
+    throw new Error(`Rejected Runtime changes notified the roster: ${JSON.stringify(first.memberEvents())}`)
   }
   const unresolvedProfile = await first.request('members.get', { agentId })
   const unresolvedInstallations = await first.request('runtime.installations.list')
@@ -180,7 +193,7 @@ try {
   await first?.stop()
   await reopened?.stop()
   await removeEphemeralRuntimeCampFilesRoot(dataDir, { homeDirectory: runtimeHome })
-  await rm(dataDir, { recursive: true, force: true })
+  await rm(dataFixtureRoot, { recursive: true, force: true })
   await rm(runtimeHome, { recursive: true, force: true })
 }
 
@@ -216,12 +229,24 @@ function startCore(dataDirectory) {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: childEnvironment
   })
-  child.stderr.pipe(process.stderr)
+  const stderr = []
+  child.stderr.on('data', (chunk) => {
+    stderr.push(String(chunk))
+    process.stderr.write(chunk)
+  })
   const pending = new Map()
+  const memberEvents = []
+  const startupFailures = []
   let nextId = 1
   createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
-    if (message.method) return
+    if (message.kind === 'core_startup' && message.status === 'failed') {
+      startupFailures.push({ phase: message.phase, code: message.error?.code })
+    }
+    if (message.method) {
+      if (message.method === 'members.invalidated') memberEvents.push(message)
+      return
+    }
     const request = pending.get(message.id)
     if (!request) return
     clearTimeout(request.timer)
@@ -236,7 +261,15 @@ function startCore(dataDirectory) {
     }
     pending.clear()
   })
+  child.once('close', (code, signal) => {
+    for (const request of pending.values()) {
+      clearTimeout(request.timer)
+      request.reject(new Error(`rovai-core exited before replying (code=${code}, signal=${signal}): ${JSON.stringify(startupFailures)} ${stderr.slice(-10).join('')}`))
+    }
+    pending.clear()
+  })
   return {
+    memberEvents: () => [...memberEvents],
     request(method, params = {}) {
       const id = nextId++
       return new Promise((resolveRequest, rejectRequest) => {

@@ -5,7 +5,7 @@ import { fileDigest } from './file-digest'
 import { newCommandId } from '../../desktop/src/shared/command-id'
 import type { ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
 
-const HOST_WEB_PROTOCOL_VERSION = 3
+const HOST_WEB_PROTOCOL_VERSION = 4
 
 class HttpRequestError extends Error {
   constructor(readonly status: number, readonly code: string) { super(`请求未完成（${code}）。`) }

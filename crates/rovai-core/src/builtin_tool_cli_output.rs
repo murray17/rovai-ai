@@ -95,8 +95,17 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
         "team.create_task" => Ok(task_mutation_agent_schema(false)),
         "team.get_task" => Ok(task_get_agent_schema()),
         "team.update_task" => Ok(task_mutation_agent_schema(true)),
+        "team.list_tasks" => Ok(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tasks", "nextCursor", "truncated"],
+            "properties": {
+                "tasks": {"type": "array", "items": task_mutation_agent_schema(false)},
+                "nextCursor": {"type": ["string", "null"]},
+                "truncated": {"type": "boolean"}
+            }
+        })),
         "member.create"
-        | "team.list_tasks"
         | "camp.list"
         | "camp.search"
         | "camp.read"
@@ -218,8 +227,12 @@ fn project_success(operation: &str, result: Value) -> Result<Value> {
                 .context("Canonical Operation Result must be an object")?,
             true,
         ),
+        "team.list_tasks" => project_task_list(
+            result
+                .as_object()
+                .context("Canonical Operation Result must be an object")?,
+        ),
         "member.create"
-        | "team.list_tasks"
         | "camp.list"
         | "camp.search"
         | "camp.read"
@@ -244,14 +257,7 @@ fn project_success(operation: &str, result: Value) -> Result<Value> {
 }
 
 fn task_mutation_agent_schema(include_changed: bool) -> Value {
-    let mut required = vec![
-        "taskId",
-        "title",
-        "status",
-        "assigneeAgentId",
-        "version",
-        "availableActions",
-    ];
+    let mut required = vec!["taskId", "title", "status", "assigneeAgentId"];
     if include_changed {
         required.push("changed");
     }
@@ -259,9 +265,7 @@ fn task_mutation_agent_schema(include_changed: bool) -> Value {
         "taskId": {"type": "string"},
         "title": {"type": "string"},
         "status": {"type": "string", "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]},
-        "assigneeAgentId": {"type": ["string", "null"]},
-        "version": {"type": "integer", "minimum": 1},
-        "availableActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["update"]}}
+        "assigneeAgentId": {"type": ["string", "null"]}
     });
     if include_changed {
         properties["changed"] = json!({"type": "boolean"});
@@ -280,21 +284,13 @@ fn task_get_agent_schema() -> Value {
             "description",
             "status",
             "assigneeAgentId",
-            "version",
-            "availableActions",
         ];
         let mut properties = json!({
             "taskId": {"type": "string"},
             "title": {"type": "string"},
             "description": {"type": "string", "maxLength": 16000},
             "status": {"const": status},
-            "assigneeAgentId": {"type": ["string", "null"]},
-            "version": {"type": "integer", "minimum": 1},
-            "availableActions": {
-                "type": "array",
-                "uniqueItems": true,
-                "items": {"type": "string", "enum": ["update"]}
-            }
+            "assigneeAgentId": {"type": ["string", "null"]}
         });
         if let Some(note) = note {
             required.push(note);
@@ -326,8 +322,6 @@ fn project_task_get(object: &Map<String, Value>) -> Result<Value> {
         "description",
         "status",
         "assigneeAgentId",
-        "version",
-        "availableActions",
     ] {
         projected.insert(
             key.to_string(),
@@ -356,14 +350,7 @@ fn project_task_get(object: &Map<String, Value>) -> Result<Value> {
 
 fn project_task_mutation(object: &Map<String, Value>, include_changed: bool) -> Result<Value> {
     let mut projected = Map::new();
-    for key in [
-        "taskId",
-        "title",
-        "status",
-        "assigneeAgentId",
-        "version",
-        "availableActions",
-    ] {
+    for key in ["taskId", "title", "status", "assigneeAgentId"] {
         projected.insert(
             key.to_string(),
             object
@@ -382,6 +369,27 @@ fn project_task_mutation(object: &Map<String, Value>, include_changed: bool) -> 
         );
     }
     Ok(Value::Object(projected))
+}
+
+fn project_task_list(object: &Map<String, Value>) -> Result<Value> {
+    let tasks = object
+        .get("tasks")
+        .and_then(Value::as_array)
+        .context("Task list result has no tasks")?
+        .iter()
+        .map(|task| {
+            project_task_mutation(
+                task.as_object()
+                    .context("Task list item must be an object")?,
+                false,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(json!({
+        "tasks": tasks,
+        "nextCursor": object.get("nextCursor").context("Task list result has no nextCursor")?,
+        "truncated": object.get("truncated").context("Task list result has no truncated")?,
+    }))
 }
 
 fn project_error(error: &BuiltinToolError) -> Result<Value> {
@@ -824,7 +832,6 @@ mod tests {
                 "closedByType": null,
                 "closedById": null,
                 "closedByAgentRunId": null,
-                "version": 2,
                 "createdAt": "2026-01-01T00:00:00Z",
                 "updatedAt": "2026-01-01T00:00:00Z",
                 "closedAt": null,
@@ -841,7 +848,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(projected[note_key], note_value);
-            assert_eq!(projected.as_object().unwrap().len(), 8);
+            assert_eq!(projected.as_object().unwrap().len(), 6);
             for unrelated in [
                 "campId",
                 "createdById",

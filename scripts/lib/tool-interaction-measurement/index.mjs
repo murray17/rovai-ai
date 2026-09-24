@@ -514,7 +514,6 @@ function normalizeOracle(adapter, value) {
       'forbiddenTaskIds',
       'requiredStatuses',
       'requiredAssigneeAgentIds',
-      'requiredVersions',
       'requireEffectBinding',
       'requireMutationReceipt'
     ]
@@ -572,7 +571,6 @@ function normalizeOracle(adapter, value) {
     result.forbiddenTaskIds = normalizedIdentifiers(value.forbiddenTaskIds)
     result.requiredStatuses = normalizedIdentifiers(value.requiredStatuses)
     result.requiredAssigneeAgentIds = normalizedIdentifiers(value.requiredAssigneeAgentIds)
-    result.requiredVersions = normalizedIntegers(value.requiredVersions)
     result.requireEffectBinding = booleanDefault(value.requireEffectBinding, true)
     result.requireMutationReceipt = booleanDefault(value.requireMutationReceipt, true)
   }
@@ -1036,13 +1034,11 @@ function assessTaskCoordination(oracle, interactions) {
   const taskIds = new Set(records.map((record) => record.taskId).filter(Boolean))
   const statuses = new Set(records.map((record) => record.status).filter(Boolean))
   const assignees = new Set(records.map((record) => record.assigneeAgentId).filter(Boolean))
-  const versions = new Set(records.map((record) => record.version).filter(Number.isSafeInteger))
   const requiredTaskObserved = oracle.requiredTaskIds.filter((id) => taskIds.has(id)).length
   const forbiddenTaskObserved = oracle.forbiddenTaskIds.filter((id) => taskIds.has(id)).length
   const requiredStatusObserved = oracle.requiredStatuses.filter((status) => statuses.has(status)).length
   const requiredAssigneeObserved = oracle.requiredAssigneeAgentIds
     .filter((agentId) => assignees.has(agentId)).length
-  const requiredVersionObserved = oracle.requiredVersions.filter((version) => versions.has(version)).length
   const mutating = interactions.filter((item) => (
     ['team.create_task', 'team.update_task'].includes(item.canonicalTool)
   ))
@@ -1053,9 +1049,6 @@ function assessTaskCoordination(oracle, interactions) {
   if (requiredStatusObserved !== oracle.requiredStatuses.length) reasons.push('required_task_status_missing')
   if (requiredAssigneeObserved !== oracle.requiredAssigneeAgentIds.length) {
     reasons.push('required_task_assignee_missing')
-  }
-  if (requiredVersionObserved !== oracle.requiredVersions.length) {
-    reasons.push('required_task_version_missing')
   }
   if (oracle.requireMutationReceipt && mutationReceiptCount !== mutating.length) {
     reasons.push('task_mutation_receipt_missing')
@@ -1068,8 +1061,6 @@ function assessTaskCoordination(oracle, interactions) {
     observedRequiredStatusCount: requiredStatusObserved,
     requiredAssigneeCount: oracle.requiredAssigneeAgentIds.length,
     observedRequiredAssigneeCount: requiredAssigneeObserved,
-    requiredVersionCount: oracle.requiredVersions.length,
-    observedRequiredVersionCount: requiredVersionObserved,
     mutationCount: mutating.length,
     mutationReceiptCount
   }, reasons)
@@ -1270,7 +1261,6 @@ function projectOperationInput(operation, value) {
   })
   if (operation === 'team.update_task') return compactObject({
     taskId: boundedNullableString(value.taskId),
-    expectedVersion: boundedInteger(value.expectedVersion),
     requestedStatus: boundedNullableString(value.requestedStatus),
     assigneeAgentId: boundedNullableString(value.assigneeAgentId),
     clearAssignee: booleanOrNull(value.clearAssignee),
@@ -1430,7 +1420,6 @@ function normalizeTaskRecord(value) {
     taskId: boundedNullableString(value.taskId),
     status: boundedNullableString(value.status),
     assigneeAgentId: boundedNullableString(value.assigneeAgentId),
-    version: boundedInteger(value.version),
     changed: booleanOrNull(value.changed)
   })
 }
@@ -1966,7 +1955,6 @@ function extractTaskRecords(value) {
     taskId: item.taskId ?? null,
     status: item.status ?? null,
     assigneeAgentId: item.assigneeAgentId ?? null,
-    version: Number.isSafeInteger(item.version) ? item.version : null
   }))
 }
 

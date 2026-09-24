@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-member-identity
 status: accepted
-last_updated: 2026-09-16
+last_updated: 2026-09-24
 ---
 
 # 队员身份与图像
@@ -27,6 +27,11 @@ last_updated: 2026-09-16
 队员页的当前局部结构见
 [`member-workspace` surface brief](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)；
 会话内锚定身份卡见[结构化 Mention](structured-mentions.md#锚定人物信息卡)。
+
+进入队员页时先显示现有名册，再异步读取 `members.list`；已打开队员页收到 Core 的
+`members.invalidated` 后也异步读取。读取期间保留旧名册与当前选择，失败仍保留旧内容；在途读取之后
+到达的新失效提示必须触发后续读取，旧结果不能覆盖较新的名册。事件只提示重读，不直接修改行数据，
+也不要求同时重读 Runtime Installation。
 
 ## 队员配置页
 

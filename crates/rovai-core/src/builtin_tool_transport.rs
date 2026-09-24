@@ -12,13 +12,13 @@ use crate::{
     team_tool_catalog::builtin_tool_definitions,
 };
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 31;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 32;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 2;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 31;
-pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 4;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v31";
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 32;
+pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 5;
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v32";
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
@@ -874,10 +874,6 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
                 });
             }
         }
-        "team.update_task" => errors.push(BuiltinToolErrorContract {
-            code: "task.version_conflict".to_string(),
-            recovery: BuiltinToolRecovery::RefreshThenDecide,
-        }),
         "memory.write" => {
             for code in ["memory.revision_conflict", "memory.review_version_conflict"] {
                 errors.push(BuiltinToolErrorContract {
@@ -1113,9 +1109,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 31);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 31);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v31");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 32);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 32);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v32");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -1174,8 +1170,7 @@ mod tests {
             "7b5db24c-4a43-4cab-9217-d982b08f7691",
             json!({
                 "taskId": "task-1",
-                "status": "completed",
-                "version": 2
+                "status": "completed"
             }),
         )
         .unwrap();

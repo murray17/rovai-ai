@@ -9,7 +9,7 @@ describe('console transport', () => {
   it('uses Host channel capabilities and fences a channel reply across reauthentication', async () => {
     let pending: ((value: Response) => void) | undefined
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async url => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
       return new Promise(resolve => { pending = resolve })
     })
     const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)
@@ -36,8 +36,8 @@ describe('console transport', () => {
     await expect(client.login('b'.repeat(64))).rejects.toThrow('协议')
     await expect(client.request('app.info')).rejects.toBeInstanceOf(SessionRequired)
     expect(fetcher).toHaveBeenCalledOnce()
-    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).protocolVersion).toBe(3)
-    const session = { protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' }
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).protocolVersion).toBe(4)
+    const session = { protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' }
     fetcher.mockResolvedValue(Response.json(session))
     await client.login('b'.repeat(64))
     const scope = client.editingScope
@@ -53,7 +53,7 @@ describe('console transport', () => {
     let delayedLogout: ((value: Response) => void) | undefined
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async function (this: typeof globalThis, url, options) {
       expect(this).toBe(globalThis)
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token, clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token, clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/logout')) return new Promise<Response>(resolve => { delayedLogout = resolve })
       if (String(url).endsWith('/request') && JSON.parse(String(options?.body)).params.delayed) {
         return new Promise<Response>((resolve) => { delayed = resolve })
@@ -108,7 +108,7 @@ describe('console transport', () => {
     const params = { commandId: newCommandId(), campId: 'test', draftRevision: 4, execution: null }
     const result = { commandResult: { status: 'applied', payload: { campMessageId: 'once' } } }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
       if (body.operation === 'camp.messages.send') throw new TypeError('connection lost after admission')
       expect(body).toEqual({ operation: 'commands.reconcile', params: { operation: 'camp.messages.send', params } })
@@ -137,7 +137,7 @@ describe('console transport', () => {
     let intent: unknown
     const draft = { campId: 'test', draftId: 'test/editor', revision: 2, attachments: [{ id: 'bound' }] }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/uploads')) {
         intent = JSON.parse(String((options?.body as FormData).get('intent')))
         expect(intent).toMatchObject({ campId: 'test', expectedRevision: 1, displayName: 'input.txt', byteSize: 5 })
@@ -162,7 +162,7 @@ describe('console transport', () => {
     let recorded = false
     let sends = 0
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
       if (body.operation === 'messageQuotes.mutateDraft') { sends++; throw new TypeError('reply lost after rejection was recorded') }
       expect(body.operation).toBe('commands.reconcile')
@@ -194,7 +194,7 @@ describe('console transport', () => {
     let allowRetry = false
     const result = { commandResult: { status: 'applied' }, replayed: true }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 3, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
       if (body.operation === 'commands.reconcile') return Response.json({ result: { state: 'unknown' } })
       expect(body).toEqual({ operation: 'camp.messages.send', params: original })
@@ -224,7 +224,7 @@ describe('tab session recovery', () => {
     const values = new Map<string, string>()
     return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value) }, removeItem: (key: string) => { values.delete(key) } }
   }
-  const identity = { protocolVersion: 3, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'local_user', channels: 'desktop' }
+  const identity = { protocolVersion: 4, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'local_user', channels: 'desktop' }
   it('exchanges a scan ticket only in POST and retains this tab editor but never a copied editor', async () => {
     const storage = memory()
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => Response.json(identity))
@@ -242,7 +242,7 @@ describe('tab session recovery', () => {
     expect(fetcher.mock.calls[0][0]).toBe('http://localhost:4317/api/v1/login-ticket')
     const options = fetcher.mock.calls[0][1]!
     expect(options).toMatchObject({ method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store' })
-    expect(JSON.parse(String(options.body))).toEqual({ protocolVersion: 3, ticket: 'e'.repeat(64), editor: { clientId: identity.clientId, proof: identity.editorProof } })
+    expect(JSON.parse(String(options.body))).toEqual({ protocolVersion: 4, ticket: 'e'.repeat(64), editor: { clientId: identity.clientId, proof: identity.editorProof } })
     expect(storage.getItem('rovai.web.session.v1')).not.toContain('e'.repeat(64))
     expect(storage.getItem('rovai.web.edits.v1')).toBe('original unsaved text')
     const copy = new ConsoleClient('http://localhost:4317', fetcher, storage)
@@ -325,7 +325,7 @@ describe('tab session recovery', () => {
 describe('renewable browser authentication', () => {
   const origin = 'http://localhost:4317'
   const day = 86_400_000
-  const identity = { protocolVersion: 3, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'owner' }
+  const identity = { protocolVersion: 4, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'owner' }
   const memory = () => {
     const values = new Map<string, string>()
     return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value) }, removeItem: (key: string) => { values.delete(key) } }

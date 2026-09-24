@@ -297,7 +297,7 @@ fn camp_read_thread_schema() -> Value {
             "anchorMessageId": {"type": "string"},
             "threadRootMessageId": {"type": "string"},
             "direction": {"type": "string", "enum": ["before", "after"]},
-            "items": {"type": "array", "maxItems": 20, "items": collection_message_schema()},
+            "items": {"type": "array", "maxItems": 100, "items": collection_message_schema()},
             "nextCursor": {"type": ["integer", "null"], "minimum": 1},
             "hasMore": {"type": "boolean"}
         }
@@ -315,7 +315,7 @@ fn camp_read_timeline_schema() -> Value {
             "campId": {"type": "string"},
             "mode": {"const": "timeline"},
             "direction": {"type": "string", "enum": ["before", "after"]},
-            "items": {"type": "array", "maxItems": 20, "items": collection_message_schema()},
+            "items": {"type": "array", "maxItems": 100, "items": collection_message_schema()},
             "nextCursor": {"type": ["integer", "null"], "minimum": 1},
             "hasMore": {"type": "boolean"}
         }
@@ -400,7 +400,6 @@ fn task_detail_success_schema(include_changed: bool) -> Value {
         "closedByType",
         "closedById",
         "closedByAgentRunId",
-        "version",
         "createdAt",
         "updatedAt",
         "closedAt",
@@ -425,7 +424,6 @@ fn task_detail_success_schema(include_changed: bool) -> Value {
         "closedByType": {"type": ["string", "null"]},
         "closedById": {"type": ["string", "null"]},
         "closedByAgentRunId": {"type": ["string", "null"]},
-        "version": {"type": "integer", "minimum": 1},
         "createdAt": {"type": "string", "format": "date-time"},
         "updatedAt": {"type": "string", "format": "date-time"},
         "closedAt": {"type": ["string", "null"], "format": "date-time"},
@@ -1107,14 +1105,14 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": TEAM_GET_TASK_TOOL_NAME,
             "title": "Get a durable Task",
-            "description": "Read a task's content, status, owner and current version in this Camp.",
+            "description": "Read a task's current content, status and owner in this Camp.",
             "inputSchema": TeamToolService::get_task_input_schema(),
             "outputSchema": task_detail_success_schema(false)
         }),
         json!({
             "name": TEAM_UPDATE_TASK_TOOL_NAME,
             "title": "Update a durable Task",
-            "description": "Update a non-terminal task using the version you read.\nUser/Default Lead may edit task content, assignment and status.\nOther assignees may update only their own status and matching blockedReason or completionSummary.\nReread on conflict. Does not notify or start work.",
+            "description": "Update explicit fields of a non-terminal task.\nUser/Default Lead may edit task content, assignment and status.\nOther assignees may update only their own status and matching blockedReason or completionSummary.\nDoes not notify or start work.",
             "inputSchema": TeamToolService::update_task_input_schema(),
             "outputSchema": task_detail_success_schema(true)
         }),
@@ -1149,7 +1147,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_READ_TOOL_NAME,
             "title": "Read original Camp messages",
-            "description": "Read messages from exactly one public Camp. Target-Camp membership is not a read permission. With no message selector, return the newest visible messages from the current or explicitly selected Camp; use before as the exclusive sequence cursor and limit for paging. Use messageId for one exact message, or thread for a thread page ending before the optional cursor. Reuse nextCursor as before. IDs and cursors locate content but never bypass message visibility.",
+            "description": "Read messages from exactly one public Camp. Target-Camp membership is not a read permission. With no message selector, return the newest visible messages from the current or explicitly selected Camp; use before as the exclusive sequence cursor. The default limit is 20; an explicit limit must be an integer from 1 to 100. Use messageId for one exact message, or thread for a thread page ending before the optional cursor. Reuse nextCursor as before. IDs and cursors locate content but never bypass message visibility.",
             "inputSchema": CampHistoryService::camp_read_input_schema(),
             "outputSchema": camp_read_success_schema()
         }),
@@ -1251,7 +1249,7 @@ mod tests {
         assert_eq!(update["description"], update["inputSchema"]["description"]);
         assert_eq!(
             definition(TEAM_GET_TASK_TOOL_NAME)["description"],
-            "Read a task's content, status, owner and current version in this Camp."
+            "Read a task's current content, status and owner in this Camp."
         );
         assert_eq!(
             definition(TEAM_LIST_TASKS_TOOL_NAME)["description"],
@@ -1481,9 +1479,16 @@ mod tests {
         .unwrap();
         validate_builtin_tool_input(
             CAMP_READ_TOOL_NAME,
-            &json!({"thread": "message_123", "limit": 20}),
+            &json!({"thread": "message_123", "limit": 100}),
         )
         .unwrap();
+        validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &json!({"limit": 100})).unwrap();
+        for invalid in [json!(0), json!(101), json!(-1), json!(1.5), json!("20")] {
+            assert!(
+                validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &json!({"limit": invalid}))
+                    .is_err()
+            );
+        }
         for legacy in [
             json!({"mode": "timeline"}),
             json!({"direction": "before"}),

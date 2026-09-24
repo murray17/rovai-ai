@@ -196,14 +196,25 @@ pub(super) fn schema_matches_v163(connection: &Connection) -> rusqlite::Result<b
         connection,
         "context_manifest",
         &[
-            "run_facts_schema_version IN (1, 2, 3, 4, 5)",
             CURRENT_FACT_BRANCH,
             PATH_FACT_BRANCH,
             "workspace_fact_json",
             "workspace_fact_digest",
             "workspace_fact_included",
         ],
-    )?;
+    )? && (contains_schema(
+        connection,
+        "context_manifest",
+        &["run_facts_schema_version IN (1, 2, 3, 4, 5)"],
+    )? || contains_schema(
+        connection,
+        "context_manifest",
+        &["run_facts_schema_version IN (1, 2, 3, 4, 5, 6)"],
+    )? || contains_schema(
+        connection,
+        "context_manifest",
+        &["run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7)"],
+    )?);
     let context_v26 = contains_schema(
         connection,
         "context_manifest",
@@ -245,6 +256,46 @@ pub(super) fn schema_matches_v163(connection: &Connection) -> rusqlite::Result<b
         "runtime_input_delivery_attachment_auth_insert",
         &["context_manifest_version IN (24, 25, 26, 27)"],
     )?;
+    let context_v28 = contains_schema(
+        connection,
+        "context_manifest",
+        &[
+            "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28)",
+            "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28)",
+        ],
+    )? && contains_schema(
+        connection,
+        "context_manifest_v28_only_insert",
+        &[
+            "NEW.context_manifest_version = 28",
+            "batch_input.context_manifest_version",
+            "invocation_kind = 'batch'",
+        ],
+    )? && contains_schema(
+        connection,
+        "runtime_input_delivery_attachment_auth_insert",
+        &["context_manifest_version IN (26, 28)"],
+    )?;
+    let context_v29 = contains_schema(
+        connection,
+        "context_manifest",
+        &[
+            "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29)",
+            "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29)",
+        ],
+    )? && contains_schema(
+        connection,
+        "context_manifest_v29_only_insert",
+        &[
+            "NEW.context_manifest_version = 29",
+            "batch_input.context_manifest_version",
+            "invocation_kind = 'batch'",
+        ],
+    )? && contains_schema(
+        connection,
+        "runtime_input_delivery_attachment_auth_insert",
+        &["context_manifest_version IN (26, 29)"],
+    )?;
     let profile_pairing = contains_schema(
         connection,
         "context_manifest_quote_profile_insert",
@@ -252,8 +303,25 @@ pub(super) fn schema_matches_v163(connection: &Connection) -> rusqlite::Result<b
             "NEW.context_manifest_version = 26",
             "NEW.context_manifest_version = 25",
         ],
+    )? || contains_schema(
+        connection,
+        "context_manifest_quote_profile_insert",
+        &[
+            "NEW.context_manifest_version = 28",
+            "NEW.context_manifest_version = 26",
+        ],
+    )? || contains_schema(
+        connection,
+        "context_manifest_quote_profile_insert",
+        &[
+            "NEW.context_manifest_version = 29",
+            "NEW.context_manifest_version = 26",
+        ],
     )?;
-    if !common_manifest || !(context_v26 || context_v27) || !profile_pairing {
+    if !common_manifest
+        || !(context_v26 || context_v27 || context_v28 || context_v29)
+        || !profile_pairing
+    {
         return Ok(false);
     }
 

@@ -12,7 +12,6 @@ import { isAttachmentId, type DesktopAttachmentTarget } from './attachment-deskt
 import { classifyFilePreview } from './file-preview/file-preview-classifier'
 
 const REGISTRY_SCHEMA_VERSION = 1
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const MAX_PREVIEW_BYTES = 8 * 1024 * 1024
 const MAX_ENTRIES = 200
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1_000
@@ -208,10 +207,6 @@ export class LocalComposerAttachmentRegistry {
       if (!kind) throw new Error('Attachment source must be a regular file or directory')
       if (!preparing && entry.kind !== kind) {
         return { entry, view: this.#view(entry, 'kind_changed') }
-      }
-      if (kind === 'file' && info.size > MAX_ATTACHMENT_BYTES) {
-        if (preparing) throw new Error('附件超过 25 MiB。')
-        return { entry, view: this.#view(entry, 'unreadable') }
       }
       await access(entry.sourcePath, constants.R_OK)
       const classification = kind === 'file'

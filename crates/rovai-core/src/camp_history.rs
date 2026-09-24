@@ -42,7 +42,7 @@ const MAX_CAMP_QUERY_CHARS: usize = 200;
 const MAX_HISTORY_CAMP_IDS: usize = 20;
 const MAX_SNIPPET_CHARS: usize = 200;
 const DEFAULT_PAGE_LIMIT: usize = 20;
-const MAX_PAGE_LIMIT: usize = 20;
+const MAX_PAGE_LIMIT: usize = 100;
 const MAX_ATTACHMENTS: usize = 10;
 const MAX_RESPONSE_CHARS: usize = 80_000;
 
@@ -2922,6 +2922,79 @@ mod slow_tests {
                         && attachment.get("storagePath").is_none()
                         && attachment.get("content").is_none()
                 })
+        );
+
+        for sequence in 2..=230 {
+            transaction
+                .execute(
+                    "INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,created_at,tombstoned_at,recall_state)
+                     VALUES (?1,?2,?3,'user','local_user',?4,'2026-08-01T00:00:00Z',?5,?6)",
+                    params![
+                        format!("message-{sequence}"),
+                        target.camp_id,
+                        sequence,
+                        format!("Complete body {sequence}"),
+                        if sequence == 101 { Some("2026-08-02T00:00:00Z") } else { None },
+                        if sequence == 120 { "recallable" } else { "ineligible" },
+                    ],
+                )
+                .unwrap();
+        }
+        let paged_target = CampTarget {
+            camp_id: target.camp_id.clone(),
+            fence: MessageFence::Current { boundary: 230 },
+            viewer_agent_id: target.viewer_agent_id.clone(),
+        };
+        let default_page = read_timeline(
+            &transaction,
+            &paged_target,
+            ReadDirection::Before,
+            None,
+            DEFAULT_PAGE_LIMIT,
+        )
+        .unwrap();
+        assert_eq!(default_page["items"].as_array().unwrap().len(), 20);
+        assert_eq!(default_page["hasMore"], true);
+        assert_eq!(default_page["nextCursor"], 211);
+
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = read_timeline(
+                &transaction,
+                &paged_target,
+                ReadDirection::Before,
+                cursor,
+                MAX_PAGE_LIMIT,
+            )
+            .unwrap();
+            let items = page["items"].as_array().unwrap();
+            assert!(items.len() <= 100);
+            let sequences = items
+                .iter()
+                .map(|item| item["sequence"].as_i64().unwrap())
+                .collect::<Vec<_>>();
+            assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
+            if let Some(before) = cursor {
+                assert!(sequences.last().is_some_and(|sequence| *sequence < before));
+            }
+            seen.extend(sequences);
+            if page["hasMore"] == false {
+                assert!(page["nextCursor"].is_null());
+                break;
+            }
+            cursor = Some(page["nextCursor"].as_i64().unwrap());
+            assert_eq!(
+                cursor,
+                items.first().map(|item| item["sequence"].as_i64().unwrap())
+            );
+        }
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            (1..=230)
+                .filter(|sequence| *sequence != 101 && *sequence != 120)
+                .collect::<Vec<_>>()
         );
 
         let rows = (1..=20)

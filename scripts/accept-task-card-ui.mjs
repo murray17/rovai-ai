@@ -68,7 +68,6 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     taskId: completedTaskId,
-    expectedVersion: task.version,
     title: '任务卡已原地更新',
     description: '更新后的说明仍然只能在任务详情里看到。',
     status: 'in_progress',
@@ -98,7 +97,6 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     taskId: completedTaskId,
-    expectedVersion: task.version,
     status: 'blocked',
     assignee: { operation: 'unchanged' },
     blockedReason: '等待确认外部依赖的可用窗口。'
@@ -124,7 +122,6 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     taskId: completedTaskId,
-    expectedVersion: task.version,
     status: 'in_progress',
     assignee: { operation: 'unchanged' }
   })
@@ -138,7 +135,6 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     taskId: completedTaskId,
-    expectedVersion: task.version,
     status: 'completed',
     completionSummary: '任务卡路径已验证完成。'
   })
@@ -176,7 +172,6 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     taskId: cancelledTaskId,
-    expectedVersion: task.version,
     status: 'pending',
     assignee: { operation: 'clear' }
   })
@@ -203,7 +198,6 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     taskId: cancelledTaskId,
-    expectedVersion: task.version,
     status: 'pending',
     assignee: {
       operation: 'assign',
@@ -220,7 +214,6 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     taskId: cancelledTaskId,
-    expectedVersion: task.version,
     status: 'cancelled',
     cancelReason: '该责任不再需要继续。'
   })
@@ -642,14 +635,10 @@ async function verifyTaskEditorLifecycle(cdp, fixture) {
   await setTaskField(cdp, '阻塞原因', '等待用户验收')
   const concurrent = await request(cdp, 'tasks.update', {
     commandId: crypto.randomUUID(), campId: fixture.campId, taskId: task.taskId,
-    expectedVersion: task.version, description: '另一次操作更新了说明',
+    description: '另一次操作更新了说明',
     assignee: { operation: 'unchanged' }
   })
-  assert(concurrent.status === 'applied', `Could not prepare a Task version conflict: ${JSON.stringify(concurrent)}`)
-  await evaluate(cdp, `document.querySelector('.task-editor')?.requestSubmit()`)
-  await waitForExpression(cdp, `document.querySelector('.task-editor .task-form-error')?.textContent?.includes('草稿仍保留')`)
-  assert(await evaluate(cdp, `document.querySelector('.task-editor textarea')?.value === '我在编辑器中保留的修改'`),
-    'A Task version conflict overwrote the user draft')
+  assert(concurrent.status === 'applied', `Could not prepare a concurrent Task patch: ${JSON.stringify(concurrent)}`)
   await evaluate(cdp, `document.querySelector('.task-editor')?.requestSubmit()`)
   await waitForExpression(cdp, `!document.querySelector('.task-editor-dialog')
     && document.querySelector('.task-detail-status')?.textContent === '已阻塞'`)
@@ -660,11 +649,13 @@ async function verifyTaskEditorLifecycle(cdp, fixture) {
   await waitForExpression(cdp, `!document.querySelector('.task-cancel-dialog')
     && document.querySelector('.task-detail-status')?.textContent === '已取消'`)
   snapshot = await request(cdp, 'camps.snapshot', { campId: fixture.campId })
+  assert(snapshot.tasks.find((candidate) => candidate.taskId === task.taskId)?.description === '另一次操作更新了说明',
+    'A field patch overwrote a concurrently updated description')
   const cancelled = snapshot.tasks.find((candidate) => candidate.taskId === task.taskId)
   assert(cancelled?.cancelReason === '仅用于隔离 UI 验收'
     && snapshot.messages.length === 0 && snapshot.agentRuns.length === 0,
     'Task editing/cancellation created an execution or lost its cancellation reason')
-  return { draftAcrossCloseAndSwitch: true, create: true, edit: true, versionConflict: true, cancel: true, noExecutionSideEffects: true }
+  return { draftAcrossCloseAndSwitch: true, create: true, edit: true, concurrentFieldPatch: true, cancel: true, noExecutionSideEffects: true }
 }
 
 async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor) {

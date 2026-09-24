@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -39,6 +39,30 @@ describe('Local Composer attachment authority', () => {
     expect((await restoredOwner.resolveTarget({
       owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
     }))?.target).toMatchObject({ path: imagePath, canShowPath: true })
+  })
+
+  it('keeps a source file above 25 MiB available from selection through restore and open', async () => {
+    const { root, registryPath } = await fixture()
+    const sourcePath = join(root, 'large.png')
+    const byteSize = 25 * 1024 * 1024 + 1
+    await writeFile(sourcePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    await truncate(sourcePath, byteSize)
+
+    const registry = new LocalComposerAttachmentRegistry(registryPath)
+    const attachment = await registry.prepare({
+      campId: 'camp-a', sourcePath, displayName: 'large.png', mediaType: 'image/png'
+    })
+    expect(attachment).toMatchObject({ availability: 'available', byteSize, previewKind: 'image' })
+
+    const restoredOwner = new LocalComposerAttachmentRegistry(registryPath)
+    const [restored] = await restoredOwner.restore('camp-a', [attachment])
+    expect(restored).toMatchObject({ availability: 'available', byteSize })
+    expect(await restoredOwner.preview({
+      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+    })).toEqual({ preview: null, availability: 'available' })
+    expect((await restoredOwner.resolveTarget({
+      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+    }))?.target?.path).toBe(sourcePath)
   })
 
   it('does not trust a Renderer-supplied replacement path during restore', async () => {

@@ -127,7 +127,6 @@ where
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamUpdateTaskInput {
     pub task_id: String,
-    pub expected_version: i64,
     pub title: Option<String>,
     pub description: Option<String>,
     pub status: Option<TaskStatus>,
@@ -605,11 +604,10 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "description": "Update a non-terminal task using the version you read.\nUser/Default Lead may edit task content, assignment and status.\nOther assignees may update only their own status and matching blockedReason or completionSummary.\nReread on conflict. Does not notify or start work.",
-            "required": ["taskId", "expectedVersion"],
+            "description": "Update explicit fields of a non-terminal task.\nUser/Default Lead may edit task content, assignment and status.\nOther assignees may update only their own status and matching blockedReason or completionSummary.\nDoes not notify or start work.",
+            "required": ["taskId"],
             "properties": {
                 "taskId": {"type": "string", "minLength": 1},
-                "expectedVersion": {"type": "integer", "minimum": 1},
                 "title": {"type": "string", "minLength": 1, "maxLength": 160},
                 "description": {
                     "type": "string",
@@ -1359,7 +1357,6 @@ impl TeamToolService {
             execution_epoch: Some(sender.execution_epoch),
             payload: UpdateTaskCommand {
                 task_id: invocation.input.task_id.clone(),
-                expected_version: invocation.input.expected_version,
                 title: invocation.input.title.clone(),
                 description: invocation.input.description.clone(),
                 status: invocation.input.status,
@@ -5352,7 +5349,6 @@ Use this exact public input @agent_2";
             "claim-durable-task",
             TeamUpdateTaskInput {
                 task_id: task_id.clone(),
-                expected_version: 1,
                 title: None,
                 description: None,
                 status: Some(TaskStatus::InProgress),
@@ -6121,7 +6117,7 @@ Use this exact public input @agent_2";
     }
 
     #[cfg(feature = "slow-tests")]
-    fn task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing() {
+    fn task_tool_lead_creation_ignores_capability_catalog_and_updates_fields() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let current_config: String = fixture
@@ -6162,22 +6158,11 @@ Use this exact public input @agent_2";
             .create_task(&mut fixture.database, &allowed_invocation)
             .unwrap();
         assert_eq!(allowed.result.status, CommandResultStatus::Applied);
-        let current_version: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT version FROM task WHERE id = ?1",
-                [&fixture.task_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        let stale_invocation = fixture.task_invocation(
-            "stale-task-version",
+        let later_invocation = fixture.task_invocation(
+            "later-task-title",
             TeamUpdateTaskInput {
                 task_id: fixture.task_id.clone(),
-                expected_version: 99,
-                title: Some("Must not overwrite".to_string()),
+                title: Some("Latest title".to_string()),
                 description: None,
                 status: None,
                 assignee_agent_id: None,
@@ -6185,12 +6170,13 @@ Use this exact public input @agent_2";
                 ..Default::default()
             },
         );
-        let stale = service
-            .update_task(&mut fixture.database, &stale_invocation)
+        let later = service
+            .update_task(&mut fixture.database, &later_invocation)
             .unwrap();
-        assert_eq!(stale.result.code, "task.version_conflict");
-        assert_eq!(stale.result.payload["taskId"], fixture.task_id);
-        assert_eq!(stale.result.payload["currentVersion"], current_version);
+        assert_eq!(later.result.status, CommandResultStatus::Applied);
+        assert_eq!(later.result.payload["taskId"], fixture.task_id);
+        assert_eq!(later.result.payload["title"], "Latest title");
+        assert!(later.result.payload.get("version").is_none());
     }
 
     #[cfg(feature = "slow-tests")]
@@ -8310,8 +8296,8 @@ Use this exact public input @agent_2";
             super::public_send_rejects_a_left_recipient_and_accepts_a_new_membership();
         }
         #[test]
-        fn task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing() {
-            super::task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing();
+        fn task_tool_lead_creation_ignores_capability_catalog_and_updates_fields() {
+            super::task_tool_lead_creation_ignores_capability_catalog_and_updates_fields();
         }
         #[test]
         fn memory_read_reports_revision_inactive_and_deleted_without_returning_stale_body() {

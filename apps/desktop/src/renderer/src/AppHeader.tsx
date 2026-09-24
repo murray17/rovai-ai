@@ -1,5 +1,5 @@
 import type { CampSnapshot } from '@contracts'
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { MobileBack } from './MobileLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
@@ -14,6 +14,8 @@ export function AppHeader({
   detailEntryHostRef,
   onFocusApprovals,
   onBack,
+  onOpenConversationList,
+  conversationListButtonRef,
   leading,
   hideTitle = false,
   conversationActions,
@@ -25,6 +27,8 @@ export function AppHeader({
   detailEntryHostRef?(host: HTMLDivElement | null): void
   onFocusApprovals(): void
   onBack?(): void
+  onOpenConversationList?(): void
+  conversationListButtonRef?: Ref<HTMLButtonElement>
   leading?: ReactNode
   hideTitle?: boolean
   conversationActions?: ReactNode
@@ -50,6 +54,15 @@ export function AppHeader({
     >
       <div className="topbar-conversation-context">
         {leading}
+        {onOpenConversationList && <button
+          ref={conversationListButtonRef}
+          className="mobile-icon-button mobile-conversation-list-open"
+          type="button"
+          aria-label={previewVisible ? '返回对话' : '打开会话列表'}
+          onClick={previewVisible ? filePreview!.hidePane : onOpenConversationList}
+        >{previewVisible
+          ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
+          : <PanelToggleIcon side="left" visible={false} />}</button>}
         {onBack && <MobileBack label={previewVisible ? '返回对话' : '返回对话列表'} onClick={previewVisible ? filePreview!.hidePane : onBack} />}
         <div className="context-breadcrumb" hidden={hideTitle}>
           {contextLabel && <span className="context-project">{contextLabel}</span>}

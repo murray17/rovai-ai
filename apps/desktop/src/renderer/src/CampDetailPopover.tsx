@@ -183,6 +183,8 @@ export function CampDetailPopover({
   visible,
   showExecution,
   executionExpanded = visible && activeTab === 'execution',
+  mobileExecutionMaximized = false,
+  onToggleMobileExecutionMaximized,
   runningMembers,
   executionCount,
   taskCount,
@@ -198,6 +200,8 @@ export function CampDetailPopover({
   visible: boolean
   showExecution: boolean
   executionExpanded?: boolean
+  mobileExecutionMaximized?: boolean
+  onToggleMobileExecutionMaximized?(): void
   runningMembers: readonly RunningCampMember[]
   executionCount: number
   taskCount: number
@@ -245,7 +249,7 @@ export function CampDetailPopover({
     <div className="mobile-camp-tabs" role="group" aria-label="当前会话视图" hidden={secondary}>
       <button type="button" aria-pressed={!visible} onClick={onClose}>对话</button>
       <CampExecutionEntry mobile members={runningMembers} executionCount={executionCount} expanded={executionExpanded} panelId={panelId}
-        onSelect={(tab, trigger) => { triggerRef.current = trigger; onOpen(tab) }} />
+        onSelect={(tab, trigger) => { triggerRef.current = trigger; if (visible && activeTab === tab) onClose(); else onOpen(tab) }} />
     </div>
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
@@ -318,6 +322,15 @@ export function CampDetailPopover({
       <header className="camp-detail-heading">
         <CampDetailIcon tab={activeTab} />
         <strong id={`${panelId}-title`}>{labels[activeTab]}</strong>
+        {mobile && activeTab === 'execution' && onToggleMobileExecutionMaximized && <button
+          className="mobile-execution-expand"
+          type="button"
+          aria-label={mobileExecutionMaximized ? '还原执行面板' : '展开执行面板'}
+          aria-pressed={mobileExecutionMaximized}
+          onClick={onToggleMobileExecutionMaximized}
+        ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={mobileExecutionMaximized
+          ? 'M4 9h5V4m6 0v5h5M4 15h5v5m6 0v-5h5'
+          : 'M9 4H4v5m11-5h5v5M4 15v5h5m6 0h5v-5'} /></svg></button>}
         <button
           className="camp-detail-collapse"
           type="button"

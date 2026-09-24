@@ -181,7 +181,6 @@ test('v2 adapters measure history.search, memory.view and Task lifecycle without
           requiredTaskIds: ['task-1'],
           requiredStatuses: ['completed'],
           requiredAssigneeAgentIds: ['agent-reviewer'],
-          requiredVersions: [1, 2],
           requireEffectBinding: true,
           requireMutationReceipt: true
         }
@@ -233,7 +232,7 @@ test('v2 adapters measure history.search, memory.view and Task lifecycle without
           description: 'Check the sealed verifier and report evidence.',
           assigneeAgentId: 'agent-reviewer'
         },
-        result: { taskId: 'task-1', status: 'pending', assigneeAgentId: 'agent-reviewer', version: 1 },
+        result: { taskId: 'task-1', status: 'pending', assigneeAgentId: 'agent-reviewer' },
         receiptId: 'receipt-task-create',
         evidenceId: 'task-create-1'
       }),
@@ -243,11 +242,10 @@ test('v2 adapters measure history.search, memory.view and Task lifecycle without
         canonicalTool: 'team.update_task',
         input: {
           taskId: 'task-1',
-          expectedVersion: 1,
           requestedStatus: 'completed',
           completionSummary: 'Verified the sealed boundary.'
         },
-        result: { taskId: 'task-1', status: 'completed', assigneeAgentId: 'agent-reviewer', version: 2 },
+        result: { taskId: 'task-1', status: 'completed', assigneeAgentId: 'agent-reviewer' },
         receiptId: 'receipt-task-update',
         evidenceId: 'task-update-1'
       })
@@ -264,7 +262,7 @@ test('v2 adapters measure history.search, memory.view and Task lifecycle without
       {
         effectId: 'task-state-1',
         kind: 'task_state',
-        content: '{"assigneeAgentId":"agent-reviewer","status":"completed","taskId":"task-1","version":2}',
+        content: '{"assigneeAgentId":"agent-reviewer","status":"completed","taskId":"task-1"}',
         relatedResultIdentities: ['task-1'],
         evidenceReference: reference('task-state-1')
       }
@@ -283,7 +281,7 @@ test('v2 adapters measure history.search, memory.view and Task lifecycle without
   assert.equal(measurement.payload.opportunities.find((item) => item.adapter === 'task_coordination')
     .deterministicAssessment.effectBinding.status, 'pass')
   assert.equal(measurement.payload.opportunities.find((item) => item.adapter === 'task_coordination')
-    .deterministicAssessment.oracleMatch.facts.observedRequiredVersionCount, 2)
+    .deterministicAssessment.oracleMatch.facts.observedRequiredStatusCount, 1)
 })
 
 test('Memory write effectiveness requires an exact authoritative readback when pre-registered', () => {

@@ -1125,7 +1125,6 @@ describe('task event projections', () => {
       closedByType: 'user',
       closedById: 'local_user',
       closedByAgentRunId: null,
-      version: 4,
       createdAt: '2026-08-05T02:00:00Z',
       updatedAt: '2026-08-05T02:10:00Z',
       closedAt: '2026-08-05T02:10:00Z',
@@ -1212,8 +1211,7 @@ describe('task event projections', () => {
         taskId: task.taskId,
         title: '更新后的任务标题',
         status: 'completed',
-        assigneeAgentId: 'agent_2',
-        version: 4
+        assigneeAgentId: 'agent_2'
       }
     })
 
@@ -1224,7 +1222,6 @@ describe('task event projections', () => {
       completionSummary: null,
       cancelReason: '不再需要',
       assigneeAgentId: null,
-      version: 5
     }])
     expect(campConversationHasVisibleHistory(updated)).toBe(true)
     expect(updated).toHaveLength(1)
@@ -1234,8 +1231,7 @@ describe('task event projections', () => {
       task: {
         title: '再次更新标题',
         status: 'cancelled',
-        assigneeAgentId: null,
-        version: 5
+        assigneeAgentId: null
       }
     })
   })
@@ -1257,7 +1253,6 @@ describe('task event projections', () => {
       closedByType: null,
       closedById: null,
       closedByAgentRunId: null,
-      version: 1,
       createdAt: '2026-07-01T00:00:00Z',
       updatedAt: '2026-07-01T00:00:00Z',
       closedAt: null,
@@ -5181,7 +5176,7 @@ describe('task event projections', () => {
         blockedReason: null, completionSummary: null, cancelReason: null,
         status: 'pending', assigneeAgentId: 'agent_2', createdByType: 'user',
         createdById: 'local_user', sourceAgentRunId: null, closedByType: null,
-        closedById: null, closedByAgentRunId: null, version: 1,
+        closedById: null, closedByAgentRunId: null,
         createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z',
         closedAt: null, availableActions: ['update']
       }],
@@ -6045,7 +6040,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('>execute<')
   })
 
-  it('keeps the settled live-tail Tool group active until a non-Tool boundary arrives', () => {
+  it('shows a transient thinking tail after a settled Tool group without changing Tool identity', () => {
     const settledTool = {
       key: 'tool:settled',
       kind: 'tool' as const,
@@ -6090,13 +6085,41 @@ describe('task event projections', () => {
     expect(liveTailMarkup).not.toContain('class="tool-group-count"')
     expect(liveTailMarkup).not.toContain('<span>Thinking</span>')
 
+    const thinkingTailMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run,
+      progress: { items: [settledTool], runtimePhase: 'thinking' },
+      campId: 'camp-live-tail',
+      focused: true
+    }))
+    expect(thinkingTailMarkup).toContain('class="tool-activity-group status-completed"')
+    expect(thinkingTailMarkup).toContain('aria-label="已完成 1 个步骤"')
+    expect(thinkingTailMarkup).toContain('class="process-action current is-phase-feedback" role="status"')
+    expect((thinkingTailMarkup.match(/title="思考中"/g) ?? [])).toHaveLength(1)
+    expect(thinkingTailMarkup).not.toContain('aria-label="执行中：pnpm test"')
+
+    const activeToolMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run,
+      progress: {
+        items: [settledTool, {
+          key: 'tool:next', kind: 'tool',
+          step: { ...settledTool.step, id: 'tool-next', title: 'pnpm lint', publicCommand: 'pnpm lint', status: 'running' }
+        }],
+        runtimePhase: 'thinking'
+      },
+      campId: 'camp-live-tail',
+      focused: true
+    }))
+    expect(activeToolMarkup).toContain('aria-label="执行中：pnpm lint"')
+    expect(activeToolMarkup).not.toContain('title="思考中"')
+
     const boundaryMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run,
       progress: {
         items: [
           settledTool,
           { key: 'narration:boundary', kind: 'narration', body: '继续检查结果。' }
-        ]
+        ],
+        runtimePhase: 'thinking'
       },
       campId: 'camp-live-tail',
       focused: true
@@ -6105,6 +6128,15 @@ describe('task event projections', () => {
     expect(boundaryMarkup).toContain('aria-label="已完成 1 个步骤"')
     expect(boundaryMarkup).not.toMatch(/Thinking|连接中|思考中/)
     expect(boundaryMarkup).not.toMatch(/工作了|处理过程 ·|正在工作/)
+
+    const finalMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run,
+      progress: { items: [settledTool], runtimePhase: 'thinking' },
+      finalBody: '最终正文已经到达',
+      campId: 'camp-live-tail',
+      focused: true
+    }))
+    expect(finalMarkup).not.toContain('title="思考中"')
 
     const queuedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run: { ...run, status: 'queued', startedAt: null }, campId: 'camp-live-tail', focused: true
@@ -6118,10 +6150,11 @@ describe('task event projections', () => {
     expect(backgroundMarkup).not.toMatch(/工作了|处理过程 ·/)
     const terminalMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run: { ...run, status: 'succeeded', endedAt: '2026-08-26T00:00:14Z' },
-      progress: { items: [settledTool] }, campId: 'camp-live-tail'
+      progress: { items: [settledTool], runtimePhase: 'thinking' }, campId: 'camp-live-tail'
     }))
     expect(terminalMarkup).toContain('工作了 13 秒')
     expect(terminalMarkup).not.toContain('<span>Thinking</span>')
+    expect(terminalMarkup).not.toContain('title="思考中"')
 
     const renderLive = (items: ReturnType<typeof buildLiveExecutionProgress>['items'] = [], finalBody: string | null = null): string =>
       renderToStaticMarkup(createElement(RunExecutionDisclosure, {

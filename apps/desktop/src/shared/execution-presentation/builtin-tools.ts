@@ -66,7 +66,7 @@ function cliResult(operation: string, result: unknown): unknown {
   let keys: string[] | undefined
   if (operation === 'camp.message.send') keys = ['messageId', 'agentAddressingMode', 'effectiveRecipients', 'deliveryIds']
   if (operation === 'team.create_task' || operation === 'team.update_task') {
-    keys = ['taskId', 'title', 'status', 'assigneeAgentId', 'version', 'availableActions']
+    keys = ['taskId', 'title', 'status', 'assigneeAgentId']
     if (operation === 'team.update_task') keys.push('changed')
   }
   if (operation === 'memory.write') {

@@ -80,7 +80,7 @@ test('measurement pack seals opportunities, fixture and oracle and materializes 
     assert.equal(builderSpec.opportunities[1].oracle.expectedMemories[0].memoryId, 'memory-1')
     assert.equal(builderSpec.opportunities[1].oracle.expectedMemories[0].revisionId, 'revision-2')
     assert.equal(builderSpec.opportunities[3].oracle.requiredTaskIds[0], 'task-1')
-    assert.deepEqual(builderSpec.opportunities[3].oracle.requiredVersions, [1])
+    assert.equal(builderSpec.opportunities[3].oracle.requiredVersions, undefined)
     assert.equal(JSON.stringify(builderSpec).includes('$symbol:'), false)
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -247,8 +247,7 @@ async function writePack(root, caseRecord) {
           requiredStatuses: ['completed'],
           requiredAssigneeAgentIds: [],
           requireEffectBinding: true,
-          requireMutationReceipt: true,
-          requiredVersions: ['$symbol:task:review#version']
+          requireMutationReceipt: true
         }
       }
     ]

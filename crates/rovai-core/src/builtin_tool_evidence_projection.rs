@@ -156,11 +156,6 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
         }
         TEAM_UPDATE_TASK_TOOL_NAME => {
             insert_identifier(&mut projected, "taskId", input.get("taskId"));
-            insert_i64(
-                &mut projected,
-                "expectedVersion",
-                input.get("expectedVersion"),
-            );
             insert_enum(&mut projected, "requestedStatus", input.get("status"));
             insert_identifier(
                 &mut projected,

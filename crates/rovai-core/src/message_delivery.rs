@@ -127,7 +127,6 @@ struct DispatchDelivery {
     recipient_agent_id: String,
     recipient_membership_version_at_admission: i64,
     task_id: Option<String>,
-    task_version_at_admission: Option<i64>,
     assignee_agent_id_at_admission: Option<String>,
     source_agent_run_id: String,
     delivery_kind: String,
@@ -1478,7 +1477,7 @@ fn process_dispatch_attempt(
         r#"
         INSERT INTO agent_run(
             id, camp_turn_id, conversation_id, task_id,
-            task_version_at_admission, assignee_agent_id_at_admission,
+            assignee_agent_id_at_admission,
             trigger_camp_message_id, trigger_message_delivery_id,
             trigger_delivery_generation, input_ready_at,
             initial_camp_context_through_sequence,
@@ -1511,8 +1510,8 @@ fn process_dispatch_attempt(
             invocation_kind, a2a_parent_agent_run_id,
             a2a_root_agent_run_id, a2a_depth
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?33, ?34, ?5, ?6, ?35, ?7, ?8, ?9,
-            ?10, ?35, NULL, 'initial', ?11, ?36,
+            ?1, ?2, ?3, ?4, ?33, ?5, ?6, ?34, ?7, ?8, ?9,
+            ?10, ?34, NULL, 'initial', ?11, ?35,
             ?12, ?13, 'runtime_managed_v2',
             ?14, ?15, ?16, ?17, ?18, ?19, ?18, ?19,
             ?20, ?21, ?22, ?23, ?24, ?25,
@@ -1521,7 +1520,7 @@ fn process_dispatch_attempt(
             NULL, NULL, 0, NULL,
             0, NULL, NULL, NULL, NULL, NULL, 1,
             ?7, NULL, NULL, ?7,
-            ?37, ?30, ?31, ?32
+            ?36, ?30, ?31, ?32
         )
         "#,
         params![
@@ -1563,7 +1562,6 @@ fn process_dispatch_attempt(
             delivery.target_parent_agent_run_id,
             delivery.a2a_root_agent_run_id,
             delivery.a2a_depth,
-            delivery.task_version_at_admission,
             delivery.assignee_agent_id_at_admission,
             delivery.retry_generation,
             delivery.completion_role,
@@ -1649,7 +1647,6 @@ fn load_dispatch_delivery(
             SELECT delivery.id, delivery.camp_id, delivery.camp_turn_id,
                    delivery.message_id, delivery.camp_message_boundary_sequence,
                    delivery.recipient_agent_id, delivery.task_id,
-                   delivery.task_version_at_admission,
                    delivery.assignee_agent_id_at_admission,
                    delivery.source_agent_run_id,
                    delivery.delivery_kind, delivery.completion_role,
@@ -1675,20 +1672,19 @@ fn load_dispatch_delivery(
                     camp_message_boundary_sequence: row.get(4)?,
                     recipient_agent_id: row.get(5)?,
                     task_id: row.get(6)?,
-                    task_version_at_admission: row.get(7)?,
-                    assignee_agent_id_at_admission: row.get(8)?,
-                    source_agent_run_id: row.get(9)?,
-                    delivery_kind: row.get(10)?,
-                    completion_role: row.get(11)?,
-                    gather_id: row.get(12)?,
-                    edge_kind: row.get(13)?,
-                    target_parent_agent_run_id: row.get(14)?,
-                    return_to_agent_run_id: row.get(15)?,
-                    a2a_root_agent_run_id: row.get(16)?,
-                    a2a_depth: row.get(17)?,
-                    retry_generation: row.get(18)?,
-                    recipient_membership_version_at_admission: row.get(19)?,
-                    failure_detail_json: row.get(20)?,
+                    assignee_agent_id_at_admission: row.get(7)?,
+                    source_agent_run_id: row.get(8)?,
+                    delivery_kind: row.get(9)?,
+                    completion_role: row.get(10)?,
+                    gather_id: row.get(11)?,
+                    edge_kind: row.get(12)?,
+                    target_parent_agent_run_id: row.get(13)?,
+                    return_to_agent_run_id: row.get(14)?,
+                    a2a_root_agent_run_id: row.get(15)?,
+                    a2a_depth: row.get(16)?,
+                    retry_generation: row.get(17)?,
+                    recipient_membership_version_at_admission: row.get(18)?,
+                    failure_detail_json: row.get(19)?,
                 })
             },
         )

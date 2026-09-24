@@ -242,7 +242,6 @@ test('Evidence Index binds Memory v3 readback and Task state as separate Judge-s
     sourceAgentRunId: 'run-1',
     status: 'completed',
     assigneeAgentId: 'agent-reviewer',
-    version: 2,
     titleDigest: sha256('Review the boundary'),
     descriptionDigest: sha256('Check exact evidence.'),
     completedAt: '2026-08-04T00:00:08.000Z'
