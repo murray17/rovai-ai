@@ -1,8 +1,16 @@
 import { firstString, record } from './feishu-developer-identity'
-import { isFeishuLoginUrl, openPlatformOrigin, trustedFeishuUrl } from './feishu-domains'
+import {
+  FEISHU_DOMAINS,
+  isFeishuLoginUrl,
+  LARK_DOMAINS,
+  openPlatformOrigin,
+  trustedFeishuUrl,
+  type OpenPlatformDomains
+} from './feishu-domains'
 import { FeishuSessionError, type FeishuSessionHttp } from './feishu-session-http'
 
 export interface FeishuLoginProfile {
+  domains: OpenPlatformDomains
   loginOrigin: string
   redirectUri: string
   portalUrl: string
@@ -20,6 +28,7 @@ export interface FeishuLoginProfile {
 
 // Verified against the official Passport Web init/polling responses on 2026-09-12.
 export const FEISHU_LOGIN_PROFILE: Readonly<FeishuLoginProfile> = {
+  domains: FEISHU_DOMAINS,
   loginOrigin: 'https://accounts.feishu.cn',
   redirectUri: 'https://open.feishu.cn/app?lang=zh-CN',
   portalUrl: 'https://open.feishu.cn/app?lang=zh-CN',
@@ -34,6 +43,16 @@ export const FEISHU_LOGIN_PROFILE: Readonly<FeishuLoginProfile> = {
   loginTimeoutMs: 10 * 60_000
 }
 
+// Passport identifiers, API version and device info reuse the Feishu values and
+// remain unverified against the Lark site. Real probes change only this profile.
+export const LARK_LOGIN_PROFILE: Readonly<FeishuLoginProfile> = {
+  ...FEISHU_LOGIN_PROFILE,
+  domains: LARK_DOMAINS,
+  loginOrigin: 'https://accounts.larksuite.com',
+  redirectUri: 'https://open.larksuite.com/app?lang=zh-CN',
+  portalUrl: 'https://open.larksuite.com/app?lang=zh-CN'
+}
+
 export type FeishuQrPoll =
   | { kind: 'waiting' | 'scanned' | 'expired' }
   | { kind: 'complete'; crossLoginUri?: string }
@@ -41,18 +60,22 @@ export type FeishuQrPoll =
 export class FeishuLoginProtocol {
   readonly profile: Readonly<FeishuLoginProfile>
 
-  constructor(profile: Partial<FeishuLoginProfile> = {}) {
-    this.profile = { ...FEISHU_LOGIN_PROFILE, ...profile }
-    const origin = trustedFeishuUrl(this.profile.loginOrigin)
-    if (!isFeishuLoginUrl(origin.href) || origin.origin !== this.profile.loginOrigin
+  constructor(
+    profile: Partial<Omit<FeishuLoginProfile, 'domains'>> = {},
+    base: Readonly<FeishuLoginProfile> = FEISHU_LOGIN_PROFILE
+  ) {
+    this.profile = { ...base, ...profile, domains: base.domains }
+    const domains = this.profile.domains
+    const origin = trustedFeishuUrl(this.profile.loginOrigin, undefined, domains)
+    if (!isFeishuLoginUrl(origin.href, domains) || origin.origin !== this.profile.loginOrigin
       || !this.profile.appId || !this.profile.apiVersion || !this.profile.deviceInfo
       || ![this.profile.pollIntervalMs, this.profile.requestTimeoutMs, this.profile.scanTimeoutMs,
         this.profile.handoffTimeoutMs, this.profile.identityTimeoutMs, this.profile.loginTimeoutMs]
         .every((value) => Number.isFinite(value) && value > 0)) {
       throw new FeishuSessionError('feishu_login_profile_invalid')
     }
-    openPlatformOrigin(this.profile.redirectUri)
-    openPlatformOrigin(this.profile.portalUrl)
+    openPlatformOrigin(this.profile.redirectUri, domains)
+    openPlatformOrigin(this.profile.portalUrl, domains)
   }
 
   async initialize(http: FeishuSessionHttp, signal: AbortSignal): Promise<{
@@ -82,7 +105,7 @@ export class FeishuLoginProtocol {
       }
       // An empty optional handoff still requires the same Session's portal identity check.
       const raw = firstString(crossLoginUri)
-      return { kind: 'complete', ...(raw ? { crossLoginUri: trustedFeishuUrl(raw).href } : {}) }
+      return { kind: 'complete', ...(raw ? { crossLoginUri: trustedFeishuUrl(raw, undefined, this.profile.domains).href } : {}) }
     }
     if (nextStep !== 'qr_login_polling') {
       if (nextStep && INTERACTIVE_STEPS.has(nextStep)) {
@@ -97,7 +120,7 @@ export class FeishuLoginProtocol {
 
   async complete(http: FeishuSessionHttp, crossLoginUri: string | undefined, signal: AbortSignal): Promise<void> {
     if (!crossLoginUri) return
-    const { response } = await http.request(trustedFeishuUrl(crossLoginUri).href,
+    const { response } = await http.request(trustedFeishuUrl(crossLoginUri, undefined, this.profile.domains).href,
       { kind: 'navigation' }, { signal })
     if (!response.ok) throw new FeishuSessionError('feishu_login_handoff_failed', {
       httpStatus: response.status

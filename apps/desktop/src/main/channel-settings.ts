@@ -20,6 +20,15 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
+import {
+  FEISHU_PROVIDER_PROFILE,
+  presentProviderError,
+  presentProviderMessage,
+  type ChannelProviderProfile,
+  type HostBoundChannelRequest,
+  type OpenPlatformProviderKind,
+  type ProviderChannelRequest
+} from './channel-provider-profile'
 import { canAdvanceFeishuLoginStage, feishuLoginFailureDetail } from '../shared/feishu-login-progress'
 import type {
   ChannelCredentialStore,
@@ -158,7 +167,7 @@ type ClaimedChannelDelivery = {
 }
 
 type TopicRosterRefreshRequest = {
-  provider: 'feishu'
+  provider: string
   tenantKey: string
   chatId: string
   requiredRosterGeneration: number
@@ -188,6 +197,8 @@ type ExecutionConsoleSource = ExecutionConsoleSnapshot & {
 
 export interface ChannelHostDependencies {
   core: Pick<CoreClient, 'request'>
+  /** Feishu when omitted; the Lark instance injects its own profile. */
+  profile?: ChannelProviderProfile
   credentialStore: ChannelCredentialStore
   developerSession?: FeishuDeveloperSessionService
   memberBotProvisioner?: FeishuMemberBotProvisioner
@@ -271,8 +282,12 @@ const unavailableMemberBotAvatarSource: MemberBotAvatarSourceResolver = {
     throw new Error('feishu_member_bot_avatar_unavailable')
   }
 }
+// Only possible for legacy Feishu rows: Lark rows are constrained to brand=lark.
+const BRAND_MOVED_FAILURE = 'feishu_brand_moved_to_lark'
+
 export class ChannelSettingsService {
   readonly #dependencies: ChannelHostDependencies | null
+  readonly #profile: ChannelProviderProfile
   readonly #developerSession: FeishuDeveloperSessionService
   readonly #memberBotProvisioner: FeishuMemberBotProvisioner
   readonly #memberBotAvatarSource: MemberBotAvatarSourceResolver
@@ -311,6 +326,7 @@ export class ChannelSettingsService {
 
   constructor(dependencies?: ChannelHostDependencies) {
     this.#dependencies = dependencies ?? null
+    this.#profile = dependencies?.profile ?? FEISHU_PROVIDER_PROFILE
     this.#developerSession = dependencies?.developerSession
       ?? new UnavailableFeishuDeveloperSessionService()
     this.#memberBotProvisioner = dependencies?.memberBotProvisioner
@@ -322,7 +338,7 @@ export class ChannelSettingsService {
     this.#hostPump = dependencies ? new AdaptiveChannelHostPump({
       run: () => this.#pumpOnce(),
       onError: (error) => {
-        console.warn(`[rovai] Feishu outbox pump failed: ${channelFailureCode(error)}`)
+        console.warn(`[rovai] ${this.#profile.logLabel} outbox pump failed: ${channelFailureCode(error)}`)
       },
       classifyCoreEvent: (event) => trackedExecutionCoreEventWake(event, (agentRunId) => {
         const state = this.#executionCardStates.get(agentRunId)
@@ -336,6 +352,10 @@ export class ChannelSettingsService {
   }
 
   async start(): Promise<void> {
+    return this.#translated(() => this.#start())
+  }
+
+  async #start(): Promise<void> {
     if (!this.#dependencies || this.#started) return
     this.#started = true
     this.#stopped = false
@@ -344,14 +364,21 @@ export class ChannelSettingsService {
       const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
       const credentialsByRef = new Map(publishedCredentials
         .filter((item): item is PublishedChannelCredential & {
-          provider: 'feishu'
           credential: FeishuAppCredential
-        } => item.provider === 'feishu')
+        } => item.provider === this.#profile.kind)
         .map((item) => [item.credentialRef, item.credential] as const))
       let snapshot = await this.#coreSnapshot()
       await this.#recoverPublicationIntents(snapshot)
       snapshot = await this.#coreSnapshot()
+      if (snapshot.account?.status === 'connected' && snapshot.account.brand !== this.#profile.kind) {
+        await this.#expireAccount(snapshot.account)
+        snapshot = await this.#coreSnapshot()
+      }
       for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
+        if (bot.brand !== this.#profile.kind) {
+          this.#publicationFailures.set(bot.agentId, BRAND_MOVED_FAILURE)
+          continue
+        }
         try {
           await this.#startPublishedBot(bot, credentialsByRef.get(bot.credentialRef) ?? null)
         } catch (error) {
@@ -392,7 +419,7 @@ export class ChannelSettingsService {
   }
 
   async get(): Promise<ChannelSettingsSnapshot> {
-    if (!this.#dependencies) return unavailableSnapshot()
+    if (!this.#dependencies) return unavailableSnapshot(this.#profile)
     const commit = this.#connectionCommit
     if (commit && !commit.busy && this.#now() >= commit.retryAfter) {
       await this.#resolveConnectionCommit()
@@ -410,6 +437,10 @@ export class ChannelSettingsService {
   }
 
   async connect(): Promise<ChannelSettingsSnapshot> {
+    return this.#translated(() => this.#connect())
+  }
+
+  async #connect(): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
     if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
     this.#sessionCheckGeneration += 1
@@ -453,7 +484,7 @@ export class ChannelSettingsService {
         previousAccount: previous,
         command: {
           expectedPreviousAccountVersion: previous?.status === 'connected' ? previous.version : null,
-          account: feishuConnectionAccount(identity), developerSession: pending
+          account: feishuConnectionAccount(this.#profile.kind, identity), developerSession: pending
         }
       }
       this.#activeQrAbort = null
@@ -491,7 +522,7 @@ export class ChannelSettingsService {
         let result: StoredCommandResult | undefined
         for (let retry = 0; retry < 2; retry += 1) {
           try {
-            result = await this.#commandWithId('channels.feishu.account.commitConnection',
+            result = await this.#commandWithId(this.#method('account.commitConnection'),
               commit.commandId, commit.command, false)
             break
           } catch { /* The transaction may already have committed. */ }
@@ -524,6 +555,10 @@ export class ChannelSettingsService {
   }
 
   async disconnect(): Promise<ChannelSettingsSnapshot> {
+    return this.#translated(() => this.#disconnect())
+  }
+
+  async #disconnect(): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
     if (this.#connectionCommit) return this.#emit()
     this.#sessionCheckGeneration += 1
@@ -533,7 +568,7 @@ export class ChannelSettingsService {
     this.#activeProvisioningAbort = null
     await this.#developerSession.disconnect()
     if (snapshot.account?.status === 'connected') {
-      await this.#command('channels.feishu.account.disconnect', {
+      await this.#command(this.#method('account.disconnect'), {
         accountId: snapshot.account.accountId,
         expectedVersion: snapshot.account.version
       })
@@ -544,15 +579,23 @@ export class ChannelSettingsService {
   }
 
   async publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
+    return this.#translated(() => this.#publishMemberBot(agentId))
+  }
+
+  async #publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
     return this.#publishNewMemberBot(agentId, 'publish')
   }
 
   async retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
+    return this.#translated(() => this.#retryMemberBot(agentId))
+  }
+
+  async #retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
     const snapshot = await this.#coreSnapshot()
     const bot = snapshot.memberBots.find((candidate) => candidate.agentId === agentId) ?? null
     const intent = latestPublicationIntent(snapshot, agentId)
-    const credentialRef = bot?.credentialRef ?? memberCredentialRef(agentId)
+    const credentialRef = bot?.credentialRef ?? memberCredentialRef(this.#profile.kind, agentId)
     const credential = await this.#dependencies!.credentialStore.read(credentialRef)
     let retryIntentVersion = intent?.version ?? null
     let retryLastCompletedStep = intent?.lastCompletedStep ?? null
@@ -589,7 +632,7 @@ export class ChannelSettingsService {
       if (
         inspection.status === 'valid'
         && accountIdForIdentity(inspection.identity) === snapshot.account.accountId
-        && userIdDigest(inspection.identity.userId) === snapshot.account.userIdDigest
+        && userIdDigest(this.#profile.kind, inspection.identity.userId) === snapshot.account.userIdDigest
         && inspection.identity.tenantId === snapshot.account.tenantId
       ) return this.#publishNewMemberBot(agentId, 'retry')
     }
@@ -651,6 +694,10 @@ export class ChannelSettingsService {
   }
 
   async cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot> {
+    return this.#translated(() => this.#cancelQrAttempt(attemptId))
+  }
+
+  async #cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot> {
     if (this.#activeQrAttempt?.attemptId === attemptId && !this.#connectionCommit) {
       this.#activeQrAbort?.abort()
       this.#finishQr()
@@ -659,6 +706,10 @@ export class ChannelSettingsService {
   }
 
   async refreshLoginQr(attemptId: string): Promise<boolean> {
+    return this.#translated(() => this.#refreshLoginQr(attemptId))
+  }
+
+  async #refreshLoginQr(attemptId: string): Promise<boolean> {
     if (this.#activeQrAttempt?.attemptId !== attemptId) return false
     if (this.#connectionCommit) {
       await this.#resolveConnectionCommit()
@@ -666,7 +717,7 @@ export class ChannelSettingsService {
     } else if (['expired', 'awaiting_refresh'].includes(this.#activeQrAttempt.stage)) {
       this.#activeQrAbort?.abort()
       this.#finishQr()
-      await this.connect()
+      await this.#connect()
     }
     return true
   }
@@ -729,7 +780,7 @@ export class ChannelSettingsService {
     if (
       inspection.status === 'invalid'
       || accountIdForIdentity(inspection.identity) !== account.accountId
-      || userIdDigest(inspection.identity.userId) !== account.userIdDigest
+      || userIdDigest(this.#profile.kind, inspection.identity.userId) !== account.userIdDigest
       || inspection.identity.tenantId !== account.tenantId
     ) {
       await this.#expireAccount(account).catch(() => undefined)
@@ -738,7 +789,7 @@ export class ChannelSettingsService {
     const { identity } = inspection
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
-    const appDescription = memberBotAppDescription('feishu', agent.teamRole)
+    const appDescription = memberBotAppDescription(this.#profile.kind, agent.teamRole)
     const avatarSource = await this.#memberBotAvatarSource.resolve(agent.avatarRef)
     if (
       existingBot
@@ -762,7 +813,7 @@ export class ChannelSettingsService {
       agentId,
       recovering: false
     })
-    await this.#command('channels.feishu.publicationIntent.create', {
+    await this.#command(this.#method('publicationIntent.create'), {
       publicationIntentId,
       accountId: account.accountId,
       agentId,
@@ -788,7 +839,7 @@ export class ChannelSettingsService {
     }
     let remoteAppId: string | null = null
     let credentialWritten = false
-    const credentialRef = memberCredentialRef(agentId)
+    const credentialRef = memberCredentialRef(this.#profile.kind, agentId)
     const abort = new AbortController()
     this.#activeProvisioningAbort = abort
     this.#activeProvisioning = {
@@ -841,8 +892,8 @@ export class ChannelSettingsService {
         appId: provisioned.appId,
         appSecret: provisioned.appSecret
       }
-      await this.#command('channels.feishu.publicationIntent.storeCredential', {
-        provider: 'feishu',
+      await this.#command(this.#method('publicationIntent.storeCredential'), {
+        provider: this.#profile.kind,
         publicationIntentId,
         expectedIntentVersion: intentVersion,
         credentialRef,
@@ -908,7 +959,7 @@ export class ChannelSettingsService {
         provisioned.ownerOpenId,
         agent.displayName
       ).catch((error) => {
-        console.warn(`[rovai] Feishu member Bot welcome failed: ${channelFailureCode(error)}`)
+        console.warn(`[rovai] ${this.#profile.logLabel} member Bot welcome failed: ${channelFailureCode(error)}`)
       })
       timing.recordTotal('ok')
       this.#finishQr()
@@ -961,7 +1012,7 @@ export class ChannelSettingsService {
     if (!remoteAppId || !this.#memberBotProvisioner.reconcile) {
       throw new Error('当前版本无法核对已创建的飞书应用；为避免重复创建应用，不会自动重试。')
     }
-    const credentialRef = intent.credentialRef ?? memberCredentialRef(agent.agentId)
+    const credentialRef = intent.credentialRef ?? memberCredentialRef(this.#profile.kind, agent.agentId)
     const timing = new ProvisioningTimingRecorder({
       publicationIntentId: intent.publicationIntentId,
       agentId: agent.agentId,
@@ -1039,8 +1090,8 @@ export class ChannelSettingsService {
         appId: remoteAppId,
         appSecret: provisioned.appSecret
       }
-      await this.#command('channels.feishu.publicationIntent.storeCredential', {
-        provider: 'feishu',
+      await this.#command(this.#method('publicationIntent.storeCredential'), {
+        provider: this.#profile.kind,
         publicationIntentId: intent.publicationIntentId,
         expectedIntentVersion: intentVersion,
         credentialRef,
@@ -1107,7 +1158,7 @@ export class ChannelSettingsService {
           provisioned.ownerOpenId,
           agent.displayName
         ).catch((error) => {
-          console.warn(`[rovai] Feishu member Bot welcome failed: ${channelFailureCode(error)}`)
+          console.warn(`[rovai] ${this.#profile.logLabel} member Bot welcome failed: ${channelFailureCode(error)}`)
         })
       }
       timing.recordTotal('ok')
@@ -1139,7 +1190,7 @@ export class ChannelSettingsService {
   }
 
   async #upsertAccount(identity: FeishuDeveloperIdentity): Promise<void> {
-    await this.#command('channels.feishu.account.upsert', feishuConnectionAccount(identity))
+    await this.#command(this.#method('account.upsert'), feishuConnectionAccount(this.#profile.kind, identity))
   }
 
   async #inspectDeveloperSession(): Promise<FeishuDeveloperSessionInspection> {
@@ -1175,7 +1226,7 @@ export class ChannelSettingsService {
   async #expireAccount(account: NonNullable<CoreChannelSnapshot['account']>): Promise<void> {
     this.#sessionStatus = 'invalid'
     if (account.status !== 'connected') return
-    await this.#command('channels.feishu.account.expire', {
+    await this.#command(this.#method('account.expire'), {
       accountId: account.accountId,
       expectedVersion: account.version
     })
@@ -1192,7 +1243,7 @@ export class ChannelSettingsService {
       failureCode: string | null
     }
   ): Promise<void> {
-    await this.#command('channels.feishu.publicationIntent.advance', {
+    await this.#command(this.#method('publicationIntent.advance'), {
       publicationIntentId,
       expectedVersion,
       ...input
@@ -1328,7 +1379,7 @@ export class ChannelSettingsService {
     ownerOpenId: string,
     timing?: ProvisioningTimingRecorder
   ): Promise<void> {
-    await this.#command('channels.feishu.memberBot.upsert', {
+    await this.#command(this.#method('memberBot.upsert'), {
       accountId,
       agentId: agent.agentId,
       appId: credential.appId,
@@ -1339,7 +1390,7 @@ export class ChannelSettingsService {
     })
     const managed = await this.#connectBot(agent.agentId, credentialRef, credential, timing)
     try {
-      await this.#command('channels.feishu.memberBot.upsert', {
+      await this.#command(this.#method('memberBot.upsert'), {
         accountId,
         agentId: agent.agentId,
         appId: credential.appId,
@@ -1417,6 +1468,7 @@ export class ChannelSettingsService {
     const channel = this.#createChannel({
       appId: credential.appId,
       appSecret: credential.appSecret,
+      domain: this.#profile.sdkDomain,
       transport: 'websocket',
       source: 'rovai-ai',
       includeRawEvent: true,
@@ -1541,10 +1593,10 @@ export class ChannelSettingsService {
       || raw.sender?.sender_id?.open_id
       || message.senderId
     const owner = await this.#commandWithId(
-      'channels.feishu.owner.verify',
+      this.#method('owner.verify'),
       stableCommandId('owner', managed.appId, tenantKey, message.messageId),
       {
-        provider: 'feishu',
+        provider: this.#profile.kind,
         appId: managed.appId,
         tenantKey,
         senderOpenId,
@@ -1657,10 +1709,10 @@ export class ChannelSettingsService {
         return
       }
       const started = await this.#commandWithId(
-        'channels.feishu.dm.startNew',
+        this.#method('dm.startNew'),
         stableCommandId('dm-new', managed.appId, tenantKey, message.messageId),
         {
-          provider: 'feishu',
+          provider: this.#profile.kind,
           appId: managed.appId,
           tenantKey,
           chatId: message.chatId,
@@ -1686,10 +1738,10 @@ export class ChannelSettingsService {
     const quote = quoteMessageId
       ? await this.#readExternalQuote(managed.channel, quoteMessageId)
       : null
-    const observation = await this.#commandWithId('channels.inbound.observe', stableCommandId(
+    const observation = await this.#commandWithId(this.#hostMethod('inbound.observe'), stableCommandId(
       'observe', managed.appId, tenantKey, message.messageId
     ), {
-      provider: 'feishu',
+      provider: this.#profile.kind,
       appId: managed.appId,
       externalMessageId: message.messageId,
       tenantKey,
@@ -1795,7 +1847,7 @@ export class ChannelSettingsService {
         return { toast: { type: 'error', content: '群内 Bot 状态读取失败，请重试' } }
       }
       result = await this.#commandWithId(
-        'channels.feishu.pendingBinding.resolve',
+        this.#method('pendingBinding.resolve'),
         randomUUID(),
         {
           pendingBindingId: projectAction.pendingBindingId,
@@ -1862,7 +1914,7 @@ export class ChannelSettingsService {
             this.#hostPump?.wake()
             if (!raw.event_id) return executionConsoleCardActionResponse('stale')
             const result = await this.#commandWithId(
-              'channels.executionConsole.agentRun.cancel',
+              this.#hostMethod('executionConsole.agentRun.cancel'),
               stableCommandId('execution-stop', managed.appId, raw.event_id),
               {
                 callbackEventId: raw.event_id,
@@ -1901,7 +1953,7 @@ export class ChannelSettingsService {
             }
           }
           const result = await this.#commandWithId(
-            'channels.executionConsole.recentOutput.authorize',
+            this.#hostMethod('executionConsole.recentOutput.authorize'),
             randomUUID(),
             {
               agentRunId: action.agentRunId,
@@ -1965,13 +2017,13 @@ export class ChannelSettingsService {
     conversationKind: 'p2p' | 'group' | 'topic',
     aggregateId: string
   ): Promise<void> {
-    let finalized = await this.#commandWithId('channels.inbound.finalize', randomUUID(), {
+    let finalized = await this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
       aggregateId
     }, false)
     if (['channel.roster_sync_required', 'channel.bot_not_in_roster'].includes(finalized.code)
       && conversationKind !== 'p2p'
       && await this.#reconcileChatRoster(chatId, tenantKey, true)) {
-      finalized = await this.#commandWithId('channels.inbound.finalize', randomUUID(), {
+      finalized = await this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
         aggregateId
       }, false)
     }
@@ -1987,12 +2039,12 @@ export class ChannelSettingsService {
           agentId,
           expectedMembershipGeneration: membershipGeneration,
           capabilityOverrides: {},
-          source: { namespace: 'feishu', bindingId, reconciliationGeneration }
+          source: { namespace: this.#profile.kind, bindingId, reconciliationGeneration }
         })
         membershipGeneration = numberPayload(added, 'membershipGeneration')
         reconciliationGeneration += 1
       }
-      finalized = await this.#commandWithId('channels.inbound.finalize', randomUUID(), {
+      finalized = await this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
         aggregateId
       }, false)
     }
@@ -2085,8 +2137,8 @@ export class ChannelSettingsService {
         return { appId: managed!.appId, present: response.data.is_in_chat }
       })).catch(() => null)
       if (!observations) return false
-      const result = await this.#commandWithId('channels.roster.reconcile', randomUUID(), {
-        provider: 'feishu',
+      const result = await this.#commandWithId(this.#hostMethod('roster.reconcile'), randomUUID(), {
+        provider: this.#profile.kind,
         tenantKey,
         chatId,
         presentAppIds: observations.filter((item) => item.present).map((item) => item.appId)
@@ -2188,7 +2240,7 @@ export class ChannelSettingsService {
       deliveries: ClaimedChannelDelivery[]
       rosterRefreshes: TopicRosterRefreshRequest[]
       hasOutstandingWork: boolean
-    }>('channels.host.tick', {
+    }>(this.#hostMethod('host.tick'), {
       workerId: HOST_WORKER_ID,
       limit: 20
     })
@@ -2196,7 +2248,7 @@ export class ChannelSettingsService {
       ? tick.rosterRefreshes
       : []
     const rosterResults = await Promise.allSettled(rosterRefreshes.map((refresh) => {
-      if (refresh.provider !== 'feishu'
+      if (refresh.provider !== this.#profile.kind
         || !refresh.tenantKey
         || !refresh.chatId
         || !Number.isSafeInteger(refresh.requiredRosterGeneration)) {
@@ -2417,7 +2469,7 @@ export class ChannelSettingsService {
     const retryable = error instanceof LarkChannelError
       ? ['rate_limited', 'send_timeout', 'not_connected', 'unknown', 'upload_failed'].includes(error.code)
       : ['target_bot_not_connected', 'send_timeout', 'upload_failed'].includes(failureCode ?? '')
-    const result = await this.#commandWithId('channels.deliveries.settle', randomUUID(), {
+    const result = await this.#commandWithId(this.#hostMethod('deliveries.settle'), randomUUID(), {
       deliveryId: delivery.deliveryId,
       workerId: HOST_WORKER_ID,
       outcome: error ? 'failed' : 'sent',
@@ -2435,7 +2487,7 @@ export class ChannelSettingsService {
 
   async #coreSnapshot(): Promise<CoreChannelSnapshot> {
     const snapshot = await this.#dependencies!.core.request<CoreChannelSnapshot>(
-      'channels.feishu.snapshot'
+      this.#method('snapshot')
     )
     if (snapshot.schemaVersion !== 2) throw new Error('Unsupported Core channel snapshot')
     return snapshot
@@ -2453,7 +2505,7 @@ export class ChannelSettingsService {
         publicationStatus: bot.status,
         botDisplayName: bot.botDisplayName,
         appId: bot.appId,
-        managementUrl: memberBotManagementUrl(bot.brand, bot.appId),
+        managementUrl: memberBotManagementUrl(this.#profile, bot.appId),
         failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode
       })
     }
@@ -2462,16 +2514,14 @@ export class ChannelSettingsService {
         bots.has(intent.agentId)
         || !['failed_recoverable', 'failed_unknown_remote_state'].includes(intent.state)
       ) continue
-      const brand = snapshot.account?.accountId === intent.accountId
-        ? snapshot.account.brand
-        : null
+      const ownAccount = snapshot.account?.accountId === intent.accountId
       bots.set(intent.agentId, {
         agentId: intent.agentId,
         publicationStatus: 'failed',
         botDisplayName: intent.requestedAppName,
         appId: intent.remoteAppId,
-        managementUrl: brand && intent.remoteAppId
-          ? memberBotManagementUrl(brand, intent.remoteAppId)
+        managementUrl: ownAccount && intent.remoteAppId
+          ? memberBotManagementUrl(this.#profile, intent.remoteAppId)
           : null,
         failureCode: this.#publicationFailures.get(intent.agentId) ?? intent.failureCode
       })
@@ -2503,11 +2553,11 @@ export class ChannelSettingsService {
         failureCode
       })
     }
-    return {
+    return this.#present({
       schemaVersion: 4,
       channels: [{
-        kind: 'feishu',
-        displayName: '飞书',
+        kind: this.#profile.kind,
+        displayName: this.#profile.displayName,
         hostStatus: 'ready',
         connection: {
           sessionStatus: connected ? this.#sessionStatus : account?.status === 'session_expired' ? 'invalid' : 'unknown',
@@ -2536,7 +2586,39 @@ export class ChannelSettingsService {
       activeProvisioning: this.#activeProvisioning
         ? structuredClone(this.#activeProvisioning)
         : null
+    })
+  }
+
+  // Shared failure codes and copy leave this instance under its own provider name.
+  #present(snapshot: ChannelSettingsSnapshot): ChannelSettingsSnapshot {
+    const text = (value: string): string => presentProviderMessage(this.#profile, value)
+    const code = (value: string | null): string | null => value === null ? null : text(value)
+    const provisioning = snapshot.activeProvisioning
+    return {
+      ...snapshot,
+      channels: snapshot.channels.map(provider => ({
+        ...provider,
+        memberBots: provider.memberBots.map(bot => ({ ...bot, failureCode: code(bot.failureCode) }))
+      })),
+      activeQrAttempt: snapshot.activeQrAttempt
+        ? { ...snapshot.activeQrAttempt, detail: text(snapshot.activeQrAttempt.detail) }
+        : null,
+      activeProvisioning: provisioning
+        ? { ...provisioning, detail: text(provisioning.detail), failureCode: code(provisioning.failureCode) }
+        : null
     }
+  }
+
+  async #translated<T>(operation: () => Promise<T>): Promise<T> {
+    try { return await operation() } catch (error) { throw presentProviderError(this.#profile, error) }
+  }
+
+  #method<Name extends ProviderChannelRequest>(name: Name) {
+    return `${this.#profile.methodPrefix}${name}` as const
+  }
+
+  #hostMethod<Name extends HostBoundChannelRequest>(name: Name) {
+    return `${this.#profile.hostMethodPrefix}${name}` as const
   }
 
   async #command(method: Parameters<CoreClient['request']>[0], command: object): Promise<StoredCommandResult> {
@@ -2615,12 +2697,12 @@ export class ChannelSettingsService {
   }
 }
 
-function unavailableSnapshot(): ChannelSettingsSnapshot {
+function unavailableSnapshot(profile: ChannelProviderProfile): ChannelSettingsSnapshot {
   return {
     schemaVersion: 4,
     channels: [{
-      kind: 'feishu',
-      displayName: '飞书',
+      kind: profile.kind,
+      displayName: profile.displayName,
       hostStatus: 'unavailable',
       connection: { status: 'not_connected', account: null },
       memberBots: [],
@@ -2634,16 +2716,13 @@ function unavailableSnapshot(): ChannelSettingsSnapshot {
   }
 }
 
-function memberBotManagementUrl(brand: 'feishu' | 'lark', appId: string): string | null {
+function memberBotManagementUrl(profile: ChannelProviderProfile, appId: string): string | null {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(appId)) return null
-  const origin = brand === 'lark'
-    ? 'https://open.larksuite.com'
-    : 'https://open.feishu.cn'
-  return `${origin}/app/${encodeURIComponent(appId)}/baseinfo`
+  return `${profile.login.domains.defaultOrigin}/app/${encodeURIComponent(appId)}/baseinfo`
 }
 
-function memberCredentialRef(agentId: string): string {
-  return `feishu-member-${createHash('sha256').update(agentId).digest('hex').slice(0, 32)}`
+function memberCredentialRef(kind: ChannelProviderProfile['kind'], agentId: string): string {
+  return `${kind}-member-${createHash('sha256').update(agentId).digest('hex').slice(0, 32)}`
 }
 
 function digest(value: string): `sha256:${string}` {
@@ -2674,15 +2753,16 @@ function logFeishuBotDiagnostic(
   console.info(`[feishu.bot.${stage}] ${JSON.stringify(fields)}`)
 }
 
-function userIdDigest(userId: string): `sha256:${string}` {
-  return digest(`feishu-user\0${userId}`)
+// Namespaced by provider, matching Core's `<provider>-user` digest check.
+function userIdDigest(provider: OpenPlatformProviderKind, userId: string): `sha256:${string}` {
+  return digest(`${provider}-user\0${userId}`)
 }
 
 function accountIdForIdentity(identity: FeishuDeveloperIdentity): `sha256:${string}` {
   return digest(`${identity.brand}\0${identity.tenantId}\0${identity.userId}`)
 }
 
-function feishuConnectionAccount(identity: FeishuDeveloperIdentity): {
+function feishuConnectionAccount(provider: OpenPlatformProviderKind, identity: FeishuDeveloperIdentity): {
   accountId: `sha256:${string}`
   userIdDigest: `sha256:${string}`
   tenantId: string
@@ -2693,7 +2773,7 @@ function feishuConnectionAccount(identity: FeishuDeveloperIdentity): {
 } {
   return {
     accountId: accountIdForIdentity(identity),
-    userIdDigest: userIdDigest(identity.userId),
+    userIdDigest: userIdDigest(provider, identity.userId),
     tenantId: identity.tenantId,
     userName: identity.userName,
     email: identity.email ?? null,

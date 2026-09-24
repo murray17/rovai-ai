@@ -25,7 +25,6 @@ import { isCampId } from '@contracts'
 import type {
   AppearancePreferences,
   AppearanceSnapshot,
-  ChannelKind,
   CoreMethod,
   ExecutionWebSettingsSnapshot,
   ExecutionConsolePlacement,
@@ -131,6 +130,12 @@ import { requestRendererQuitPreparation } from './renderer-quit-preparation'
 import { createWindowCloseHandler } from './window-close-guard'
 import { installCloseTabShortcut } from '../shared/close-tab-shortcut'
 import { ChannelSettingsService } from './channel-settings'
+import { optionalChannelKind } from './channel-kind-input'
+import {
+  FEISHU_PROVIDER_PROFILE,
+  LARK_PROVIDER_PROFILE,
+  type ChannelProviderProfile
+} from './channel-provider-profile'
 import { ExecutionViewService } from './execution-view-service'
 import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { ChannelSettingsCoordinator, hasPublishedChannelBot } from './channel-settings-coordinator'
@@ -169,12 +174,6 @@ import {
   parseRetentionState,
   parseReopenRequest
 } from './file-preview/file-preview-ipc-input'
-
-function optionalChannelKind(value: unknown): ChannelKind | undefined {
-  if (value === undefined) return undefined
-  if (value === 'feishu' || value === 'dingtalk') return value
-  throw new Error('Invalid channel kind')
-}
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -439,19 +438,34 @@ const executionView = new ExecutionViewService({
   core,
   settingsFilePath: join(app.getPath('userData'), 'execution-web.json')
 })
-const feishuDeveloperSession = new ElectronFeishuDeveloperSessionService(
-  channelDeveloperSessionStore,
-  () => mainWindow
+// Feishu and Lark are two instances of one Host; each owns its session, provisioner and profile.
+function openPlatformChannelSettings(
+  profile: ChannelProviderProfile,
+  executionPreview?: ReturnType<typeof createFeishuExecutionPreviewHost>
+): ChannelSettingsService {
+  const developerSession = new ElectronFeishuDeveloperSessionService(
+    channelDeveloperSessionStore,
+    () => mainWindow,
+    { loginProfile: profile.login }
+  )
+  return new ChannelSettingsService({
+    core,
+    profile,
+    credentialStore: channelCredentialStore.forProvider(profile.kind),
+    developerSession,
+    memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(developerSession, {
+      sdkDomain: profile.sdkDomain
+    }),
+    memberBotAvatarSource,
+    executionPreview,
+    executionView
+  })
+}
+const feishuChannelSettings = openPlatformChannelSettings(
+  FEISHU_PROVIDER_PROFILE,
+  createFeishuExecutionPreviewHost(process.argv, coreDataPath)
 )
-const feishuChannelSettings = new ChannelSettingsService({
-  core,
-  credentialStore: channelCredentialStore,
-  developerSession: feishuDeveloperSession,
-  memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
-  memberBotAvatarSource,
-  executionPreview: createFeishuExecutionPreviewHost(process.argv, coreDataPath),
-  executionView
-})
+const larkChannelSettings = openPlatformChannelSettings(LARK_PROVIDER_PROFILE)
 const dingtalkDeveloperSession = new ElectronDingTalkDeveloperSessionService({
   store: channelDeveloperSessionStore,
   getParentWindow: () => mainWindow
@@ -473,6 +487,7 @@ const dingtalkChannelSettings = new DingTalkChannelSettingsService({
 })
 const channelSettings = new ChannelSettingsCoordinator({
   feishu: feishuChannelSettings,
+  lark: larkChannelSettings,
   dingtalk: dingtalkChannelSettings
 })
 core.setChannelHandler(createHostChannelHandler(channelSettings))

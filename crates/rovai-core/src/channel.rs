@@ -37,9 +37,57 @@ use crate::{
     },
 };
 
-const FEISHU_PROVIDER: &str = "feishu";
+/// Identifiers are closed Core-owned constants, never request payload values.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ChannelProviderSpec {
+    pub(crate) provider: &'static str,
+    pub(crate) host_component: &'static str,
+    pub(crate) account: &'static str,
+    pub(crate) owner_identity: &'static str,
+    pub(crate) owner_app_identity: &'static str,
+    pub(crate) member_bot: &'static str,
+    pub(crate) publication_intent: &'static str,
+}
+
+pub(crate) const FEISHU_SPEC: ChannelProviderSpec = ChannelProviderSpec {
+    provider: "feishu",
+    host_component: "feishu-channel-host",
+    account: "feishu_account",
+    owner_identity: "feishu_owner_identity",
+    owner_app_identity: "feishu_owner_app_identity",
+    member_bot: "feishu_member_bot",
+    publication_intent: "feishu_member_bot_publication_intent",
+};
+
+pub(crate) const LARK_SPEC: ChannelProviderSpec = ChannelProviderSpec {
+    provider: "lark",
+    host_component: "lark-channel-host",
+    account: "lark_account",
+    owner_identity: "lark_owner_identity",
+    owner_app_identity: "lark_owner_app_identity",
+    member_bot: "lark_member_bot",
+    publication_intent: "lark_member_bot_publication_intent",
+};
+
+impl ChannelProviderSpec {
+    pub(crate) fn for_provider(provider: &str) -> Option<&'static Self> {
+        match provider {
+            "feishu" => Some(&FEISHU_SPEC),
+            "lark" => Some(&LARK_SPEC),
+            _ => None,
+        }
+    }
+
+    fn code(&self, suffix: &str) -> String {
+        format!("{}_{}", self.provider, suffix)
+    }
+}
+
+const LARK_PROVIDER: &str = "lark";
+const FEISHU_PROVIDER: &str = FEISHU_SPEC.provider;
 const DINGTALK_PROVIDER: &str = "dingtalk";
-const FEISHU_CHANNEL_HOST_COMPONENT: &str = "feishu-channel-host";
+#[cfg(all(test, feature = "extended-tests"))]
+const FEISHU_CHANNEL_HOST_COMPONENT: &str = FEISHU_SPEC.host_component;
 const DINGTALK_CHANNEL_HOST_COMPONENT: &str = "dingtalk-channel-host";
 const CHANNEL_MEMBERSHIP_SYNC_COMPONENT: &str = "channel-membership-sync";
 const AGGREGATION_WINDOW_SECONDS: i64 = 3;
@@ -54,7 +102,7 @@ const FEISHU_PROJECT_SELECTION_CARD_REVISION: i64 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpsertFeishuAccountCommand {
+pub struct UpsertChannelAccountCommand<const LARK: bool> {
     pub account_id: String,
     pub user_id_digest: String,
     pub tenant_id: String,
@@ -64,21 +112,28 @@ pub struct UpsertFeishuAccountCommand {
     pub brand: String,
 }
 
-impl sealed::Sealed for UpsertFeishuAccountCommand {}
-impl DomainCommand for UpsertFeishuAccountCommand {
-    const TYPE: &'static str = "feishu_account.upsert";
+pub type UpsertFeishuAccountCommand = UpsertChannelAccountCommand<false>;
+pub type UpsertLarkAccountCommand = UpsertChannelAccountCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for UpsertChannelAccountCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for UpsertChannelAccountCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.upsert"
+    } else {
+        "feishu_account.upsert"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DisconnectFeishuAccountCommand {
+pub struct DisconnectChannelAccountCommand<const LARK: bool> {
     pub account_id: String,
     pub expected_version: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExpireFeishuAccountCommand {
+pub struct ExpireChannelAccountCommand<const LARK: bool> {
     pub account_id: String,
     pub expected_version: i64,
 }
@@ -150,15 +205,22 @@ pub struct ChannelDeveloperSessionInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CommitFeishuAccountConnectionCommand {
+pub struct CommitChannelAccountConnectionCommand<const LARK: bool> {
     pub expected_previous_account_version: Option<i64>,
     pub account: FeishuConnectionAccountInput,
     pub developer_session: ChannelDeveloperSessionInput,
 }
 
-impl sealed::Sealed for CommitFeishuAccountConnectionCommand {}
-impl DomainCommand for CommitFeishuAccountConnectionCommand {
-    const TYPE: &'static str = "feishu_account.commit_connection";
+pub type CommitFeishuAccountConnectionCommand = CommitChannelAccountConnectionCommand<false>;
+pub type CommitLarkAccountConnectionCommand = CommitChannelAccountConnectionCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for CommitChannelAccountConnectionCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for CommitChannelAccountConnectionCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.commit_connection"
+    } else {
+        "feishu_account.commit_connection"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,14 +308,21 @@ impl DomainCommand for ExpireDingTalkAccountCommand {
     const TYPE: &'static str = "dingtalk_account.expire";
 }
 
-impl sealed::Sealed for ExpireFeishuAccountCommand {}
-impl DomainCommand for ExpireFeishuAccountCommand {
-    const TYPE: &'static str = "feishu_account.expire";
+pub type ExpireFeishuAccountCommand = ExpireChannelAccountCommand<false>;
+pub type ExpireLarkAccountCommand = ExpireChannelAccountCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for ExpireChannelAccountCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for ExpireChannelAccountCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.expire"
+    } else {
+        "feishu_account.expire"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateMemberBotPublicationIntentCommand {
+pub struct CreateChannelMemberBotPublicationIntentCommand<const LARK: bool> {
     pub publication_intent_id: String,
     pub account_id: String,
     pub agent_id: String,
@@ -263,14 +332,23 @@ pub struct CreateMemberBotPublicationIntentCommand {
     pub provisioning_mode: String,
 }
 
-impl sealed::Sealed for CreateMemberBotPublicationIntentCommand {}
-impl DomainCommand for CreateMemberBotPublicationIntentCommand {
-    const TYPE: &'static str = "feishu_member_bot_publication_intent.create";
+pub type CreateMemberBotPublicationIntentCommand =
+    CreateChannelMemberBotPublicationIntentCommand<false>;
+pub type CreateLarkMemberBotPublicationIntentCommand =
+    CreateChannelMemberBotPublicationIntentCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for CreateChannelMemberBotPublicationIntentCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for CreateChannelMemberBotPublicationIntentCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_member_bot_publication_intent.create"
+    } else {
+        "feishu_member_bot_publication_intent.create"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AdvanceMemberBotPublicationIntentCommand {
+pub struct AdvanceChannelMemberBotPublicationIntentCommand<const LARK: bool> {
     pub publication_intent_id: String,
     pub expected_version: i64,
     pub state: String,
@@ -319,19 +397,35 @@ impl DomainCommand for AdvanceDingTalkPublicationIntentCommand {
     const TYPE: &'static str = "dingtalk_member_bot_publication_intent.advance";
 }
 
-impl sealed::Sealed for AdvanceMemberBotPublicationIntentCommand {}
-impl DomainCommand for AdvanceMemberBotPublicationIntentCommand {
-    const TYPE: &'static str = "feishu_member_bot_publication_intent.advance";
+pub type AdvanceMemberBotPublicationIntentCommand =
+    AdvanceChannelMemberBotPublicationIntentCommand<false>;
+pub type AdvanceLarkMemberBotPublicationIntentCommand =
+    AdvanceChannelMemberBotPublicationIntentCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for AdvanceChannelMemberBotPublicationIntentCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for AdvanceChannelMemberBotPublicationIntentCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_member_bot_publication_intent.advance"
+    } else {
+        "feishu_member_bot_publication_intent.advance"
+    };
 }
 
-impl sealed::Sealed for DisconnectFeishuAccountCommand {}
-impl DomainCommand for DisconnectFeishuAccountCommand {
-    const TYPE: &'static str = "feishu_account.disconnect";
+pub type DisconnectFeishuAccountCommand = DisconnectChannelAccountCommand<false>;
+pub type DisconnectLarkAccountCommand = DisconnectChannelAccountCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for DisconnectChannelAccountCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for DisconnectChannelAccountCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.disconnect"
+    } else {
+        "feishu_account.disconnect"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpsertFeishuMemberBotCommand {
+pub struct UpsertChannelMemberBotCommand<const LARK: bool> {
     pub account_id: String,
     pub agent_id: String,
     pub app_id: String,
@@ -359,14 +453,21 @@ impl DomainCommand for UpsertDingTalkMemberBotCommand {
     const TYPE: &'static str = "dingtalk_member_bot.upsert";
 }
 
-impl sealed::Sealed for UpsertFeishuMemberBotCommand {}
-impl DomainCommand for UpsertFeishuMemberBotCommand {
-    const TYPE: &'static str = "feishu_member_bot.upsert";
+pub type UpsertFeishuMemberBotCommand = UpsertChannelMemberBotCommand<false>;
+pub type UpsertLarkMemberBotCommand = UpsertChannelMemberBotCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for UpsertChannelMemberBotCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for UpsertChannelMemberBotCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_member_bot.upsert"
+    } else {
+        "feishu_member_bot.upsert"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VerifyFeishuOwnerCommand {
+pub struct VerifyChannelOwnerCommand<const LARK: bool> {
     pub provider: String,
     pub app_id: String,
     pub tenant_key: String,
@@ -376,9 +477,16 @@ pub struct VerifyFeishuOwnerCommand {
     pub sender_display_name: String,
 }
 
-impl sealed::Sealed for VerifyFeishuOwnerCommand {}
-impl DomainCommand for VerifyFeishuOwnerCommand {
-    const TYPE: &'static str = "feishu_owner.verify";
+pub type VerifyFeishuOwnerCommand = VerifyChannelOwnerCommand<false>;
+pub type VerifyLarkOwnerCommand = VerifyChannelOwnerCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for VerifyChannelOwnerCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for VerifyChannelOwnerCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_owner.verify"
+    } else {
+        "feishu_owner.verify"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1023,12 +1131,29 @@ pub(crate) fn backfill_sealed_execution_console_snapshots(
     Ok(())
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ChannelService {
     gateway: DomainCommandGateway,
+    spec: &'static ChannelProviderSpec,
+}
+
+impl Default for ChannelService {
+    fn default() -> Self {
+        Self {
+            gateway: DomainCommandGateway::default(),
+            spec: &FEISHU_SPEC,
+        }
+    }
 }
 
 impl ChannelService {
+    pub(crate) fn for_spec(spec: &'static ChannelProviderSpec) -> Self {
+        Self {
+            gateway: DomainCommandGateway::default(),
+            spec,
+        }
+    }
+
     pub fn dingtalk_card_action_context(
         &self,
         database: &mut Database,
@@ -1241,7 +1366,10 @@ impl ChannelService {
         };
         transaction.commit()?;
         if state == "terminal_sealed"
-            && matches!(provider.as_str(), FEISHU_PROVIDER | DINGTALK_PROVIDER)
+            && matches!(
+                provider.as_str(),
+                FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
+            )
         {
             let blob_store = ManagedBlobStore::new(
                 database
@@ -1289,6 +1417,7 @@ impl ChannelService {
         database: &mut Database,
         scope: &ChannelExecutionWebScope,
     ) -> Result<Option<ChannelExecutionWebSnapshotView>> {
+        let spec = self.spec;
         for (value, field) in [
             (&scope.channel_conversation_id, "channelConversationId"),
             (&scope.target_app_id, "targetAppId"),
@@ -1324,7 +1453,8 @@ impl ChannelService {
         let transaction = database.connection_mut().transaction()?;
         let identity = transaction
             .query_row(
-                r#"
+                &format!(
+                    r#"
                 SELECT camp.title, profile.display_name
                 FROM agent_run AS run
                 LEFT JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
@@ -1342,10 +1472,12 @@ impl ChannelService {
                   AND conversation.agent_id = ?4
                   AND console.target_app_id = ?5
                   AND console.channel_conversation_id = ?6
-                  AND channel.provider IN ('feishu', 'dingtalk')
+                  AND channel.provider IN ('{provider}', 'lark', 'dingtalk')
                   AND member.status = 'active'
                   AND member.leave_requested_at IS NULL
                 "#,
+                    provider = spec.provider
+                ),
                 params![
                     scope.focus_run_id,
                     scope.max_run_created_at,
@@ -1363,7 +1495,7 @@ impl ChannelService {
         };
 
         let facts = {
-            let mut statement = transaction.prepare(
+            let mut statement = transaction.prepare(&format!(
                 r#"
                 SELECT run.id, run.camp_turn_id, run.purpose, run.invocation_kind,
                        run.status, run.wait_reason, run.terminal_reason_code,
@@ -1380,7 +1512,8 @@ impl ChannelService {
                        ),
                        COALESCE(trigger_message.created_at, run.created_at),
                        CASE trigger_principal.provider
-                           WHEN 'feishu' THEN '飞书'
+                           WHEN '{provider}' THEN '飞书'
+                           WHEN 'lark' THEN 'Lark'
                            WHEN 'dingtalk' THEN '钉钉'
                            ELSE 'Rovai'
                        END,
@@ -1407,7 +1540,8 @@ impl ChannelService {
                   AND (run.created_at < ?3 OR run.id = ?4)
                 ORDER BY run.created_at, run.id
                 "#,
-            )?;
+                provider = spec.provider
+            ))?;
             statement
                 .query_map(
                     params![
@@ -1542,41 +1676,49 @@ impl ChannelService {
         requested_agent_ids: &[String],
         parent_command_id: &str,
     ) -> Result<()> {
+        let spec = self.spec;
         let topic_binding = database
             .connection()
             .query_row(
-                r#"
-                SELECT binding.id, conversation.tenant_key, conversation.chat_id
+                &format!(
+                    r#"
+                SELECT binding.id, conversation.tenant_key, conversation.chat_id, conversation.provider
                 FROM channel_conversation_binding AS binding
                 JOIN channel_conversation AS conversation
                   ON conversation.id = binding.channel_conversation_id
                 WHERE binding.camp_id = ?1 AND binding.status = 'active'
-                  AND conversation.provider = 'feishu'
+                  AND conversation.provider IN ('{provider}', 'lark')
                   AND conversation.conversation_kind = 'topic'
                 "#,
+                    provider = spec.provider
+                ),
                 [camp_id],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((_binding_id, tenant_key, chat_id)) = topic_binding else {
+        let Some((_binding_id, tenant_key, chat_id, provider)) = topic_binding else {
             return Ok(());
         };
+        let spec =
+            ChannelProviderSpec::for_provider(&provider).context("unsupported topic provider")?;
         reconcile_bound_group_memberships(
             database,
-            FEISHU_PROVIDER,
+            spec.provider,
             &tenant_key,
             &chat_id,
             parent_command_id,
         )?;
         for agent_id in requested_agent_ids.iter().cloned().collect::<BTreeSet<_>>() {
             let (active, roster_present): (bool, bool) = database.connection().query_row(
-                r#"
+                &format!(
+                    r#"
                 SELECT
                     EXISTS(
                         SELECT 1 FROM camp_member
@@ -1586,15 +1728,18 @@ impl ChannelService {
                     EXISTS(
                         SELECT 1
                         FROM external_group_bot_roster AS roster
-                        JOIN feishu_member_bot AS bot
+                        JOIN {member_bot} AS bot
                           ON bot.app_id = roster.app_id
                          AND bot.agent_id = roster.agent_id
-                        WHERE roster.provider = 'feishu'
+                        WHERE roster.provider = '{provider}'
                           AND roster.tenant_key = ?3 AND roster.chat_id = ?4
                           AND roster.agent_id = ?2 AND roster.status = 'present'
                           AND bot.status = 'published'
                     )
                 "#,
+                    member_bot = spec.member_bot,
+                    provider = spec.provider
+                ),
                 params![camp_id, agent_id, tenant_key, chat_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
@@ -1613,15 +1758,17 @@ impl ChannelService {
     }
 
     pub fn snapshot(&self, database: &mut Database) -> Result<FeishuChannelSnapshot> {
+        let spec = self.spec;
         refresh_project_catalog(database)?;
         let connection = database.connection();
         let account = connection
             .query_row(
-                r#"
+                &format!(
+                    r#"
                 SELECT id, user_id_digest, tenant_id, user_name, email,
                        tenant_name, brand, status, version,
                        connected_at, last_verified_at
-                FROM feishu_account
+                FROM {account}
                 WHERE user_id_digest IS NOT NULL
                   AND tenant_id IS NOT NULL
                   AND user_name IS NOT NULL
@@ -1632,6 +1779,8 @@ impl ChannelService {
                          updated_at DESC, id
                 LIMIT 1
                 "#,
+                    account = spec.account
+                ),
                 [],
                 |row| {
                     Ok(FeishuAccountView {
@@ -1652,19 +1801,25 @@ impl ChannelService {
             .optional()?;
         let member_bots = query_rows(
             connection,
-            r#"
-            SELECT bot.agent_id, bot.account_id, COALESCE(account.brand, 'feishu'),
+            &format!(
+                r#"
+            SELECT bot.agent_id, bot.account_id, COALESCE(account.brand, '{provider}'),
                    bot.app_id, bot.bot_display_name, bot.credential_ref,
                    bot.status, bot.failure_code, bot.version,
                    EXISTS(
-                       SELECT 1 FROM feishu_owner_app_identity AS identity
+                       SELECT 1 FROM {owner_app_identity} AS identity
                        WHERE identity.account_id = bot.account_id
                          AND identity.app_id = bot.app_id
                    )
-            FROM feishu_member_bot AS bot
-            JOIN feishu_account AS account ON account.id = bot.account_id
+            FROM {member_bot} AS bot
+            JOIN {account} AS account ON account.id = bot.account_id
             ORDER BY bot.agent_id
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                member_bot = spec.member_bot,
+                account = spec.account,
+                provider = spec.provider
+            ),
             [],
             |row| {
                 Ok(FeishuMemberBotView {
@@ -1687,14 +1842,17 @@ impl ChannelService {
         )?;
         let publication_intents = query_rows(
             connection,
-            r#"
+            &format!(
+                r#"
             SELECT id, agent_id, account_id, expected_user_id_digest,
                    expected_tenant_id, requested_app_name, provisioning_mode,
                    state, remote_app_id, credential_ref, last_completed_step,
                    failure_code, version, created_at, updated_at
-            FROM feishu_member_bot_publication_intent
+            FROM {publication_intent}
             ORDER BY created_at DESC, id
             "#,
+                publication_intent = spec.publication_intent
+            ),
             [],
             |row| {
                 Ok(MemberBotPublicationIntentView {
@@ -1718,7 +1876,8 @@ impl ChannelService {
         )?;
         let transport_conversations = query_rows(
             connection,
-            r#"
+            &format!(
+                r#"
             SELECT conversation.id, binding.id, conversation.provider,
                    conversation.tenant_key, conversation.chat_id,
                    conversation.topic_key, conversation.conversation_kind,
@@ -1727,10 +1886,12 @@ impl ChannelService {
             LEFT JOIN channel_conversation_binding AS binding
               ON binding.channel_conversation_id = conversation.id
              AND binding.status = 'active'
-            WHERE conversation.provider = 'feishu'
+            WHERE conversation.provider = '{provider}'
               AND conversation.conversation_kind IN ('group', 'topic')
             ORDER BY conversation.last_seen_at DESC, conversation.id
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| {
                 Ok(ChannelTransportConversationView {
@@ -1747,7 +1908,8 @@ impl ChannelService {
         )?;
         let pending_aggregates = query_rows(
             connection,
-            r#"
+            &format!(
+                r#"
             SELECT aggregate.id, aggregate.tenant_key, aggregate.chat_id,
                    aggregate.topic_key, conversation.conversation_kind,
                    json_extract(aggregate.frozen_payload_json, '$.acknowledgementAppId')
@@ -1757,7 +1919,7 @@ impl ChannelService {
                    aggregate.frozen_payload_json, '$.conversationId'
                  )
             WHERE aggregate.status = 'collecting'
-              AND conversation.provider = 'feishu'
+              AND conversation.provider = '{provider}'
               AND (
                 aggregate.canonical_mentions_complete = 1
                 OR NOT EXISTS (
@@ -1772,6 +1934,8 @@ impl ChannelService {
               )
             ORDER BY aggregate.created_at, aggregate.id
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| {
                 Ok(PendingChannelAggregateView {
@@ -1785,29 +1949,35 @@ impl ChannelService {
             },
         )?;
         let pending_binding_count = connection.query_row(
-            r#"
+            &format!(
+                r#"
             SELECT COUNT(*)
             FROM pending_camp_binding AS pending
             JOIN channel_conversation AS conversation
               ON conversation.id = pending.channel_conversation_id
             WHERE pending.status IN ('pending', 'resolving')
-              AND conversation.provider = 'feishu'
+              AND conversation.provider = '{provider}'
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| row.get(0),
         )?;
         let binding_issue_count = connection.query_row(
-            r#"
+            &format!(
+                r#"
             SELECT COUNT(*)
             FROM channel_conversation_binding AS binding
             JOIN channel_conversation AS conversation
               ON conversation.id = binding.channel_conversation_id
             LEFT JOIN project_catalog_item AS project ON project.id = binding.project_id
             WHERE binding.status = 'active'
-              AND conversation.provider = 'feishu'
+              AND conversation.provider = '{provider}'
               AND binding.execution_scope_kind = 'project'
               AND (project.id IS NULL OR project.status <> 'active')
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| row.get(0),
         )?;
@@ -2165,24 +2335,14 @@ impl ChannelService {
             r#"
             SELECT bot.agent_id, credential.credential_ref, credential.provider,
                    credential.remote_app_id, credential.payload_json, credential.revision
-            FROM feishu_member_bot AS bot
+            FROM channel_member_bot_directory AS bot
             JOIN channel_credentials AS credential
               ON credential.credential_ref = bot.credential_ref
-             AND credential.provider = 'feishu'
+             AND credential.provider = bot.provider
              AND credential.credential_kind = 'member_bot'
              AND credential.remote_app_id = bot.app_id
             WHERE bot.status = 'published'
-            UNION ALL
-            SELECT bot.agent_id, credential.credential_ref, credential.provider,
-                   credential.remote_app_id, credential.payload_json, credential.revision
-            FROM dingtalk_member_bot AS bot
-            JOIN channel_credentials AS credential
-              ON credential.credential_ref = bot.credential_ref
-             AND credential.provider = 'dingtalk'
-             AND credential.credential_kind = 'member_bot'
-             AND credential.remote_app_id = bot.app_key
-            WHERE bot.status = 'published'
-            ORDER BY provider, agent_id
+            ORDER BY credential.provider, bot.agent_id
             "#,
             [],
             |row| {
@@ -2252,14 +2412,18 @@ impl ChannelService {
             .map_err(Into::into)
     }
 
-    pub fn commit_feishu_account_connection(
+    pub fn commit_feishu_account_connection<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<CommitFeishuAccountConnectionCommand>,
+        envelope: &CommandEnvelope<CommitChannelAccountConnectionCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
         validate_feishu_connection(&envelope.payload)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, self.spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can commit a connection",
@@ -2267,28 +2431,29 @@ impl ChannelService {
             }
             if let Some(conflict) = previous_account_version_conflict(
                 transaction,
-                "feishu_account",
+                self.spec.account,
                 envelope.payload.expected_previous_account_version,
             )? {
                 return Ok(version_conflict(conflict));
             }
             let session_revision = replace_developer_session_row(
                 transaction,
-                FEISHU_PROVIDER,
+                self.spec.provider,
                 &envelope.payload.account.account_id,
                 &envelope.payload.developer_session.identity,
                 &envelope.payload.developer_session.session,
             )?;
-            let account_version = persist_feishu_account(transaction, &envelope.payload.account)?;
+            let account_version =
+                persist_feishu_account(self.spec, transaction, &envelope.payload.account)?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.connection_committed",
+                &self.spec.code("account.connection_committed"),
                 json!({
                     "accountId": envelope.payload.account.account_id,
                     "version": account_version,
                     "sessionRevision": session_revision,
                 }),
                 Some(EntityReference {
-                    entity_type: "feishu_account".to_string(),
+                    entity_type: self.spec.account.to_string(),
                     entity_id: envelope.payload.account.account_id.clone(),
                 }),
             ))
@@ -2357,8 +2522,8 @@ impl ChannelService {
                     "Only this provider's trusted Channel Host can replace its session",
                 ));
             }
-            let account_table = if envelope.payload.provider == FEISHU_PROVIDER {
-                "feishu_account"
+            let account_table = if let Some(spec) = ChannelProviderSpec::for_provider(&envelope.payload.provider) {
+                spec.account
             } else {
                 "dingtalk_account"
             };
@@ -2512,30 +2677,35 @@ impl ChannelService {
                     "Only this provider's trusted Channel Host can freeze credentials",
                 ));
             }
-            if envelope.payload.provider == FEISHU_PROVIDER {
-                store_feishu_publication_credential(transaction, &envelope.payload, &payload)
+            if let Some(spec) = ChannelProviderSpec::for_provider(&envelope.payload.provider) {
+                store_feishu_publication_credential(spec, transaction, &envelope.payload, &payload)
             } else {
                 store_dingtalk_publication_credential(transaction, &envelope.payload, &payload)
             }
         })
     }
 
-    pub fn upsert_feishu_account(
+    pub fn upsert_feishu_account<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<UpsertFeishuAccountCommand>,
+        envelope: &CommandEnvelope<UpsertChannelAccountCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         validate_nonempty(&envelope.payload.account_id, "accountId")?;
         validate_digest(&envelope.payload.user_id_digest, "userIdDigest")?;
         validate_nonempty(&envelope.payload.tenant_id, "tenantId")?;
         let user_name = normalize_display_name(&envelope.payload.user_name)?;
         let email = normalize_optional_email(envelope.payload.email.as_deref())?;
         let tenant_name = normalize_display_name(&envelope.payload.tenant_name)?;
-        if !matches!(envelope.payload.brand.as_str(), "feishu" | "lark") {
-            anyhow::bail!("brand must be feishu or lark");
+        if envelope.payload.brand != self.spec.provider {
+            anyhow::bail!("brand does not match the channel provider");
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can persist account facts",
@@ -2543,7 +2713,10 @@ impl ChannelService {
             }
             let conflicting_identity = transaction
                 .query_row(
-                    "SELECT user_id_digest FROM feishu_account WHERE id = ?1",
+                    &format!(
+                        "SELECT user_id_digest FROM {account} WHERE id = ?1",
+                        account = spec.account
+                    ),
                     [&envelope.payload.account_id],
                     |row| row.get::<_, Option<String>>(0),
                 )
@@ -2552,23 +2725,27 @@ impl ChannelService {
                 .is_some_and(|digest| digest != envelope.payload.user_id_digest);
             if conflicting_identity {
                 return Ok(rejected(
-                    "feishu_account.identity_conflict",
+                    &spec.code("account.identity_conflict"),
                     "Account identity changed for the same account ID",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_account
+                &format!(
+                    r#"
+                UPDATE {account}
                 SET status = 'disconnected', disconnected_at = ?2,
                     version = version + 1, updated_at = ?2
                 WHERE status = 'connected' AND id <> ?1
                 "#,
+                    account = spec.account
+                ),
                 params![envelope.payload.account_id, now],
             )?;
             transaction.execute(
-                r#"
-                INSERT INTO feishu_account(
+                &format!(
+                    r#"
+                INSERT INTO {account}(
                     id, identity_digest, display_name, tenant_name,
                     status, version, created_at, updated_at, disconnected_at,
                     user_id_digest, tenant_id, user_name, email, brand,
@@ -2589,15 +2766,17 @@ impl ChannelService {
                     status = 'connected',
                     disconnected_at = NULL,
                     connected_at = CASE
-                        WHEN feishu_account.status = 'connected'
-                         AND feishu_account.connected_at IS NOT NULL
-                        THEN feishu_account.connected_at
+                        WHEN {account}.status = 'connected'
+                         AND {account}.connected_at IS NOT NULL
+                        THEN {account}.connected_at
                         ELSE excluded.connected_at
                     END,
                     last_verified_at = excluded.last_verified_at,
-                    version = feishu_account.version + 1,
+                    version = {account}.version + 1,
                     updated_at = excluded.updated_at
                 "#,
+                    account = spec.account
+                ),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.user_id_digest,
@@ -2610,8 +2789,9 @@ impl ChannelService {
                 ],
             )?;
             transaction.execute(
-                r#"
-                INSERT INTO feishu_owner_identity(
+                &format!(
+                    r#"
+                INSERT INTO {owner_identity}(
                     account_id, tenant_id, canonical_owner_principal_id,
                     user_id_digest, union_id_digest, verified_at,
                     version, created_at, updated_at
@@ -2620,9 +2800,11 @@ impl ChannelService {
                     tenant_id = excluded.tenant_id,
                     user_id_digest = excluded.user_id_digest,
                     verified_at = excluded.verified_at,
-                    version = feishu_owner_identity.version + 1,
+                    version = {owner_identity}.version + 1,
                     updated_at = excluded.updated_at
                 "#,
+                    owner_identity = spec.owner_identity
+                ),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.tenant_id,
@@ -2632,44 +2814,55 @@ impl ChannelService {
                 ],
             )?;
             let version: i64 = transaction.query_row(
-                "SELECT version FROM feishu_account WHERE id = ?1",
+                &format!(
+                    "SELECT version FROM {account} WHERE id = ?1",
+                    account = spec.account
+                ),
                 [&envelope.payload.account_id],
                 |row| row.get(0),
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.connected",
+                &spec.code("account.connected"),
                 json!({ "accountId": envelope.payload.account_id, "version": version }),
                 Some(EntityReference {
-                    entity_type: "feishu_account".to_string(),
+                    entity_type: spec.code("account").to_string(),
                     entity_id: envelope.payload.account_id.clone(),
                 }),
             ))
         })
     }
 
-    pub fn disconnect_feishu_account(
+    pub fn disconnect_feishu_account<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<DisconnectFeishuAccountCommand>,
+        envelope: &CommandEnvelope<DisconnectChannelAccountCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_owner(&envelope.actor) {
                 return Ok(rejected(
-                    "feishu_account.owner_required",
-                    "Only the local owner can disconnect Feishu",
+                    &spec.code("account.owner_required"),
+                    "Only the local owner can disconnect the channel account",
                 ));
             }
             let version = transaction
                 .query_row(
-                    "SELECT version FROM feishu_account WHERE id = ?1 AND status = 'connected'",
+                    &format!(
+                        "SELECT version FROM {account} WHERE id = ?1 AND status = 'connected'",
+                        account = spec.account
+                    ),
                     [&envelope.payload.account_id],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
             let Some(version) = version else {
                 return Ok(rejected(
-                    "feishu_account.not_connected",
-                    "Connected Feishu account does not exist",
+                    &spec.code("account.not_connected"),
+                    "Connected channel account does not exist",
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -2677,33 +2870,44 @@ impl ChannelService {
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_account
+                &format!(
+                    r#"
+                UPDATE {account}
                 SET status = 'disconnected', disconnected_at = ?2,
                     version = version + 1, updated_at = ?2
                 WHERE id = ?1 AND version = ?3
                 "#,
+                    account = spec.account
+                ),
                 params![envelope.payload.account_id, now, version],
             )?;
             transaction.execute(
-                "DELETE FROM channel_developer_sessions WHERE provider = 'feishu'",
+                &format!(
+                    "DELETE FROM channel_developer_sessions WHERE provider = '{provider}'",
+                    provider = spec.provider
+                ),
                 [],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.disconnected",
+                &spec.code("account.disconnected"),
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
                 None,
             ))
         })
     }
 
-    pub fn expire_feishu_account(
+    pub fn expire_feishu_account<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<ExpireFeishuAccountCommand>,
+        envelope: &CommandEnvelope<ExpireChannelAccountCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can expire a developer session",
@@ -2711,15 +2915,18 @@ impl ChannelService {
             }
             let version = transaction
                 .query_row(
-                    "SELECT version FROM feishu_account WHERE id = ?1 AND status = 'connected'",
+                    &format!(
+                        "SELECT version FROM {account} WHERE id = ?1 AND status = 'connected'",
+                        account = spec.account
+                    ),
                     [&envelope.payload.account_id],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
             let Some(version) = version else {
                 return Ok(rejected(
-                    "feishu_account.not_connected",
-                    "Connected Feishu account does not exist",
+                    &spec.code("account.not_connected"),
+                    "Connected channel account does not exist",
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -2727,20 +2934,26 @@ impl ChannelService {
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_account
+                &format!(
+                    r#"
+                UPDATE {account}
                 SET status = 'session_expired', disconnected_at = ?2,
                     version = version + 1, updated_at = ?2
                 WHERE id = ?1 AND version = ?3
                 "#,
+                    account = spec.account
+                ),
                 params![envelope.payload.account_id, now, version],
             )?;
             transaction.execute(
-                "DELETE FROM channel_developer_sessions WHERE provider = 'feishu'",
+                &format!(
+                    "DELETE FROM channel_developer_sessions WHERE provider = '{provider}'",
+                    provider = spec.provider
+                ),
                 [],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.session_expired",
+                &spec.code("account.session_expired"),
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
                 None,
             ))
@@ -2971,11 +3184,16 @@ impl ChannelService {
         })
     }
 
-    pub fn create_member_bot_publication_intent(
+    pub fn create_member_bot_publication_intent<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<CreateMemberBotPublicationIntentCommand>,
+        envelope: &CommandEnvelope<CreateChannelMemberBotPublicationIntentCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         for (value, field) in [
             (
                 &envelope.payload.publication_intent_id,
@@ -2996,20 +3214,20 @@ impl ChannelService {
             anyhow::bail!("provisioningMode must be developer_session");
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can create publication intents",
                 ));
             }
             let account_matches: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_account
+                    SELECT 1 FROM {account}
                     WHERE id = ?1 AND status = 'connected'
                       AND user_id_digest = ?2 AND tenant_id = ?3
                 )
-                "#,
+                "#, account = spec.account),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.expected_user_id_digest,
@@ -3019,7 +3237,7 @@ impl ChannelService {
             )?;
             if !account_matches {
                 return Ok(rejected(
-                    "feishu_account.identity_mismatch",
+                    &spec.code("account.identity_mismatch"),
                     "Publication intent requires the exact connected developer identity",
                 ));
             }
@@ -3035,55 +3253,55 @@ impl ChannelService {
                 ));
             }
             let member_bot_bound: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM feishu_member_bot WHERE agent_id = ?1)",
+                &format!("SELECT EXISTS(SELECT 1 FROM {member_bot} WHERE agent_id = ?1)", member_bot = spec.member_bot),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             if member_bot_bound {
                 return Ok(rejected(
-                    "feishu_member_bot.already_bound",
+                    &spec.code("member_bot.already_bound"),
                     "This member already has an immutable Feishu App binding",
                 ));
             }
             let has_active: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_member_bot_publication_intent
+                    SELECT 1 FROM {publication_intent}
                     WHERE agent_id = ?1
                       AND state NOT IN (
                         'completed', 'failed_recoverable'
                       )
                 )
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             if has_active {
                 return Ok(rejected(
-                    "feishu_publication_intent.active_conflict",
+                    &spec.code("publication_intent.active_conflict"),
                     "This member already has an active publication intent",
                 ));
             }
             let app_identity_frozen: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_member_bot_publication_intent
+                    SELECT 1 FROM {publication_intent}
                     WHERE agent_id = ?1 AND remote_app_id IS NOT NULL
                 )
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             if app_identity_frozen {
                 return Ok(rejected(
-                    "feishu_publication_intent.app_identity_frozen",
+                    &spec.code("publication_intent.app_identity_frozen"),
                     "This member already has a frozen Feishu App identity",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                INSERT INTO feishu_member_bot_publication_intent(
+                &format!(r#"
+                INSERT INTO {publication_intent}(
                     id, agent_id, account_id, expected_user_id_digest,
                     expected_tenant_id, requested_app_name, provisioning_mode,
                     state, remote_app_id, credential_ref, last_completed_step,
@@ -3092,7 +3310,7 @@ impl ChannelService {
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7,
                     'created', NULL, NULL, NULL, NULL, 1, ?8, ?8
                 )
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 params![
                     envelope.payload.publication_intent_id,
                     envelope.payload.agent_id,
@@ -3105,24 +3323,29 @@ impl ChannelService {
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_member_bot_publication_intent.created",
+                &spec.code("member_bot_publication_intent.created"),
                 json!({
                     "publicationIntentId": envelope.payload.publication_intent_id,
                     "version": 1,
                 }),
                 Some(EntityReference {
-                    entity_type: "feishu_member_bot_publication_intent".to_string(),
+                    entity_type: spec.code("member_bot_publication_intent").to_string(),
                     entity_id: envelope.payload.publication_intent_id.clone(),
                 }),
             ))
         })
     }
 
-    pub fn advance_member_bot_publication_intent(
+    pub fn advance_member_bot_publication_intent<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<AdvanceMemberBotPublicationIntentCommand>,
+        envelope: &CommandEnvelope<AdvanceChannelMemberBotPublicationIntentCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         validate_nonempty(
             &envelope.payload.publication_intent_id,
             "publicationIntentId",
@@ -3141,7 +3364,7 @@ impl ChannelService {
             validate_nonempty(code, "failureCode")?;
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can advance publication intents",
@@ -3149,11 +3372,11 @@ impl ChannelService {
             }
             let current = transaction
                 .query_row(
-                    r#"
+                    &format!(r#"
                     SELECT agent_id, account_id, state, remote_app_id, credential_ref, version
-                    FROM feishu_member_bot_publication_intent
+                    FROM {publication_intent}
                     WHERE id = ?1
-                    "#,
+                    "#, publication_intent = spec.publication_intent),
                     [&envelope.payload.publication_intent_id],
                     |row| {
                         Ok((
@@ -3177,7 +3400,7 @@ impl ChannelService {
             )) = current
             else {
                 return Ok(rejected(
-                    "feishu_publication_intent.not_found",
+                    &spec.code("publication_intent.not_found"),
                     "Publication intent does not exist",
                 ));
             };
@@ -3186,36 +3409,36 @@ impl ChannelService {
             }
             if !publication_intent_transition_allowed(&current_state, &envelope.payload.state) {
                 return Ok(rejected(
-                    "feishu_publication_intent.invalid_transition",
+                    &spec.code("publication_intent.invalid_transition"),
                     "Publication intent transition is not allowed",
                 ));
             }
             if current_state == "completed" && envelope.payload.state == "session_verified" {
                 let Some(frozen_app_id) = current_app_id.as_deref() else {
                     return Ok(rejected(
-                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        &spec.code("publication_intent.reactivation_binding_mismatch"),
                         "Completed publication cannot be reactivated without its frozen App",
                     ));
                 };
                 let Some(frozen_credential_ref) = current_credential_ref.as_deref() else {
                     return Ok(rejected(
-                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        &spec.code("publication_intent.reactivation_binding_mismatch"),
                         "Completed publication cannot be reactivated without its frozen credential identity",
                     ));
                 };
                 let exact_disabled_binding: bool = transaction.query_row(
-                    r#"
+                    &format!(r#"
                     SELECT EXISTS(
                         SELECT 1
-                        FROM feishu_member_bot AS bot
-                        JOIN feishu_account AS account ON account.id = bot.account_id
+                        FROM {member_bot} AS bot
+                        JOIN {account} AS account ON account.id = bot.account_id
                         WHERE bot.agent_id = ?1 AND bot.account_id = ?2
                           AND bot.app_id = ?3
                           AND bot.credential_ref = ?4
                           AND bot.status IN ('published', 'disabled')
                           AND account.status = 'connected'
                     )
-                    "#,
+                    "#, member_bot = spec.member_bot, account = spec.account),
                     params![agent_id, account_id, frozen_app_id, frozen_credential_ref],
                     |row| row.get(0),
                 )?;
@@ -3223,7 +3446,7 @@ impl ChannelService {
                     || envelope.payload.remote_app_id.as_deref() != Some(frozen_app_id)
                 {
                     return Ok(rejected(
-                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        &spec.code("publication_intent.reactivation_binding_mismatch"),
                         "Only an existing member Bot may recover its exact frozen App",
                     ));
                 }
@@ -3236,7 +3459,7 @@ impl ChannelService {
                 && current_app_id.is_none()
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.reconciliation_remote_app_required",
+                    &spec.code("publication_intent.reconciliation_remote_app_required"),
                     "Unknown publication recovery requires an already frozen remote App",
                 ));
             }
@@ -3245,7 +3468,7 @@ impl ChannelService {
                 && current_app_id != envelope.payload.remote_app_id
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.remote_app_conflict",
+                    &spec.code("publication_intent.remote_app_conflict"),
                     "Publication intent cannot change its remote App identity",
                 ));
             }
@@ -3254,7 +3477,7 @@ impl ChannelService {
                 && current_credential_ref != envelope.payload.credential_ref
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.credential_conflict",
+                    &spec.code("publication_intent.credential_conflict"),
                     "Publication intent cannot change its credential reference",
                 ));
             }
@@ -3266,7 +3489,7 @@ impl ChannelService {
                 .or(current_credential_ref);
             if publication_intent_requires_app(&envelope.payload.state) && remote_app_id.is_none() {
                 return Ok(rejected(
-                    "feishu_publication_intent.remote_app_required",
+                    &spec.code("publication_intent.remote_app_required"),
                     "This publication state requires a frozen remote App ID",
                 ));
             }
@@ -3280,7 +3503,7 @@ impl ChannelService {
             ) && credential_ref.is_none()
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.credential_required",
+                    &spec.code("publication_intent.credential_required"),
                     "This publication state requires a frozen credential reference",
                 ));
             }
@@ -3289,20 +3512,20 @@ impl ChannelService {
                 "connection_verified" | "completed"
             ) {
                 let exact_published_binding: bool = transaction.query_row(
-                    r#"
+                    &format!(r#"
                     SELECT EXISTS(
-                        SELECT 1 FROM feishu_member_bot
+                        SELECT 1 FROM {member_bot}
                         WHERE agent_id = ?1 AND account_id = ?2
                           AND app_id = ?3 AND credential_ref = ?4
                           AND status = 'published'
                     )
-                    "#,
+                    "#, member_bot = spec.member_bot),
                     params![agent_id, account_id, remote_app_id, credential_ref,],
                     |row| row.get(0),
                 )?;
                 if !exact_published_binding {
                     return Ok(rejected(
-                        "feishu_publication_intent.member_bot_binding_required",
+                        &spec.code("publication_intent.member_bot_binding_required"),
                         "Connection completion requires the exact published member Bot binding",
                     ));
                 }
@@ -3311,19 +3534,19 @@ impl ChannelService {
                 && envelope.payload.failure_code.is_none()
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.failure_code_required",
+                    &spec.code("publication_intent.failure_code_required"),
                     "A failed publication intent requires a failure code",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_member_bot_publication_intent
+                &format!(r#"
+                UPDATE {publication_intent}
                 SET state = ?2, remote_app_id = ?3, credential_ref = ?4,
                     last_completed_step = ?5, failure_code = ?6,
                     version = version + 1, updated_at = ?7
                 WHERE id = ?1 AND version = ?8
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 params![
                     envelope.payload.publication_intent_id,
                     envelope.payload.state,
@@ -3336,14 +3559,14 @@ impl ChannelService {
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_member_bot_publication_intent.advanced",
+                &spec.code("member_bot_publication_intent.advanced"),
                 json!({
                     "publicationIntentId": envelope.payload.publication_intent_id,
                     "state": envelope.payload.state,
                     "version": version + 1,
                 }),
                 Some(EntityReference {
-                    entity_type: "feishu_member_bot_publication_intent".to_string(),
+                    entity_type: spec.code("member_bot_publication_intent").to_string(),
                     entity_id: envelope.payload.publication_intent_id.clone(),
                 }),
             ))
@@ -3786,11 +4009,16 @@ impl ChannelService {
         })
     }
 
-    pub fn upsert_feishu_member_bot(
+    pub fn upsert_feishu_member_bot<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<UpsertFeishuMemberBotCommand>,
+        envelope: &CommandEnvelope<UpsertChannelMemberBotCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         for (value, field) in [
             (&envelope.payload.account_id, "accountId"),
             (&envelope.payload.agent_id, "agentId"),
@@ -3805,7 +4033,7 @@ impl ChannelService {
         }
         let display_name = normalize_display_name(&envelope.payload.bot_display_name)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can persist Bot facts",
@@ -3824,11 +4052,11 @@ impl ChannelService {
             }
             let existing_binding = transaction
                 .query_row(
-                    r#"
+                    &format!(r#"
                     SELECT account_id, app_id, credential_ref, status
-                    FROM feishu_member_bot
+                    FROM {member_bot}
                     WHERE agent_id = ?1
-                    "#,
+                    "#, member_bot = spec.member_bot),
                     [&envelope.payload.agent_id],
                     |row| {
                         Ok((
@@ -3846,50 +4074,50 @@ impl ChannelService {
                     || credential_ref != &envelope.payload.credential_ref
                 {
                     return Ok(rejected(
-                        "feishu_member_bot.binding_immutable",
+                        &spec.code("member_bot.binding_immutable"),
                         "A member Bot cannot change its Feishu App, owner account, or credential identity",
                     ));
                 }
                 if status != "published"
-                    && !member_bot_publication_ready(transaction, &envelope.payload)?
+                    && !member_bot_publication_ready(self.spec, transaction, &envelope.payload)?
                 {
                     return Ok(rejected(
-                        "feishu_member_bot.publication_state_required",
+                        &spec.code("member_bot.publication_state_required"),
                         "Reactivating a member Bot requires its matching publication state machine",
                     ));
                 }
             } else {
                 let account_connected: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM feishu_account WHERE id = ?1 AND status = 'connected')",
+                    &format!("SELECT EXISTS(SELECT 1 FROM {account} WHERE id = ?1 AND status = 'connected')", account = spec.account),
                     [&envelope.payload.account_id],
                     |row| row.get(0),
                 )?;
                 if !account_connected {
                     return Ok(rejected(
-                        "feishu_account.not_connected",
+                        &spec.code("account.not_connected"),
                         "Initial Bot publication requires the connected Feishu account",
                     ));
                 }
-                if !member_bot_publication_ready(transaction, &envelope.payload)? {
+                if !member_bot_publication_ready(self.spec, transaction, &envelope.payload)? {
                     return Ok(rejected(
-                        "feishu_member_bot.publication_state_required",
+                        &spec.code("member_bot.publication_state_required"),
                         "Initial Bot binding requires the matching publication state machine",
                     ));
                 }
             }
             let owner_open_id_digest =
-                opaque_digest("feishu-open", &envelope.payload.owner_open_id);
+                opaque_digest(&format!("{}-open", spec.provider), &envelope.payload.owner_open_id);
             let owner_identity_conflict: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_owner_app_identity
+                    SELECT 1 FROM {owner_app_identity}
                     WHERE app_id = ?1
                       AND (
                         account_id <> ?2
                         OR (open_id_digest IS NOT NULL AND open_id_digest <> ?3)
                       )
                 )
-                "#,
+                "#, owner_app_identity = spec.owner_app_identity),
                 params![
                     envelope.payload.app_id,
                     envelope.payload.account_id,
@@ -3899,14 +4127,14 @@ impl ChannelService {
             )?;
             if owner_identity_conflict {
                 return Ok(rejected(
-                    "feishu_owner_identity.conflict",
+                    &spec.code("owner_identity.conflict"),
                     "The frozen App-scoped Owner identity cannot be rebound",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                INSERT INTO feishu_member_bot(
+                &format!(r#"
+                INSERT INTO {member_bot}(
                     agent_id, account_id, app_id, bot_open_id, bot_display_name,
                     credential_ref, status, failure_code, version,
                     created_at, updated_at, published_at
@@ -3916,9 +4144,9 @@ impl ChannelService {
                     bot_display_name = excluded.bot_display_name,
                     status = 'published', failure_code = NULL,
                     published_at = excluded.published_at,
-                    version = feishu_member_bot.version + 1,
+                    version = {member_bot}.version + 1,
                     updated_at = excluded.updated_at
-                "#,
+                "#, member_bot = spec.member_bot),
                 params![
                     envelope.payload.agent_id,
                     envelope.payload.account_id,
@@ -3930,8 +4158,8 @@ impl ChannelService {
                 ],
             )?;
             transaction.execute(
-                r#"
-                INSERT INTO feishu_owner_app_identity(
+                &format!(r#"
+                INSERT INTO {owner_app_identity}(
                     account_id, app_id, open_id_digest, user_id_digest,
                     union_id_digest, verified_at, version, created_at, updated_at
                 ) VALUES (?1, ?2, ?3, NULL, NULL, ?4, 1, ?4, ?4)
@@ -3939,12 +4167,12 @@ impl ChannelService {
                     open_id_digest = excluded.open_id_digest,
                     verified_at = excluded.verified_at,
                     version = CASE
-                        WHEN feishu_owner_app_identity.open_id_digest = excluded.open_id_digest
-                        THEN feishu_owner_app_identity.version
-                        ELSE feishu_owner_app_identity.version + 1
+                        WHEN {owner_app_identity}.open_id_digest = excluded.open_id_digest
+                        THEN {owner_app_identity}.version
+                        ELSE {owner_app_identity}.version + 1
                     END,
                     updated_at = excluded.updated_at
-                "#,
+                "#, owner_app_identity = spec.owner_app_identity),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.app_id,
@@ -3953,15 +4181,15 @@ impl ChannelService {
                 ],
             )?;
             let version: i64 = transaction.query_row(
-                "SELECT version FROM feishu_member_bot WHERE agent_id = ?1",
+                &format!("SELECT version FROM {member_bot} WHERE agent_id = ?1", member_bot = spec.member_bot),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_member_bot.published",
+                &spec.code("member_bot.published"),
                 json!({ "agentId": envelope.payload.agent_id, "version": version }),
                 Some(EntityReference {
-                    entity_type: "feishu_member_bot".to_string(),
+                    entity_type: spec.code("member_bot").to_string(),
                     entity_id: envelope.payload.agent_id.clone(),
                 }),
             ))
@@ -4176,11 +4404,15 @@ impl ChannelService {
         })
     }
 
-    pub fn verify_feishu_owner(
+    pub fn verify_feishu_owner<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<VerifyFeishuOwnerCommand>,
+        envelope: &CommandEnvelope<VerifyChannelOwnerCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
         validate_owner_identity_input(
             &envelope.payload.provider,
             &envelope.payload.app_id,
@@ -4191,7 +4423,10 @@ impl ChannelService {
         )?;
         let display_name = normalize_display_name(&envelope.payload.sender_display_name)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider)
+                || (envelope.payload.provider != self.spec.provider
+                    && (LARK || envelope.payload.provider != DINGTALK_PROVIDER))
+            {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only this provider's trusted Channel Host can verify sender identity",
@@ -4199,6 +4434,8 @@ impl ChannelService {
             }
             let now = Utc::now().to_rfc3339();
             match classify_and_record_feishu_owner(
+                ChannelProviderSpec::for_provider(&envelope.payload.provider)
+                    .unwrap_or(&FEISHU_SPEC),
                 transaction,
                 &envelope.payload.provider,
                 &envelope.payload.app_id,
@@ -4248,9 +4485,9 @@ impl ChannelService {
         validate_nonempty(&envelope.payload.target_agent_id, "targetAgentId")?;
         if !matches!(
             envelope.payload.provider.as_str(),
-            FEISHU_PROVIDER | DINGTALK_PROVIDER
+            FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
         ) {
-            anyhow::bail!("provider must be feishu or dingtalk");
+            anyhow::bail!("provider must be feishu, lark or dingtalk");
         }
         let conversation_display_name =
             normalize_display_name(&envelope.payload.conversation_display_name)?;
@@ -4263,6 +4500,7 @@ impl ChannelService {
                 ));
             }
             let owner = load_verified_owner_for_app(
+                ChannelProviderSpec::for_provider(&envelope.payload.provider).unwrap_or(&FEISHU_SPEC),
                 transaction,
                 &envelope.payload.provider,
                 &envelope.payload.app_id,
@@ -4454,9 +4692,9 @@ impl ChannelService {
     ) -> Result<CommandExecution> {
         if !matches!(
             envelope.payload.provider.as_str(),
-            FEISHU_PROVIDER | DINGTALK_PROVIDER
+            FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
         ) {
-            anyhow::bail!("channel provider must be feishu or dingtalk");
+            anyhow::bail!("channel provider must be feishu, lark or dingtalk");
         }
         validate_nonempty(&envelope.payload.tenant_key, "tenantKey")?;
         validate_nonempty(&envelope.payload.chat_id, "chatId")?;
@@ -4658,6 +4896,8 @@ impl ChannelService {
             let now = Utc::now();
             let now_text = now.to_rfc3339();
             let owner = classify_and_record_feishu_owner(
+                ChannelProviderSpec::for_provider(&envelope.payload.provider)
+                    .unwrap_or(&FEISHU_SPEC),
                 transaction,
                 &envelope.payload.provider,
                 &envelope.payload.app_id,
@@ -5455,7 +5695,7 @@ impl ChannelService {
                 ));
             }
             let quick_chat_supported = match pending.conversation.provider.as_str() {
-                FEISHU_PROVIDER => matches!(
+                FEISHU_PROVIDER | LARK_PROVIDER => matches!(
                     pending.conversation.conversation_kind.as_str(),
                     "group" | "topic"
                 ),
@@ -5878,6 +6118,7 @@ impl ChannelService {
         database: &mut Database,
         envelope: &CommandEnvelope<AuthorizeChannelExecutionConsolePageCommand>,
     ) -> Result<CommandExecution> {
+        let spec = &FEISHU_SPEC;
         validate_nonempty(&envelope.payload.agent_run_id, "agentRunId")?;
         validate_nonempty(&envelope.payload.app_id, "appId")?;
         validate_nonempty(&envelope.payload.external_message_id, "externalMessageId")?;
@@ -5905,12 +6146,13 @@ impl ChannelService {
             }
             let projection = transaction
                 .query_row(
-                    r#"
+                    &format!(r#"
                     SELECT channel_conversation.provider,
                            console.target_app_id, console.external_message_id,
                            console.latest_sequence, console.state,
                            COALESCE(
                                feishu_owner.canonical_owner_principal_id,
+                       lark_owner.canonical_owner_principal_id,
                                dingtalk_owner.canonical_owner_principal_id
                            )
                     FROM channel_execution_console AS console
@@ -5921,14 +6163,17 @@ impl ChannelService {
                     LEFT JOIN channel_member_bot_directory AS bot
                       ON bot.provider = channel_conversation.provider
                      AND bot.app_id = console.target_app_id AND bot.status = 'published'
-                    LEFT JOIN feishu_owner_identity AS feishu_owner
-                      ON channel_conversation.provider = 'feishu'
+                    LEFT JOIN {owner_identity} AS feishu_owner
+                      ON channel_conversation.provider = '{provider}'
                      AND feishu_owner.account_id = bot.account_id
-                    LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
+                    LEFT JOIN {lark_owner_identity} AS lark_owner
+              ON channel_conversation.provider = 'lark'
+             AND lark_owner.account_id = bot.account_id
+            LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
                       ON channel_conversation.provider = 'dingtalk'
                      AND dingtalk_owner.account_id = bot.account_id
                     WHERE console.agent_run_id = ?1
-                    "#,
+                    "#, owner_identity = spec.owner_identity, lark_owner_identity = LARK_SPEC.owner_identity, provider = spec.provider),
                     [&envelope.payload.agent_run_id],
                     |row| {
                         Ok(ExecutionConsolePageProjection {
@@ -6322,7 +6567,7 @@ impl ChannelService {
                 remaining,
                 &now,
             )?);
-            let roster_refreshes = if provider == FEISHU_PROVIDER {
+            let roster_refreshes = if ChannelProviderSpec::for_provider(&provider).is_some() {
                 crate::message_delivery::pending_topic_roster_refreshes(&transaction)?
             } else {
                 Vec::new()
@@ -7026,14 +7271,17 @@ fn execution_console_action_projection(
     transaction: &Transaction<'_>,
     agent_run_id: &str,
 ) -> Result<Option<ExecutionConsoleActionProjection>> {
+    let spec = &FEISHU_SPEC;
     transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT conversation.provider,
                    console.target_app_id, console.external_message_id,
                    console.latest_sequence, console.state,
                    COALESCE(
                        feishu_owner.canonical_owner_principal_id,
+                       lark_owner.canonical_owner_principal_id,
                        dingtalk_owner.canonical_owner_principal_id
                    ),
                    COALESCE(run.camp_id, turn.camp_id), console.camp_turn_id,
@@ -7047,14 +7295,21 @@ fn execution_console_action_projection(
             LEFT JOIN channel_member_bot_directory AS bot
               ON bot.provider = conversation.provider
              AND bot.app_id = console.target_app_id AND bot.status = 'published'
-            LEFT JOIN feishu_owner_identity AS feishu_owner
-              ON conversation.provider = 'feishu'
+            LEFT JOIN {owner_identity} AS feishu_owner
+              ON conversation.provider = '{provider}'
              AND feishu_owner.account_id = bot.account_id
+            LEFT JOIN {lark_owner_identity} AS lark_owner
+              ON conversation.provider = 'lark'
+             AND lark_owner.account_id = bot.account_id
             LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
               ON conversation.provider = 'dingtalk'
              AND dingtalk_owner.account_id = bot.account_id
             WHERE console.agent_run_id = ?1
             "#,
+                owner_identity = spec.owner_identity,
+                lark_owner_identity = LARK_SPEC.owner_identity,
+                provider = spec.provider
+            ),
             [agent_run_id],
             |row| {
                 Ok(ExecutionConsoleActionProjection {
@@ -7244,15 +7499,22 @@ fn validate_owner_identity_input(
     user_id: Option<&str>,
     union_id: Option<&str>,
 ) -> Result<()> {
-    if !matches!(provider, FEISHU_PROVIDER | DINGTALK_PROVIDER) {
-        anyhow::bail!("provider must be feishu or dingtalk");
+    if !matches!(
+        provider,
+        FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
+    ) {
+        anyhow::bail!("provider must be feishu, lark or dingtalk");
     }
     validate_nonempty(app_id, "appId")?;
     validate_nonempty(tenant_key, "tenantKey")?;
     if provider == DINGTALK_PROVIDER && user_id.is_none() {
         anyhow::bail!("a DingTalk sender userId is required");
     }
-    if provider == FEISHU_PROVIDER && open_id.is_none() && user_id.is_none() && union_id.is_none() {
+    if ChannelProviderSpec::for_provider(&provider).is_some()
+        && open_id.is_none()
+        && user_id.is_none()
+        && union_id.is_none()
+    {
         anyhow::bail!("a Feishu sender identity is required");
     }
     for (value, field) in [
@@ -7272,6 +7534,7 @@ fn validate_owner_identity_input(
 
 #[allow(clippy::too_many_arguments)]
 fn classify_and_record_feishu_owner(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     provider: &str,
     app_id: &str,
@@ -7294,19 +7557,24 @@ fn classify_and_record_feishu_owner(
     }
     let identity = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT bot.account_id, owner.canonical_owner_principal_id,
                    owner.user_id_digest, owner.union_id_digest,
                    app.open_id_digest, app.user_id_digest, app.union_id_digest,
                    principal.tenant_key
-            FROM feishu_member_bot AS bot
-            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
-            LEFT JOIN feishu_owner_app_identity AS app
+            FROM {member_bot} AS bot
+            JOIN {owner_identity} AS owner ON owner.account_id = bot.account_id
+            LEFT JOIN {owner_app_identity} AS app
               ON app.account_id = owner.account_id AND app.app_id = bot.app_id
             LEFT JOIN external_principal AS principal
               ON principal.id = owner.canonical_owner_principal_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot
+            ),
             [app_id],
             |row| {
                 Ok((
@@ -7341,9 +7609,10 @@ fn classify_and_record_feishu_owner(
     {
         return Ok(FeishuOwnerClassification::Unverified);
     }
-    let open_digest = open_id.map(|value| opaque_digest("feishu-open", value));
-    let user_digest = user_id.map(|value| opaque_digest("feishu-user", value));
-    let union_digest = union_id.map(|value| opaque_digest("feishu-union", value));
+    let open_digest = open_id.map(|value| opaque_digest(&format!("{}-open", spec.provider), value));
+    let user_digest = user_id.map(|value| opaque_digest(&format!("{}-user", spec.provider), value));
+    let union_digest =
+        union_id.map(|value| opaque_digest(&format!("{}-union", spec.provider), value));
     let matches = user_digest.as_deref() == Some(canonical_user_digest.as_str())
         || union_digest.as_deref().is_some_and(|digest| {
             canonical_union_digest.as_deref() == Some(digest)
@@ -7378,17 +7647,21 @@ fn classify_and_record_feishu_owner(
         return Ok(FeishuOwnerClassification::Unverified);
     }
     transaction.execute(
-        r#"
-        UPDATE feishu_owner_identity
+        &format!(
+            r#"
+        UPDATE {owner_identity}
         SET union_id_digest = COALESCE(union_id_digest, ?2),
             verified_at = ?3, version = version + 1, updated_at = ?3
         WHERE account_id = ?1
         "#,
+            owner_identity = spec.owner_identity
+        ),
         params![account_id, union_digest, now],
     )?;
     transaction.execute(
-        r#"
-        INSERT INTO feishu_owner_app_identity(
+        &format!(
+            r#"
+        INSERT INTO {owner_app_identity}(
             account_id, app_id, open_id_digest, user_id_digest,
             union_id_digest, verified_at, version, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?6, ?6)
@@ -7397,9 +7670,11 @@ fn classify_and_record_feishu_owner(
             user_id_digest = COALESCE(excluded.user_id_digest, user_id_digest),
             union_id_digest = COALESCE(excluded.union_id_digest, union_id_digest),
             verified_at = excluded.verified_at,
-            version = feishu_owner_app_identity.version + 1,
+            version = {owner_app_identity}.version + 1,
             updated_at = excluded.updated_at
         "#,
+            owner_app_identity = spec.owner_app_identity
+        ),
         params![
             account_id,
             app_id,
@@ -7583,6 +7858,7 @@ fn persist_external_principal_identities(
 }
 
 fn load_verified_owner_for_app(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     provider: &str,
     app_id: &str,
@@ -7610,17 +7886,22 @@ fn load_verified_owner_for_app(
     }
     transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT owner.canonical_owner_principal_id, principal.display_name
-            FROM feishu_member_bot AS bot
-            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
-            JOIN feishu_owner_app_identity AS app
+            FROM {member_bot} AS bot
+            JOIN {owner_identity} AS owner ON owner.account_id = bot.account_id
+            JOIN {owner_app_identity} AS app
               ON app.account_id = owner.account_id AND app.app_id = bot.app_id
             JOIN external_principal AS principal
               ON principal.id = owner.canonical_owner_principal_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
               AND principal.tenant_key = ?2
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot
+            ),
             params![app_id, tenant_key],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -7687,7 +7968,8 @@ fn operator_matches_channel_owner(
         )?;
         return Ok(true);
     }
-    operator_matches_feishu_owner(
+    operator_matches_feishu_owner_with_spec(
+        ChannelProviderSpec::for_provider(provider).context("unsupported owner provider")?,
         transaction,
         app_id,
         expected_principal_id,
@@ -7699,7 +7981,8 @@ fn operator_matches_channel_owner(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn operator_matches_feishu_owner(
+fn operator_matches_feishu_owner_with_spec(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     app_id: &str,
     expected_principal_id: &str,
@@ -7710,16 +7993,21 @@ fn operator_matches_feishu_owner(
 ) -> Result<bool> {
     let identity = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT owner.account_id, owner.union_id_digest,
                    app.open_id_digest, app.union_id_digest
-            FROM feishu_member_bot AS bot
-            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
-            JOIN feishu_owner_app_identity AS app
+            FROM {member_bot} AS bot
+            JOIN {owner_identity} AS owner ON owner.account_id = bot.account_id
+            JOIN {owner_app_identity} AS app
               ON app.account_id = owner.account_id AND app.app_id = bot.app_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
               AND owner.canonical_owner_principal_id = ?2
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot
+            ),
             params![app_id, expected_principal_id],
             |row| {
                 Ok((
@@ -7734,8 +8022,9 @@ fn operator_matches_feishu_owner(
     let Some((account_id, owner_union_digest, app_open_digest, app_union_digest)) = identity else {
         return Ok(false);
     };
-    let open_digest = open_id.map(|value| opaque_digest("feishu-open", value));
-    let union_digest = union_id.map(|value| opaque_digest("feishu-union", value));
+    let open_digest = open_id.map(|value| opaque_digest(&format!("{}-open", spec.provider), value));
+    let union_digest =
+        union_id.map(|value| opaque_digest(&format!("{}-union", spec.provider), value));
     let matches = union_digest.as_deref().is_some_and(|digest| {
         owner_union_digest.as_deref() == Some(digest) || app_union_digest.as_deref() == Some(digest)
     }) || open_digest
@@ -7760,28 +8049,34 @@ fn operator_matches_feishu_owner(
         return Ok(false);
     }
     transaction.execute(
-        r#"
-        UPDATE feishu_owner_identity
+        &format!(
+            r#"
+        UPDATE {owner_identity}
         SET union_id_digest = COALESCE(union_id_digest, ?2),
             verified_at = ?3, version = version + 1, updated_at = ?3
         WHERE account_id = ?1
         "#,
+            owner_identity = spec.owner_identity
+        ),
         params![account_id, union_digest, now],
     )?;
     transaction.execute(
-        r#"
-        UPDATE feishu_owner_app_identity
+        &format!(
+            r#"
+        UPDATE {owner_app_identity}
         SET open_id_digest = COALESCE(open_id_digest, ?3),
             union_id_digest = COALESCE(union_id_digest, ?4),
             verified_at = ?5, version = version + 1, updated_at = ?5
         WHERE account_id = ?1 AND app_id = ?2
         "#,
+            owner_app_identity = spec.owner_app_identity
+        ),
         params![account_id, app_id, open_digest, union_digest, now],
     )?;
     persist_external_principal_identities(
         transaction,
         expected_principal_id,
-        FEISHU_PROVIDER,
+        spec.provider,
         app_id,
         open_id,
         None,
@@ -8210,7 +8505,7 @@ fn insert_pending_project_delivery(
         "pendingBindingId": input.pending_binding_id,
         "conversationDisplayName": input.conversation.display_name,
         "conversationKind": input.conversation.conversation_kind,
-        "cardRevision": if input.conversation.provider == FEISHU_PROVIDER {
+        "cardRevision": if ChannelProviderSpec::for_provider(&input.conversation.provider).is_some() {
             FEISHU_PROJECT_SELECTION_CARD_REVISION
         } else {
             PROJECT_SELECTION_CARD_REVISION
@@ -8467,9 +8762,11 @@ fn reconcile_obsolete_project_picker_card_revision(
     transaction: &Transaction<'_>,
     now: &str,
 ) -> Result<()> {
+    let spec = &FEISHU_SPEC;
     let pending = query_rows(
         transaction,
-        r#"
+        &format!(
+            r#"
         SELECT pending.id, pending.acknowledgement_app_id, pending.version,
                conversation.id, conversation.provider, conversation.display_name,
                conversation.tenant_key, conversation.chat_id,
@@ -8494,7 +8791,7 @@ fn reconcile_obsolete_project_picker_card_revision(
                         '$.cardRevision'
                     ) AS INTEGER),
                     0
-                ) < CASE conversation.provider WHEN 'feishu' THEN ?2 ELSE ?3 END
+                ) < CASE WHEN conversation.provider IN ('{provider}', 'lark') THEN ?2 ELSE ?3 END
                 AND (
                     (
                         candidate.status = 'failed'
@@ -8523,6 +8820,8 @@ fn reconcile_obsolete_project_picker_card_revision(
         WHERE pending.status = 'pending' AND pending.expires_at > ?1
         ORDER BY pending.created_at, pending.id
         "#,
+            provider = spec.provider
+        ),
         params![
             now,
             FEISHU_PROJECT_SELECTION_CARD_REVISION,
@@ -9774,8 +10073,9 @@ fn project_active_request_deliveries_for_turn(
                 serde_json::from_str(&structured_content_json)?;
             if let Some(author_app_id) = bot_app_id(transaction, &provider, &agent_id)? {
                 if !body.trim().is_empty() {
-                    let payload = if provider == FEISHU_PROVIDER {
-                        feishu_agent_output_projection(
+                    let payload = if let Some(spec) = ChannelProviderSpec::for_provider(&provider) {
+                        feishu_agent_output_projection_with_spec(
+                            spec,
                             transaction,
                             &message_id,
                             &agent_id,
@@ -9837,7 +10137,26 @@ fn project_active_request_deliveries_for_turn(
     Ok(())
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
 fn feishu_agent_output_projection(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    agent_id: &str,
+    author_app_id: &str,
+    content: &[StructuredCampMessageSegment],
+) -> Result<Value> {
+    feishu_agent_output_projection_with_spec(
+        &FEISHU_SPEC,
+        transaction,
+        message_id,
+        agent_id,
+        author_app_id,
+        content,
+    )
+}
+
+fn feishu_agent_output_projection_with_spec(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     message_id: &str,
     agent_id: &str,
@@ -9859,21 +10178,24 @@ fn feishu_agent_output_projection(
     let body = render_current_plain_text(transaction, &body_content)?;
     let member_recipients = query_rows(
         transaction,
-        r#"
+        &format!(
+            r#"
         SELECT delivery.recipient_agent_id,
                COALESCE(profile.display_name, bot.bot_display_name, delivery.recipient_agent_id),
                bot.bot_open_id
         FROM message_delivery AS delivery
         LEFT JOIN agent_profile AS profile ON profile.id = delivery.recipient_agent_id
-        LEFT JOIN feishu_member_bot AS bot
+        LEFT JOIN {member_bot} AS bot
           ON bot.agent_id = delivery.recipient_agent_id
          AND bot.status = 'published'
          AND bot.account_id = (
-             SELECT account_id FROM feishu_member_bot WHERE app_id = ?2
+             SELECT account_id FROM {member_bot} WHERE app_id = ?2
          )
         WHERE delivery.message_id = ?1 AND delivery.delivery_kind = 'public_a2a'
         ORDER BY delivery.recipient_canonical_position, delivery.id
         "#,
+            member_bot = spec.member_bot
+        ),
         params![message_id, author_app_id],
         |row| {
             Ok(json!({
@@ -9890,11 +10212,21 @@ fn feishu_agent_output_projection(
         "body": body,
         "mentionPrincipal": mentions_current_user(content),
         "memberRecipients": member_recipients,
-        "reply": feishu_agent_reply_projection(transaction, message_id, author_app_id)?,
+        "reply": feishu_agent_reply_projection_with_spec(spec, transaction, message_id, author_app_id)?,
     }))
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
 fn feishu_agent_reply_projection(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    author_app_id: &str,
+) -> Result<Value> {
+    feishu_agent_reply_projection_with_spec(&FEISHU_SPEC, transaction, message_id, author_app_id)
+}
+
+fn feishu_agent_reply_projection_with_spec(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     message_id: &str,
     author_app_id: &str,
@@ -9903,7 +10235,8 @@ fn feishu_agent_reply_projection(
     // Only a surviving, earlier message in this same Camp may supply an excerpt.
     let source = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT source.reply_to_camp_message_id, parent.structured_content_json,
                    CASE parent.author_type
                      WHEN 'agent' THEN COALESCE(profile.display_name, '队员')
@@ -9923,14 +10256,18 @@ fn feishu_agent_reply_projection(
               ON parent.author_type = 'agent' AND profile.id = parent.author_id
             LEFT JOIN external_principal AS principal
               ON parent.author_type = 'external_principal' AND principal.id = parent.author_id
-            LEFT JOIN feishu_member_bot AS bot ON bot.app_id = ?2
-            LEFT JOIN feishu_owner_identity AS owner
+            LEFT JOIN {member_bot} AS bot ON bot.app_id = ?2
+            LEFT JOIN {owner_identity} AS owner
               ON owner.account_id = bot.account_id
              AND parent.author_type = 'external_principal'
              AND owner.canonical_owner_principal_id = parent.author_id
-            LEFT JOIN feishu_account AS account ON account.id = owner.account_id
+            LEFT JOIN {account} AS account ON account.id = owner.account_id
             WHERE source.id = ?1
             "#,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot,
+                account = spec.account
+            ),
             params![message_id, author_app_id],
             |row| {
                 Ok((
@@ -10063,7 +10400,7 @@ fn upgrade_legacy_feishu_output_claim(
     transaction: &Transaction<'_>,
     claim: &mut ClaimedChannelDelivery,
 ) -> Result<()> {
-    if claim.provider != FEISHU_PROVIDER
+    if ChannelProviderSpec::for_provider(&claim.provider).is_none()
         || claim.delivery_kind != "agent_output"
         || claim.payload.get("presentationVersion").is_some()
     {
@@ -10084,7 +10421,9 @@ fn upgrade_legacy_feishu_output_claim(
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
     let content: StructuredCampMessageContent = serde_json::from_str(&content_json)?;
-    claim.payload = feishu_agent_output_projection(
+    claim.payload = feishu_agent_output_projection_with_spec(
+        ChannelProviderSpec::for_provider(&claim.provider)
+            .context("unsupported output provider")?,
         transaction,
         &message_id,
         &agent_id,
@@ -10395,8 +10734,9 @@ pub(crate) fn enqueue_bound_camp_agent_message(
     };
 
     if !body.trim().is_empty() {
-        let payload = if provider == FEISHU_PROVIDER {
-            feishu_agent_output_projection(
+        let payload = if let Some(spec) = ChannelProviderSpec::for_provider(&provider) {
+            feishu_agent_output_projection_with_spec(
+                spec,
                 transaction,
                 message_id,
                 agent_id,
@@ -10754,6 +11094,7 @@ fn claim_deliveries(
     limit: usize,
     now: &chrono::DateTime<Utc>,
 ) -> Result<Vec<ClaimedChannelDelivery>> {
+    let spec = &FEISHU_SPEC;
     let now_text = now.to_rfc3339();
     transaction.execute(
         r#"
@@ -10872,7 +11213,8 @@ fn claim_deliveries(
             continue;
         }
         let mut claim = transaction.query_row(
-            r#"
+            &format!(
+                r#"
             SELECT delivery.id, delivery.request_id, delivery.delivery_kind,
                    delivery.target_app_id, COALESCE(bot.credential_ref, ''),
                    COALESCE(
@@ -10910,7 +11252,7 @@ fn claim_deliveries(
                            request_conversation.provider,
                             pending_conversation.provider,
                             bound_conversation.provider
-                        ) = 'feishu'
+                        ) IN ('{provider}', 'lark')
                        THEN (
                            SELECT previous.external_delivery_message_id
                            FROM channel_delivery AS previous
@@ -11015,6 +11357,8 @@ fn claim_deliveries(
               ON console.id = delivery.console_id
             WHERE delivery.id = ?1
             "#,
+                provider = spec.provider
+            ),
             [&delivery_id],
             |row| {
                 let payload_json = row.get::<_, String>(8)?;
@@ -11262,9 +11606,9 @@ fn assemble_external_content(
 fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<()> {
     if !matches!(
         command.provider.as_str(),
-        FEISHU_PROVIDER | DINGTALK_PROVIDER
+        FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
     ) {
-        anyhow::bail!("channel provider must be feishu or dingtalk");
+        anyhow::bail!("channel provider must be feishu, lark or dingtalk");
     }
     for (value, field) in [
         (&command.app_id, "appId"),
@@ -11620,7 +11964,10 @@ fn bot_app_id(
 }
 
 fn validate_provider(provider: &str) -> Result<()> {
-    if !matches!(provider, FEISHU_PROVIDER | DINGTALK_PROVIDER) {
+    if !matches!(
+        provider,
+        FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
+    ) {
         anyhow::bail!("provider is not supported");
     }
     Ok(())
@@ -11628,13 +11975,9 @@ fn validate_provider(provider: &str) -> Result<()> {
 
 fn validate_credential_ref(credential_ref: &str, provider: &str) -> Result<()> {
     validate_nonempty(credential_ref, "credentialRef")?;
-    let prefix = if provider == FEISHU_PROVIDER {
-        "feishu-"
-    } else {
-        "dingtalk-"
-    };
+    let prefix = format!("{provider}-");
     if credential_ref.len() > 128
-        || !credential_ref.starts_with(prefix)
+        || !credential_ref.starts_with(&prefix)
         || !credential_ref
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
@@ -11664,7 +12007,7 @@ fn validated_credential_payload(provider: &str, value: &Value) -> Result<Value> 
         .as_object()
         .context("credential payload must be an object")?;
     let app_secret = required_json_string(object, "appSecret", 16_384)?;
-    if provider == FEISHU_PROVIDER {
+    if ChannelProviderSpec::for_provider(&provider).is_some() {
         if object.len() != 1 {
             anyhow::bail!("Feishu credential payload has unsupported fields");
         }
@@ -11701,7 +12044,7 @@ fn validate_developer_session_documents(
     if serde_json::to_vec(session)?.len() > 1_048_576 {
         anyhow::bail!("developer session exceeds the storage limit");
     }
-    if provider == FEISHU_PROVIDER {
+    if ChannelProviderSpec::for_provider(&provider).is_some() {
         for (key, maximum) in [
             ("brand", 16),
             ("userId", 512),
@@ -11711,10 +12054,7 @@ fn validate_developer_session_documents(
         ] {
             required_json_string(identity_object, key, maximum)?;
         }
-        if !matches!(
-            identity_object.get("brand").and_then(Value::as_str),
-            Some("feishu" | "lark")
-        ) {
+        if identity_object.get("brand").and_then(Value::as_str) != Some(provider) {
             anyhow::bail!("Feishu developer identity brand is invalid");
         }
         if let Some(email) = identity_object.get("email")
@@ -11756,14 +12096,16 @@ fn validate_developer_session_documents(
             required_json_string(cookie, "value", 16_384)?;
             let domain = required_json_string(cookie, "domain", 512)?;
             let domain = domain.trim_start_matches('.').to_ascii_lowercase();
-            if !(domain == "feishu.cn"
-                || domain.ends_with(".feishu.cn")
-                || domain == "larkoffice.com"
-                || domain.ends_with(".larkoffice.com")
-                || domain == "larksuite.com"
-                || domain.ends_with(".larksuite.com"))
-            {
-                anyhow::bail!("Feishu developer session cookie domain is invalid");
+            let allowed = if provider == LARK_PROVIDER {
+                domain == "larksuite.com" || domain.ends_with(".larksuite.com")
+            } else {
+                domain == "feishu.cn"
+                    || domain.ends_with(".feishu.cn")
+                    || domain == "larkoffice.com"
+                    || domain.ends_with(".larkoffice.com")
+            };
+            if !allowed {
+                anyhow::bail!("developer session cookie domain does not match provider");
             }
             required_json_string(cookie, "path", 4096)?;
         }
@@ -11912,7 +12254,10 @@ fn profile_key_for_dingtalk(corp_id: &str, user_id: &str) -> String {
     format!("rvdtp_{}", &encoded[..32])
 }
 
-fn validate_feishu_connection(command: &CommitFeishuAccountConnectionCommand) -> Result<()> {
+fn validate_feishu_connection<const LARK: bool>(
+    command: &CommitChannelAccountConnectionCommand<LARK>,
+) -> Result<()> {
+    let spec = if LARK { &LARK_SPEC } else { &FEISHU_SPEC };
     let account = &command.account;
     validate_nonempty(&account.account_id, "accountId")?;
     validate_digest(&account.user_id_digest, "userIdDigest")?;
@@ -11920,17 +12265,27 @@ fn validate_feishu_connection(command: &CommitFeishuAccountConnectionCommand) ->
     normalize_display_name(&account.user_name)?;
     normalize_display_name(&account.tenant_name)?;
     normalize_optional_email(account.email.as_deref())?;
-    if !matches!(account.brand.as_str(), "feishu" | "lark") {
-        anyhow::bail!("brand must be feishu or lark");
+    if account.brand
+        != if LARK {
+            LARK_SPEC.provider
+        } else {
+            FEISHU_SPEC.provider
+        }
+    {
+        anyhow::bail!("brand does not match the channel provider");
     }
     validate_developer_session_documents(
-        FEISHU_PROVIDER,
+        if LARK {
+            LARK_SPEC.provider
+        } else {
+            FEISHU_SPEC.provider
+        },
         &command.developer_session.identity,
         &command.developer_session.session,
     )?;
     let identity = command.developer_session.identity.as_object().unwrap();
     let user_id = required_json_string(identity, "userId", 512)?;
-    if opaque_digest("feishu-user", user_id) != account.user_id_digest
+    if opaque_digest(&format!("{}-user", spec.provider), user_id) != account.user_id_digest
         || required_json_string(identity, "tenantId", 512)? != account.tenant_id
         || required_json_string(identity, "userName", 512)? != account.user_name
         || required_json_string(identity, "tenantName", 512)? != account.tenant_name
@@ -12023,12 +12378,16 @@ fn replace_developer_session_row(
 }
 
 fn persist_feishu_account(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     account: &FeishuConnectionAccountInput,
 ) -> Result<i64> {
     let conflicting_identity = transaction
         .query_row(
-            "SELECT user_id_digest FROM feishu_account WHERE id = ?1",
+            &format!(
+                "SELECT user_id_digest FROM {account} WHERE id = ?1",
+                account = spec.account
+            ),
             [&account.account_id],
             |row| row.get::<_, Option<String>>(0),
         )
@@ -12040,17 +12399,21 @@ fn persist_feishu_account(
     }
     let now = Utc::now().to_rfc3339();
     transaction.execute(
-        r#"
-        UPDATE feishu_account
+        &format!(
+            r#"
+        UPDATE {account}
         SET status = 'disconnected', disconnected_at = ?2,
             version = version + 1, updated_at = ?2
         WHERE status = 'connected' AND id <> ?1
         "#,
+            account = spec.account
+        ),
         params![account.account_id, now],
     )?;
     transaction.execute(
-        r#"
-        INSERT INTO feishu_account(
+        &format!(
+            r#"
+        INSERT INTO {account}(
             id, identity_digest, display_name, tenant_name,
             status, version, created_at, updated_at, disconnected_at,
             user_id_digest, tenant_id, user_name, email, brand,
@@ -12070,13 +12433,15 @@ fn persist_feishu_account(
             brand = excluded.brand,
             status = 'connected', disconnected_at = NULL,
             connected_at = CASE
-                WHEN feishu_account.status = 'connected'
-                 AND feishu_account.connected_at IS NOT NULL
-                THEN feishu_account.connected_at ELSE excluded.connected_at END,
+                WHEN {account}.status = 'connected'
+                 AND {account}.connected_at IS NOT NULL
+                THEN {account}.connected_at ELSE excluded.connected_at END,
             last_verified_at = excluded.last_verified_at,
-            version = feishu_account.version + 1,
+            version = {account}.version + 1,
             updated_at = excluded.updated_at
         "#,
+            account = spec.account
+        ),
         params![
             account.account_id,
             account.user_id_digest,
@@ -12089,8 +12454,9 @@ fn persist_feishu_account(
         ],
     )?;
     transaction.execute(
-        r#"
-        INSERT INTO feishu_owner_identity(
+        &format!(
+            r#"
+        INSERT INTO {owner_identity}(
             account_id, tenant_id, canonical_owner_principal_id,
             user_id_digest, union_id_digest, verified_at,
             version, created_at, updated_at
@@ -12099,9 +12465,11 @@ fn persist_feishu_account(
             tenant_id = excluded.tenant_id,
             user_id_digest = excluded.user_id_digest,
             verified_at = excluded.verified_at,
-            version = feishu_owner_identity.version + 1,
+            version = {owner_identity}.version + 1,
             updated_at = excluded.updated_at
         "#,
+            owner_identity = spec.owner_identity
+        ),
         params![
             account.account_id,
             account.tenant_id,
@@ -12112,7 +12480,10 @@ fn persist_feishu_account(
     )?;
     transaction
         .query_row(
-            "SELECT version FROM feishu_account WHERE id = ?1",
+            &format!(
+                "SELECT version FROM {account} WHERE id = ?1",
+                account = spec.account
+            ),
             [&account.account_id],
             |row| row.get(0),
         )
@@ -12291,16 +12662,20 @@ fn upsert_credential_row(
 }
 
 fn store_feishu_publication_credential(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     command: &StorePublicationCredentialCommand,
     payload: &Value,
 ) -> Result<CommandHandlerResult> {
     let current = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT state, remote_app_id, credential_ref, version
-            FROM feishu_member_bot_publication_intent WHERE id = ?1
+            FROM {publication_intent} WHERE id = ?1
             "#,
+                publication_intent = spec.publication_intent
+            ),
             [&command.publication_intent_id],
             |row| {
                 Ok((
@@ -12314,7 +12689,7 @@ fn store_feishu_publication_credential(
         .optional()?;
     let Some((state, remote_app_id, credential_ref, version)) = current else {
         return Ok(rejected(
-            "feishu_publication_intent.not_found",
+            &spec.code("publication_intent.not_found"),
             "Publication intent does not exist",
         ));
     };
@@ -12323,13 +12698,13 @@ fn store_feishu_publication_credential(
     }
     if !publication_intent_transition_allowed(&state, "credentials_read") {
         return Ok(rejected(
-            "feishu_publication_intent.invalid_transition",
+            &spec.code("publication_intent.invalid_transition"),
             "Credential storage requires the credentials_read transition",
         ));
     }
     if remote_app_id.as_deref() != Some(command.remote_app_id.as_str()) {
         return Ok(rejected(
-            "feishu_publication_intent.remote_app_conflict",
+            &spec.code("publication_intent.remote_app_conflict"),
             "Credential does not belong to the frozen App",
         ));
     }
@@ -12338,7 +12713,7 @@ fn store_feishu_publication_credential(
         .is_some_and(|current| current != command.credential_ref)
         || credential_identity_conflict(
             transaction,
-            FEISHU_PROVIDER,
+            spec.provider,
             &command.credential_ref,
             &command.remote_app_id,
         )?
@@ -12350,20 +12725,23 @@ fn store_feishu_publication_credential(
     }
     let revision = upsert_credential_row(
         transaction,
-        FEISHU_PROVIDER,
+        spec.provider,
         &command.credential_ref,
         &command.remote_app_id,
         payload,
     )?;
     let now = Utc::now().to_rfc3339();
     transaction.execute(
-        r#"
-        UPDATE feishu_member_bot_publication_intent
+        &format!(
+            r#"
+        UPDATE {publication_intent}
         SET state = 'credentials_read', credential_ref = ?2,
             last_completed_step = 'credentials_read', failure_code = NULL,
             version = version + 1, updated_at = ?3
         WHERE id = ?1 AND version = ?4
         "#,
+            publication_intent = spec.publication_intent
+        ),
         params![
             command.publication_intent_id,
             command.credential_ref,
@@ -12372,7 +12750,7 @@ fn store_feishu_publication_credential(
         ],
     )?;
     Ok(CommandHandlerResult::applied(
-        "feishu_publication_intent.credential_stored",
+        &spec.code("publication_intent.credential_stored"),
         json!({
             "publicationIntentId": command.publication_intent_id,
             "credentialRef": command.credential_ref,
@@ -12523,15 +12901,19 @@ fn is_channel_host(actor: &ActorRef) -> bool {
     matches!(
         actor,
         ActorRef::System { component_id }
-            if component_id == FEISHU_CHANNEL_HOST_COMPONENT
+            if component_id == FEISHU_SPEC.host_component
+                || component_id == LARK_SPEC.host_component
                 || component_id == DINGTALK_CHANNEL_HOST_COMPONENT
     )
 }
 
 fn channel_host_provider(actor: &ActorRef) -> Option<&'static str> {
     match actor {
-        ActorRef::System { component_id } if component_id == FEISHU_CHANNEL_HOST_COMPONENT => {
-            Some(FEISHU_PROVIDER)
+        ActorRef::System { component_id } if component_id == LARK_SPEC.host_component => {
+            Some(LARK_SPEC.provider)
+        }
+        ActorRef::System { component_id } if component_id == FEISHU_SPEC.host_component => {
+            Some(FEISHU_SPEC.provider)
         }
         ActorRef::System { component_id } if component_id == DINGTALK_CHANNEL_HOST_COMPONENT => {
             Some(DINGTALK_PROVIDER)
@@ -12555,19 +12937,23 @@ fn version_conflict(current_version: i64) -> CommandHandlerResult {
     )
 }
 
-fn member_bot_publication_ready(
+fn member_bot_publication_ready<const LARK: bool>(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
-    command: &UpsertFeishuMemberBotCommand,
+    command: &UpsertChannelMemberBotCommand<LARK>,
 ) -> Result<bool> {
     Ok(transaction.query_row(
-        r#"
+        &format!(
+            r#"
         SELECT EXISTS(
-            SELECT 1 FROM feishu_member_bot_publication_intent
+            SELECT 1 FROM {publication_intent}
             WHERE agent_id = ?1 AND account_id = ?2
               AND remote_app_id = ?3 AND credential_ref = ?4
               AND state = 'version_published'
         )
         "#,
+            publication_intent = spec.publication_intent
+        ),
         params![
             command.agent_id,
             command.account_id,
@@ -12629,6 +13015,1440 @@ mod tests {
     };
 
     #[test]
+    fn lark_and_feishu_accounts_are_isolated_and_wrong_hosts_cannot_write() {
+        let mut database = seeded_runtime_database_owned();
+        let feishu = ChannelService::default();
+        let lark = ChannelService::for_spec(&LARK_SPEC);
+        connect_account(&feishu, &mut database);
+        let command = UpsertLarkAccountCommand {
+            account_id: "account_1".into(),
+            user_id_digest: opaque_digest("lark-user", "user_1"),
+            tenant_id: "tenant_1".into(),
+            user_name: "Lark Owner".into(),
+            email: None,
+            tenant_name: "Lark tenant".into(),
+            brand: "lark".into(),
+        };
+        let mut envelope = host_envelope("lark-account", command.clone());
+        envelope.actor = ActorRef::System {
+            component_id: LARK_SPEC.host_component.into(),
+        };
+        assert_eq!(
+            lark.upsert_feishu_account(&mut database, &envelope)
+                .unwrap()
+                .result
+                .status,
+            CommandResultStatus::Applied
+        );
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .user_name,
+            "Owner"
+        );
+        assert_eq!(
+            lark.snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .user_name,
+            "Lark Owner"
+        );
+        let facts = |database: &Database| {
+            [
+                "feishu_account",
+                "lark_account",
+                "feishu_owner_identity",
+                "lark_owner_identity",
+                "feishu_member_bot",
+                "lark_member_bot",
+                "feishu_owner_app_identity",
+                "lark_owner_app_identity",
+                "feishu_member_bot_publication_intent",
+                "lark_member_bot_publication_intent",
+                "external_principal",
+                "external_principal_app_identity",
+                "channel_credentials",
+                "channel_developer_sessions",
+                "channel_conversation",
+            ]
+            .map(|table| {
+                let mut statement = database
+                    .connection()
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                    .unwrap();
+                statement
+                    .query_map([], |row| {
+                        (0..row.as_ref().column_count())
+                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+        };
+        let before = facts(&database);
+        let event_count = |database: &Database| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM event_log WHERE event_type <> 'command.result'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let events_before = event_count(&database);
+        let wrong_lark = host_envelope("feishu-host-lark-write", command);
+        assert_eq!(
+            lark.upsert_feishu_account(&mut database, &wrong_lark)
+                .unwrap()
+                .result
+                .code,
+            "channel.host_required"
+        );
+        let mut wrong_feishu = host_envelope(
+            "lark-host-feishu-write",
+            UpsertFeishuAccountCommand {
+                account_id: "account_1".into(),
+                user_id_digest: owner_user_digest(),
+                tenant_id: "tenant_1".into(),
+                user_name: "Changed".into(),
+                email: None,
+                tenant_name: "tenant".into(),
+                brand: "feishu".into(),
+            },
+        );
+        wrong_feishu.actor = ActorRef::System {
+            component_id: LARK_SPEC.host_component.into(),
+        };
+        assert_eq!(
+            feishu
+                .upsert_feishu_account(&mut database, &wrong_feishu)
+                .unwrap()
+                .result
+                .code,
+            "channel.host_required"
+        );
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        let receipt_count = |database: &Database| {
+            database.connection().query_row(
+                "SELECT count(*) FROM event_log WHERE event_type='command.result' AND command_id IN ('feishu-host-lark-write','lark-host-feishu-write')",
+                [], |row| row.get::<_, i64>(0),
+            ).unwrap()
+        };
+        assert_eq!(receipt_count(&database), 2);
+        lark.upsert_feishu_account(&mut database, &wrong_lark)
+            .unwrap();
+        feishu
+            .upsert_feishu_account(&mut database, &wrong_feishu)
+            .unwrap();
+        assert_eq!(receipt_count(&database), 2);
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        wrong_feishu.command_id = "brand-crossing".into();
+        wrong_feishu.actor = ActorRef::System {
+            component_id: FEISHU_SPEC.host_component.into(),
+        };
+        wrong_feishu.payload.brand = "lark".into();
+        assert!(
+            feishu
+                .upsert_feishu_account(&mut database, &wrong_feishu)
+                .is_err()
+        );
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        let commit = CommitFeishuAccountConnectionCommand {
+            expected_previous_account_version: Some(1),
+            account: FeishuConnectionAccountInput {
+                account_id: "account_1".into(),
+                user_id_digest: owner_user_digest(),
+                tenant_id: "tenant_1".into(),
+                user_name: "Owner".into(),
+                email: None,
+                tenant_name: "Tenant".into(),
+                brand: "lark".into(),
+            },
+            developer_session: ChannelDeveloperSessionInput {
+                identity: json!({}),
+                session: json!({}),
+            },
+        };
+        assert!(
+            feishu
+                .commit_feishu_account_connection(
+                    &mut database,
+                    &host_envelope("commit-brand-crossing", commit)
+                )
+                .is_err()
+        );
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        // Legacy rows stay in place and readable; no implicit transfer into Lark.
+        let lark_accounts = |database: &Database| facts(database)[1].clone();
+        let lark_accounts_before = lark_accounts(&database);
+        database
+            .connection()
+            .execute(
+                "UPDATE feishu_account SET brand='lark' WHERE id='account_1'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .brand,
+            "lark"
+        );
+        assert_eq!(
+            lark.snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .user_name,
+            "Lark Owner"
+        );
+        assert_eq!(lark_accounts(&database), lark_accounts_before);
+        let mut second = envelope.clone();
+        second.command_id = "lark-account-switch".into();
+        second.payload.account_id = "account_2".into();
+        lark.upsert_feishu_account(&mut database, &second).unwrap();
+        for table in ["feishu_account", "lark_account"] {
+            let count: i64 = database
+                .connection()
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE status='connected'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .account_id,
+            "account_1"
+        );
+        assert_eq!(
+            lark.snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .account_id,
+            "account_2"
+        );
+        let account = lark.snapshot(&mut database).unwrap().account.unwrap();
+        let disconnect = actor_envelope(
+            &ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            "lark-disconnect".to_string(),
+            DisconnectLarkAccountCommand {
+                account_id: account.account_id,
+                expected_version: account.version,
+            },
+        );
+        assert_eq!(
+            lark.disconnect_feishu_account(&mut database, &disconnect)
+                .unwrap()
+                .result
+                .code,
+            "lark_account.disconnected"
+        );
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .status,
+            "connected"
+        );
+    }
+
+    // Every provider-bound write, fed a real row of one provider but the other
+    // provider's Host, must commit only its single rejected receipt.
+    #[test]
+    fn wrong_provider_hosts_are_rejected_by_every_lark_capable_handler() {
+        let mut database = seeded_runtime_database_owned();
+        let quick_chat_path = quick_chat_path(&database);
+        let feishu = provider_world::<false>(&mut database, &quick_chat_path);
+        let lark = provider_world::<true>(&mut database, &quick_chat_path);
+        for (world, other) in [(&feishu, &lark), (&lark, &feishu)] {
+            let provider = world.spec.provider;
+            let wrong = |id: &str| format!("{provider}-row-by-{}-{id}", other.spec.provider);
+            let actor = ActorRef::System {
+                component_id: other.spec.host_component.to_string(),
+            };
+            let service = ChannelService::for_spec(world.spec);
+            let shared = ChannelService::default();
+            let host_required = "channel.host_required";
+            if provider == LARK_PROVIDER {
+                lark_only_commands_reject::<true>(&mut database, world, &actor, &wrong);
+            } else {
+                lark_only_commands_reject::<false>(&mut database, world, &actor, &wrong);
+            }
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("store-credential"),
+                host_required,
+                |database| {
+                    shared
+                        .store_publication_credential(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("store-credential"),
+                                StorePublicationCredentialCommand {
+                                    provider: provider.to_string(),
+                                    publication_intent_id: world.intent_id.clone(),
+                                    expected_intent_version: world.intent_version,
+                                    credential_ref: world.credential_ref.clone(),
+                                    remote_app_id: world.intent_app_id.clone(),
+                                    credential: json!({ "appSecret": "replaced" }),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("observe"),
+                host_required,
+                |database| {
+                    let mut command = observation_command(
+                        &world.app_id,
+                        &format!("om_{provider}_wrong_host"),
+                        &format!("oc_{provider}_dm"),
+                        "",
+                        "p2p",
+                        "错误宿主",
+                        &[("agent_1", world.app_id.as_str())],
+                        true,
+                    );
+                    command.provider = provider.to_string();
+                    shared
+                        .observe_inbound(
+                            database,
+                            &actor_envelope(&actor, wrong("observe"), command),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("finalize"),
+                host_required,
+                |database| {
+                    shared
+                        .finalize_inbound(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("finalize"),
+                                FinalizeChannelInboundCommand {
+                                    aggregate_id: world.open_aggregate_id.clone(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("settle"),
+                host_required,
+                |database| {
+                    shared
+                        .settle_delivery(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("settle"),
+                                SettleChannelDeliveryCommand {
+                                    delivery_id: world.claimed_delivery_id.clone(),
+                                    worker_id: world.worker_id.clone(),
+                                    outcome: "sent".to_string(),
+                                    external_delivery_message_id: Some("om_wrong".to_string()),
+                                    external_update_message_id: None,
+                                    failure_code: None,
+                                    retryable: false,
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("finalize-finalized"),
+                host_required,
+                |database| {
+                    shared
+                        .finalize_inbound(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("finalize-finalized"),
+                                FinalizeChannelInboundCommand {
+                                    aggregate_id: world.finalized_aggregate_id.clone(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("settle-notification"),
+                host_required,
+                |database| {
+                    shared
+                        .settle_delivery(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("settle-notification"),
+                                SettleChannelDeliveryCommand {
+                                    delivery_id: world.notification_delivery_id.clone(),
+                                    worker_id: world.worker_id.clone(),
+                                    outcome: "sent".to_string(),
+                                    external_delivery_message_id: Some("om_wrong".to_string()),
+                                    external_update_message_id: None,
+                                    failure_code: None,
+                                    retryable: false,
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("roster"),
+                host_required,
+                |database| {
+                    shared
+                        .reconcile_feishu_group_roster(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("roster"),
+                                ReconcileFeishuGroupRosterCommand {
+                                    provider: provider.to_string(),
+                                    tenant_key: "tenant_1".to_string(),
+                                    chat_id: format!("oc_{provider}_group"),
+                                    present_app_ids: Vec::new(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("resolve"),
+                host_required,
+                |database| {
+                    shared
+                        .resolve_pending_camp_binding(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("resolve"),
+                                ResolvePendingCampBindingCommand {
+                                    pending_binding_id: world.pending_binding_id.clone(),
+                                    app_id: world.app_id.clone(),
+                                    external_picker_message_id: "om_picker".to_string(),
+                                    expected_version: 1,
+                                    nonce: "nonce".to_string(),
+                                    action: "cancel".to_string(),
+                                    project_id: None,
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("dm"),
+                host_required,
+                |database| {
+                    shared
+                        .start_new_feishu_dm(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("dm"),
+                                StartNewFeishuDmCommand {
+                                    provider: provider.to_string(),
+                                    app_id: world.app_id.clone(),
+                                    tenant_key: "tenant_1".to_string(),
+                                    chat_id: format!("oc_{provider}_dm"),
+                                    conversation_display_name: "Owner 私聊".to_string(),
+                                    target_agent_id: "agent_1".to_string(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("console-page"),
+                host_required,
+                |database| {
+                    shared
+                        .authorize_execution_console_page(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("console-page"),
+                                AuthorizeChannelExecutionConsolePageCommand {
+                                    agent_run_id: world.agent_run_id.clone(),
+                                    app_id: world.app_id.clone(),
+                                    external_message_id: world.console_message_id.clone(),
+                                    snapshot_sequence: 1,
+                                    page_index: 0,
+                                    page_count: Some(1),
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("recent-output"),
+                host_required,
+                |database| {
+                    shared
+                        .authorize_execution_recent_output(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("recent-output"),
+                                AuthorizeChannelExecutionRecentOutputCommand {
+                                    agent_run_id: world.agent_run_id.clone(),
+                                    app_id: world.app_id.clone(),
+                                    external_message_id: world.console_message_id.clone(),
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("cancel-run"),
+                host_required,
+                |database| {
+                    shared
+                        .cancel_channel_agent_run(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("cancel-run"),
+                                ChannelAgentRunCancelCommand {
+                                    callback_event_id: wrong("cancel-event"),
+                                    app_id: world.app_id.clone(),
+                                    external_message_id: world.console_message_id.clone(),
+                                    agent_run_id: world.agent_run_id.clone(),
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("session-replace"),
+                host_required,
+                |database| {
+                    shared
+                        .replace_channel_developer_session(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("session-replace"),
+                                ReplaceChannelDeveloperSessionCommand {
+                                    provider: provider.to_string(),
+                                    account_id: world.account_id.clone(),
+                                    identity: developer_identity(provider),
+                                    session: json!({ "cookies": [] }),
+                                    expected_revision: Some(1),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("session-delete"),
+                host_required,
+                |database| {
+                    shared
+                        .delete_channel_developer_session(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("session-delete"),
+                                DeleteChannelDeveloperSessionCommand {
+                                    provider: provider.to_string(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("credential-delete"),
+                host_required,
+                |database| {
+                    shared
+                        .delete_channel_credential(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("credential-delete"),
+                                DeleteChannelCredentialCommand {
+                                    provider: provider.to_string(),
+                                    credential_ref: world.credential_ref.clone(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            // The provider's own Host still owns every row the rejections left intact.
+            assert_eq!(
+                service
+                    .snapshot(&mut database)
+                    .unwrap()
+                    .account
+                    .unwrap()
+                    .status,
+                "connected"
+            );
+        }
+        lark_disconnect_is_owner_only_and_provider_scoped(&mut database, &feishu, &lark);
+    }
+
+    // C3: disconnect is an Owner command for Lark as for Feishu and DingTalk.
+    fn lark_disconnect_is_owner_only_and_provider_scoped(
+        database: &mut Database,
+        feishu: &ProviderWorld,
+        lark: &ProviderWorld,
+    ) {
+        let service = ChannelService::for_spec(&LARK_SPEC);
+        let owner = ActorRef::User {
+            user_id: CURRENT_USER_ID.to_string(),
+        };
+        let disconnect = |database: &mut Database, actor: &ActorRef, id: &str, account_id: &str| {
+            service
+                .disconnect_feishu_account(
+                    database,
+                    &actor_envelope(
+                        actor,
+                        id.to_string(),
+                        DisconnectLarkAccountCommand {
+                            account_id: account_id.to_string(),
+                            expected_version: lark.account_version,
+                        },
+                    ),
+                )
+                .unwrap()
+        };
+        for host in [feishu.spec.host_component, LARK_SPEC.host_component] {
+            let actor = ActorRef::System {
+                component_id: host.to_string(),
+            };
+            let id = format!("lark-disconnect-by-{host}");
+            assert_rejected_without_side_effects(
+                database,
+                &id,
+                "lark_account.owner_required",
+                |database| disconnect(database, &actor, &id, &lark.account_id),
+            );
+        }
+        assert_rejected_without_side_effects(
+            database,
+            "lark-disconnect-feishu-account",
+            "lark_account.not_connected",
+            |database| {
+                disconnect(
+                    database,
+                    &owner,
+                    "lark-disconnect-feishu-account",
+                    &feishu.account_id,
+                )
+            },
+        );
+        let sessions = |database: &Database, provider: &str| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM channel_developer_sessions WHERE provider = ?1",
+                    [provider],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let feishu_facts = |database: &mut Database| {
+            (
+                serde_json::to_value(
+                    ChannelService::default()
+                        .snapshot(database)
+                        .unwrap()
+                        .account,
+                )
+                .unwrap(),
+                sessions(database, FEISHU_PROVIDER),
+            )
+        };
+        let feishu_before = feishu_facts(database);
+        assert_eq!(feishu_before.1, 1);
+        assert_eq!(
+            disconnect(database, &owner, "lark-owner-disconnect", &lark.account_id)
+                .result
+                .code,
+            "lark_account.disconnected"
+        );
+        assert_eq!(sessions(database, LARK_PROVIDER), 0);
+        assert_eq!(feishu_facts(database), feishu_before);
+        assert_eq!(feishu_before.0["status"], "connected");
+    }
+
+    fn lark_only_commands_reject<const LARK: bool>(
+        database: &mut Database,
+        world: &ProviderWorld,
+        actor: &ActorRef,
+        wrong: &dyn Fn(&str) -> String,
+    ) {
+        let service = ChannelService::for_spec(world.spec);
+        let provider = world.spec.provider;
+        let host_required = "channel.host_required";
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("commit"),
+            host_required,
+            |database| {
+                service
+                    .commit_feishu_account_connection(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("commit"),
+                            CommitChannelAccountConnectionCommand::<LARK> {
+                                expected_previous_account_version: Some(world.account_version),
+                                account: connection_account(provider, "account_2"),
+                                developer_session: ChannelDeveloperSessionInput {
+                                    identity: developer_identity(provider),
+                                    session: json!({ "cookies": [] }),
+                                },
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("expire"),
+            host_required,
+            |database| {
+                service
+                    .expire_feishu_account(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("expire"),
+                            ExpireChannelAccountCommand::<LARK> {
+                                account_id: world.account_id.clone(),
+                                expected_version: world.account_version,
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(database, &wrong("bot"), host_required, |database| {
+            service
+                .upsert_feishu_member_bot(
+                    database,
+                    &actor_envelope(
+                        actor,
+                        wrong("bot"),
+                        UpsertChannelMemberBotCommand::<LARK> {
+                            account_id: world.account_id.clone(),
+                            agent_id: "agent_1".to_string(),
+                            app_id: world.app_id.clone(),
+                            owner_open_id: "ou_user".to_string(),
+                            bot_open_id: Some("ou_replaced".to_string()),
+                            bot_display_name: "replaced".to_string(),
+                            credential_ref: format!("{provider}/member/agent_1"),
+                        },
+                    ),
+                )
+                .unwrap()
+        });
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("intent-create"),
+            host_required,
+            |database| {
+                service
+                    .create_member_bot_publication_intent(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("intent-create"),
+                            CreateChannelMemberBotPublicationIntentCommand::<LARK> {
+                                publication_intent_id: format!("intent-{provider}-wrong"),
+                                account_id: world.account_id.clone(),
+                                agent_id: "agent_3".to_string(),
+                                expected_user_id_digest: provider_owner_digest(provider),
+                                expected_tenant_id: "tenant_1".to_string(),
+                                requested_app_name: "agent_3".to_string(),
+                                provisioning_mode: "developer_session".to_string(),
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("intent-advance"),
+            host_required,
+            |database| {
+                service
+                    .advance_member_bot_publication_intent(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("intent-advance"),
+                            AdvanceChannelMemberBotPublicationIntentCommand::<LARK> {
+                                publication_intent_id: world.intent_id.clone(),
+                                expected_version: world.intent_version,
+                                state: "failed_recoverable".to_string(),
+                                remote_app_id: Some(world.intent_app_id.clone()),
+                                credential_ref: Some(world.credential_ref.clone()),
+                                last_completed_step: Some("credentials_read".to_string()),
+                                failure_code: Some("wrong_host".to_string()),
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("owner"),
+            host_required,
+            |database| {
+                service
+                    .verify_feishu_owner(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("owner"),
+                            VerifyChannelOwnerCommand::<LARK> {
+                                provider: provider.to_string(),
+                                app_id: world.app_id.clone(),
+                                tenant_key: "tenant_1".to_string(),
+                                sender_open_id: Some("ou_user".to_string()),
+                                sender_user_id: Some("user_1".to_string()),
+                                sender_union_id: Some("union_user".to_string()),
+                                sender_display_name: "Owner".to_string(),
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+    }
+
+    fn actor_envelope<P>(actor: &ActorRef, command_id: String, payload: P) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id,
+            actor: actor.clone(),
+            camp_id: None,
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload,
+        }
+    }
+
+    fn host_envelope_for<P>(
+        spec: &ChannelProviderSpec,
+        command_id: &str,
+        payload: P,
+    ) -> CommandEnvelope<P> {
+        let actor = ActorRef::System {
+            component_id: spec.host_component.to_string(),
+        };
+        actor_envelope(&actor, format!("{}-{command_id}", spec.provider), payload)
+    }
+
+    struct ProviderWorld {
+        spec: &'static ChannelProviderSpec,
+        account_id: String,
+        app_id: String,
+        account_version: i64,
+        intent_id: String,
+        intent_version: i64,
+        intent_app_id: String,
+        credential_ref: String,
+        open_aggregate_id: String,
+        finalized_aggregate_id: String,
+        notification_delivery_id: String,
+        pending_binding_id: String,
+        claimed_delivery_id: String,
+        worker_id: String,
+        agent_run_id: String,
+        console_message_id: String,
+    }
+
+    // One connected account, one published Bot with an executing DM run, one
+    // open aggregate, one pending group binding with a claimed picker delivery,
+    // one credential and one developer session, all owned by the provider's Host.
+    fn provider_world<const LARK: bool>(
+        database: &mut Database,
+        quick_chat_path: &std::path::Path,
+    ) -> ProviderWorld {
+        let spec: &'static ChannelProviderSpec = if LARK { &LARK_SPEC } else { &FEISHU_SPEC };
+        let provider = spec.provider;
+        let service = ChannelService::for_spec(spec);
+        let shared = ChannelService::default();
+        let applied = |execution: CommandExecution, what: &str| {
+            assert_ne!(
+                execution.result.status,
+                CommandResultStatus::Rejected,
+                "{provider} {what}: {:?}",
+                execution.result
+            );
+            execution.result.payload
+        };
+        let app_id = format!("cli_{provider}_1");
+        let account_id = format!("{provider}-account");
+        applied(
+            service
+                .commit_feishu_account_connection(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "commit",
+                        CommitChannelAccountConnectionCommand::<LARK> {
+                            expected_previous_account_version: None,
+                            account: connection_account(provider, &account_id),
+                            developer_session: ChannelDeveloperSessionInput {
+                                identity: developer_identity(provider),
+                                session: json!({ "cookies": [] }),
+                            },
+                        },
+                    ),
+                )
+                .unwrap(),
+            "commit",
+        );
+        let credential_ref = format!("{provider}/member/agent_1");
+        let intent = |agent_id: &str| format!("intent-{provider}-{agent_id}");
+        let advance = |database: &mut Database,
+                       intent_id: &str,
+                       version: i64,
+                       state: &str,
+                       remote_app_id: &str,
+                       credential_ref: Option<&str>| {
+            service
+                .advance_member_bot_publication_intent(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        &format!("{intent_id}-{state}"),
+                        AdvanceChannelMemberBotPublicationIntentCommand::<LARK> {
+                            publication_intent_id: intent_id.to_string(),
+                            expected_version: version,
+                            state: state.to_string(),
+                            remote_app_id: (state != "session_verified")
+                                .then(|| remote_app_id.to_string()),
+                            credential_ref: credential_ref.map(ToString::to_string),
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap()
+        };
+        let create_intent = |database: &mut Database, agent_id: &str| {
+            service
+                .create_member_bot_publication_intent(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        &format!("create-{agent_id}"),
+                        CreateChannelMemberBotPublicationIntentCommand::<LARK> {
+                            publication_intent_id: intent(agent_id),
+                            account_id: account_id.clone(),
+                            agent_id: agent_id.to_string(),
+                            expected_user_id_digest: provider_owner_digest(provider),
+                            expected_tenant_id: "tenant_1".to_string(),
+                            requested_app_name: agent_id.to_string(),
+                            provisioning_mode: "developer_session".to_string(),
+                        },
+                    ),
+                )
+                .unwrap()
+        };
+        applied(create_intent(database, "agent_1"), "create intent");
+        for (version, state) in [
+            (1, "session_verified"),
+            (2, "app_created"),
+            (3, "credentials_read"),
+            (4, "bot_configured"),
+            (5, "version_published"),
+        ] {
+            let reference = (version >= 3).then_some(credential_ref.as_str());
+            applied(
+                advance(
+                    database,
+                    &intent("agent_1"),
+                    version,
+                    state,
+                    &app_id,
+                    reference,
+                ),
+                state,
+            );
+        }
+        applied(
+            service
+                .upsert_feishu_member_bot(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "publish",
+                        UpsertChannelMemberBotCommand::<LARK> {
+                            account_id: account_id.clone(),
+                            agent_id: "agent_1".to_string(),
+                            app_id: app_id.clone(),
+                            owner_open_id: "ou_user".to_string(),
+                            bot_open_id: Some(format!("ou_bot_{provider}")),
+                            bot_display_name: "agent_1".to_string(),
+                            credential_ref: credential_ref.clone(),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "publish",
+        );
+        for (version, state) in [(6, "connection_verified"), (7, "completed")] {
+            applied(
+                advance(
+                    database,
+                    &intent("agent_1"),
+                    version,
+                    state,
+                    &app_id,
+                    Some(&credential_ref),
+                ),
+                state,
+            );
+        }
+        // A second, unfinished publication holds the frozen credential.
+        let intent_app_id = format!("cli_{provider}_2");
+        let stored_credential_ref = format!("{provider}-member-agent-2");
+        applied(create_intent(database, "agent_2"), "create second intent");
+        for (version, state) in [(1, "session_verified"), (2, "app_created")] {
+            applied(
+                advance(
+                    database,
+                    &intent("agent_2"),
+                    version,
+                    state,
+                    &intent_app_id,
+                    None,
+                ),
+                state,
+            );
+        }
+        applied(
+            shared
+                .store_publication_credential(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "store-credential",
+                        StorePublicationCredentialCommand {
+                            provider: provider.to_string(),
+                            publication_intent_id: intent("agent_2"),
+                            expected_intent_version: 3,
+                            credential_ref: stored_credential_ref.clone(),
+                            remote_app_id: intent_app_id.clone(),
+                            credential: json!({ "appSecret": "fixture-secret" }),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "store credential",
+        );
+        applied(
+            service
+                .verify_feishu_owner(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "verify-owner",
+                        VerifyChannelOwnerCommand::<LARK> {
+                            provider: provider.to_string(),
+                            app_id: app_id.clone(),
+                            tenant_key: "tenant_1".to_string(),
+                            sender_open_id: Some("ou_user".to_string()),
+                            sender_user_id: Some("user_1".to_string()),
+                            sender_union_id: Some("union_user".to_string()),
+                            sender_display_name: "Owner".to_string(),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "verify owner",
+        );
+        let dm_chat = format!("oc_{provider}_dm");
+        applied(
+            shared
+                .start_new_feishu_dm(
+                    database,
+                    quick_chat_path,
+                    &host_envelope_for(
+                        spec,
+                        "start-dm",
+                        StartNewFeishuDmCommand {
+                            provider: provider.to_string(),
+                            app_id: app_id.clone(),
+                            tenant_key: "tenant_1".to_string(),
+                            chat_id: dm_chat.clone(),
+                            conversation_display_name: "Owner 私聊".to_string(),
+                            target_agent_id: "agent_1".to_string(),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "start dm",
+        );
+        let observe = |database: &mut Database, id: &str, chat: &str, kind: &str| {
+            let mut command = observation_command(
+                &app_id,
+                &format!("om_{provider}_{id}"),
+                chat,
+                "",
+                kind,
+                "检查登录流程",
+                &[("agent_1", app_id.as_str())],
+                true,
+            );
+            command.provider = provider.to_string();
+            applied(
+                shared
+                    .observe_inbound(
+                        database,
+                        &host_envelope_for(spec, &format!("observe-{id}"), command),
+                    )
+                    .unwrap(),
+                "observe",
+            )["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let finalize = |database: &mut Database, id: &str, aggregate_id: String| {
+            applied(
+                shared
+                    .finalize_inbound(
+                        database,
+                        quick_chat_path,
+                        &host_envelope_for(
+                            spec,
+                            &format!("finalize-{id}"),
+                            FinalizeChannelInboundCommand { aggregate_id },
+                        ),
+                    )
+                    .unwrap(),
+                "finalize",
+            )
+        };
+        let finalized_aggregate_id = observe(database, "dm", &dm_chat, "p2p");
+        finalize(database, "dm", finalized_aggregate_id.clone());
+        assert_eq!(claim_waiting_runs(database).len(), 1);
+        let worker_id = format!("{provider}-worker");
+        let tick = |database: &mut Database| {
+            serde_json::to_value(
+                shared
+                    .host_tick(
+                        database,
+                        &ActorRef::System {
+                            component_id: spec.host_component.to_string(),
+                        },
+                        &ChannelHostTickRequest {
+                            worker_id: worker_id.clone(),
+                            limit: 20,
+                        },
+                    )
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let console = tick(database)["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|delivery| delivery["deliveryKind"] == "execution_console_upsert")
+            .unwrap()
+            .clone();
+        let console_message_id = format!("om_{provider}_console");
+        applied(
+            shared
+                .settle_delivery(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "settle-console",
+                        SettleChannelDeliveryCommand {
+                            delivery_id: console["deliveryId"].as_str().unwrap().to_string(),
+                            worker_id: worker_id.clone(),
+                            outcome: "sent".to_string(),
+                            external_delivery_message_id: Some(console_message_id.clone()),
+                            external_update_message_id: Some(console_message_id.clone()),
+                            failure_code: None,
+                            retryable: false,
+                        },
+                    ),
+                )
+                .unwrap(),
+            "settle console",
+        );
+        let group_chat = format!("oc_{provider}_group");
+        applied(
+            shared
+                .reconcile_feishu_group_roster(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "roster",
+                        ReconcileFeishuGroupRosterCommand {
+                            provider: provider.to_string(),
+                            tenant_key: "tenant_1".to_string(),
+                            chat_id: group_chat.clone(),
+                            present_app_ids: vec![app_id.clone()],
+                        },
+                    ),
+                )
+                .unwrap(),
+            "roster",
+        );
+        let aggregate_id = observe(database, "group", &group_chat, "group");
+        let pending = finalize(database, "group", aggregate_id);
+        let pending_binding_id = pending["pendingBindingId"].as_str().unwrap().to_string();
+        let claimed_delivery_id = tick(database)["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|delivery| delivery["deliveryKind"] == "project_selection")
+            .unwrap()["deliveryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let open_aggregate_id = observe(database, "open", &dm_chat, "p2p");
+        let notification_delivery_id = format!("{provider}-notification");
+        database
+            .connection()
+            .execute_batch(&format!(
+                r#"
+                INSERT INTO automation_run(
+                    id, automation_id, automation_version, trigger_kind, scheduled_for,
+                    status, reason, prompt, member_id, project_ref_json,
+                    notify_channels_json, timeout_at, created_at, started_at, ended_at,
+                    updated_at
+                ) VALUES (
+                    '{provider}-run', '{provider}-automation', 1, 'manual', 'scheduled',
+                    'failed', 'timeout', 'Report', 'agent_1', '{{"kind":"quick_chat"}}',
+                    '["{provider}"]', NULL, 'created', 'started', 'ended', 'updated'
+                );
+                INSERT INTO automation_notification_delivery(
+                    id, automation_run_id, provider, member_id, payload_json, status,
+                    available_at, created_at, updated_at
+                ) VALUES (
+                    '{notification_delivery_id}', '{provider}-run', '{provider}', 'agent_1',
+                    '{{}}', 'pending', 'available', 'created', 'updated'
+                );
+                "#
+            ))
+            .unwrap();
+        ProviderWorld {
+            spec,
+            account_id,
+            account_version: service.snapshot(database).unwrap().account.unwrap().version,
+            app_id,
+            intent_id: intent("agent_2"),
+            intent_version: 4,
+            intent_app_id,
+            credential_ref: stored_credential_ref,
+            open_aggregate_id,
+            finalized_aggregate_id,
+            notification_delivery_id,
+            pending_binding_id,
+            claimed_delivery_id,
+            worker_id,
+            agent_run_id: console["payload"]["agentRunId"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            console_message_id,
+        }
+    }
+
+    fn connection_account(provider: &str, account_id: &str) -> FeishuConnectionAccountInput {
+        FeishuConnectionAccountInput {
+            account_id: account_id.to_string(),
+            user_id_digest: provider_owner_digest(provider),
+            tenant_id: "tenant_1".to_string(),
+            user_name: "Owner".to_string(),
+            email: None,
+            tenant_name: "Tenant".to_string(),
+            brand: provider.to_string(),
+        }
+    }
+
+    fn provider_owner_digest(provider: &str) -> String {
+        opaque_digest(&format!("{provider}-user"), "user_1")
+    }
+
+    fn developer_identity(provider: &str) -> Value {
+        json!({
+            "brand": provider, "userId": "user_1", "userName": "Owner",
+            "tenantId": "tenant_1", "tenantName": "Tenant"
+        })
+    }
+
+    // Every table except the event log and its sequence counter, which carry
+    // the one permitted rejection receipt.
+    fn database_facts(database: &Database) -> Vec<(String, Vec<String>)> {
+        let connection = database.connection();
+        let tables = connection
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' \
+                 AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event_log', 'event_sequence') \
+                 ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        tables
+            .into_iter()
+            .map(|table| {
+                let mut rows = connection
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
+                    .unwrap()
+                    .query_map([], |row| {
+                        (0..row.as_ref().column_count())
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                            .map(|values| format!("{values:?}"))
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                rows.sort();
+                (table, rows)
+            })
+            .collect()
+    }
+
+    fn assert_rejected_without_side_effects(
+        database: &mut Database,
+        command_id: &str,
+        expected_code: &str,
+        run: impl Fn(&mut Database) -> CommandExecution,
+    ) {
+        let non_result_events = |database: &Database| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM event_log WHERE event_type <> 'command.result'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let receipts = |database: &Database| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM event_log \
+                     WHERE event_type = 'command.result' AND command_id = ?1",
+                    [command_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let facts = database_facts(database);
+        let events = non_result_events(database);
+        let first = run(database);
+        assert_eq!(
+            (first.result.status, first.result.code.as_str()),
+            (CommandResultStatus::Rejected, expected_code),
+            "{command_id}"
+        );
+        let replay = run(database);
+        assert_eq!(replay.result, first.result, "{command_id}");
+        assert_eq!(receipts(database), 1, "{command_id}");
+        assert_eq!(non_result_events(database), events, "{command_id}");
+        let changed = database_facts(database)
+            .into_iter()
+            .zip(facts)
+            .filter(|(after, before)| after != before)
+            .map(|(after, before)| (after.0, before.1, after.1))
+            .collect::<Vec<_>>();
+        assert!(
+            changed.is_empty(),
+            "{command_id} changed business facts: {changed:#?}"
+        );
+    }
+
+    #[test]
     fn host_ticks_are_ephemeral_and_reject_untrusted_or_invalid_requests() {
         // This owner exercises the public maintenance interface against SQLite:
         // repeated polls must not grow either command receipts or domain events.
@@ -12648,6 +14468,7 @@ mod tests {
         let writes_before = database.connection().total_changes();
         for component in [
             FEISHU_CHANNEL_HOST_COMPONENT,
+            LARK_SPEC.host_component,
             DINGTALK_CHANNEL_HOST_COMPONENT,
         ] {
             let actor = ActorRef::System {
@@ -13176,12 +14997,24 @@ mod tests {
             branded_identity["brand"] = json!(brand);
             let mut branded_session = session.clone();
             branded_session["portalOrigin"] = json!(origin);
-            validate_developer_session_documents(
-                FEISHU_PROVIDER,
-                &branded_identity,
-                &branded_session,
-            )
-            .unwrap();
+            if brand == LARK_PROVIDER {
+                branded_session["cookies"][0]["domain"] = json!(".larksuite.com");
+            }
+            validate_developer_session_documents(brand, &branded_identity, &branded_session)
+                .unwrap();
+            let other_provider = if brand == LARK_PROVIDER {
+                FEISHU_PROVIDER
+            } else {
+                LARK_PROVIDER
+            };
+            assert!(
+                validate_developer_session_documents(
+                    other_provider,
+                    &branded_identity,
+                    &branded_session,
+                )
+                .is_err()
+            );
         }
         let mut legacy_session = session.clone();
         legacy_session
@@ -14591,6 +16424,9 @@ mod tests {
                                         | "operation_policy_version"
                                         | "destination_conversation_id"
                                 ))
+                            // v169 deletion state is absent from this v132 source fixture;
+                            // its defaults and preservation belong to the v169 migration owner.
+                            && !(table == "camp" && matches!(column.as_str(), "deletion_operation_id" | "deletion_requested_at" | "deletion_attempt_count" | "deletion_next_attempt_at" | "deletion_last_error_code" | "deletion_attention_required" | "deletion_attention_revision"))
                             && column != "workspace_preparing_at"
                             && column != "automation_run_id"
                             && column != "quotes_json"

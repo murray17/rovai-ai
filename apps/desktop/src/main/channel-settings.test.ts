@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createLarkChannel,
+  Domain,
   LarkChannelError,
   LoggerLevel
 } from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentRunExecutionEvidenceView } from '@contracts'
+import { FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE } from './channel-provider-profile'
 import {
   ChannelSettingsService,
   feishuMemberBotWelcomeCard,
@@ -54,7 +56,8 @@ function consoleCommandEvidence(agentRunId: string): AgentRunExecutionEvidenceVi
 }
 
 function memoryCredentialStore(
-  initial: Record<string, FeishuAppCredential> = {}
+  initial: Record<string, FeishuAppCredential> = {},
+  providerOf: (credentialRef: string) => 'feishu' | 'lark' = () => 'feishu'
 ): ChannelCredentialStore & { values: Map<string, FeishuAppCredential> } {
   const values = new Map(Object.entries(initial))
   const store = {
@@ -72,7 +75,7 @@ function memoryCredentialStore(
       return [...values].map(([credentialRef, credential]) => ({
         agentId: credentialRef,
         credentialRef,
-        provider: 'feishu' as const,
+        provider: providerOf(credentialRef),
         remoteAppId: credential.appId,
         credential,
         revision: 1
@@ -374,6 +377,120 @@ describe('channel settings service', () => {
     }
   })
 
+  it.each([
+    ['Feishu', FEISHU_PROVIDER_PROFILE, Domain.Feishu],
+    ['Lark', LARK_PROVIDER_PROFILE, Domain.Lark]
+  ] as const)('%s starts only its own published Bots with its explicit SDK domain and Core requests', async (_name, profile, domain) => {
+    const other = profile.kind === 'feishu' ? 'lark' : 'feishu'
+    const created = fakeCreateChannel()
+    // Constructing a Bot channel without a domain would silently use the SDK default.
+    const createChannel = vi.fn((options: Parameters<typeof created>[0]) => {
+      if (options.domain === undefined) throw new Error('sdk_domain_missing')
+      return created(options)
+    }) as unknown as typeof created
+    expect(() => createChannel({ appId: 'cli_x', appSecret: 'fixture' })).toThrow('sdk_domain_missing')
+    const methods: string[] = []
+    const account = connectedAccount(identity({ brand: profile.kind }))
+    const service = new ChannelSettingsService({
+      ...inertInterval(),
+      profile,
+      developerSession: developerSession(identity({ brand: profile.kind })),
+      credentialStore: memoryCredentialStore({
+        [`${profile.kind}-member-a`]: { appId: 'cli_own', appSecret: 'fixture-secret' },
+        [`${other}-member-a`]: { appId: 'cli_other', appSecret: 'fixture-secret' }
+      }, (credentialRef) => credentialRef.startsWith('lark-') ? 'lark' : 'feishu'),
+      createChannel,
+      core: channelCore((method) => {
+        methods.push(method)
+        if (method === `channels.${profile.kind}.snapshot`) return coreSnapshot({
+          account,
+          memberBots: [{
+            agentId: 'agent-a', accountId: account.accountId,
+            brand: profile.kind, appId: 'cli_own', botDisplayName: '审阅员',
+            credentialRef: `${profile.kind}-member-a`, status: 'published', failureCode: null,
+            version: 1, ownerIdentityStatus: 'verified'
+          }]
+        })
+        if (method.startsWith('channels.feishu.') || method.startsWith('channels.lark.')) {
+          throw new Error(`unexpected ${method}`)
+        }
+        return { status: 'applied', payload: { deliveries: [] } }
+      })
+    })
+    try {
+      await service.start()
+      expect(createChannel).toHaveBeenCalledTimes(2)
+      expect(created).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ appId: 'cli_own', domain }))
+      expect(methods.filter((method) => method.startsWith(`channels.${other}.`))).toEqual([])
+      expect((await service.get()).channels[0]).toMatchObject({ kind: profile.kind, displayName: profile.displayName })
+    } finally {
+      await service.stop()
+    }
+  })
+
+  it('expires a legacy brand=lark Feishu account and does not start its Bots', async () => {
+    const createChannel = fakeCreateChannel()
+    const legacy = connectedAccount(identity({ brand: 'lark' }))
+    let account: Record<string, unknown> = legacy
+    const commands: Array<[string, unknown]> = []
+    const service = new ChannelSettingsService({
+      ...inertInterval(),
+      developerSession: developerSession(),
+      credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'fixture-secret' } }),
+      createChannel,
+      core: channelCore((method, params) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({
+          account,
+          memberBots: [{
+            agentId: 'agent-a', accountId: legacy.accountId,
+            brand: 'lark', appId: 'cli_a', botDisplayName: '审阅员',
+            credentialRef: 'feishu-member-a', status: 'published', failureCode: null,
+            version: 1, ownerIdentityStatus: 'verified'
+          }]
+        })
+        commands.push([method, params])
+        if (method === 'channels.feishu.account.expire') account = { ...legacy, status: 'session_expired' }
+        return { status: 'applied', payload: { deliveries: [] } }
+      })
+    })
+    try {
+      await service.start()
+      expect(commands.filter(([method]) => method === 'channels.feishu.account.expire')).toEqual([[
+        'channels.feishu.account.expire',
+        expect.objectContaining({ command: { accountId: legacy.accountId, expectedVersion: 1 } })
+      ]])
+      expect(createChannel).not.toHaveBeenCalled()
+      const provider = (await service.get()).channels[0]
+      expect(provider.connection.status).toBe('session_expired')
+      expect(provider.memberBots[0]).toMatchObject({ agentId: 'agent-a', failureCode: 'feishu_brand_moved_to_lark' })
+    } finally {
+      await service.stop()
+    }
+  })
+
+  it('presents shared failures under the Lark name without changing Feishu copy', async () => {
+    const snapshot = coreSnapshot({
+      memberBots: [{
+        agentId: 'agent-a', accountId: 'account', brand: 'lark', appId: 'cli_a', botDisplayName: '审阅员',
+        credentialRef: 'lark-member-a', status: 'disabled', failureCode: 'feishu_connection_error',
+        version: 1, ownerIdentityStatus: 'verified'
+      }]
+    })
+    const lark = new ChannelSettingsService({
+      profile: LARK_PROVIDER_PROFILE,
+      credentialStore: memoryCredentialStore(),
+      core: channelCore(() => snapshot)
+    })
+    const feishu = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      core: channelCore(() => snapshot)
+    })
+    await expect(lark.publishMemberBot('agent-b')).rejects.toThrow(/^Lark 登录已过期，请先重新连接账号。$/)
+    await expect(feishu.publishMemberBot('agent-b')).rejects.toThrow(/^飞书登录已过期，请先重新连接账号。$/)
+    expect((await lark.get()).channels[0].memberBots[0]?.failureCode).toBe('lark_connection_error')
+    expect((await feishu.get()).channels[0].memberBots[0]?.failureCode).toBe('feishu_connection_error')
+  })
+
   it.each(['expired', 'identity_changed'] as const)(
     'expires the account only after a conclusive background inspection: %s',
     async (reason) => {
@@ -598,10 +715,12 @@ describe('channel settings service', () => {
     expect(serialized).not.toMatch(/credentialRef|ownerIdentityStatus|super-secret|tenant-private|chat-private|aggregate-private/)
   })
 
-  it('projects the bound account brand into the exact Lark app management page', async () => {
+  it('projects a Lark instance bot into the exact Lark app management page', async () => {
+    const methods: string[] = []
     const service = new ChannelSettingsService({
+      profile: LARK_PROVIDER_PROFILE,
       credentialStore: memoryCredentialStore(),
-      core: channelCore(() => coreSnapshot({
+      core: channelCore((method) => { methods.push(method); return coreSnapshot({
         memberBots: [{
           agentId: 'agent-a',
           accountId: 'account-lark',
@@ -623,12 +742,14 @@ describe('channel settings service', () => {
           failureCode: null,
           version: 1
         }]
-      }))
+      }) })
     })
 
-    expect((await service.get()).channels[0].memberBots[0]?.managementUrl)
-      .toBe('https://open.larksuite.com/app/cli_lark_agent/baseinfo')
-    expect((await service.get()).channels[0].memberBots[1]?.managementUrl).toBeNull()
+    const provider = (await service.get()).channels[0]
+    expect(provider).toMatchObject({ kind: 'lark', displayName: 'Lark' })
+    expect(provider.memberBots[0]?.managementUrl).toBe('https://open.larksuite.com/app/cli_lark_agent/baseinfo')
+    expect(provider.memberBots[1]?.managementUrl).toBeNull()
+    expect(new Set(methods)).toEqual(new Set(['channels.lark.snapshot']))
   })
 
   it('connects a real developer identity without registering an app or storing a controller secret', async () => {
@@ -680,6 +801,42 @@ describe('channel settings service', () => {
     expect(JSON.stringify(commit)).toContain('owner-user-id')
     expect(JSON.stringify(commit)).toContain('tenant-1')
     expect(JSON.stringify(commit)).not.toMatch(/appSecret|client_secret|controller/i)
+  })
+
+  it.each([
+    ['feishu', FEISHU_PROVIDER_PROFILE],
+    ['lark', LARK_PROVIDER_PROFILE]
+  ] as const)('commits a %s connection with the user digest namespace Core verifies', async (kind, profile) => {
+    // Core rejects the commit unless userIdDigest = sha256("<provider>-user\0userId").
+    const owner = identity({ brand: kind })
+    const commands: Array<{ method: string; params: unknown }> = []
+    const service = new ChannelSettingsService({
+      profile,
+      credentialStore: memoryCredentialStore(),
+      developerSession: {
+        beginLogin: async () => owner,
+        pendingConnection: () => ({ identity: owner, session: { cookies: [] } }),
+        async activatePendingLogin() {},
+        async discardPendingLogin() { return null },
+        async inspect() { return { status: 'invalid', reason: 'missing' } },
+        async requireExpectedIdentity() { throw new Error('not_used') },
+        async disconnect() {}
+      },
+      core: channelCore((method, params) => {
+        commands.push({ method, params })
+        if (method === `channels.${kind}.account.commitConnection`) {
+          return { status: 'applied', payload: { sessionRevision: 1 } }
+        }
+        return coreSnapshot()
+      })
+    })
+
+    await service.connect()
+
+    const commit = commands.find((entry) => entry.method === `channels.${kind}.account.commitConnection`)
+    const account = (commit?.params as { command: { account: Record<string, unknown> } }).command.account
+    const digest = (input: string): string => `sha256:${createHash('sha256').update(input).digest('hex')}`
+    expect(account).toMatchObject({ brand: kind, userIdDigest: digest(`${kind}-user\0owner-user-id`) })
   })
 
   it('uses only the developer session for publishing', async () => {

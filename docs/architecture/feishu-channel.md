@@ -3,12 +3,12 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-18
+last_updated: 2026-09-24
 ---
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v16](../contracts/feishu-channel-v16.md)，当前异步入站/外发语义见
+字段、状态和恢复合同见 [Feishu Channel v17](../contracts/feishu-channel-v17.md)，当前异步入站/外发语义见
 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v27](../contracts/context-manifest-evidence-v27.md)，取舍理由见
@@ -56,9 +56,9 @@ Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事�
 
 “连接飞书账号”在一次性 Electron Session 中经独立协议适配器请求初始化与串行状态轮询，本地生成二维码，
 完成可信跨域交接后从开放平台 HTTP HTML 被动解析
-`userId + userName + tenantId + tenantName + brand` 与 CSRF，并收集受限飞书/Lark 域 Cookie。
+`userId + userName + tenantId + tenantName + brand` 与 CSRF，并收集受限飞书域 Cookie。
 正常登录、恢复与管理前检查均不创建 BrowserWindow，不执行远端脚本，不观察画布、图片变化或页面文字。
-身份字段共享归一化器，优先级、必需字段和别名由 [Feishu Channel v16](../contracts/feishu-channel-v16.md) 拥有。它不创建 App、不产生 App
+身份字段共享归一化器，优先级、必需字段和别名由 [Feishu Channel v16](../contracts/feishu-channel-v16.md) 拥有，品牌与可信域由 v17 收窄。它不创建 App、不产生 App
 ID/Secret，也不启动 Bot。身份与 Cookie 在登录期间只留在临时 Session；Main 随后调用
 `channels.feishu.account.commitConnection`，由 Core 在一个 SQLite 事务中同时写入 connected account 与
 `channel_developer_sessions`。缺少任一身份字段、identity mismatch、previous account version conflict 或 SQLite 失败都不能
@@ -77,8 +77,8 @@ Developer Session revision CAS 保存远端刷新；断开/过期在 Core 同一
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
 `userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 通过统一 Session HTTP 层请求开放平台 HTML，
 只在 Main 中被动提取 `csrfToken + apiOrigin`；后续请求使用该 Session 的 Chromium 网络栈和 Cookie policy，不组装、记录或
-返回 Cookie header。`apiOrigin` 取每跳校验后的最终可信站点，支持 `open.feishu.cn`、`open.larkoffice.com`（均为 Feishu）和
-`open.larksuite.com`（Lark）；保存 origin 并在恢复与 API 中复用，不按名称包含 lark 判断品牌。API
+返回 Cookie header。`apiOrigin` 取每跳校验后的最终可信站点，支持 `open.feishu.cn` 与 `open.larkoffice.com`，两者均为飞书；`open.larksuite.com` 属于独立的
+[Lark 渠道](lark-channel.md)，在飞书 Host 中按不可信站点拒绝。保存 origin 并在恢复与 API 中复用，不按名称包含 lark 判断品牌。API
 路径只允许 `/developers/`，相似域、跨源 URL 和身份漂移均在创建前拒绝。
 
 HTTP 层统一拥有手动重定向、显式 finalUrl、Session Cookie policy、正文读取上限与单请求期限；登录上下文另外拥有
@@ -114,7 +114,7 @@ WebSocket handshake 的阶段与总耗时；日志只含白名单分类和 App d
 Core 写路径只更新连接回读、显示字段和 lifecycle status，不更新 App、账号或 credential identity，也不存在换绑命令。
 
 Rovai 不提供 Bot 管理、停用、关闭、删除或换绑命令。已发布行只提供官方开放平台应用详情入口；远端应用的停用、
-删除和其他治理由 Owner 在飞书/Lark 开放平台完成。历史数据库中的 `disabled` 仅作为历史读取状态保留：Owner 连接原开发者
+删除和其他治理由 Owner 在飞书开放平台完成。历史数据库中的 `disabled` 仅作为历史读取状态保留：Owner 连接原开发者
 账号后，可以把同一 completed intent 重新推进到 `session_verified`，由 console reconciliation 核对原 App、重读
 Secret、配置并验证后回到 `completed`；状态机中的 `app_created` 在这条路径表示原 App 已确认。新 intent 和第二次
 create App 均不可用于恢复。发布状态为 `published` 时再次调用普通 publish 直接拒绝；凭据丢失的显式 retry 也只核对

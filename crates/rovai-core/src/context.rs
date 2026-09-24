@@ -13815,6 +13815,8 @@ mod slow_tests {
             ("feishu", "project", "closed", false),
             ("dingtalk", "quick_chat", "active", false),
             ("dingtalk", "project", "active", false),
+            ("lark", "quick_chat", "active", false),
+            ("lark", "project", "active", false),
         ] {
             fixture
                 .database
@@ -13845,6 +13847,16 @@ mod slow_tests {
                 expected,
                 "{provider}/{scope}/{status}"
             );
+            if provider == "lark" {
+                let guidance =
+                    camp_has_active_feishu_binding(fixture.database.connection(), &fixture.camp_id)
+                        .unwrap();
+                assert!(
+                    !build_session_charter(&snapshot, guidance, false)
+                        .unwrap()
+                        .contains(FEISHU_FILE_DELIVERY_GUIDANCE)
+                );
+            }
         }
         fixture
             .database

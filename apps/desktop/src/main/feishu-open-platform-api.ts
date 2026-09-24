@@ -1174,7 +1174,7 @@ export class OpenPlatformApiClient {
     if (isRedirectStatus(response.status)) {
       const location = response.headers.get('location')
       const target = redirectTarget(location, url)
-      if (!target || isFeishuLoginUrl(target.href)) {
+      if (!target || isFeishuLoginUrl(target.href, this.#session.domains)) {
         throw apiError('feishu_developer_session_expired', false)
       }
       if (

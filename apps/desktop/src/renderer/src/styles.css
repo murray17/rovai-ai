@@ -5567,6 +5567,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-mark { --channel-accent: var(--channel-feishu); display: inline-grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid color-mix(in srgb, var(--channel-accent) 24%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--channel-accent) 6%, var(--surface-raised)); }
 .channel-mark-dingtalk { --channel-accent: var(--channel-dingtalk); }
 .channel-mark img { display: block; width: 21px; height: 21px; object-fit: contain; }
+.channel-qualification-note { margin: 8px 0 0 40px; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
 .channel-connection-row { display: grid; min-height: 68px; grid-template-columns: 30px minmax(128px, .7fr) minmax(220px, 1.35fr) auto; gap: 12px; align-items: center; padding: 10px 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .channel-connection-label,
 .channel-account-summary > span:last-child { display: grid; min-width: 0; gap: 3px; }

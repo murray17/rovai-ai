@@ -24,13 +24,67 @@ import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { ChannelLoginViewport } from './ChannelLoginViewport'
 import { memberBotAppDescription } from '../../shared/channel-member-bot-copy'
-import feishuLogo from './assets/channel-logos/feishu.svg'
-import dingtalkLogo from './assets/channel-logos/dingtalk.svg'
+import { CHANNEL_PROVIDER_BRANDS, channelCopy, type ChannelProviderBrand } from './channel-provider-brand'
+
+interface ChannelProviderPresentation extends ChannelProviderBrand {
+  connectLabel: string
+  qrDialogClassName: string
+  supportsNativeLoginInteraction: boolean
+  approverSelectionFailureCode: string | null
+  qualificationNote: string | null
+}
+
+const CHANNEL_PROVIDER_PRESENTATIONS = {
+  feishu: {
+    ...CHANNEL_PROVIDER_BRANDS.feishu,
+    connectLabel: '登录开放平台',
+    qrDialogClassName: '',
+    supportsNativeLoginInteraction: false,
+    approverSelectionFailureCode: null,
+    qualificationNote: null
+  },
+  lark: {
+    ...CHANNEL_PROVIDER_BRANDS.lark,
+    connectLabel: '登录开放平台',
+    qrDialogClassName: '',
+    supportsNativeLoginInteraction: false,
+    approverSelectionFailureCode: null,
+    qualificationNote: 'Lark 支持尚未完成真实租户验收'
+  },
+  dingtalk: {
+    ...CHANNEL_PROVIDER_BRANDS.dingtalk,
+    connectLabel: '连接钉钉',
+    qrDialogClassName: ' is-dingtalk',
+    supportsNativeLoginInteraction: true,
+    approverSelectionFailureCode: 'dingtalk_approver_selection_required',
+    qualificationNote: null
+  }
+} satisfies Record<ChannelKind, ChannelProviderPresentation>
+
+function channelProviderPresentation(kind: ChannelKind): ChannelProviderPresentation {
+  return CHANNEL_PROVIDER_PRESENTATIONS[kind]
+}
 
 export function visibleChannelMembers(agents: readonly AgentProfile[]): AgentProfile[] {
   return agents
     .filter((agent) => agent.presence === 'present')
     .sort((left, right) => left.memberOrder - right.memberOrder || left.agentId.localeCompare(right.agentId))
+}
+
+export interface ChannelActionError {
+  kind: ChannelKind
+  message: string
+}
+
+// Action failures belong to the provider that raised them; switching tabs must
+// not show one provider's failure on another provider's page.
+export function channelActionErrorFor(error: ChannelActionError | null, kind: ChannelKind): string | null {
+  return error?.kind === kind ? error.message : null
+}
+
+function channelActionError(kind: ChannelKind, error: unknown): ChannelActionError | null {
+  const message = channelErrorMessage(error)
+  return message ? { kind, message } : null
 }
 
 function channelProvisioning(snapshot: ChannelSettingsSnapshot | null, kind: ChannelKind): MemberBotProvisioningView | null {
@@ -51,7 +105,7 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
 function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; channels: NonNullable<CampClient['channels']> }): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<ChannelSettingsSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ChannelActionError | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [selectedKind, setSelectedKind] = useState<ChannelKind>('feishu')
@@ -97,6 +151,7 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
 
   const run = useCallback(async (
     key: string,
+    kind: ChannelKind,
     action: () => Promise<ChannelSettingsSnapshot>
   ): Promise<ChannelSettingsSnapshot | null> => {
     if (busy) return null
@@ -109,28 +164,28 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
       return next
     } catch (nextError) {
       if (!mounted.current) return null
-      setError(channelErrorMessage(nextError))
+      setError(channelActionError(kind, nextError))
       return null
     } finally {
       if (mounted.current) setBusy(null)
     }
   }, [busy])
 
-  const cancelQrAttempt = useCallback(async (attemptId: string): Promise<void> => {
+  const cancelQrAttempt = useCallback(async (attemptId: string, kind: ChannelKind): Promise<void> => {
     setError(null)
     try {
       setSnapshot(assertChannelSettingsSnapshot(
         await channels.native!.cancelQrAttempt(attemptId)
       ))
     } catch (nextError) {
-      setError(channelErrorMessage(nextError))
+      setError(channelActionError(kind, nextError))
     }
   }, [channels])
 
-  const refreshLoginQr = useCallback(async (attemptId: string): Promise<void> => {
+  const refreshLoginQr = useCallback(async (attemptId: string, kind: ChannelKind): Promise<void> => {
     setError(null)
     try { await channels.native!.refreshLoginQr(attemptId) }
-    catch (nextError) { setError(channelErrorMessage(nextError)) }
+    catch (nextError) { setError(channelActionError(kind, nextError)) }
   }, [channels])
 
   const publishChannel = snapshot?.channels.find((candidate) => candidate.kind === publishKind) ?? null
@@ -144,16 +199,18 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
         snapshot={snapshot}
         loading={loading}
         busy={busy}
-        error={error ?? readError}
+        error={channelActionErrorFor(error, selectedKind) ?? readError}
         selectedKind={selectedKind}
         onSelectChannel={setSelectedKind}
         onRetry={() => void load()}
         onConnect={channels.native ? (provider) => void run(
           `connect:${provider.kind}`,
+          provider.kind,
           () => channels.native!.connect(provider.kind)
         ) : undefined}
         onDisconnect={channels.native ? (provider) => void run(
           `disconnect:${provider.kind}`,
+          provider.kind,
           () => channels.native!.disconnect(provider.kind)
         ) : undefined}
         onPublish={(provider, agent) => {
@@ -172,6 +229,7 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
           if (pending?.agentId === agent.agentId && pending.failureCode === 'dingtalk_approver_selection_required') return
           void run(
           `retry:${provider.kind}:${agent.agentId}`,
+          provider.kind,
           () => channels.retryMemberBot(agent.agentId, provider.kind)
         )
         }}
@@ -181,8 +239,8 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
         snapshot={snapshot}
         kind={selectedKind}
         busy={busy !== null}
-        onClose={(attemptId) => void cancelQrAttempt(attemptId)}
-        onRefresh={(attemptId) => void refreshLoginQr(attemptId)}
+        onClose={(attemptId) => void cancelQrAttempt(attemptId, selectedKind)}
+        onRefresh={(attemptId) => void refreshLoginQr(attemptId, selectedKind)}
       />}
 
       <PublishBotDialog
@@ -192,7 +250,7 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
         boundAppId={publishBoundAppId}
         provisioning={provisioning?.agentId === publishAgentId ? provisioning : null}
         busy={busy !== null}
-        error={error}
+        error={channelActionErrorFor(error, publishKind)}
         onClose={() => {
           setPublishAgentId(null)
           setPublishBoundAppId(null)
@@ -201,11 +259,12 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
           setPublishAgentId(null)
           setPublishBoundAppId(null)
           setSelectedKind(publishKind)
-          void run(`connect:${publishKind}`, () => channels.native!.connect(publishKind))
+          void run(`connect:${publishKind}`, publishKind, () => channels.native!.connect(publishKind))
         } : undefined}
         onPublish={(agentId) => {
           void run(
             `publish:${publishKind}:${agentId}`,
+            publishKind,
             () => channels.publishMemberBot(agentId, publishKind)
           ).then((next) => {
               if (
@@ -219,6 +278,7 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
         onSelectApprover={(agentId, userId) => {
           void run(
             `approve:${publishKind}:${agentId}`,
+            publishKind,
             () => channels.selectPublicationApprover(agentId, userId, publishKind)
           ).then((next) => {
             if (
@@ -277,7 +337,7 @@ export function ChannelSettingsView({
       <SettingsPageHeader
         eyebrow="Settings / Channels"
         title="渠道"
-        description={desktopManagedWeb ? '渠道由运行此服务的 Rovai Desktop 管理。连接、切换账号和重新登录，请在该电脑的桌面应用中完成；已有账号的 Bot 发布和重试可以在此操作。' : '连接飞书或钉钉，让队员在你常用的平台协作。'}
+        description={desktopManagedWeb ? '渠道由运行此服务的 Rovai Desktop 管理。连接、切换账号和重新登录，请在该电脑的桌面应用中完成；已有账号的 Bot 发布和重试可以在此操作。' : '连接飞书、Lark 或钉钉，让队员在你常用的平台协作。'}
         aside={<span className="settings-page-note">{desktopManagedWeb ? '宿主 Desktop 管理' : '本机管理'}</span>}
       />
 
@@ -336,7 +396,7 @@ export function ChannelSettingsView({
             <section className="channel-settings-section" aria-labelledby="channel-connection-heading">
               <ChannelSectionHeading
                 id="channel-connection-heading"
-                title={`${providerName}连接`}
+                title={channelCopy`${providerName}连接`}
                 description="连接后可发布队员 Bot。"
               />
               <ChannelConnectionRow
@@ -346,7 +406,12 @@ export function ChannelSettingsView({
                 onConnect={onConnect}
                 onDisconnect={onDisconnect}
               />
-              <details className="settings-disclosure channel-policy"><summary><OwnerShieldIcon /><span>连接与权限</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary><div><p>只有 Rovai Owner 可以从外部渠道触发队员；项目选择与执行管理仍由运行服务的 Desktop 掌控。</p><p>连接只决定后续 Bot 的发布目标，切换连接不会迁移或停用已发布 Bot。</p><p>账号会话和应用凭据保存在运行服务的 Desktop 所在设备。项目绝对路径不会发送到外部渠道。</p><p>{providerName}中的 Owner 消息不获得本机管理权限。</p></div></details>
+              {channelProviderPresentation(channel.kind).qualificationNote && (
+                <p className="channel-qualification-note">
+                  {channelProviderPresentation(channel.kind).qualificationNote}
+                </p>
+              )}
+              <details className="settings-disclosure channel-policy"><summary><OwnerShieldIcon /><span>连接与权限</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary><div><p>只有 Rovai Owner 可以从外部渠道触发队员；项目选择与执行管理仍由运行服务的 Desktop 掌控。</p><p>连接只决定后续 Bot 的发布目标，切换连接不会迁移或停用已发布 Bot。</p><p>账号会话和应用凭据保存在运行服务的 Desktop 所在设备。项目绝对路径不会发送到外部渠道。</p><p>{channelCopy`${providerName}中的 Owner 消息不获得本机管理权限。`}</p></div></details>
             </section>
 
             <section className="channel-settings-section" aria-labelledby="channel-member-bots-heading">
@@ -573,9 +638,10 @@ export function ChannelConnectionRow({
   const providerName = channel.displayName
   const connectBusy = busy === `connect:${channel.kind}`
   const disconnectBusy = busy === `disconnect:${channel.kind}`
+  const presentation = channelProviderPresentation(channel.kind)
   const connectLabel = !hostReady ? '尚未开放'
     : expired ? '重新连接'
-      : channel.kind === 'dingtalk' ? '连接钉钉' : '登录开放平台'
+      : presentation.connectLabel
 
   useEffect(() => {
     setMenuOpen(false)
@@ -585,17 +651,17 @@ export function ChannelConnectionRow({
     <div className="channel-connection-row" aria-busy={connectBusy || disconnectBusy}>
       <ChannelMark kind={channel.kind} />
       <div className="channel-connection-label">
-        <strong>{providerName}开放平台</strong>
+        <strong>{channelCopy`${providerName}开放平台`}</strong>
         <span>{hostReady
           ? '开发者账号会话 · 保存在 Rovai 本地数据库'
           : '渠道宿主尚未就绪'}</span>
       </div>
       {account ? (
         <div className="channel-account-summary">
-          <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.userName ?? `${providerName}用户`)}</span>
+          <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.userName ?? channelCopy`${providerName}用户`)}</span>
           <span>
             <span className="channel-account-heading">
-              <strong>{account.userName ?? `${providerName}用户`}</strong>
+              <strong>{account.userName ?? channelCopy`${providerName}用户`}</strong>
               <span className={`channel-connection-status${connected && channel.connection.sessionStatus === 'valid' ? ' is-connected' : ''}${expired ? ' is-expired' : ''}`} role="status">
                 {disconnectBusy ? '断开中…' : connected ? sessionLabel(channel) : expired ? '登录已失效' : '未连接'}
               </span>
@@ -606,7 +672,7 @@ export function ChannelConnectionRow({
       ) : (
         <span className="channel-account-empty">{!hostReady ? '连接能力尚未开放'
           : expired
-            ? '登录已失效，请重新连接' : `还没有连接${providerName}账号`}</span>
+            ? '登录已失效，请重新连接' : channelCopy`还没有连接${providerName}账号`}</span>
       )}
       {!remote && <div className="channel-connection-actions">
         {connected ? (
@@ -616,8 +682,8 @@ export function ChannelConnectionRow({
                 className="quiet-button compact channel-connection-trigger"
                 type="button"
                 disabled={menuDisabled}
-                title={!hostReady ? `${providerName}渠道宿主尚未接入` : undefined}
-                aria-label={`管理连接（${providerName}）`}
+                title={!hostReady ? channelCopy`${providerName}渠道宿主尚未接入` : undefined}
+                aria-label={channelCopy`管理连接（${providerName}）`}
               >
                 <span>管理连接</span>
                 <DialogControlIcon name="chevron" />
@@ -631,7 +697,7 @@ export function ChannelConnectionRow({
                 collisionPadding={12}
                 loop
                 onCloseAutoFocus={(event) => event.preventDefault()}
-                aria-label={`${providerName}连接操作`}
+                aria-label={channelCopy`${providerName}连接操作`}
               >
                 <DropdownMenu.Item
                   className="compact-option channel-connection-menu-item"
@@ -662,7 +728,7 @@ export function ChannelConnectionRow({
             className="quiet-button compact"
             type="button"
             disabled={disabled || !onConnect}
-            title={!hostReady ? `${providerName}渠道宿主尚未接入` : undefined}
+            title={!hostReady ? channelCopy`${providerName}渠道宿主尚未接入` : undefined}
             onClick={() => onConnect?.(channel)}
           >
             {connectBusy ? '等待扫码…' : connectLabel}
@@ -696,7 +762,7 @@ function ChannelMemberBotTable({
   return (
     <div className="channel-member-bot-table" role="table" aria-label="队员 Bot">
       <div className="channel-member-bot-grid channel-member-bot-head" role="row">
-        <span role="columnheader">队员</span><span role="columnheader">{channel.displayName}身份</span><span role="columnheader">状态</span><span role="columnheader" aria-label="操作" />
+        <span role="columnheader">队员</span><span role="columnheader">{channelCopy`${channel.displayName}身份`}</span><span role="columnheader">状态</span><span role="columnheader" aria-label="操作" />
       </div>
       <div role="rowgroup">
         {members.map((agent) => {
@@ -731,9 +797,9 @@ function ChannelMemberBotTable({
                     href={bot.managementUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    aria-label={`在${channel.displayName}开放平台管理 ${agent.displayName}`}
+                    aria-label={channelCopy`在${channel.displayName}开放平台管理 ${agent.displayName}`}
                   >
-                    {channel.displayName}管理
+                    {channelCopy`${channel.displayName}管理`}
                   </a>
                 ) : (
                   <button
@@ -778,8 +844,9 @@ export function QrDialog({
   const attempt = snapshot?.activeQrAttempt ?? null
   if (!attempt) return <></>
   const attemptKind = attempt.kind ?? kind
-  const providerName = attemptKind === 'dingtalk' ? '钉钉' : '飞书'
-  const interaction = attemptKind === 'dingtalk' && attempt.stage === 'awaiting_interaction'
+  const presentation = channelProviderPresentation(attemptKind)
+  const providerName = presentation.name
+  const interaction = presentation.supportsNativeLoginInteraction && attempt.stage === 'awaiting_interaction'
   const committing = attempt.stage === 'saving_local_session'
   const refreshable = attempt.stage === 'expired' || attempt.stage === 'awaiting_refresh'
   const deadlineDetail = attempt.expiresAt
@@ -789,9 +856,9 @@ export function QrDialog({
     <Dialog.Root open onOpenChange={(open) => { if (!open && !committing) onClose(attempt.attemptId) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent className={`channel-qr-dialog${attemptKind === 'dingtalk' ? ' is-dingtalk' : ''}${interaction ? ' has-platform-view' : ''}`}>
+        <AppDialogContent className={`channel-qr-dialog${presentation.qrDialogClassName}${interaction ? ' has-platform-view' : ''}`}>
           <AppDialogHeader
-            title={`登录${providerName}开放平台`}
+            title={channelCopy`登录${providerName}开放平台`}
             description="仅登录开发者平台，本次不会创建应用或发布 Bot。"
             icon="shield"
             closeDisabled={committing}
@@ -812,7 +879,7 @@ export function QrDialog({
                   </button>
               : <div className={`channel-qr-frame is-${attempt.stage}`}>
                   {attempt.qrDataUrl
-                    ? <img src={attempt.qrDataUrl} alt={`${providerName}连接二维码`} />
+                    ? <img src={attempt.qrDataUrl} alt={channelCopy`${providerName}连接二维码`} />
                     : <span aria-hidden="true"><ChannelMark kind={attemptKind} /></span>}
                 </div>}
             <strong role="status" aria-live="polite">{attempt.detail}</strong>
@@ -864,7 +931,8 @@ function PublishBotDialog({
     setSelectedApprover('')
   }, [agent?.agentId, approverKey])
   if (!agent || !account) return <></>
-  const providerName = kind === 'dingtalk' ? '钉钉' : '飞书'
+  const presentation = channelProviderPresentation(kind)
+  const providerName = presentation.name
   const terminal = provisioning
     ? ['completed', 'failed', 'unknown_remote_state'].includes(provisioning.stage)
     : false
@@ -874,8 +942,8 @@ function PublishBotDialog({
   const connectionFailed = provisioning?.failureCode === 'feishu_connection_error'
     || provisioning?.failureCode === 'dingtalk_connection_error'
   const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号|重新连接/.test(error))
-  const awaitingApprover = kind === 'dingtalk'
-    && provisioning?.failureCode === 'dingtalk_approver_selection_required'
+  const awaitingApprover = presentation.approverSelectionFailureCode !== null
+    && provisioning?.failureCode === presentation.approverSelectionFailureCode
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && (!busy || terminal)) onClose() }}>
       <Dialog.Portal>
@@ -883,8 +951,8 @@ function PublishBotDialog({
         <AppDialogContent className="channel-publish-dialog">
           <AppDialogHeader
             title={boundAppId
-              ? `重新发布「${agent.displayName}」${providerName} Bot`
-              : `发布「${agent.displayName}」为${providerName} Bot`}
+              ? channelCopy`重新发布「${agent.displayName}」${providerName} Bot`
+              : channelCopy`发布「${agent.displayName}」为${providerName} Bot`}
             description={effectiveAppId ? "核对并恢复已有应用，保持原 App ID。" : "将使用当前账号创建并发布这位队员的独立应用。"}
             icon="server"
             closeDisabled={busy && !terminal}
@@ -901,9 +969,9 @@ function PublishBotDialog({
               <span><strong>{agent.displayName}</strong><small>{agent.teamRole || '协作者'}</small></span>
               <span className="channel-publish-arrow" aria-hidden="true">→</span>
               <ChannelMark kind={kind} />
-              <span><strong>独立{providerName} Bot</strong><small>权限、事件与长连接彼此隔离</small></span>
+              <span><strong>{channelCopy`独立${providerName} Bot`}</strong><small>权限、事件与长连接彼此隔离</small></span>
             </div>
-            <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName ?? `${providerName}用户`}</strong></div>
+            <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName ?? channelCopy`${providerName}用户`}</strong></div>
             <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName ?? '当前企业'}</strong></div>
             {effectiveAppId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{effectiveAppId}</code></div>}
             <div className="channel-dialog-fact"><span>应用说明</span><strong>{memberBotAppDescription(kind, agent.teamRole)}</strong></div>
@@ -943,7 +1011,7 @@ function PublishBotDialog({
             ) : (
               <p className="channel-publish-note">
                 {boundAppId
-                  ? `该队员的${providerName}身份已冻结到此应用；重新发布只恢复原应用的配置、版本和连接。`
+                  ? channelCopy`该队员的${providerName}身份已冻结到此应用；重新发布只恢复原应用的配置、版本和连接。`
                   : "发布前会验证账号与租户；账号变化或登录失效时，需要重新连接。"}
               </p>
             )}
@@ -951,7 +1019,7 @@ function PublishBotDialog({
           <AppDialogFooter note={connectionFailed
             ? effectiveAppId
               ? '已保留原应用绑定；关闭后可以稍后重试。'
-              : `${providerName}连接异常；关闭后可以稍后重试。`
+              : channelCopy`${providerName}连接异常；关闭后可以稍后重试。`
             : retryLocked
               ? '创建结果无法确认。Rovai 已锁定再次创建，避免产生重复应用。'
             : effectiveAppId
@@ -960,7 +1028,7 @@ function PublishBotDialog({
             <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>取消</button>
             {sessionUnavailable && onReconnect ? (
               <button className="primary-button" type="button" disabled={busy} onClick={onReconnect}>
-                重新连接{providerName}
+                {channelCopy`重新连接${providerName}`}
               </button>
             ) : awaitingApprover ? (
               <button
@@ -992,9 +1060,10 @@ function PublishBotDialog({
 }
 
 function ChannelMark({ kind }: { kind: ChannelKind }): React.JSX.Element {
+  const presentation = channelProviderPresentation(kind)
   return (
     <span className={`channel-mark channel-mark-${kind}`} aria-hidden="true">
-      <img src={kind === 'dingtalk' ? dingtalkLogo : feishuLogo} alt="" />
+      <img src={presentation.logo} alt="" />
     </span>
   )
 }

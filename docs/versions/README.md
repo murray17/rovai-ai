@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.70
+current_version: v1.71
 last_updated: 2026-09-24
 ---
 
@@ -222,4 +222,5 @@ last_updated: 2026-09-24
 | v1.67 | `historical` | Task 去版本化、Agent Task 输出精简与模型上下文技术字段清理 | [v1.67/README.md](v1.67/README.md) |
 | v1.68 | `historical` | 公共历史按需读取、执行边界提示与分页上限 100 | [v1.68/README.md](v1.68/README.md) |
 | v1.69 | `historical` | Camp 主动读取、搜索与撤回占位 | [v1.69/README.md](v1.69/README.md) |
-| v1.70 | `current` | Skills 资源、工具箱、原生发现和模型索引重构 | [v1.70/README.md](v1.70/README.md) |
+| v1.70 | `historical` | Skills 资源、工具箱、原生发现和模型索引重构 | [v1.70/README.md](v1.70/README.md) |
+| v1.71 | `current` | Lark 独立渠道：克隆表族、参数化飞书实现、可信域与 SDK 域分离；自动化验收完成，真实租户逐项验收进行中 | [v1.71/README.md](v1.71/README.md) |

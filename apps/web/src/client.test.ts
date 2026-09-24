@@ -30,6 +30,24 @@ describe('console transport', () => {
     client.clear()
   })
 
+  it('sends the Lark provider kind unchanged for publish and retry', async () => {
+    const bodies: unknown[] = []
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
+      bodies.push(JSON.parse(String(init?.body)))
+      return Response.json({ result: { schemaVersion: 4 } })
+    })
+    const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)
+    await client.login('b'.repeat(64))
+    await client.channel({ operation: 'publish', kind: 'lark', agentId: 'agent-a' })
+    await client.channel({ operation: 'retry', kind: 'lark', agentId: 'agent-a' })
+    expect(bodies).toEqual([
+      { operation: 'publish', kind: 'lark', agentId: 'agent-a' },
+      { operation: 'retry', kind: 'lark', agentId: 'agent-a' }
+    ])
+    client.clear()
+  })
+
   it('rejects an incompatible Host before installing credentials or admitting business requests', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ protocolVersion: 2, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' }))
     const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)

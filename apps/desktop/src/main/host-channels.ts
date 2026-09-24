@@ -1,5 +1,6 @@
 import type { ChannelKind, ChannelSettingsSnapshot, MemberBotProvisioningView } from '@contracts'
 import type { ChannelSettingsCoordinator } from './channel-settings-coordinator'
+import { LARK_PROVIDER_PROFILE, presentProviderMessage } from './channel-provider-profile'
 
 export type HostChannelRequest = { operation: 'get' }
   | { operation: 'publish'; kind: ChannelKind; agentId: string }
@@ -15,7 +16,7 @@ export function parseHostChannelRequest(value: unknown): HostChannelRequest | nu
   const id = (value: unknown): value is string => typeof value === 'string' && value.length > 0
     && Buffer.byteLength(value) <= 256 && !/[\u0000-\u001f\u007f]/u.test(value)
   if (request.operation === 'get' && keys === 'operation') return { operation: 'get' }
-  if (!['feishu', 'dingtalk'].includes(String(request.kind)) || !id(request.agentId)) return null
+  if (!['feishu', 'lark', 'dingtalk'].includes(String(request.kind)) || !id(request.agentId)) return null
   if (['publish', 'retry'].includes(String(request.operation)) && keys === 'agentId,kind,operation') {
     return { operation: request.operation as 'publish' | 'retry', kind: request.kind as ChannelKind, agentId: request.agentId }
   }
@@ -76,13 +77,23 @@ function managementUrl(value: string | null): string | null {
   } catch { return null }
 }
 
-const reconnectFailures = new Set([
+const feishuReconnectFailures = [
   '飞书登录已过期，请先重新连接账号。', '飞书登录已过期或账号已变化，请先重新连接账号。',
-  '请先连接最初发布该队员应用的飞书账号。', '请先连接最初发布该队员应用的钉钉账号。',
+  '请先连接最初发布该队员应用的飞书账号。', 'feishu_session_expired',
+  'feishu_developer_session_expired', 'feishu_developer_identity_changed'
+]
+// Lark failures are the Feishu ones as presented by the Lark instance; neither leaks into the other.
+const reconnectFailures = new Set([
+  ...feishuReconnectFailures,
+  ...feishuReconnectFailures.map(failure => presentProviderMessage(LARK_PROVIDER_PROFILE, failure)),
+  '请先连接最初发布该队员应用的钉钉账号。',
   '请先连接钉钉开发者账号。', '钉钉账号已变化，请重新连接。',
   'dingtalk_developer_session_expired', 'dingtalk_legacy_session_requires_reconnect',
-  'dingtalk_account_identity_changed', 'feishu_session_expired',
-  'feishu_developer_session_expired', 'feishu_developer_identity_changed'
+  'dingtalk_account_identity_changed'
+])
+const nativeInteractionFailures = new Set([
+  'feishu_login_interaction_required', 'lark_login_interaction_required',
+  'dingtalk_login_interaction_required'
 ])
 
 export function createHostChannelHandler(service: Pick<ChannelSettingsCoordinator,
@@ -98,8 +109,7 @@ export function createHostChannelHandler(service: Pick<ChannelSettingsCoordinato
     } catch (error) {
       const code = error instanceof Error ? error.message : ''
       return { error: reconnectFailures.has(code) ? 'channel_session_expired'
-        : code === 'feishu_login_interaction_required' || code === 'dingtalk_login_interaction_required'
-          ? 'channel_native_interaction' : 'channel_operation_failed' }
+        : nativeInteractionFailures.has(code) ? 'channel_native_interaction' : 'channel_operation_failed' }
     }
   }
 }

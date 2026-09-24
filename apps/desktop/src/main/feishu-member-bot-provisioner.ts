@@ -133,18 +133,20 @@ OpenPlatformApiClient,
 >
 
 type WebSessionProvisionerOptions = {
+  // Explicit SDK domain of the owning provider; the SDK default is never relied upon.
+  sdkDomain: Domain
   createClient?: (
     session: FeishuOpenPlatformSession,
     timing: ProvisioningTimingRecorder
   ) => OpenPlatformClient
   createOwnerIdentityClient?: (input: {
-    brand: 'feishu' | 'lark'
+    domain: Domain
     appId: string
     appSecret: string
   }) => OwnerIdentityClient
   readDefaultAvatar?: () => Promise<AvatarPng>
   resolveOwnerOpenId?: (input: {
-    brand: 'feishu' | 'lark'
+    domain: Domain
     appId: string
     appSecret: string
     signal?: AbortSignal
@@ -184,12 +186,14 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
   ) => OpenPlatformClient
   readonly #readDefaultAvatar: () => Promise<AvatarPng>
   readonly #resolveOwnerOpenId: NonNullable<WebSessionProvisionerOptions['resolveOwnerOpenId']>
+  readonly #sdkDomain: Domain
 
   constructor(
     developerSession: FeishuDeveloperPortalSession,
-    options: WebSessionProvisionerOptions = {}
+    options: WebSessionProvisionerOptions
   ) {
     this.#developerSession = developerSession
+    this.#sdkDomain = options.sdkDomain
     this.#createClient = options.createClient
       ?? ((session, timing) => new OpenPlatformApiClient(session, { timing }))
     this.#readDefaultAvatar = options.readDefaultAvatar ?? readDefaultAvatar
@@ -332,7 +336,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
       }))
       const ownerOpenId = await timing.measure('owner_identity_ms', () => (
         this.#resolveOwnerOpenId({
-          brand: identity.brand,
+          domain: this.#sdkDomain,
           appId,
           appSecret,
           signal: input.signal
@@ -551,7 +555,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
       }
       const ownerOpenId = await timing.measure('owner_identity_ms', () => (
         this.#resolveOwnerOpenId({
-          brand: identity.brand,
+          domain: this.#sdkDomain,
           appId: input.remoteAppId,
           appSecret,
           signal: input.signal
@@ -619,7 +623,7 @@ export class UnavailableFeishuDeveloperSessionService implements FeishuDeveloper
 
 async function resolveOwnerOpenId(
   input: {
-    brand: 'feishu' | 'lark'
+    domain: Domain
     appId: string
     appSecret: string
     signal?: AbortSignal
@@ -631,7 +635,7 @@ async function resolveOwnerOpenId(
   }
   try {
     const client = createClient({
-      brand: input.brand,
+      domain: input.domain,
       appId: input.appId,
       appSecret: input.appSecret
     })
@@ -668,7 +672,7 @@ async function resolveOwnerOpenId(
 }
 
 function createOwnerIdentityClient(input: {
-  brand: 'feishu' | 'lark'
+  domain: Domain
   appId: string
   appSecret: string
 }): OwnerIdentityClient {
@@ -676,7 +680,7 @@ function createOwnerIdentityClient(input: {
     appId: input.appId,
     appSecret: input.appSecret,
     appType: AppType.SelfBuild,
-    domain: input.brand === 'lark' ? Domain.Lark : Domain.Feishu,
+    domain: input.domain,
     loggerLevel: LoggerLevel.error
   })
 }
