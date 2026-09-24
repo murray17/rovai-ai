@@ -655,8 +655,8 @@ Claude 原生非文件工具（含 `Agent`、`TaskStop`、`TaskOutput`、Task �
 加入相同的 `tool_result.content` 文本准入。`Read`、`Grep`、`Glob`、`LSP`、`ReadMcpResourceTool`
 及文件修改工具继续不公开结果正文；未知新工具默认不准入。该增量目前由确定性 adapter 测试与
 隔离成品 App 的模拟 Evidence UI 夹具验证，不代表真实 Claude 原生调用已复测。已准入结果受 Core 的 7,680 UTF-8
-字节持久化上限约束，未持久化的历史结果不能由新版补回。最终 `result`、
-Usage 与 Session 校验路径没有改变。确定性 stream fixture
+字节持久化上限约束，未持久化的历史结果不能由新版补回。该工具结果展示增量没有改变最终 `result`、
+Usage 与 Session 校验路径。确定性 stream fixture
 已证明 partial/full 去重、start/terminal 关联、command marker 可见及私有字段不泄露。真实 smoke 还会
 强制原生 `Bash` 执行固定 `printf`，并要求 command marker 同时从对应 started
 `runtime.action.payload.input` 和 terminal `runtime.action.payload.output` 取得、原生
@@ -665,6 +665,15 @@ Run 没有该公开 delta，只用通过 Session/terminal 校验的 success `res
 原始 `thinking_delta`、失败 result 与 provider metadata 不进入 Evidence，最终 Camp Message 仍由 terminal
 result 独立结算。真实 smoke 的两次无工具回复同时要求 narration marker 可见，避免“最终消息存在但处理
 过程为空”的 Claude-only 缺口回归。
+
+2026-09-24 的一轮本地 Claude Code `2.1.267` 执行因第二个同 Session `type=result` 被旧 Adapter
+判为 `runtime_stream_incompatible`，已接受的输入因此没有成功结算。前一轮刚取消，受影响轮有原生
+Agent/Task 活动；原始 stdout 未留存，无法确认两条结果的 subtype、先后正文或上游触发原因。
+[Claude Code Action 的公开问题](https://github.com/anthropics/claude-code-action/issues/1533)记录过后台子代理之后再次出现
+`result` 的相似流形态，但不是该轮的直接证据。现行
+[Runtime Launch and Verification v43](contracts/runtime-launch-and-verification-v43.md)要求逐条校验并读到 EOF，
+仅最后一条结果决定终态、Usage 和最终正文 fallback。确定性夹具覆盖先成功后成功、先成功后失败、
+后续缺字段和跨 Session；这尚未构成真实 Claude 模型调用验收，也不能恢复历史失败 Run。
 
 Antigravity 的健康探测仅在 `--help` 同时声明 `--output-format` 与 `stream-json` 时发布可选
 `output.stream_json` capability；冻结为支持的 AgentRun 才追加 `--output-format stream-json`，从 NDJSON

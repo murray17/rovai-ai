@@ -1184,6 +1184,11 @@ where
             &mut state,
         )?;
     }
+    if let Some(fallback) = claude_final_result_fallback(&state)
+        && let Some(sender) = runtime_events.as_ref()
+    {
+        let _ = sender.send(fallback);
+    }
     Ok(ClaudeCodeStreamCapture {
         final_result: state.final_result,
         acceptance_emitted: state.acceptance_emitted,
@@ -1218,9 +1223,6 @@ fn process_claude_stream_line(
         }
     }
     if event.get("type").and_then(Value::as_str) == Some("result") {
-        if state.final_result.is_some() {
-            anyhow::bail!("Claude Code stream emitted more than one final result event");
-        }
         if !matches!(event.get("subtype"), Some(Value::String(_)))
             || !matches!(event.get("is_error"), Some(Value::Bool(_)))
             || !matches!(event.get("result"), Some(Value::String(_)))
@@ -1228,11 +1230,29 @@ fn process_claude_stream_line(
         {
             anyhow::bail!("Claude Code final stream event omitted a required result field");
         }
+        // A print-mode process can keep working after an early result (for
+        // example while background agents finish). Only the last validated
+        // result at EOF determines the terminal outcome and usage.
         state.final_result = Some(
             serde_json::from_value(event).context("Claude Code final stream event was invalid")?,
         );
     }
     Ok(())
+}
+
+fn claude_final_result_fallback(state: &ClaudeCodeStreamState) -> Option<ClaudeCodeRuntimeEvent> {
+    let result = state.final_result.as_ref()?;
+    if state.text_delta_emitted || result.subtype.as_deref() != Some("success") || result.is_error {
+        return None;
+    }
+    let text = result.result.trim();
+    (!text.is_empty()).then(|| ClaudeCodeRuntimeEvent {
+        event_type: "agent.text.delta",
+        payload: serde_json::json!({
+            "itemId": "claude-final",
+            "delta": text,
+        }),
+    })
 }
 
 fn claude_text_item_id(state: &ClaudeCodeStreamState, index: u64) -> String {
@@ -1647,31 +1667,6 @@ fn normalize_claude_runtime_events(
                     payload,
                 });
             }
-        }
-        Some("result") => {
-            if state.text_delta_emitted
-                || event.get("subtype").and_then(Value::as_str) != Some("success")
-                || event.get("is_error").and_then(Value::as_bool) == Some(true)
-            {
-                return Ok(normalized);
-            }
-            let Some(result) = event
-                .get("result")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|result| !result.is_empty())
-            else {
-                return Ok(normalized);
-            };
-            validate_claude_stream_session(event, expected_session_id)?;
-            state.text_delta_emitted = true;
-            normalized.push(ClaudeCodeRuntimeEvent {
-                event_type: "agent.text.delta",
-                payload: serde_json::json!({
-                    "itemId": "claude-final",
-                    "delta": result,
-                }),
-            });
         }
         _ => {}
     }
@@ -3256,22 +3251,22 @@ mod tests {
             .unwrap()
             .is_empty()
         );
-        let fallback = normalize_claude_runtime_events(
-            &json!({
+        fallback_state.final_result = Some(
+            serde_json::from_value(json!({
                 "type": "result",
                 "subtype": "success",
                 "is_error": false,
                 "result": "  fallback final  ",
                 "session_id": session_id
-            }),
-            session_id,
-            &mut fallback_state,
-        )
-        .unwrap();
-        assert_eq!(fallback.len(), 1);
-        assert_eq!(fallback[0].event_type, "agent.text.delta");
-        assert_eq!(fallback[0].payload["itemId"], "claude-final");
-        assert_eq!(fallback[0].payload["delta"], "fallback final");
+            }))
+            .unwrap(),
+        );
+        let fallback = claude_final_result_fallback(&fallback_state).unwrap();
+        assert_eq!(fallback.event_type, "agent.text.delta");
+        assert_eq!(fallback.payload["itemId"], "claude-final");
+        assert_eq!(fallback.payload["delta"], "fallback final");
+        complete_only.final_result = fallback_state.final_result.take();
+        assert!(claude_final_result_fallback(&complete_only).is_none());
 
         let mut failure_state = ClaudeCodeStreamState::default();
         assert!(
@@ -4189,6 +4184,22 @@ mod tests {
                         "privateCommand": "CLAUDE_MUST_NOT_LEAK"
                     }
                 }),
+                json!({
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": false,
+                    "result": "early result must not become public fallback",
+                    "session_id": session_id_for_writer,
+                    "usage": {"input_tokens": 1}
+                }),
+                json!({
+                    "type": "system",
+                    "subtype": "api_retry",
+                    "attempt": 1,
+                    "max_retries": 2,
+                    "retry_delay_ms": 1_000,
+                    "session_id": session_id_for_writer
+                }),
             ] {
                 writer
                     .write_all(format!("{event}\n").as_bytes())
@@ -4201,7 +4212,8 @@ mod tests {
                 "subtype": "success",
                 "is_error": false,
                 "result": "done",
-                "session_id": session_id_for_writer
+                "session_id": session_id_for_writer,
+                "usage": {"input_tokens": 2}
             });
             writer
                 .write_all(format!("{result}\n").as_bytes())
@@ -4239,6 +4251,13 @@ mod tests {
         assert_eq!(completed.payload["status"], "completed");
         assert_eq!(completed.payload["input"], "printf CLAUDE_PRINTF_OK");
         assert_eq!(completed.payload["output"], "CLAUDE_PRINTF_OK");
+        let after_early_result =
+            tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
+                .await
+                .expect("events after an early result should arrive before EOF")
+                .expect("events after an early result must still be processed");
+        assert_eq!(after_early_result.event_type, "runtime.diagnostic");
+        assert_eq!(after_early_result.payload["code"], "runtime_api_retrying");
         assert!(
             !serde_json::to_string(&completed.payload)
                 .expect("normalized event should serialize")
@@ -4256,7 +4275,9 @@ mod tests {
         finish_sender.send(()).unwrap();
 
         let captured = capture_task.await.unwrap().unwrap();
-        assert_eq!(captured.final_result.unwrap().result, "done");
+        let final_result = captured.final_result.unwrap();
+        assert_eq!(final_result.result, "done");
+        assert_eq!(final_result.usage["input_tokens"], 2);
         writer_task.await.unwrap();
         let fallback_narration = runtime_event_receiver
             .recv()
@@ -4274,5 +4295,79 @@ mod tests {
         assert_eq!(claude_tool_kind("Edit"), "edit");
         assert_eq!(claude_tool_kind("Write"), "write");
         assert_eq!(claude_tool_kind("FutureTool"), "tool");
+    }
+
+    // A later terminal failure must not be masked by an earlier success result.
+    #[tokio::test]
+    async fn later_claude_result_controls_failure_and_invalid_frames_still_fail() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let early = json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "early success",
+            "session_id": session_id
+        });
+        let cases = [
+            (
+                "terminal error",
+                json!({
+                    "type": "result", "subtype": "error", "is_error": true,
+                    "result": "provider rejected", "session_id": session_id
+                }),
+            ),
+            (
+                "missing result field",
+                json!({
+                    "type": "result", "subtype": "success", "is_error": false,
+                    "session_id": session_id
+                }),
+            ),
+            (
+                "another session",
+                json!({
+                    "type": "result", "subtype": "success", "is_error": false,
+                    "result": "foreign result",
+                    "session_id": "5ade59ac-f87e-4827-8cf2-0e1f3ba720ea"
+                }),
+            ),
+        ];
+        for (case, last) in cases {
+            let wire = format!("{early}\n{last}\n");
+            let (sender, mut receiver) = mpsc::unbounded_channel();
+            let captured = capture_claude_stream(
+                wire.as_bytes(),
+                session_id.into(),
+                "claude-code:run-1:1".into(),
+                None,
+                Some(sender),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await;
+            if case == "terminal error" {
+                let output = captured.unwrap().final_result.unwrap();
+                let failure = validate_claude_terminal_result(
+                    &output,
+                    session_id,
+                    "claude-code:run-1:1",
+                    &[],
+                )
+                .expect_err("the later error must determine the terminal outcome");
+                assert_eq!(
+                    failure
+                        .downcast_ref::<ClaudeCodeDeliveredFailure>()
+                        .unwrap()
+                        .failure
+                        .origin,
+                    RuntimeFailureOrigin::Runtime
+                );
+            } else {
+                assert!(captured.is_err(), "{case} must fail stream parsing");
+            }
+            assert!(
+                receiver.try_recv().is_err(),
+                "{case} must not publish the early success as a fallback"
+            );
+        }
     }
 }
