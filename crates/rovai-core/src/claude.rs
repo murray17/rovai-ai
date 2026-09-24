@@ -649,7 +649,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         let active = self.active.clone();
         let private_runtime_dir = self.private_runtime_dir.clone();
         let launch_handoff = request.launch_handoff.take();
-        let (result_sender, result_receiver) = oneshot::channel();
+        let (mut result_sender, result_receiver) = oneshot::channel();
         let tracked_control = control.clone();
         let worker = tokio::spawn(async move {
             let result = Self::run_process(
@@ -657,6 +657,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                 &tracked_control,
                 &request,
                 interrupted,
+                &mut result_sender,
                 launch_handoff,
             )
             .await;
@@ -769,6 +770,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         control: &ClaudeCodeProcessControl,
         request: &ClaudeCodeRunRequest,
         mut interrupted: oneshot::Receiver<()>,
+        result_sender: &mut oneshot::Sender<Result<ClaudeCodeRunResult>>,
         launch_handoff: Option<oneshot::Sender<()>>,
     ) -> Result<ClaudeCodeRunResult> {
         let execution_root = Path::new(&request.workspace.execution_root);
@@ -961,6 +963,9 @@ impl ClaudeCodeCliRuntimeAdapter {
             Some(config)
         };
         command.current_dir(execution_root);
+        if result_sender.is_closed() {
+            anyhow::bail!("Claude Code caller ended before spawn");
+        }
         if !matches!(
             interrupted.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
@@ -1017,6 +1022,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                     request,
                     resources,
                     interrupted,
+                    result_sender,
                     launch_handoff,
                     native_session_id,
                 )
@@ -1047,6 +1053,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         request: &ClaudeCodeRunRequest,
         resources: &mut ClaudeCodeRunResources,
         mut interrupted: oneshot::Receiver<()>,
+        result_sender: &mut oneshot::Sender<Result<ClaudeCodeRunResult>>,
         launch_handoff: Option<oneshot::Sender<()>>,
         native_session_id: String,
     ) -> Result<ClaudeCodeRunResult> {
@@ -1057,6 +1064,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         tokio::select! {
             biased;
             _ = &mut interrupted => anyhow::bail!("Claude Code process was interrupted during stdin delivery"),
+            _ = result_sender.closed() => anyhow::bail!("Claude Code caller ended during stdin delivery"),
             delivered = async {
                 stdin
                     .write_all(request.prompt.as_bytes())
@@ -1106,6 +1114,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             tokio::select! {
                 biased;
                 _ = &mut interrupted => anyhow::bail!("Claude Code process was interrupted"),
+                _ = result_sender.closed() => anyhow::bail!("Claude Code caller ended"),
                 _ = async move { tokio::time::sleep_until(deadline.expect("output deadline is set")).await }, if deadline.is_some() => {
                     anyhow::bail!("Claude Code output collectors did not finish after root exit");
                 }
@@ -3189,7 +3198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn aborted_caller_leaves_the_registered_run_to_clean_up_at_shutdown() {
+    async fn aborted_caller_terminates_the_registered_run_without_shutdown() {
         let (root, workspace) = claude_fixture();
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
         let executable = fake_claude_executable(&root, "blocked", session_id, "blocked");
@@ -3212,12 +3221,14 @@ mod tests {
                 .expect_err("run task should be aborted")
                 .is_cancelled()
         );
-        assert_eq!(claude_launch_files(&root)[0].1, b"owned after caller abort");
-        assert!(adapter.active.lock().unwrap().contains_key(&(run_id, 1)));
-        tokio::time::timeout(Duration::from_secs(5), adapter.shutdown_all())
-            .await
-            .expect("shutdown must finish the tracked Claude Code run");
+        assert!(
+            adapter
+                .wait_for_agent_run_quiescence(&run_id, 1, Duration::from_secs(2))
+                .await,
+            "caller abort alone must finish the tracked Claude Code run"
+        );
         assert!(claude_launch_files(&root).is_empty());
+        assert!(claude_owner_records(&root).is_empty());
         assert!(adapter.active.lock().unwrap().is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
