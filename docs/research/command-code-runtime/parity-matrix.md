@@ -6,7 +6,7 @@ status: implementation-in-progress
 admission: research
 observed_version: 1.64.0
 observed_platform: macos-arm64
-last_updated: 2026-09-23
+last_updated: 2026-09-24
 ---
 
 # Command Code 1.64.0 实现前 Parity Matrix
@@ -18,8 +18,8 @@ last_updated: 2026-09-23
 | Auth / Provider / Model | 自身原生认证、默认/显式模型、变化后精确 fence | 原生认证/BYOK、`--model`、`--list-models` | 继承用户原生配置；Probe 区分认证与模型目录，保存后核对显式模型 | `--list-models` 可见隔离 BYOK；headless 仍以退出码 3 拒绝未登录；完整轴未实现 | 无 |
 | Host / Fleet / LRU | 声明进程策略并统一管理生命周期 | `-p` 单次 query 后退出；未见驻留 RPC | 候选 `one_shot_resumable`，每 Run 一个受管进程 | ManagedProcess 传输已实现并通过假 CLI 测试；真实 Runtime 生命周期未验证 | 无 |
 | Native Session / Continuation | 稳定完整 ID，warm/cold/Core restart 精确恢复 | `result.sessionId`、`--resume <id>`；`--continue` 选最近一次 | 只保存完整 ID；未知/失败不自动重投 accepted input | 本机 local-only fixture 已验证指定 ID 续接和不存在 ID 失败；真实账号、Core restart 未验证 | 无 |
-| Bootstrap / Context | 高权限 Charter/Identity/Memory，逐 Run 冻结上下文 | 普通 `--print` stdin；`--mod` 与 `appendSystemPrompt`、Home `AGENTS.md` 可注入 system prompt，但失败时继续模型调用 | 用户选择每 Run 将 Bootstrap 与冻结 Dynamic Context 合成普通 user Prompt；实现前按精确提案二次确认 | fixture 已验证 Mod 失败语义；普通 Prompt 路线尚未实现 / NotImplemented | 用户已选择降低指令层级；正式差异决定待记录 |
-| Compaction continuity | 压缩与恢复后绑定、能力不变 | 原生压缩及 `compaction_*` events | 每个新 AgentRun 重投普通 Prompt 引导；同一次原生多轮执行内的压缩仍需验证或列明能力缺口 | DocumentationOnly / NotImplemented | 无 |
+| Bootstrap / Context | 高权限 Charter/Identity/Memory，逐 Run 冻结上下文 | 普通 `--print` stdin；`--mod` 与 `appendSystemPrompt`、Home `AGENTS.md` 可注入 system prompt，但失败时继续模型调用 | 复用现有 `first_payload`：新 Session 的普通 user Prompt 包含 Bootstrap 与冻结 Dynamic Context，普通精确恢复仅发本 Run 动态上下文；实施前按 revision 3 二次确认 | fixture 已验证 Mod 失败语义；`first_payload` 尚未接入 Command Code / NotImplemented | 用户已选择降低指令层级；正式差异决定待记录 |
+| Compaction continuity | 压缩与恢复后绑定、能力不变 | 原生压缩及 `compaction_*` events | 沿用 Core 合格信号后的下一次 Bootstrap 补发；先证明 Command Code 信号、同一次原生多轮执行内压缩及 cold resume 行为 | DocumentationOnly / NotImplemented；没有合格 signal 时此轴不能宣称通过 | 无 |
 | Skills | 现有 Assignment 追加、更新、撤销、隔离 | 单次 `--skill <path>`；额外路径优先级低于项目/用户 | 使用现有 delivery group 的 Run-local 受管路径；验证同名规则 | DocumentationOnly / NotImplemented | 无 |
 | External MCP | `PreparedMcpProjection` 仅目标 Run/Session 可见 | 原生 MCP 主要持久 local/project/user scope；无已观察单次配置 flag | 先确认其他官方隔离入口；否则评估受管 Mod/Tool 桥与完整生命周期 | DocumentationOnly / Blocked | 无 |
 | Tool / Action / Output | native ID 唯一生命周期、六类命令输出 | `tool_queued/running/update/completed/errored/denied` 等事件 | 独立 NDJSON parser，按 ID 状态机归一；未知 event 私有忽略或失败 | 本机 fixture 已采集 completed、hook-blocked、denied；Core 事件归约已写，六类命令输出及真实 Tool 未完成 | 无 |
