@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-09-22
+last_updated: 2026-09-24
 ---
 
 # 当前规范与决定理由导航
@@ -132,6 +132,8 @@ last_updated: 2026-09-22
 - 理由来源：[v0.16](../versions/v0.16/decisions.md)、[v0.17](../versions/v0.17/decisions.md)、[v0.19](../versions/v0.19/decisions.md)、[v0.20](../versions/v0.20/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.64](../versions/v0.64/decisions.md)、[v0.66](../versions/v0.66/decisions.md)、[v1.01](../versions/v1.01/decisions.md)、[v1.03](../versions/v1.03/decisions.md)、[v1.04](../versions/v1.04/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.11](../versions/v1.11/decisions.md)、[v1.12](../versions/v1.12/decisions.md)、[v1.13](../versions/v1.13/decisions.md)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.20-D02](../versions/v1.20/decisions.md#v1-20-d02)、[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)、[V1.22-D01](../versions/v1.22/decisions.md#v1-22-d01)、[V1.24-D01](../versions/v1.24/decisions.md#v1-24-d01)。
 
 ## Session、Context 与 Bootstrap
+
+- Command Code 候选普通用户层 Bootstrap 当前边界：[Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md#command-code-研究接入边界)、[FirstPayload 与补发](../architecture/native-session-bootstrap-redelivery.md)；理由：[V1.69-D01](../versions/v1.69/decisions.md#v1-69-d01)。该选择不等于 Product Runtime 或平台资格。
 
 - 当前规范：[Context 基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Structured Skill Links](../architecture/structured-current-input-skill-links.md)、[ContextManifest Evidence v29](../contracts/context-manifest-evidence-v29.md)、[Context Delivery Profile v9](../contracts/context-delivery-profile-v9.md)、[Run Facts v7](../contracts/run-facts-v7.md)和[Run Input Skill Links v2](../contracts/current-input-skill-links-v2.md)；Single Chat 使用 Formatter/Manifest 26、Profile 6、[非 batch Run Facts v5](../contracts/run-facts-nonbatch-v5.md) 与 Skill Links v1；投影技术字段清理理由见 [V1.67-D01](../versions/v1.67/decisions.md#v1-67-d01)，公开历史按需读取理由见 [V1.68-D01](../versions/v1.68/decisions.md#v1-68-d01)。
 - 理由来源：[v0.21](../versions/v0.21/decisions.md)、[v0.35](../versions/v0.35/decisions.md)、[v0.44](../versions/v0.44/decisions.md)、[v0.48](../versions/v0.48/decisions.md)、[v0.50](../versions/v0.50/decisions.md)、[v0.52](../versions/v0.52/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v0.94](../versions/v0.94/decisions.md)、[v0.98](../versions/v0.98/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[V1.15-D03](../versions/v1.15/decisions.md#v1-15-d03)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.28-D05](../versions/v1.28/decisions.md#v1-28-d05)。

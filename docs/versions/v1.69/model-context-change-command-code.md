@@ -1,21 +1,20 @@
 ---
-document_type: model-context-change-proposal
-runtime: command-code
-baseline_version: v1.68
-target_version: v1.69
+document_type: model-context-change
+version: v1.69
+change_id: command-code
 revision: 3
 confirmation_status: confirmed
 confirmed_by: Principal
-confirmed_at: 2026-09-24T05:24:42.898114Z
+confirmed_at: 2026-09-24T05:24:42Z
 confirmed_revision: 3
-authority: proposal-only
+authority: proposed-model-input-change-statement
 implementation_status: in_progress
 last_updated: 2026-09-24
 ---
 
-# Command Code 普通 Prompt 引导：模型输入变更提案（revision 3）
+# Command Code 普通 Prompt 引导：模型输入变更说明（revision 3）
 
-开发者已选择将 Command Code 改为“普通 Prompt 引导”的接入。本文件保存获得二次确认的研究提案；同一 revision 已纳入当前版本的[模型上下文变更说明](../../versions/v1.69/model-context-change-command-code.md)。它不单独修改当前 Context Contract 或 Product Runtime Catalog。
+开发者已选择将 Command Code 改为“普通 Prompt 引导”的接入。本文件把已确认的 revision 3 纳入唯一 current 版本的模型输入变更范围；它本身不修改当前 Context Contract 或 Product Runtime Catalog。原审阅稿保存在[研究提案](../../research/command-code-runtime/prompt-guidance-proposal.md)。
 
 revision 2 将基线更新到已合入的 v1.68：v1.67 删除 Core 生成模型投影中的 `schemaVersion` 并升级 Bootstrap，v1.68 移除公开 Camp 的自动历史投影，改由 `RUN_FACTS.historyHint` 提示按需读取历史。revision 3 进一步复核现有 Context 实现，改为复用已有 `first_payload`；此前拟新增的 `prompt_guidance` mode、包裹 marker 和每 Run 重投均不是开发者已要求或现有共用主链所必需的行为。该修订改变首次后续 Run 的输入字节与连续性策略，旧 revision 不能沿用。
 
@@ -120,7 +119,7 @@ Core 在每个 Command Code AgentRun（包括按完整 UUID 恢复的 Run）把�
 - 当前公开 Camp 29/29/Profile 9 与非 batch 26/26/Profile 6 的 Dynamic Context section、字段、选择、预算和证据不变；其他 Adapter 的交付模式与模型输入不变。公开 `historyHint` 只作为现有 `P` 的一部分投递，不新增自动历史选择或阅读确认。
 - `NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION = native_session_bootstrap_v4`、Bootstrap Formatter 4、Session Charter revision 13 和现有 delivery mode 集合不变；不为本接入额外引入 Context 版本轴。
 - Built-in `rovai` CLI 的权限由 Core 逐次验证；Prompt 不代替授权或审批。
-- 本提案只解决 Bootstrap 投递选择。Skills、External MCP、权限、Usage、真实认证 Smoke 与逐平台准入仍按 [Parity Matrix](parity-matrix.md) 单独验收。没有完成前不把 Command Code 宣称为 First-Class。
+- 本说明只解决 Bootstrap 投递选择。Skills、External MCP、权限、Usage、真实认证 Smoke 与逐平台准入仍按 [Parity Matrix](../../research/command-code-runtime/parity-matrix.md) 单独验收。没有完成前不把 Command Code 宣称为 First-Class。
 
 ## 版本、迁移与兼容
 
@@ -138,3 +137,7 @@ Core 在每个 Command Code AgentRun（包括按完整 UUID 恢复的 Run）把�
 ## 二次确认
 
 `revision: 3 / confirmation_status: confirmed`。用户最初选择了普通 Prompt 路线；revision 1/2 又分别使用旧 Context 基线或额外的新投递语义，均不算对本 revision 的二次确认。在 revision 3 完整说明发给用户后，Principal 于 2026-09-24 05:24:42 UTC 以 Camp 消息 `c45a7510-05c0-4ac8-91f3-1525bc46052d` 回复“行，那你开始”，确认按本 revision 实施。此确认只覆盖上述模型输入方案，不将未验证的 Runtime 能力提升为正式资格。
+
+## 阶段记录：2026-09-24
+
+本说明实际纳入 v1.69。内部 Command Code 传输现要求 Core `PreparedContext` 且只发送 `runtime_payload`，拒绝非 `first_payload` mode；没有新 Product Binding、Manifest 或旧数据迁移。固定 1.64.0 的隔离 Home/本机模型 fixture 已验证首轮 user 层 `B + P`、完整 UUID 恢复后的新 `P` 和原生请求历史中保留的旧 `B`；还未证明真实认证、压缩或 Core 冷恢复。完整 AgentRun Context/Input Delivery 接线仍未实施，不能把传输夹具视为模型上下文合同已经在产品路径完成。

@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.68
-last_updated: 2026-09-23
+current_version: v1.69
+last_updated: 2026-09-24
 ---
 
 # Rovai-ai 版本记录
@@ -220,4 +220,5 @@ last_updated: 2026-09-23
 | v1.65 | `historical` | 可靠异步 Camp 删除、阶段交接、最小重试界面与聚合 SQL 收敛 | [v1.65/README.md](v1.65/README.md) |
 | v1.66 | `historical` | 新 Tool 持久化输出 7,680 UTF-8 字节上限、显式三态归约与诚实丢失提示 | [v1.66/README.md](v1.66/README.md) |
 | v1.67 | `historical` | Task 去版本化、Agent Task 输出精简与模型上下文技术字段清理 | [v1.67/README.md](v1.67/README.md) |
-| v1.68 | `current` | 公共历史按需读取、执行边界提示与分页上限 100 | [v1.68/README.md](v1.68/README.md) |
+| v1.68 | `historical` | 公共历史按需读取、执行边界提示与分页上限 100 | [v1.68/README.md](v1.68/README.md) |
+| v1.69 | `current` | Command Code 普通 Prompt 引导与接入研究；正式产品资格未完成 | [v1.69/README.md](v1.69/README.md) |

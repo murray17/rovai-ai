@@ -13,6 +13,7 @@ use tokio::{
 };
 
 use crate::command_code_activity::{CommandCodeActivityNormalizer, CommandCodeRuntimeEvent};
+use crate::context::{CharterDeliveryMode, PreparedContext};
 use crate::managed_process::{
     ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
     ManagedWindowsArgvDialect,
@@ -28,7 +29,10 @@ const RUN_END_PREFIX: &[u8] = b"{\"type\":\"event\",\"event\":{\"type\":\"run_en
 pub(crate) struct CommandCodeHeadlessRequest {
     pub executable_path: PathBuf,
     pub execution_root: PathBuf,
-    pub prompt: String,
+    /// Materialized and frozen by the shared Context owner. The transport
+    /// sends `runtime_payload`, which includes Bootstrap only when the
+    /// existing FirstPayload policy selected it for this input.
+    pub prepared_context: PreparedContext,
     pub resume_session_id: Option<String>,
     pub model_id: Option<String>,
     pub max_turns: Option<u16>,
@@ -225,7 +229,11 @@ fn validate_session_id(id: &str) -> Result<()> {
 
 fn command_for(request: &CommandCodeHeadlessRequest) -> Result<Command> {
     ensure!(
-        !request.prompt.trim().is_empty(),
+        request.prepared_context.charter_delivery_mode == CharterDeliveryMode::FirstPayload,
+        "Command Code requires first_payload context delivery"
+    );
+    ensure!(
+        !request.prepared_context.runtime_payload.trim().is_empty(),
         "Command Code prompt is empty"
     );
     ensure!(
@@ -271,8 +279,9 @@ fn command_for(request: &CommandCodeHeadlessRequest) -> Result<Command> {
 }
 
 /// Runs a single headless turn through the shared process owner. This
-/// transport is not a Product Runtime adapter: it does not project Bootstrap,
-/// Skills, MCP, Tool actions, or permission approvals.
+/// transport is not a Product Runtime adapter: it consumes the shared frozen
+/// Context input but does not materialize Context or project Skills, MCP,
+/// Tool actions, or permission approvals.
 pub(crate) async fn run_headless(
     request: CommandCodeHeadlessRequest,
     interrupted: oneshot::Receiver<()>,
@@ -295,7 +304,9 @@ pub(crate) async fn run_headless(
     let stderr = child
         .take_stderr()
         .context("Command Code stderr unavailable")?;
-    stdin.write_all(request.prompt.as_bytes()).await?;
+    stdin
+        .write_all(request.prepared_context.runtime_payload.as_bytes())
+        .await?;
     stdin.shutdown().await?;
     drop(stdin);
 
@@ -508,23 +519,35 @@ printf '%s\n' '{"type":"result","subtype":"success","sessionId":"11111111-1111-4
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-        let result = run_headless(
-            CommandCodeHeadlessRequest {
-                executable_path: executable,
-                execution_root: root.clone(),
-                prompt: "frozen input".into(),
-                resume_session_id: Some("11111111-1111-4111-8111-111111111111".into()),
-                model_id: Some("probe/fixture".into()),
-                max_turns: Some(2),
-                local_only: true,
-                trust_project: true,
-                ownership: "command-code-transport-test".into(),
-                events: Some(event_tx),
+        let mut request = CommandCodeHeadlessRequest {
+            executable_path: executable,
+            execution_root: root.clone(),
+            prepared_context: PreparedContext {
+                manifest_id: "fixture-manifest".into(),
+                bootstrap_evidence_id: "fixture-bootstrap".into(),
+                rendered_payload: "dynamic input".into(),
+                rendered_payload_digest: "fixture-rendered-digest".into(),
+                runtime_payload: "frozen input".into(),
+                charter_delivery_mode: CharterDeliveryMode::FirstPayload,
+                bootstrap_in_runtime_payload: true,
+                bootstrap_redelivery_revision: Some(1),
+                expected_binding_generation: 1,
+                requires_new_native_session: false,
+                camp_message_boundary_sequence: 0,
+                collaboration_state_digest: "fixture-collaboration-digest".into(),
             },
-            cancel_rx,
-        )
-        .await
-        .unwrap();
+            resume_session_id: Some("11111111-1111-4111-8111-111111111111".into()),
+            model_id: Some("probe/fixture".into()),
+            max_turns: Some(2),
+            local_only: true,
+            trust_project: true,
+            ownership: "command-code-transport-test".into(),
+            events: Some(event_tx),
+        };
+        request.prepared_context.charter_delivery_mode = CharterDeliveryMode::NativeAppend;
+        assert!(command_for(&request).is_err());
+        request.prepared_context.charter_delivery_mode = CharterDeliveryMode::FirstPayload;
+        let result = run_headless(request, cancel_rx).await.unwrap();
         drop(cancel_tx);
         assert_eq!(result.session_id, "11111111-1111-4111-8111-111111111111");
         assert_eq!(result.final_text, "fixture done");

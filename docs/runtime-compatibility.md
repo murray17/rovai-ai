@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-17
+last_updated: 2026-09-24
 ---
 
 # Agent Runtime 兼容性清单
@@ -17,6 +17,10 @@ operations 的正式准入基线是 [Built-in 运输不变量](architecture/foun
 Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core Router。旧 Team、
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
+
+## Command Code 研究状态
+
+Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。这不是正式认证或真实模型 Smoke。其已确认的普通 Prompt 引导设计见[v1.69 模型输入说明](versions/v1.69/model-context-change-command-code.md)。当前 Command Code 不在 Product Runtime Catalog，所有目标平台均未取得准入或资格证据。
 
 ## 当前 Product Runtime Catalog
 
