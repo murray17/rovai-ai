@@ -26,6 +26,7 @@ def main():
     parser.add_argument('package', type=Path)
     parser.add_argument('--expected-source', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--startup-timeout', type=int, default=30)
     args = parser.parse_args()
     assert platform.system() == 'Linux' and platform.machine() == 'x86_64'
     assert os.geteuid() != 0, 'Run acceptance as an ordinary user'
@@ -90,7 +91,7 @@ def main():
                     lines.put(line)
                 lines.put(None)
             threading.Thread(target=collect, daemon=True).start()
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + args.startup_timeout
             while time.monotonic() < deadline:
                 line = lines.get(timeout=max(0.1, deadline - time.monotonic()))
                 assert line is not None, 'Server exited before readiness'

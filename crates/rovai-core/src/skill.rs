@@ -2221,7 +2221,12 @@ impl SkillLibraryService {
         };
         let mut removed = 0;
         let revisions_root = self.root.join("revisions");
-        for skill_entry in fs::read_dir(&revisions_root)? {
+        let skill_entries = match fs::read_dir(&revisions_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error.into()),
+        };
+        for skill_entry in skill_entries {
             let skill_entry = skill_entry?;
             let skill_metadata = fs::symlink_metadata(skill_entry.path())?;
             if !skill_metadata.file_type().is_dir() {
@@ -5359,7 +5364,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn startup_gc_removes_only_uuid_shaped_orphan_revision_directories() {
+    fn startup_gc_skips_missing_tree_and_removes_only_uuid_shaped_orphans() {
         let root = temporary_directory("rovai-skill-library");
         let data = temporary_directory("rovai-skill-db");
         let database = Database::open(&data).unwrap();
@@ -5378,6 +5383,9 @@ mod slow_tests {
         assert_eq!(service.cleanup_orphan_revisions(&database).unwrap(), 1);
         assert!(!orphan.exists());
         assert!(unmanaged.exists());
+        remove_directory_if_present(&root.join("revisions")).unwrap();
+        assert_eq!(service.cleanup_orphan_revisions(&database).unwrap(), 0);
+        assert!(!root.join("revisions").exists());
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&data).unwrap();
     }
