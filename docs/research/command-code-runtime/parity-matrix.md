@@ -4,12 +4,12 @@ runtime: command-code
 authority: research-evidence-only
 status: implementation-in-progress
 admission: research
-observed_version: 1.64.0
+observed_version: 1.64.0, 1.65.2
 observed_platform: macos-arm64
 last_updated: 2026-09-24
 ---
 
-# Command Code 1.64.0 实现前 Parity Matrix
+# Command Code Parity Matrix（1.64.0 fixture；1.65.2 真实 BYOK）
 
 本矩阵按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 建立，先于正式 Adapter 实现。最接近的生产 Adapter 是 `claude-code-cli`；公共控制流可参考它，Command Code 的 wire 与能力证据必须独立取得。`DocumentationOnly` 仅指 [官方 CLI/Headless/Mods/MCP 文档](https://commandcode.ai/docs)或发布包帮助，未替代真实账号、模型、Tool 或 Session Smoke。开发者曾在 v1.68 基线上二次确认[研究提案 revision 3](prompt-guidance-proposal.md)的普通 Prompt 差异；合并后的当前 Context 基线仍须另行确认，不提升其他能力轴或平台资格。
 
@@ -29,6 +29,12 @@ last_updated: 2026-09-24
 | Usage / Cache / Cost | 已知字段归入 canonical buckets，未知 NULL | 最终 `result.usage`；具体字段/计数语义未实测 | 只在 scope 与 counter mode 证明后落库 | DocumentationOnly / NotImplemented | 无 |
 | Retry / Queue / Cancel / Cleanup | accepted fence、唯一终态、整树清理 | `run_start/run_end/interrupted`、headless exit codes | 确定 native accepted 点；统一 ManagedProcess 处理取消与 shutdown | 传输层有取消与整树清理；真实 accepted/cancel/恢复语义未验证 | 无 |
 | Ready / Version / Platform | 静态身份、认证 Ready、平台资格分层 | `--version`、`status --json`、Node `>=22`；普通 `--version` 会落盘 | 浅检隔离；深检沿用用户配置；每平台独立证据 | 本机 `DO_NOT_TRACK=1` 浅检未落盘；`status --json` 为未认证；未接产品 Probe | 无 |
+
+## 1.65.2 真实调用后的证据增量
+
+[真实 BYOK Smoke](real-byok-smoke-2026-09-25.md)把 Auth/显式 Model、原生同 UUID warm 恢复、`read_file`、`edit_file`、`shell_command` stdout/stderr/空输出/非零退出，以及手动 `/compact` 后的原生 cold CLI 恢复从 `NotObserved` 推进到 **upstream Verified on macOS arm64, 1.65.2, one isolated account/session**。`result.usage` 的四个 token 字段已观察到，但 scope、累计方式和 Rovai 归属未验证。`gpt-6-sol` 未出现在当次 `/v1/models` 响应中，却能通过 Command Code 官方 Provider 配置显式调用；catalog/Ready 不能由该列表单独裁定。
+
+这些增量没有改变对应 Rovai implementation：Product Adapter、AgentRun dispatch、Native Binding/Input Delivery、App Camp Action/Usage、Builtin CLI、Skills/MCP、Approval/cancel、Compaction redelivery 和逐平台 qualification 仍为 `NotImplemented` 或 `Blocked`。1.65.2 的 `dont-ask` 实测读成功、edit/command 被拒；显式 `--yolo` 则能完成隔离 edit/command。当前内部传输固定 `dont-ask`，直接接 Camp 会阻断写和命令，必须先设计并验收唯一权限权威。原生非零 Shell 退出仍产生 `tool_completed`、CLI 顶层 `result.success`，内部 staged normalizer 已补充按终态文本退出码归为失败，并隐藏 read/edit 的结果正文；实际 App Action 尚未验证。旧表中 `1.64.0` 单元格只描述固定版本 fixture，不能读成 1.65.2 的所有轴已过关。
 
 ## 实施准入顺序
 

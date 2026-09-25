@@ -17,6 +17,8 @@ pub(crate) struct CommandCodeRuntimeEvent {
 struct ToolState {
     name: String,
     requested_input: Option<Value>,
+    streamed_output: String,
+    last_update: String,
     started: bool,
     terminal: bool,
 }
@@ -105,6 +107,8 @@ impl CommandCodeActivityNormalizer {
                             ToolState {
                                 name: name.to_owned(),
                                 requested_input: event.get("input").cloned(),
+                                streamed_output: String::new(),
+                                last_update: String::new(),
                                 started: false,
                                 terminal: false,
                             },
@@ -120,6 +124,22 @@ impl CommandCodeActivityNormalizer {
                     output.push(action_event(id, tool, "in_progress", None));
                 }
             }
+            Some("tool_update") => {
+                let (id, name) = tool_identity(event)?;
+                let tool = self.tool(id, name)?;
+                if name == "shell_command"
+                    && !tool.terminal
+                    && let Some(partial) = event.get("partial").and_then(public_text)
+                {
+                    // The native result is text only. Remember bounded live output
+                    // to avoid treating a successful `printf 'Exit code: 7'` as a
+                    // failed shell command.
+                    tool.last_update = partial.clone();
+                    if tool.streamed_output.len() + partial.len() <= 64 * 1024 {
+                        tool.streamed_output.push_str(&partial);
+                    }
+                }
+            }
             Some("tool_completed" | "tool_errored" | "tool_denied" | "tool_hook_blocked") => {
                 let event_type = event["type"].as_str().unwrap_or_default();
                 let (id, name) = tool_identity(event)?;
@@ -132,7 +152,9 @@ impl CommandCodeActivityNormalizer {
                     output.push(action_event(id, tool, "in_progress", None));
                 }
                 tool.terminal = true;
-                let status = if event_type == "tool_completed" {
+                let status = if event_type == "tool_completed"
+                    && !shell_command_exited_nonzero(tool, event.get("result"))
+                {
                     "completed"
                 } else {
                     "failed"
@@ -163,6 +185,8 @@ impl CommandCodeActivityNormalizer {
             .or_insert_with(|| ToolState {
                 name: name.to_owned(),
                 requested_input: None,
+                streamed_output: String::new(),
+                last_update: String::new(),
                 started: false,
                 terminal: false,
             });
@@ -204,6 +228,23 @@ fn public_text(value: &Value) -> Option<String> {
     }
 }
 
+fn shell_command_exited_nonzero(tool: &ToolState, result: Option<&Value>) -> bool {
+    if tool.name != "shell_command" {
+        return false;
+    }
+    let Some(text) = result.and_then(public_text) else {
+        return false;
+    };
+    if text == tool.streamed_output || text == tool.last_update {
+        return false;
+    }
+    text.lines()
+        .next()
+        .and_then(|line| line.strip_prefix("Exit code: "))
+        .and_then(|code| code.parse::<i32>().ok())
+        .is_some_and(|code| code != 0)
+}
+
 fn action_event(
     id: &str,
     tool: &ToolState,
@@ -222,6 +263,9 @@ fn action_event(
         .then(|| tool.requested_input.as_ref()?.get("command")?.as_str())
         .flatten()
         .map(str::to_owned);
+    // File reads and edits can contain private source text or patch contents.
+    // Only command tools have an output presentation contract here.
+    let output = (kind == "execute").then_some(output).flatten();
     CommandCodeRuntimeEvent {
         event_type: "runtime.action",
         payload: json!({
@@ -256,19 +300,41 @@ mod tests {
             json!({"type":"tool_completed","toolCallId":"tool-1","toolName":"shell_command","result":[{"type":"text","text":"MARKER"}]}),
             json!({"type":"tool_queued","toolCallId":"tool-2","toolName":"shell_command","input":{"command":"touch marker"}}),
             json!({"type":"tool_denied","toolCallId":"tool-2","toolName":"shell_command"}),
+            json!({"type":"tool_queued","toolCallId":"tool-3","toolName":"shell_command","input":{"command":"exit 7"}}),
+            json!({"type":"tool_completed","toolCallId":"tool-3","toolName":"shell_command","result":[{"type":"text","text":"Exit code: 7\nSTDOUT\n\nSTDERR\n"}]}),
+            json!({"type":"tool_queued","toolCallId":"tool-4","toolName":"read_file","input":{"path":"private.txt"}}),
+            json!({"type":"tool_completed","toolCallId":"tool-4","toolName":"read_file","result":[{"type":"text","text":"PRIVATE_SOURCE_MARKER"}]}),
+            json!({"type":"tool_queued","toolCallId":"tool-5","toolName":"edit_file","input":{"path":"private.txt"}}),
+            json!({"type":"tool_completed","toolCallId":"tool-5","toolName":"edit_file","result":[{"type":"text","text":"PRIVATE_PATCH_MARKER"}]}),
+            json!({"type":"tool_queued","toolCallId":"tool-6","toolName":"shell_command","input":{"command":"printf 'Exit code: 7\\n'"}}),
+            json!({"type":"tool_update","toolCallId":"tool-6","toolName":"shell_command","partial":[{"type":"text","text":"Exit code: 7\n"}]}),
+            json!({"type":"tool_completed","toolCallId":"tool-6","toolName":"shell_command","result":[{"type":"text","text":"Exit code: 7\n"}]}),
             json!({"type":"run_end","result":{"nextState":{"messages":[{"role":"user","content":"private prompt"}]}}}),
         ];
         let output = frames
             .iter()
             .flat_map(|frame| normalizer.observe(frame).unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(output.len(), 7);
+        assert_eq!(output.len(), 15);
         assert_eq!(output[0].event_type, "runtime.model.observed");
         assert_eq!(output[1].event_type, "agent.text.delta");
         assert_eq!(output[2].event_type, "agent.text.completed");
         assert_eq!(output[4].payload["output"], "MARKER");
         assert_eq!(output[5].payload["status"], "in_progress");
         assert_eq!(output[6].payload["status"], "failed");
+        assert_eq!(output[8].payload["status"], "failed");
+        assert!(
+            output[8].payload["output"]
+                .as_str()
+                .unwrap()
+                .contains("STDERR")
+        );
+        assert_eq!(output[10].payload["kind"], "read");
+        assert!(output[10].payload["output"].is_null());
+        assert_eq!(output[12].payload["kind"], "edit");
+        assert!(output[12].payload["output"].is_null());
+        assert_eq!(output[14].payload["status"], "completed");
         assert!(!format!("{output:?}").contains("private"));
+        assert!(!format!("{output:?}").contains("PRIVATE_"));
     }
 }

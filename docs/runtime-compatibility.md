@@ -24,7 +24,7 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## Command Code 研究状态
 
-Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。这不是正式认证或真实模型 Smoke。其曾在 v1.68 基线确认的普通 Prompt 引导设计见[研究提案](research/command-code-runtime/prompt-guidance-proposal.md)；合并后的当前 Context 基线仍待确认。当前 Command Code 不在 Product Runtime Catalog，所有目标平台均未取得准入或资格证据。
+Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。2026-09-25 又用官方 1.65.2、隔离的现有 BYOK 配置和 `sub2api/gpt-6-sol` 真实完成原生生成、同 UUID 续接、read/edit/command 与手动 compact 后恢复；范围及失败语义见[真实 Smoke](research/command-code-runtime/real-byok-smoke-2026-09-25.md)。这些调用没有经过 Rovai AgentRun 或 App Camp。其曾在 v1.68 基线确认的普通 Prompt 引导见[研究提案 revision 3](research/command-code-runtime/prompt-guidance-proposal.md)；合并后 Bootstrap v5／Manifest v31 的[revision 4](research/command-code-runtime/prompt-guidance-v1.70-proposal.md)待二次确认。当前 Command Code 不在 Product Runtime Catalog，所有目标平台均未取得准入或资格证据。
 
 ## 当前 Product Runtime Catalog
 

@@ -5,7 +5,7 @@ upstream: CommandCodeAI/command-code
 authority: research-evidence-only
 status: implementation-in-progress
 admission: research
-observed_version: 1.64.0
+observed_version: 1.64.0, 1.65.2
 observed_platform: macos-arm64
 last_updated: 2026-09-24
 ---
@@ -13,6 +13,8 @@ last_updated: 2026-09-24
 # Command Code Runtime 接入研究
 
 本文记录实现前的本地检查与候选设计，以及隔离的 headless 传输层实现。它不增加 Product Runtime identity、平台准入或机器 Ready 证据。正式接入必须遵循 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)；产品目录与平台资格分别由 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md) 和 [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md) 决定。
+
+2026-09-25 的 [真实 BYOK Smoke](real-byok-smoke-2026-09-25.md)、[与现有 Runtime 的差异](runtime-comparison-2026-09-25.md)和[当前 Context 基线提案 revision 4](prompt-guidance-v1.70-proposal.md)分别记录原生证据、产品差距和待确认的输入方案；下文保留 1.64.0 的固定 fixture 历史。
 
 实现前六列评估见 [Parity Matrix](parity-matrix.md)。
 
@@ -22,7 +24,7 @@ last_updated: 2026-09-24
 
 **接入方向更新（2026-09-24）：**开发者已在当时 v1.68 基线上二次确认[研究提案 revision 3](prompt-guidance-proposal.md)，复用现有 `first_payload`：新 Native Session 的第一条普通用户 Prompt 带完整 Bootstrap，普通精确恢复只带本 Run 动态上下文，合格压缩信号后的下一次输入沿用现有补发机制；不新增 delivery mode、包裹 marker 或每 Run 重投。Rovai 不以受管 `--mod` 或可变 `AGENTS.md` 承担 Bootstrap。内部传输现已要求 Core 生成的 `PreparedContext` 并写入其 `runtime_payload`，但尚无 Command Code Product Adapter/AgentRun dispatch。此前 Mod 失败实测继续保留为选择此路线的证据。
 
-这仍是 **Research**。目前没有目标 Runtime 的真实账号认证、模型、Tool、Session、MCP、权限或取消 Smoke，所有平台的 qualification evidence 都为空。普通 Prompt 引导明确低于 System/Developer 指令，且同一次 Command Code 多轮执行期间的原生压缩仍可能丢失引导；它是开发者选择的产品差异，不等于高权限 Bootstrap parity。成员级 MCP 隔离、权限失败语义与其他能力轴仍须分别闭合。正式 Product Runtime 准入不能由本研究文档单独宣称。
+这仍是 **Research**。[1.65.2 真实 BYOK Smoke](real-byok-smoke-2026-09-25.md)已在隔离 Home 中覆盖显式模型、精确续接、读、编辑、命令输出及手动压缩后的原生恢复。它没有经过 Rovai Product Adapter 或 App Camp；MCP、权限、取消和各平台 qualification evidence 仍未闭合。普通 Prompt 引导明确低于 System/Developer 指令，且同一次 Command Code 多轮执行期间的原生压缩仍可能丢失引导；它是开发者选择的产品差异，不等于高权限 Bootstrap parity。成员级 MCP 隔离、权限失败语义与其他能力轴仍须分别闭合。正式 Product Runtime 准入不能由本研究文档单独宣称。
 
 ## 2026-09-23 本机检查
 
@@ -52,7 +54,7 @@ python3 docs/research/command-code-runtime/fixtures/local_headless_probe.py --cl
 
 同一 workspace 下，仅复制静态 fixture Provider/Settings 到第二个隔离 Home：第二个 Home 按第一个 Home 的完整 UUID 恢复被拒且无事件，自己新建 Session 的 ID 独立。这证明本机 1.64.0 的原生 Session 发现受 Home 边界约束；它尚未证明生产认证、MCP/Skills/Taste 投影或从用户原生配置安全建立/刷新私有 Home 的完整方案。
 
-已在 [`command_code.rs`](../../../crates/rovai-core/src/command_code.rs) 建立内部 headless 传输层：受管 one-shot 进程、stdin 投递、逐行 NDJSON、完整 Session ID fence、最终 `result` 裁定以及取消后的进程树清理。传输输入改为共享 Context owner 产出的 `PreparedContext.runtime_payload`，且要求 `first_payload` mode；不再接受任意字符串作为正式请求字段。[`command_code_activity.rs`](../../../crates/rovai-core/src/command_code_activity.rs) 只将公开文本、模型和 Tool 生命周期投影成 Core 事件，并剔除私有 thinking 与含完整会话的 `run_end`。Parser、事件归约和假 CLI 进程边界测试已通过。正式 AgentRun 仍未连接 Context materialization、Native Binding/Input Delivery、Skills、MCP、权限审批和 Product Catalog；真实认证/模型 Smoke 与各平台准入仍在后续阶段。
+已在 [`command_code.rs`](../../../crates/rovai-core/src/command_code.rs) 建立内部 headless 传输层：受管 one-shot 进程、stdin 投递、逐行 NDJSON、完整 Session ID fence、最终 `result` 裁定以及取消后的进程树清理。传输输入改为共享 Context owner 产出的 `PreparedContext.runtime_payload`，且要求 `first_payload` mode；不再接受任意字符串作为正式请求字段。[`command_code_activity.rs`](../../../crates/rovai-core/src/command_code_activity.rs) 只将公开文本、模型和 Tool 生命周期投影成 Core 事件，并剔除私有 thinking 与含完整会话的 `run_end`。Parser、事件归约和假 CLI 进程边界测试已通过；1.65.2 真实试验发现非零 Shell 退出仍是 `tool_completed`，现按终态文本中的非零退出码单独归为失败。正式 AgentRun 仍未连接 Context materialization、Native Binding/Input Delivery、Skills、MCP、权限审批和 Product Catalog；真实原生 CLI Smoke 不能充当 App Camp 验收，各平台准入仍在后续阶段。
 
 | 本地证据 | 观察 | 能证明的范围 |
 | --- | --- | --- |
