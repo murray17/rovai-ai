@@ -2,11 +2,13 @@
 document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
-status: accepted
+status: historical
 last_updated: 2026-09-19
 ---
 
 # Skill Projection Reconciliation Architecture
+
+> 本文件解释 v1.69 及更早的 Skill Library 与项目投递，用于旧 Run、Observation 和安全清理。v1.70 新 Run 的当前权威见 [Skills 来源、配置与模型投递](skills.md)。以下旧路径的现在时描述仅适用于历史合同。
 
 本文件说明 Rovai Skill Library、execution-root SkillProjection 与 AgentRun
 SkillExposureSnapshot 的长期组件边界。决策理由见

@@ -193,12 +193,11 @@ function utf8Length(value: string): number {
 export function recoverComposerClipboardDocument(
   document: ComposerDocument,
   members: readonly ComposerCatalogMember[],
-  skills: readonly ComposerSkillOption[]
+  _skills: readonly ComposerSkillOption[]
 ): ComposerDocument {
   const availableMembers = new Set(
     members.filter((member) => member.mentionable !== false).map((member) => member.agentId)
   )
-  const availableSkills = new Set(skills.map((skill) => skill.id))
   const segments: ComposerSegment[] = []
   for (const segment of document.segments) {
     if (segment.kind === 'text') {
@@ -208,10 +207,6 @@ export function recoverComposerClipboardDocument(
     const atom = segment.atom
     if (atom.type === 'member' && !availableMembers.has(atom.agentId)) {
       segments.push({ kind: 'text', text: memberAtomPlainText(atom, null) })
-      continue
-    }
-    if (atom.type === 'skill' && !availableSkills.has(atom.skillId)) {
-      segments.push({ kind: 'text', text: `/${atom.nameAtSend}` })
       continue
     }
     segments.push({ kind: 'atom', atom: cloneComposerAtom(atom) })
@@ -244,10 +239,9 @@ function memberAtomPlainText(
 export function composerDocumentStatus(
   document: ComposerDocument,
   members: readonly ComposerCatalogMember[],
-  skills: readonly ComposerSkillOption[]
+  _skills: readonly ComposerSkillOption[]
 ): ComposerLocalStatus {
   const memberById = new Map(members.map((member) => [member.agentId, member]))
-  const skillIds = new Set(skills.map((skill) => skill.id))
   let hasContent = false
   let hasExplicitRecipient = false
   let hasUnavailableAtom = false
@@ -269,7 +263,8 @@ export function composerDocumentStatus(
       }
       continue
     }
-    if (!skillIds.has(atom.skillId)) hasUnavailableAtom = true
+    // Skill selection records the sender's source identity. A source can
+    // disappear before sending; Core preserves that intent and omits the link.
   }
   return { hasContent, hasExplicitRecipient, hasUnavailableAtom }
 }

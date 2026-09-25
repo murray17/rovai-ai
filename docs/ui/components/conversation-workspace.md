@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-22
+last_updated: 2026-09-24
 ---
 
 # Camp 会话工作区
@@ -15,7 +15,7 @@ last_updated: 2026-09-22
   Scheduler claim 后才出现真实 Run，并由真实 Run 接管后续状态与停止语义。
 - 执行区“停止”只 CAS 当前精确 Run。没有公屏通用停止、队列暂停/恢复、Camp 全部停止、业务重试或手工放行入口；终态后队列按正常规则继续。
 - accepted/outcome-unknown 对用户显示普通红色失败，不显示“结果未知”产品状态；诊断和 evidence 仍保留内部真实分类。旧执行尚未隔离时，后继消息继续显示等待，不制造必败 Run。
-- 本地用户消息仅在首次目标 claim 前显示撤回；成功后时间线可显示“你撤回了一条消息”，但 Agent 读取、搜索、线程和分页不包含正文或占位。
+- 本地用户消息仅在首次目标 claim 前显示撤回；成功后时间线可显示“你撤回了一条消息”。Agent 主动读取可在 claim 前看到原文，撤回后 `camp.read` 仅在原序号返回 `Message withdrawn` 状态项，搜索不再命中原文。
 - Channel-bound Camp 的 Agent 公共发言默认外发；没有 `--to-channel` 或 Run 级外发开关。
 - 本地用户或 External Principal 的公开消息使用 `addressMode=default` 且只有一个冻结
   `addressedAgentId` 时，历史气泡在正文前派生该队员的 Member Mention；附件-only 消息也显示该 Mention。
@@ -25,7 +25,7 @@ last_updated: 2026-09-22
 
 字段与状态见 [Message Delivery v10](../../contracts/message-delivery-v10.md)、
 [Camp Composer Draft v15](../../contracts/camp-composer-draft-v15.md)和
-[Camp History v8](../../contracts/camp-history-v8.md)。本文件后续仍描述的 Core-owned public Draft/Pending、
+[Camp History v10](../../contracts/camp-history-v10.md)。本文件后续仍描述的 Core-owned public Draft/Pending、
 CampTurn Stop、Gather 或业务重试均为历史交互，不再适用于当前 public Camp；本机草稿与 recipient
 continuation 是当前 Desktop 行为。
 
@@ -62,7 +62,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v23](../../contracts/camp-open-projection-v23.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v24](../../contracts/camp-open-projection-v24.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -250,7 +250,7 @@ Agent 公共消息继续左对齐，仅正文使用与用户消息相同的雾�
 已发布的当前用户消息在正文下方、与复制按钮同一操作行提供轻量处理回执，只显示“待处理 / 处理中”和数量；
 终态失败不增加“未完成”汇总。点击可见回执后才列出具体队员、各自状态与已建立 Run 的“查看执行”。当权威
 `canWithdraw` 投影为真时，同一行显示撤回入口；确认框只显示
-“所有接收队员均未读，可直接撤回。”，取消关闭弹窗，撤回提交期间防止重复操作。成功后原位置显示
+“所有接收队员尚未领取，可直接撤回。”，取消关闭弹窗，撤回提交期间防止重复操作。成功后原位置显示
 “你撤回了一条消息”，不再呈现正文、附件或队员状态。队员消息不增加这组回执，继续保留上面的底色框和操作行。
 事务资格、并发围栏与标记投影由 [Camp Message Send v23](../../contracts/camp-message-send-v23.md) 拥有。
 
@@ -508,7 +508,9 @@ waiting Delivery，队员入口优先显示“排队中”；已有 non-terminal
 可点击层数图标；点击打开同一输入清单，`Escape` 关闭并把焦点还给层数按钮。计数使用冻结输入 ID，不因消息正文尚未载入
 而退化为单条。单卡停止只作用 exact Run，批次停止只作用该批列出的 queued Run；执行台不提供消息撤回。
 
-卡头为最小 46px 的标题区域，摘要保持原文、12.5px/600 字重及单行省略；标题按钮具有 heading 语义。
+卡头为最小 46px 的标题区域，摘要使用随 Run 返回的 `inputSummary`，与聊天区已载入消息页无关；
+保留来源措辞、归一空白并最多 240 个 Unicode scalar，超出以 `…` 结尾。纯附件使用附件名，显式不可用来源
+回退 purpose；加载历史消息不替换标题。使用 12.5px/600 字重及单行省略；标题按钮具有 heading 语义。
 展开时标题和原有操作只在本卡范围内吸顶，滚过本卡后退出，不复制全局标题或脱离所属 Run 的停止按钮。
 Desktop 与宽屏 Web 的展开正文首尾、主要过程项间距及相邻 Run 间距统一使用 8px，运行中切到终态时不得改变
 这组密度；Mobile 继续由独立 mobile stylesheet 拥有其触控行高与紧凑过程间距，不继承该桌面调整。
@@ -583,7 +585,7 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 按窗口呈现。顶部“加载更早记录”复用会话区的文字箭头、已显示计数与原位加载／重试样式；向下滚动自动恢复
 已读缓存，取消“加载较新记录”按钮。“回到最新”采用最新缓存并跳转；首次展开执行中 Run 时，首屏与完整正文
 异步到达后仍定位到最新。历史阅读期间后台只更新最新缓存，不替换当前窗口或抢滚动位置。缓存预算见
-[Camp Open v23](../../contracts/camp-open-projection-v23.md)，不把未加载部分当作不存在。Built-in Tool 有唯一已确认
+[Camp Open v24](../../contracts/camp-open-projection-v24.md)，不把未加载部分当作不存在。Built-in Tool 有唯一已确认
 Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ command` 与下一行原始 JSON／文本输出，保留正文参数
 和多行输入，沿用 Shell Evidence 的按条惰性读取。Core 操作身份、图标和状态保持不变；不新增入参存储。
 缺少可靠关联时回退对应 `rovai` CLI 名称和同一 operation 的 Core 公共 `canonicalInput`，省略投影辅助事实和
@@ -676,8 +678,9 @@ Shell command Tool disclosure 展开后第一行显示 `$ ` 加完整 command；
 连续显示，不插入“命令 / 输出”标签或空白分隔行。两者的数据来源不得互相替代；Claude/ACP terminal
 Evidence 自带 command，不依赖 Renderer 回看 started event。除没有可靠 Shell 关联、仅显示入参的 Built-in 外，其他 Tool
 disclosure 继续在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
-直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
-“重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
+直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取成功但没有公开文本时，
+原位显示“没有可展示的公开结果。”，不误报读取失败或提供重试。读取中、真实读取错误与“重试”都留在该
+disclosure，重试成功后焦点进入结果区域，若仍无公开文本则返回对应 summary。全文置于固定最大高度的可聚焦
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。Web 搜索 disclosure 只有在 `runtimeSearchOperation.status=available` 且 Canonical semantic 同时为
 `tool.web.search` 时，才在第一行以 `搜索 ` 紧接 typed 公共 query；多项 query 以中文逗号按原顺序连接。存在
@@ -708,7 +711,8 @@ Canonical Activity 的 presentation row，明确 add 显示“新增”，其他
 已经持久化的历史卡片不重算。临时文件经 `rovai send --file` 发布后，附件由独立的 Camp Attachment UI 呈现。
 
 文件操作使用阅读文件或笔形 16px 图标。动作词和文件名始终横向单行排列，之间固定保留 5px 间距；空间不足时仅文件名显示省略号，动作词与状态保持完整，完整路径保留在 title 与可访问名称中。执行抽屉与其他执行面使用同一布局。文件名以虚线底线按钮展示。canonical diff 修改文件行优先用 exact Run Activity Evidence 授权，并以来源 AgentRun
-的 `executionRoot` 解析；历史 Run 缺少有效执行根时才回退 Camp 项目，缺少 Evidence identity 的历史 presentation
+的 `executionRoot` 解析；无 Diff 的终态 Read/Write 行使用同一 Run Activity 来源，以该 Evidence 已准入的
+文件操作路径校验并按 Run 根解析。历史 Run 缺少有效执行根时才回退 Camp 项目，缺少 Evidence identity 的历史 Diff presentation
 保留当前 Camp workspace 兼容回退。鼠标或键盘点击后成功才提交预览导航；失败只在当前页显示 danger Toast `无法打开该文件`，不创建或切换
 预览页。写入行有 Diff 时，除文件名预览链接外，动作文字、图标、统计、空白和右侧箭头都属于同一个
 可展开摘要，提供 hover/focus 反馈并控制原有 Diff；键盘可聚焦摘要并用 Enter/Space 切换。文件预览与

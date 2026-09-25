@@ -26,8 +26,6 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::brand::preferred_or_existing_legacy_paths;
-
 use crate::{
     agent_profile::{AdapterKind, AgentProfileService},
     agent_runtime_adapter::{
@@ -812,14 +810,20 @@ impl SkillLibraryService {
             return Ok(PathBuf::from(root));
         }
         let home = dirs::home_dir()
-            .context("could not determine the home directory for ~/.rovai/skills")?;
-        Ok(preferred_or_existing_legacy_paths(
+            .context("could not determine the home directory for the legacy Skill Library")?;
+        // v1.68 publishes ordinary managed resources at ~/.rovai/skills. That
+        // directory must never make an existing Revision Library switch roots
+        // on the next launch. Identify old Libraries by their revisions tree.
+        for root in [
             home.join(".rovai").join("skills"),
-            [
-                home.join(".horizonward").join("skills"),
-                home.join(".lumen").join("skills"),
-            ],
-        ))
+            home.join(".horizonward").join("skills"),
+            home.join(".lumen").join("skills"),
+        ] {
+            if root.join("revisions").is_dir() {
+                return Ok(root);
+            }
+        }
+        Ok(home.join(".rovai").join("skill-library"))
     }
 
     pub fn new(root: PathBuf) -> Result<Self> {

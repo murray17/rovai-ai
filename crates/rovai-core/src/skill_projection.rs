@@ -41,6 +41,18 @@ const MANAGED_GIT_EXCLUDE_MARKERS: [(&str, &str); 3] = [
         "# END LUMEN MANAGED SKILL PROJECTIONS",
     ),
 ];
+#[cfg(windows)]
+const WINDOWS_LEGACY_NAMED_CLEANUP_SKILLS: [&str; 9] = [
+    "analyze-agent-codebase",
+    "campfire",
+    "cli-operations",
+    "grill-duo",
+    "grill-duo-with-docs",
+    "member-studio",
+    "memory-stewardship",
+    "review-duo",
+    "worktree",
+];
 #[cfg(unix)]
 const MANAGED_TEMP_PREFIX: &str = ".rovai-skill-projection-";
 
@@ -51,6 +63,37 @@ pub struct ReconcileSkillProjectionsCommand {}
 impl sealed::Sealed for ReconcileSkillProjectionsCommand {}
 impl DomainCommand for ReconcileSkillProjectionsCommand {
     const TYPE: &'static str = "skill.projections.reconcile";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CleanupLegacySkillEntriesCommand {}
+
+impl sealed::Sealed for CleanupLegacySkillEntriesCommand {}
+impl DomainCommand for CleanupLegacySkillEntriesCommand {
+    const TYPE: &'static str = "skill.projections.cleanup_legacy_entries";
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacySkillCleanupReport {
+    pub removed: usize,
+    pub already_missing: usize,
+    pub retained_active_run: usize,
+    pub retained_inaccessible: usize,
+    pub retained_unverified: usize,
+    pub remaining: usize,
+}
+
+#[derive(Debug, Clone)]
+struct LegacyEntryObservation {
+    execution_root: String,
+    group_key: SkillDeliveryGroupKey,
+    skill_id: String,
+    revision_id: String,
+    skill_name: String,
+    entry_path: String,
+    delivered_via_group_key: Option<SkillDeliveryGroupKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -182,6 +225,82 @@ enum ReconcileRepairPolicy {
 pub struct SkillProjectionReconciler;
 
 impl SkillProjectionReconciler {
+    /// This count reads only dispatch records. It never visits a project or schedules cleanup.
+    pub fn legacy_entry_count(&self, database: &Database) -> Result<usize> {
+        Ok(database.connection().query_row(
+            "SELECT COUNT(DISTINCT entry_path) FROM skill_projection_observation",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as usize)
+    }
+
+    /// Invoked only by the explicit Diagnostics action. In particular, this never changes
+    /// skill_projection_root_state: Navigation alone owns project access transitions.
+    pub fn cleanup_legacy_entries(
+        &self,
+        database: &mut Database,
+        library: &SkillLibraryService,
+    ) -> Result<LegacySkillCleanupReport> {
+        let mut report = LegacySkillCleanupReport::default();
+        let mut grouped = BTreeMap::<String, Vec<LegacyEntryObservation>>::new();
+        for observation in legacy_entry_observations(database)? {
+            grouped
+                .entry(observation.entry_path.clone())
+                .or_default()
+                .push(observation);
+        }
+
+        for observations in grouped.values() {
+            let classification = classify_legacy_entry(database, library, observations);
+            match classification {
+                LegacyEntryClassification::ActiveRun => report.retained_active_run += 1,
+                LegacyEntryClassification::Inaccessible => report.retained_inaccessible += 1,
+                LegacyEntryClassification::Unverified => report.retained_unverified += 1,
+                LegacyEntryClassification::Missing | LegacyEntryClassification::Owned => {
+                    // Check again at the point of mutation: access, Run state and ownership may
+                    // have changed since the list was read. A missing project only removes its
+                    // observation; no project file or root access state is changed.
+                    match classify_legacy_entry(database, library, observations) {
+                        LegacyEntryClassification::Owned => {
+                            let entry_path = Path::new(&observations[0].entry_path);
+                            #[cfg(unix)]
+                            let removal: Result<()> =
+                                fs::remove_file(entry_path).map_err(Into::into);
+                            #[cfg(windows)]
+                            let removal = remove_legacy_windows_copy(
+                                database,
+                                library,
+                                observations,
+                                entry_path,
+                            );
+                            #[cfg(not(any(unix, windows)))]
+                            let removal: Result<()> = Err(anyhow::anyhow!(
+                                "legacy Skill cleanup is unsupported on this platform"
+                            ));
+                            if removal.is_ok() {
+                                delete_legacy_observations(database, observations)?;
+                                report.removed += 1;
+                            } else {
+                                report.retained_inaccessible += 1;
+                            }
+                        }
+                        LegacyEntryClassification::ActiveRun => report.retained_active_run += 1,
+                        LegacyEntryClassification::Inaccessible => {
+                            report.retained_inaccessible += 1
+                        }
+                        LegacyEntryClassification::Unverified => report.retained_unverified += 1,
+                        LegacyEntryClassification::Missing => {
+                            delete_legacy_observations(database, observations)?;
+                            report.already_missing += 1;
+                        }
+                    }
+                }
+            }
+        }
+        report.remaining = self.legacy_entry_count(database)?;
+        Ok(report)
+    }
+
     pub fn synchronize_removed_execution_roots(
         &self,
         database: &mut Database,
@@ -211,13 +330,23 @@ impl SkillProjectionReconciler {
             transaction.execute(
                 r#"
                 UPDATE skill_projection_root_state
-                SET access_state = 'active', dirty = 1,
+                SET access_state = 'active', dirty = 0,
                     cleanup_required = 0, removed_at = NULL, updated_at = ?2
                 WHERE execution_root = ?1 AND access_state = 'removed'
                 "#,
                 params![execution_root, now],
             )?;
         }
+        // Legacy projection dirtiness no longer schedules project writes.
+        // Keep observations for the explicit Diagnostics review instead.
+        transaction.execute(
+            r#"
+            UPDATE skill_projection_root_state
+            SET dirty = 0, cleanup_required = 0, updated_at = ?1
+            WHERE access_state = 'active' AND (dirty != 0 OR cleanup_required != 0)
+            "#,
+            [&now],
+        )?;
         for execution_root in removed_execution_roots {
             let observed: i64 = transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM skill_projection_observation WHERE execution_root = ?1)",
@@ -1319,6 +1448,260 @@ fn exposure_conflict_statuses(observation: &SkillProjectionObservationView) -> V
         statuses.push("duplicate_visible".to_string());
     }
     statuses
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LegacyEntryClassification {
+    Owned,
+    Missing,
+    ActiveRun,
+    Inaccessible,
+    Unverified,
+}
+
+fn legacy_entry_observations(database: &Database) -> Result<Vec<LegacyEntryObservation>> {
+    let mut statement = database.connection().prepare(
+        r#"
+        SELECT observation.execution_root, observation.group_key,
+               observation.skill_id, observation.revision_id, COALESCE(skill.name, ''),
+               observation.entry_path, observation.delivered_via_group_key
+        FROM skill_projection_observation AS observation
+        LEFT JOIN skill ON skill.id = observation.skill_id
+        ORDER BY observation.entry_path, observation.group_key
+        "#,
+    )?;
+    Ok(statement
+        .query_map([], |row| {
+            let group = row.get::<_, String>(1)?;
+            let delivered = row.get::<_, Option<String>>(6)?;
+            Ok(LegacyEntryObservation {
+                execution_root: row.get(0)?,
+                group_key: SkillDeliveryGroupKey::from_str(&group).map_err(to_sql_error)?,
+                skill_id: row.get(2)?,
+                revision_id: row.get(3)?,
+                skill_name: row.get(4)?,
+                entry_path: row.get(5)?,
+                delivered_via_group_key: delivered
+                    .map(|value| SkillDeliveryGroupKey::from_str(&value))
+                    .transpose()
+                    .map_err(to_sql_error)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn classify_legacy_entry(
+    database: &Database,
+    library: &SkillLibraryService,
+    observations: &[LegacyEntryObservation],
+) -> LegacyEntryClassification {
+    let Some(first) = observations.first() else {
+        return LegacyEntryClassification::Unverified;
+    };
+    let root = Path::new(&first.execution_root);
+    let path = Path::new(&first.entry_path);
+    let name_is_single_component = matches!(
+        Path::new(&first.skill_name)
+            .components()
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [Component::Normal(_)]
+    );
+    if !name_is_single_component
+        || validate_persisted_execution_root(&first.execution_root).is_err()
+        || observations.iter().any(|observation| {
+            observation.execution_root != first.execution_root
+                || observation.skill_id != first.skill_id
+                || observation.revision_id != first.revision_id
+                || observation.skill_name != first.skill_name
+                || observation.entry_path != first.entry_path
+                || root
+                    .join(
+                        observation
+                            .delivered_via_group_key
+                            .unwrap_or(observation.group_key)
+                            .relative_path(),
+                    )
+                    .join(&observation.skill_name)
+                    != path
+        })
+    {
+        return LegacyEntryClassification::Unverified;
+    }
+    let access = database
+        .connection()
+        .query_row(
+            "SELECT access_state FROM skill_projection_root_state WHERE execution_root = ?1",
+            [&first.execution_root],
+            |row| row.get::<_, String>(0),
+        )
+        .optional();
+    if !matches!(access, Ok(Some(ref state)) if state == "active") {
+        return LegacyEntryClassification::Inaccessible;
+    }
+    match has_active_run(database, &first.execution_root, None, None) {
+        Ok(true) => return LegacyEntryClassification::ActiveRun,
+        Ok(false) => {}
+        Err(_) => return LegacyEntryClassification::Inaccessible,
+    }
+    match fs::symlink_metadata(root) {
+        Ok(metadata) if metadata.is_dir() => {
+            if root.canonicalize().ok().as_deref() != Some(root) {
+                return LegacyEntryClassification::Inaccessible;
+            }
+        }
+        Ok(_) => return LegacyEntryClassification::Unverified,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let Some(parent) = root.parent() else {
+                return LegacyEntryClassification::Inaccessible;
+            };
+            // ENOENT alone can mean an unavailable ancestor or a dangling symlink.
+            // Require a readable, canonical parent and a second explicit NotFound on
+            // the exact root before treating its observations as stale.
+            match parent.canonicalize() {
+                Ok(canonical) if canonical == parent => {}
+                Ok(_) => return LegacyEntryClassification::Unverified,
+                Err(_) => return LegacyEntryClassification::Inaccessible,
+            }
+            if fs::read_dir(parent).is_err() {
+                return LegacyEntryClassification::Inaccessible;
+            }
+            #[cfg(windows)]
+            match windows_projection::has_active_run_registration_for_unavailable_root(
+                database,
+                &first.execution_root,
+            ) {
+                Ok(true) => return LegacyEntryClassification::ActiveRun,
+                Ok(false) => {}
+                Err(_) => return LegacyEntryClassification::Inaccessible,
+            }
+            return match fs::symlink_metadata(root) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    LegacyEntryClassification::Missing
+                }
+                _ => LegacyEntryClassification::Inaccessible,
+            };
+        }
+        Err(_) => return LegacyEntryClassification::Inaccessible,
+    }
+    match projection_mutation_blocked(database, root, &first.execution_root, None) {
+        Ok(true) => return LegacyEntryClassification::ActiveRun,
+        Ok(false) => {}
+        Err(_) => return LegacyEntryClassification::Inaccessible,
+    }
+    let Some(parent) = path.parent() else {
+        return LegacyEntryClassification::Unverified;
+    };
+    // A linked Skills parent could redirect an exact-looking entry outside the project.
+    match parent.canonicalize() {
+        Ok(canonical) if canonical == parent => {}
+        Ok(_) => return LegacyEntryClassification::Unverified,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return LegacyEntryClassification::Missing;
+        }
+        Err(_) => return LegacyEntryClassification::Inaccessible,
+    }
+    #[cfg(windows)]
+    if !observations.iter().any(|observation| {
+        observation.group_key
+            == observation
+                .delivered_via_group_key
+                .unwrap_or(observation.group_key)
+    }) {
+        return LegacyEntryClassification::Unverified;
+    }
+    #[cfg(windows)]
+    if is_windows_legacy_named_cleanup_skill(first) {
+        return match fs::symlink_metadata(path) {
+            Ok(metadata)
+                if metadata.is_dir()
+                    && !metadata.file_type().is_symlink()
+                    && windows_projection::is_plain_legacy_directory(path) =>
+            {
+                LegacyEntryClassification::Owned
+            }
+            Ok(_) => LegacyEntryClassification::Unverified,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                LegacyEntryClassification::Missing
+            }
+            Err(_) => LegacyEntryClassification::Inaccessible,
+        };
+    }
+    match inspect_entry(database, library, path) {
+        Ok(EntryState::Managed(actual))
+            if actual.skill_id == first.skill_id && actual.revision_id == first.revision_id =>
+        {
+            LegacyEntryClassification::Owned
+        }
+        Ok(EntryState::Missing) => LegacyEntryClassification::Missing,
+        Ok(EntryState::Managed(_) | EntryState::ProjectOwned(_)) => {
+            LegacyEntryClassification::Unverified
+        }
+        Err(_) => LegacyEntryClassification::Inaccessible,
+    }
+}
+
+#[cfg(windows)]
+fn is_windows_legacy_named_cleanup_skill(observation: &LegacyEntryObservation) -> bool {
+    WINDOWS_LEGACY_NAMED_CLEANUP_SKILLS.contains(&observation.skill_name.as_str())
+}
+
+fn delete_legacy_observations(
+    database: &mut Database,
+    observations: &[LegacyEntryObservation],
+) -> Result<()> {
+    for observation in observations {
+        delete_observation(
+            database,
+            &observation.execution_root,
+            observation.group_key,
+            &observation.skill_id,
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn remove_legacy_windows_copy(
+    database: &mut Database,
+    library: &SkillLibraryService,
+    observations: &[LegacyEntryObservation],
+    entry_path: &Path,
+) -> Result<()> {
+    let direct = observations
+        .iter()
+        .find(|observation| {
+            observation.group_key
+                == observation
+                    .delivered_via_group_key
+                    .unwrap_or(observation.group_key)
+        })
+        .context("legacy Skill copy has no direct dispatch observation")?;
+    if is_windows_legacy_named_cleanup_skill(direct) {
+        return windows_projection::remove_legacy_named_copy(
+            Path::new(&direct.execution_root),
+            direct.group_key,
+            &direct.skill_name,
+            entry_path,
+        );
+    }
+    let skill = library
+        .list(database)?
+        .into_iter()
+        .find(|skill| skill.id == direct.skill_id)
+        .context("legacy Skill copy has no library identity")?;
+    windows_projection::remove_managed_copy(
+        database,
+        library,
+        &direct.execution_root,
+        direct.group_key,
+        &skill,
+        entry_path,
+        &ManagedEntry {
+            skill_id: direct.skill_id.clone(),
+            revision_id: direct.revision_id.clone(),
+        },
+    )
 }
 
 fn load_observation(
@@ -2730,8 +3113,13 @@ fn to_sql_error(error: anyhow::Error) -> rusqlite::Error {
 mod slow_tests {
     use super::*;
     use crate::{
+        collaboration::{
+            AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
+            TestCampMessageAddress, TestCampMessageCommand,
+        },
         command::{ActorRef, CommandEnvelope},
         context::ContextService,
+        runtime::{AgentRunWorkspace, ClaimAgentRunCommand, ExecutionRuntimeService},
         skill::{
             CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
             SetSkillGroupAssignmentsCommand, SkillLibraryService,
@@ -2764,6 +3152,19 @@ mod slow_tests {
                 user_id: "projection-test-user".to_string(),
             },
             camp_id: None,
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload,
+        }
+    }
+
+    fn camp_envelope<P>(command_id: &str, camp_id: &str, payload: P) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id: command_id.to_string(),
+            actor: ActorRef::User {
+                user_id: "projection-test-user".to_string(),
+            },
+            camp_id: Some(camp_id.to_string()),
             expected_versions: Vec::new(),
             execution_epoch: None,
             payload,
@@ -2966,6 +3367,259 @@ mod slow_tests {
                 ],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn explicit_legacy_cleanup_preserves_run_launch_and_unverified_entries_on_repeat() {
+        let (mut database, data) = crate::test_support::seeded_runtime_database_fast();
+        let library_root = temporary_directory("rovai-legacy-cleanup-library");
+        let library = SkillLibraryService::new(library_root.clone()).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        let mut roots = (0..7)
+            .map(|_| {
+                temporary_directory("rovai-legacy-cleanup-root")
+                    .canonicalize()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let unavailable_parent = temporary_directory("rovai-legacy-cleanup-unavailable-parent");
+        let unavailable_root = unavailable_parent.join("project");
+        fs::create_dir(&unavailable_root).unwrap();
+        roots.push(unavailable_root.canonicalize().unwrap());
+        for root in &roots {
+            SkillProjectionReconciler
+                .reconcile_root(
+                    &mut database,
+                    &library,
+                    root,
+                    &[SkillDeliveryGroupKey::Codex],
+                )
+                .unwrap();
+        }
+        let entry = |root: &Path| root.join(".codex/skills/analyze-agent-codebase");
+        insert_active_run(&database, &roots[1]);
+        insert_second_active_run(&database, &roots[5]);
+        upsert_root_access_state(
+            &mut database,
+            roots[2].to_string_lossy().as_ref(),
+            "removed",
+            true,
+            true,
+        )
+        .unwrap();
+        fs::remove_file(entry(&roots[3])).unwrap();
+        fs::write(entry(&roots[3]), "User-created Skill").unwrap();
+        fs::remove_dir_all(&roots[4]).unwrap();
+        fs::remove_dir_all(&roots[5]).unwrap();
+        fs::remove_dir_all(&roots[6]).unwrap();
+        #[cfg(unix)]
+        symlink(roots[6].with_extension("unavailable"), &roots[6]).unwrap();
+        #[cfg(windows)]
+        fs::write(&roots[6], "Unexpected project root file").unwrap();
+        fs::remove_dir_all(&unavailable_parent).unwrap();
+        let root_states = |database: &Database| {
+            let mut statement = database.connection().prepare(
+                "SELECT execution_root, access_state, dirty, cleanup_required, removed_at, updated_at \
+                 FROM skill_projection_root_state ORDER BY execution_root",
+            ).unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let root_states_before = root_states(&database);
+
+        let first = SkillProjectionReconciler
+            .cleanup_legacy_entries(&mut database, &library)
+            .unwrap();
+        assert_eq!(first.removed, 1);
+        assert_eq!(first.already_missing, 1);
+        assert_eq!(first.retained_active_run, 2);
+        assert_eq!(first.retained_inaccessible, 2);
+        assert_eq!(first.retained_unverified, 2);
+        assert_eq!(first.remaining, 6);
+        assert_eq!(root_states(&database), root_states_before);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM skill_projection_observation WHERE execution_root = ?1",
+                    [roots[4].to_string_lossy().as_ref()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "the deleted project's observations, and only those rows, must be removed"
+        );
+        assert!(fs::symlink_metadata(entry(&roots[0])).is_err());
+        assert!(
+            !SkillProjectionReconciler
+                .execution_root_is_removed(&database, roots[0].to_string_lossy().as_ref())
+                .unwrap(),
+            "the Run launch gate must still admit the normal project"
+        );
+        assert!(entry(&roots[1]).exists());
+        assert!(entry(&roots[2]).exists());
+        assert_eq!(
+            SkillProjectionReconciler
+                .legacy_entry_count(&database)
+                .unwrap(),
+            6,
+            "Diagnostics must read the refreshed observation count"
+        );
+        assert_eq!(
+            fs::read_to_string(entry(&roots[3])).unwrap(),
+            "User-created Skill"
+        );
+        for (index, root) in roots.iter().take(4).enumerate() {
+            let access: String = database.connection().query_row(
+                "SELECT access_state FROM skill_projection_root_state WHERE execution_root = ?1",
+                [root.to_string_lossy().as_ref()],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(access, if index == 2 { "removed" } else { "active" });
+        }
+
+        // Exercise the queue transition as well as its root-access predicate: the old
+        // cleanup marked this root removed and made scheduler dispatch return early.
+        let collaboration = CollaborationService::default();
+        let created = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "legacy-cleanup-run-camp",
+                    CreateCampCommand::for_test_with_members(
+                        roots[0].to_string_lossy().into_owned(),
+                        &["agent_2"],
+                        "agent_2",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        collaboration
+            .add_camp_member(
+                &mut database,
+                &camp_envelope(
+                    "legacy-cleanup-run-member",
+                    camp_id,
+                    AddCampMemberCommand {
+                        camp_id: camp_id.to_string(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
+                        capability_overrides: serde_json::json!({}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let queued = collaboration
+            .send_test_camp_message(
+                &mut database,
+                &camp_envelope(
+                    "legacy-cleanup-queue-run",
+                    camp_id,
+                    TestCampMessageCommand {
+                        camp_id: camp_id.to_string(),
+                        draft_revision: None,
+                        body: "Verify the normal project Run can start".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "Verify normal project dispatch".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let run_id = queued.result.payload["agentRunIds"][0].as_str().unwrap();
+        let (queued_status, version): (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT status, version FROM agent_run WHERE id = ?1",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(queued_status, "queued");
+        assert!(
+            !SkillProjectionReconciler
+                .execution_root_is_removed(&database, roots[0].to_string_lossy().as_ref())
+                .unwrap()
+        );
+        let claimed = ExecutionRuntimeService::default()
+            .claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "legacy-cleanup-claim-run".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
+                    },
+                    camp_id: Some(camp_id.to_string()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: run_id.to_string(),
+                        expected_version: version,
+                        lease_owner: "legacy-cleanup-test-host".to_string(),
+                        lease_seconds: 60,
+                        workspace: Some(AgentRunWorkspace {
+                            execution_root: roots[0].to_string_lossy().into_owned(),
+                            access: "write".to_string(),
+                            isolation: "shared".to_string(),
+                        }),
+                        starting_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            claimed.result.status,
+            crate::command::CommandResultStatus::Accepted
+        );
+        let running_status: String = database
+            .connection()
+            .query_row(
+                "SELECT status FROM agent_run WHERE id = ?1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(running_status, "running");
+
+        let root_states_before_repeat = root_states(&database);
+        let repeated = SkillProjectionReconciler
+            .cleanup_legacy_entries(&mut database, &library)
+            .unwrap();
+        assert_eq!(repeated.removed, 0);
+        assert_eq!(repeated.already_missing, 0);
+        assert_eq!(repeated.remaining, 6);
+        assert_eq!(root_states(&database), root_states_before_repeat);
+        assert_eq!(
+            fs::read_to_string(entry(&roots[3])).unwrap(),
+            "User-created Skill"
+        );
+        drop(database);
+        fs::remove_file(&roots[6]).unwrap();
+        for root in roots.into_iter().take(4) {
+            fs::remove_dir_all(root).unwrap();
+        }
+        fs::remove_dir_all(data).unwrap();
+        fs::remove_dir_all(library_root).unwrap();
     }
 
     fn insert_second_active_run(database: &Database, execution_root: &Path) {
@@ -3630,6 +4284,72 @@ mod slow_tests {
             .unwrap();
         assert_eq!(state, ("removed".to_string(), 0, 0));
         assert!(!Path::new(&missing).exists());
+    }
+
+    #[test]
+    fn startup_access_sync_restores_mislabelled_project_without_removing_its_legacy_entry() {
+        let root = temporary_directory("rovai-projection-mislabelled-root");
+        let canonical_root = root.canonicalize().unwrap();
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
+        let library = SkillLibraryService::new(library_root).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &canonical_root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+        let entry = canonical_root.join(".codex/skills/analyze-agent-codebase");
+        assert!(entry.canonicalize().is_ok());
+
+        upsert_root_access_state(
+            &mut database,
+            canonical_root.to_string_lossy().as_ref(),
+            "removed",
+            true,
+            true,
+        )
+        .unwrap();
+        let actual_removed = temporary_directory("rovai-projection-actual-removed")
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        SkillProjectionReconciler
+            .synchronize_removed_execution_roots(&mut database, &[actual_removed.clone()])
+            .unwrap();
+
+        assert!(
+            !SkillProjectionReconciler
+                .execution_root_is_removed(&database, canonical_root.to_string_lossy().as_ref())
+                .unwrap()
+        );
+        assert!(
+            SkillProjectionReconciler
+                .execution_root_is_removed(&database, &actual_removed)
+                .unwrap()
+        );
+        assert!(
+            !root_cleanup_pending(&database, canonical_root.to_string_lossy().as_ref()).unwrap()
+        );
+        assert!(!root_is_dirty(&database, canonical_root.to_string_lossy().as_ref()).unwrap());
+        assert!(entry.canonicalize().is_ok());
+
+        SkillProjectionReconciler
+            .mark_observed_roots_dirty(&mut database, true)
+            .unwrap();
+        SkillProjectionReconciler
+            .synchronize_removed_execution_roots(&mut database, &[actual_removed])
+            .unwrap();
+        assert!(!root_is_dirty(&database, canonical_root.to_string_lossy().as_ref()).unwrap());
+        assert!(
+            !root_cleanup_pending(&database, canonical_root.to_string_lossy().as_ref()).unwrap()
+        );
+        assert!(entry.canonicalize().is_ok());
     }
 
     #[test]

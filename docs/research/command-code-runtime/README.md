@@ -20,7 +20,7 @@ last_updated: 2026-09-24
 
 候选路线是独立的 `command-code-cli` Adapter，采用 `one_shot_resumable` 进程策略，读取 Command Code 原生 `-p --output-format json` NDJSON，并按完整原生 Session ID 恢复。进程与输入收敛最接近 Claude Code；两者的协议、权限和配置结论不能直接沿用。
 
-**接入方向更新（2026-09-24）：**开发者已二次确认[模型输入变更说明 revision 3](../../versions/v1.69/model-context-change-command-code.md)，复用现有 `first_payload`：新 Native Session 的第一条普通用户 Prompt 带完整 Bootstrap，普通精确恢复只带本 Run 动态上下文，合格压缩信号后的下一次输入沿用现有补发机制；不新增 delivery mode、包裹 marker 或每 Run 重投。Rovai 不以受管 `--mod` 或可变 `AGENTS.md` 承担 Bootstrap。内部传输现已要求 Core 生成的 `PreparedContext` 并写入其 `runtime_payload`，但尚无 Command Code Product Adapter/AgentRun dispatch。此前 Mod 失败实测继续保留为选择此路线的证据。
+**接入方向更新（2026-09-24）：**开发者已在当时 v1.68 基线上二次确认[研究提案 revision 3](prompt-guidance-proposal.md)，复用现有 `first_payload`：新 Native Session 的第一条普通用户 Prompt 带完整 Bootstrap，普通精确恢复只带本 Run 动态上下文，合格压缩信号后的下一次输入沿用现有补发机制；不新增 delivery mode、包裹 marker 或每 Run 重投。Rovai 不以受管 `--mod` 或可变 `AGENTS.md` 承担 Bootstrap。内部传输现已要求 Core 生成的 `PreparedContext` 并写入其 `runtime_payload`，但尚无 Command Code Product Adapter/AgentRun dispatch。此前 Mod 失败实测继续保留为选择此路线的证据。
 
 这仍是 **Research**。目前没有目标 Runtime 的真实账号认证、模型、Tool、Session、MCP、权限或取消 Smoke，所有平台的 qualification evidence 都为空。普通 Prompt 引导明确低于 System/Developer 指令，且同一次 Command Code 多轮执行期间的原生压缩仍可能丢失引导；它是开发者选择的产品差异，不等于高权限 Bootstrap parity。成员级 MCP 隔离、权限失败语义与其他能力轴仍须分别闭合。正式 Product Runtime 准入不能由本研究文档单独宣称。
 

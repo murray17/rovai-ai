@@ -15,6 +15,15 @@ module.exports = async function assertCommandInteraction(window, run, capture) {
     ${expression}
   })()`)
   const top = selector => run(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().top`)
+  const clickAt = async expression => {
+    const point = await run(`(() => { const rect = (${expression}).getBoundingClientRect(); return {
+      x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2)
+    } })()`)
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+    window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+    await settle()
+  }
   const stable = async (selector, before, label) => {
     await settle()
     const after = await top(selector)
@@ -119,7 +128,9 @@ module.exports = async function assertCommandInteraction(window, run, capture) {
       await settle()
       await run(`window.commandSummary = document.querySelector(${JSON.stringify(command)}); window.commandSummary.click()`)
       await settle()
-      await run(`[...document.querySelectorAll('.execution-placement-button')].find(button => button.getClientRects().length).click()`)
+      await clickAt(`[...document.querySelectorAll('.execution-placement-button')].find(button => button.getClientRects().length)`)
+      await waitFor(`document.querySelector('.execution-placement-option[data-placement=${targetPlacement}]') !== null`)
+      await clickAt(`document.querySelector('.execution-placement-option[data-placement=${targetPlacement}]')`)
       await waitFor(`document.querySelector('.execution-drawer-${targetPlacement}') !== null`)
       assert.equal(await run(`window.commandSummary === document.querySelector(${JSON.stringify(command)})`), true, 'placement moves the same command DOM')
       await settle()

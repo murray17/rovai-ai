@@ -157,7 +157,7 @@ describe('ComposerDocument V2', () => {
     ])).toThrow('cannot migrate')
   })
 
-  it('restores only resolvable structured clipboard identities and degrades the rest visibly', () => {
+  it('preserves source identity for unavailable Skills when restoring clipboard content', () => {
     const encoded = JSON.stringify({
       version: 2,
       segments: [
@@ -177,7 +177,8 @@ describe('ComposerDocument V2', () => {
       version: 2,
       segments: [
         { kind: 'atom', atom: { type: 'member', agentId: 'agent-a' } },
-        { kind: 'text', text: ' /literal @离队成员/old-skill' }
+        { kind: 'text', text: ' /literal @离队成员' },
+        { kind: 'atom', atom: { type: 'skill', skillId: 'skill-missing', nameAtSend: 'old-skill' } }
       ]
     })
     expect(parseComposerClipboardDocument('[{"kind":"member_mention","agentId":"agent-a"}]'))
@@ -198,7 +199,7 @@ describe('ComposerDocument V2', () => {
     }, members, skills)).toEqual({
       hasContent: true,
       hasExplicitRecipient: true,
-      hasUnavailableAtom: true
+      hasUnavailableAtom: false
     })
   })
 })

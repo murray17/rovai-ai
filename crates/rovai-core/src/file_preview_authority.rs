@@ -1,4 +1,7 @@
-use std::path::{Component, Path};
+use std::{
+    path::{Component, Path},
+    str::FromStr,
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, params};
@@ -9,7 +12,9 @@ use crate::{
     canonical_activity,
     db::Database,
     managed_blob::ManagedBlobStore,
+    managed_skills::{TOOLBOX_SKILLS, managed_skills_root},
     runtime_diff::CommandDiffProjection,
+    runtime_file_operation,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -31,6 +36,90 @@ pub struct ResolveFilePreviewSourceParams {
     pub evidence_id: Option<String>,
     #[serde(default)]
     pub action: Option<String>,
+    #[serde(default)]
+    pub skill_id: Option<String>,
+}
+
+pub fn resolve_skill_preview_source(
+    database: &Database,
+    data_dir: &Path,
+    params: &ResolveFilePreviewSourceParams,
+) -> Result<Option<ResolvedFilePreviewSource>> {
+    let camp_id = required_bounded(Some(&params.camp_id), "campId", 128)?;
+    let skill_id = required_bounded(params.skill_id.as_deref(), "skillId", 128)?;
+    if params.raw_reference.as_deref() != Some("SKILL.md") {
+        return Ok(None);
+    }
+    let active: i64 = database.connection().query_row(
+        "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1 AND activation_state = 'active' AND deletion_operation_id IS NULL)",
+        [camp_id],
+        |row| row.get(0),
+    )?;
+    if active == 0 {
+        return Ok(None);
+    }
+    let root = if let Some(name) = skill_id.strip_prefix("rovai:") {
+        if !TOOLBOX_SKILLS.contains(&name) {
+            return Ok(None);
+        }
+        let published = managed_skills_root(data_dir)?;
+        let path = published.join(name);
+        if std::fs::symlink_metadata(&path).is_err()
+            || std::fs::symlink_metadata(path.join("SKILL.md")).is_err()
+            || std::fs::symlink_metadata(&path)?.file_type().is_symlink()
+            || std::fs::symlink_metadata(path.join("SKILL.md"))?
+                .file_type()
+                .is_symlink()
+        {
+            return Ok(None);
+        }
+        let published = published.canonicalize()?;
+        let path = path.canonicalize()?;
+        if !path.starts_with(&published) {
+            return Ok(None);
+        }
+        path
+    } else if skill_id.starts_with("native:") {
+        let record: Option<(String, String, String, String, String)> = database.connection().query_row(
+            "SELECT name, entry_path, canonical_path, source_scope, adapter_kind FROM native_skill_reference WHERE id = ?1",
+            [skill_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        ).optional()?;
+        let Some((name, path, canonical, scope, adapter)) = record else {
+            return Ok(None);
+        };
+        let entry = Path::new(&path);
+        if entry.file_name().is_none_or(|value| value != "SKILL.md")
+            || entry.canonicalize().ok().as_deref() != Some(Path::new(&canonical))
+        {
+            return Ok(None);
+        }
+        let adapter = match crate::agent_profile::AdapterKind::from_str(&adapter) {
+            Ok(adapter) => adapter,
+            Err(_) => return Ok(None),
+        };
+        let observed =
+            crate::native_skills::read_native_skill(entry, Path::new(&canonical), &scope, adapter);
+        if !matches!(observed, Ok(ref skill) if skill.id == skill_id && skill.name == name) {
+            return Ok(None);
+        }
+        Path::new(&canonical)
+            .parent()
+            .context("Skill entry has no directory")?
+            .to_path_buf()
+    } else {
+        return Ok(None);
+    };
+    let root = root.to_string_lossy().into_owned();
+    Ok(Some(ResolvedFilePreviewSource::FileTarget {
+        camp_id: camp_id.to_string(),
+        source_kind: "skill_reference".to_string(),
+        source_identity: format!("skill:{skill_id}"),
+        root_path: root.clone(),
+        base_path: root,
+        raw_reference: "SKILL.md".to_string(),
+        allow_children: true,
+    }))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -442,11 +531,12 @@ fn run_activity_authorizes_file(
     evidence_id: &str,
     path: &str,
 ) -> Result<bool> {
-    let projection_json = database
+    let authorization = database
         .connection()
         .query_row(
             r#"
-            SELECT activity.diff_projection_json
+            SELECT activity.diff_projection_json, evidence.payload_preview_json,
+                   evidence.phase, activity.outcome
             FROM agent_run_execution_evidence AS evidence
             JOIN agent_run ON agent_run.id = evidence.agent_run_id
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -484,25 +574,44 @@ fn run_activity_authorizes_file(
                 canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
             ],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
         )
         .optional()
-        .context("failed to resolve the Run activity file projection")?
-        .flatten();
-    let Some(projection_json) = projection_json else {
+        .context("failed to resolve the Run activity file projection")?;
+    let Some((projection_json, payload_json, evidence_phase, activity_outcome)) = authorization
+    else {
         return Ok(false);
     };
-    let projection: CommandDiffProjection = serde_json::from_str(&projection_json)
-        .context("Run activity file projection is invalid")?;
-    Ok(projection.status == "available"
-        && projection
-            .source_evidence_ids
-            .iter()
-            .any(|candidate| candidate == evidence_id)
-        && projection
-            .entries
-            .as_ref()
-            .is_some_and(|entries| entries.iter().any(|entry| entry.path == path)))
+    if let Some(projection_json) = projection_json {
+        let projection: CommandDiffProjection = serde_json::from_str(&projection_json)
+            .context("Run activity file projection is invalid")?;
+        if projection.status == "available"
+            && projection
+                .source_evidence_ids
+                .iter()
+                .any(|candidate| candidate == evidence_id)
+            && projection
+                .entries
+                .as_ref()
+                .is_some_and(|entries| entries.iter().any(|entry| entry.path == path))
+        {
+            return Ok(true);
+        }
+    }
+    if evidence_phase != "completed" || activity_outcome != "succeeded" {
+        return Ok(false);
+    }
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_json).context("Run activity file evidence is invalid")?;
+    Ok(runtime_file_operation::operation_from_evidence(&payload)
+        .is_some_and(|operation| operation.path == path))
 }
 
 fn run_activity_file(
@@ -676,7 +785,8 @@ mod tests {
 
     use super::{
         ResolveFilePreviewSourceParams, ResolvedFilePreviewSource, is_supported_run_evidence_path,
-        message_authorizes_reference, resolve_file_preview_source, run_evidence_root,
+        message_authorizes_reference, resolve_file_preview_source, resolve_skill_preview_source,
+        run_evidence_root,
     };
     use crate::{
         agent_run_file_change::AgentRunFileChangeProjector, db::Database,
@@ -769,6 +879,71 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn skill_preview_requires_exact_registered_native_source_and_active_camp() {
+        let (database, data_dir, root, _) = run_workspace_fixture();
+        let skill_root = root.join("native/custom");
+        std::fs::create_dir_all(&skill_root).unwrap();
+        let entry = skill_root.join("SKILL.md");
+        std::fs::write(
+            &entry,
+            "---\nname: custom\ndescription: Preview\n---\nGuide\n",
+        )
+        .unwrap();
+        let canonical = entry.canonicalize().unwrap();
+        let skill = crate::native_skills::read_native_skill(
+            &entry,
+            &canonical,
+            "project",
+            crate::agent_profile::AdapterKind::CodexCli,
+        )
+        .unwrap();
+        database.connection().execute(
+            "INSERT INTO native_skill_reference(id, name, entry_path, canonical_path, source_scope, adapter_kind, discovered_at) VALUES (?1, ?2, ?3, ?4, 'project', 'codex-cli', '2026-09-24T00:00:00Z')",
+            params![skill.id, skill.name, skill.entry_path, skill.canonical_path],
+        ).unwrap();
+        let request = ResolveFilePreviewSourceParams {
+            kind: "skill_reference".to_string(),
+            camp_id: "preview-camp".to_string(),
+            message_id: None,
+            raw_reference: Some("SKILL.md".to_string()),
+            agent_run_id: None,
+            execution_epoch: None,
+            evidence_file_id: None,
+            evidence_id: None,
+            action: None,
+            skill_id: Some(skill.id.clone()),
+        };
+        assert!(
+            matches!(resolve_skill_preview_source(&database, &data_dir, &request).unwrap(), Some(ResolvedFilePreviewSource::FileTarget { source_kind, .. }) if source_kind == "skill_reference")
+        );
+        let mut changed = request.clone();
+        changed.raw_reference = Some("other.md".to_string());
+        assert!(
+            resolve_skill_preview_source(&database, &data_dir, &changed)
+                .unwrap()
+                .is_none()
+        );
+        changed = request.clone();
+        changed.camp_id = "another-camp".to_string();
+        assert!(
+            resolve_skill_preview_source(&database, &data_dir, &changed)
+                .unwrap()
+                .is_none()
+        );
+        std::fs::write(
+            &entry,
+            "---\nname: changed\ndescription: Preview\n---\nGuide\n",
+        )
+        .unwrap();
+        assert!(
+            resolve_skill_preview_source(&database, &data_dir, &request)
+                .unwrap()
+                .is_none()
+        );
+        clean_run_workspace_fixture(database, data_dir, root);
+    }
+
     fn project_run_file_operations(
         database: &mut Database,
         data_dir: &Path,
@@ -835,6 +1010,7 @@ mod tests {
                 evidence_file_id: Some(evidence_file_id.to_string()),
                 evidence_id: None,
                 action: Some("open_current".to_string()),
+                skill_id: None,
             },
         )
         .unwrap()
@@ -925,6 +1101,7 @@ mod tests {
                 evidence_file_id: None,
                 evidence_id: Some(evidence_id.to_string()),
                 action: None,
+                skill_id: None,
             },
         )
         .unwrap()
@@ -1125,6 +1302,142 @@ mod tests {
                 "a mismatched Run activity locator must fail closed"
             );
         }
+        let operation_path = "src/operation-only.ts";
+        let project_root: PathBuf = database
+            .connection()
+            .query_row(
+                "SELECT project_path FROM camp WHERE id = 'preview-camp'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map(PathBuf::from)
+            .unwrap();
+        std::fs::create_dir_all(project_root.join("src")).unwrap();
+        std::fs::create_dir_all(execution_root.join("src")).unwrap();
+        std::fs::write(project_root.join(operation_path), "project\n").unwrap();
+        std::fs::write(execution_root.join(operation_path), "mission\n").unwrap();
+        let operation_evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                "preview-run",
+                1,
+                "runtime.action",
+                &json!({
+                    "eventId": "preview-operation-event",
+                    "toolCallId": "preview-operation-tool",
+                    "status": "completed",
+                    "kind": "edit",
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": "write",
+                        "path": operation_path
+                    }
+                }),
+            )
+            .unwrap()
+            .expect("path-only file evidence should be recorded");
+        let ResolvedFilePreviewSource::FileTarget {
+            root_path,
+            raw_reference,
+            ..
+        } = resolve_run_activity_file(
+            &database,
+            &data_dir,
+            "preview-run",
+            1,
+            &operation_evidence.evidence.id,
+            operation_path,
+        )
+        .expect("the exact path-only file operation should resolve in the Run worktree")
+        else {
+            panic!("Run file operation should resolve a file target")
+        };
+        assert_eq!(Path::new(&root_path), execution_root);
+        assert_eq!(raw_reference, operation_path);
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&root_path).join(&raw_reference)).unwrap(),
+            "mission\n",
+            "the operation-only row must not open the Camp project's same-named file"
+        );
+        let read_evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                "preview-run",
+                1,
+                "runtime.action",
+                &json!({
+                    "eventId": "preview-read-event",
+                    "toolCallId": "preview-read-tool",
+                    "status": "completed",
+                    "kind": "read",
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": "read",
+                        "path": operation_path
+                    }
+                }),
+            )
+            .unwrap()
+            .expect("path-only read evidence should be recorded");
+        let ResolvedFilePreviewSource::FileTarget { root_path, .. } = resolve_run_activity_file(
+            &database,
+            &data_dir,
+            "preview-run",
+            1,
+            &read_evidence.evidence.id,
+            operation_path,
+        )
+        .expect("the exact path-only read should resolve in the Run worktree") else {
+            panic!("Run read operation should resolve a file target")
+        };
+        assert_eq!(Path::new(&root_path), execution_root);
+        for (run_id, epoch, path) in [
+            ("other-run", 1, operation_path),
+            ("preview-run", 2, operation_path),
+            ("preview-run", 1, "src/not-reported.ts"),
+            ("preview-run", 1, "../operation-only.ts"),
+        ] {
+            assert!(
+                resolve_run_activity_file(
+                    &database,
+                    &data_dir,
+                    run_id,
+                    epoch,
+                    &operation_evidence.evidence.id,
+                    path,
+                )
+                .is_none(),
+                "path-only evidence must not authorize another Run, epoch or path"
+            );
+        }
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run_execution_evidence
+                 SET payload_preview_json=json_set(
+                   payload_preview_json, '$.runtimeFileOperation.status', 'unavailable'
+                 ) WHERE id=?1",
+                [&operation_evidence.evidence.id],
+            )
+            .unwrap();
+        assert!(
+            resolve_run_activity_file(
+                &database,
+                &data_dir,
+                "preview-run",
+                1,
+                &operation_evidence.evidence.id,
+                operation_path,
+            )
+            .is_none(),
+            "an unavailable operation must not authorize a file"
+        );
         clean_run_workspace_fixture(database, data_dir, root);
     }
 

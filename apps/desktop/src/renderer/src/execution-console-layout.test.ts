@@ -199,8 +199,9 @@ describe('execution console layout', () => {
     expect(styleBlock('.tool-group-line')).toMatch(/line-height:\s*16px/)
   })
 
-  it('keeps deferred Tool result loading neutral', () => {
+  it('keeps empty and deferred Tool result states on the Shell result canvas', () => {
     expect(styleBlock('.tool-result-state')).toMatch(/color:\s*var\(--evidence-muted\)/)
+    expect(styleBlock('.tool-result-state')).toMatch(/background:\s*var\(--shell-result-canvas\)/)
     expect(styleBlock('.tool-result-spinner')).toMatch(/border-top-color:\s*var\(--evidence-muted\)/)
     expect(styleBlock('.tool-result-spinner')).not.toMatch(/var\(--(?:brand|info|success|attention)\)/)
   })

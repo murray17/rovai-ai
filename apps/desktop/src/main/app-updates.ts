@@ -5,6 +5,7 @@ import type {
   AppUpdateRelease,
   AppUpdateSnapshot
 } from '@contracts'
+import { currentReleaseFromBundledNotes } from '../shared/app-current-release'
 
 export const FIRST_CHECK_DELAY_MS = 5_000
 export const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
@@ -42,6 +43,7 @@ export interface DesktopAutoUpdater {
 
 interface AppUpdatesServiceOptions {
   currentVersion(): string
+  bundledReleaseNotes?: string
   isPackaged(): boolean
   updater: DesktopAutoUpdater | null
   automaticChecksEnabled?: boolean
@@ -69,6 +71,7 @@ export function createAppUpdatesServiceFailOpen(
 
 export class AppUpdatesService {
   readonly #currentVersion: () => string
+  readonly #bundledReleaseNotes: string | undefined
   readonly #isPackaged: () => boolean
   readonly #updater: DesktopAutoUpdater | null
   readonly #automaticChecksEnabled: boolean
@@ -88,6 +91,7 @@ export class AppUpdatesService {
 
   constructor(options: AppUpdatesServiceOptions) {
     this.#currentVersion = options.currentVersion
+    this.#bundledReleaseNotes = options.bundledReleaseNotes
     this.#isPackaged = options.isPackaged
     this.#updater = options.updater
     this.#automaticChecksEnabled = options.automaticChecksEnabled ?? true
@@ -96,7 +100,7 @@ export class AppUpdatesService {
     this.#scheduleTimer = options.scheduleTimer ?? setTimeout
     this.#clearTimer = options.clearTimer ?? clearTimeout
     this.#warn = options.warn ?? ((message) => console.warn(message))
-    this.#snapshot = idleSnapshot(this.#currentVersion())
+    this.#snapshot = idleSnapshot(this.#currentVersion(), this.#bundledReleaseNotes)
 
     if (!this.#updater) return
     this.#updater.autoDownload = false
@@ -148,7 +152,7 @@ export class AppUpdatesService {
         return
       }
       this.#replace({
-        ...idleSnapshot(this.#currentVersion()),
+        ...idleSnapshot(this.#currentVersion(), this.#bundledReleaseNotes),
         status: 'up_to_date',
         lastCheckSource: this.#snapshot.lastCheckSource,
         checkedAt: this.#snapshot.checkedAt ?? this.#nowIso(),
@@ -401,9 +405,10 @@ export class AppUpdatesService {
   }
 }
 
-function idleSnapshot(currentVersion: string): AppUpdateSnapshot {
+function idleSnapshot(currentVersion: string, bundledReleaseNotes?: string): AppUpdateSnapshot {
   return {
     currentVersion,
+    currentRelease: currentReleaseFromBundledNotes(currentVersion, bundledReleaseNotes),
     status: 'idle',
     availableRelease: null,
     lastCheckSource: null,

@@ -2,11 +2,13 @@
 document_type: architecture
 architecture: structured-current-input-skill-links
 authority: structured-skill-selection-and-context-resolution-boundaries
-status: accepted
+status: historical
 last_updated: 2026-09-18
 ---
 
 # Structured Run Input Skill Links Architecture
+
+> 本文件解释旧 Library、Exposure 与 SkillProjection 参与的输入。v1.70 新 Run 的来源身份和消息局部链接见 [Skills 来源、配置与模型投递](skills.md)及 [Skills Rebuild v1](../contracts/skills-rebuild-v1.md)。
 
 本文件说明 Picker identity、claim-time 批次冻结、SkillProjection preflight、start-time resolution、Context
 Formatter 和 Runtime Adapter 的 Module seam。字段级合同见

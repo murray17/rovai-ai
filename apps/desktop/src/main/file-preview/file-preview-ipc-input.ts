@@ -126,6 +126,14 @@ export function parseFilePreviewCamp(value: unknown): string | null {
 export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequest {
   const input = record(value)
   switch (input.kind) {
+    case 'skill_reference':
+      if (input.rawReference !== 'SKILL.md') throw new Error('Unsupported Skill entry')
+      return {
+        kind: input.kind,
+        campId: campId(input.campId),
+        skillId: string(input.skillId, 128),
+        rawReference: 'SKILL.md'
+      }
     case 'message_reference':
       return {
         kind: input.kind,

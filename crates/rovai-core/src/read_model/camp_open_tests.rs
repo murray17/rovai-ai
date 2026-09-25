@@ -66,9 +66,9 @@ fn business_fixture() -> (OwnedTestDatabase, String, String, String) {
         .execute(
             r#"INSERT INTO task (
             id, camp_id, title, description, acceptance_criteria_json, status,
-            assignee_agent_id, created_by_type, created_by_id, version, created_at, updated_at
+            assignee_agent_id, created_by_type, created_by_id, created_at, updated_at
         ) VALUES ('open-task', ?1, '旧任务', '保留任务业务数据', '[]', 'pending',
-                  'agent_2', 'user', 'local_user', 1, ?2, ?2)"#,
+                  'agent_2', 'user', 'local_user', ?2, ?2)"#,
             params![camp_id, now],
         )
         .unwrap();
@@ -474,6 +474,106 @@ fn camp_open_preserves_business_state_without_reading_event_history() {
         serde_json::to_value(refreshed.messages).unwrap(),
         open_json["messages"]
     );
+}
+
+#[test]
+fn camp_open_run_titles_survive_message_paging() {
+    let (mut database, camp_id, completed_run, active_run) = business_fixture();
+    let source_id: String = database.connection().query_row(
+        "SELECT message_id FROM agent_run_input WHERE agent_run_id = ?1 ORDER BY ordinal LIMIT 1",
+        [&active_run], |row| row.get(0),
+    ).unwrap();
+    // A later input/anchor must not replace the first input as its message falls
+    // out of the conversation page. The fixture's hand-off is already claimed.
+    database.connection().execute(
+        "INSERT INTO agent_run_input(agent_run_id, ordinal, delivery_id, message_id, message_sequence, message_content_digest, context_manifest_version)
+         SELECT ?1, 1, 'open-delivery', id, sequence, content_digest,
+         (SELECT context_manifest_version FROM agent_run_input WHERE agent_run_id = ?1 AND ordinal = 0)
+         FROM camp_message WHERE id = 'open-agent-message'",
+        [&active_run],
+    ).unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE agent_run SET anchor_message_id = 'open-agent-message' WHERE id = ?1",
+            [&active_run],
+        )
+        .unwrap();
+    for sequence in 3..=32 {
+        database.connection().execute(
+            "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body,
+             structured_content_json, content_digest, address_mode, addressed_agent_ids_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'user', 'local_user', '较新消息',
+             '[{\"kind\":\"text\",\"text\":\"较新消息\"}]', 'sha256:later', 'default', '[]',
+             '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z')",
+            params![format!("title-page-{sequence}"), camp_id, sequence],
+        ).unwrap();
+    }
+    // Exercise supported pre-batch Runs through the same summary loader.
+    database.connection().execute(
+        "INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, created_at, updated_at,
+         execution_budget_schema_version, execution_budget_accepted_at,
+         execution_budget_max_agent_run_responsibilities, execution_budget_max_accepted_a2a,
+         execution_budget_root_agent_run_responsibilities)
+         VALUES ('title-legacy-turn', ?1, 'camp_message', ?2, 'running',
+         '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z',
+         1, '2026-08-31T00:00:00Z', 32, 16, 1)", params![camp_id, source_id],
+    ).unwrap();
+    database
+        .connection()
+        .execute(
+            "DELETE FROM agent_run_input WHERE agent_run_id = ?1",
+            [&completed_run],
+        )
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE agent_run SET invocation_kind = 'direct', camp_turn_id = 'title-legacy-turn',
+         camp_id = NULL, anchor_message_id = NULL, current_public_tail_sequence = NULL,
+         trigger_camp_message_id = ?2 WHERE id = ?1",
+            params![completed_run, source_id],
+        )
+        .unwrap();
+    // Changing source state proves that summaries are read projections, not a
+    // persisted duplicate that could keep erased content. Unicode is bounded
+    // by scalars without splitting UTF-8; attachment metadata needs no file IO.
+    let long_body = "花🌷".repeat(130);
+    let shortened = format!("{}…", long_body.chars().take(239).collect::<String>());
+    for (body, recall, tombstoned, expected) in [
+        (
+            "保留业务状态\n  并换行",
+            "closed",
+            false,
+            Some("保留业务状态 并换行"),
+        ),
+        (
+            long_body.as_str(),
+            "closed",
+            false,
+            Some(shortened.as_str()),
+        ),
+        (" \n ", "closed", false, Some("attachment.txt")),
+        (
+            "should not escape",
+            "withdrawn",
+            false,
+            Some("Message withdrawn"),
+        ),
+        ("deleted text", "closed", true, None),
+    ] {
+        database.connection().execute(
+            "UPDATE camp_message SET body = ?2, structured_content_json = ?3,
+             recall_state = ?4, tombstoned_at = CASE WHEN ?5 THEN '2026-08-31T00:00:00Z' END WHERE id = ?1",
+            params![source_id, body, json!([{"kind":"text", "text":body}]).to_string(), recall, tombstoned],
+        ).unwrap();
+        let (open, _, _) = read_metered(&mut database, &camp_id);
+        assert_eq!(open.messages.len(), 20);
+        assert!(open.messages.iter().all(|message| message.id != source_id));
+        for run in &open.agent_runs {
+            assert_eq!(run.input_summary.as_deref(), expected, "{}", run.id);
+        }
+    }
 }
 
 #[test]

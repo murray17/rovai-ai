@@ -2,7 +2,7 @@
 document_type: model-context-change-proposal
 runtime: command-code
 baseline_version: v1.68
-target_version: v1.69
+target_version: unassigned
 revision: 3
 confirmation_status: confirmed
 confirmed_by: Principal
@@ -10,12 +10,12 @@ confirmed_at: 2026-09-24T05:24:42.898114Z
 confirmed_revision: 3
 authority: proposal-only
 implementation_status: in_progress
-last_updated: 2026-09-24
+last_updated: 2026-09-25
 ---
 
 # Command Code 普通 Prompt 引导：模型输入变更提案（revision 3）
 
-开发者已选择将 Command Code 改为“普通 Prompt 引导”的接入。本文件保存获得二次确认的研究提案；同一 revision 已纳入当前版本的[模型上下文变更说明](../../versions/v1.69/model-context-change-command-code.md)。它不单独修改当前 Context Contract 或 Product Runtime Catalog。
+开发者已选择将 Command Code 改为“普通 Prompt 引导”的接入。本文件保存 2026-09-24 在 v1.68 基线上获得二次确认的 revision 3。合并最新 `main` 后，v1.69 是 Camp 主动读取的历史版本，v1.70 是当前 Skills 版本；原分支的 v1.69 Command Code 版本说明不能覆盖这些版本。本提案中的“当前”均指确认时的基线，不代表合并后的 Bootstrap v5／公开 Manifest v31。正式 Product Adapter 修改模型输入前，须按届时唯一 current 版本和现行 Context 合同重新形成说明并取得二次确认。
 
 revision 2 将基线更新到已合入的 v1.68：v1.67 删除 Core 生成模型投影中的 `schemaVersion` 并升级 Bootstrap，v1.68 移除公开 Camp 的自动历史投影，改由 `RUN_FACTS.historyHint` 提示按需读取历史。revision 3 进一步复核现有 Context 实现，改为复用已有 `first_payload`；此前拟新增的 `prompt_guidance` mode、包裹 marker 和每 Run 重投均不是开发者已要求或现有共用主链所必需的行为。该修订改变首次后续 Run 的输入字节与连续性策略，旧 revision 不能沿用。
 

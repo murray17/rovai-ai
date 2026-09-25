@@ -2,7 +2,8 @@ use std::{collections::HashSet, path::Path};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::{Value, json};
 
 use crate::{
     agent_profile::AdapterKind,
@@ -12,9 +13,17 @@ use crate::{
     skill_projection::PreparedSkillExposure,
 };
 
-pub const SKILL_SELECTION_SCHEMA_VERSION: i64 = 1;
-pub const CURRENT_INPUT_SKILL_RESOLUTION_SCHEMA_VERSION: i64 = 1;
-pub const EMPTY_SKILL_SELECTION_JSON: &str = r#"{"schemaVersion":1,"entries":[]}"#;
+pub const SKILL_SELECTION_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_INPUT_SKILL_RESOLUTION_SCHEMA_VERSION: i64 = 2;
+pub const EMPTY_SKILL_SELECTION_JSON: &str = r#"{"entries":[],"schemaVersion":2}"#;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillSource {
+    Rovai,
+    Native,
+    Legacy,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -26,22 +35,64 @@ pub enum SkillSelectionOmissionReason {
     RuntimeGroupUnassignedAtSend,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SkillSelectionEntry {
     pub skill_id: String,
     pub name_at_send: String,
     pub first_segment_index: usize,
+    #[serde(default)]
+    pub first_message_index: usize,
+    #[serde(default)]
+    pub source: Option<SkillSource>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default = "bool_true")]
     pub eligible_at_send: bool,
+    #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omission_reason: Option<SkillSelectionOmissionReason>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn bool_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SkillSelectionSnapshot {
     pub schema_version: i64,
     pub entries: Vec<SkillSelectionEntry>,
+}
+
+impl Serialize for SkillSelectionSnapshot {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let entries: Vec<Value> = self
+            .entries
+            .iter()
+            .map(|entry| {
+                if self.schema_version == 2 {
+                    json!({
+                        "skillId": entry.skill_id, "nameAtSend": entry.name_at_send,
+                        "source": entry.source, "sourcePath": entry.source_path,
+                        "firstMessageIndex": entry.first_message_index,
+                        "firstSegmentIndex": entry.first_segment_index,
+                    })
+                } else {
+                    let mut value = json!({
+                        "skillId": entry.skill_id, "nameAtSend": entry.name_at_send,
+                        "firstSegmentIndex": entry.first_segment_index,
+                        "eligibleAtSend": entry.eligible_at_send,
+                    });
+                    if let Some(reason) = entry.omission_reason {
+                        value["omissionReason"] = json!(reason);
+                    }
+                    value
+                }
+            })
+            .collect();
+        json!({"schemaVersion":self.schema_version,"entries":entries}).serialize(serializer)
+    }
 }
 
 impl Default for SkillSelectionSnapshot {
@@ -76,12 +127,19 @@ pub enum RunSkillAvailabilityView {
         matching_group_keys: Vec<String>,
     },
 }
+impl Default for RunSkillAvailabilityView {
+    fn default() -> Self {
+        Self::Missing
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CurrentInputSkillResolutionOutcome {
     Included,
     Omitted,
+    Available,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,19 +156,31 @@ pub enum CurrentInputSkillOmissionReason {
     ExposureNotReady,
     ExposureGroupIncompatible,
     SkillFileUnavailable,
+    SourceMissing,
+    SourceUnreadable,
+    LegacyUnresolved,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CurrentInputSkillResolutionEntry {
     pub skill_id: String,
     pub name_at_send: String,
+    #[serde(default)]
     pub first_segment_index: usize,
+    #[serde(default)]
+    pub source: Option<SkillSource>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default = "bool_true")]
     pub eligible_at_send: bool,
+    #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub send_omission_reason: Option<SkillSelectionOmissionReason>,
+    #[serde(default)]
     pub run_availability: RunSkillAvailabilityView,
     pub outcome: CurrentInputSkillResolutionOutcome,
+    #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<CurrentInputSkillOmissionReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,13 +195,70 @@ pub struct CurrentInputSkillResolutionEntry {
     pub delivered_via_group_key: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CurrentInputSkillResolution {
     pub schema_version: i64,
     pub selection_snapshot_digest: String,
+    #[serde(default)]
     pub skill_exposure_digest: String,
     pub entries: Vec<CurrentInputSkillResolutionEntry>,
+}
+
+impl Serialize for CurrentInputSkillResolution {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        if self.schema_version == 2 {
+            let entries: Vec<Value> = self
+                .entries
+                .iter()
+                .map(|entry| {
+                    let mut value = json!({
+                        "skillId": entry.skill_id, "nameAtSend": entry.name_at_send,
+                        "source": entry.source, "sourcePath": entry.source_path,
+                        "outcome": entry.outcome,
+                    });
+                    if let Some(reason) = entry.reason {
+                        value["reason"] = json!(reason);
+                    }
+                    value
+                })
+                .collect();
+            json!({"schemaVersion": 2, "selectionSnapshotDigest": self.selection_snapshot_digest,
+                "entries": entries})
+            .serialize(serializer)
+        } else {
+            let entries: Vec<Value> = self
+                .entries
+                .iter()
+                .map(|entry| {
+                    let mut value = json!({
+                        "skillId": entry.skill_id, "nameAtSend": entry.name_at_send,
+                        "firstSegmentIndex": entry.first_segment_index,
+                        "eligibleAtSend": entry.eligible_at_send,
+                        "runAvailability": entry.run_availability, "outcome": entry.outcome,
+                    });
+                    for (key, field) in [
+                        ("sendOmissionReason", json!(entry.send_omission_reason)),
+                        ("reason", json!(entry.reason)),
+                        ("path", json!(entry.path)),
+                        ("revisionId", json!(entry.revision_id)),
+                        ("contentDigest", json!(entry.content_digest)),
+                        ("groupKey", json!(entry.group_key)),
+                        ("deliveredViaGroupKey", json!(entry.delivered_via_group_key)),
+                    ] {
+                        if !field.is_null() {
+                            value[key] = field;
+                        }
+                    }
+                    value
+                })
+                .collect();
+            json!({"schemaVersion":self.schema_version,
+                "selectionSnapshotDigest":self.selection_snapshot_digest,
+                "skillExposureDigest":self.skill_exposure_digest,"entries":entries})
+            .serialize(serializer)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +266,10 @@ pub struct CurrentInputSkillResolution {
 pub struct CurrentInputSkillLink {
     pub name: String,
     pub path: String,
+    #[serde(skip)]
+    pub skill_id: Option<String>,
+    #[serde(skip)]
+    pub message_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +290,23 @@ pub(crate) fn projected_skill_links_for_claim(
     execution_root: &Path,
 ) -> Result<Vec<CurrentInputSkillLink>> {
     validate_selection_snapshot(selection)?;
+    if selection.schema_version == 2 {
+        return Ok(selection
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                resolve_v2_source(connection, entry, adapter_kind)
+                    .ok()
+                    .and_then(|result| result.ok())
+                    .map(|path| CurrentInputSkillLink {
+                        name: entry.name_at_send.clone(),
+                        path,
+                        skill_id: Some(entry.skill_id.clone()),
+                        message_index: Some(entry.first_message_index),
+                    })
+            })
+            .collect());
+    }
     let delivery_groups = AgentRuntimeAdapterRegistry::default()
         .skill_discovery(adapter_kind)
         .delivery_groups;
@@ -196,6 +344,8 @@ pub(crate) fn projected_skill_links_for_claim(
                 .join("SKILL.md")
                 .to_string_lossy()
                 .to_string(),
+            skill_id: None,
+            message_index: None,
         });
     }
     Ok(links)
@@ -206,6 +356,31 @@ pub fn freeze_skill_selection(
     content: &[StructuredCampMessageSegment],
     adapter_kind: AdapterKind,
 ) -> Result<SkillSelectionSnapshot> {
+    freeze_skill_selection_with_messages(
+        transaction,
+        content,
+        &vec![0; content.len()],
+        adapter_kind,
+    )
+}
+
+pub fn freeze_skill_selection_with_messages(
+    transaction: &Transaction<'_>,
+    content: &[StructuredCampMessageSegment],
+    message_indices: &[usize],
+    adapter_kind: AdapterKind,
+) -> Result<SkillSelectionSnapshot> {
+    anyhow::ensure!(
+        content.len() == message_indices.len(),
+        "Skill selection message positions are incomplete"
+    );
+    let v2_available: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='native_skill_reference')",
+        [], |row| row.get(0)
+    )?;
+    if v2_available {
+        return freeze_skill_selection_v2(transaction, content, message_indices);
+    }
     let delivery_groups = AgentRuntimeAdapterRegistry::default()
         .skill_discovery(adapter_kind)
         .delivery_groups;
@@ -241,16 +416,99 @@ pub fn freeze_skill_selection(
             skill_id: skill_id.clone(),
             name_at_send: name_at_send.clone(),
             first_segment_index: index,
+            first_message_index: 0,
+            source: None,
+            source_path: None,
             eligible_at_send: omission_reason.is_none(),
             omission_reason,
         });
     }
     let snapshot = SkillSelectionSnapshot {
-        schema_version: SKILL_SELECTION_SCHEMA_VERSION,
+        schema_version: 1,
         entries,
     };
     validate_selection_snapshot(&snapshot)?;
     Ok(snapshot)
+}
+
+fn freeze_skill_selection_v2(
+    transaction: &Transaction<'_>,
+    content: &[StructuredCampMessageSegment],
+    message_indices: &[usize],
+) -> Result<SkillSelectionSnapshot> {
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+    let db_path: String = transaction.query_row("PRAGMA database_list", [], |row| row.get(2))?;
+    let managed_root = Path::new(&db_path)
+        .parent()
+        .filter(|_| !db_path.is_empty())
+        .and_then(|data_dir| crate::managed_skills::managed_skills_root(data_dir).ok());
+    for (index, segment) in content.iter().enumerate() {
+        let StructuredCampMessageSegment::SkillMention {
+            skill_id,
+            name_at_send,
+        } = segment
+        else {
+            continue;
+        };
+        if !seen.insert(skill_id.as_str()) {
+            continue;
+        }
+        let (source, source_path) = if let Some(name) = skill_id.strip_prefix("rovai:") {
+            let trusted =
+                name == name_at_send && crate::managed_skills::TOOLBOX_SKILLS.contains(&name);
+            (
+                SkillSource::Rovai,
+                trusted
+                    .then(|| {
+                        managed_root.as_ref().map(|root| {
+                            root.join(name)
+                                .join("SKILL.md")
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                    })
+                    .flatten(),
+            )
+        } else if skill_id.starts_with("native:") {
+            let registered: Option<(String, String, String)> = transaction.query_row(
+                "SELECT name, entry_path, canonical_path FROM native_skill_reference WHERE id = ?1",
+                [skill_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            ).optional()?;
+            let path = registered.and_then(|(name, entry, canonical)| {
+                (name == *name_at_send && native_identity(&canonical) == *skill_id).then_some(entry)
+            });
+            (SkillSource::Native, path)
+        } else {
+            (SkillSource::Legacy, None)
+        };
+        entries.push(SkillSelectionEntry {
+            skill_id: skill_id.clone(),
+            name_at_send: name_at_send.clone(),
+            first_message_index: message_indices[index],
+            first_segment_index: content[..index]
+                .iter()
+                .enumerate()
+                .rev()
+                .take_while(|(previous, _)| message_indices[*previous] == message_indices[index])
+                .count(),
+            source: Some(source),
+            source_path,
+            eligible_at_send: true,
+            omission_reason: None,
+        });
+    }
+    let snapshot = SkillSelectionSnapshot {
+        schema_version: 2,
+        entries,
+    };
+    validate_selection_snapshot(&snapshot)?;
+    Ok(snapshot)
+}
+
+fn native_identity(canonical: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("native:{:x}", Sha256::digest(canonical.as_bytes()))
 }
 
 pub fn parse_skill_selection_snapshot(
@@ -277,6 +535,14 @@ pub fn resolve_current_input_skills(
     if selection.canonical_digest()? != selection_digest {
         anyhow::bail!("AgentRun Skill selection snapshot digest is invalid");
     }
+    if selection.schema_version == 2 {
+        return resolve_current_input_skills_v2(
+            connection,
+            selection,
+            selection_digest,
+            adapter_kind,
+        );
+    }
     if exposure.snapshot.schema_version != 2
         || canonical_json_digest(&serde_json::to_value(&exposure.snapshot)?)? != exposure.digest
     {
@@ -301,6 +567,8 @@ pub fn resolve_current_input_skills(
             skill_id: selected.skill_id.clone(),
             name_at_send: selected.name_at_send.clone(),
             first_segment_index: selected.first_segment_index,
+            source: None,
+            source_path: None,
             eligible_at_send: selected.eligible_at_send,
             send_omission_reason: selected.omission_reason,
             run_availability: availability,
@@ -402,11 +670,13 @@ pub fn resolve_current_input_skills(
         links.push(CurrentInputSkillLink {
             name: selected.name_at_send.clone(),
             path: skill_file,
+            skill_id: None,
+            message_index: None,
         });
         entries.push(entry);
     }
     let resolution = CurrentInputSkillResolution {
-        schema_version: CURRENT_INPUT_SKILL_RESOLUTION_SCHEMA_VERSION,
+        schema_version: 1,
         selection_snapshot_digest: selection_digest.to_string(),
         skill_exposure_digest: exposure.digest.clone(),
         entries,
@@ -419,6 +689,138 @@ pub fn resolve_current_input_skills(
     })
 }
 
+fn resolve_current_input_skills_v2(
+    connection: &Connection,
+    selection: &SkillSelectionSnapshot,
+    selection_digest: &str,
+    adapter_kind: AdapterKind,
+) -> Result<PreparedCurrentInputSkillResolution> {
+    let mut entries = Vec::with_capacity(selection.entries.len());
+    let mut links = Vec::new();
+    for selected in &selection.entries {
+        let result = resolve_v2_source(connection, selected, adapter_kind)?;
+        let (outcome, reason, path) = match result {
+            Ok(path) => (
+                CurrentInputSkillResolutionOutcome::Available,
+                None,
+                Some(path),
+            ),
+            Err(reason) => (
+                CurrentInputSkillResolutionOutcome::Unavailable,
+                Some(reason),
+                None,
+            ),
+        };
+        if let Some(path) = &path {
+            links.push(CurrentInputSkillLink {
+                name: selected.name_at_send.clone(),
+                path: path.clone(),
+                skill_id: Some(selected.skill_id.clone()),
+                message_index: Some(selected.first_message_index),
+            });
+        }
+        entries.push(CurrentInputSkillResolutionEntry {
+            skill_id: selected.skill_id.clone(),
+            name_at_send: selected.name_at_send.clone(),
+            first_segment_index: selected.first_segment_index,
+            source: selected.source,
+            source_path: selected.source_path.clone(),
+            eligible_at_send: true,
+            send_omission_reason: None,
+            run_availability: RunSkillAvailabilityView::Missing,
+            outcome,
+            reason,
+            path,
+            revision_id: None,
+            content_digest: None,
+            group_key: None,
+            delivered_via_group_key: None,
+        });
+    }
+    let resolution = CurrentInputSkillResolution {
+        schema_version: 2,
+        selection_snapshot_digest: selection_digest.to_owned(),
+        skill_exposure_digest: String::new(),
+        entries,
+    };
+    let digest = canonical_json_digest(&serde_json::to_value(&resolution)?)?;
+    Ok(PreparedCurrentInputSkillResolution {
+        resolution,
+        digest,
+        links,
+    })
+}
+
+fn resolve_v2_source(
+    connection: &Connection,
+    selected: &SkillSelectionEntry,
+    adapter_kind: AdapterKind,
+) -> Result<std::result::Result<String, CurrentInputSkillOmissionReason>> {
+    use CurrentInputSkillOmissionReason as Reason;
+    let Some(source) = selected.source else {
+        return Ok(Err(Reason::SourceMissing));
+    };
+    if source == SkillSource::Legacy {
+        return Ok(Err(Reason::LegacyUnresolved));
+    }
+    let Some(path) = selected.source_path.as_deref() else {
+        return Ok(Err(Reason::SourceMissing));
+    };
+    let entry = Path::new(path);
+    if !entry.is_absolute() || entry.file_name().is_none_or(|name| name != "SKILL.md") {
+        return Ok(Err(Reason::SourceMissing));
+    }
+    if !entry.exists() {
+        return Ok(Err(Reason::SourceMissing));
+    }
+    if !entry.is_file() {
+        return Ok(Err(Reason::SourceUnreadable));
+    }
+    match source {
+        SkillSource::Rovai => {
+            let Some(name) = selected.skill_id.strip_prefix("rovai:") else {
+                return Ok(Err(Reason::SourceMissing));
+            };
+            if name != selected.name_at_send
+                || !crate::managed_skills::TOOLBOX_SKILLS.contains(&name)
+            {
+                return Ok(Err(Reason::SourceMissing));
+            }
+            let db_path: String =
+                connection.query_row("PRAGMA database_list", [], |row| row.get(2))?;
+            let expected = Path::new(&db_path)
+                .parent()
+                .filter(|_| !db_path.is_empty())
+                .and_then(|dir| crate::managed_skills::managed_skills_root(dir).ok())
+                .map(|root| root.join(name).join("SKILL.md"));
+            if expected.as_deref() != Some(entry) {
+                return Ok(Err(Reason::SourceMissing));
+            }
+            if crate::managed_skills::read_frontmatter(entry, name).is_err() {
+                return Ok(Err(Reason::SourceUnreadable));
+            }
+        }
+        SkillSource::Native => {
+            let Ok(canonical) = entry.canonicalize() else {
+                return Ok(Err(Reason::SourceUnreadable));
+            };
+            if native_identity(&canonical.to_string_lossy()) != selected.skill_id {
+                return Ok(Err(Reason::SourceMissing));
+            }
+            let Ok(skill) =
+                crate::native_skills::read_native_skill(entry, &canonical, "user", adapter_kind)
+            else {
+                return Ok(Err(Reason::SourceUnreadable));
+            };
+            if skill.name != selected.name_at_send {
+                return Ok(Err(Reason::SourceMissing));
+            }
+        }
+        SkillSource::Legacy => unreachable!(),
+    }
+    Ok(Ok(path.to_owned()))
+}
+
 pub fn validate_persisted_resolution(
     resolution_json: &str,
     expected_digest: &str,
@@ -428,15 +830,39 @@ pub fn validate_persisted_resolution(
 ) -> Result<CurrentInputSkillResolution> {
     let resolution: CurrentInputSkillResolution = serde_json::from_str(resolution_json)
         .context("Stored ContextManifest Current Input Skill resolution is invalid")?;
-    if resolution.schema_version != CURRENT_INPUT_SKILL_RESOLUTION_SCHEMA_VERSION
+    if resolution.schema_version != selection.schema_version
         || resolution.selection_snapshot_digest != selection_digest
-        || resolution.skill_exposure_digest != exposure_digest
+        || (resolution.schema_version == 1 && resolution.skill_exposure_digest != exposure_digest)
         || canonical_json_digest(&serde_json::to_value(&resolution)?)? != expected_digest
     {
         anyhow::bail!("Stored ContextManifest Current Input Skill resolution is inconsistent");
     }
     if resolution.entries.len() != selection.entries.len() {
         anyhow::bail!("Stored ContextManifest Current Input Skill resolution is incomplete");
+    }
+    if resolution.schema_version == 2 {
+        for (entry, selected) in resolution.entries.iter().zip(&selection.entries) {
+            if entry.skill_id != selected.skill_id
+                || entry.name_at_send != selected.name_at_send
+                || entry.source != selected.source
+                || entry.source_path != selected.source_path
+                || !matches!(
+                    (entry.outcome, entry.reason),
+                    (CurrentInputSkillResolutionOutcome::Available, None)
+                        | (
+                            CurrentInputSkillResolutionOutcome::Unavailable,
+                            Some(
+                                CurrentInputSkillOmissionReason::SourceMissing
+                                    | CurrentInputSkillOmissionReason::SourceUnreadable
+                                    | CurrentInputSkillOmissionReason::LegacyUnresolved
+                            )
+                        )
+                )
+            {
+                anyhow::bail!("Stored ContextManifest Skill source resolution is inconsistent");
+            }
+        }
+        return Ok(resolution);
     }
     for (entry, selected) in resolution.entries.iter().zip(&selection.entries) {
         if entry.skill_id != selected.skill_id
@@ -571,11 +997,11 @@ fn load_skill_state(
 }
 
 fn validate_selection_snapshot(snapshot: &SkillSelectionSnapshot) -> Result<()> {
-    if snapshot.schema_version != SKILL_SELECTION_SCHEMA_VERSION {
+    if !matches!(snapshot.schema_version, 1 | 2) {
         anyhow::bail!("unsupported AgentRun Skill selection snapshot version");
     }
     let mut seen = HashSet::new();
-    let mut previous_index = None;
+    let mut previous_position = None;
     for entry in &snapshot.entries {
         if entry.skill_id.is_empty()
             || entry.skill_id.trim() != entry.skill_id
@@ -584,13 +1010,23 @@ fn validate_selection_snapshot(snapshot: &SkillSelectionSnapshot) -> Result<()> 
             anyhow::bail!("AgentRun Skill selection has an invalid Skill ID");
         }
         crate::skill::validate_skill_name(&entry.name_at_send)?;
+        let position = (entry.first_message_index, entry.first_segment_index);
         if !seen.insert(entry.skill_id.as_str())
-            || previous_index.is_some_and(|previous| entry.first_segment_index <= previous)
-            || entry.eligible_at_send == entry.omission_reason.is_some()
+            || previous_position.is_some_and(|previous| position <= previous)
+            || (snapshot.schema_version == 1
+                && entry.eligible_at_send == entry.omission_reason.is_some())
+            || (snapshot.schema_version == 2
+                && (entry.source.is_none()
+                    || !entry.eligible_at_send
+                    || entry.omission_reason.is_some()
+                    || entry
+                        .source_path
+                        .as_deref()
+                        .is_some_and(|path| !Path::new(path).is_absolute())))
         {
             anyhow::bail!("AgentRun Skill selection entries are inconsistent");
         }
-        previous_index = Some(entry.first_segment_index);
+        previous_position = Some(position);
     }
     Ok(())
 }
@@ -861,6 +1297,8 @@ mod tests {
             [CurrentInputSkillLink {
                 name: "review-pr".to_string(),
                 path: opencode.join("SKILL.md").to_string_lossy().to_string(),
+                skill_id: None,
+                message_index: None,
             }]
         );
         assert_eq!(
@@ -1004,6 +1442,9 @@ mod tests {
                             skill_id: skill_id.to_string(),
                             name_at_send: name_at_send.to_string(),
                             first_segment_index,
+                            first_message_index: 0,
+                            source: None,
+                            source_path: None,
                             eligible_at_send: eligible,
                             omission_reason: reason,
                         }

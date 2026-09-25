@@ -264,47 +264,34 @@ impl super::Core {
         if self.subsystems.begin("skills") {
             let result = async {
                 let started = Instant::now();
-                let plan = {
-                    let mut database = self.database.lock().await;
-                    SkillProjectionReconciler.synchronize_removed_execution_roots(
-                        &mut database,
-                        self.removed_skill_project_roots.get()?,
-                    )?;
-                    self.skill_library.plan_bundled_skills(&mut database)?
-                };
-                let library = SkillLibraryService::deferred(self.skill_library.root().to_path_buf());
-                let prepared = tokio::task::spawn_blocking(move || library.prepare_bundled_skills(plan))
-                    .await
-                    .context("Bundled Skill preparation task failed")??;
-                let bundled = {
-                    let mut database = self.database.lock().await;
-                    let bundled = self.skill_library.commit_bundled_skills(&mut database, prepared)?;
-                    if bundled.changed {
-                        SkillProjectionReconciler
-                            .mark_observed_roots_dirty(&mut database, false)?;
+                match rovai_core::managed_skills::ManagedSkills::for_data_dir(&self.data_dir) {
+                    Ok(managed) => {
+                        if let Err(error) = tokio::task::spawn_blocking(move || managed.sync())
+                            .await
+                            .context("managed Skill synchronization task failed")?
+                        {
+                            // A missing or modified resource is a diagnostic, not a
+                            // Runtime admission gate. New Run preparation retries.
+                            eprintln!("managed Skill synchronization unavailable: {error:#}");
+                        }
                     }
-                    SkillProjectionReconciler
-                        .finalize_unprojected_deletions(&mut database, &self.skill_library)?;
-                    bundled
-                };
-                eprintln!(
-                    "[startup] stage=bundled_skills_ready duration_ms={} fast_path_count={} materialized_count={} repaired_count={} changed={}",
-                    started.elapsed().as_millis(),
-                    bundled.fast_path_count,
-                    bundled.materialized_count,
-                    bundled.repaired_count,
-                    bundled.changed,
-                );
-                for root in &self.startup_skill_execution_roots {
-                    let mut database = self.database.lock().await;
-                    SkillProjectionReconciler.reconcile_after_run_terminal(
-                        &mut database,
-                        &self.skill_library,
-                        Path::new(root),
-                    )?;
+                    Err(error) => eprintln!("managed Skill resources unavailable: {error:#}"),
                 }
+                let mut database = self.database.lock().await;
+                // Project access is owned by Navigation. A previous startup
+                // cleanup marked observed projects removed, so synchronize the
+                // persisted access state without touching project files.
+                SkillProjectionReconciler.synchronize_removed_execution_roots(
+                    &mut database,
+                    self.removed_skill_project_roots.get()?,
+                )?;
+                eprintln!(
+                    "[startup] stage=managed_skills_ready duration_ms={}",
+                    started.elapsed().as_millis()
+                );
                 Ok(())
-            }.await;
+            }
+            .await;
             self.finish_subsystem("skills", result);
         }
         tokio::task::yield_now().await;

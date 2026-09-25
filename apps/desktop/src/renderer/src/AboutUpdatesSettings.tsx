@@ -1,4 +1,7 @@
-import type { AppUpdateSnapshot } from '@contracts'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { AppUpdateRelease, AppUpdateSnapshot } from '@contracts'
+import { currentReleaseFromBundledNotes } from '../../shared/app-current-release'
+import { displayReleaseNotes } from './release-notes-display'
 import { SafeMarkdown } from './SafeMarkdown'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import type { AppUpdateActionError, AppUpdatesController } from './useAppUpdates'
@@ -18,6 +21,7 @@ export function AboutUpdatesSettings({
       onCheck={() => void updates.check()}
       onDownload={() => void updates.download()}
       onInstall={() => void updates.install()}
+      onDismissPrompt={updates.dismissPrompt}
     />
   )
 }
@@ -31,6 +35,7 @@ export function AboutUpdatesSettingsView({
   onCheck,
   onDownload,
   onInstall,
+  onDismissPrompt,
   product = 'desktop',
   readOnly = false
 }: {
@@ -42,19 +47,77 @@ export function AboutUpdatesSettingsView({
   onCheck(): void
   onDownload(): void
   onInstall(): void
+  onDismissPrompt?(promptId: string): Promise<boolean>
   product?: 'desktop' | 'server'
   readOnly?: boolean
 }): React.JSX.Element {
+  const [showCurrentForVersion, setShowCurrentForVersion] = useState<string | null>(null)
+  const availableTabRef = useRef<HTMLButtonElement>(null)
+  const currentTabRef = useRef<HTMLButtonElement>(null)
   const presentation = product === 'server' && snapshot?.failureReason === 'restart_unconfirmed'
     ? { tone: 'error', title: '尚未确认 Server 恢复连接', detail: '可以重试连接；如果持续无法连接，请检查运行 Server 的电脑。' }
     : updatePresentation(snapshot, loading, loadError, actionError, canUpdate)
   const primaryAction = updatePrimaryAction(snapshot, loading, canUpdate)
-  const release = snapshot?.availableRelease ?? null
+  const availableRelease = snapshot?.availableRelease ?? null
+  const currentRelease = snapshot
+    ? snapshot.currentRelease?.version === snapshot.currentVersion.replace(/^v/iu, '')
+      ? snapshot.currentRelease
+      : currentReleaseFromBundledNotes(snapshot.currentVersion, null)
+    : null
+  const showCurrent = !availableRelease || showCurrentForVersion === availableRelease.version
+  const release = showCurrent ? currentRelease : availableRelease
   const downloading = snapshot?.status === 'downloading'
   const progress = downloading ? snapshot.downloadPercent ?? 0 : 0
   const showManualCheck = snapshot?.status === 'available' || snapshot?.status === 'download_failed'
   const showFallback = snapshot?.status === 'download_failed'
     || (snapshot?.status === 'check_failed' && snapshot.failureReason === 'updater_unavailable')
+  const officialReleasesUrl = product === 'server'
+    ? availableRelease
+      ? `https://github.com/murray17/rovai-ai/releases/tag/server-v${encodeURIComponent(availableRelease.version)}`
+      : 'https://github.com/murray17/rovai-ai/releases'
+    : 'https://github.com/murray17/rovai-ai/releases/latest'
+
+  useEffect(() => {
+    setShowCurrentForVersion(null)
+  }, [availableRelease?.version])
+
+  useEffect(() => {
+    const prompt = snapshot?.pendingPrompt
+    if (!prompt || !onDismissPrompt || showCurrent || availableRelease?.version !== prompt.version) return undefined
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const section = document.querySelector<HTMLElement>('.about-release-section')
+        if (section?.dataset.appUpdateReleaseVersion === prompt.version) {
+          void onDismissPrompt(prompt.id)
+        }
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+    }
+  }, [snapshot?.pendingPrompt?.id, availableRelease?.version, showCurrent, onDismissPrompt])
+
+  const selectRelease = (target: 'available' | 'current'): void => {
+    if (!availableRelease) return
+    setShowCurrentForVersion(target === 'current' ? availableRelease.version : null)
+    const tabRef = target === 'current' ? currentTabRef : availableTabRef
+    tabRef.current?.focus()
+  }
+
+  const onReleaseTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    target: 'available' | 'current'
+  ): void => {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+      event.preventDefault()
+      selectRelease(target === 'available' ? 'current' : 'available')
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      selectRelease(event.key === 'Home' ? 'available' : 'current')
+    }
+  }
 
   const runPrimary = (): void => {
     if (primaryAction.kind === 'download') onDownload()
@@ -156,7 +219,7 @@ export function AboutUpdatesSettingsView({
                     : '可以从官方发布页手动获取版本，或提交问题。'}</span>
                 </div>
                 <div className="about-update-fallback-actions">
-                  <a href={product === 'server' ? (release ? `https://github.com/murray17/rovai-ai/releases/tag/server-v${release.version}` : 'https://github.com/murray17/rovai-ai/releases') : 'https://github.com/murray17/rovai-ai/releases/latest'} target="_blank" rel="noreferrer noopener">官方 Releases</a>
+                  <a href={officialReleasesUrl} target="_blank" rel="noreferrer noopener">官方 Releases</a>
                   <a href="https://github.com/murray17/rovai-ai/issues" target="_blank" rel="noreferrer noopener">获取支持</a>
                 </div>
               </div>
@@ -175,28 +238,64 @@ export function AboutUpdatesSettingsView({
             <div className="section-heading">
               <div>
                 <h2 id="about-release-notes-heading" tabIndex={-1}>更新日志</h2>
-                <p>版本变化</p>
               </div>
+              {availableRelease && <div className="about-release-tabs" role="tablist" aria-label="日志版本">
+                <button ref={availableTabRef} type="button" role="tab" id="about-release-tab-available"
+                  aria-controls="about-release-panel-available" aria-selected={!showCurrent} tabIndex={showCurrent ? -1 : 0}
+                  data-app-update-release-tab="available"
+                  onClick={() => selectRelease('available')}
+                  onKeyDown={(event) => onReleaseTabKeyDown(event, 'available')}>新版本</button>
+                <button ref={currentTabRef} type="button" role="tab" id="about-release-tab-current"
+                  aria-controls="about-release-panel-current" aria-selected={showCurrent} tabIndex={showCurrent ? 0 : -1}
+                  data-app-update-release-tab="current"
+                  onClick={() => selectRelease('current')}
+                  onKeyDown={(event) => onReleaseTabKeyDown(event, 'current')}>当前版本</button>
+              </div>}
             </div>
-            <div className="about-release-body">
-              <div className="about-release-header">
-                <div>
-                  <h3>{release.releaseName ?? `Rovai AI ${displayVersion(release.version)}`}</h3>
-                  <p>{release.releaseDate
-                    ? <>发布日期：<time dateTime={release.releaseDate}>{formatReleaseDate(release.releaseDate)}</time></>
-                    : '发布日期暂未提供'}</p>
-                </div>
-                <code>{displayVersion(release.version)}</code>
+            {availableRelease && currentRelease ? <>
+              <div id="about-release-panel-available" role="tabpanel" aria-labelledby="about-release-tab-available"
+                className="about-release-panel" hidden={showCurrent}>
+                <ReleaseNotesBody release={availableRelease} installed={false} showContext={false} />
               </div>
-              {release.releaseNotes
-                ? <SafeMarkdown className="about-release-notes">{release.releaseNotes}</SafeMarkdown>
-                : <p className="about-release-empty">此版本没有提供更新日志。版本号与下载操作仍以正式发布信息为准。</p>}
-            </div>
+              <div id="about-release-panel-current" role="tabpanel" aria-labelledby="about-release-tab-current"
+                className="about-release-panel" hidden={!showCurrent}>
+                <ReleaseNotesBody release={currentRelease} installed showContext={false} />
+              </div>
+            </> : <ReleaseNotesBody release={release} installed showContext />}
           </section>
         )}
       </div>
     </div>
   )
+}
+
+function ReleaseNotesBody({ release, installed, showContext }: {
+  release: AppUpdateRelease
+  installed: boolean
+  showContext: boolean
+}): React.JSX.Element {
+  const notes = useMemo(
+    () => displayReleaseNotes(release),
+    [release.version, release.releaseName, release.releaseNotes]
+  )
+  return <div className="about-release-body" data-notes-version={release.version}>
+    <div className="about-release-header">
+      <div>
+        <div className="about-release-title-line">
+          <h3>{release.releaseName ?? `Rovai AI ${displayVersion(release.version)}`}</h3>
+          {showContext && <span className="about-release-context">{installed ? '当前版本' : '新版本'}</span>}
+        </div>
+        <p>{release.releaseDate
+          ? <>发布日期：<time dateTime={release.releaseDate}>{formatReleaseDate(release.releaseDate)}</time></>
+          : '发布日期暂未提供'}</p>
+      </div>
+    </div>
+    {notes
+      ? <SafeMarkdown className="about-release-notes">{notes}</SafeMarkdown>
+      : <p className="about-release-empty">{installed
+        ? '此版本暂无内置更新日志。'
+        : '此版本没有提供更新日志。版本号与下载操作仍以正式发布信息为准。'}</p>}
+  </div>
 }
 
 function updatePrimaryAction(

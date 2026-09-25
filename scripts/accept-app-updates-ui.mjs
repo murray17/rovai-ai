@@ -58,6 +58,8 @@ try {
       isolatedPackagedApplication: true,
       packagedVersion: '0.3.2',
       typedIdleUpdaterSnapshot: true,
+      bundledCurrentRelease: true,
+      duplicateReleaseTitleRemoved: true,
       productAndBundleName: 'Rovai AI',
       existingSettingsVisualWorld: true,
       noVerticalHeadingRules: true,
@@ -99,6 +101,8 @@ async function openAboutUpdates(cdp) {
 async function assertAboutUpdates(cdp, context) {
   const updaterSnapshot = await evaluate(cdp, 'window.rovai.appUpdates.get()', true)
   assert(updaterSnapshot?.currentVersion === '0.3.2'
+    && updaterSnapshot.currentRelease?.version === '0.3.2'
+    && updaterSnapshot.currentRelease.releaseNotes?.startsWith('# Rovai AI v0.3.2\n')
     && updaterSnapshot.status === 'idle'
     && updaterSnapshot.availableRelease === null
     && updaterSnapshot.lastCheckSource === null
@@ -124,6 +128,9 @@ async function assertAboutUpdates(cdp, context) {
       source: surface?.querySelector('.about-update-source')?.textContent ?? '',
       progressVisible: Boolean(surface?.querySelector('progress')),
       releaseVisible: Boolean(surface?.querySelector('.about-release-section')),
+      releaseVersion: surface?.querySelector('.about-release-section')?.dataset.appUpdateReleaseVersion,
+      releaseNotesText: surface?.querySelector('.about-release-notes')?.textContent ?? '',
+      repeatedReleaseTitle: Boolean(surface?.querySelector('[data-markdown-heading="Rovai AI v0.3.2"]')),
       fallbackVisible: Boolean(surface?.querySelector('.about-update-fallback')),
       globalPromptVisible: Boolean(document.querySelector('.app-update-prompt')),
       forbiddenCopy: /校验 hash|等待当前任务|自动开始下载/.test(surface?.textContent ?? ''),
@@ -142,12 +149,15 @@ async function assertAboutUpdates(cdp, context) {
     `${context} did not expose a keyboard-focusable check action`)
   assert(state.statusRole === 'status' && state.source.includes('GitHub Release'),
     `${context} omitted updater status/source evidence`)
+  assert(state.releaseVisible && state.releaseVersion === '0.3.2'
+    && state.releaseNotesText.includes('删除 Camp 更快')
+    && !state.repeatedReleaseTitle,
+    `${context} omitted or duplicated bundled release notes: ${JSON.stringify(state)}`)
   assert(!state.progressVisible
-    && !state.releaseVisible
     && !state.fallbackVisible
     && !state.globalPromptVisible
     && !state.forbiddenCopy,
-  `${context} rendered release, prompt, progress, or fallback UI while idle`)
+  `${context} rendered prompt, progress, or fallback UI while idle`)
   assert(state.headingRule === 'none' && state.sectionRule === 'none',
     `${context} restored vertical heading rules: ${JSON.stringify(state)}`)
   assert(!state.documentOverflow && !state.surfaceOverflow,
@@ -210,6 +220,7 @@ async function launchApp(width, height) {
     const health = await evaluate(cdp, "window.rovai.request('health.check', {})", true)
     assert(await realpath(health.database.path) === await realpath(join(dataDir, 'rovai.sqlite')),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
+    await waitForExpression(cdp, `!document.querySelector('.startup-loading-canvas')`, 45_000)
     return { cdp, child }
   } catch (error) {
     cdp?.close()

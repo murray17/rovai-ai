@@ -76,13 +76,9 @@ const fixtureExecutionRoot = join(fixtureRoot, 'workspace')
 const codexExpectedCommand = 'rovai camp read --limit 20'
 const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
 const webSearchQueries = ['password=公开验收词 token=保持原样', '第二项公开查询']
-const fixtureContextManifestVersion = 27
+const fixtureContextManifestVersion = 29
 const fixtureContextDeliveryProfile = {
-  profileVersion: 8,
-  maxPublicMessages: 15,
-  maxPublicHistoryChars: 24_000,
-  maxMessageBodyChars: 2_000,
-  maxPublicReferenceChainMessages: 3,
+  profileVersion: 9,
   maxSelfActiveTasks: 8
 }
 
@@ -193,7 +189,8 @@ try {
     `document.querySelectorAll(${JSON.stringify(runArticleSelector)}).length`)
   assert(renderedMessageCount === runtimes.length,
     `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
-  if (previewOnly || completeToolOnly) {
+  const selectActiveRunBeforeEntryCheck = previewOnly || completeToolOnly || toolDetailsOnly
+  if (selectActiveRunBeforeEntryCheck) {
     await evaluate(app.cdp, `document.querySelector(
       ${JSON.stringify(`.run-pulse-chip[data-agent-id="${activeAgentId}"]`)}
     )?.click()`)
@@ -207,10 +204,18 @@ try {
     drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
   }))()`)
   assert(workspaceEntryExecution.placement === 'inspector'
-    && workspaceEntryExecution.selectedAgentId === activeAgentId
+    && (workspaceEntryExecution.selectedAgentId === activeAgentId
+      || (!selectActiveRunBeforeEntryCheck && workspaceEntryExecution.selectedAgentId === executionOverviewScope))
     && workspaceEntryExecution.focusedRunId === activeRunId
-    && ((previewOnly || completeToolOnly) || !workspaceEntryExecution.drawerOwnsFocus),
+    && (selectActiveRunBeforeEntryCheck || !workspaceEntryExecution.drawerOwnsFocus),
     `A fresh installation did not open the latest Run in the popover without stealing focus: ${JSON.stringify(workspaceEntryExecution)}`)
+  if (!selectActiveRunBeforeEntryCheck) {
+    await evaluate(app.cdp, `document.querySelector(
+      ${JSON.stringify(`.run-pulse-chip[data-agent-id="${activeAgentId}"]`)}
+    )?.click()`)
+    await waitForExpression(app.cdp,
+      `document.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId === ${JSON.stringify(activeAgentId)}`)
+  }
   if (placementRestartOnly) {
     const restart = await verifyExecutionPlacementAcrossRestart(app)
     app = restart.app
@@ -279,6 +284,9 @@ try {
     const shellPresentation = toolDetailsOnly ? await verifyClaudeCommandDisclosure(app.cdp) : null
     const shellCapture = toolDetailsOnly ? join(outputDir, 'runtime-activity-shell-command.png') : null
     if (shellCapture) await capture(app.cdp, shellCapture)
+    const claudeResults = toolDetailsOnly ? await verifyClaudeToolResults(app.cdp) : null
+    const claudeResultsCapture = toolDetailsOnly ? join(outputDir, 'runtime-activity-claude-results.png') : null
+    if (claudeResultsCapture) await capture(app.cdp, claudeResultsCapture)
     const reportPath = join(outputDir, toolDetailsOnly ? 'runtime-tool-details-acceptance.json' : 'runtime-search-acceptance.json')
     const report = {
       ok: true,
@@ -286,8 +294,8 @@ try {
       app: basename(appPath),
       fixtureRoot,
       outputDir,
-      verified: { webSearchPresentation, ...(toolDetailsOnly ? { shellPresentation } : {}) },
-      captures: { webSearch: webSearchCapture, ...(shellCapture ? { shell: shellCapture } : {}) }
+      verified: { webSearchPresentation, ...(toolDetailsOnly ? { shellPresentation, claudeResults } : {}) },
+      captures: { webSearch: webSearchCapture, ...(shellCapture ? { shell: shellCapture, claudeResults: claudeResultsCapture } : {}) }
     }
     await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
     console.log(JSON.stringify({ ...report, reportPath }, null, 2))
@@ -1168,6 +1176,11 @@ async function seedFixture() {
   const emptyCatalogDigest = '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
   const attachmentRootRelativePath = `camps/${campId}/attachments`
   const publishedAttachmentRoot = join(runtimeRoot, attachmentRootRelativePath)
+  const fixtureRunFacts = {
+    attachmentOutputRoot: publishedAttachmentRoot,
+    historyHint: 'No public-message boundary from a previous run is recorded for you in this Camp.'
+  }
+  const fixtureRunFactRefs = [{ fact: 'attachment_output_root' }, { fact: 'history_hint' }]
   const campAttachmentViewReceipt = {
     schemaVersion: 2,
     campId,
@@ -1478,7 +1491,7 @@ async function seedFixture() {
       delivery_mode, created_at
     ) VALUES (
       'fixture-copilot-bootstrap', 'conversation-copilot', 'fixture-copilot-binding', 1,
-      'native_session_bootstrap_v3', 3,
+      'native_session_bootstrap_v4', 4,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)},
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)},
       '[]', 'fixture-authorization-basis', 'native_append', ${sqlLiteral(now)}
@@ -1512,7 +1525,9 @@ async function seedFixture() {
       'fixture-copilot-manifest', ${sqlLiteral(recoveryBlockedRunId)},
       'fixture-copilot-bootstrap', 1, ${fixtureLastMessageSequence}, 0,
       '[]', 'fixture-collaboration', 0,
-      '[]', 'fixture-run-fact', '{}',
+      ${sqlLiteral(JSON.stringify(fixtureRunFactRefs))},
+      ${sqlLiteral(createHash('sha256').update(JSON.stringify(fixtureRunFacts)).digest('hex'))},
+      '{}',
       '[]', 'fixture-attachments',
       '{"schemaVersion":2,"skills":[]}', '34d0df31466d3cc5a5adedad674cca325dcad3b5593e54e8400447a0617fceaf',
       '{"schemaVersion":1,"selectionSnapshotDigest":"eaf741c591ae9eb798b55a703ddadfeec7c803b91b3199272a7ccd39e56160c1","skillExposureDigest":"34d0df31466d3cc5a5adedad674cca325dcad3b5593e54e8400447a0617fceaf","entries":[]}',
@@ -1520,16 +1535,16 @@ async function seedFixture() {
       '{"schemaVersion":2,"configDigest":"sha256:empty-mcp-config","configStatus":"ready","projectionMode":"unsupported","sameNamePolicy":null,"warnings":[],"servers":[]}',
       'sha256:legacy-empty-mcp-exposure', 'fixture-mcp-projection',
       '[]', 'fixture-active-tasks',
-      0, ${fixtureLastMessageSequence}, 0,
+      1, ${fixtureLastMessageSequence}, 0,
       ${fixtureContextDeliveryProfile.profileVersion},
       ${sqlLiteral(JSON.stringify(fixtureContextDeliveryProfile))},
       ${sqlLiteral(canonicalJsonDigest(fixtureContextDeliveryProfile))}, NULL,
       '[]', ${fixtureContextManifestVersion},
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
-      '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":5}',
+      '[]', '[]', '[]', 'fixture-shared-message-evidence', ${sqlLiteral(JSON.stringify(fixtureRunFacts))},
       'agent_v1', '{"schemaVersion":1,"included":false}',
       '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92',
-      ${fixtureContextManifestVersion}, 5, 2,
+      ${fixtureContextManifestVersion}, 7, 2,
       ${sqlLiteral(JSON.stringify(campAttachmentViewReceipt))},
       ${sqlLiteral(campAttachmentViewReceiptDigest)}
     );
@@ -1604,6 +1619,7 @@ async function seedFixture() {
     if (entry.runLevelOnly) continue
     await seedActivity(entry, index)
   }
+  if (toolDetailsOnly) await seedClaudeToolDetailFixtures()
 }
 
 async function seedEmptyAttachmentViewRoots(runtimeRoot, campIds) {
@@ -2274,6 +2290,70 @@ async function seedActivity(entry, index) {
     );
     COMMIT;
   `)
+}
+
+async function seedClaudeToolDetailFixtures() {
+  const runId = 'run-claude'
+  const fixtures = [
+    { key: 'mcp', toolName: 'mcp__exa__web_fetch_exa', output: 'MCP_PUBLIC_RESULT_MARKER\n第二段', deferred: false },
+    { key: 'skill', toolName: 'Skill', output: 'SKILL_PUBLIC_RESULT_MARKER', deferred: true },
+    { key: 'agent', toolName: 'Agent', output: 'AGENT_PUBLIC_RESULT_MARKER', deferred: true },
+    { key: 'task-stop', toolName: 'TaskStop', output: 'TASK_STOP_PUBLIC_RESULT_MARKER', deferred: false, failed: true },
+    { key: 'task-output', toolName: 'TaskOutput', output: 'TASK_OUTPUT_PUBLIC_RESULT_MARKER', deferred: true },
+    { key: 'no-public-text', toolName: 'mcp__fixture__resource_only', output: null, deferred: true }
+  ]
+  for (const [index, fixture] of fixtures.entries()) {
+    const sequence = index + 2
+    const occurredAt = `2026-08-05T12:10:0${sequence}Z`
+    const evidenceId = `evidence-claude-${fixture.key}`
+    const operationId = `operation-claude-${fixture.key}`
+    const phase = fixture.failed ? 'failed' : 'completed'
+    const payload = {
+      toolCallId: `toolu-claude-${fixture.key}`,
+      status: phase, kind: 'tool', toolName: fixture.toolName,
+      title: fixture.toolName, input: null, output: fixture.output
+    }
+    const encoded = Buffer.from(JSON.stringify(payload))
+    const blob = fixture.deferred ? await seedManagedBlob(encoded, occurredAt) : null
+    const preview = blob ? { ...payload, output: null } : payload
+    await runSql(databasePath, `
+      PRAGMA foreign_keys = ON;
+      BEGIN IMMEDIATE;
+      ${blob ? `INSERT INTO managed_blob(
+        id, sha256, byte_size, media_type, storage_relative_path,
+        state, sensitivity, created_at, verified_at, updated_at
+      ) VALUES (
+        ${sqlLiteral(blob.id)}, ${sqlLiteral(blob.digest)}, ${blob.byteSize},
+        'application/json', ${sqlLiteral(blob.relativePath)},
+        'present', 'normal', ${sqlLiteral(occurredAt)}, ${sqlLiteral(occurredAt)}, ${sqlLiteral(occurredAt)}
+      );` : ''}
+      INSERT INTO agent_run_execution_evidence(
+        id, agent_run_id, execution_epoch, sequence, event_type, kind, phase,
+        source_event_key, payload_preview_json, content_blob_id,
+        content_byte_count, is_truncated, output_truncated, occurred_at
+      ) VALUES (
+        ${sqlLiteral(evidenceId)}, ${sqlLiteral(runId)}, 1, ${sequence},
+        'runtime.action', 'tool_result', ${sqlLiteral(phase)},
+        ${sqlLiteral(`runtime.action:${operationId}:${phase}`)},
+        ${sqlLiteral(JSON.stringify(preview))}, ${sqlNullable(blob?.id)},
+        ${encoded.byteLength}, ${blob ? 1 : 0}, 0, ${sqlLiteral(occurredAt)}
+      );
+      INSERT INTO canonical_runtime_activity(
+        agent_run_id, execution_epoch, operation_id, classifier_version,
+        activity_domain, semantic_kind, tool_name, presentation_hint,
+        phase, outcome, credibility, coverage_level, source_authority,
+        source_evidence_ids_json, first_evidence_sequence,
+        last_evidence_sequence, revision, created_at, updated_at
+      ) VALUES (
+        ${sqlLiteral(runId)}, 1, ${sqlLiteral(operationId)}, 'activity-v2',
+        'tool', 'tool.call', ${sqlLiteral(fixture.toolName)}, ${sqlLiteral(fixture.toolName)},
+        'terminal', ${sqlLiteral(fixture.failed ? 'failed' : 'succeeded')}, 'runtime_structured', 'fine_grained', 'runtime',
+        ${sqlLiteral(JSON.stringify([evidenceId]))}, ${sequence}, ${sequence}, 1,
+        ${sqlLiteral(occurredAt)}, ${sqlLiteral(occurredAt)}
+      );
+      COMMIT;
+    `)
+  }
 }
 
 function boundedEvidencePreview(value) {
@@ -3438,6 +3518,79 @@ async function verifyClaudeCommandDisclosure(cdp) {
     && presentation.staticCount === 0,
   `Claude Bash command without output was not expandable: ${JSON.stringify(presentation)}`)
   return presentation
+}
+
+async function verifyClaudeToolResults(cdp) {
+  const expected = [
+    { toolName: 'mcp__exa__web_fetch_exa', marker: 'MCP_PUBLIC_RESULT_MARKER' },
+    { toolName: 'Skill', marker: 'SKILL_PUBLIC_RESULT_MARKER' },
+    { toolName: 'Agent', marker: 'AGENT_PUBLIC_RESULT_MARKER' },
+    { toolName: 'TaskStop', marker: 'TASK_STOP_PUBLIC_RESULT_MARKER' },
+    { toolName: 'TaskOutput', marker: 'TASK_OUTPUT_PUBLIC_RESULT_MARKER' },
+    { toolName: 'mcp__fixture__resource_only', marker: null }
+  ]
+  const presentations = []
+  for (const { toolName, marker } of expected) {
+    await waitForExpression(cdp, `(() => [...document.querySelectorAll(
+      '.execution-drawer details.tool-call-disclosure .tool-call-title'
+    )].some((candidate) => candidate.textContent?.trim() === ${JSON.stringify(toolName)}))()`)
+    const opened = await evaluate(cdp, `(() => {
+      const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+        .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
+          === ${JSON.stringify(toolName)})
+      const group = disclosure?.closest('details.tool-activity-group')
+      if (group && !group.open) group.querySelector(':scope > summary')?.click()
+      disclosure?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
+      return Boolean(disclosure)
+    })()`)
+    assert(opened, `Claude ${toolName} disclosure was unavailable`)
+    await waitForExpression(cdp, `(() => {
+      const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+        .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
+          === ${JSON.stringify(toolName)})
+      return disclosure?.open === true && ${marker === null
+        ? `disclosure.querySelector('.tool-result-state[role="status"]')?.textContent?.trim() === '没有可展示的公开结果。'`
+        : `disclosure.querySelector('.tool-call-detail pre')?.textContent?.includes(${JSON.stringify(marker)}) === true`}
+    })()`, 30_000)
+    const presentation = await evaluate(cdp, `(() => {
+      const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+        .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
+          === ${JSON.stringify(toolName)})
+      const emptyState = disclosure?.querySelector('.tool-result-state[role="status"]')
+      const shellResult = document.querySelector('.execution-drawer .tool-call-result-scroll')
+      return {
+        toolName: ${JSON.stringify(toolName)},
+        open: disclosure?.open ?? false,
+        executionStatus: disclosure?.querySelector('.tool-call-state[role="img"]')?.getAttribute('aria-label') ?? null,
+        result: disclosure?.querySelector('.tool-call-detail pre')?.textContent ?? null,
+        emptyState: emptyState?.textContent?.trim() ?? null,
+        emptyStateBackground: emptyState ? getComputedStyle(emptyState).backgroundColor : null,
+        shellResultBackground: shellResult ? getComputedStyle(shellResult).backgroundColor : null,
+        error: disclosure?.querySelector('.tool-result-state[role="alert"]')?.textContent?.trim() ?? null,
+        retryCount: disclosure?.querySelectorAll('.tool-result-retry').length ?? 0
+      }
+    })()`)
+    assert(presentation.open
+      && presentation.error === null
+      && presentation.retryCount === 0
+      && presentation.executionStatus === (toolName === 'TaskStop' ? '失败' : '成功')
+      && (marker === null
+        ? presentation.result === null
+          && presentation.emptyState === '没有可展示的公开结果。'
+          && presentation.emptyStateBackground !== null
+          && presentation.emptyStateBackground === presentation.shellResultBackground
+        : presentation.result?.includes(marker)),
+    `Claude ${toolName} result detail mismatch: ${JSON.stringify(presentation)}`)
+    presentations.push(presentation)
+  }
+  await evaluate(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'TaskStop')
+    disclosure?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+  })()`)
+  await wait(150)
+  return presentations
 }
 
 async function verifyExecutionDrawerResizeControl(cdp) {

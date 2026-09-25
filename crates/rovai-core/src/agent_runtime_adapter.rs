@@ -26,7 +26,10 @@ use crate::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_RUNTIME_CAPABILITY, builtin_tool_catalog_digest,
     },
     command::canonical_json_digest,
-    context_contract::{CODEX_SESSION_GUIDANCE_REVISION, native_binding_context_contract},
+    context_contract::{
+        CODEX_SESSION_GUIDANCE_REVISION,
+        native_binding_compatibility_context_contract as native_binding_context_contract,
+    },
     mcp::McpServerDefinition,
     platform::HostPlatformKey,
     runtime_platform_admission::{

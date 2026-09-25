@@ -12,7 +12,7 @@ export function createServerUpdates(transport: ConsoleClient, reload = () => loc
   const request = async (operation: 'get' | 'check' | 'download' | 'install'): Promise<AppUpdateSnapshot> => {
     const generation = ++issued
     const version = operation === 'download' || operation === 'install' ? snapshot?.availableRelease?.version : undefined
-    const next = await transport.updates(operation, version)
+    const next = normalizeServerReleaseIdentity(await transport.updates(operation, version), snapshot)
     if (generation < accepted && snapshot) return snapshot
     accepted = generation
     if ((restartingFrom && next.currentVersion !== restartingFrom) || (snapshot && next.currentVersion !== snapshot.currentVersion)) {
@@ -54,4 +54,37 @@ export function createServerUpdates(transport: ConsoleClient, reload = () => loc
       return () => { clearInterval(timer); listeners.delete(listener) }
     }
   }
+}
+
+/** Older Servers may report the installed release under availableRelease. */
+function normalizeServerReleaseIdentity(raw: AppUpdateSnapshot, previous: AppUpdateSnapshot | null): AppUpdateSnapshot {
+  const snapshot = {
+    ...raw,
+    currentRelease: raw.currentRelease
+      ?? (previous?.currentVersion === raw.currentVersion ? previous.currentRelease : null)
+  }
+  const release = snapshot.availableRelease
+  if (!release) return snapshot
+  const comparison = compareVersions(release.version, snapshot.currentVersion)
+  if (comparison === 1) return snapshot
+  return {
+    ...snapshot,
+    currentRelease: comparison === 0 ? release : snapshot.currentRelease,
+    availableRelease: null
+  }
+}
+
+function compareVersions(candidate: string, installed: string): -1 | 0 | 1 | null {
+  const coordinates = (value: string): readonly [bigint, bigint, bigint] | null => {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value.trim().replace(/^v/iu, ''))
+    return match ? [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])] : null
+  }
+  const left = coordinates(candidate)
+  const right = coordinates(installed)
+  if (!left || !right) return null
+  for (const index of [0, 1, 2] as const) {
+    if (left[index] > right[index]) return 1
+    if (left[index] < right[index]) return -1
+  }
+  return 0
 }

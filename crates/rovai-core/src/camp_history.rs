@@ -28,7 +28,7 @@ pub const CAMP_LIST_TOOL_NAME: &str = "camp.list";
 pub const CAMP_SEARCH_TOOL_NAME: &str = "camp.search";
 pub const HISTORY_SEARCH_TOOL_NAME: &str = "history.search";
 pub const CAMP_READ_TOOL_NAME: &str = "camp.read";
-pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 8;
+pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 10;
 
 const CAMP_LIST_DEFAULT_LIMIT: usize = 20;
 const CAMP_LIST_MAX_LIMIT: usize = 50;
@@ -103,7 +103,6 @@ struct RunFence {
     current_camp_id: String,
     current_boundary: i64,
     global_boundary: i64,
-    viewer_agent_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +137,7 @@ struct MessageRow {
     created_at: String,
     recency: i64,
     camp_title: Option<String>,
+    withdrawn: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -171,7 +171,6 @@ impl ParsedDateRange {
 
 #[derive(Debug, Clone, Copy)]
 struct HistorySearchScope<'a> {
-    run: &'a AuthenticatedTeamToolRun,
     fence: &'a RunFence,
     camp_ids: &'a [String],
     dates: ParsedDateRange,
@@ -340,10 +339,9 @@ impl CampHistoryService {
             .ok_or_else(search_unavailable)?;
         let budget = limit * SEARCH_CANDIDATE_MULTIPLIER;
         let (mut candidates, search_incomplete) =
-            load_target_body_candidates(&transaction, run, &fence, &target, &query, budget)?;
+            load_target_body_candidates(&transaction, &fence, &target, &query, budget)?;
         merge_target_reference_candidates(
             &transaction,
-            run,
             &fence,
             &target,
             &query,
@@ -402,7 +400,6 @@ impl CampHistoryService {
         }
         let budget = limit * SEARCH_CANDIDATE_MULTIPLIER;
         let history_scope = HistorySearchScope {
-            run,
             fence: &fence,
             camp_ids: &scope,
             dates,
@@ -633,7 +630,6 @@ fn load_run_fence(
                     current_camp_id: run.camp_id.clone(),
                     current_boundary: row.get(1)?,
                     global_boundary: row.get(2)?,
-                    viewer_agent_id: run.agent_id.clone(),
                 })
             },
         )
@@ -782,12 +778,10 @@ fn literal_fts_query(query: &str) -> String {
 }
 
 fn target_history_scope<'a>(
-    run: &'a AuthenticatedTeamToolRun,
     fence: &'a RunFence,
     target: &'a CampTarget,
 ) -> Option<HistorySearchScope<'a>> {
     matches!(target.fence, MessageFence::History { .. }).then(|| HistorySearchScope {
-        run,
         fence,
         camp_ids: std::slice::from_ref(&target.camp_id),
         dates: ParsedDateRange {
@@ -799,13 +793,12 @@ fn target_history_scope<'a>(
 
 fn load_target_body_candidates(
     transaction: &Transaction<'_>,
-    run: &AuthenticatedTeamToolRun,
     fence: &RunFence,
     target: &CampTarget,
     query: &str,
     budget: usize,
 ) -> Result<CandidatePage> {
-    if let Some(scope) = target_history_scope(run, fence, target) {
+    if let Some(scope) = target_history_scope(fence, target) {
         load_history_body_candidates(transaction, &scope, query, budget)
     } else {
         load_current_body_candidates(transaction, fence, query, budget)
@@ -829,13 +822,7 @@ fn load_current_body_candidates(
         WHERE message.camp_id = ?1
           AND message.sequence <= ?2
           AND message.tombstoned_at IS NULL
-          AND message.recall_state NOT IN ('recallable', 'withdrawn')
-          AND NOT EXISTS (
-              SELECT 1 FROM camp_message_delivery AS hidden_delivery
-              WHERE hidden_delivery.message_id = message.id
-                AND hidden_delivery.recipient_agent_id = ?4
-                AND hidden_delivery.status = 'waiting'
-          )
+          AND message.recall_state <> 'withdrawn'
         ORDER BY message.sequence DESC, message.id
         LIMIT ?3
         "#
@@ -851,13 +838,7 @@ fn load_current_body_candidates(
           AND message.camp_id = ?1
           AND message.sequence <= ?2
           AND message.tombstoned_at IS NULL
-          AND message.recall_state NOT IN ('recallable', 'withdrawn')
-          AND NOT EXISTS (
-              SELECT 1 FROM camp_message_delivery AS hidden_delivery
-              WHERE hidden_delivery.message_id = message.id
-                AND hidden_delivery.recipient_agent_id = ?5
-                AND hidden_delivery.status = 'waiting'
-          )
+          AND message.recall_state <> 'withdrawn'
         ORDER BY message.sequence DESC, message.id
         LIMIT ?3
         "#
@@ -870,7 +851,6 @@ fn load_current_body_candidates(
                     fence.current_camp_id,
                     fence.current_boundary,
                     (budget + 1) as i64,
-                    fence.viewer_agent_id,
                 ],
                 message_search_row,
             )?
@@ -883,7 +863,6 @@ fn load_current_body_candidates(
                     fence.current_boundary,
                     (budget + 1) as i64,
                     literal_fts_query(query),
-                    fence.viewer_agent_id,
                 ],
                 message_search_row,
             )?
@@ -922,20 +901,14 @@ fn load_history_body_candidates(
         JOIN public_camp_message_publication AS publication
           ON publication.message_id = message.id
         WHERE camp.deletion_operation_id IS NULL
-          AND publication.global_sequence <= ?3
+          AND publication.global_sequence <= ?2
           AND message.tombstoned_at IS NULL
-          AND message.recall_state NOT IN ('recallable', 'withdrawn')
-          AND NOT EXISTS (
-              SELECT 1 FROM camp_message_delivery AS hidden_delivery
-              WHERE hidden_delivery.message_id = message.id
-                AND hidden_delivery.recipient_agent_id = ?2
-                AND hidden_delivery.status = 'waiting'
-          )
-          AND message.camp_id IN (SELECT value FROM json_each(?4))
-          AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
-          AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
+          AND message.recall_state <> 'withdrawn'
+          AND message.camp_id IN (SELECT value FROM json_each(?3))
+          AND (?4 IS NULL OR julianday(message.created_at) >= julianday(?4))
+          AND (?5 IS NULL OR julianday(message.created_at) < julianday(?5))
         ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-        LIMIT ?7
+        LIMIT ?6
         "#
         )
     } else {
@@ -956,21 +929,15 @@ fn load_history_body_candidates(
         JOIN public_camp_message_publication AS publication
           ON publication.message_id = message.id
         WHERE camp.deletion_operation_id IS NULL
-          AND publication.global_sequence <= ?3
+          AND publication.global_sequence <= ?2
           AND message.tombstoned_at IS NULL
-          AND message.recall_state NOT IN ('recallable', 'withdrawn')
-          AND NOT EXISTS (
-              SELECT 1 FROM camp_message_delivery AS hidden_delivery
-              WHERE hidden_delivery.message_id = message.id
-                AND hidden_delivery.recipient_agent_id = ?2
-                AND hidden_delivery.status = 'waiting'
-          )
-          AND message.camp_id IN (SELECT value FROM json_each(?4))
-          AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
-          AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
-          AND camp_message_fts MATCH ?8
+          AND message.recall_state <> 'withdrawn'
+          AND message.camp_id IN (SELECT value FROM json_each(?3))
+          AND (?4 IS NULL OR julianday(message.created_at) >= julianday(?4))
+          AND (?5 IS NULL OR julianday(message.created_at) < julianday(?5))
+          AND camp_message_fts MATCH ?7
         ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-        LIMIT ?7
+        LIMIT ?6
         "#
         )
     };
@@ -983,7 +950,6 @@ fn load_history_body_candidates(
             .query_map(
                 params![
                     scope.fence.manifest_id,
-                    scope.run.agent_id,
                     scope.fence.global_boundary,
                     camp_ids,
                     from,
@@ -998,7 +964,6 @@ fn load_history_body_candidates(
             .query_map(
                 params![
                     scope.fence.manifest_id,
-                    scope.run.agent_id,
                     scope.fence.global_boundary,
                     camp_ids,
                     from,
@@ -1043,13 +1008,7 @@ fn merge_current_principal_candidates(
         WHERE message.camp_id = ?1
           AND message.sequence <= ?2
           AND message.tombstoned_at IS NULL
-          AND message.recall_state NOT IN ('recallable', 'withdrawn')
-          AND NOT EXISTS (
-              SELECT 1 FROM camp_message_delivery AS hidden_delivery
-              WHERE hidden_delivery.message_id = message.id
-                AND hidden_delivery.recipient_agent_id = ?4
-                AND hidden_delivery.status = 'waiting'
-          )
+          AND message.recall_state <> 'withdrawn'
           AND EXISTS (
               SELECT 1 FROM json_each(message.structured_content_json) AS segment
               WHERE json_extract(segment.value, '$.kind') = 'current_user_mention'
@@ -1065,7 +1024,6 @@ fn merge_current_principal_candidates(
                 fence.current_camp_id,
                 fence.current_boundary,
                 (remaining + 1) as i64,
-                fence.viewer_agent_id,
             ],
             message_search_row,
         )?
@@ -1104,25 +1062,19 @@ fn merge_history_principal_candidates(
         JOIN public_camp_message_publication AS publication
           ON publication.message_id = message.id
         WHERE camp.deletion_operation_id IS NULL
-          AND publication.global_sequence <= ?3
+          AND publication.global_sequence <= ?2
           AND message.tombstoned_at IS NULL
-          AND message.recall_state NOT IN ('recallable', 'withdrawn')
-          AND NOT EXISTS (
-              SELECT 1 FROM camp_message_delivery AS hidden_delivery
-              WHERE hidden_delivery.message_id = message.id
-                AND hidden_delivery.recipient_agent_id = ?2
-                AND hidden_delivery.status = 'waiting'
-          )
-          AND message.camp_id IN (SELECT value FROM json_each(?4))
-          AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
-          AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
+          AND message.recall_state <> 'withdrawn'
+          AND message.camp_id IN (SELECT value FROM json_each(?3))
+          AND (?4 IS NULL OR julianday(message.created_at) >= julianday(?4))
+          AND (?5 IS NULL OR julianday(message.created_at) < julianday(?5))
           AND EXISTS (
               SELECT 1 FROM json_each(message.structured_content_json) AS segment
               WHERE json_extract(segment.value, '$.kind') = 'current_user_mention'
                 AND json_extract(segment.value, '$.userId') = 'local_user'
           )
         ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-        LIMIT ?7
+        LIMIT ?6
         "#,
     );
     let mut statement = transaction.prepare(&sql)?;
@@ -1133,7 +1085,6 @@ fn merge_history_principal_candidates(
         .query_map(
             params![
                 scope.fence.manifest_id,
-                scope.run.agent_id,
                 scope.fence.global_boundary,
                 camp_ids,
                 from,
@@ -1191,13 +1142,7 @@ fn merge_current_reference_candidates(
               AND message.camp_id = ?3
               AND message.sequence <= ?4
               AND message.tombstoned_at IS NULL
-              AND message.recall_state NOT IN ('recallable', 'withdrawn')
-              AND NOT EXISTS (
-                  SELECT 1 FROM camp_message_delivery AS hidden_delivery
-                  WHERE hidden_delivery.message_id = message.id
-                    AND hidden_delivery.recipient_agent_id = ?6
-                    AND hidden_delivery.status = 'waiting'
-              )
+              AND message.recall_state <> 'withdrawn'
             ORDER BY message.sequence DESC, message.id
             LIMIT ?5
             "#,
@@ -1210,7 +1155,6 @@ fn merge_current_reference_candidates(
                     fence.current_camp_id,
                     fence.current_boundary,
                     (limit + 1) as i64,
-                    fence.viewer_agent_id,
                 ],
                 message_search_row,
             )?
@@ -1222,14 +1166,13 @@ fn merge_current_reference_candidates(
 
 fn merge_target_reference_candidates(
     transaction: &Transaction<'_>,
-    run: &AuthenticatedTeamToolRun,
     fence: &RunFence,
     target: &CampTarget,
     query: &str,
     limit: usize,
     candidates: &mut CandidateMap,
 ) -> Result<()> {
-    if let Some(scope) = target_history_scope(run, fence, target) {
+    if let Some(scope) = target_history_scope(fence, target) {
         merge_history_reference_candidates(transaction, &scope, query, limit, candidates)
     } else {
         merge_current_reference_candidates(transaction, fence, query, limit, candidates)
@@ -1264,22 +1207,16 @@ fn merge_history_reference_candidates(
              AND snapshot.camp_id = camp.id
             JOIN public_camp_message_publication AS publication
               ON publication.message_id = message.id
-            WHERE reference.kind = ?3 AND reference.value = ?4
+            WHERE reference.kind = ?2 AND reference.value = ?3
               AND camp.deletion_operation_id IS NULL
-              AND publication.global_sequence <= ?5
+              AND publication.global_sequence <= ?4
               AND message.tombstoned_at IS NULL
-              AND message.recall_state NOT IN ('recallable', 'withdrawn')
-              AND NOT EXISTS (
-                  SELECT 1 FROM camp_message_delivery AS hidden_delivery
-                  WHERE hidden_delivery.message_id = message.id
-                    AND hidden_delivery.recipient_agent_id = ?2
-                    AND hidden_delivery.status = 'waiting'
-              )
-              AND message.camp_id IN (SELECT value FROM json_each(?6))
-              AND (?7 IS NULL OR julianday(message.created_at) >= julianday(?7))
-              AND (?8 IS NULL OR julianday(message.created_at) < julianday(?8))
+              AND message.recall_state <> 'withdrawn'
+              AND message.camp_id IN (SELECT value FROM json_each(?5))
+              AND (?6 IS NULL OR julianday(message.created_at) >= julianday(?6))
+              AND (?7 IS NULL OR julianday(message.created_at) < julianday(?7))
             ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-            LIMIT ?9
+            LIMIT ?8
             "#
         );
         let mut statement = transaction.prepare(&sql)?;
@@ -1287,7 +1224,6 @@ fn merge_history_reference_candidates(
             .query_map(
                 params![
                     scope.fence.manifest_id,
-                    scope.run.agent_id,
                     kind,
                     value,
                     scope.fence.global_boundary,
@@ -1388,7 +1324,14 @@ fn message_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
         created_at: row.get(7)?,
         recency: row.get(8)?,
         camp_title: row.get(9)?,
+        withdrawn: false,
     })
+}
+
+fn message_read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
+    let mut message = message_search_row(row)?;
+    message.withdrawn = row.get(10)?;
+    Ok(message)
 }
 
 fn rank_message(message: MessageRow, query: &str, exact_reference: bool) -> RankedMessage {
@@ -1603,19 +1546,15 @@ fn read_item(
     run: &AuthenticatedTeamToolRun,
     message_id: &str,
 ) -> Result<Value> {
-    let message = match load_item_message(transaction, target, run, message_id)? {
-        Some(message) => message,
-        None => {
-            return if message_is_withdrawn(transaction, &target.camp_id, message_id)? {
-                Err(tool_error(
-                    "message.withdrawn",
-                    "The Camp message has been withdrawn",
-                ))
-            } else {
-                Err(read_unavailable())
-            };
-        }
-    };
+    let message =
+        load_item_message(transaction, target, run, message_id)?.ok_or_else(read_unavailable)?;
+    if message.withdrawn {
+        return Ok(json!({
+            "campId": target.camp_id,
+            "mode": "item",
+            "items": [withdrawn_item(&message)],
+        }));
+    }
     let (attachments, attachment_count) = load_attachments(transaction, message_id)?;
     let addressing = load_exact_addressing(transaction, message_id)?;
     let mut value = json!({
@@ -1638,22 +1577,6 @@ fn read_item(
     });
     attach_message_quotes(transaction, target, message_id, &mut value["items"][0])?;
     Ok(value)
-}
-
-fn message_is_withdrawn(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    message_id: &str,
-) -> Result<bool> {
-    transaction
-        .query_row(
-            "SELECT recall_state = 'withdrawn' FROM camp_message WHERE id = ?1 AND camp_id = ?2",
-            params![message_id, camp_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map(|value| value.unwrap_or(false))
-        .map_err(Into::into)
 }
 
 fn load_item_message(
@@ -1745,7 +1668,7 @@ fn load_exact_addressing(transaction: &Transaction<'_>, message_id: &str) -> Res
         SELECT effective_recipient_ids_json, structured_content_json
         FROM camp_message
         WHERE id = ?1 AND tombstoned_at IS NULL
-          AND recall_state NOT IN ('recallable', 'withdrawn')
+          AND recall_state <> 'withdrawn'
         "#,
         [message_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1816,13 +1739,13 @@ fn load_anchor_message(
     message_id: &str,
 ) -> Result<MessageRow> {
     if let Some(message) = load_visible_message(transaction, target, message_id)? {
+        if message.withdrawn {
+            return Err(tool_error(
+                "message.withdrawn",
+                "The Camp message has been withdrawn",
+            ));
+        }
         return Ok(message);
-    }
-    if message_is_withdrawn(transaction, &target.camp_id, message_id)? {
-        return Err(tool_error(
-            "message.withdrawn",
-            "The Camp message has been withdrawn",
-        ));
     }
     Err(read_unavailable())
 }
@@ -1873,17 +1796,11 @@ fn load_visible_message(
         MessageFence::Current { boundary } => (
             r#"
             SELECT id, camp_id, sequence, author_type, author_id,
-                   reply_to_camp_message_id, body, created_at, sequence, NULL
+                   reply_to_camp_message_id, body, created_at, sequence, NULL,
+                   recall_state = 'withdrawn'
             FROM camp_message
             WHERE id = ?1 AND camp_id = ?2
               AND sequence <= ?3 AND tombstoned_at IS NULL
-              AND recall_state NOT IN ('recallable', 'withdrawn')
-              AND NOT EXISTS (
-                  SELECT 1 FROM camp_message_delivery AS hidden_delivery
-                  WHERE hidden_delivery.message_id = camp_message.id
-                    AND hidden_delivery.recipient_agent_id = ?4
-                    AND hidden_delivery.status = 'waiting'
-              )
             "#
             .to_string(),
             boundary,
@@ -1895,20 +1812,14 @@ fn load_visible_message(
             SELECT message.id, message.camp_id, message.sequence,
                    message.author_type, message.author_id,
                    message.reply_to_camp_message_id, message.body,
-                   message.created_at, publication.global_sequence, NULL
+                   message.created_at, publication.global_sequence, NULL,
+                   message.recall_state = 'withdrawn'
             FROM camp_message AS message
             JOIN public_camp_message_publication AS publication
               ON publication.message_id = message.id
             WHERE message.id = ?1 AND message.camp_id = ?2
               AND publication.global_sequence <= ?3
               AND message.tombstoned_at IS NULL
-              AND message.recall_state NOT IN ('recallable', 'withdrawn')
-              AND NOT EXISTS (
-                  SELECT 1 FROM camp_message_delivery AS hidden_delivery
-                  WHERE hidden_delivery.message_id = message.id
-                    AND hidden_delivery.recipient_agent_id = ?4
-                    AND hidden_delivery.status = 'waiting'
-              )
             LIMIT 1
             "#
             ),
@@ -1918,16 +1829,11 @@ fn load_visible_message(
     let mut message = transaction
         .query_row(
             &sql,
-            params![
-                message_id,
-                target.camp_id,
-                parameter,
-                target.viewer_agent_id,
-            ],
-            message_search_row,
+            params![message_id, target.camp_id, parameter],
+            message_read_row,
         )
         .optional()?;
-    if let Some(message) = message.as_mut() {
+    if let Some(message) = message.as_mut().filter(|message| !message.withdrawn) {
         message.body = projected_message_body(transaction, &message.id)?;
     }
     Ok(message)
@@ -2014,19 +1920,13 @@ fn load_ordered_messages(
         SELECT message.id, message.camp_id, message.sequence,
                message.author_type, message.author_id,
                message.reply_to_camp_message_id, message.body,
-               message.created_at, message.sequence, NULL
+               message.created_at, message.sequence, NULL,
+               message.recall_state = 'withdrawn'
         FROM camp_message AS message
         {thread_join}
         WHERE message.camp_id = ?1
           {fence_filter}
           AND message.tombstoned_at IS NULL
-          AND message.recall_state NOT IN ('recallable', 'withdrawn')
-          AND NOT EXISTS (
-              SELECT 1 FROM camp_message_delivery AS hidden_delivery
-              WHERE hidden_delivery.message_id = message.id
-                AND hidden_delivery.recipient_agent_id = ?5
-                AND hidden_delivery.status = 'waiting'
-          )
           {cursor_filter}
         ORDER BY message.sequence {order}, message.id
         LIMIT ?4
@@ -2040,19 +1940,15 @@ fn load_ordered_messages(
     let mut statement = transaction.prepare(&sql)?;
     let mut messages = statement
         .query_map(
-            params![
-                target.camp_id,
-                boundary,
-                cursor_parameter,
-                limit as i64,
-                target.viewer_agent_id,
-            ],
-            message_search_row,
+            params![target.camp_id, boundary, cursor_parameter, limit as i64],
+            message_read_row,
         )?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(anyhow::Error::from)?;
     for message in &mut messages {
-        message.body = projected_message_body(transaction, &message.id)?;
+        if !message.withdrawn {
+            message.body = projected_message_body(transaction, &message.id)?;
+        }
     }
     Ok(messages)
 }
@@ -2069,6 +1965,9 @@ fn resolve_thread_root(
         }
         message =
             load_visible_message(transaction, target, &parent_id)?.ok_or_else(read_unavailable)?;
+        if message.withdrawn {
+            return Err(read_unavailable());
+        }
     }
     Ok(message)
 }
@@ -2264,6 +2163,9 @@ fn collection_item(
     target: &CampTarget,
     row: &MessageRow,
 ) -> Result<Value> {
+    if row.withdrawn {
+        return Ok(withdrawn_item(row));
+    }
     let mut value = json!({
         "messageId": row.id,
         "sequence": row.sequence,
@@ -2276,6 +2178,15 @@ fn collection_item(
     });
     attach_message_quotes(transaction, target, &row.id, &mut value)?;
     Ok(value)
+}
+
+fn withdrawn_item(row: &MessageRow) -> Value {
+    json!({
+        "messageId": row.id,
+        "sequence": row.sequence,
+        "withdrawn": true,
+        "displayText": "Message withdrawn",
+    })
 }
 
 fn truncate_metadata(value: String) -> String {
@@ -2349,6 +2260,7 @@ mod slow_tests {
                 created_at: "2026-08-01T00:00:00Z".to_string(),
                 recency: sequence,
                 camp_title: None,
+                withdrawn: false,
             })
             .collect();
         let (candidates, search_incomplete) = body_candidates(rows, "任务", 8, true).unwrap();
@@ -2405,7 +2317,6 @@ mod slow_tests {
                 current_camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 current_boundary: 100,
                 global_boundary: 100,
-                viewer_agent_id: "agent_1".to_string(),
             },
             "x",
             8,
@@ -2428,6 +2339,7 @@ mod slow_tests {
             created_at: "2026-08-01T00:00:00Z".to_string(),
             recency,
             camp_title: Some("Camp".to_string()),
+            withdrawn: false,
         };
         let mut candidates = CandidateMap::new();
         let reference = row("reference", "no literal match", 1);
@@ -2512,6 +2424,7 @@ mod slow_tests {
             created_at: "2026-08-01T00:00:00Z".to_string(),
             recency: 1,
             camp_title: None,
+            withdrawn: false,
         };
         let mut candidates = CandidateMap::from([(
             (row.camp_id.clone(), row.id.clone()),
@@ -2533,7 +2446,6 @@ mod slow_tests {
                     current_camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                     current_boundary: 1,
                     global_boundary: 1,
-                    viewer_agent_id: "agent_1".to_string(),
                 },
                 "@Principal",
                 8,
@@ -2849,6 +2761,18 @@ mod slow_tests {
                     '["agent_5"]',
                     '2026-08-01T00:00:00Z'
                 );
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, effective_recipient_ids_json,
+                    created_at, recall_state
+                ) VALUES
+                    ('message-2', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 2, 'user', 'local_user',
+                     'waiting claim', '[{"kind":"text","text":"waiting claim"}]', '["agent_1"]',
+                     '2026-08-01T00:00:01Z', 'recallable'),
+                    ('message-3', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 3, 'user', 'local_user',
+                     '', '[]', '[]', '2026-08-01T00:00:02Z', 'withdrawn');
+                INSERT INTO camp_message_delivery(message_id, recipient_agent_id, status)
+                VALUES ('message-2', 'agent_1', 'waiting');
                 "#,
             )
             .unwrap();
@@ -2924,7 +2848,70 @@ mod slow_tests {
                 })
         );
 
-        for sequence in 2..=230 {
+        let latest_target = CampTarget {
+            camp_id: target.camp_id.clone(),
+            fence: MessageFence::Current { boundary: 3 },
+            viewer_agent_id: target.viewer_agent_id.clone(),
+        };
+        let recallable = read_item(&transaction, &latest_target, &run, "message-2").unwrap();
+        assert_eq!(recallable["items"][0]["body"], "waiting claim");
+        let search_fence = RunFence {
+            manifest_id: "manifest-1".to_string(),
+            current_camp_id: target.camp_id.clone(),
+            current_boundary: 3,
+            global_boundary: 3,
+        };
+        let (candidates, _) =
+            load_current_body_candidates(&transaction, &search_fence, "w", 8).unwrap();
+        assert!(candidates.contains_key(&(target.camp_id.clone(), "message-2".to_string())));
+        assert!(!candidates.contains_key(&(target.camp_id.clone(), "message-3".to_string())));
+        let delivery_status: String = transaction
+            .query_row(
+                "SELECT status FROM camp_message_delivery WHERE message_id = 'message-2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(delivery_status, "waiting");
+
+        let latest =
+            read_timeline(&transaction, &latest_target, ReadDirection::Before, None, 1).unwrap();
+        assert_eq!(
+            latest["items"][0],
+            json!({
+                "messageId": "message-3",
+                "sequence": 3,
+                "withdrawn": true,
+                "displayText": "Message withdrawn",
+            })
+        );
+        assert_eq!(latest["hasMore"], true);
+        assert_eq!(latest["nextCursor"], 3);
+        assert_eq!(
+            read_item(&transaction, &latest_target, &run, "message-3").unwrap()["items"][0],
+            latest["items"][0]
+        );
+        assert!(
+            load_visible_message(&transaction, &target, "message-3")
+                .unwrap()
+                .is_none()
+        );
+
+        transaction.execute_batch(
+            "UPDATE camp_message SET body = '', structured_content_json = '[]', recall_state = 'withdrawn' WHERE id = 'message-2';
+             UPDATE camp_message_delivery SET status = 'cancelled' WHERE message_id = 'message-2';",
+        ).unwrap();
+        let after_withdrawal = read_item(&transaction, &latest_target, &run, "message-2").unwrap();
+        assert_eq!(
+            after_withdrawal["items"][0]["displayText"],
+            "Message withdrawn"
+        );
+        assert!(after_withdrawal["items"][0].get("body").is_none());
+        let (candidates, _) =
+            load_current_body_candidates(&transaction, &search_fence, "w", 8).unwrap();
+        assert!(!candidates.contains_key(&(target.camp_id.clone(), "message-2".to_string())));
+
+        for sequence in 4..=230 {
             transaction
                 .execute(
                     "INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,created_at,tombstoned_at,recall_state)
@@ -2993,10 +2980,9 @@ mod slow_tests {
         assert_eq!(
             seen,
             (1..=230)
-                .filter(|sequence| *sequence != 101 && *sequence != 120)
+                .filter(|sequence| *sequence != 101)
                 .collect::<Vec<_>>()
         );
-
         let rows = (1..=20)
             .map(|sequence| MessageRow {
                 id: format!("message-{sequence}"),
@@ -3009,6 +2995,7 @@ mod slow_tests {
                 created_at: "2026-08-01T00:00:00Z".to_string(),
                 recency: sequence,
                 camp_title: None,
+                withdrawn: false,
             })
             .collect();
         let collection = fit_collection_response(

@@ -3,12 +3,12 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-09-22
+last_updated: 2026-09-24
 ---
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v23](../contracts/camp-open-projection-v23.md)与
+字段与窗口见 [Camp Open Projection v24](../contracts/camp-open-projection-v24.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -51,6 +51,10 @@ Run 仍包含各自的 `executionEvidenceCount` 和 `executionEvidenceChangeSequ
 历史 Run 水位保持 0 且不回填，初始 page 与旧 refresh-ID 兼容读取仍可用；原始计数不是全 Camp 合计，
 也不被最多 96 个 Run 的局部求和代替。因此打开 Camp A 的 SQL
 VM 工作量不得随 Camp B 的 Evidence 历史规模增长。
+
+Run 标题由 ReadModel 按所返回 Run 的首条输入或历史触发关系定向取得，作为有界 `inputSummary`
+随 Run 返回。它复用当前消息正文渲染与附件 metadata，不依赖首屏 20 条聊天消息、不扩大历史窗口、
+不回填持久副本。Renderer 直接使用该摘要，因此重启、缓存淘汰和聊天分页不会让旧 Run 丢失标题。
 
 此边界只约束投影读取，不撤销已执行 Active reconciliation 的 command receipt，也不修改完整
 `camp_snapshot()`、显式 History/Find、Navigation 或 `events.subscribe` 的审计与 invalidation 语义。
@@ -138,7 +142,7 @@ Renderer 保留连续已加载区间，用实测高度占位虚拟化视口外�
 生命周期记录；固定展示 `sequence`、Evidence 行数和 `executionEvidenceCount` 都不能充当更新游标。
 增量合并不改变历史 cursor，不把可见内容裁回最新一页。Camp 切换只卸载订阅与 DOM，保留有界 session 缓存；
 切回先显示最新缓存，再补齐变化。虚拟高度调整与翻页保留锚点，初始跟随意图等异步内容到达后完成。
-预算、淘汰后按需恢复和字段由 Camp Open v23 拥有。
+预算、淘汰后按需恢复和字段由 Camp Open v24 拥有。
 
 ## Complete conversation find flow
 
@@ -181,6 +185,6 @@ Memory 仍分别拥有读取与错误状态，但冷启动可见反馈共用不�
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v23](../contracts/camp-open-projection-v23.md)
+- [Camp Open Projection v24](../contracts/camp-open-projection-v24.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)

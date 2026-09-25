@@ -273,11 +273,13 @@ About row inside Settings repeats the badge as non-interactive status. Available
 ready/installing and failed states use different icon/copy and accessible names, not color alone.
 
 The page keeps the installed version visible through idle, checking, available, downloading, up-to-date,
-ready-to-install, installing and recoverable check/download/install failure states. A known release is a
-separate fact and remains visible when a later check fails. Its valid name, version, date and bounded release
-notes appear below the action; empty notes have an explicit state, long notes scroll within a bounded region,
-and all notes use the shared safe Markdown renderer. Renderer receives no remote HTML, local installer path
-or updater credential.
+ready-to-install, installing and recoverable check/download/install failure states. Its bundled, version-matched
+release notes remain visible offline after an install. A known newer release is a separate fact and remains visible
+when a later check fails. When a newer release exists, the page defaults to its notes and offers keyboard-accessible
+tabs to switch between new and installed versions; the switch does not start a network request. An absent source has
+an explicit empty state. A duplicate first version heading is removed only from the display copy; long notes scroll
+within a bounded region, and all notes use the shared safe Markdown renderer. Renderer receives no remote HTML, local
+installer path or updater credential.
 
 Downloading shows determinate percent, transferred/total bytes and speed without blocking navigation or
 ordinary App use. Repeated download requests visibly remain one operation. Download completion changes the

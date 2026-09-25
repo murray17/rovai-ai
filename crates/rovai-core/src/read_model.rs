@@ -1,5 +1,9 @@
 use crate::message_quote::{MessageQuoteSnapshot, QuoteStorage, load_quotes};
-use std::{cmp::Ordering, collections::BTreeMap, path::Path};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -339,6 +343,7 @@ pub struct AgentRunView {
     pub camp_turn_id: Option<String>,
     pub input_message_ids: Vec<String>,
     pub anchor_message_id: Option<String>,
+    pub input_summary: Option<String>,
     pub conversation_id: String,
     pub agent_id: String,
     pub task_id: Option<String>,
@@ -3144,7 +3149,15 @@ fn load_agent_runs(
                    ORDER BY ordinal
                  ) AS input
                ), '[]'),
-               agent_run.anchor_message_id
+               agent_run.anchor_message_id,
+               COALESCE(
+                 (SELECT message_id FROM agent_run_input
+                  WHERE agent_run_id = agent_run.id ORDER BY ordinal LIMIT 1),
+                 agent_run.anchor_message_id,
+                 agent_run.trigger_camp_message_id,
+                 CASE WHEN camp_turn.trigger_type = 'camp_message'
+                      THEN camp_turn.trigger_id END
+               )
         FROM agent_run
         LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
@@ -3212,9 +3225,15 @@ fn load_agent_runs(
                 row.get::<_, Option<String>>(37)?,
                 row.get::<_, String>(38)?,
                 row.get::<_, Option<String>>(39)?,
+                row.get::<_, Option<String>>(40)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let message_ids = rows
+        .iter()
+        .filter_map(|row| row.40.as_deref())
+        .collect::<BTreeSet<_>>();
+    let summaries = load_run_input_summaries(transaction, camp_id, &message_ids)?;
     rows.into_iter()
         .map(
             |(
@@ -3258,6 +3277,7 @@ fn load_agent_runs(
                 runtime_observed_model_id,
                 input_message_ids_json,
                 anchor_message_id,
+                summary_message_id,
             )| {
                 Ok(AgentRunView {
                     id,
@@ -3265,6 +3285,8 @@ fn load_agent_runs(
                     input_message_ids: serde_json::from_str(&input_message_ids_json)
                         .context("AgentRun input Message IDs are invalid")?,
                     anchor_message_id,
+                    input_summary: summary_message_id
+                        .and_then(|id| summaries.get(&id).cloned().flatten()),
                     conversation_id,
                     agent_id,
                     task_id,
@@ -3328,6 +3350,80 @@ fn load_agent_runs(
             },
         )
         .collect()
+}
+
+// Title sources are loaded by exact ID for the selected Runs, independently of
+// the conversation's message page. Reuse message rendering and attachment order
+// without reading publication events, attachment files, or unrelated history.
+fn load_run_input_summaries(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    message_ids: &BTreeSet<&str>,
+) -> Result<BTreeMap<String, Option<String>>> {
+    if message_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT message.id, message.sequence, NULL AS timeline_global_sequence,
+               message.author_type, message.author_id, message.source_agent_run_id,
+               message.body, message.structured_content_json,
+               message.source_attachments_json, message.address_mode,
+               message.addressed_agent_ids_json, message.reply_to_camp_message_id,
+               message.camp_turn_id,
+               CASE WHEN message.author_type = 'agent'
+                    THEN message.recipient_presentation_json ELSE message.presentation_json END,
+               message.created_at, message.recall_state, message.version
+        FROM json_each(?2) AS requested
+        JOIN camp_message AS message ON message.id = requested.value
+        WHERE message.camp_id = ?1 AND message.tombstoned_at IS NULL
+        "#,
+    )?;
+    let rows = statement
+        .query_map(
+            params![camp_id, serde_json::to_string(message_ids)?],
+            camp_message_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(hydrate_message_views(transaction, rows)?
+        .into_iter()
+        .map(|message| {
+            let summary = if message.withdrawn {
+                Some("Message withdrawn".to_string())
+            } else {
+                let body = message
+                    .body
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let text = if !body.is_empty() {
+                    Some(body)
+                } else {
+                    message.attachments.first().map(|attachment| {
+                        if message.attachments.len() > 1 {
+                            format!(
+                                "{} 等 {} 个附件",
+                                attachment.display_name,
+                                message.attachments.len()
+                            )
+                        } else {
+                            attachment.display_name.clone()
+                        }
+                    })
+                };
+                text.map(|text| {
+                    let mut chars = text.chars();
+                    let mut summary = chars.by_ref().take(240).collect::<String>();
+                    if chars.next().is_some() {
+                        summary.pop();
+                        summary.push('…');
+                    }
+                    summary
+                })
+            };
+            (message.id, summary)
+        })
+        .collect())
 }
 
 fn load_execution_evidence(

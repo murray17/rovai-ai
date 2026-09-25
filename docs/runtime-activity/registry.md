@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v4
-last_updated: 2026-09-22
+last_updated: 2026-09-24
 ---
 
 # Runtime Activity Mapping Registry
@@ -236,7 +236,11 @@ grep/find/ls、失败终态、缺 path/patch、header 冲突和未知 shape 都�
 `shell.execute`，Read/Glob 映射 file read，Edit/Write 映射 file write，Grep 映射 `file.search`，WebSearch
 映射 `tool.web.search`；未知名称保持 `tool.call`。只允许 Bash `tool_use.input.command` 进入公开 input，并按
 tool-use ID 同时放入 started 与 terminal Evidence，使没有 stdout/stderr 或只加载 terminal 的命令仍可检查；
-只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result 进入 output。WebSearch 另只把精确
+只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result，以及 `mcp__*`、`Skill` 和精确名称的
+已审核原生非文件工具的 `tool_result.content` 字符串/typed text block 进入 output；其中包括
+`Agent`、`TaskStop`、`TaskOutput`、Task 管理、Web 与控制工具。图片、资源与 provider metadata 不进入
+output；`Read`、`Grep`、`Glob`、`LSP`、`ReadMcpResourceTool`、文件修改和未知名称均不准入。
+WebSearch 另只把精确
 `input.query` 送入 internal candidate，并按 tool-use ID 保持 started/terminal 自包含；Core 准入后只在
 `runtimeSearchOperation.query` 保存首项，多项时另存有序 `queries`；每项原样保存、不做敏感词过滤或去重。
 ToolSearch 只是工具发现，不获得这条准入。其它工具输入、

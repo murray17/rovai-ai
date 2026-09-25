@@ -241,6 +241,18 @@ pub enum Operation {
     Skills,
     #[serde(rename = "skills.get")]
     Skill,
+    #[serde(rename = "toolbox.list")]
+    ToolboxList,
+    #[serde(rename = "toolbox.read")]
+    ToolboxRead,
+    #[serde(rename = "toolbox.setMembers")]
+    ToolboxSetMembers,
+    #[serde(rename = "nativeSkills.list")]
+    NativeSkillsList,
+    #[serde(rename = "nativeSkills.read")]
+    NativeSkillsRead,
+    #[serde(rename = "skills.candidates")]
+    SkillCandidates,
     #[serde(rename = "mcp.config.get")]
     Mcp,
     #[serde(rename = "messageQuotes.mutateDraft")]
@@ -515,6 +527,12 @@ impl Operation {
             Self::Monitoring => "monitoring.snapshot",
             Self::Skills => "skills.list",
             Self::Skill => "skills.get",
+            Self::ToolboxList => "toolbox.list",
+            Self::ToolboxRead => "toolbox.read",
+            Self::ToolboxSetMembers => "toolbox.setMembers",
+            Self::NativeSkillsList => "nativeSkills.list",
+            Self::NativeSkillsRead => "nativeSkills.read",
+            Self::SkillCandidates => "skills.candidates",
             Self::Mcp => "mcp.config.get",
         }
     }

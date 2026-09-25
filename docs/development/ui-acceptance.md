@@ -437,24 +437,26 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 | --- | --- | --- |
 | `scripts/accept-new-conversation-ui.mjs` | 新对话 Dialog 与创建流程 | 使用脚本创建的独立 App 数据；精确参数见源码 |
 | `scripts/capture-mcp.mjs` | MCP 设置完整操作链 | 脚本创建临时 Home、来源配置和 `userData` |
-| `scripts/capture-skills.mjs` | Skill 页面截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR`；200% 验收设置 `ROVAI_CAPTURE_ZOOM_FACTOR=2` |
+| `scripts/accept-rebuilt-skills-ui.mjs` | 当前 Skills／工具箱隔离验收与截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR`；支持 Day／Night 与 200% 缩放 |
+| `scripts/capture-skills.mjs` | 旧 Skill Library 页面历史截图入口 | 只适用于旧版本 App，不作为当前 Skills 验收证据 |
 | `scripts/capture-camp-inspectors.mjs` | 已有 Camp 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
 | `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 必须设置隔离 `userData`；省略或指向日常目录即拒绝启动 |
 
-Skill 页面验收必须先证明 Core 返回十四项 official Skill，再证明列表只展示其中十二项
-`user_managed` Skill；`cli-operations` 与 `memory-stewardship` 两项 `system_required` Skill 不产生列表行、
-禁用开关、生效范围或 locked badge。各项初始开关状态与 bundled registry 的默认值一致。
-十二个可配置 Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
-`--identity-1..8` 中一个 token（不要求十二项覆盖八种颜色），七个短标签显示“Rovai”，五个固定上游
-Skill 短标签显示“GitHub”；主行不存在来源明细，`DonkeyKing01/tasteful-ui-skill` / `159ccd47` 与
-`mattpocock/skills` / `84fdeffd` 只在“详情”中出现。列表名称/简介/来源字号至少为
-14/12.5/10.5px；宽窗列表的身份标记位留空，四个可见列名固定为
-“Skill / 生效范围 / 状态 / 查看”，并与主行使用同一组 Grid 轨道，不存在旧三点菜单。34×20 Steel Switch 不显示“已启用 / 已停用 / 保存中”
-文案，并保留 `role="switch"`、`aria-checked` 和动作型可访问名称。详情必须包含真实 Revision、安装或
-更新时间、文件信息、内容摘要与固定副本说明，其 Steel rail/Porcelain background 在不同身份色之间
-保持一致；official/固定上游 Skill 不出现删除。九个 Runtime 生效组及真实队员投影继续按原门禁操作。
-专项脚本至少以 1440×920 默认比例和同一物理画布的 `ROVAI_CAPTURE_ZOOM_FACTOR=2` 各运行一次，
-两种场景均不得产生页面或设置面板横向溢出。
+当前页面合同见[Skills／工具箱／会话选择](../ui/components/skills-settings.md)。专项脚本给验收 App
+配置独立 `userData`、Skill Library 和临时原生 Home，只读发现一项合成 Codex Skill，并核对正文预览。
+它还验证五项工具箱及 `member-studio` 默认队员配置，通过界面切换一次 `campfire` 复选框并恢复；
+分别留下 Skills 与工具箱截图及 JSON 报告。Day 常规比例与 Night 200% 缩放使用两份全新的隔离目录：
+
+```bash
+FIXTURE_ROOT="$(mktemp -d)"
+ROVAI_CAPTURE_USER_DATA_DIR="$FIXTURE_ROOT/user-data" \
+  node scripts/accept-rebuilt-skills-ui.mjs "$ROVAI_APP" "$FIXTURE_ROOT/report"
+
+FIXTURE_ROOT="$(mktemp -d)"
+ROVAI_CAPTURE_USER_DATA_DIR="$FIXTURE_ROOT/user-data" \
+ROVAI_CAPTURE_THEME=night ROVAI_CAPTURE_ZOOM_FACTOR=2 \
+  node scripts/accept-rebuilt-skills-ui.mjs "$ROVAI_APP" "$FIXTURE_ROOT/report"
+```
 
 ## 从明确来源创建只读隔离副本
 

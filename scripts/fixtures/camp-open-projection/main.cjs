@@ -88,9 +88,9 @@ app.whenReady().then(async () => {
       await run('window.campOpenTest.completeEntrySnapshot()')
       await settle()
       entryState = await run('window.campOpenTest.entryState()')
-      assert.equal(entryState.selectedAgentId, 'agent-1', 'formal readiness auto-opens the running Run when untouched')
+      assert.equal(entryState.selectedAgentId, '__execution_overview__', 'formal readiness auto-opens overview around the running Run when untouched')
       assert.equal(entryState.expanded, true)
-      console.log(JSON.stringify({ ok: true, mode, checks: ['historical-selection', 'closed-stays-closed', 'untouched-auto-open'] }))
+      console.log(JSON.stringify({ ok: true, mode, checks: ['historical-selection', 'closed-stays-closed', 'untouched-overview-auto-open'] }))
       window.destroy()
       app.quit()
       return
@@ -115,43 +115,54 @@ app.whenReady().then(async () => {
         await state()
         await run('document.querySelector("button[aria-label^=打开][aria-label*=执行过程]").click()')
         await state()
+        assert.equal(await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded")'), 'false')
+        await run('document.querySelector(".execution-history-toggle").click()')
+        await state()
+        await run(`[...document.querySelectorAll('.execution-history-list .execution-run-toggle')]
+          .filter(button => button.getAttribute('aria-expanded') === 'false').forEach(button => button.click())`)
+        await state()
         await run('document.querySelector(".execution-drawer-body").scrollTop = 0')
         await state()
         assert.equal(await run('document.querySelectorAll(".execution-disclosure .return-to-latest, .execution-history-latest").length'), 0)
-        assert.equal(await run('document.querySelectorAll("[data-return-scope=execution]").length'), 1)
+        const executionReturnState = await run(`(() => { const host = document.querySelector('.execution-drawer-body'); return {
+          buttonCount: document.querySelectorAll('[data-return-scope=execution]').length,
+          scrollHeight: host.scrollHeight, clientHeight: host.clientHeight, scrollTop: host.scrollTop,
+          historyExpanded: document.querySelector('.execution-history-toggle')?.getAttribute('aria-expanded')
+        } })()`)
+        assert.equal(executionReturnState.buttonCount, 1, JSON.stringify(executionReturnState))
         await run(`(() => {
           const host = document.querySelector('.execution-drawer-body')
           const button = document.querySelector('[data-return-scope=execution]')
-          const target = [...document.querySelectorAll('.execution-disclosure > summary')]
-            .map(summary => host.scrollTop + summary.getBoundingClientRect().top - button.getBoundingClientRect().top - 3)
+          const target = [...document.querySelectorAll('.execution-run-card-header')]
+            .map(header => host.scrollTop + header.getBoundingClientRect().top - button.getBoundingClientRect().top - 3)
             .find(top => top >= 0 && top < host.scrollHeight - host.clientHeight - 24)
-          if (target === undefined) throw new Error('No summary can overlap the control while reading history')
+          if (target === undefined) throw new Error('No Run header can overlap the control while reading history')
           host.scrollTop = target
         })()`)
         await state()
-        const opened = await run('[...document.querySelectorAll("details.execution-disclosure")].map(node=>node.open)')
-        const summaryOverlap = await run(`(() => {
+        const opened = await run('[...document.querySelectorAll(".execution-run-toggle")].map(node=>node.getAttribute("aria-expanded"))')
+        const headerOverlap = await run(`(() => {
           const b=document.querySelector('[data-return-scope=execution]').getBoundingClientRect()
-          return [...document.querySelectorAll('.execution-disclosure > summary')].some(node=>{
+          return [...document.querySelectorAll('.execution-run-card-header')].some(node=>{
             const r=node.getBoundingClientRect(); return r.top<=b.top+7 && r.bottom>=b.top+7
           })
         })()`)
-        assert.equal(summaryOverlap, true, 'regression control overlaps a real Run summary row')
+        assert.equal(headerOverlap, true, 'regression control overlaps a real Run header')
         await capture(`return-latest-${placement}`)
         await assertReturnToLatest(window, run, 'execution')
         await state()
-        assert.deepEqual(await run('[...document.querySelectorAll("details.execution-disclosure")].map(node=>node.open)'), opened)
+        assert.deepEqual(await run('[...document.querySelectorAll(".execution-run-toggle")].map(node=>node.getAttribute("aria-expanded"))'), opened)
         assert.equal(await run('document.querySelectorAll("[data-return-scope=execution]").length'), 0)
         assert.ok(await run('(() => { const v=document.querySelector(".execution-drawer-body"); return v.scrollHeight-v.clientHeight-v.scrollTop < 2 })()'))
         await run('window.campOpenTest.appendCollapsedRunningExecution()')
         await state()
-        assert.equal(await run('document.querySelector("[data-agent-run-id=empty-failed-latest-running] details").open'), false)
+        assert.equal(await run('document.querySelector("[data-agent-run-id=empty-failed-latest-running] .execution-run-toggle")?.getAttribute("aria-expanded")'), 'false')
         await run('document.querySelector(".execution-drawer-body").scrollTop = 0')
         await state()
-        const beforeReturn = await run('[...document.querySelectorAll("details.execution-disclosure")].map(node=>node.open)')
+        const beforeReturn = await run('[...document.querySelectorAll(".execution-run-toggle")].map(node=>node.getAttribute("aria-expanded"))')
         await assertReturnToLatest(window, run, 'execution')
         await state()
-        assert.deepEqual(await run('[...document.querySelectorAll("details.execution-disclosure")].map(node=>node.open)'), beforeReturn,
+        assert.deepEqual(await run('[...document.querySelectorAll(".execution-run-toggle")].map(node=>node.getAttribute("aria-expanded"))'), beforeReturn,
           'returning from an older focused Run preserves the collapsed latest running Run')
         assert.equal(await run('document.querySelector(".execution-drawer-body").dataset.followingLatest'), 'true')
       }
@@ -186,7 +197,7 @@ app.whenReady().then(async () => {
       const initialFeedback = []
       for (const placement of ['bottom', 'inspector']) {
         await run(`document.documentElement.dataset.theme = '${placement === 'bottom' ? 'day' : 'night'}'; window.campOpenTest.showRunningExecution('${placement}', -1, 0)`)
-        await waitFor("document.querySelector('.process-action.current')?.textContent === '思考中'")
+        await waitFor("document.querySelector('.process-action.current')?.textContent === '执行中'")
         await waitForContent()
         const feedback = await run(`(() => {
           const content = document.querySelector('.process-content')
@@ -346,74 +357,37 @@ app.whenReady().then(async () => {
       app.exit(0)
       return
     }
-    if (mode === '--pending-return') {
+    if (mode === '--composer-local-draft') {
       const settle = () => run('window.campOpenTest.settle()')
-      const pendingState = async () => { await settle(); return run('window.campOpenTest.pendingState()') }
+      const localDraftState = async () => { await settle(); return run('window.campOpenTest.localDraftState()') }
       const waitFor = async expression => {
-        for (let attempt = 0; attempt < 80; attempt += 1) {
-          if (await run(expression)) return
-          await new Promise(resolve => setTimeout(resolve, 25))
-        }
-        throw new Error(`Pending fixture condition timed out: ${expression}`)
+        const deadline = Date.now() + 4000
+        do { await settle(); if (await run(expression)) return } while (Date.now() < deadline)
+        assert.fail(`Local draft condition: ${expression}`)
       }
-      await run('window.campOpenTest.showPendingQueue()')
-      await waitFor('document.querySelectorAll(".pending-input-row").length === 2 && document.querySelector("#camp-message")?.getAttribute("contenteditable") === "true"')
+      await settle()
       await run('document.querySelector("#camp-message").focus()')
-      await run('window.campOpenTest.failDraftSave(true)')
       await window.webContents.insertText('当前已有草稿')
-      await run('document.querySelector(".pending-input-edit").click()')
-      await waitFor('Boolean(window.campOpenTest.pendingState().error)')
-      let value = await pendingState()
-      assert.equal(value.text, '当前已有草稿', 'preflight save failure keeps dirty input')
-      assert.equal(value.editable, 'true')
-      assert.equal(value.calls.includes('return_to_composer'), false, 'failed preflight never dispatches withdrawal')
-      assert.equal(await run('Array.from(document.querySelectorAll("button")).some(button => button.textContent.includes("重新加载"))'), false)
-      await run('window.campOpenTest.failDraftSave(false)')
-      await settle()
-      await run('window.campOpenTest.holdPendingReturn(true); document.querySelector(".pending-input-edit").click()')
-      await waitFor('window.campOpenTest.pendingState().calls.includes("return_to_composer")')
-      value = await pendingState()
-      assert.equal(value.editable, 'false', 'return locks the native editor before the response')
-      assert.equal(value.rowCount, 2, 'queue row remains until Core confirms withdrawal')
+      await waitFor('window.campOpenTest.localDraftState().body === "当前已有草稿"')
+      let value = await localDraftState()
       assert.equal(value.text, '当前已有草稿')
-      await run('window.campOpenTest.releasePendingReturn()')
-      await waitFor('Boolean(window.campOpenTest.pendingState().error)')
-      value = await pendingState()
-      assert.equal(value.text, '当前已有草稿', 'publication winning the race keeps existing input')
       assert.equal(value.editable, 'true')
-      assert.equal(value.rowCount, 2)
-      await run('window.campOpenTest.holdPendingReturn(); document.querySelector(".pending-input-edit").click()')
-      await settle()
-      await run('window.campOpenTest.releasePendingReturn()')
-      await waitFor('window.campOpenTest.pendingState().rowCount === 1 && window.campOpenTest.pendingState().editable === "true"')
-      value = await pendingState()
-      assert.deepEqual(value.queue, ['pending-C'])
-      assert.equal(value.text, 'B：请检查输入框和排队行为。')
-      assert.equal(value.focused, true)
-      assert.equal(value.editingCount, 0)
-      assert.ok(value.calls.indexOf('save_content') < value.calls.indexOf('return_to_composer'))
+      assert.equal(value.pendingRows, 0, 'public Camp has no private pending queue')
+      await run('window.campOpenTest.refresh(true)')
+      value = await localDraftState()
+      assert.equal(value.text, '当前已有草稿', 'business projection refresh preserves the local draft')
+      assert.equal(value.body, '当前已有草稿')
+      await run('window.campOpenTest.remount()')
+      await waitFor('window.campOpenTest.localDraftState().text === "当前已有草稿"')
+      value = await localDraftState()
+      assert.equal(value.body, '当前已有草稿', 'remount restores the Camp-local draft')
+      assert.equal(value.editable, 'true')
       for (const theme of ['day', 'night']) {
         await run('document.documentElement.dataset.theme = ' + JSON.stringify(theme))
         await settle()
-        await capture(`pending-return-${theme}`)
+        await capture(`camp-local-draft-${theme}`)
       }
-      // A committed withdrawal followed by read failure cannot autosave the previous text.
-      await run('window.campOpenTest.holdPendingReturn(false, true); document.querySelector(".pending-input-edit").click()')
-      await settle()
-      await run('window.campOpenTest.releasePendingReturn()')
-      await waitFor('window.campOpenTest.pendingState().queue.length === 0 && Boolean(window.campOpenTest.pendingState().error)')
-      value = await pendingState()
-      assert.equal(value.editable, 'false')
-      assert.equal(value.draft.body, 'C：继续执行下一条消息。')
-      await run('window.campOpenTest.allowDraftRead()')
-      await run('Array.from(document.querySelectorAll("button")).find(button => button.textContent.includes("重新加载"))?.click()')
-      await waitFor('window.campOpenTest.pendingState().editable === "true"')
-      value = await pendingState()
-      assert.equal(value.text, 'C：继续执行下一条消息。')
-      assert.equal(value.error, '', 'successful reload clears the stale transfer error')
-      assert.equal(value.rowCount, 0)
-      assert.equal(value.editingCount, 0)
-      console.log(JSON.stringify({ ok: true, mode, checks: ['overwrite', 'focus', 'no-edit-mode', 'preflight-failure-preserves-dirty-input', 'rejected-preserves-input', 'uncertain-reload-fence'] }))
+      console.log(JSON.stringify({ ok: true, mode, checks: ['local-persistence', 'projection-refresh', 'remount', 'no-private-pending-queue'] }))
       window.destroy(); app.quit()
       return
     }

@@ -94,7 +94,7 @@ App 的 `app-update.yml` 读取官方 `murray17/rovai-ai` GitHub Release 通道�
 
 本地隔离 packaged UI 验收可以在同时满足隔离实例 admission 时设置
 `ROVAI_DISABLE_AUTO_UPDATE_CHECKS=1`，避免访问真实 Release 通道。该变量不对日常实例生效，也不构成
-更新功能或签名连续性的发布证据。完整状态合同见 [App Update v2](../contracts/app-update-v2.md)。
+更新功能或签名连续性的发布证据。完整状态合同见 [App Update v5](../contracts/app-update-v5.md)。
 
 [`build/release-notes.md`](../../build/release-notes.md) 是 macOS 与 Windows 共用的唯一发布说明源；
 `package.json#build.releaseInfo.releaseNotesFile` 必须显式指向它。首个非空行必须是
@@ -102,6 +102,10 @@ App 的 `app-update.yml` 读取官方 `murray17/rovai-ai` GitHub Release 通道�
 Markdown 写入 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`，使 updater 不再把 GitHub Atom HTML
 fallback 当作页面日志内容。发布者不得手工维护另一份 manifest 日志，也不得为日志展示增加 Renderer
 GitHub 请求；版本提升必须在同一个 Release PR 中更新该文件。
+
+Desktop Main 也在构建时内嵌此文件，并只在首标题与运行版本完全匹配时把它作为当前版本日志投影给
+Renderer。更新页离线显示当前日志；新版日志继续只来自既有更新检查结果。`releaseInfo.releaseNotesFile`
+本身仅保证更新清单内容，不能替代 App 内嵌。验收打包产物时应核对 Main 快照与页面都含当前日志。
 
 macOS 正式 Release 必须在同一个版本标签中上传以下完整集合：
 

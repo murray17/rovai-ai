@@ -63,7 +63,8 @@ describe('desktop package metadata', () => {
       'bin/rovai-core',
       'bin/rovai-host',
       'bin/rovai',
-      'web-ui'
+      'web-ui',
+      'skills'
     ])
   })
 
@@ -78,7 +79,8 @@ describe('desktop package metadata', () => {
         from: 'resources/bin/macos-${arch}/rovai',
         to: 'bin/rovai'
       },
-      { from: 'out/web', to: 'web-ui' }
+      { from: 'out/web', to: 'web-ui' },
+      { from: 'skills', to: 'skills' }
     ])
     expect(packageMetadata.build.win.extraResources).toEqual([
       {
@@ -90,7 +92,8 @@ describe('desktop package metadata', () => {
         from: 'resources/bin/windows-x64/rovai.exe',
         to: 'bin/rovai.exe'
       },
-      { from: 'out/web', to: 'web-ui' }
+      { from: 'out/web', to: 'web-ui' },
+      { from: 'skills', to: 'skills' }
     ])
     expect(packageMetadata.build).not.toHaveProperty('extraResources')
     expect(packageMetadata.build.mac.binaries).toEqual([

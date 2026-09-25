@@ -65,6 +65,6 @@ status/completed_at 同事务完成。Runtime 后台清理与审计无关。同�
 
 ## Read side 与 Renderer
 
-[Camp Open Projection v23](../contracts/camp-open-projection-v23.md)投影当前 generation、成员 version 与历史尚未完成的
+[Camp Open Projection v24](../contracts/camp-open-projection-v24.md)投影当前 generation、成员 version 与历史尚未完成的
 reconciliation；新 cutover 已同事务完成，不产生持续收口等待。Renderer 使用权威 removal preview 解释影响，以 exact values 提交；成功后重读 Camp，不在本地
 模拟关系。最后成员操作保持可发现但禁用，添加候选来自当前存在且不在 active set 的 AgentProfile。

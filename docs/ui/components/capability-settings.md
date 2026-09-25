@@ -5,6 +5,8 @@ last_updated: 2026-09-08
 
 # MCP 与 Skills 设置
 
+> 本文件的 Skills Library、导入、启停、Revision 与生效组交互是 v1.69 及更早的历史合同。v1.70 当前 Skills／工具箱界面见 [Skills、工具箱与会话选择](skills-settings.md)；以下 MCP 交互继续适用。
+
 使用既有主题 token 和设置导航。内容区为左侧列表、右侧详情的单一工作区，日间保持白底，
 夜间沿用 Steel Night。新增、导入、内容预览和更新确认均在右侧完成。删除 MCP 或 Skill 使用
 共享应用确认弹窗，默认聚焦“取消”，保留红色“确认删除”。

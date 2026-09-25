@@ -103,6 +103,59 @@ describe('AgentRun file preview routing', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 
+  it.each(['read', 'write'] as const)(
+    'opens an operation-only %s from its exact Run evidence',
+    async (operationKind) => {
+      const open = vi.fn().mockResolvedValue({ kind: 'preview', tabId: 'operation-file' })
+      const onError = vi.fn()
+      const evidence = {
+        id: `operation-${operationKind}`,
+        agentRunId: 'run-mission',
+        executionEpoch: 4,
+        phase: 'completed' as const,
+        payload: {
+          runtimeFileOperation: {
+            schemaVersion: 2,
+            status: 'available',
+            operationKind,
+            path: 'src/operation-only.ts'
+          }
+        }
+      }
+
+      await expect(openAgentRunActivityFilePreview({
+        filePreview: { open },
+        campId: 'camp-1',
+        evidence,
+        path: 'src/operation-only.ts',
+        onError
+      })).resolves.toBe(true)
+      expect(open).toHaveBeenCalledWith({
+        kind: 'run_activity_file',
+        campId: 'camp-1',
+        agentRunId: 'run-mission',
+        executionEpoch: 4,
+        evidenceId: evidence.id,
+        rawReference: 'src/operation-only.ts'
+      }, undefined, { fileName: 'src/operation-only.ts' }, {
+        commitOnSuccess: true,
+        previewOnly: true
+      })
+      expect(onError).not.toHaveBeenCalled()
+
+      open.mockClear()
+      await expect(openAgentRunActivityFilePreview({
+        filePreview: { open },
+        campId: 'camp-1',
+        evidence,
+        path: 'src/other.ts',
+        onError
+      })).resolves.toBe(false)
+      expect(open).not.toHaveBeenCalled()
+      expect(onError).toHaveBeenCalledWith('无法打开该文件')
+    }
+  )
+
   it('keeps the Camp workspace fallback for legacy Command rows without evidence identity', async () => {
     const open = vi.fn().mockResolvedValue({ kind: 'preview', tabId: 'legacy-file' })
     await expect(openAgentRunActivityFilePreview({
@@ -114,6 +167,7 @@ describe('AgentRun file preview routing', () => {
         canonical: null
       },
       path: 'src/legacy.ts',
+      allowLegacyWorkspaceFallback: true,
       onError: vi.fn()
     })).resolves.toBe(true)
     expect(open).toHaveBeenCalledWith({
@@ -121,6 +175,19 @@ describe('AgentRun file preview routing', () => {
       campId: 'camp-1',
       rawReference: 'src/legacy.ts'
     }, undefined, { fileName: 'src/legacy.ts' }, { commitOnSuccess: true, previewOnly: true })
+  })
+
+  it('does not fall back to a same-named Camp file when a typed operation lacks Evidence', async () => {
+    const open = vi.fn()
+    const onError = vi.fn()
+    await expect(openAgentRunActivityFilePreview({
+      filePreview: { open },
+      campId: 'mission-camp',
+      path: 'src/worktree-only.ts',
+      onError
+    })).resolves.toBe(false)
+    expect(open).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('无法打开该文件')
   })
 
   it('does not downgrade a malformed canonical diff to the Camp workspace', async () => {

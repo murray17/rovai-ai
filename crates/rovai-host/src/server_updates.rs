@@ -57,7 +57,8 @@ impl ServerUpdates {
         Ok(Self(Arc::new(Inner {
             state: Mutex::new(State {
                 snapshot: json!({
-                    "currentVersion": env!("CARGO_PKG_VERSION"), "status": if failed_install { "check_failed" } else { "idle" }, "availableRelease":null,
+                    "currentVersion": env!("CARGO_PKG_VERSION"), "status": if failed_install { "check_failed" } else { "idle" },
+                    "currentRelease":null, "availableRelease":null,
                     "lastCheckSource":null,"checkedAt":null,"lastSuccessfulCheckAt":null,
                     "downloadPercent":null,"transferredBytes":null,"totalBytes":null,"bytesPerSecond":null,
                     "failureReason": if failed_install { json!("install_failed") } else { Value::Null },"pendingPrompt":null
@@ -184,15 +185,24 @@ impl ServerUpdates {
         ensure!(size > 0 && size <= MAX_ARCHIVE, "invalid_release");
         let mut state = self.0.state.lock().unwrap();
         let now = Utc::now().to_rfc3339();
-        let available = coordinates
-            > version_numbers(env!("CARGO_PKG_VERSION")).context("invalid current version")?;
-        state.snapshot["status"] = json!(if available { "available" } else { "up_to_date" });
-        state.snapshot["lastSuccessfulCheckAt"] = json!(now);
-        state.snapshot["failureReason"] = Value::Null;
-        state.snapshot["availableRelease"] = json!({"version":version,
+        let current =
+            version_numbers(env!("CARGO_PKG_VERSION")).context("invalid current version")?;
+        let available = coordinates > current;
+        let release_info = json!({"version":version,
             "releaseName": release["name"].as_str().map(|v| v.chars().take(500).collect::<String>()),
             "releaseDate": release["published_at"].as_str(),
             "releaseNotes": release["body"].as_str().map(|v| v.chars().take(100_000).collect::<String>())});
+        state.snapshot["status"] = json!(if available { "available" } else { "up_to_date" });
+        state.snapshot["lastSuccessfulCheckAt"] = json!(now);
+        state.snapshot["failureReason"] = Value::Null;
+        if available {
+            state.snapshot["availableRelease"] = release_info;
+        } else {
+            state.snapshot["availableRelease"] = Value::Null;
+            if coordinates == current {
+                state.snapshot["currentRelease"] = release_info;
+            }
+        }
         state.release = available.then(|| Release {
             version: version.into(),
             size,

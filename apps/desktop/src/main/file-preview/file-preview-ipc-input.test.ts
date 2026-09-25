@@ -20,6 +20,12 @@ describe('parseOpenFilePreviewRequest', () => {
   it('accepts a Mission attachment locator', () => {
     expect(parseOpenFilePreviewRequest(missionAttachmentRequest)).toEqual(missionAttachmentRequest)
   })
+
+  it('accepts only the Skill entry file for a Skill reference', () => {
+    const request = { kind: 'skill_reference', campId: missionAttachmentRequest.campId, skillId: 'native:abc', rawReference: 'SKILL.md' }
+    expect(parseOpenFilePreviewRequest(request)).toEqual(request)
+    expect(() => parseOpenFilePreviewRequest({ ...request, rawReference: '../private.txt' })).toThrow('Unsupported Skill entry')
+  })
 })
 
 describe('parseRestoreFilePreviewRequest', () => {
@@ -29,6 +35,12 @@ describe('parseRestoreFilePreviewRequest', () => {
       campId: 'rvcamp_01m1s4cranehs9cdc9r7ayj5d3',
       messageId: 'message-1',
       rawReference: 'docs/README.md'
+    },
+    {
+      kind: 'skill_reference',
+      campId: 'rvcamp_01m1s4cranehs9cdc9r7ayj5d3',
+      skillId: 'native:abc',
+      rawReference: 'SKILL.md'
     },
     {
       kind: 'camp_workspace',

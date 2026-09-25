@@ -3,6 +3,7 @@ import type { AppUpdateSnapshot, AppUpdatesApi } from '@contracts'
 import { useCampClient } from './camp-client'
 import { AboutUpdatesSettingsView } from './AboutUpdatesSettings'
 import { useAppUpdates } from './useAppUpdates'
+import { currentReleaseFromBundledNotes } from '../../shared/app-current-release'
 import releaseNotes from '../../../../../build/release-notes.md?raw'
 
 export function RemoteAboutSettings({ updatesApi }: { updatesApi?: AppUpdatesApi }): React.JSX.Element {
@@ -16,16 +17,16 @@ export function RemoteAboutSettings({ updatesApi }: { updatesApi?: AppUpdatesApi
     void client.request<{ version: string }>('app.info').then(info => {
       if (!active) return
       setCurrent({ currentVersion: info.version, status: 'idle',
-        availableRelease: { version: info.version, releaseName: `Rovai AI v${info.version}`, releaseDate: null,
-          releaseNotes: releaseNotes.startsWith(`# Rovai AI v${info.version}\n`) ? releaseNotes.replace(/^# [^\n]+\n+/, '') : null },
+        currentRelease: currentReleaseFromBundledNotes(info.version, desktopHosted ? releaseNotes : null),
+        availableRelease: null,
         lastCheckSource: null, checkedAt: null, lastSuccessfulCheckAt: null,
         downloadPercent: null, transferredBytes: null, totalBytes: null, bytesPerSecond: null,
         failureReason: null, pendingPrompt: null })
     }, () => { if (active) setFailed(true) })
     return () => { active = false }
-  }, [client])
+  }, [client, desktopHosted])
   const snapshot = desktopHosted ? current : updates.snapshot && {
-    ...updates.snapshot, availableRelease: updates.snapshot.availableRelease ?? current?.availableRelease ?? null
+    ...updates.snapshot, currentRelease: updates.snapshot.currentRelease ?? current?.currentRelease ?? null
   }
   return <AboutUpdatesSettingsView snapshot={snapshot} product={desktopHosted ? 'desktop' : 'server'} readOnly={desktopHosted}
     canUpdate={!desktopHosted && !!updatesApi} loading={desktopHosted ? !current && !failed : updates.loading}

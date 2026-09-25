@@ -5,6 +5,31 @@ import { createServerUpdates } from './server-updates'
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 describe('Server updates transport', () => {
+  it('uses version identity for installed notes while retaining a newer candidate after a failed check', async () => {
+    const installed = { version: '0.2.6', releaseName: 'Server 0.2.6', releaseNotes: 'Installed notes' }
+    const newer = { version: '0.2.7', releaseName: 'Server 0.2.7', releaseNotes: 'Newer notes' }
+    const base = { currentVersion: '0.2.6', currentRelease: null }
+    const updates = vi.fn()
+      .mockResolvedValueOnce({ ...base, status: 'up_to_date', availableRelease: installed })
+      .mockResolvedValueOnce({ ...base, status: 'available', availableRelease: newer })
+      .mockResolvedValueOnce({ ...base, status: 'check_failed', availableRelease: newer, failureReason: 'network' })
+      .mockResolvedValueOnce({ ...base, status: 'up_to_date', availableRelease: { version: '0.2.5' } })
+    const api = createServerUpdates({ authenticated: true, updates } as unknown as ConsoleClient)
+
+    expect(await api.get()).toMatchObject({
+      status: 'up_to_date', currentRelease: installed, availableRelease: null
+    })
+    expect(await api.check()).toMatchObject({
+      status: 'available', currentRelease: installed, availableRelease: newer
+    })
+    expect(await api.get()).toMatchObject({
+      status: 'check_failed', currentRelease: installed, availableRelease: newer
+    })
+    expect(await api.check()).toMatchObject({
+      status: 'up_to_date', currentRelease: installed, availableRelease: null
+    })
+  })
+
   it('pins explicit actions to the observed release and resumes polling through restart without logging in', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('document', { visibilityState: 'visible' })

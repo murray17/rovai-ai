@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-09-20
+last_updated: 2026-09-24
 ---
 
 # Built-in Tool Runtime Architecture
@@ -11,7 +11,7 @@ last_updated: 2026-09-20
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
 [Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
-[Camp History v8](../contracts/camp-history-v8.md)、
+[Camp History v10](../contracts/camp-history-v10.md)、
 [Durable Task v5](../contracts/durable-task-v5.md) 和
 [Camp Message Send v22](../contracts/camp-message-send-v22.md)、
 [Current User Attention v7](../contracts/current-user-attention-v7.md)与
@@ -196,7 +196,7 @@ CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 gramm
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 该 schema 继续进入当前 catalog digest。
 当前 v32 contract/CLI command version、`builtin_cli.transport.v32` capability 与 IPC protocol 2 必须同时进入
-Binding compatibility 和 digest。Camp History 使用 v8；Native Binding context contract 加入内部
+Binding compatibility 和 digest。Camp History 当前使用 v10；Native Binding context contract 加入内部
 `sessionCharterRevision: 12`；Task help 路由教学的变化轮换 Binding。Bootstrap v4/Formatter 4；public 动态 Context
 使用 Formatter 28 / ContextManifest 28，Single Chat 使用 Formatter/Manifest 26，不做 endpoint 猜测并 fail closed。
 
@@ -307,7 +307,7 @@ aggregate。重放不重新读源，身份漂移只清理本 operation 尚未拥
 Run/epoch，再把所有存续公共 Camp 作为可读范围；目标 Camp membership/profile 不参与授权。`camp.read` 直接解析目标
 Camp 并使用调用时 sequence boundary；ContextManifest history catalog 不限制它。`camp.list`、跨 Camp
 `camp.search` 和 `history.search` 继续使用冻结 global public boundary 保持 discovery 时序，并为旧 Manifest
-漏掉的 Camp 动态补足 catalog。任何 message ID 都不能绕过 recall、withdrawal、recipient suppression 或 quote 可见性。
+漏掉的 Camp 动态补足 catalog。显式 read/search 在发布边界内可读取 recallable 或 waiting 原文，但不 claim Delivery 或关闭撤回；撤回后 read 只返回 `Message withdrawn`，搜索不命中。任何 message ID 都不能绕过 publication、tombstone 或 quote-source 边界。
 
 ### 新 Session
 

@@ -50,7 +50,7 @@
 :root .settings-sidebar-menu button.active strong {
   font-weight: 600;
 }
-:root .settings-content .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) {
+:root .settings-content .settings-panel:not(.settings-panel-mcp,.settings-panel-skills,.settings-panel-toolbox) {
   border-top: 0;
   padding: 32px 32px 48px;
 }
@@ -1096,6 +1096,9 @@
   background: color-mix(in srgb,var(--attention) 15%,var(--home-surface));
   color: var(--attention);
 }
+:root .settings-panel.settings-panel-diagnostics .diagnostics-cleanup-status {
+  color: var(--attention);
+}
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-copy>div>span {
   font-size: 10.5px;
   font-weight: 400;
@@ -1342,6 +1345,13 @@
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-section {
   border-bottom: 0;
 }
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-section>.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-body {
   gap: 16px;
 }
@@ -1511,7 +1521,7 @@
   font-weight: 500;
 }
 @media(max-width:1100px) {
-  :root .settings-content .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) {
+  :root .settings-content .settings-panel:not(.settings-panel-mcp,.settings-panel-skills,.settings-panel-toolbox) {
     padding: 28px 24px 40px;
   }
   :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-list {

@@ -98,6 +98,9 @@ export interface StructuredMentionComposerProps {
   members: readonly StructuredMentionMember[]
   skills?: readonly ComposerSkillOption[] | null
   skillCatalogStatus?: 'loading' | 'ready' | 'error'
+  skillCatalogErrors?: readonly string[]
+  skillCatalogRefreshing?: boolean
+  onRefreshSkills?(): void
   ariaLabel: string
   placeholder?: string
   disabled?: boolean
@@ -147,10 +150,14 @@ export function structuredSkillOptions(
   query: string
 ): ComposerSkillOption[] {
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
-  if (!normalizedQuery) return [...skills]
-  return skills.filter((skill) => `${skill.name}\n${skill.description}`
+  const filtered = normalizedQuery ? skills.filter((skill) => `${skill.name}\n${skill.description}`
     .toLocaleLowerCase('zh-CN')
-    .includes(normalizedQuery))
+    .includes(normalizedQuery)) : skills
+  // The typeahead indexes this array for Arrow/Enter. Match the menu's visual groups.
+  return [
+    ...filtered.filter((skill) => skill.source === 'toolbox'),
+    ...filtered.filter((skill) => skill.source !== 'toolbox')
+  ]
 }
 
 export function StructuredMentionOptionAvatar({
@@ -208,6 +215,9 @@ function ComposerBridge({
   members,
   skills = [],
   skillCatalogStatus = 'ready',
+  skillCatalogErrors = [],
+  skillCatalogRefreshing = false,
+  onRefreshSkills,
   ariaLabel,
   placeholder = '',
   disabled = false,
@@ -556,6 +566,10 @@ function ComposerBridge({
             skillMenuId,
             skillCatalogStatus,
             skillMenuOptions,
+            members,
+            skillCatalogErrors ?? [],
+            skillCatalogRefreshing,
+            onRefreshSkills,
             selectedIndex,
             setHighlightedIndex,
             selectIndex
@@ -598,22 +612,33 @@ function renderSkillMenu(
   menuId: string,
   status: 'loading' | 'ready' | 'error',
   options: readonly ComposerSkillOption[],
+  members: readonly StructuredMentionMember[],
+  errors: readonly string[],
+  refreshing: boolean,
+  onRefresh: (() => void) | undefined,
   selectedIndex: number,
   setHighlightedIndex: (index: number) => void,
   selectIndex: (index: number) => void
 ): JSX.Element {
+  const sections = [
+    { label: '工具箱', entries: options.map((option, index) => ({ option, index })).filter(({ option }) => option.source === 'toolbox') },
+    { label: 'Skills', entries: options.map((option, index) => ({ option, index })).filter(({ option }) => option.source !== 'toolbox') }
+  ].filter(({ entries }) => entries.length > 0)
   return <div id={menuId} className="mention-menu skill-picker-menu structured-skill-menu"
     role="listbox" aria-label="选择 Skill">
-    <div className="mention-menu-heading"><strong>选择 Skill</strong><span>↑↓ 选择 · Enter 确认</span></div>
+    <div className="mention-menu-heading"><strong>选择 Skill</strong><span>↑↓ 选择 · Enter 确认</span>{onRefresh && <button type="button" aria-label="刷新 Skill 候选" disabled={refreshing} onMouseDown={(event) => event.preventDefault()} onClick={onRefresh}>刷新</button>}</div>
     {status === 'loading'
       ? <p className="structured-mention-empty">正在读取可用 Skills…</p>
       : status === 'error'
         ? <p className="structured-mention-empty">Skills 暂时无法读取，请稍后重试</p>
         : options.length === 0
           ? <p className="structured-mention-empty">没有匹配的 Skill</p>
-          : options.map((option, index) => <button type="button" role="option" id={`${menuId}-option-${index}`}
+          : sections.map((section) => <div className="skill-picker-section" role="group" aria-label={section.label} key={section.label}>
+            <div className="skill-picker-group" aria-hidden="true">{section.label}</div>
+            {section.entries.map(({ option, index }) => <button type="button" role="option" id={`${menuId}-option-${index}`}
               key={`skill:${option.id}`} data-skill-name={option.name}
               aria-selected={selectedIndex === index}
+              aria-label={`/${option.name}，${option.source === 'toolbox' ? '工具箱' : option.sourceScope === 'project' ? '项目 Skill' : '用户 Skill'}${option.memberIds?.length ? `，关联队员：${members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join('、')}` : ''}`}
               className={selectedIndex === index ? 'active' : ''}
               onMouseMove={() => setHighlightedIndex(index)}
               onMouseDown={(event) => event.preventDefault()}
@@ -623,8 +648,17 @@ function renderSkillMenu(
                 <strong>/{option.name}</strong>
                 <small>{option.description}</small>
               </span>
+              {option.memberIds && <span className="skill-picker-member-count" title={`${option.source === 'toolbox' ? '已配置此 Skill 的队员' : '在以下队员的环境中发现'}：${members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join('、')}`}>{option.memberIds.slice(0, 3).map((id) => {
+                const member = members.find((candidate) => candidate.agentId === id)
+                return member ? <MemberAvatar key={id} agentId={id} avatarRef={member.avatarRef ?? null} displayName={member.displayName} size="execution" decorative /> : null
+              })}{option.memberIds.length > 3 && <small>+{option.memberIds.length - 3}</small>}</span>}
               <span className="skill-picker-enter" aria-hidden="true">↵</span>
             </button>)}
+          </div>)}
+    {refreshing && <p className="structured-mention-empty" role="status">正在刷新 Skill 候选…</p>}
+    {errors.includes('刷新失败')
+      ? <p className="structured-mention-empty" role="alert">刷新失败，当前显示上次读取的候选。请重试。</p>
+      : errors.length > 0 && <p className="structured-mention-empty" role="status">部分来源暂不可读，仍可选择已发现的 Skill。</p>}
   </div>
 }
 

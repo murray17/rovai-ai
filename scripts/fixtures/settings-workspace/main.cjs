@@ -265,6 +265,15 @@ app.whenReady().then(async () => {
     assert.equal(await run("document.querySelector('#about-update-status').classList.contains('about-status-quiet')"), false)
     await capture('about-download-error')
 
+    await navigate('about', 'server_download_failed')
+    const serverReleaseLink = 'https://github.com/murray17/rovai-ai/releases/tag/server-v0.0.7'
+    assert.equal(await run("document.querySelector('.about-update-fallback-actions a').href"), serverReleaseLink)
+    await click('[data-app-update-release-tab="current"]')
+    assert.equal(await run("document.querySelector('.about-release-section').dataset.appUpdateReleaseVersion"), '0.0.6')
+    assert.equal(await run("document.querySelector('.about-update-fallback-actions a').href"), serverReleaseLink)
+    await navigate('about', 'server_no_candidate')
+    assert.equal(await run("document.querySelector('.about-update-fallback-actions a').href"), 'https://github.com/murray17/rovai-ai/releases')
+
     await navigate('channels')
     await waitFor('document.hasFocus()')
     const trigger = '.channel-connection-trigger'

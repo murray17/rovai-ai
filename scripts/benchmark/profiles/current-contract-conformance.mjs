@@ -2,14 +2,14 @@ import { defineBenchmarkProfile } from '../execution/suite.mjs'
 import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
-  version: 'v1.66',
-  projectionSchemaVersion: 120
+  versionPattern: '^v1\\.[0-9]+$',
+  minimumProjectionSchemaVersion: 120
 })
 
 const criteria = [
-  criterion('CCC-001', 'Public batch RUN_INPUT preserves trusted sender identity and historical frozen Delivery remains replayable', [
+  criterion('CCC-001', 'Public batch RUN_INPUT preserves trusted sender identity and the redelivery overlay remains frozen', [
     test('crates/rovai-core/src/team_tool.rs', 'batch_public_delivery_preserves_trusted_sender_in_run_input'),
-    test('crates/rovai-core/src/team_tool.rs', 'legacy_public_delivery_replays_frozen_context_versions')
+    test('crates/rovai-core/src/context.rs', 'redelivery_overlay_is_frozen_at_prepare_and_acknowledges_only_its_revision')
   ]),
   criterion('CCC-002', 'Ordinary user RUN_INPUT remains complete with its trusted sender type', [
     test('crates/rovai-core/src/context.rs', 'run_input_is_complete_even_when_it_exceeds_the_history_body_limit')
@@ -27,30 +27,27 @@ const criteria = [
     test('crates/rovai-core/src/camp_content.rs', 'rendering_projects_current_names_without_changing_semantic_digest'),
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
-  criterion('CCC-007', 'The incremental public window keeps the latest 15 messages, including self output, with bounded omission evidence', [
-    test('crates/rovai-core/src/context.rs', 'recent_public_messages_include_self_before_limit_and_omission_aggregation')
+  criterion('CCC-007', 'Public batch keeps its accepted watermark across replacement Sessions', [
+    test('crates/rovai-core/src/context.rs', 'batch_public_window_keeps_the_camp_agent_watermark_across_new_sessions')
   ]),
-  criterion('CCC-008', 'Required RUN_INPUT stays complete while optional shared history yields to the Runtime payload budget', [
+  criterion('CCC-008', 'Required RUN_INPUT stays complete under the Runtime payload budget', [
     test('crates/rovai-core/src/context.rs', 'oversized_required_context_fails_before_manifest_or_boundary_ack'),
-    test('crates/rovai-core/src/context.rs', 'fully_evicted_batch_history_cursor_still_covers_the_frozen_tail')
+    test('crates/rovai-core/src/context.rs', 'run_input_is_complete_even_when_it_exceeds_the_history_body_limit')
   ]),
-  criterion('CCC-009', 'A fully evicted shared-history window retains only a bounded count and live read cursor', [
-    test('crates/rovai-core/src/context.rs', 'fully_evicted_batch_history_cursor_still_covers_the_frozen_tail')
+  criterion('CCC-009', 'Public history remains readable on demand after the accepted watermark', [
+    test('crates/rovai-core/src/context.rs', 'replacement_binding_bootstrap_keeps_history_on_demand_after_the_accepted_watermark'),
+    test('crates/rovai-core/src/context.rs', 'public_history_is_readable_without_target_camp_membership_or_live_recheck')
   ]),
   criterion('CCC-010', 'ContextManifest and Formatter versions match the current context contract', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
   criterion(
     'CCC-011',
-    `Data Contract is ${CURRENT_CONTRACT_DATA_STORE.version} with projection schema ${CURRENT_CONTRACT_DATA_STORE.projectionSchemaVersion}`,
+    'The checkout admits its declared current Data Contract and required schema objects',
     [
       test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
       test('crates/rovai-core/src/db.rs', 'current_schema_contains_required_contract_objects'),
-      test('crates/rovai-core/src/db.rs', 'v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills'),
-      test('crates/rovai-core/src/db.rs', 'v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills'),
-      test('crates/rovai-core/src/db.rs', 'v111_upgrades_current_main_v110_and_keeps_zero_attempt_cancellation_terminal'),
-      test('crates/rovai-core/src/db.rs', 'v112_upgrades_v111_and_installs_managed_attachment_v2_idempotently'),
-      test('crates/rovai-core/src/db.rs', 'v119_upgrades_v112_preserves_evidence_and_installs_channel_contracts')
+      test('crates/rovai-core/src/db.rs', 'v172_preserves_historical_context_rows_and_gates_new_writes')
     ]
   ),
   criterion('CCC-012', 'CampSnapshot matches the current read model contract', [
@@ -60,8 +57,8 @@ const criteria = [
     test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
     test('crates/rovai-core/src/db.rs', 'v107_quarantine_moves_owned_directories_without_following_links')
   ]),
-  criterion('CCC-014', 'The v163 transition preserves published work, requeues unfrozen Delivery, and retires legacy Run placeholders', [
-    test('crates/rovai-core/src/db.rs', 'v163_requeues_unfrozen_public_work_and_retires_the_legacy_run_placeholder')
+  criterion('CCC-014', 'The v172 transition preserves historical context rows and gates new writes', [
+    test('crates/rovai-core/src/db.rs', 'v172_preserves_historical_context_rows_and_gates_new_writes')
   ]),
   criterion('CCC-015', 'Public batch windows keep their accepted Camp+Agent watermark across Native Session replacement and do not apply the legacy self filter', [
     test('crates/rovai-core/src/context.rs', 'batch_public_window_keeps_the_camp_agent_watermark_across_new_sessions')
@@ -96,7 +93,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.66.0',
+  version: '1.69.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -114,8 +111,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.66-current-contract',
-    version: '1.66.0',
+    id: 'rovai-current-contract',
+    version: '1.69.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

@@ -184,6 +184,8 @@ function referenceFileName(value: string): string {
 
 export function filePreviewSourceKey(request: OpenFilePreviewRequest): string {
   switch (request.kind) {
+    case 'skill_reference':
+      return `skill:${request.campId}:${request.skillId}`
     case 'message_reference': {
       const path = parseFileReference(request.rawReference)?.pathPart ?? request.rawReference
       return `message:${request.campId}:${request.messageId}:${path}`

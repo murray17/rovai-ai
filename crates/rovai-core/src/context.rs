@@ -58,9 +58,8 @@ use crate::{
     managed_blob::ManagedBlobStore,
     mcp_projection::{McpExposureSnapshot, PreparedMcpProjection},
     memory::{MemoryScopeKind, MemoryService, RelationshipDirection},
-    single_chat::filter_single_chat_skill_exposure,
     skill::SkillLibraryService,
-    skill_projection::{PreparedSkillExposure, SkillExposureSnapshot, SkillProjectionReconciler},
+    skill_projection::{PreparedSkillExposure, SkillExposureSnapshot},
 };
 
 pub const CONTEXT_FORMATTER_VERSION: i64 = AGENT_RUN_CONTEXT_FORMATTER_VERSION;
@@ -74,13 +73,16 @@ fn context_manifest_is_dispatchable(
     invocation_kind: &str,
 ) -> bool {
     if invocation_kind == "batch" {
-        manifest_version == PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
+        (manifest_version == PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
             && formatter_version == PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
-            && profile_version == 9
+            && profile_version == 10)
+            || (manifest_version == 30 && formatter_version == 30 && profile_version == 10)
+            || (manifest_version == 29 && formatter_version == 29 && profile_version == 9)
     } else {
-        manifest_version == CONTEXT_MANIFEST_VERSION
+        (manifest_version == CONTEXT_MANIFEST_VERSION
             && formatter_version == CONTEXT_FORMATTER_VERSION
-            && profile_version == 6
+            && profile_version == 7)
+            || (manifest_version == 26 && formatter_version == 26 && profile_version == 6)
     }
 }
 
@@ -266,6 +268,7 @@ pub struct PreparedSessionBootstrap {
 struct PreparedBootstrapEvidence {
     evidence_id: String,
     session_charter: String,
+    platform_skills: Option<String>,
     memory_entrypoint: String,
     stable_evidence_digest: String,
     native_binding_id: String,
@@ -449,11 +452,11 @@ impl ContextService {
     pub fn prepare_skill_exposure(
         &self,
         database: &mut Database,
-        skill_library: &SkillLibraryService,
+        _skill_library: &SkillLibraryService,
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Result<PreparedSkillExposure> {
-        let snapshot = load_run_snapshot(database, agent_run_id, execution_epoch)?
+        let _snapshot = load_run_snapshot(database, agent_run_id, execution_epoch)?
             .context("AgentRun is not active for Skill exposure preparation")?;
         let existing = database
             .connection()
@@ -479,29 +482,14 @@ impl ContextService {
                 digest,
             });
         }
-        let adapter_kind = snapshot
-            .effective_config
-            .get("runtimeAdapter")
-            .and_then(Value::as_str)
-            .context("AgentRun effective configuration has no Runtime Adapter")
-            .and_then(|value| value.parse::<AdapterKind>())?;
-        let execution_root = snapshot
-            .workspace
-            .get("executionRoot")
-            .and_then(Value::as_str)
-            .context("AgentRun workspace has no execution root")?;
-        let prepared = SkillProjectionReconciler.prepare_run_exposure(
-            database,
-            skill_library,
-            agent_run_id,
-            std::path::Path::new(execution_root),
-            adapter_kind,
-        )?;
-        if snapshot.invocation_kind == "single_chat" {
-            filter_single_chat_skill_exposure(database, prepared)
-        } else {
-            Ok(prepared)
-        }
+        // v1.68 no longer projects Skills into user projects. Frozen older
+        // manifests retain their original Exposure above for exact recovery.
+        let exposure = SkillExposureSnapshot::default();
+        let digest = canonical_json_digest(&serde_json::to_value(&exposure)?)?;
+        Ok(PreparedSkillExposure {
+            snapshot: exposure,
+            digest,
+        })
     }
 
     fn materialize_inner(
@@ -530,6 +518,19 @@ impl ContextService {
             max_payload_bytes,
         )? {
             return Ok(ContextMaterialization::Ready(existing));
+        }
+        let batch_context_manifest_version = (snapshot.invocation_kind == "batch")
+            .then(|| {
+                frozen_batch_context_manifest_version(
+                    database.context_connection(),
+                    &snapshot.agent_run_id,
+                )
+            })
+            .transpose()?;
+        if batch_context_manifest_version == Some(30) {
+            anyhow::bail!(
+                "Unmaterialized public v30 input has no frozen Additional Skills evidence"
+            );
         }
         if !snapshot.skill_selection_snapshot.entries.is_empty()
             && prepared_skill_exposure.is_none()
@@ -596,7 +597,13 @@ impl ContextService {
                 != Some(bootstrap_evidence_digest.as_str());
         let previous_accepted_public_boundary_sequence = accepted_public_window_lower_bound(
             &snapshot.invocation_kind,
-            snapshot.last_accepted_public_boundary_sequence,
+            if batch_context_manifest_version == Some(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION) {
+                snapshot
+                    .claim_previous_public_boundary_sequence
+                    .context("Batch AgentRun has no frozen previous public boundary")?
+            } else {
+                snapshot.last_accepted_public_boundary_sequence
+            },
             requires_new_native_session,
         );
         if previous_accepted_public_boundary_sequence > snapshot.camp_message_boundary_sequence {
@@ -627,18 +634,12 @@ impl ContextService {
         let collaboration_changed = bootstrap_required
             || snapshot.native_collaboration_state_digest.as_deref()
                 != Some(collaboration_state_digest.as_str());
-        let batch_context_manifest_version = (snapshot.invocation_kind == "batch")
-            .then(|| {
-                frozen_batch_context_manifest_version(
-                    database.context_connection(),
-                    &snapshot.agent_run_id,
-                )
-            })
-            .transpose()?;
-        let profile = if batch_context_manifest_version.is_some() {
-            current_public_camp_batch_context_delivery_profile()?
-        } else {
-            current_context_delivery_profile()?
+        let profile = match batch_context_manifest_version {
+            Some(29) => {
+                crate::context_delivery::PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9.validate()?
+            }
+            Some(_) => current_public_camp_batch_context_delivery_profile()?,
+            None => current_context_delivery_profile()?,
         };
         let profile_json = profile.frozen_json()?;
         let profile_digest = profile.canonical_digest()?;
@@ -735,9 +736,20 @@ impl ContextService {
         let (mut run_facts, mission_details_version) =
             build_run_facts(database, &snapshot, requires_new_native_session, a2a_count)?;
         if snapshot.invocation_kind == "batch" {
-            run_facts.history_hint = Some(public_history_hint(
-                previous_accepted_public_boundary_sequence,
-            ));
+            run_facts.history_hint = Some(
+                if batch_context_manifest_version
+                    == Some(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION)
+                {
+                    public_history_hint(
+                        previous_accepted_public_boundary_sequence,
+                        snapshot
+                            .claim_has_additional_public_messages
+                            .context("Batch AgentRun has no frozen additional-message result")?,
+                    )
+                } else {
+                    previous_public_history_hint(previous_accepted_public_boundary_sequence)
+                },
+            );
         }
         let rendered_run_facts = render_run_facts(&run_facts)?;
         let bootstrap_redelivery_revision = pending_redelivery_revision(
@@ -772,6 +784,18 @@ impl ContextService {
 
         let workspace_fact =
             prepare_workspace_fact(database, &snapshot, requires_new_native_session, false)?;
+        let additional_skills = (batch_context_manifest_version != Some(29))
+            .then(|| {
+                prepare_additional_skills(
+                    database.connection(),
+                    database
+                        .path()
+                        .parent()
+                        .context("Core data directory is unavailable")?,
+                    &snapshot,
+                )
+            })
+            .transpose()?;
         let (shared_conversation, payload, runtime_payload) = loop {
             let origin_is_recent = originating_public_user_message
                 .as_ref()
@@ -826,6 +850,9 @@ impl ContextService {
                     .then_some(&shared_conversation),
                 run_facts: &rendered_run_facts,
                 workspace: workspace_fact.section(),
+                additional_skills: additional_skills
+                    .as_ref()
+                    .map(|skills| skills.section.as_str()),
                 a2a_guidance: a2a_guidance.payload_json.as_deref(),
                 single_chat_guidance: (snapshot.invocation_kind == "single_chat")
                     .then_some(SINGLE_CHAT_GUIDANCE.trim()),
@@ -1064,12 +1091,19 @@ impl ContextService {
             batch_context_manifest_version.unwrap_or(CONTEXT_MANIFEST_VERSION);
         let context_formatter_version = batch_context_manifest_version
             .map(|version| {
-                debug_assert_eq!(version, PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION);
+                debug_assert!(matches!(
+                    version,
+                    29 | 30 | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
+                ));
                 version
             })
             .unwrap_or(CONTEXT_FORMATTER_VERSION);
         let run_facts_schema_version = if snapshot.invocation_kind == "batch" {
-            7_i64
+            if context_manifest_version == PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION {
+                8_i64
+            } else {
+                7_i64
+            }
         } else {
             5_i64
         };
@@ -1200,6 +1234,9 @@ impl ContextService {
             }
             existing_id
         } else {
+            if let Some(additional_skills) = &additional_skills {
+                persist_additional_skills_evidence(&transaction, &manifest_id, additional_skills)?;
+            }
             for camp in &history_camps {
                 transaction.execute(
                     r#"
@@ -1384,6 +1421,17 @@ impl ContextService {
         };
         let workspace_fact =
             prepare_workspace_fact(transaction, &snapshot, requires_new_native_session, true)?;
+        let additional_skills = prepare_additional_skills(
+            transaction,
+            std::path::Path::new(
+                transaction
+                    .path()
+                    .context("Core database path is unavailable")?,
+            )
+            .parent()
+            .context("Core data directory is unavailable")?,
+            &snapshot,
+        )?;
         let (shared_conversation, payload) = loop {
             let origin_is_recent = originating_public_user_message
                 .as_ref()
@@ -1433,6 +1481,7 @@ impl ContextService {
                 shared_conversation: Some(&shared_conversation),
                 run_facts: &rendered_run_facts,
                 workspace: workspace_fact.section(),
+                additional_skills: Some(&additional_skills.section),
                 a2a_guidance: a2a_guidance.payload_json.as_deref(),
                 single_chat_guidance: None,
                 current_input: Some(&current_input_value),
@@ -1592,6 +1641,9 @@ impl ContextService {
             "workspaceFact": workspace_fact.value,
             "workspaceFactDigest": workspace_fact.digest,
             "workspaceFactIncluded": workspace_fact.included,
+            "additionalSkillsSection": additional_skills.section,
+            "additionalSkillsSectionDigest": sha256_text(&additional_skills.section),
+            "additionalSkillsOmitted": additional_skills.omitted,
             "missionDetailsVersion": mission_details_version,
             "campAttachmentViewReceiptVersion": camp_attachment_view_receipt.as_ref().map(|_| CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION),
             "campAttachmentViewReceipt": camp_attachment_view_receipt,
@@ -2038,6 +2090,7 @@ impl ContextService {
                        context_manifest.formatter_version,
                        context_manifest.context_delivery_profile_version,
                        agent_run.invocation_kind,
+                       context_manifest.run_facts_schema_version,
                        context_manifest.camp_attachment_view_receipt_json,
                        context_manifest.camp_attachment_view_receipt_digest
                 FROM context_manifest
@@ -2063,8 +2116,9 @@ impl ContextService {
                         row.get::<_, i64>(11)?,
                         row.get::<_, i64>(12)?,
                         row.get::<_, String>(13)?,
-                        row.get::<_, Option<String>>(14)?,
+                        row.get::<_, i64>(14)?,
                         row.get::<_, Option<String>>(15)?,
+                        row.get::<_, Option<String>>(16)?,
                     ))
                 },
             )
@@ -2088,15 +2142,31 @@ impl ContextService {
         if row.5 != "running" || row.6 != execution_epoch {
             anyhow::bail!("AgentRun or Native Binding changed before input delivery");
         }
-        if !context_manifest_is_dispatchable(row.10, row.11, row.12, &row.13) {
-            anyhow::bail!("ContextManifest cannot be dispatched");
+        if !context_manifest_is_dispatchable(row.10, row.11, row.12, &row.13)
+            || row.14
+                != if row.13 == "batch" {
+                    if row.10 == PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION {
+                        8
+                    } else {
+                        7
+                    }
+                } else {
+                    5
+                }
+        {
+            anyhow::bail!("ContextManifest version evidence cannot be dispatched");
+        }
+        if row.13 == "batch"
+            && frozen_batch_context_manifest_version(&transaction, agent_run_id)? != row.10
+        {
+            anyhow::bail!("ContextManifest does not match its frozen RunInput version");
         }
         let (runtime_attachment_auth_receipt, runtime_attachment_auth_receipt_digest) =
             optional_legacy_runtime_auth(
                 &transaction,
                 &row.7,
-                row.14.as_deref(),
                 row.15.as_deref(),
+                row.16.as_deref(),
             )?;
         let runtime_payload_digest = runtime_payload_digest.unwrap_or(row.0.as_str());
         let runtime_request_digest = canonical_json_digest(&json!({
@@ -2423,13 +2493,39 @@ fn accepted_public_window_lower_bound(
     }
 }
 
-fn public_history_hint(previous_accepted_public_boundary_sequence: i64) -> String {
+fn previous_public_history_hint(previous_accepted_public_boundary_sequence: i64) -> String {
     if previous_accepted_public_boundary_sequence > 0 {
         format!(
             "The latest public message before your last recorded run in this Camp had sequence {previous_accepted_public_boundary_sequence}."
         )
     } else {
         "No public-message boundary from a previous run is recorded for you in this Camp."
+            .to_string()
+    }
+}
+
+pub(crate) fn public_history_hint(
+    previous_accepted_public_boundary_sequence: i64,
+    has_additional_messages: bool,
+) -> String {
+    if previous_accepted_public_boundary_sequence > 0 {
+        let boundary = format!(
+            "The latest public message before your last recorded run in this Camp had sequence {previous_accepted_public_boundary_sequence}."
+        );
+        if has_additional_messages {
+            format!(
+                "{boundary} As of this run's start, there are additional visible messages after that sequence beyond RUN_INPUT and messages written by you."
+            )
+        } else {
+            format!(
+                "{boundary} As of this run's start, all visible messages after that sequence are already in RUN_INPUT or were written by you."
+            )
+        }
+    } else if has_additional_messages {
+        "As of this run's start, there are additional visible messages in this Camp beyond RUN_INPUT and messages written by you."
+            .to_string()
+    } else {
+        "As of this run's start, all visible messages in this Camp are already in RUN_INPUT or were written by you."
             .to_string()
     }
 }
@@ -2642,6 +2738,8 @@ struct RunSnapshot {
     native_binding_id: Option<String>,
     native_binding_generation: i64,
     last_accepted_public_boundary_sequence: i64,
+    claim_previous_public_boundary_sequence: Option<i64>,
+    claim_has_additional_public_messages: Option<bool>,
     native_charter_digest: Option<String>,
     native_collaboration_state_digest: Option<String>,
     default_lead_agent_id: Option<String>,
@@ -2715,6 +2813,8 @@ fn prospective_delivery_snapshot(
         native_binding_id: conversation.3,
         native_binding_generation: conversation.4,
         last_accepted_public_boundary_sequence: conversation.5,
+        claim_previous_public_boundary_sequence: None,
+        claim_has_additional_public_messages: None,
         native_charter_digest: conversation.6,
         native_collaboration_state_digest: conversation.7,
         default_lead_agent_id,
@@ -2761,7 +2861,9 @@ fn load_run_snapshot<R: ContextReadConnection>(
                    agent_run.a2a_parent_agent_run_id,
                    agent_run.a2a_root_agent_run_id,
                    agent_run.skill_selection_snapshot_json,
-                   agent_run.skill_selection_snapshot_digest
+                   agent_run.skill_selection_snapshot_digest,
+                   agent_run.claim_previous_public_boundary_sequence,
+                   agent_run.claim_has_additional_public_messages
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
@@ -2824,6 +2926,8 @@ fn load_run_snapshot<R: ContextReadConnection>(
                     native_binding_id: row.get(23)?,
                     native_binding_generation: row.get(24)?,
                     last_accepted_public_boundary_sequence: row.get(25)?,
+                    claim_previous_public_boundary_sequence: row.get(32)?,
+                    claim_has_additional_public_messages: row.get(33)?,
                     native_charter_digest: row.get(26)?,
                     native_collaboration_state_digest: row.get(27)?,
                     default_lead_agent_id: row.get(17)?,
@@ -2885,7 +2989,7 @@ fn build_session_charter(
         "- CURRENT_INPUT is the immediate work item. Its source and current Core authorization determine its authority."
     };
     let shared_conversation_guidance = if is_batch {
-        "- Use `rovai camp read` for relevant Camp history. The boundary in `RUN_FACTS.historyHint` is a reference point, not a record of messages read or work completed."
+        "- Proceed directly when `RUN_INPUT` and your existing context are sufficient; use `rovai camp read` only for missing Camp context needed by the current work. The boundary in `RUN_FACTS.historyHint` is a reference point, not a read or completion marker."
     } else {
         "- In SHARED_CONVERSATION, the top-level campId applies to every projected message. A historical nextBodyOffset, when present, only marks a truncated context prefix; camp.read item returns the complete message and accepts no body offset. Omitted sequence bounds may contain gaps and are not executable ranges."
     };
@@ -2950,11 +3054,16 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         .connection()
         .query_row(
             r#"
-            SELECT id, session_charter_blob_id, session_charter_digest,
-                   memory_entrypoint_blob_id, memory_entrypoint_digest,
-                   delivery_mode
-            FROM native_session_bootstrap_evidence
-            WHERE native_binding_id = ?1 AND native_binding_generation = ?2
+            SELECT bootstrap.id, bootstrap.session_charter_blob_id,
+                   bootstrap.session_charter_digest,
+                   bootstrap.memory_entrypoint_blob_id,
+                   bootstrap.memory_entrypoint_digest,
+                   bootstrap.delivery_mode, bootstrap.contract_version,
+                   platform.section_text, platform.section_digest
+            FROM native_session_bootstrap_evidence AS bootstrap
+            LEFT JOIN native_session_platform_skills_evidence AS platform
+              ON platform.bootstrap_evidence_id = bootstrap.id
+            WHERE bootstrap.native_binding_id = ?1 AND bootstrap.native_binding_generation = ?2
             "#,
             params![native_binding_id, native_binding_generation],
             |row| {
@@ -2965,6 +3074,9 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             },
         )
@@ -2976,6 +3088,9 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         entrypoint_blob_id,
         entrypoint_digest,
         frozen_delivery_mode,
+        contract_version,
+        platform_skills,
+        platform_digest,
     )) = existing
     {
         if frozen_delivery_mode != delivery_mode.as_str() {
@@ -2987,15 +3102,42 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         {
             anyhow::bail!("Native Session Bootstrap evidence Blob digest mismatch");
         }
+        if contract_version == NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION {
+            let section = platform_skills
+                .as_deref()
+                .context("new Bootstrap platform Skills are missing")?;
+            anyhow::ensure!(
+                Some(sha256_text(section)) == platform_digest,
+                "Bootstrap platform Skills digest mismatch"
+            );
+        } else {
+            anyhow::ensure!(
+                contract_version == "native_session_bootstrap_v4" && platform_skills.is_none(),
+                "unsupported frozen Bootstrap Skills evidence"
+            );
+        }
         return Ok(PreparedBootstrapEvidence {
             evidence_id,
             session_charter: charter,
+            platform_skills,
             memory_entrypoint: entrypoint,
-            stable_evidence_digest: bootstrap_evidence_digest(&charter_digest, &entrypoint_digest),
+            stable_evidence_digest: bootstrap_evidence_digest_for(
+                &contract_version,
+                &charter_digest,
+                platform_digest.as_deref(),
+                &entrypoint_digest,
+            )?,
             native_binding_id: native_binding_id.to_string(),
             native_binding_generation,
             delivery_mode,
         });
+    }
+
+    if snapshot.native_session_id.is_some()
+        && snapshot.native_binding_id.as_deref() == Some(native_binding_id)
+        && snapshot.native_binding_generation == native_binding_generation
+    {
+        anyhow::bail!("Existing Native Session has no frozen Bootstrap evidence");
     }
 
     // Channel guidance is selected only for new evidence, never when replaying a Binding.
@@ -3021,6 +3163,24 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         };
     let charter_digest = sha256_text(&charter);
     let entrypoint_digest = sha256_text(&entrypoint);
+    let managed_skills = crate::managed_skills::ManagedSkills::for_data_dir(
+        database
+            .path()
+            .parent()
+            .context("Core data directory is unavailable")?,
+    )?;
+    managed_skills.sync()?;
+    let (platform_entries, omitted) = managed_skills.index(crate::managed_skills::PLATFORM_SKILLS);
+    anyhow::ensure!(
+        omitted.is_empty(),
+        "platform Skill source is unavailable: {}",
+        omitted.join("; ")
+    );
+    let platform_skills = format!(
+        "[ROVAI_PLATFORM_SKILLS]\n{}\n[/ROVAI_PLATFORM_SKILLS]",
+        managed_skills.index_json(&platform_entries)?
+    );
+    let platform_digest = sha256_text(&platform_skills);
     let charter_blob = blob_store.put_bytes(
         database,
         charter.as_bytes(),
@@ -3067,6 +3227,10 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
             created_at,
         ],
     )?;
+    transaction.execute(
+        "INSERT INTO native_session_platform_skills_evidence(bootstrap_evidence_id, section_text, section_digest) VALUES (?1, ?2, ?3)",
+        params![evidence_id, platform_skills, platform_digest],
+    )?;
     for observation in &observed {
         transaction.execute(
             r#"
@@ -3097,8 +3261,14 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
     Ok(PreparedBootstrapEvidence {
         evidence_id,
         session_charter: charter,
+        platform_skills: Some(platform_skills),
         memory_entrypoint: entrypoint,
-        stable_evidence_digest: bootstrap_evidence_digest(&charter_digest, &entrypoint_digest),
+        stable_evidence_digest: bootstrap_evidence_digest_for(
+            NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,
+            &charter_digest,
+            Some(&platform_digest),
+            &entrypoint_digest,
+        )?,
         native_binding_id: native_binding_id.to_string(),
         native_binding_generation,
         delivery_mode,
@@ -3114,6 +3284,7 @@ fn format_session_bootstrap_for_snapshot(
     let payload = render_session_bootstrap(
         &evidence.session_charter,
         &member_identity,
+        evidence.platform_skills.as_deref(),
         &evidence.memory_entrypoint,
     )?;
     Ok(PreparedSessionBootstrap {
@@ -3170,6 +3341,7 @@ fn load_latest_member_identity(
 fn render_session_bootstrap(
     charter: &str,
     member_identity: &MemberIdentityBootstrapProjection,
+    platform_skills: Option<&str>,
     memory_entrypoint: &str,
 ) -> Result<String> {
     let mut bootstrap = format!(
@@ -3177,6 +3349,10 @@ fn render_session_bootstrap(
         charter.trim(),
         serde_json::to_string_pretty(member_identity)?,
     );
+    if let Some(platform_skills) = platform_skills {
+        bootstrap.push_str("\n\n");
+        bootstrap.push_str(platform_skills);
+    }
     if !memory_entrypoint.trim().is_empty() {
         bootstrap.push_str(&format!(
             "\n\n[MEMORY_ENTRYPOINT]\n{}\n[/MEMORY_ENTRYPOINT]",
@@ -3199,8 +3375,27 @@ fn render_bootstrap_redelivery_overlay(bootstrap: &str) -> String {
 
 fn bootstrap_evidence_digest(charter_digest: &str, memory_entrypoint_digest: &str) -> String {
     sha256_text(&format!(
-        "{NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION}\n{charter_digest}\n{memory_entrypoint_digest}"
+        "native_session_bootstrap_v4\n{charter_digest}\n{memory_entrypoint_digest}"
     ))
+}
+
+fn bootstrap_evidence_digest_for(
+    contract_version: &str,
+    charter_digest: &str,
+    platform_digest: Option<&str>,
+    memory_entrypoint_digest: &str,
+) -> Result<String> {
+    match contract_version {
+        "native_session_bootstrap_v4" => Ok(bootstrap_evidence_digest(
+            charter_digest,
+            memory_entrypoint_digest,
+        )),
+        NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION => Ok(sha256_text(&format!(
+            "{contract_version}\n{charter_digest}\n{}\n{memory_entrypoint_digest}",
+            platform_digest.context("Bootstrap platform digest is missing")?
+        ))),
+        _ => anyhow::bail!("unsupported Native Session Bootstrap contract"),
+    }
 }
 
 fn bootstrap_required_for_snapshot<R: ContextReadConnection>(
@@ -3218,18 +3413,34 @@ fn bootstrap_required_for_snapshot<R: ContextReadConnection>(
         .context_connection()
         .query_row(
             r#"
-            SELECT session_charter_digest, memory_entrypoint_digest
-            FROM native_session_bootstrap_evidence
-            WHERE native_binding_id = ?1 AND native_binding_generation = ?2
+            SELECT bootstrap.contract_version, bootstrap.session_charter_digest,
+                   platform.section_digest, bootstrap.memory_entrypoint_digest
+            FROM native_session_bootstrap_evidence AS bootstrap
+            LEFT JOIN native_session_platform_skills_evidence AS platform
+              ON platform.bootstrap_evidence_id = bootstrap.id
+            WHERE bootstrap.native_binding_id = ?1 AND bootstrap.native_binding_generation = ?2
             "#,
             params![native_binding_id, snapshot.native_binding_generation],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((charter_digest, entrypoint_digest)) = evidence else {
+    let Some((contract_version, charter_digest, platform_digest, entrypoint_digest)) = evidence
+    else {
         return Ok(true);
     };
-    let evidence_digest = bootstrap_evidence_digest(&charter_digest, &entrypoint_digest);
+    let evidence_digest = bootstrap_evidence_digest_for(
+        &contract_version,
+        &charter_digest,
+        platform_digest.as_deref(),
+        &entrypoint_digest,
+    )?;
     Ok(snapshot.native_charter_digest.as_deref() != Some(evidence_digest.as_str()))
 }
 
@@ -3882,6 +4093,7 @@ struct SharedMessage {
     default_recipient_mention: Option<DefaultRecipientMention>,
     mentions_current_user: bool,
     skill_names: Vec<String>,
+    skill_mentions: Vec<(String, String)>,
     reply_to_message_id: Option<String>,
     attachments: Vec<SharedMessageAttachment>,
     body: String,
@@ -3976,7 +4188,8 @@ impl BatchModelContext {
             "messages": self
                 .run_input_messages
                 .iter()
-                .map(|message| model_batch_input_message(message, skill_links))
+                .enumerate()
+                .map(|(index, message)| model_batch_input_message(message, skill_links, index))
                 .collect::<Vec<_>>()
         })
     }
@@ -4074,14 +4287,34 @@ fn model_batch_message(message: &SharedMessage) -> Value {
 fn model_batch_input_message(
     message: &SharedMessage,
     skill_links: &[CurrentInputSkillLink],
+    message_index: usize,
 ) -> Value {
     let mut value = model_batch_message(message);
-    let selected = skill_links
-        .iter()
-        .filter(|link| message.skill_names.iter().any(|name| name == &link.name))
-        .collect::<Vec<_>>();
+    let selected: Vec<Value> = if skill_links.iter().any(|link| link.skill_id.is_some()) {
+        message
+            .skill_mentions
+            .iter()
+            .filter_map(|(id, name_at_send)| {
+                skill_links
+                    .iter()
+                    .find(|link| link.skill_id.as_deref() == Some(id))
+                    .map(|link| json!({"name": name_at_send, "path": link.path}))
+            })
+            .collect::<Vec<_>>()
+    } else {
+        skill_links
+            .iter()
+            .filter(|link| {
+                link.message_index.map_or_else(
+                    || message.skill_names.iter().any(|name| name == &link.name),
+                    |index| index == message_index,
+                )
+            })
+            .map(|link| json!(link))
+            .collect::<Vec<_>>()
+    };
     if !selected.is_empty() {
-        value["skills"] = json!(selected);
+        value["skills"] = Value::Array(selected);
     }
     value
 }
@@ -4106,7 +4339,7 @@ pub(crate) fn project_batch_run_input_for_claim(
     };
     let claimed_source_message_ids = message_ids.iter().cloned().collect::<HashSet<_>>();
     let mut messages = Vec::with_capacity(message_ids.len());
-    for message_id in message_ids {
+    for (message_index, message_id) in message_ids.iter().enumerate() {
         let row = transaction
             .query_row(
                 r#"
@@ -4143,10 +4376,10 @@ pub(crate) fn project_batch_run_input_for_claim(
             )
             .optional()?
             .context("Delivery claim message is outside its frozen Camp boundary")?;
-        let skill_names = row
+        let (skill_names, skill_mentions) = row
             .5
             .as_deref()
-            .map(batch_message_skill_names)
+            .map(batch_message_skill_mentions)
             .transpose()?
             .unwrap_or_default();
         let (body, mentions_current_user, default_recipient_mention) =
@@ -4178,7 +4411,12 @@ pub(crate) fn project_batch_run_input_for_claim(
         )?;
         message.default_recipient_mention = default_recipient_mention;
         message.skill_names = skill_names;
-        messages.push(model_batch_input_message(&message, skill_links));
+        message.skill_mentions = skill_mentions;
+        messages.push(model_batch_input_message(
+            &message,
+            skill_links,
+            message_index,
+        ));
     }
     Ok(json!({"messages": messages}))
 }
@@ -4211,7 +4449,10 @@ fn frozen_batch_context_manifest_version(
     );
     let version = minimum.context("Batch AgentRun context version is missing")?;
     anyhow::ensure!(
-        version == PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION,
+        matches!(
+            version,
+            29 | 30 | PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
+        ),
         "Batch AgentRun uses an unsupported context version"
     );
     Ok(version)
@@ -4256,9 +4497,9 @@ fn load_batch_model_context<R: ContextReadConnection>(
                     addressed_agent_ids_json,
                     frozen_default_recipient_display_name,
                 )| {
-                    let skill_names = structured_content_json
+                    let (skill_names, skill_mentions) = structured_content_json
                         .as_deref()
-                        .map(batch_message_skill_names)
+                        .map(batch_message_skill_mentions)
                         .transpose()?
                         .unwrap_or_default();
                     let (body, mentions_current_user, default_recipient_mention) =
@@ -4290,6 +4531,7 @@ fn load_batch_model_context<R: ContextReadConnection>(
                     )?;
                     message.default_recipient_mention = default_recipient_mention;
                     message.skill_names = skill_names;
+                    message.skill_mentions = skill_mentions;
                     Ok(message)
                 },
             )
@@ -4351,20 +4593,30 @@ fn load_batch_model_context<R: ContextReadConnection>(
     Ok(BatchModelContext { run_input_messages })
 }
 
-fn batch_message_skill_names(structured_content_json: &str) -> Result<Vec<String>> {
+fn batch_message_skill_mentions(
+    structured_content_json: &str,
+) -> Result<(Vec<String>, Vec<(String, String)>)> {
     let content = serde_json::from_str::<StructuredCampMessageContent>(structured_content_json)
         .context("CampMessage Structured Content is invalid")?;
-    let mut seen = HashSet::new();
-    Ok(content
-        .into_iter()
-        .filter_map(|segment| match segment {
-            crate::camp_content::StructuredCampMessageSegment::SkillMention {
-                name_at_send,
-                ..
-            } if seen.insert(name_at_send.clone()) => Some(name_at_send),
-            _ => None,
-        })
-        .collect())
+    let mut seen_names = HashSet::new();
+    let mut seen_ids = HashSet::new();
+    let mut names = Vec::new();
+    let mut mentions = Vec::new();
+    for segment in content {
+        if let crate::camp_content::StructuredCampMessageSegment::SkillMention {
+            skill_id,
+            name_at_send,
+        } = segment
+        {
+            if seen_ids.insert(skill_id.clone()) {
+                mentions.push((skill_id, name_at_send.clone()));
+            }
+            if seen_names.insert(name_at_send.clone()) {
+                names.push(name_at_send);
+            }
+        }
+    }
+    Ok((names, mentions))
 }
 
 #[derive(Debug, Serialize)]
@@ -5161,6 +5413,7 @@ fn project_shared_message<R: ContextReadConnection>(
         default_recipient_mention: None,
         mentions_current_user,
         skill_names: Vec::new(),
+        skill_mentions: Vec::new(),
         reply_to_message_id,
         attachments,
         body: prefix.body,
@@ -6742,6 +6995,7 @@ struct RenderPayloadInput<'a> {
     shared_conversation: Option<&'a SharedConversation>,
     run_facts: &'a RenderedRunFacts,
     workspace: Option<&'a Value>,
+    additional_skills: Option<&'a str>,
     a2a_guidance: Option<&'a str>,
     single_chat_guidance: Option<&'a str>,
     current_input: Option<&'a Value>,
@@ -6780,6 +7034,10 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
     if let Some(workspace) = input.workspace {
         append_json_section(&mut output, "WORKSPACE", workspace)?;
     }
+    if let Some(additional_skills) = input.additional_skills {
+        output.push_str(additional_skills);
+        output.push_str("\n\n");
+    }
     if let Some(a2a_guidance) = input.a2a_guidance {
         append_json_text_section(&mut output, "A2A_GUIDANCE", a2a_guidance);
     }
@@ -6796,6 +7054,60 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
         _ => anyhow::bail!("Context must contain exactly one input section"),
     }
     Ok(output)
+}
+
+#[derive(Debug, Clone)]
+struct PreparedAdditionalSkills {
+    section: String,
+    omitted: Vec<String>,
+}
+
+fn prepare_additional_skills(
+    connection: &rusqlite::Connection,
+    data_dir: &std::path::Path,
+    snapshot: &RunSnapshot,
+) -> Result<PreparedAdditionalSkills> {
+    let managed = crate::managed_skills::ManagedSkills::for_data_dir(data_dir)?;
+    // Source failure omits only that item. The frozen index records the actual
+    // readable set; it never fabricates a description from legacy Library data.
+    let sync_error = managed
+        .sync()
+        .err()
+        .map(|error| format!("managed Skill synchronization: {error:#}"));
+    let mut names =
+        crate::managed_skills::configured_toolbox_names(connection, &snapshot.agent_id)?;
+    names.extend(
+        snapshot
+            .skill_selection_snapshot
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.source == Some(crate::current_input_skill::SkillSource::Rovai)
+                    && crate::managed_skills::TOOLBOX_SKILLS.contains(&entry.name_at_send.as_str())
+            })
+            .map(|entry| entry.name_at_send.clone()),
+    );
+    let (entries, mut omitted) = managed.index(names);
+    if let Some(error) = sync_error {
+        omitted.push(error);
+    }
+    let section = format!(
+        "[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{}\n[/ROVAI_ADDITIONAL_SKILLS]",
+        managed.index_json(&entries)?
+    );
+    Ok(PreparedAdditionalSkills { section, omitted })
+}
+
+fn persist_additional_skills_evidence(
+    transaction: &Transaction<'_>,
+    manifest_id: &str,
+    prepared: &PreparedAdditionalSkills,
+) -> Result<()> {
+    transaction.execute(
+        "INSERT INTO context_additional_skills_evidence(context_manifest_id, section_text, section_digest, omitted_json) VALUES (?1, ?2, ?3, ?4)",
+        params![manifest_id, prepared.section, sha256_text(&prepared.section), serde_json::to_string(&prepared.omitted)?],
+    )?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7061,7 +7373,9 @@ fn load_existing_manifest(
                    manifest.current_input_skill_resolution_digest,
                    manifest.message_projection_audience,
                    manifest.a2a_guidance_evidence_json,
-                   manifest.a2a_guidance_evidence_digest
+                   manifest.a2a_guidance_evidence_digest,
+                   manifest.context_manifest_version,
+                   manifest.run_facts_schema_version
             FROM context_manifest AS manifest
             JOIN native_session_bootstrap_evidence AS bootstrap
               ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -7104,6 +7418,8 @@ fn load_existing_manifest(
                     row.get::<_, String>(31)?,
                     row.get::<_, String>(32)?,
                     row.get::<_, String>(33)?,
+                    row.get::<_, i64>(34)?,
+                    row.get::<_, i64>(35)?,
                 ))
             },
         )
@@ -7114,8 +7430,25 @@ fn load_existing_manifest(
     if row.2 != snapshot.camp_message_boundary_sequence {
         anyhow::bail!("Stored ContextManifest no longer matches its frozen AgentRun input");
     }
-    if !context_manifest_is_dispatchable(row.15, row.15, row.16, &snapshot.invocation_kind) {
-        anyhow::bail!("Stored ContextManifest uses an obsolete context formatter");
+    if !context_manifest_is_dispatchable(row.34, row.15, row.16, &snapshot.invocation_kind)
+        || row.35
+            != if snapshot.invocation_kind == "batch" {
+                if row.34 == PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION {
+                    8
+                } else {
+                    7
+                }
+            } else {
+                5
+            }
+    {
+        anyhow::bail!("Stored ContextManifest version evidence is inconsistent");
+    }
+    if snapshot.invocation_kind == "batch"
+        && frozen_batch_context_manifest_version(database.connection(), &snapshot.agent_run_id)?
+            != row.34
+    {
+        anyhow::bail!("Stored ContextManifest does not match its frozen RunInput version");
     }
     if row.31 != AGENT_MESSAGE_PROJECTION_AUDIENCE {
         anyhow::bail!("Stored ContextManifest projection audience is invalid");
@@ -7159,15 +7492,7 @@ fn load_existing_manifest(
     )?;
     let stored_profile = ContextDeliveryProfile::from_frozen_json(&row.17)
         .context("Stored ContextManifest delivery profile is invalid")?;
-    let current_profile = if row.15 == PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION {
-        current_public_camp_batch_context_delivery_profile()?
-    } else {
-        current_context_delivery_profile()?
-    };
-    if row.16 != current_profile.profile_version
-        || stored_profile != current_profile
-        || row.18 != current_profile.canonical_digest()?
-    {
+    if row.16 != stored_profile.profile_version || row.18 != stored_profile.canonical_digest()? {
         anyhow::bail!("Stored ContextManifest delivery profile evidence is inconsistent");
     }
     if let Some(prepared) = prepared_mcp_projection {
@@ -7191,6 +7516,23 @@ fn load_existing_manifest(
     if sha256_text(&payload) != row.4 {
         anyhow::bail!("Stored ContextManifest payload digest is invalid");
     }
+    if matches!(
+        row.15,
+        CONTEXT_FORMATTER_VERSION | 30 | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
+    ) {
+        let dynamic_evidence: Option<(String, String, String)> = database.connection().query_row(
+            "SELECT section_text, section_digest, omitted_json FROM context_additional_skills_evidence WHERE context_manifest_id = ?1",
+            [&row.0],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).optional()?;
+        let (section, digest, omitted) = dynamic_evidence
+            .context("new ContextManifest Additional Skills evidence is missing")?;
+        anyhow::ensure!(
+            sha256_text(&section) == digest && payload.matches(&section).count() == 1,
+            "Stored Additional Skills section changed"
+        );
+        let _: Vec<String> = serde_json::from_str(&omitted)?;
+    }
     validate_a2a_guidance_evidence(&a2a_guidance_evidence, &row.33, &payload)?;
     let (workspace_json,workspace_digest,workspace_included)=database.connection().query_row("SELECT workspace_fact_json,workspace_fact_digest,workspace_fact_included FROM context_manifest WHERE id=?1",[&row.0],|r|Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?)))?;
     validate_workspace_evidence(
@@ -7207,7 +7549,23 @@ fn load_existing_manifest(
     if sha256_text(&charter) != row.11 || sha256_text(&entrypoint) != row.13 {
         anyhow::bail!("Stored Native Session Bootstrap digest is invalid");
     }
-    let bootstrap_digest = bootstrap_evidence_digest(&row.11, &row.13);
+    let (bootstrap_contract, platform_section, platform_digest): (String, Option<String>, Option<String>) = database.connection().query_row(
+        "SELECT bootstrap.contract_version, platform.section_text, platform.section_digest FROM native_session_bootstrap_evidence AS bootstrap LEFT JOIN native_session_platform_skills_evidence AS platform ON platform.bootstrap_evidence_id = bootstrap.id WHERE bootstrap.id = ?1",
+        [&row.9],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    if let Some(section) = platform_section.as_deref() {
+        anyhow::ensure!(
+            Some(sha256_text(section)) == platform_digest,
+            "Stored platform Skills digest is invalid"
+        );
+    }
+    let bootstrap_digest = bootstrap_evidence_digest_for(
+        &bootstrap_contract,
+        &row.11,
+        platform_digest.as_deref(),
+        &row.13,
+    )?;
     let bootstrap_required = requires_new_native_session
         || snapshot.native_charter_digest.as_deref() != Some(bootstrap_digest.as_str());
     let bootstrap_redelivery_revision = if row.19 {
@@ -7227,7 +7585,12 @@ fn load_existing_manifest(
         || bootstrap_redelivery_revision.is_some();
     let runtime_payload = if bootstrap_in_runtime_payload {
         let member_identity = load_latest_member_identity(database, &snapshot.agent_id)?;
-        let bootstrap = render_session_bootstrap(&charter, &member_identity, &entrypoint)?;
+        let bootstrap = render_session_bootstrap(
+            &charter,
+            &member_identity,
+            platform_section.as_deref(),
+            &entrypoint,
+        )?;
         let bootstrap = if bootstrap_redelivery_revision.is_some() {
             render_bootstrap_redelivery_overlay(&bootstrap)
         } else {
@@ -7368,10 +7731,26 @@ fn validate_frozen_view_receipt(
     let version = selection
         .get("contextManifestVersion")
         .and_then(Value::as_i64);
-    if version != Some(CONTEXT_MANIFEST_VERSION)
-        || selection.get("runFactsSchemaVersion") != Some(&json!(5))
+    let profile = selection
+        .get("contextDeliveryProfileVersion")
+        .and_then(Value::as_i64);
+    if !matches!(
+        (version, profile),
+        (Some(27), Some(7)) | (Some(26), Some(6))
+    ) || selection.get("runFactsSchemaVersion") != Some(&json!(5))
     {
         anyhow::bail!("Frozen Delivery Context uses an obsolete Attachment contract");
+    }
+    if version == Some(CONTEXT_MANIFEST_VERSION) {
+        let _ = frozen_additional_skills(frozen)?;
+    } else if selection.contains_key("additionalSkillsSection")
+        || selection.contains_key("additionalSkillsSectionDigest")
+        || selection.contains_key("additionalSkillsOmitted")
+        || frozen
+            .rendered_payload
+            .contains("[ROVAI_ADDITIONAL_SKILLS]")
+    {
+        anyhow::bail!("Legacy frozen Context contains unexpected Additional Skills");
     }
     if selection
         .get("campAttachmentViewReceipt")
@@ -7407,6 +7786,36 @@ fn validate_frozen_view_receipt(
     validate_frozen_camp_attachment_view_receipt(&receipt)
 }
 
+fn frozen_additional_skills(frozen: &FrozenDeliveryContext) -> Result<PreparedAdditionalSkills> {
+    let selection = frozen
+        .manifest_selection
+        .as_object()
+        .context("Frozen Delivery Context has no manifest selection")?;
+    let additional_section = selection
+        .get("additionalSkillsSection")
+        .and_then(Value::as_str)
+        .context("Frozen Delivery Context Additional Skills section is missing")?;
+    let additional_digest = selection
+        .get("additionalSkillsSectionDigest")
+        .and_then(Value::as_str)
+        .context("Frozen Delivery Context Additional Skills digest is missing")?;
+    anyhow::ensure!(
+        sha256_text(additional_section) == additional_digest
+            && frozen.rendered_payload.matches(additional_section).count() == 1,
+        "Frozen Additional Skills section is inconsistent"
+    );
+    let additional_omitted: Vec<String> = serde_json::from_value(
+        selection
+            .get("additionalSkillsOmitted")
+            .context("Frozen Additional Skills omissions are missing")?
+            .clone(),
+    )?;
+    Ok(PreparedAdditionalSkills {
+        section: additional_section.to_owned(),
+        omitted: additional_omitted,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn materialize_frozen_delivery_context(
     database: &mut Database,
@@ -7435,42 +7844,12 @@ fn materialize_frozen_delivery_context(
         sha256_text(&frozen.rendered_payload) == frozen.rendered_payload_digest,
         "Frozen Delivery Context digest changed before materialization"
     );
-    let workspace_fact = if frozen.manifest_selection["contextDeliveryProfileVersion"] == json!(6) {
-        prepare_workspace_fact(database, snapshot, requires_new_native_session, false)?
-    } else {
-        PreparedWorkspaceFact::default()
-    };
-    let finalized;
-    let frozen = if workspace_fact.value.is_some() {
-        let mut next = frozen.clone();
-        if let Some(start) = next.rendered_payload.find("[WORKSPACE]\n") {
-            let end = next.rendered_payload[start..]
-                .find("\n[/WORKSPACE]\n\n")
-                .context("Frozen WORKSPACE is incomplete")?
-                + start
-                + "\n[/WORKSPACE]\n\n".len();
-            next.rendered_payload.replace_range(start..end, "");
-        }
-        if let Some(value) = workspace_fact.section() {
-            let end = next
-                .rendered_payload
-                .find("\n[/RUN_FACTS]\n\n")
-                .context("Mission Run Facts are missing")?
-                + "\n[/RUN_FACTS]\n\n".len();
-            let mut section = String::new();
-            append_json_section(&mut section, "WORKSPACE", value)?;
-            next.rendered_payload.insert_str(end, &section);
-        }
-        next.rendered_payload_digest = sha256_text(&next.rendered_payload);
-        next.runtime_payload = next.rendered_payload.clone();
-        next.runtime_payload_digest = next.rendered_payload_digest.clone();
-        next.manifest_selection["workspaceFact"] = json!(workspace_fact.value);
-        next.manifest_selection["workspaceFactDigest"] = json!(workspace_fact.digest);
-        next.manifest_selection["workspaceFactIncluded"] = json!(workspace_fact.included);
-        finalized = next;
-        &finalized
-    } else {
-        frozen
+    let workspace_fact = PreparedWorkspaceFact {
+        value: serde_json::from_value(frozen.manifest_selection["workspaceFact"].clone())?,
+        digest: serde_json::from_value(frozen.manifest_selection["workspaceFactDigest"].clone())?,
+        included: frozen.manifest_selection["workspaceFactIncluded"]
+            .as_bool()
+            .context("Frozen workspace inclusion evidence is invalid")?,
     };
     let bootstrap_redelivery_revision = pending_redelivery_revision(
         database,
@@ -7622,7 +8001,13 @@ fn materialize_frozen_delivery_context(
         .then(|| serde_json::to_string(receipt_value))
         .transpose()?;
     let camp_attachment_view_receipt_digest = required("campAttachmentViewReceiptDigest")?.as_str();
-    if (context_manifest_version, run_facts_schema_version) != (CONTEXT_MANIFEST_VERSION, 5) {
+    if !context_manifest_is_dispatchable(
+        context_manifest_version,
+        context_manifest_version,
+        profile_version,
+        &snapshot.invocation_kind,
+    ) || run_facts_schema_version != 5
+    {
         anyhow::bail!("Frozen Delivery Context version evidence is inconsistent");
     }
     if let Some(digest) = camp_attachment_view_receipt_digest {
@@ -7635,6 +8020,9 @@ fn materialize_frozen_delivery_context(
         anyhow::bail!("Frozen Delivery Context View evidence is incomplete");
     }
 
+    let prepared_additional_skills = (context_manifest_version == CONTEXT_MANIFEST_VERSION)
+        .then(|| frozen_additional_skills(frozen))
+        .transpose()?;
     let manifest_id = Uuid::new_v4().to_string();
     let created_at = chrono::Utc::now().to_rfc3339();
     let transaction = database.connection_mut().transaction()?;
@@ -7759,6 +8147,9 @@ fn materialize_frozen_delivery_context(
             mission_details_version,
         ],
     )?;
+    if let Some(prepared_additional_skills) = &prepared_additional_skills {
+        persist_additional_skills_evidence(&transaction, &manifest_id, prepared_additional_skills)?;
+    }
     for camp in &history_camps {
         transaction.execute(
             r#"
@@ -8004,12 +8395,16 @@ fn load_delivery_target(
                    runtime_input_delivery.status,
                    runtime_input_delivery.native_input_id,
                    runtime_input_delivery.bootstrap_redelivery_revision,
-                   context_manifest.mission_details_version
+                   context_manifest.mission_details_version,
+                   bootstrap.contract_version,
+                   platform.section_digest
             FROM runtime_input_delivery
             JOIN context_manifest
               ON context_manifest.id = runtime_input_delivery.context_manifest_id
             JOIN native_session_bootstrap_evidence AS bootstrap
               ON bootstrap.id = context_manifest.bootstrap_evidence_id
+            LEFT JOIN native_session_platform_skills_evidence AS platform
+              ON platform.bootstrap_evidence_id = bootstrap.id
             JOIN agent_run ON agent_run.id = runtime_input_delivery.agent_run_id
             JOIN conversation ON conversation.id = agent_run.conversation_id
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -8026,10 +8421,19 @@ fn load_delivery_target(
                     current_native_binding_id: row.get(5)?,
                     current_native_binding_generation: row.get(6)?,
                     boundary_camp_message_sequence: row.get(7)?,
-                    charter_digest: bootstrap_evidence_digest(
+                    charter_digest: bootstrap_evidence_digest_for(
+                        &row.get::<_, String>(17)?,
                         &row.get::<_, String>(8)?,
+                        row.get::<_, Option<String>>(18)?.as_deref(),
                         &row.get::<_, String>(9)?,
-                    ),
+                    )
+                    .map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            17,
+                            rusqlite::types::Type::Text,
+                            error.into(),
+                        )
+                    })?,
                     collaboration_state_digest: row.get(10)?,
                     collaboration_state_included: row.get(11)?,
                     camp_id: row.get(12)?,
@@ -8307,10 +8711,14 @@ mod tests {
                     context_manifest_version INTEGER
                 );
                 INSERT INTO agent_run_input VALUES ('historical', 26);
-                INSERT INTO agent_run_input VALUES ('current', 29);
-                INSERT INTO agent_run_input VALUES ('current', 29);
+                INSERT INTO agent_run_input VALUES ('current', 31);
+                INSERT INTO agent_run_input VALUES ('current', 31);
+                INSERT INTO agent_run_input VALUES ('previous', 30);
+                INSERT INTO agent_run_input VALUES ('previous', 30);
+                INSERT INTO agent_run_input VALUES ('legacy', 29);
+                INSERT INTO agent_run_input VALUES ('legacy', 29);
                 INSERT INTO agent_run_input VALUES ('mixed', 26);
-                INSERT INTO agent_run_input VALUES ('mixed', 29);
+                INSERT INTO agent_run_input VALUES ('mixed', 31);
                 INSERT INTO agent_run_input VALUES ('missing', NULL);
                 "#,
             )
@@ -8320,15 +8728,26 @@ mod tests {
             frozen_batch_context_manifest_version(&connection, "current").unwrap(),
             PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
         );
+        assert_eq!(
+            frozen_batch_context_manifest_version(&connection, "legacy").unwrap(),
+            29
+        );
+        assert_eq!(
+            frozen_batch_context_manifest_version(&connection, "previous").unwrap(),
+            30
+        );
         for invalid in ["historical", "mixed", "missing", "absent"] {
             assert!(frozen_batch_context_manifest_version(&connection, invalid).is_err());
         }
     }
 
     #[test]
-    fn dispatch_admission_accepts_only_new_context_contracts() {
-        assert!(context_manifest_is_dispatchable(26, 26, 6, "single_chat"));
+    fn dispatch_admission_accepts_current_and_frozen_predecessor_contracts() {
+        assert!(context_manifest_is_dispatchable(27, 27, 7, "single_chat"));
+        assert!(context_manifest_is_dispatchable(31, 31, 10, "batch"));
+        assert!(context_manifest_is_dispatchable(30, 30, 10, "batch"));
         assert!(context_manifest_is_dispatchable(29, 29, 9, "batch"));
+        assert!(context_manifest_is_dispatchable(26, 26, 6, "single_chat"));
         for (manifest, formatter, profile, invocation) in [
             (25, 25, 6, "single_chat"),
             (26, 26, 7, "batch"),
@@ -8337,6 +8756,10 @@ mod tests {
             (28, 27, 8, "batch"),
             (28, 28, 6, "batch"),
             (29, 29, 8, "batch"),
+            (29, 29, 10, "batch"),
+            (30, 30, 9, "batch"),
+            (31, 31, 9, "batch"),
+            (31, 30, 10, "batch"),
             (26, 26, 8, "single_chat"),
         ] {
             assert!(!context_manifest_is_dispatchable(
@@ -8356,12 +8779,20 @@ mod tests {
         assert_eq!(accepted_public_window_lower_bound("direct", 41, true), 0);
         assert_eq!(accepted_public_window_lower_bound("direct", 41, false), 41);
         assert_eq!(
-            public_history_hint(0),
-            "No public-message boundary from a previous run is recorded for you in this Camp."
+            public_history_hint(0, false),
+            "As of this run's start, all visible messages in this Camp are already in RUN_INPUT or were written by you."
         );
         assert_eq!(
-            public_history_hint(150),
-            "The latest public message before your last recorded run in this Camp had sequence 150."
+            public_history_hint(0, true),
+            "As of this run's start, there are additional visible messages in this Camp beyond RUN_INPUT and messages written by you."
+        );
+        assert_eq!(
+            public_history_hint(150, false),
+            "The latest public message before your last recorded run in this Camp had sequence 150. As of this run's start, all visible messages after that sequence are already in RUN_INPUT or were written by you."
+        );
+        assert_eq!(
+            public_history_hint(150, true),
+            "The latest public message before your last recorded run in this Camp had sequence 150. As of this run's start, there are additional visible messages after that sequence beyond RUN_INPUT and messages written by you."
         );
     }
 
@@ -8380,6 +8811,7 @@ mod tests {
             default_recipient_mention: None,
             mentions_current_user: false,
             skill_names: vec!["review-code".to_string()],
+            skill_mentions: Vec::new(),
             reply_to_message_id: None,
             attachments: Vec::new(),
             body: "$review-code inspect".to_string(),
@@ -8394,10 +8826,14 @@ mod tests {
             CurrentInputSkillLink {
                 name: "review-code".to_string(),
                 path: "/skills/review-code/SKILL.md".to_string(),
+                skill_id: None,
+                message_index: None,
             },
             CurrentInputSkillLink {
                 name: "unrelated".to_string(),
                 path: "/skills/unrelated/SKILL.md".to_string(),
+                skill_id: None,
+                message_index: None,
             },
         ]);
 
@@ -8407,6 +8843,68 @@ mod tests {
                 "name": "review-code",
                 "path": "/skills/review-code/SKILL.md",
             }])
+        );
+    }
+
+    #[test]
+    fn batch_run_input_reuses_resolved_skill_by_id_in_each_message() {
+        let template = SharedMessage {
+            quotes: Vec::new(),
+            quote_scope_current: true,
+            camp_id: "camp-1".to_string(),
+            message_id: "message-1".to_string(),
+            sequence: 1,
+            sender_type: "user".to_string(),
+            sender_id: "local_user".to_string(),
+            source_conversation_id: None,
+            content_digest: "sha256:test".to_string(),
+            default_recipient_mention: None,
+            mentions_current_user: false,
+            skill_names: vec!["review-code".to_string()],
+            skill_mentions: vec![("native:one".to_string(), "review-code".to_string())],
+            reply_to_message_id: None,
+            attachments: Vec::new(),
+            body: "inspect".to_string(),
+            body_length: 7,
+            body_truncated: false,
+            next_body_offset: None,
+        };
+        let mut second = template.clone();
+        second.message_id = "message-2".to_string();
+        second.sequence = 2;
+        second.skill_mentions = vec![
+            ("native:two".to_string(), "review-code".to_string()),
+            ("native:one".to_string(), "renamed-code".to_string()),
+        ];
+        let context = BatchModelContext {
+            run_input_messages: vec![template, second],
+        };
+        let projection = context.run_input_projection(&[
+            CurrentInputSkillLink {
+                name: "review-code".to_string(),
+                path: "/skills/one/SKILL.md".to_string(),
+                skill_id: Some("native:one".to_string()),
+                message_index: Some(0),
+            },
+            CurrentInputSkillLink {
+                name: "review-code".to_string(),
+                path: "/skills/two/SKILL.md".to_string(),
+                skill_id: Some("native:two".to_string()),
+                message_index: Some(1),
+            },
+        ]);
+        assert_eq!(
+            projection["messages"][0]["skills"],
+            json!([{
+                "name": "review-code", "path": "/skills/one/SKILL.md",
+            }])
+        );
+        assert_eq!(
+            projection["messages"][1]["skills"],
+            json!([
+                {"name": "review-code", "path": "/skills/two/SKILL.md"},
+            {"name": "renamed-code", "path": "/skills/one/SKILL.md"},
+            ])
         );
     }
 
@@ -8505,6 +9003,8 @@ mod tests {
             native_binding_id: None,
             native_binding_generation: 0,
             last_accepted_public_boundary_sequence: 0,
+            claim_previous_public_boundary_sequence: None,
+            claim_has_additional_public_messages: None,
             native_charter_digest: None,
             native_collaboration_state_digest: None,
             default_lead_agent_id: Some("agent_1".to_string()),
@@ -8692,6 +9192,8 @@ mod slow_tests {
             &[CurrentInputSkillLink {
                 name: "review-pr".to_string(),
                 path: "/repo/.codex/skills/review-pr/SKILL.md".to_string(),
+                skill_id: None,
+                message_index: None,
             }],
         );
         assert_eq!(
@@ -8713,6 +9215,8 @@ mod slow_tests {
                     &[CurrentInputSkillLink {
                         name: "review-pr".to_string(),
                         path: "/repo/.codex/skills/review-pr/SKILL.md".to_string(),
+                        skill_id: None,
+                        message_index: None,
                     }]
                 )
                 .get("skills"),
@@ -8731,7 +9235,7 @@ mod slow_tests {
             working_principles: String::new(),
             growth_topic: String::new(),
         };
-        let formatted = render_session_bootstrap("charter", &identity, "entrypoint").unwrap();
+        let formatted = render_session_bootstrap("charter", &identity, None, "entrypoint").unwrap();
         assert_eq!(
             formatted,
             "[SESSION_CHARTER]\ncharter\n[/SESSION_CHARTER]\n\n\
@@ -8752,7 +9256,8 @@ mod slow_tests {
             working_principles: String::new(),
             growth_topic: String::new(),
         };
-        let formatted = render_session_bootstrap("single chat charter", &identity, "").unwrap();
+        let formatted =
+            render_session_bootstrap("single chat charter", &identity, None, "").unwrap();
         assert!(formatted.contains("[SESSION_CHARTER]"));
         assert!(formatted.contains("[MEMBER_IDENTITY]"));
         assert!(!formatted.contains("[MEMORY_ENTRYPOINT]"));
@@ -8809,6 +9314,7 @@ mod slow_tests {
             shared_conversation: Some(&shared_conversation),
             run_facts: &run_facts,
             workspace: None,
+            additional_skills: None,
             a2a_guidance: None,
             single_chat_guidance: Some(SINGLE_CHAT_GUIDANCE.trim()),
             current_input: Some(&json!({
@@ -8880,6 +9386,8 @@ mod slow_tests {
             native_binding_id: None,
             native_binding_generation: 0,
             last_accepted_public_boundary_sequence: 0,
+            claim_previous_public_boundary_sequence: None,
+            claim_has_additional_public_messages: None,
             native_charter_digest: None,
             native_collaboration_state_digest: None,
             default_lead_agent_id: None,
@@ -9696,6 +10204,14 @@ mod slow_tests {
             .database
             .connection()
             .execute(
+                "UPDATE camp_message SET recall_state = 'recallable' WHERE id = ?1",
+                [&unjoined_message_id],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
                 r#"
                 DELETE FROM context_manifest_history_camp
                 WHERE camp_id = ?1
@@ -9801,7 +10317,7 @@ mod slow_tests {
                 &run,
                 &HistorySearchInput {
                     query: "PUBLIC_HISTORY_WITHOUT_SNAPSHOT_MEMBERSHIP".to_string(),
-                    camp_ids: Some(vec![unjoined_camp_id]),
+                    camp_ids: Some(vec![unjoined_camp_id.clone()]),
                     date_from: None,
                     date_to: None,
                     limit: None,
@@ -9812,6 +10328,43 @@ mod slow_tests {
             history_without_snapshot["results"][0]["messageId"],
             unjoined_message_id
         );
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET body = '', structured_content_json = '[]', recall_state = 'withdrawn' WHERE id = ?1",
+                [&unjoined_message_id],
+            )
+            .unwrap();
+        let withdrawn = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput {
+                    camp_id: Some(unjoined_camp_id.clone()),
+                    message_id: Some(unjoined_message_id.clone()),
+                    thread: None,
+                    before: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(withdrawn["items"][0]["displayText"], "Message withdrawn");
+        assert!(withdrawn["items"][0].get("body").is_none());
+        let no_results = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "PUBLIC_HISTORY_WITHOUT_SNAPSHOT_MEMBERSHIP".to_string(),
+                    camp_ids: Some(vec![unjoined_camp_id]),
+                    date_from: None,
+                    date_to: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(no_results["results"].as_array().unwrap().is_empty());
         fixture.cleanup();
     }
 
@@ -10324,6 +10877,172 @@ mod slow_tests {
     }
 
     #[test]
+    fn batch_history_hint_uses_claim_result_after_history_and_watermark_change() {
+        let mut fixture = fixture();
+        let frozen: (i64, bool) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT claim_previous_public_boundary_sequence, claim_has_additional_public_messages FROM agent_run WHERE id = ?1",
+                [&fixture.run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(frozen, (0, false));
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = fixture.database.connection_mut().transaction().unwrap();
+        transaction
+            .execute(
+                "UPDATE camp SET last_message_sequence = 2, version = version + 1, updated_at = ?2 WHERE id = ?1",
+                params![fixture.camp_id, now],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, content_digest,
+                    address_mode, addressed_agent_ids_json,
+                    effective_recipient_ids_json, recipient_presentation_json,
+                    origin_kind, recall_state, version, created_at, updated_at
+                ) VALUES (
+                    'after-claim-history', ?1, 2, 'agent', 'agent_2', 'new public history',
+                    '[{"kind":"text","text":"new public history"}]', 'sha256:after-claim-history',
+                    'explicit', '["agent_2"]', '["agent_2"]', '{}',
+                    'agent', 'closed', 1, ?2, ?2
+                )
+                "#,
+                params![fixture.camp_id, now],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "UPDATE conversation SET last_accepted_public_boundary_sequence = 2 WHERE id = (SELECT conversation_id FROM agent_run WHERE id = ?1)",
+                [&fixture.run_id],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let request = MaterializeContextRequest {
+            agent_run_id: &fixture.run_id,
+            execution_epoch: fixture.execution_epoch,
+            charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+            max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+        };
+        let ContextMaterialization::Ready(first) = ContextService
+            .materialize(&mut fixture.database, &store, &request)
+            .unwrap()
+        else {
+            panic!("frozen batch context should materialize")
+        };
+        assert!(first.rendered_payload.contains(
+            "As of this run's start, all visible messages in this Camp are already in RUN_INPUT or were written by you."
+        ));
+        assert!(!first.rendered_payload.contains("new public history"));
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET recall_state = 'withdrawn' WHERE id = 'after-claim-history'",
+                [],
+            )
+            .unwrap();
+        let ContextMaterialization::Ready(second) = ContextService
+            .materialize(&mut fixture.database, &store, &request)
+            .unwrap()
+        else {
+            panic!("frozen batch manifest should be reusable")
+        };
+        assert_eq!(first.manifest_id, second.manifest_id);
+        assert_eq!(first.rendered_payload, second.rendered_payload);
+        assert_eq!(
+            first.rendered_payload_digest,
+            second.rendered_payload_digest
+        );
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn batch_history_hint_materializes_frozen_true_without_rechecking_history() {
+        let mut fixture = fixture();
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = fixture.database.connection_mut().transaction().unwrap();
+        transaction
+            .execute(
+                "UPDATE camp SET last_message_sequence = 2, version = version + 1, updated_at = ?2 WHERE id = ?1",
+                params![fixture.camp_id, now],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, content_digest,
+                    address_mode, addressed_agent_ids_json,
+                    effective_recipient_ids_json, recipient_presentation_json,
+                    origin_kind, recall_state, version, created_at, updated_at
+                ) VALUES (
+                    'withdrawn-before-materialization', ?1, 2, 'agent', 'agent_2', '',
+                    '[]', 'sha256:withdrawn-before-materialization',
+                    'explicit', '[]', '[]', '{}',
+                    'agent', 'withdrawn', 1, ?2, ?2
+                )
+                "#,
+                params![fixture.camp_id, now],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "UPDATE agent_run SET current_public_tail_sequence = 2, initial_camp_context_through_sequence = 2, claim_has_additional_public_messages = 1 WHERE id = ?1",
+                [&fixture.run_id],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        let frozen: (i64, bool) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT claim_previous_public_boundary_sequence, claim_has_additional_public_messages FROM agent_run WHERE id = ?1",
+                [&fixture.run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(frozen, (0, true));
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let request = MaterializeContextRequest {
+            agent_run_id: &fixture.run_id,
+            execution_epoch: fixture.execution_epoch,
+            charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+            max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+        };
+        let ContextMaterialization::Ready(first) = ContextService
+            .materialize(&mut fixture.database, &store, &request)
+            .unwrap()
+        else {
+            panic!("frozen batch context should materialize")
+        };
+        assert!(first.rendered_payload.contains(
+            "As of this run's start, there are additional visible messages in this Camp beyond RUN_INPUT and messages written by you."
+        ));
+        let ContextMaterialization::Ready(second) = ContextService
+            .materialize(&mut fixture.database, &store, &request)
+            .unwrap()
+        else {
+            panic!("frozen batch manifest should be reusable")
+        };
+        assert_eq!(first.manifest_id, second.manifest_id);
+        assert_eq!(first.rendered_payload, second.rendered_payload);
+        assert_eq!(
+            first.rendered_payload_digest,
+            second.rendered_payload_digest
+        );
+        fixture.cleanup();
+    }
+
+    #[test]
     fn attachment_only_current_input_is_empty_and_reuses_stable_camp_attachment_paths() {
         let mut fixture = fixture();
         let claim_recipient_display_name: String = fixture
@@ -10483,7 +11202,7 @@ mod slow_tests {
         let run_facts: Value = serde_json::from_str(run_facts_json).unwrap();
         assert_eq!(
             run_facts["historyHint"],
-            "No public-message boundary from a previous run is recorded for you in this Camp."
+            "As of this run's start, all visible messages in this Camp are already in RUN_INPUT or were written by you."
         );
         let (manifest_version, formatter_version, facts_version, profile_json, shared_evidence): (
             i64,
@@ -10512,7 +11231,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             (manifest_version, formatter_version, facts_version),
-            (29, 29, 7)
+            (30, 30, 8)
         );
         assert_eq!(
             serde_json::from_str::<Value>(&profile_json).unwrap(),
@@ -11019,6 +11738,9 @@ mod slow_tests {
                 skill_id: official.id.clone(),
                 name_at_send: official.name.clone(),
                 first_segment_index: 0,
+                first_message_index: 0,
+                source: None,
+                source_path: None,
                 eligible_at_send: true,
                 omission_reason: None,
             }],
@@ -13345,9 +14067,8 @@ mod slow_tests {
         assert!(!charter.contains("recognized inline Agent addressing"));
         assert!(!charter.contains("--to-user"));
         assert!(!charter.contains("It overrides Agent addressing"));
-        assert!(charter.contains("Use `rovai camp read` for relevant Camp history."));
         assert!(charter.contains(
-            "The boundary in `RUN_FACTS.historyHint` is a reference point, not a record of messages read or work completed."
+            "Proceed directly when `RUN_INPUT` and your existing context are sufficient; use `rovai camp read` only for missing Camp context needed by the current work. The boundary in `RUN_FACTS.historyHint` is a reference point, not a read or completion marker."
         ));
         assert!(!charter.contains("omittedCount and historyReadCursor"));
         assert!(!charter.contains("nextBodyOffset is the Unicode-scalar bodyOffset"));
@@ -13460,6 +14181,7 @@ mod slow_tests {
                 default_recipient_mention: None,
                 mentions_current_user: false,
                 skill_names: Vec::new(),
+                skill_mentions: Vec::new(),
                 reply_to_message_id: None,
                 attachments: Vec::new(),
                 body: body.clone(),
@@ -13867,6 +14589,7 @@ mod slow_tests {
             shared_conversation: Some(&shared_conversation),
             run_facts: &camp_resources_only,
             workspace: None,
+            additional_skills: None,
             a2a_guidance: None,
             single_chat_guidance: None,
             current_input: Some(&json!({"source":{"type":"user"},"body":"work"})),

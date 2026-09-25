@@ -17,7 +17,7 @@ pub struct ContextDeliveryProfile {
 
 impl ContextDeliveryProfile {
     pub fn validate(self) -> Result<Self> {
-        if !matches!(self.profile_version, 5 | 6 | 7 | 8 | 9) {
+        if !matches!(self.profile_version, 5 | 6 | 7 | 8 | 9 | 10) {
             anyhow::bail!("unsupported Context Delivery Profile version");
         }
         if self.max_public_messages == 0
@@ -43,10 +43,10 @@ impl ContextDeliveryProfile {
     }
 
     pub fn frozen_json(self) -> Result<Value> {
-        if self.profile_version == 9 {
+        if matches!(self.profile_version, 9 | 10) {
             self.validate()?;
             Ok(json!({
-                "profileVersion": 9,
+                "profileVersion": self.profile_version,
                 "maxSelfActiveTasks": self.max_self_active_tasks,
             }))
         } else {
@@ -56,7 +56,8 @@ impl ContextDeliveryProfile {
 
     pub fn from_frozen_json(value: &str) -> Result<Self> {
         let value: Value = serde_json::from_str(value)?;
-        if value.get("profileVersion") == Some(&json!(9)) {
+        if matches!(value.get("profileVersion"), Some(version) if version == &json!(9) || version == &json!(10))
+        {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase", deny_unknown_fields)]
             struct PublicProfile9 {
@@ -67,7 +68,7 @@ impl ContextDeliveryProfile {
             let profile = ContextDeliveryProfile {
                 profile_version: selected.profile_version,
                 max_self_active_tasks: selected.max_self_active_tasks,
-                ..PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9
+                ..PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V10
             };
             profile.validate()
         } else {
@@ -102,18 +103,29 @@ pub const PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V8: ContextDeliveryProfile 
         ..PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V7
     };
 
+pub const CURRENT_CONTEXT_DELIVERY_PROFILE_V7: ContextDeliveryProfile = ContextDeliveryProfile {
+    profile_version: 7,
+    ..CONTEXT_DELIVERY_PROFILE_V6
+};
+
 pub const PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9: ContextDeliveryProfile =
     ContextDeliveryProfile {
         profile_version: 9,
         ..PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V8
     };
 
+pub const PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V10: ContextDeliveryProfile =
+    ContextDeliveryProfile {
+        profile_version: 10,
+        ..PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9
+    };
+
 pub fn current_context_delivery_profile() -> Result<ContextDeliveryProfile> {
-    CONTEXT_DELIVERY_PROFILE_V6.validate()
+    CURRENT_CONTEXT_DELIVERY_PROFILE_V7.validate()
 }
 
 pub fn current_public_camp_batch_context_delivery_profile() -> Result<ContextDeliveryProfile> {
-    PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9.validate()
+    PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V10.validate()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,25 +161,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_v6_remains_current_for_single_chat_and_v9_owns_public_batches() {
+    fn profile_v7_is_current_for_single_chat_and_v10_owns_public_batches() {
         assert_eq!(
             current_context_delivery_profile().unwrap(),
-            CONTEXT_DELIVERY_PROFILE_V6
+            CURRENT_CONTEXT_DELIVERY_PROFILE_V7
         );
         assert_eq!(
             current_public_camp_batch_context_delivery_profile().unwrap(),
-            PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9
+            PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V10
         );
-        let frozen = PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9
+        let frozen = PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V10
             .frozen_json()
             .unwrap();
         assert_eq!(
             frozen,
-            json!({"profileVersion": 9, "maxSelfActiveTasks": 8})
+            json!({"profileVersion": 10, "maxSelfActiveTasks": 8})
         );
         assert_eq!(
             ContextDeliveryProfile::from_frozen_json(&frozen.to_string()).unwrap(),
-            PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9
+            PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V10
         );
         assert_eq!(
             CONTEXT_DELIVERY_PROFILE_V5.canonical_digest().unwrap(),
@@ -179,7 +191,7 @@ mod tests {
     fn profile_validation_rejects_unknown_versions_and_invalid_limits() {
         for invalid in [
             ContextDeliveryProfile {
-                profile_version: 10,
+                profile_version: 11,
                 ..CONTEXT_DELIVERY_PROFILE_V6
             },
             ContextDeliveryProfile {

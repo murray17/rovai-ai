@@ -56,6 +56,12 @@ test('v12 constrains split-claim quotations to literal delivery text without rel
  assert.deepEqual(props.sourceSegmentId.enum,['final'])
  assert.deepEqual(props.text.enum,[content])
  assert.ok(!props.text.enum.includes('实现已完成'))
+ pack.evidenceSegments[0].content='target: "staging"'
+ const escaped=judgeOutputSchema(['SER.response.claim_accuracy'],'generic-task-v12',pack).properties.claimsAudit.properties.claims.items.properties
+ assert.deepEqual(escaped.sourceSegmentId.enum,['final'])
+ assert.equal(escaped.text.enum,undefined)
+ pack.evidenceSegments[0].content='target: \\"staging\\"'
+ assert.equal(judgeOutputSchema(['SER.response.claim_accuracy'],'generic-task-v12',pack).properties.claimsAudit.properties.claims.items.properties.text.enum,undefined)
  pack.evidenceSegments[0].content='x'.repeat(1300)
  assert.ok(judgeOutputSchema(['SER.response.claim_accuracy'],'generic-task-v12',pack).properties.claimsAudit.properties.claims.items.properties.text.enum.every(text=>text.length<=1200))
  pack.evidenceSegments[0].content=Array.from({length:257},(_,i)=>String(i)).join('\n')

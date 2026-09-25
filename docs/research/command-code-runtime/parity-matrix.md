@@ -11,14 +11,14 @@ last_updated: 2026-09-24
 
 # Command Code 1.64.0 实现前 Parity Matrix
 
-本矩阵按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 建立，先于正式 Adapter 实现。最接近的生产 Adapter 是 `claude-code-cli`；公共控制流可参考它，Command Code 的 wire 与能力证据必须独立取得。`DocumentationOnly` 仅指 [官方 CLI/Headless/Mods/MCP 文档](https://commandcode.ai/docs)或发布包帮助，未替代真实账号、模型、Tool 或 Session Smoke。开发者已二次确认[精确输入说明 revision 3](../../versions/v1.69/model-context-change-command-code.md)，[V1.69-D01](../../versions/v1.69/decisions.md#v1-69-d01)接受普通 Prompt 的指令层级差异，不提升其他能力轴或平台资格。
+本矩阵按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 建立，先于正式 Adapter 实现。最接近的生产 Adapter 是 `claude-code-cli`；公共控制流可参考它，Command Code 的 wire 与能力证据必须独立取得。`DocumentationOnly` 仅指 [官方 CLI/Headless/Mods/MCP 文档](https://commandcode.ai/docs)或发布包帮助，未替代真实账号、模型、Tool 或 Session Smoke。开发者曾在 v1.68 基线上二次确认[研究提案 revision 3](prompt-guidance-proposal.md)的普通 Prompt 差异；合并后的当前 Context 基线仍须另行确认，不提升其他能力轴或平台资格。
 
 | 能力轴 | Rovai 标准行为 | Command Code 1.64.0 上游能力面 | 候选接入策略 | 当前状态与证据 | 已接受差异 |
 | --- | --- | --- | --- | --- | --- |
 | Auth / Provider / Model | 自身原生认证、默认/显式模型、变化后精确 fence | 原生认证/BYOK、`--model`、`--list-models` | 继承用户原生配置；Probe 区分认证与模型目录，保存后核对显式模型 | `--list-models` 可见隔离 BYOK；headless 仍以退出码 3 拒绝未登录；完整轴未实现 | 无 |
 | Host / Fleet / LRU | 声明进程策略并统一管理生命周期 | `-p` 单次 query 后退出；未见驻留 RPC | 候选 `one_shot_resumable`，每 Run 一个受管进程 | ManagedProcess 传输已实现并通过假 CLI 测试；真实 Runtime 生命周期未验证 | 无 |
 | Native Session / Continuation | 稳定完整 ID，warm/cold/Core restart 精确恢复 | `result.sessionId`、`--resume <id>`；`--continue` 选最近一次 | 只保存完整 ID；未知/失败不自动重投 accepted input | 本机 local-only fixture 已验证指定 ID 续接、不存在 ID 失败，且同 cwd 的第二个隔离 Home 无法恢复第一个 Home 的 ID；真实账号、Core restart 未验证 | 无 |
-| Bootstrap / Context | 高权限 Charter/Identity/Memory，逐 Run 冻结上下文 | 普通 `--print` stdin；`--mod` 与 `appendSystemPrompt`、Home `AGENTS.md` 可注入 system prompt，但失败时继续模型调用 | 复用现有 `first_payload`：新 Session 的普通 user Prompt 包含 Bootstrap 与冻结 Dynamic Context，普通精确恢复仅发本 Run 动态上下文 | 内部传输要求 `PreparedContext.runtime_payload`；本机隔离 fixture 验证首次两次模型请求的 user 层 Bootstrap、精确恢复仅新 `P` 且原生历史保留旧 `B`；正式 AgentRun Context 接线未实施 | [V1.69-D01](../../versions/v1.69/decisions.md#v1-69-d01)接受普通用户指令层级，不能宣称高权限 parity |
+| Bootstrap / Context | 高权限 Charter/Identity/Memory，逐 Run 冻结上下文 | 普通 `--print` stdin；`--mod` 与 `appendSystemPrompt`、Home `AGENTS.md` 可注入 system prompt，但失败时继续模型调用 | 复用现有 `first_payload`：新 Session 的普通 user Prompt 包含 Bootstrap 与冻结 Dynamic Context，普通精确恢复仅发本 Run 动态上下文 | 内部传输要求 `PreparedContext.runtime_payload`；本机隔离 fixture 验证首次两次模型请求的 user 层 Bootstrap、精确恢复仅新 `P` 且原生历史保留旧 `B`；正式 AgentRun Context 接线未实施 | [当时确认的研究提案](prompt-guidance-proposal.md)接受普通用户指令层级，不能宣称高权限 parity |
 | Compaction continuity | 压缩与恢复后绑定、能力不变 | 原生压缩及 `compaction_*` events | 沿用 Core 合格信号后的下一次 Bootstrap 补发；先证明 Command Code 信号、同一次原生多轮执行内压缩及 cold resume 行为 | DocumentationOnly / NotImplemented；没有合格 signal 时此轴不能宣称通过 | 无 |
 | Skills | 现有 Assignment 追加、更新、撤销、隔离 | 单次 `--skill <path>`；额外路径优先级低于项目/用户 | 使用现有 delivery group 的 Run-local 受管路径；验证同名规则 | DocumentationOnly / NotImplemented | 无 |
 | External MCP | `PreparedMcpProjection` 仅目标 Run/Session 可见 | 原生 MCP 主要持久 local/project/user scope；无已观察单次配置 flag；1.64.0 `--config 'mcp={}'` 在启动前拒绝 | 研究私有 Home 的原生用户级 MCP 投影，并证明认证/设置同步、与原生 project MCP 兼容、Secret、撤销及 Server 生命周期；必要时再评估受管 Mod/Tool 桥 | 本机双 Home fixture：A 可搜索、在 yolo 下调用私有 stdio MCP，B 同 cwd 无该 Tool；dont-ask 拒绝且无 tools/call。`PreparedMcpProjection`/生产生命周期未实现，仍 Blocked | 无 |
@@ -33,8 +33,8 @@ last_updated: 2026-09-24
 ## 实施准入顺序
 
 1. 用固定 1.64.0 发布包和隔离工作区记录真实 NDJSON、失败、取消、精确恢复与原生 Tool 事件；确认 Runtime 接受输入的最早可证明时点。
-2. [Prompt 引导 revision 3](../../versions/v1.69/model-context-change-command-code.md)已二次确认；本机 fixture 已验证首次与精确恢复请求中的普通 user Prompt 位置。继续在正式 AgentRun Context 接线后验证相同字节和 Input Delivery；Mod 失败证据保留，不作为 Rovai Bootstrap 路径。
+2. [Prompt 引导 revision 3](prompt-guidance-proposal.md)已二次确认；本机 fixture 已验证首次与精确恢复请求中的普通 user Prompt 位置。继续在正式 AgentRun Context 接线后验证相同字节和 Input Delivery；Mod 失败证据保留，不作为 Rovai Bootstrap 路径。
 3. 证明成员 A 的 MCP、Skills、Taste 与权限在同 cwd 成员 B 的并发/后继 Run 中不泄漏；没有单次 MCP 注入方案前，保持此轴 `Blocked`。
 4. 在上述隔离与权限策略确定后实现完整 Adapter、Catalog、Probe、dispatch、Usage、Settings/诊断投影；各目标平台运行 Checklist Golden Flows 才可升级资格。
 
-设计中不把通用 Core 基础设施的存在记作 Command Code 的 `Implemented`。当前 Product Runtime Catalog 和各平台 Admission 均不增加 Command Code；普通 Prompt 引导的降低权限差异已由 V1.69-D01 接受，是否进入 preview 或正式目录仍须额外证据与完整产品接入决定。
+设计中不把通用 Core 基础设施的存在记作 Command Code 的 `Implemented`。当前 Product Runtime Catalog 和各平台 Admission 均不增加 Command Code；普通 Prompt 引导的降低权限差异已由 当时研究提案接受，是否进入 preview 或正式目录仍须额外证据与完整产品接入决定。

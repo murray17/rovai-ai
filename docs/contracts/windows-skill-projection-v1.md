@@ -3,7 +3,7 @@ document_type: contract
 contract: windows-skill-projection-v1
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-18
+last_updated: 2026-09-25
 ---
 
 # Windows Skill Projection v1
@@ -111,10 +111,17 @@ macOS observations remain valid with null Windows-only identity fields; Migratio
 
 ## 5. Ownership and delete
 
-DB observation, journal/operation identity, persisted entry identity, current entry/root opened identities,
-Skill/Revision identity and exact content digest must agree before replace or delete. Missing evidence, ordinary
-directories, foreign links or external modifications are project-owned/drift: preserve them, record the issue and fail
-closed. Runtime-visible Skill content contains no marker.
+Normal projection reconcile requires DB observation, journal/operation identity, persisted entry identity, current
+entry/root opened identities, Skill/Revision identity and exact content digest to agree before replace or delete.
+Missing evidence, ordinary directories, foreign links or external modifications remain project-owned/drift during
+reconcile. Runtime-visible Skill content contains no marker.
+
+The user-triggered `skills.cleanupLegacyEntries` has a separate Windows-only rule for the nine fixed v1.70 official
+Skill names in [Skills Rebuild v1](skills-rebuild-v1.md). It requires an exact legacy observation, an active and readable
+execution root, no active Run, the recorded group path, and a plain directory tree without reparse points. The command
+deletes that one observed directory through retained handles even if its old operation, entry file identity or digest
+no longer matches; it then deletes its observations. It does not run at startup or affect ordinary projection reconcile,
+other Skill names, or macOS links.
 
 ## References
 

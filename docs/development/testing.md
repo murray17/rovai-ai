@@ -470,7 +470,7 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
 | `pnpm smoke:builtin-cli` | 默认十三种可执行实现；Cursor 未准入，Pi 仅 debug 验收 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用二十二项 CLI operation；Automation case 覆盖定义 CRUD、读取、列表与无 Runtime 队员的确定性立即运行失败；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。选择 Pi 时复制官方配置到临时 Home，不污染用户 Session；通过不晋升平台资格 |
-| `pnpm smoke:skills` | Codex 默认；`all` 为十三种可执行实现 | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十三组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills`、Grok `.grok/skills` 与 Pi `.pi/skills` 进入矩阵；选择 Pi 时使用临时官方配置副本与 debug-only admission，结果不等于正式资格；`--to-user` 仅为隐藏兼容 alias |
+| `pnpm smoke:skills` | 历史受管 Skill Library 的 Codex 默认／十三 Runtime 矩阵 | 保留旧导入、Revision 与原投递路径的兼容验证；不作为 v1.70 原生 Skills／工具箱新路径通过证据。当前 UI 验收见[桌面 UI 验收](ui-acceptance.md)，模型上下文 Gate 见[评测](evaluation.md)；Cursor `.cursor/skills` 仍为 DocumentationOnly，Pi debug 结果不晋升正式资格 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
 | `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin 并 `NativeWinsSkip`；Kimi 覆盖 stdio、Streamable HTTP 和第二个 stdio Server；默认十一种。Pi 的 External MCP 为 `Unsupported`，不属于本 smoke，保存的 Assignment 在 Pi dispatch 时静默忽略 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
@@ -558,8 +558,9 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 
 `pnpm test:notification-attention` 在隔离 Electron 中挂载生产通知 Controller 与 CSS，验证当前公屏 / 精确
 单聊的完成静默、抑制不等于已读、原始来源点击、单卡与手动队列、前后台收敛，以及悬停 / 焦点暂停剩余
-时间。`ROVAI_KEEP_NOTIFICATION_FIXTURE=1` 保留双主题截图。`node --test scripts/lib/single-chat-panel.test.mjs` 的既有 owner
-另验证原 Conversation / Run 定位、结束来源明确失败且不创建后继对话。两者使用临时绝对 userData 和
+时间。`ROVAI_KEEP_NOTIFICATION_FIXTURE=1` 保留双主题截图。`pnpm test:single-chat-pending` 已纳入
+`test:desktop:integration`，验证私有待发送撤回的回执恢复、导航围栏与命令重放；
+`node --test scripts/lib/single-chat-panel.test.mjs` 的既有 owner 另验证原 Conversation / Run 定位、结束来源明确失败且不创建后继对话。两者使用临时绝对 userData 和
 封闭 RPC 投影，不启动 Core、Runtime 或日常 App，不代替真实模型 Smoke。
 
 `pnpm test:approval-dock` 使用生产 ApprovalDock/CSS 的独立 Electron fixture，验证原生顺序、标签与

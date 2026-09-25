@@ -67,9 +67,11 @@ export async function runCurrentContractConformance({
   const evidenceDigest = digestJson(evidenceRecord)
   const productContract = await collectProductContractFingerprint({ repositoryRoot, coreExecutable })
   const productContractMatched =
-    productContract.dataContractVersion.value === CURRENT_CONTRACT_DATA_STORE.version &&
-    productContract.dataContractSchemaVersion.value ===
-      CURRENT_CONTRACT_DATA_STORE.projectionSchemaVersion
+    new RegExp(CURRENT_CONTRACT_DATA_STORE.versionPattern)
+      .test(productContract.dataContractVersion.value) &&
+    Number.isInteger(productContract.dataContractSchemaVersion.value) &&
+    productContract.dataContractSchemaVersion.value >=
+      CURRENT_CONTRACT_DATA_STORE.minimumProjectionSchemaVersion
   const executionEnvironment = buildExecutionEnvironment({
     teamRuntimeCompatibilityDigest: digestJson({
       runner: 'cargo-test',

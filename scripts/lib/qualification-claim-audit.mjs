@@ -45,7 +45,9 @@ export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE, pack = null) {
     if (!quotes.size || quotes.size > 256) throw new Error('claim_audit.quote_inventory_unavailable_or_over_budget')
     const properties = schema.properties.claims.items.properties
     properties.sourceSegmentId.enum = sources.map(source => source.segmentId)
-    properties.text.enum = [...quotes]
+    // Strict provider schemas reject escaped quotes or backslashes in enum values. Keep
+    // source IDs constrained and let applyClaimAudit validate exact source text.
+    if (![...quotes].some(quote => /["\\]/.test(quote))) properties.text.enum = [...quotes]
     properties.text.description = 'Select an exact original excerpt. To audit separate propositions in a compound sentence, reuse the entire original excerpt and distinguish the proposition in kind/reason. Never rewrite the excerpt.'
   }
   return schema

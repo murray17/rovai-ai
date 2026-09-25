@@ -46,8 +46,9 @@ last_updated: 2026-09-22
 | [First-run Onboarding](first-run-onboarding.md) | Full Core authority-origin 首次安装 admission、schema 2 三页状态、无 Runtime 延后完成、幂等 provisioning 与 Desktop-local Active Camp starter 第四页边界 |
 | [File Preview](file-preview.md) | 显式 Markdown 消息资源入口、来源上下文解析、Main canonical 路径投影、窗口内 Camp Tab shell、项目内子文件独立恢复来源、无副作用恢复、binding generation、具体文件能力/重开、分页、Root Grant、watcher、HTML 协议与资源生命周期 |
 | [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |
-| [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、bundled bootstrap 快速路径、root access ledger、事件驱动 dirty、当前 Run 完整校验 preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |
-| [Structured Run Input Skill Links](structured-current-input-skill-links.md) | Picker SkillMention、claim-time 批次 snapshot、verified Exposure、只读 Resolver、per-message `RUN_INPUT.messages[].skills` 与 unchanged Adapter transport |
+| [Skills 来源、配置与模型投递](skills.md) | 当前平台/工具箱与 Harness 原生来源、队员配置、消息来源身份、Run 冻结、旧投影安全清理和历史恢复 |
+| [Skill Projection Reconciliation（历史）](skill-projection-reconciliation.md) | 旧 Library desired state、项目投递、SkillExposureSnapshot 与旧 Run 审计/清理 |
+| [Structured Run Input Skill Links（历史）](structured-current-input-skill-links.md) | 旧 Library/Exposure 的 Picker SkillMention、claim-time snapshot 与消息链接 |
 | [User Automation](user-automation.md) | 一个 `rovai` binary 下隔离的 Agent/User transport、Main-owned 本机 IPC、封闭 dispatch、Camp navigation、CLI-owned Diagnostic Trial、双 cursor 与安全导出边界 |
 | [Windows Desktop Platform](windows-desktop-platform.md) | Windows x64 host envelope、平台 seam、原子 Job 启动、Transport v14、私有 local storage、hidden title strip + top-level menu projection + native controls、NSIS 与真实 Windows 验收组合 |
 | [Runtime File Change Observation](runtime-file-change-observation.md) | Runtime 文件操作、Command Diff、每 AgentRun/epoch 的版本化文件变化归约、exact managed-output exclusion、Managed Blob、迟到事实重算、恢复与授权读取边界；不扫描工作区或依赖 Git |

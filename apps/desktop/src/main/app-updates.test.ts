@@ -28,10 +28,12 @@ function service(
     scheduleTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
     clearTimer?: (timer: ReturnType<typeof setTimeout>) => void
     warn?: (message: string) => void
+    bundledReleaseNotes?: string
   } = {}
 ): AppUpdatesService {
   return new AppUpdatesService({
     currentVersion: () => '0.0.2',
+    bundledReleaseNotes: options.bundledReleaseNotes ?? '# Rovai AI v0.0.2\n\n- Installed release',
     isPackaged: () => options.isPackaged ?? true,
     updater: updater as unknown as DesktopAutoUpdater | null,
     now: () => NOW,
@@ -87,6 +89,12 @@ describe('AppUpdatesService', () => {
 
     expect(updates.get()).toEqual({
       currentVersion: '0.0.2',
+      currentRelease: {
+        version: '0.0.2',
+        releaseName: 'Rovai AI v0.0.2',
+        releaseDate: null,
+        releaseNotes: '# Rovai AI v0.0.2\n\n- Installed release'
+      },
       status: 'idle',
       availableRelease: null,
       lastCheckSource: null,
@@ -325,8 +333,18 @@ describe('AppUpdatesService', () => {
     await expect(updates.check()).resolves.toMatchObject({
       status: 'up_to_date',
       availableRelease: null,
+      currentRelease: { version: '0.0.2', releaseNotes: '# Rovai AI v0.0.2\n\n- Installed release' },
       pendingPrompt: null,
       lastSuccessfulCheckAt: NOW.toISOString()
+    })
+  })
+
+  it('does not present bundled notes from a different installed version', () => {
+    const updates = service(null, { bundledReleaseNotes: '# Rovai AI v0.0.1\n\n- Older release' })
+    expect(updates.get()).toMatchObject({
+      currentVersion: '0.0.2',
+      currentRelease: { version: '0.0.2', releaseNotes: null },
+      availableRelease: null
     })
   })
 

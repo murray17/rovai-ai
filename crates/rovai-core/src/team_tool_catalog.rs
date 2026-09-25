@@ -208,6 +208,20 @@ fn collection_message_schema() -> Value {
     })
 }
 
+fn withdrawn_message_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["messageId", "sequence", "withdrawn", "displayText"],
+        "properties": {
+            "messageId": {"type": "string"},
+            "sequence": {"type": "integer", "minimum": 1},
+            "withdrawn": {"const": true},
+            "displayText": {"const": "Message withdrawn"}
+        }
+    })
+}
+
 fn camp_read_attachment_schema() -> Value {
     json!({
         "type": "object",
@@ -277,7 +291,7 @@ fn camp_read_item_schema() -> Value {
             "mode": {"const": "item"},
             "items": {
                 "type": "array", "minItems": 1, "maxItems": 1,
-                "items": item_message_schema()
+                "items": {"oneOf": [item_message_schema(), withdrawn_message_schema()]}
             }
         }
     })
@@ -297,7 +311,8 @@ fn camp_read_thread_schema() -> Value {
             "anchorMessageId": {"type": "string"},
             "threadRootMessageId": {"type": "string"},
             "direction": {"type": "string", "enum": ["before", "after"]},
-            "items": {"type": "array", "maxItems": 100, "items": collection_message_schema()},
+            "items": {"type": "array", "maxItems": 100,
+                "items": {"oneOf": [collection_message_schema(), withdrawn_message_schema()]}},
             "nextCursor": {"type": ["integer", "null"], "minimum": 1},
             "hasMore": {"type": "boolean"}
         }
@@ -315,7 +330,8 @@ fn camp_read_timeline_schema() -> Value {
             "campId": {"type": "string"},
             "mode": {"const": "timeline"},
             "direction": {"type": "string", "enum": ["before", "after"]},
-            "items": {"type": "array", "maxItems": 100, "items": collection_message_schema()},
+            "items": {"type": "array", "maxItems": 100,
+                "items": {"oneOf": [collection_message_schema(), withdrawn_message_schema()]}},
             "nextCursor": {"type": ["integer", "null"], "minimum": 1},
             "hasMore": {"type": "boolean"}
         }
@@ -1146,8 +1162,8 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": CAMP_READ_TOOL_NAME,
-            "title": "Read original Camp messages",
-            "description": "Read messages from exactly one public Camp. Target-Camp membership is not a read permission. With no message selector, return the newest visible messages from the current or explicitly selected Camp; use before as the exclusive sequence cursor. The default limit is 20; an explicit limit must be an integer from 1 to 100. Use messageId for one exact message, or thread for a thread page ending before the optional cursor. Reuse nextCursor as before. IDs and cursors locate content but never bypass message visibility.",
+            "title": "Read public Camp messages",
+            "description": "Read messages from exactly one public Camp. Target-Camp membership is not a read permission. With no message selector, return the newest published messages from the current or explicitly selected Camp; use before as the exclusive sequence cursor. The default limit is 20; an explicit limit must be an integer from 1 to 100. Recallable messages remain readable until withdrawn; a withdrawn message returns a Message withdrawn marker without its original content. Use messageId for one exact message, or thread for a thread page ending before the optional cursor. Reuse nextCursor as before. IDs and cursors never bypass the publication boundary.",
             "inputSchema": CampHistoryService::camp_read_input_schema(),
             "outputSchema": camp_read_success_schema()
         }),
@@ -1500,7 +1516,7 @@ mod tests {
     }
 
     #[test]
-    fn camp_read_item_attachment_contract_requires_kind_and_file_count() {
+    fn camp_read_output_contract_distinguishes_original_and_withdrawn_items() {
         let schema = camp_read_success_schema();
         let mut item = json!({
             "campId": "camp_123",
@@ -1536,6 +1552,20 @@ mod tests {
             .unwrap()
             .remove("kind");
         assert!(crate::builtin_tool_cli_output::validate_schema(&item, &schema).is_err());
+
+        let mut withdrawn = json!({
+            "campId": "camp_123",
+            "mode": "item",
+            "items": [{
+                "messageId": "message_123",
+                "sequence": 1,
+                "withdrawn": true,
+                "displayText": "Message withdrawn"
+            }]
+        });
+        crate::builtin_tool_cli_output::validate_schema(&withdrawn, &schema).unwrap();
+        withdrawn["items"][0]["body"] = json!("erased content");
+        assert!(crate::builtin_tool_cli_output::validate_schema(&withdrawn, &schema).is_err());
     }
 
     #[test]

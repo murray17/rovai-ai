@@ -7,8 +7,6 @@ import type {
   AgentRunView,
   AgentRunExecutionEvidenceView,
   CampComposerDraftView,
-  CampPendingInputsView,
-  CoreEvent,
   CampOpenMessageCoverage,
   CampOpenProjection,
   LocalAttachmentOwnerLocator,
@@ -18,6 +16,7 @@ import type {
 import { AppHeader, campOpenProjectionAsSnapshot } from '../../../apps/desktop/src/renderer/src/App'
 import { CampWorkspace, RunExecutionDisclosure, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import { CampNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
+import { loadLocalCampComposerDraft } from '../../../apps/desktop/src/renderer/src/camp-composer-local-store'
 import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -193,7 +192,7 @@ const reviewImages = [
 ]
 let imageResult: FixtureImageResult = reviewImages[0]
 let imageResultsById = new Map<string, FixtureImageResult>()
-let draft: CampComposerDraftView = { campId, body: '', content: { version: 2, segments: [] }, revision: 1, attachments: [],
+let draft: CampComposerDraftView = { campId, body: '', content: { version: 2, segments: [] }, revision: 1, attachments: [], quotes: [],
   replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 
 const attachmentFile = (id: string, displayName: string, mediaType: string, options: {
@@ -205,6 +204,7 @@ const attachmentFile = (id: string, displayName: string, mediaType: string, opti
   mediaType, byteSize: id.length * 2048, previewKind: options.previewKind ?? 'none',
   availability: 'available' as const
 })
+const draftAttachmentId = (index: number): string => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 
 function installAttachmentSurfaceState(result: FixtureImageResult): void {
   const supplied = { ...result, displayName: result.displayName || '会话布局参考' }
@@ -214,7 +214,7 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
     ['user-image-one', imageVariants[0]], ['user-image-two', imageVariants[1]], ['user-image-three', imageVariants[2]],
     ['agent-preview-one', imageVariants[2]], ['agent-preview-two', imageVariants[0]],
     ['agent-runtime-preview', imageVariants[1]],
-    ['draft-image-one', imageVariants[0]], ['draft-image-two', imageVariants[1]], ['draft-image-three', imageVariants[2]]
+    [draftAttachmentId(2), imageVariants[0]], [draftAttachmentId(3), imageVariants[1]], [draftAttachmentId(7), imageVariants[2]]
   ])
   const userAttachments = [
     attachmentFile('user-report', '调研说明.pdf', 'application/pdf'),
@@ -248,15 +248,15 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
     attachmentFile('agent-preview-two', '交付预览二.svg', 'image/svg+xml', { previewKind: 'image' })
   ]
   const composerFiles = [
-    attachmentFile('draft-pdf', '文件展示参考.pdf', 'application/pdf'),
-    attachmentFile('draft-image-one', '会话截图.svg', 'image/svg+xml', { previewKind: 'image' }),
-    attachmentFile('draft-image-two', '布局参考.svg', 'image/svg+xml', { previewKind: 'image' }),
-    attachmentFile('draft-folder', '参考素材', 'inode/directory', { kind: 'directory', fileCount: 12 }),
-    attachmentFile('draft-notes', '交互记录.log', 'text/plain'),
-    attachmentFile('draft-code', 'surface-spec.py', 'text/x-python'),
-    attachmentFile('draft-image-three', '交付预览.svg', 'image/svg+xml', { previewKind: 'image' }),
-    attachmentFile('draft-archive', '导出结果.zip', 'application/zip'),
-    attachmentFile('draft-json', 'icon-map.json', 'application/json')
+    attachmentFile(draftAttachmentId(1), '文件展示参考.pdf', 'application/pdf'),
+    attachmentFile(draftAttachmentId(2), '会话截图.svg', 'image/svg+xml', { previewKind: 'image' }),
+    attachmentFile(draftAttachmentId(3), '布局参考.svg', 'image/svg+xml', { previewKind: 'image' }),
+    attachmentFile(draftAttachmentId(4), '参考素材', 'inode/directory', { kind: 'directory', fileCount: 12 }),
+    attachmentFile(draftAttachmentId(5), '交互记录.log', 'text/plain'),
+    attachmentFile(draftAttachmentId(6), 'surface-spec.py', 'text/x-python'),
+    attachmentFile(draftAttachmentId(7), '交付预览.svg', 'image/svg+xml', { previewKind: 'image' }),
+    attachmentFile(draftAttachmentId(8), '导出结果.zip', 'application/zip'),
+    attachmentFile(draftAttachmentId(9), 'icon-map.json', 'application/json')
   ]
   const draftBody = '请按交互稿核对附件尺寸、顺序、图标和视觉层级。'
   draft = {
@@ -294,42 +294,25 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
 }
 
 if (attachmentReviewMode) installAttachmentSurfaceState(reviewImages[0])
-let pendingQueue: CampPendingInputsView = { campId, executionActive: false, editSession: null, items: [] }
-const pendingListeners = new Set<(event: CoreEvent) => void>()
-let releaseReturn: (() => void) | null = null
-let returnGate: Promise<void> | null = null
-let rejectReturn = false
-let failDraftReadAfterReturn = false
-let failDraftRead = false
-let failDraftSave = false
-const pendingCalls: string[] = []
-const invalidatePending = () => {
-  for (const listener of pendingListeners) listener({ method: 'camp.pendingInputs.changed', params: { campId, reason: 'edited' } } as CoreEvent)
-}
 let copiedPublicText = ''
-let repliedPublicMessageId: string | null = null
 
 Object.assign(window, { rovai: {
-  platform: 'darwin', onEvent: (listener: (event: CoreEvent) => void) => { pendingListeners.add(listener); return () => pendingListeners.delete(listener) },
+  platform: 'darwin', onEvent: () => () => {},
   clipboard: { write: async ({ text }: { text: string }) => { copiedPublicText = text } },
   request: async (method: string, params?: {
     imageId?: string
-    content?: CampComposerDraftView['content']
     evidenceId?: string
     agentRunId?: string
-    replyToCampMessageId?: string
-    afterSequence?: number
+    afterChangeSequence?: number
     refreshEvidenceIds?: string[]
     beforeSequence?: number | null
     limit?: number
-
-    command?: { pendingInputId: string; expectedRevision: number; action: { type: string; expectedDraftRevision: number } }
   }): Promise<unknown> => {
     if (method === 'agentRunExecution.page') {
       if (params?.agentRunId?.startsWith('empty-failed-')) return {
-        schemaVersion: 1, campId, agentRunId: params.agentRunId,
+        schemaVersion: 2, campId, agentRunId: params.agentRunId,
         requestedBeforeSequence: params.beforeSequence ?? null, nextBeforeSequence: null,
-        throughSequence: 0, hasMore: false, evidence: []
+        throughSequence: 0, throughChangeSequence: 0, hasMore: false, evidence: []
       }
       const beforeSequence = params?.beforeSequence ?? null
       const limit = params?.limit ?? 24
@@ -338,8 +321,9 @@ Object.assign(window, { rovai: {
       if (executionReadFailure && beforeSequence !== null) throw new Error('Fixture page offline')
       const end = (beforeSequence ?? executionThrough + 1) - 1
       const start = Math.max(1, end - limit + 1)
-      return { schemaVersion: 1, campId, agentRunId: executionRun.id, requestedBeforeSequence: beforeSequence,
-        nextBeforeSequence: start > 1 ? start : null, throughSequence: executionThrough, hasMore: start > 1,
+      return { schemaVersion: 2, campId, agentRunId: executionRun.id, requestedBeforeSequence: beforeSequence,
+        nextBeforeSequence: start > 1 ? start : null, throughSequence: executionThrough,
+        throughChangeSequence: executionThrough, runtimePhase: 'executing', hasMore: start > 1,
         evidence: Array.from({ length: end - start + 1 }, (_, offset) => {
           const item = windowEvidence(start + offset)
           return runningExecutionScenario && item.kind === 'narration'
@@ -347,11 +331,12 @@ Object.assign(window, { rovai: {
         }) }
     }
     if (method === 'agentRunExecution.changes') {
-      const after = params?.afterSequence ?? 0
+      const after = params?.afterChangeSequence ?? 0
       const end = Math.min(executionThrough, after + (params?.limit ?? 96))
       executionChanges.push(after)
-      return { schemaVersion: 1, campId, agentRunId: executionRun.id, requestedAfterSequence: after,
-        nextAfterSequence: end, throughSequence: executionThrough, hasMore: end < executionThrough,
+      return { schemaVersion: 2, campId, agentRunId: executionRun.id, requestedAfterChangeSequence: after,
+        nextAfterChangeSequence: end, throughSequence: executionThrough,
+        throughChangeSequence: executionThrough, runtimePhase: 'executing', hasMore: end < executionThrough,
         evidence: Array.from({ length: Math.max(0, end - after) }, (_, i) => windowEvidence(after + i + 1)), refreshedEvidence: [] }
     }
     if (method === 'agentRunEvidence.list') return { schemaVersion: 1, agentRunId: 'text-run',
@@ -376,41 +361,8 @@ Object.assign(window, { rovai: {
       if (textReadFailures-- > 0) throw new Error('Transient Blob read error')
       return { payload: { text: fullNarration } }
     }
+    if (method === 'skills.candidates') return { skills: [], errors: [] }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
-    if (method === 'camp.composerDraft.get') {
-      if (failDraftRead) throw new Error('Draft read unavailable')
-      return structuredClone(draft)
-    }
-    if (method === 'camp.pendingInputs.get') return structuredClone(pendingQueue)
-    if (method === 'camp.pendingInputs.edit') {
-      const command = params!.command!
-      pendingCalls.push(command.action.type)
-      if (returnGate) await returnGate
-      if (rejectReturn) return { status: 'rejected', code: 'pending_input.changed' }
-      const item = pendingQueue.items.find(entry => entry.id === command.pendingInputId)!
-      if (command.action.type === 'return_to_composer') {
-        if (command.action.expectedDraftRevision !== draft.revision) throw new Error('Wrong Draft revision')
-        draft = { ...draft, revision: draft.revision + 1, content: item.content, body: item.body,
-          attachments: item.attachments, quotes: item.quotes, replyIntent: item.replyIntent }
-        failDraftRead = failDraftReadAfterReturn
-      }
-      pendingQueue = { ...pendingQueue, items: pendingQueue.items.filter(entry => entry.id !== item.id) }
-      invalidatePending()
-      return { status: 'applied', code: 'pending_input.returned_to_composer', payload: { draftRevision: draft.revision } }
-    }
-    if (method === 'camp.composerDraft.startReply') {
-      repliedPublicMessageId = params?.replyToCampMessageId ?? null
-      draft = { ...draft, revision: draft.revision + 1 }
-      return draft
-    }
-    if (method === 'camp.composerDraft.save') {
-      pendingCalls.push('save_content')
-      if (failDraftSave) throw new Error('Draft save unavailable')
-      const content = params?.content ?? { version: 2, segments: [] }
-      draft = { ...draft, content, body: content.segments.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
-        revision: draft.revision + 1 }
-      return draft
-    }
     if (method === 'agentRunImages.read') return imageResultsById.get(params?.imageId ?? '') ?? imageResult
     throw new Error(`Unexpected fixture API: ${method}`)
   },
@@ -490,6 +442,7 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
       detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
       <CampWorkspace snapshot={snapshot} projectName="rovai-ai" agents={agents} busy={false} stopping={false}
+        initialComposerDraft={draft.attachments.length > 0 ? draft : null}
         messageHistory={messageHistory}
         onLoadEarlierMessages={async () => {
           current = { ...current, messages: [...current.messages, messages[60]] }
@@ -591,35 +544,6 @@ Object.assign(window, { campOpenTest: {
       executionEvidence: [] }
     reactRoot.render(<Fixture key={`failed-${placement}`} executionPlacement={placement} windowed />)
   },
-  showPendingQueue: () => {
-    pendingCalls.length = 0
-    pendingQueue = { campId, executionActive: true, editSession: null, items: ['B', 'C'].map((name, index) => ({
-      id: `pending-${name}`, campId, enqueueSequence: index + 1, revision: 1, state: 'queued',
-      body: name === 'B' ? 'B：请检查输入框和排队行为。' : 'C：继续执行下一条消息。',
-      content: { version: 2, segments: [{ kind: 'text', text: name === 'B' ? 'B：请检查输入框和排队行为。' : 'C：继续执行下一条消息。' }] },
-      attachments: [], quotes: [], replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null
-    })) }
-    current = { ...current, camp: { ...current.camp, title: '待发送消息移回输入框' },
-      tasks: [], turns: [], agentRuns: [], messageDeliveries: [], messages: messages.slice(-1) }
-    updateSnapshot(current)
-    invalidatePending()
-  },
-  holdPendingReturn: (reject = false, failRead = false) => {
-    rejectReturn = reject
-    failDraftReadAfterReturn = failRead
-    returnGate = new Promise<void>(resolve => { releaseReturn = resolve })
-  },
-  releasePendingReturn: () => { releaseReturn?.(); returnGate = null },
-  allowDraftRead: () => { failDraftRead = false; failDraftReadAfterReturn = false },
-  failDraftSave: (fail: boolean) => { failDraftSave = fail },
-  pendingState: () => ({
-    queue: pendingQueue.items.map(item => item.id), calls: pendingCalls, draft: structuredClone(draft),
-    text: element('#camp-message')?.textContent, editable: element('#camp-message')?.getAttribute('contenteditable'),
-    focused: document.activeElement === element('#camp-message'),
-    rowCount: document.querySelectorAll('.pending-input-row').length,
-    editingCount: document.querySelectorAll('.pending-input-row.is-editing, .pending-input-editor').length,
-    error: document.querySelector('.pending-input-notice')?.textContent ?? '',
-  }),
   showCurrentUserProfile: () => {
     current = { ...current, tasks: [], turns: [], agentRuns: [], messageDeliveries: [], timeline: [],
       agentRunImages: [], agentRunFileChanges: [],
@@ -680,7 +604,8 @@ Object.assign(window, { campOpenTest: {
     updateSnapshot(current)
   },
   messageGroupState: () => ({
-    copiedPublicText, repliedPublicMessageId,
+    copiedPublicText,
+    repliedPublicMessageId: loadLocalCampComposerDraft(campId)?.replyIntent?.replyToCampMessageId ?? null,
     overflow: document.documentElement.scrollWidth > innerWidth,
     messages: [...document.querySelectorAll<HTMLElement>('.public-agent-message')].map(node => {
       const content = node.querySelector<HTMLElement>('.message-surface')!
@@ -760,6 +685,13 @@ Object.assign(window, { campOpenTest: {
   }),
   failExecutionRead: (fail: boolean) => { executionReadFailure = fail },
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
+  remount: () => reactRoot.render(<Fixture key="local-draft-remount" />),
+  localDraftState: () => ({
+    body: loadLocalCampComposerDraft(campId)?.body ?? null,
+    text: element('#camp-message')?.textContent ?? null,
+    editable: element('#camp-message')?.getAttribute('contenteditable') ?? null,
+    pendingRows: document.querySelectorAll('.pending-input-row').length
+  }),
   openTask: () => element('.task-event-card').click(),
   closeTask: () => closeTask(),
   bookmark: () => {
@@ -802,7 +734,7 @@ Object.assign(window, { campOpenTest: {
   },
   showAttachmentSurfaces: (result: { displayName: string; mediaType: string; data: string }) => {
     installAttachmentSurfaceState(result)
-    updateSnapshot(current)
+    reactRoot.render(<Fixture key="attachment-surfaces" />)
   },
   setComposerText: (value: string) => {
     const editor = element('#camp-message')

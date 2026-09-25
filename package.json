@@ -56,6 +56,7 @@
     "test:command-view": "node --test scripts/lib/command-view.test.mjs",
     "test:channel-camp-naming": "node --test scripts/lib/channel-camp-naming.test.mjs",
     "test:camp-open-projection": "node --test scripts/lib/camp-open-projection.test.mjs",
+    "test:single-chat-pending": "node --test --test-name-pattern='Single Chat pending withdrawal' scripts/lib/single-chat-panel.test.mjs",
     "review:attachments": "node scripts/review-attachment-presentation.mjs",
     "test:execution-avatar-rail": "node --test --test-concurrency=1 scripts/lib/execution-avatar-rail.test.mjs scripts/lib/execution-state-transition.test.mjs",
     "test:notification-attention": "node --test scripts/lib/notification-attention.test.mjs",
@@ -66,7 +67,7 @@
     "test:file-preview-layout": "node --test scripts/lib/file-preview-layout.test.mjs",
     "test:file-reference-navigation": "node --test scripts/lib/file-reference-navigation.test.mjs",
     "test:runtime-model-picker": "node --test scripts/lib/runtime-model-picker.test.mjs",
-    "test:desktop:integration": "pnpm test:desktop-bridge && pnpm test:window-close && pnpm test:composer-input && pnpm test:composer-continuation && pnpm test:startup-presentation && pnpm test:navigation-shell && pnpm test:file-preview-layout && pnpm test:html-preview && pnpm test:file-reference-navigation && pnpm test:camp-fast-layout && pnpm test:camp-open-projection && pnpm test:execution-avatar-rail && pnpm test:approval-dock && pnpm test:notification-attention && pnpm test:capability-workspace && pnpm test:settings-workspace && pnpm test:runtime-model-picker && pnpm test:mission-board",
+    "test:desktop:integration": "pnpm test:desktop-bridge && pnpm test:window-close && pnpm test:composer-input && pnpm test:composer-continuation && pnpm test:startup-presentation && pnpm test:navigation-shell && pnpm test:file-preview-layout && pnpm test:html-preview && pnpm test:file-reference-navigation && pnpm test:camp-fast-layout && pnpm test:camp-open-projection && pnpm test:single-chat-pending && pnpm test:execution-avatar-rail && pnpm test:approval-dock && pnpm test:notification-attention && pnpm test:capability-workspace && pnpm test:settings-workspace && pnpm test:runtime-model-picker && pnpm test:mission-board",
     "test:zcode-owner": "node --test scripts/test-zcode-owner.mjs",
     "smoke:zcode-background": "node scripts/smoke-zcode-background.mjs",
     "test:core-startup": "cargo build -p rovai-core --bins && node --test scripts/lib/core-startup-availability.test.mjs",
@@ -260,6 +261,10 @@
         {
           "from": "out/web",
           "to": "web-ui"
+        },
+        {
+          "from": "skills",
+          "to": "skills"
         }
       ],
       "binaries": [
@@ -317,6 +322,10 @@
         {
           "from": "out/web",
           "to": "web-ui"
+        },
+        {
+          "from": "skills",
+          "to": "skills"
         }
       ],
       "artifactName": "Rovai-AI-${version}-${arch}.${ext}"

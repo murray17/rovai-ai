@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.68
 authority: decision-rationale
 lifecycle: historical
-last_updated: 2026-09-23
+last_updated: 2026-09-24
 ---
 
 # v1.68 版本决定

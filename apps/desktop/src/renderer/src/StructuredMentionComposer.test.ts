@@ -103,6 +103,12 @@ describe('StructuredMentionComposer V2', () => {
     expect(structuredSkillOptions(skills, '')).toEqual(skills)
   })
 
+  it('orders keyboard selection to match the Toolbox and Skills groups', () => {
+    const native = { ...skills[0], source: 'native' as const }
+    const toolbox = { ...skills[1], source: 'toolbox' as const }
+    expect(structuredSkillOptions([native, toolbox], '')).toEqual([toolbox, native])
+  })
+
   it('keeps the generic Enter handler limited to composition and line-break rules', () => {
     expect(shouldSubmitStructuredComposerOnEnter({
       key: 'Enter', shiftKey: false, isComposing: true

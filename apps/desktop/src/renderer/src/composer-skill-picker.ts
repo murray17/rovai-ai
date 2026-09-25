@@ -1,5 +1,6 @@
 import type {
   SkillDeliveryGroupView,
+  ComposerSkillCandidates,
   SkillOrigin,
   SkillView
 } from '@contracts'
@@ -9,6 +10,23 @@ export interface ComposerSkillOption {
   name: string
   description: string
   origin: SkillOrigin
+  source?: 'toolbox' | 'native'
+  sourceScope?: 'user' | 'project'
+  entryPath?: string
+  memberIds?: string[]
+}
+
+export function composerSkillsFromCandidates(candidates: ComposerSkillCandidates): ComposerSkillOption[] {
+  return candidates.skills.map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    origin: 'official',
+    source: skill.source,
+    sourceScope: skill.sourceScope,
+    entryPath: skill.entryPath,
+    memberIds: skill.memberIds
+  }))
 }
 
 /**

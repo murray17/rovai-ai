@@ -6,6 +6,7 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
   'remote',
   'general',
   'skills',
+  'toolbox',
   'mcp',
   'runtime',
   'channels',

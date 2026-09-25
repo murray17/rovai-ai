@@ -142,6 +142,7 @@ impl Core {
                 };
                 search.activate_for_runtime_commands();
                 *self.runtime_search_environment.write().await = Arc::new(search);
+                self.native_skill_discovery.invalidate_cache();
                 // No fleet invalidation: a live host retains its captured process environment.
                 drop(_update);
                 self.run_runtime_discovery().await;

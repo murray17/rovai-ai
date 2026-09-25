@@ -87,6 +87,7 @@ impl Core {
             )?;
         search.activate_for_runtime_commands();
         *self.runtime_search_environment.write().await = search.clone();
+        self.native_skill_discovery.invalidate_cache();
         Ok(search)
     }
 

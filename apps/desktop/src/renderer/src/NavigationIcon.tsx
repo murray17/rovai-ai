@@ -6,6 +6,7 @@ export type NavigationIconName =
   | 'arrow-left'
   | 'bell-ring'
   | 'blocks'
+  | 'briefcase-business'
   | 'brain'
   | 'calendar-clock'
   | 'chart-line'
@@ -73,6 +74,8 @@ function navigationIconPaths(name: NavigationIconName): React.JSX.Element {
       return <><path d="m12 3-1.1 3.4a2 2 0 0 1-1.3 1.3L6.2 8.8l3.4 1.1a2 2 0 0 1 1.3 1.3L12 14.6l1.1-3.4a2 2 0 0 1 1.3-1.3l3.4-1.1-3.4-1.1a2 2 0 0 1-1.3-1.3Z" /><path d="m19 15-.6 1.8a1.2 1.2 0 0 1-.8.8l-1.8.6 1.8.6a1.2 1.2 0 0 1 .8.8l.6 1.8.6-1.8a1.2 1.2 0 0 1 .8-.8l1.8-.6-1.8-.6a1.2 1.2 0 0 1-.8-.8Z" /><path d="m5 15-.45 1.3a1 1 0 0 1-.65.65l-1.3.45 1.3.45a1 1 0 0 1 .65.65L5 19.8l.45-1.3a1 1 0 0 1 .65-.65l1.3-.45-1.3-.45a1 1 0 0 1-.65-.65Z" /></>
     case 'blocks':
       return <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="8.5" y="14" width="7" height="7" rx="1.5" /><path d="M6.5 10v2h11v-2" /><path d="M12 12v2" /></>
+    case 'briefcase-business':
+      return <><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18M10 12v2h4v-2" /></>
     case 'cpu':
       return <><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" rx="1" /><path d="M9 1v3" /><path d="M15 1v3" /><path d="M9 20v3" /><path d="M15 20v3" /><path d="M20 9h3" /><path d="M20 14h3" /><path d="M1 9h3" /><path d="M1 14h3" /></>
     case 'radio-tower':

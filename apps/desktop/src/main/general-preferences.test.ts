@@ -190,7 +190,7 @@ describe('general preferences', () => {
 
     await Promise.all([
       store.setStartupLocationMode('quick_chat'),
-      store.setLastSettingsSection('runtime'),
+      store.setLastSettingsSection('toolbox'),
       store.setExecutionConsolePlacement('bottom'),
       store.setWorldMapEnabled(false),
       store.setStartupLocationMode('last_location')
@@ -199,7 +199,7 @@ describe('general preferences', () => {
     expect(store.get()).toEqual({
       schemaVersion: 4,
       startupLocationMode: 'last_location',
-      lastSettingsSection: 'runtime',
+      lastSettingsSection: 'toolbox',
       executionConsolePlacement: 'bottom',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,

@@ -671,8 +671,9 @@ export const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     key: 'capabilities',
     label: '能力',
     items: [
-      { key: 'skills', icon: 'sparkles', label: 'Skills' },
       { key: 'mcp', icon: 'blocks', label: 'MCP' },
+      { key: 'skills', icon: 'sparkles', label: 'Skills' },
+      { key: 'toolbox', icon: 'briefcase-business', label: '工具箱' },
       { key: 'runtime', icon: 'cpu', label: '运行时' },
       { key: 'remote', icon: 'monitor-smartphone', label: '远程连接' },
       { key: 'channels', icon: 'radio-tower', label: '渠道' }

@@ -79,7 +79,7 @@ export type FilePreviewAuthorityResult =
   | {
       kind: 'file_target'
       campId: string
-      sourceKind: 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence' | 'run_activity_file'
+      sourceKind: 'skill_reference' | 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence' | 'run_activity_file'
       sourceIdentity: string
       rootPath: string
       basePath: string

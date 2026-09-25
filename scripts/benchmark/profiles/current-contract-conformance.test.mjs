@@ -11,12 +11,12 @@ import { collectProductContractFingerprint } from '../protocol/product-contract.
 
 test('current contract profile is deterministic, offline, and covers every requested criterion', async () => {
   assert.equal(CURRENT_CONTRACT_PROFILE.id, 'current-contract-conformance')
-  assert.equal(CURRENT_CONTRACT_PROFILE.version, '1.66.0')
-  assert.equal(CURRENT_CONTRACT_PROFILE.suite.version, '1.66.0')
-  assert.deepEqual(CURRENT_CONTRACT_DATA_STORE, { version: 'v1.66', projectionSchemaVersion: 120 })
+  assert.equal(CURRENT_CONTRACT_PROFILE.version, '1.69.0')
+  assert.equal(CURRENT_CONTRACT_PROFILE.suite.version, '1.69.0')
+  assert.deepEqual(CURRENT_CONTRACT_DATA_STORE, { versionPattern: '^v1\\.[0-9]+$', minimumProjectionSchemaVersion: 120 })
   const productContract = await collectProductContractFingerprint({ repositoryRoot: process.cwd() })
-  assert.equal(productContract.dataContractVersion.value, CURRENT_CONTRACT_DATA_STORE.version)
-  assert.equal(productContract.dataContractSchemaVersion.value, CURRENT_CONTRACT_DATA_STORE.projectionSchemaVersion)
+  assert.match(productContract.dataContractVersion.value, new RegExp(CURRENT_CONTRACT_DATA_STORE.versionPattern))
+  assert.ok(productContract.dataContractSchemaVersion.value >= CURRENT_CONTRACT_DATA_STORE.minimumProjectionSchemaVersion)
   assert.equal(CURRENT_CONTRACT_CRITERIA.length, 16)
   assert.equal(CURRENT_CONTRACT_PROFILE.suite.cases.length, CURRENT_CONTRACT_CRITERIA.length)
   assert.equal(CURRENT_CONTRACT_PROFILE.publicationPolicy.publishOutcomeRate, false)

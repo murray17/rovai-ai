@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: unified-rust-host
-last_updated: 2026-09-22
+last_updated: 2026-09-25
 ---
 
 # 统一 Rust Host
@@ -162,3 +162,6 @@ Desktop 从安装包明确路径启动自己的 Host，随整个 Desktop 安装�
 独立 Server 的更新状态、下载验证与重启交接由 Rust Host 的 Server updater 拥有，Web 只提供已认证的封闭动作。
 Desktop 托管页只读展示版本说明，不提供 Electron updater 代理。Server Web/Mobile 与 Desktop 复用同一更新页面及状态，
 下载资产按各自发布通道区分；字段、停机与失败边界见 [Host Web v2](../contracts/host-web-v2.md#login-presentation-and-server-updates)。
+Server 成功检查后按版本坐标归属发布信息：等于运行版本的日志进入 `currentRelease`，严格高于运行版本的
+候选进入 `availableRelease`，更旧版本不成为候选；失败检查保留已知的新版本。Web 适配器也按版本身份
+归一化旧 Server 的快照，日志页签只选择阅读内容，不决定下载或官方发布页链接的目标。

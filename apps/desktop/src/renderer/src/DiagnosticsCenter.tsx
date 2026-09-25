@@ -23,7 +23,7 @@ type Notice = {
 }
 
 export type DiagnosticAction =
-  | { kind: 'repair_skill'; label: string }
+  | { kind: 'cleanup_legacy_skill'; label: string }
   | { kind: 'repair_mcp'; label: string }
   | { kind: 'open_mcp'; label: string }
   | { kind: 'retry_runtime'; label: string; runtimeKind: AdapterKind }
@@ -40,6 +40,24 @@ const STATUS_META: Record<DiagnosticStatus, { label: string }> = {
   ok: { label: '正常' },
   attention: { label: '需要处理' },
   unknown: { label: '暂时无法确认' }
+}
+
+type LegacyCleanupResult = {
+  removed: number
+  alreadyMissing: number
+  retainedActiveRun: number
+  retainedInaccessible: number
+  retainedUnverified: number
+  remaining: number
+}
+
+function legacyCleanupMessage(result: LegacyCleanupResult): string {
+  const retained = [
+    result.retainedActiveRun ? `运行中 ${result.retainedActiveRun} 个` : null,
+    result.retainedInaccessible ? `不可访问 ${result.retainedInaccessible} 个` : null,
+    result.retainedUnverified ? `归属无法确认 ${result.retainedUnverified} 个` : null
+  ].filter(Boolean)
+  return `已清理 ${result.removed} 个旧入口${result.alreadyMissing ? `，移除 ${result.alreadyMissing} 条失效记录` : ''}。${retained.length ? `已保留：${retained.join('、')}。` : ''}`
 }
 
 export function DiagnosticsCenter({
@@ -59,6 +77,7 @@ export function DiagnosticsCenter({
   const [initialError, setInitialError] = useState<string | null>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [legacyCleanupResult, setLegacyCleanupResult] = useState<LegacyCleanupResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -147,13 +166,17 @@ export function DiagnosticsCenter({
     setRepairingId(check.id)
     setNotice(null)
     setRecoveryError(null)
+    if (action.kind === 'cleanup_legacy_skill') setLegacyCleanupResult(null)
     try {
-      if (action.kind === 'repair_skill') {
-        const result = await client.request<StoredCommandResult>('skills.reconcile', {
+      let cleanupResult: LegacyCleanupResult | null = null
+      if (action.kind === 'cleanup_legacy_skill') {
+        const result = await client.request<StoredCommandResult>('skills.cleanupLegacyEntries', {
           commandId: newCommandId(),
           command: {}
         })
         assertApplied(result)
+        cleanupResult = result.payload as LegacyCleanupResult
+        setLegacyCleanupResult(cleanupResult)
       } else if (action.kind === 'repair_mcp') {
         await client.request('mcp.config.repairPermissions')
       } else {
@@ -168,8 +191,10 @@ export function DiagnosticsCenter({
       if (rechecked?.status === 'ok') {
         setNotice({
           tone: 'success',
-          title: action.kind === 'repair_skill' ? 'Skill 已重新同步' : action.kind === 'repair_mcp' ? 'MCP 权限已修复' : 'Runtime 重新检测完成',
-          detail: '复检已确认该项目恢复正常；摘要和完整结果已同步更新。'
+          title: action.kind === 'cleanup_legacy_skill' ? '旧版 Skill 入口已清理' : action.kind === 'repair_mcp' ? 'MCP 权限已修复' : 'Runtime 重新检测完成',
+          detail: action.kind === 'cleanup_legacy_skill' && cleanupResult
+            ? legacyCleanupMessage(cleanupResult)
+            : '复检已确认该项目恢复正常；摘要和完整结果已同步更新。'
         })
       } else if (rechecked?.status === 'unknown') {
         setNotice({
@@ -181,10 +206,16 @@ export function DiagnosticsCenter({
         setNotice({
           tone: 'attention',
           title: '操作完成，但问题仍然存在',
-          detail: '复检没有确认恢复正常。诊断详情已更新，请按新的原因继续处理。'
+          detail: action.kind === 'cleanup_legacy_skill'
+            ? '未确认的旧入口已保留；处理状态显示在同一问题中。'
+            : '复检没有确认恢复正常。诊断详情已更新，请按新的原因继续处理。'
         })
       }
     } catch (error) {
+      if (action.kind === 'cleanup_legacy_skill') {
+        try { setReport(await readReport(client)) }
+        catch { /* Keep the last successful report when a fresh check is unavailable. */ }
+      }
       setNotice({
         tone: 'attention',
         title: '操作未完成',
@@ -267,6 +298,7 @@ export function DiagnosticsCenter({
                     busy={repairingId === check.id}
                     disabled={disabled}
                     onAction={() => void executeAction(check)}
+                    legacyCleanupResult={check.id === 'legacy-skill-entries' ? legacyCleanupResult : null}
                   />
                 ))}</div>}
           </section>
@@ -326,27 +358,30 @@ function DiagnosticIssue({
   action,
   busy,
   disabled,
-  onAction
+  onAction,
+  legacyCleanupResult
 }: {
   check: DiagnosticCheck
   action: DiagnosticAction | null
   busy: boolean
   disabled: boolean
   onAction(): void
+  legacyCleanupResult: LegacyCleanupResult | null
 }): React.JSX.Element {
   const copy = diagnosticIssueCopy(check)
   return (
     <article className="diagnostics-issue">
       <span className="diagnostics-issue-mark" aria-label="需要处理"><DiagnosticStatusIcon status="attention" /></span>
       <div className="diagnostics-issue-copy">
-        <div><h3>{copy.title}</h3><span>{action?.kind.startsWith('repair_') ? '安全修复' : '用户操作'}</span></div>
+        <div><h3>{copy.title}</h3><span>{action?.kind.startsWith('repair_') || action?.kind === 'cleanup_legacy_skill' ? '安全修复' : '用户操作'}</span></div>
         <p>{copy.reason}</p>
-        <small><strong>影响：</strong>{copy.impact}</small>
+        <small>{check.id === 'legacy-skill-entries' ? copy.impact : <><strong>影响：</strong>{copy.impact}</>}</small>
+        {legacyCleanupResult && <p className="diagnostics-cleanup-status" role="status">{legacyCleanupMessage(legacyCleanupResult)}</p>}
       </div>
       <div className="diagnostics-issue-action">
-        {action && <button className={action.kind.startsWith('repair_') ? 'primary-button compact' : 'quiet-button compact'} type="button" onClick={onAction} disabled={disabled}>{busy ? '正在处理…' : action.label}</button>}
+        {action && <button className={action.kind.startsWith('repair_') || action.kind === 'cleanup_legacy_skill' ? 'primary-button compact' : 'quiet-button compact'} type="button" onClick={onAction} disabled={disabled}>{busy ? '正在处理…' : action.label}</button>}
       </div>
-      <DiagnosticDetails check={check} />
+      {check.id !== 'legacy-skill-entries' && <DiagnosticDetails check={check} />}
     </article>
   )
 }
@@ -444,14 +479,7 @@ function DiagnosticGlyph({ name }: { name: 'shield' | 'close' | 'refresh' | 'che
 }
 
 export function diagnosticActionForCheck(check: DiagnosticCheck): DiagnosticAction | null {
-  if (check.id === 'skill-projections' && check.status === 'attention') {
-    return {
-      kind: 'repair_skill',
-      label: hasIssueCode(check, 'broken_or_unavailable_symlink')
-        ? '清理旧链接并重新同步'
-        : '重新同步 Skill'
-    }
-  }
+  if (check.id === 'legacy-skill-entries' && check.status === 'attention') return { kind: 'cleanup_legacy_skill', label: '清理旧入口' }
   if (check.id === 'mcp-config' && check.code === 'mcp_config_permissions_too_broad') return { kind: 'repair_mcp', label: "修复权限" }
   if (check.id === 'mcp-config' && check.status === 'attention') return { kind: 'open_mcp', label: '前往 MCP 设置' }
   if (check.subjectKind === 'runtime' && check.subjectId && check.status === 'attention') return { kind: 'open_runtime', label: '前往 Agent 运行时', runtimeKind: check.subjectId as AdapterKind }
@@ -462,6 +490,7 @@ export function diagnosticActionForCheck(check: DiagnosticCheck): DiagnosticActi
 }
 
 function resultActionForCheck(check: DiagnosticCheck): DiagnosticAction | null {
+  if (check.id === 'legacy-skill-entries') return null
   return check.status === 'ok' ? null : diagnosticActionForCheck(check)
 }
 
@@ -473,15 +502,10 @@ export function diagnosticChecksForFilter(
 }
 
 export function diagnosticIssueCopy(check: DiagnosticCheck): { title: string; reason: string; impact: string } {
-  if (check.id === 'skill-projections' && hasOnlyIssueCode(check, 'broken_or_unavailable_symlink')) return {
-    title: 'Skill 投影包含旧的断开链接',
-    reason: `${factValue(check, 'issueCount') ?? '部分'} 个受管入口仍指向已经移除的旧 Skill Revision。`,
-    impact: '影响之后启动的 AgentRun；修复只清理已识别的旧 .lumen 断链，其他项目内容不会被覆盖。'
-  }
-  if (check.id === 'skill-projections') return {
-    title: 'Skill 投影需要重新同步',
-    reason: `${factValue(check, 'issueCount') ?? '部分'} 个受管投影与当前 Library Revision 不一致。`,
-    impact: '影响之后启动的 AgentRun；当前运行不会热切换，项目自有同名内容不会被覆盖。'
+  if (check.id === 'legacy-skill-entries') return {
+    title: '旧版 Skill 入口待清理',
+    reason: '项目目录中留有旧版 Rovai 派发的 Skill 入口，可以统一清理。',
+    impact: '仅清理确认由 Rovai 派发的旧入口；运行中或无法确认的入口会自动跳过。'
   }
   if (check.id === 'mcp-config' && check.code === 'mcp_config_permissions_too_broad') return {
     title: 'MCP 配置权限不安全',
@@ -518,7 +542,7 @@ export function diagnosticCheckDetail(check: DiagnosticCheck): string {
     const version = factValue(check, 'reportedVersion')
     return `${STATUS_META[check.status].label}${version ? ` · ${version}` : ''}${check.stale ? ' · 保留最近成功证据' : ''}`
   }
-  if (check.id === 'skill-projections') return check.status === 'ok' ? '所有受管投影与当前 Revision 一致' : `${factValue(check, 'issueCount') ?? '—'} 个投影需要处理`
+  if (check.id === 'legacy-skill-entries') return check.status === 'ok' ? '旧版 Rovai 派发入口已清理' : `发现 ${factValue(check, 'entryCount') ?? '—'} 个旧版派发入口或记录`
   if (check.id === 'mcp-config') return check.code === 'mcp_config_not_initialized' ? '尚未初始化 · 无外部 MCP' : check.status === 'ok' ? `配置有效 · ${factValue(check, 'serverCount') ?? '0'} 个 Server` : STATUS_META[check.status].label
   if (check.id === 'database') return check.status === 'ok' ? 'WAL · quick_check 通过' : STATUS_META[check.status].label
   if (check.id === 'git') return check.status === 'ok' ? factValue(check, 'version') ?? '可用' : '当前 PATH 中不可用'
@@ -544,29 +568,13 @@ function factValue(check: DiagnosticCheck, key: string): string | null {
   return check.facts.find((fact) => fact.key === key)?.value ?? null
 }
 
-function issueCodes(check: DiagnosticCheck): string[] {
-  return (factValue(check, 'issueCodes') ?? '')
-    .split(',')
-    .map((code) => code.trim())
-    .filter(Boolean)
-}
-
-function hasIssueCode(check: DiagnosticCheck, code: string): boolean {
-  return issueCodes(check).includes(code)
-}
-
-function hasOnlyIssueCode(check: DiagnosticCheck, code: string): boolean {
-  const codes = issueCodes(check)
-  return codes.length === 1 && codes[0] === code
-}
-
 function factLabel(key: string): string {
   const labels: Record<string, string> = {
     version: '版本',
     quickCheck: 'quick_check',
     quickCheckResultCount: '异常结果数',
     issueCount: '问题数',
-    issueCodes: '问题代码',
+    entryCount: '旧入口数',
     serverCount: 'Server 数',
     expectedMode: '期望权限',
     usedByMemberCount: '使用队员数',

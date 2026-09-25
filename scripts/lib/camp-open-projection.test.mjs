@@ -24,7 +24,7 @@ test('formal Camp entry readiness preserves cached-preview execution choices', {
 
 test('command interaction keeps disclosure anchors through async results and accessible states', { timeout: 120_000 }, t => runFixture(t, '--command-interaction'))
 
-test('pending edit withdraws into the ordinary Composer and fences failed or uncertain returns', { timeout: 60_000 }, t => runFixture(t, '--pending-return'))
+test('public Camp draft survives projection refresh and remount without a private pending queue', { timeout: 60_000 }, t => runFixture(t, '--composer-local-draft'))
 
 async function runFixture(t, mode = '--camp-open') {
   if (!admitElectronIntegrationTest(t)) return

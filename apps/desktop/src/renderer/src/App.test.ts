@@ -136,6 +136,7 @@ import {
   executionDeliveryQueueBatches,
   executionQueueBatches,
   executionRunInputMessageIds,
+  executionMessageSummary,
   executionWorkspaceEntrySelection,
   firstSubmittedAgentRun,
   formatStopElapsed,
@@ -3224,6 +3225,7 @@ describe('task event projections', () => {
     expect(applicationGroup.indexOf('<strong>通用</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>外观</strong>'))
     expect(applicationGroup.indexOf('<strong>外观</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>提醒</strong>'))
     expect(capabilitiesGroup).toContain('<strong>Skills</strong>')
+    expect(capabilitiesGroup).toContain('<strong>工具箱</strong>')
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
     expect(capabilitiesGroup).toContain('<strong>运行时</strong>')
     expect(capabilitiesGroup).toContain('<strong>远程连接</strong>')
@@ -3232,8 +3234,9 @@ describe('task event projections', () => {
     expect(capabilitiesGroup).toContain('data-navigation-icon="blocks"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="cpu"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="radio-tower"')
-    expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
-    expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>运行时</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Skills</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>工具箱</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>工具箱</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>运行时</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>运行时</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>远程连接</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>远程连接</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>渠道</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
@@ -3267,6 +3270,7 @@ describe('task event projections', () => {
       remote: '远程连接',
       general: '通用',
       skills: 'Skills',
+      toolbox: '工具箱',
       mcp: 'MCP',
       runtime: '运行时',
       channels: '渠道',
@@ -3278,9 +3282,12 @@ describe('task event projections', () => {
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
       const markup = renderToStaticMarkup(createElement(SettingsView, { remoteConnection: createElement(RemoteConnectionStatus, { origin: 'http://fixture.invalid', state: 'live', onLogout: () => undefined }), preferencesApi: {} as import('@contracts').GeneralPreferencesApi, ...baseProps, section }))
-      if (section === 'skills' || section === 'mcp') {
+      if (section === 'mcp') {
         expect(markup).toContain(`<h1>${heading}<span>`)
         expect(markup.match(/class="capability-library-heading"/g)).toHaveLength(1)
+      } else if (section === 'skills' || section === 'toolbox') {
+        expect(markup).toContain(`<h1>${heading}</h1>`)
+        expect(markup).toContain('class="rebuilt-skills-page"')
       } else {
         expect(markup).toContain(`<h1>${heading}</h1>`)
         expect(markup.match(/class="settings-page-heading"/g)).toHaveLength(1)
@@ -4574,6 +4581,21 @@ describe('task event projections', () => {
       inspectorVisible: false
     }))
     expect(plannedStoppedMarkup).toContain('已停止')
+  })
+
+  it('keeps Run titles stable when their source message is outside the loaded page', () => {
+    const message = { body: '已载入的消息正文', attachments: [] }
+    const run = { inputSummary: '早期触发消息', purpose: 'Handle the claimed Camp message batch' }
+    expect(executionMessageSummary(null, run)).toBe('早期触发消息')
+    expect(executionMessageSummary(message, run)).toBe('早期触发消息')
+    // A null summary is authoritative; cached message text must not revive it.
+    expect(executionMessageSummary(message, { ...run, inputSummary: null }))
+      .toBe(run.purpose)
+    expect(executionMessageSummary(null, { ...run, inputSummary: 'Message withdrawn' }))
+      .toBe('Message withdrawn')
+    // Older projections without the additive field retain their existing path.
+    expect(executionMessageSummary(message, { ...run, inputSummary: undefined }))
+      .toBe(message.body)
   })
 
   it('labels the execution drawer with the member and configured Runtime product', () => {

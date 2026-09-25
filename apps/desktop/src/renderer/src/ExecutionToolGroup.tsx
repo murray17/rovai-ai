@@ -6,7 +6,7 @@ import { RunningText } from './RunningText'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { exactMutationDiffLines, inlineDiffLines } from './file-changes-presentation'
-import { openAgentRunActivityFilePreview } from './agent-run-file-preview'
+import { openAgentRunActivityFilePreview, runFileOperationEvidencePath } from './agent-run-file-preview'
 import { readErrorMessage } from './error-message'
 import {
   activityStatusForAgentRun,
@@ -45,17 +45,25 @@ export function isPresentableExecutionEvidence(
 
 export function selectCompletePresentableExecutionEvidence(
   evidence: AgentRunExecutionEvidenceView[]
-): ReturnType<typeof selectCompleteExecutionEvidence<PresentableExecutionEvidence>> {
+): ReturnType<typeof selectCompleteExecutionEvidence<PresentableExecutionEvidence>> & {
+  byFileOperationToolId: Map<string, PresentableExecutionEvidence>
+} {
   // Deferred payloads, permanently bounded output and Canonical diffs need their
   // exact Evidence identity even when the saved result projection is already inline.
-  return selectCompleteExecutionEvidence(
-    evidence
-      .filter((item) => item.isTruncated || item.outputTruncated === true || item.canonical?.diffProjection != null)
-      .filter(isPresentableExecutionEvidence)
-  )
+  const presentable = evidence.filter(isPresentableExecutionEvidence)
+  const selected = selectCompleteExecutionEvidence(presentable.filter((item) =>
+    item.isTruncated || item.outputTruncated === true || item.canonical?.diffProjection != null
+      || runFileOperationEvidencePath(item) !== null
+  ))
+  // A later bounded tool result may be preferred for output display. Keep the
+  // terminal file-operation Evidence separately so its path still has an identity.
+  const byFileOperationToolId = selectCompleteExecutionEvidence(
+    presentable.filter((item) => runFileOperationEvidencePath(item) !== null)
+  ).byToolId
+  return { ...selected, byFileOperationToolId }
 }
 
-type ToolResultLoadStatus = 'idle' | 'loading' | 'ready' | 'failed'
+type ToolResultLoadStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'failed'
 
 interface ToolResultViewState {
   evidenceId: string | null
@@ -201,14 +209,11 @@ function ToolCallDetail({
         response.payload,
         completeEvidence.canonical
       )
-      if (fullText === null) {
-        throw new Error('证据中没有可展示的公开结果')
-      }
       if (requestSequence.current !== sequence) return
       setResult({
         evidenceId: completeEvidence.id,
-        status: 'ready',
-        text: fullText,
+        status: fullText === null ? 'empty' : 'ready',
+        text: fullText ?? '',
         error: null
       })
     } catch (error) {
@@ -237,6 +242,8 @@ function ToolCallDetail({
     if (!restoreFocusAfterLoad.current) return undefined
     const target = result.status === 'ready'
       ? resultRef.current
+      : result.status === 'empty'
+        ? summaryRef.current
       : result.status === 'failed'
         ? retryRef.current
         : null
@@ -278,6 +285,9 @@ function ToolCallDetail({
           <span className="tool-result-spinner" aria-hidden="true" />
           <span>正在读取{resultLabel}…</span>
         </div>
+      )}
+      {result.status === 'empty' && (
+        <div className="tool-result-state" role="status">没有可展示的公开结果。</div>
       )}
       {result.status === 'failed' && (
         <div className="tool-result-state is-error" role="alert">
@@ -347,6 +357,7 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
       campId,
       evidence: completeEvidence,
       path: change.path,
+      allowLegacyWorkspaceFallback: true,
       onError: onFileOpenError
     })
   }
@@ -431,10 +442,11 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
   )
 }
 
-export function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
+export function FileOperationRow({ campId, step, runStatus, completeEvidence, onFileOpenError }: {
   campId: string
   step: ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }
   runStatus: AgentRunView['status']
+  completeEvidence?: PresentableExecutionEvidence
   onFileOpenError(message: string): void
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
@@ -443,17 +455,9 @@ export function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
   const verb = operationKind === 'read' ? '阅读' : changeKind === 'add' ? '新增' : '编辑'
   const status = activityStatusForAgentRun(step.status, runStatus)
   const openFile = async (): Promise<void> => {
-    if (!filePreview) {
-      onFileOpenError('无法打开该文件')
-      return
-    }
-    const outcome = await filePreview.open(
-      { kind: 'camp_workspace', campId, rawReference: path },
-      undefined,
-      undefined,
-      { commitOnSuccess: true, previewOnly: true }
-    )
-    if (outcome.kind !== 'preview') onFileOpenError('无法打开该文件')
+    await openAgentRunActivityFilePreview({
+      filePreview, campId, evidence: completeEvidence, path, onError: onFileOpenError
+    })
   }
   return (
     <div
@@ -727,6 +731,7 @@ export function ToolActivityGroup({
   runStatus: AgentRunView['status']
   completeEvidence: {
     byToolId: Map<string, PresentableExecutionEvidence>
+    byFileOperationToolId?: Map<string, PresentableExecutionEvidence>
   }
   onFileOpenError(message: string): void
 }): JSX.Element {
@@ -823,6 +828,7 @@ export function ToolActivityGroup({
                 campId={campId}
                 step={step as ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }}
                 runStatus={runStatus}
+                completeEvidence={completeEvidence.byFileOperationToolId?.get(step.id)}
                 onFileOpenError={onFileOpenError}
               />
             )

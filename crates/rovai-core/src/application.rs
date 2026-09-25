@@ -178,7 +178,9 @@ use rovai_core::{
         AgentRunExecutionEvidence, ExecutionEvidenceService, PreparedRuntimeEvidence,
         RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES, RecordedExecutionEvidence,
     },
-    file_preview_authority::{ResolveFilePreviewSourceParams, resolve_file_preview_source},
+    file_preview_authority::{
+        ResolveFilePreviewSourceParams, resolve_file_preview_source, resolve_skill_preview_source,
+    },
     git,
     local_attachment_source::{
         LocalAttachmentFailure, LocalAttachmentOwnerLocator, load_agent_run_source_attachments,
@@ -276,8 +278,8 @@ use rovai_core::{
         SetSkillGroupAssignmentsCommand, SkillContentRequest, SkillLibraryService,
     },
     skill_projection::{
-        PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionGateBusy,
-        SkillProjectionReconciler,
+        CleanupLegacySkillEntriesCommand, PreparedSkillExposure, ReconcileSkillProjectionsCommand,
+        SkillProjectionGateBusy, SkillProjectionReconciler,
     },
     storage_layout::CampOutputDirectory,
     team_tool::{
@@ -1354,6 +1356,36 @@ struct SkillIdParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativeSkillsListParams {
+    adapter_kind: String,
+    #[serde(default)]
+    refresh: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampSkillCandidatesParams {
+    camp_id: String,
+    #[serde(default)]
+    refresh: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativeSkillReadParams {
+    skill_id: String,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ToolboxReadParams {
+    skill_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SyncSkillProjectAccessParams {
     removed_execution_roots: Vec<String>,
 }
@@ -2081,7 +2113,6 @@ struct Core {
     database: Mutex<Database>,
     subsystems: CoreSubsystems,
     subsystem_initialization: Mutex<SubsystemInitialization>,
-    startup_skill_execution_roots: Vec<String>,
     removed_skill_project_roots: RemovedSkillProjectRoots,
     startup_pending_camp_ids: Vec<String>,
     builtin_tool_listener: Mutex<Option<LocalIpcListener>>,
@@ -2118,6 +2149,7 @@ struct Core {
     network_recovery_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
+    native_skill_discovery: Arc<rovai_core::native_skills::NativeSkillDiscovery>,
     mcp_config: Result<McpConfigStore>,
     mcp_projection: McpProjectionService,
     codex_cli: CodexCliRuntimeAdapter,
@@ -3881,46 +3913,44 @@ impl Core {
             let database = self.database.lock().await;
             checks.push(database_integrity_check(&database));
 
-            match SkillProjectionReconciler.stored_diagnostic_summary(&database) {
-                Ok((0, _)) => checks.push(
+            match SkillProjectionReconciler.legacy_entry_count(&database) {
+                Ok(0) => checks.push(
                     DiagnosticCheck::new(
-                        "skill-projections",
+                        "legacy-skill-entries",
                         DiagnosticGroup::ManagedContent,
-                        "skill_projections",
-                        "Skill 投影",
+                        "legacy_skill_entries",
+                        "旧版 Skill 入口",
                         DiagnosticStatus::Ok,
-                        "skill_projections_ready",
-                        "Stored Skill projection state has no pending reconciliation",
+                        "legacy_skill_entries_clear",
+                        "No legacy Skill dispatch entries remain",
                     )
                     .with_observed_at(&checked_at)
-                    .with_fact("issueCount", "0"),
+                    .with_fact("entryCount", "0"),
                 ),
-                Ok((issue_count, codes)) => {
-                    let codes = codes.into_iter().collect::<Vec<_>>().join(",");
+                Ok(entry_count) => {
                     checks.push(
                         DiagnosticCheck::new(
-                            "skill-projections",
+                            "legacy-skill-entries",
                             DiagnosticGroup::ManagedContent,
-                            "skill_projections",
-                            "Skill 投影",
+                            "legacy_skill_entries",
+                            "旧版 Skill 入口",
                             DiagnosticStatus::Attention,
-                            "skill_projections_need_reconcile",
-                            "Stored Skill projection state will reconcile on the next relevant Run or explicit repair",
+                            "legacy_skill_entries_recorded",
+                            "Legacy Rovai Skill dispatch entries await explicit cleanup",
                         )
                         .with_observed_at(&checked_at)
-                        .with_fact("issueCount", issue_count.to_string())
-                        .with_fact("issueCodes", codes),
+                        .with_fact("entryCount", entry_count.to_string()),
                     );
                 }
                 Err(_) => checks.push(
                     DiagnosticCheck::new(
-                        "skill-projections",
+                        "legacy-skill-entries",
                         DiagnosticGroup::ManagedContent,
-                        "skill_projections",
-                        "Skill 投影",
+                        "legacy_skill_entries",
+                        "旧版 Skill 入口",
                         DiagnosticStatus::Unknown,
-                        "skill_projection_audit_failed",
-                        "Stored Skill projection state could not be confirmed",
+                        "legacy_skill_entries_unavailable",
+                        "Legacy Skill dispatch records could not be read",
                     )
                     .with_observed_at(&checked_at),
                 ),
@@ -7895,6 +7925,219 @@ impl Core {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(self.skill_library.list(&database)?)?)
             }
+            "toolbox.list" => {
+                let managed =
+                    rovai_core::managed_skills::ManagedSkills::for_data_dir(&self.data_dir)?;
+                if let Err(error) = managed.sync() {
+                    eprintln!("managed Skill refresh unavailable: {error:#}");
+                }
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    managed.list_toolbox(database.connection())?,
+                )?)
+            }
+            "toolbox.read" => {
+                let params: ToolboxReadParams = serde_json::from_value(request.params.clone())?;
+                let managed =
+                    rovai_core::managed_skills::ManagedSkills::for_data_dir(&self.data_dir)?;
+                let content = tokio::task::spawn_blocking(move || {
+                    managed.read_toolbox_content(&params.skill_name)
+                })
+                .await??;
+                Ok(serde_json::json!({ "content": content }))
+            }
+            "toolbox.setMembers" => {
+                let params: UserCommandParams<
+                    rovai_core::managed_skills::SetToolboxMembersCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::managed_skills::set_toolbox_members(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "nativeSkills.list" => {
+                let params: NativeSkillsListParams =
+                    serde_json::from_value(request.params.clone())?;
+                let kind: rovai_core::agent_profile::AdapterKind = params.adapter_kind.parse()?;
+                let configuration = self
+                    .runtime_search_environment
+                    .read()
+                    .await
+                    .startup_configuration(kind);
+                let discovery = self.native_skill_discovery.clone();
+                let scan = tokio::task::spawn_blocking(move || {
+                    discovery.discover(kind, None, true, params.refresh, &configuration)
+                })
+                .await??;
+                let mut database = self.database.lock().await;
+                rovai_core::native_skills::remember_native_skill_references(
+                    &mut database,
+                    &scan.skills,
+                )?;
+                Ok(serde_json::to_value(scan)?)
+            }
+            "nativeSkills.read" => {
+                let params: NativeSkillReadParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let (name, path, canonical, scope, adapter): (String, String, String, String, String) = database.connection().query_row(
+                    "SELECT name, entry_path, canonical_path, source_scope, adapter_kind FROM native_skill_reference WHERE id = ?1",
+                    [&params.skill_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                ).context("Native Skill source is not known to this Core")?;
+                drop(database);
+                let id = params.skill_id;
+                let selected_path = params.path.unwrap_or_else(|| "SKILL.md".to_string());
+                let content = tokio::task::spawn_blocking(
+                    move || -> Result<rovai_core::skill::SkillContentView> {
+                        let entry = std::path::Path::new(&path);
+                        anyhow::ensure!(
+                            entry.is_absolute()
+                                && entry.file_name().is_some_and(|value| value == "SKILL.md"),
+                            "Native Skill entry is invalid"
+                        );
+                        let current = entry.canonicalize()?;
+                        anyhow::ensure!(
+                            current == std::path::Path::new(&canonical),
+                            "Native Skill source changed; refresh the list"
+                        );
+                        let adapter = adapter.parse()?;
+                        let observed = rovai_core::native_skills::read_native_skill(
+                            entry, &current, &scope, adapter,
+                        )?;
+                        anyhow::ensure!(
+                            observed.id == id && observed.name == name,
+                            "Native Skill source changed; refresh the list"
+                        );
+                        let root = current
+                            .parent()
+                            .context("Native Skill source has no directory")?;
+                        rovai_core::native_skills::read_native_skill_content(root, &selected_path)
+                    },
+                )
+                .await??;
+                Ok(serde_json::to_value(content)?)
+            }
+            "skills.candidates" => {
+                let params: CampSkillCandidatesParams =
+                    serde_json::from_value(request.params.clone())?;
+                let (project_path, roster, toolbox_rows, old_projection_paths) = {
+                    let database = self.database.lock().await;
+                    let project_path: String = database.connection().query_row(
+                        "SELECT COALESCE((SELECT working_directory FROM mission_workspace WHERE camp_id = camp.id AND state = 'ready' ORDER BY created_at DESC LIMIT 1), project_path) FROM camp WHERE id = ?1",
+                        [&params.camp_id], |row| row.get(0)
+                    ).context("Camp does not exist")?;
+                    let mut members = database.connection().prepare(
+                        "SELECT cm.agent_id, COALESCE(ap.selected_runtime_adapter_kind, ai.adapter_kind) FROM camp_member AS cm JOIN agent_profile AS ap ON ap.id = cm.agent_id LEFT JOIN adapter_installation AS ai ON ai.id = ap.default_runtime_installation_id WHERE cm.camp_id = ?1 AND cm.status = 'active' AND ap.profile_status <> 'removed' ORDER BY ap.member_order, cm.agent_id"
+                    )?;
+                    let roster = members
+                        .query_map([&params.camp_id], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    let mut toolbox = database.connection().prepare(
+                        "SELECT mts.skill_name, mts.agent_id FROM member_toolbox_skill AS mts JOIN camp_member AS cm ON cm.agent_id = mts.agent_id AND cm.camp_id = ?1 AND cm.status = 'active' ORDER BY mts.skill_name, mts.agent_id"
+                    )?;
+                    let toolbox_rows = toolbox
+                        .query_map([&params.camp_id], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    let mut old = database
+                        .connection()
+                        .prepare("SELECT entry_path FROM skill_projection_observation")?;
+                    let old_projection_paths = old
+                        .query_map([], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+                    (project_path, roster, toolbox_rows, old_projection_paths)
+                };
+                let project = PathBuf::from(project_path);
+                let project = project.is_absolute().then_some(project);
+                let mut candidates = BTreeMap::<String, Value>::new();
+                let mut member_sets = BTreeMap::<String, BTreeSet<String>>::new();
+                let mut errors = Vec::<String>::new();
+                let managed =
+                    rovai_core::managed_skills::ManagedSkills::for_data_dir(&self.data_dir)?;
+                if let Err(error) = managed.sync() {
+                    errors.push(format!("Rovai Skills: {error:#}"));
+                }
+                for (name, member_id) in toolbox_rows {
+                    let id = format!("rovai:{name}");
+                    member_sets.entry(id.clone()).or_default().insert(member_id);
+                    if !candidates.contains_key(&id) {
+                        let (entries, omitted) = managed.index([&name]);
+                        errors.extend(omitted);
+                        let description = entries
+                            .first()
+                            .map(|entry| entry.desc.clone())
+                            .unwrap_or_default();
+                        candidates.insert(id.clone(), json!({"id": id, "name": name, "description": description, "source": "toolbox", "entryPath": managed.entry_path(&name)?.to_string_lossy()}));
+                    }
+                }
+                let runtime_search = self.runtime_search_environment.read().await.clone();
+                let mut references = Vec::new();
+                for (member_id, kind) in roster {
+                    let Some(kind) = kind else {
+                        continue;
+                    };
+                    let Ok(kind) = kind.parse::<rovai_core::agent_profile::AdapterKind>() else {
+                        errors.push(format!("{member_id}: unknown Runtime {kind}"));
+                        continue;
+                    };
+                    let project_for_member = project.clone();
+                    let refresh = params.refresh;
+                    let configuration = runtime_search.startup_configuration(kind);
+                    let discovery = self.native_skill_discovery.clone();
+                    match tokio::task::spawn_blocking(move || {
+                        discovery.discover(
+                            kind,
+                            project_for_member.as_deref(),
+                            false,
+                            refresh,
+                            &configuration,
+                        )
+                    })
+                    .await?
+                    {
+                        Ok(scan) => {
+                            errors.extend(scan.errors);
+                            for skill in scan.skills {
+                                if old_projection_paths.contains(
+                                    &std::path::Path::new(&skill.entry_path)
+                                        .parent()
+                                        .unwrap_or_else(|| std::path::Path::new(""))
+                                        .to_string_lossy()
+                                        .into_owned(),
+                                ) {
+                                    continue;
+                                }
+                                let id = skill.id.clone();
+                                member_sets
+                                    .entry(id.clone())
+                                    .or_default()
+                                    .insert(member_id.clone());
+                                candidates.entry(id.clone()).or_insert_with(|| json!({"id": id, "name": skill.name, "description": skill.description, "source": "native", "sourceScope": skill.source_scope, "entryPath": skill.entry_path}));
+                                references.push(skill);
+                            }
+                        }
+                        Err(error) => errors.push(format!("{member_id}: {error:#}")),
+                    }
+                }
+                let mut database = self.database.lock().await;
+                rovai_core::native_skills::remember_native_skill_references(
+                    &mut database,
+                    &references,
+                )?;
+                let skills = candidates
+                    .into_iter()
+                    .map(|(id, mut value)| {
+                        value["memberIds"] =
+                            serde_json::to_value(member_sets.remove(&id).unwrap_or_default())?;
+                        Ok(value)
+                    })
+                    .collect::<Result<Vec<Value>>>()?;
+                Ok(json!({"skills": skills, "errors": errors}))
+            }
             "skills.get" => {
                 let params: SkillIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
@@ -8154,6 +8397,28 @@ impl Core {
                             "rootCount": reports.len(),
                             "reports": reports,
                         }),
+                        None,
+                    ))
+                })?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "skills.cleanupLegacyEntries" => {
+                let params: UserCommandParams<CleanupLegacySkillEntriesCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = user_command_envelope(params.command_id, params.command);
+                if let Some(replay) = {
+                    let database = self.database.lock().await;
+                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                } {
+                    return Ok(serde_json::to_value(replay.result)?);
+                }
+                let mut database = self.database.lock().await;
+                let report = SkillProjectionReconciler
+                    .cleanup_legacy_entries(&mut database, &self.skill_library)?;
+                let execution = DomainCommandGateway.execute(&mut database, &envelope, |_| {
+                    Ok(rovai_core::command::CommandHandlerResult::applied(
+                        "legacy_skill_entries_cleaned",
+                        serde_json::to_value(report)?,
                         None,
                     ))
                 })?;
@@ -9363,11 +9628,16 @@ impl Core {
                 let params: ResolveFilePreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                Ok(serde_json::to_value(resolve_file_preview_source(
-                    &database,
-                    &ManagedBlobStore::new(&self.data_dir),
-                    params,
-                )?)?)
+                let resolved = if params.kind == "skill_reference" {
+                    resolve_skill_preview_source(&database, &self.data_dir, &params)?
+                } else {
+                    resolve_file_preview_source(
+                        &database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        params,
+                    )?
+                };
+                Ok(serde_json::to_value(resolved)?)
             }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
@@ -16227,25 +16497,22 @@ async fn run_core(
         rovai_core::runtime::settle_legacy_retry_waits(&mut database)?;
         Ok(controlled)
     })();
-    let controlled_shutdown_recovery = match recovery {
-        Ok(recovery) => recovery,
-        Err(error) => {
-            write_startup_frame(
-                &output_target,
-                "failed",
-                Some("recovering_authority"),
-                json!({ "kind": "admitted" }),
-                Some(structured_startup_error(
-                    "authority_recovery_failed",
-                    format!("{error:#}"),
-                    true,
-                    json!({ "stage": "authority_recovery" }),
-                )),
-                None,
-            )?;
-            return Ok(());
-        }
-    };
+    if let Err(error) = recovery {
+        write_startup_frame(
+            &output_target,
+            "failed",
+            Some("recovering_authority"),
+            json!({ "kind": "admitted" }),
+            Some(structured_startup_error(
+                "authority_recovery_failed",
+                format!("{error:#}"),
+                true,
+                json!({ "stage": "authority_recovery" }),
+            )),
+            None,
+        )?;
+        return Ok(());
+    }
     // Freeze candidate IDs before exposing RPC, then recheck eligibility at
     // deletion time. A failed optional snapshot skips cleanup for this boot;
     // neither fail authority readiness nor rescan newly created Camps on retry.
@@ -16255,13 +16522,6 @@ async fn run_core(
             eprintln!("Startup pending Camp cleanup skipped: {error:#}");
             Vec::new()
         });
-    let startup_skill_execution_roots = controlled_shutdown_recovery
-        .fenced_agent_runs
-        .iter()
-        .map(|run| run.execution_root.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
     let skill_library = SkillLibraryService::deferred(skill_library_root);
     let mcp_config = mcp_config_path
         .map_or_else(McpConfigStore::default_path, Ok)
@@ -16293,7 +16553,6 @@ async fn run_core(
         database: Mutex::new(database),
         subsystems: CoreSubsystems::new(),
         subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
-        startup_skill_execution_roots,
         removed_skill_project_roots,
         startup_pending_camp_ids,
         builtin_tool_listener: Mutex::new(None),
@@ -16342,6 +16601,7 @@ async fn run_core(
         network_recovery_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
+        native_skill_discovery: Arc::new(rovai_core::native_skills::NativeSkillDiscovery::default()),
         mcp_config,
         mcp_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
@@ -24063,7 +24323,6 @@ mod tests {
             automation_scheduler_control: RwLock::new(None),
             subsystems: CoreSubsystems::ready_for_test(),
             subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
-            startup_skill_execution_roots: Vec::new(),
             removed_skill_project_roots: RemovedSkillProjectRoots::default(),
             startup_pending_camp_ids: Vec::new(),
             builtin_tool_listener: Mutex::new(None),
@@ -24099,6 +24358,9 @@ mod tests {
             network_recovery_notify: Notify::new(),
             pending_execution_recovery: Mutex::new(()),
             skill_library,
+            native_skill_discovery: Arc::new(
+                rovai_core::native_skills::NativeSkillDiscovery::default(),
+            ),
             mcp_config: Ok(mcp_config),
             mcp_projection,
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),

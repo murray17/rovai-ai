@@ -3,14 +3,14 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-delivery-and-agent-run-boundaries
 status: accepted
-last_updated: 2026-09-22
+last_updated: 2026-09-24
 ---
 
 # Public Camp Message、Delivery 与 AgentRun
 
 本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v23](../contracts/camp-message-send-v23.md)、
-[Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 29](../contracts/context-manifest-evidence-v29.md)
-与 [Camp History v9](../contracts/camp-history-v9.md)。Single Chat 不使用本主链。
+[Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 30](../contracts/context-manifest-evidence-v30.md)
+与 [Camp History v10](../contracts/camp-history-v10.md)。Single Chat 不使用本主链。
 
 ## 三类事实
 
@@ -58,9 +58,10 @@ Runtime 配置。Scheduler 获得执行资格时，在一个事务中：
 3. 读取当前 Runtime、模型、模式、工作区、工具与权限配置；
 4. 用本次 Runtime payload capacity 和正式 `RUN_INPUT.messages[]` 投影/序列化结果，从队首选取能完整交付的
    最大连续前缀，不跳过任何中间项；每条消息按自身 ID 投影正文、quotes、source attachments 与 Skills；
-5. 创建一个 batch AgentRun 和有序 AgentRunInput；
-6. 以最后一条输入作为 Run anchor，冻结 ContextManifest 和实际执行配置；
-7. 把所选 Delivery 原子改为 claimed 并绑定该 Run。
+5. 在同一事务内用上次有效接受边界、本次公屏尾、最终选择的全部输入 ID 和当前 Agent，对可见公屏历史做无分页上限的 `EXISTS`；排除已选输入和自己写的消息，查询失败回滚 claim；完整 `historyHint` 文本纳入容量预算；
+6. 创建一个 batch AgentRun 和有序 AgentRunInput，在 Run 内冻结该边界和额外消息判断；
+7. 以最后一条输入作为 Run anchor，冻结 ContextManifest 和实际执行配置；
+8. 把所选 Delivery 原子改为 claimed 并绑定该 Run。
 
 用户、Agent、Mission、Automation 与 Channel 来源使用同一规则，不形成批次边界。新消息不会追加到已冻结 Run。
 commit 前崩溃只留下 waiting Delivery；commit 后恢复同一 Run。设置变化影响未 claim 消息，不改变既有 Run。
@@ -83,17 +84,16 @@ completion 的协调循环。
 
 ## 可见性与撤回
 
-本地 Principal Composer 消息在所有目标仍未 claim 时可撤回，并对所有 Agent 隐藏。首个目标 claim 原子关闭撤回资格。
-此后已 claim 目标通过 `RUN_INPUT` 接收；仍未 claim 的目标继续被所有 Agent-facing 读取路径隔离；非目标 Agent 按普通
-公共规则读取。撤回成功取消所有 waiting Delivery 并擦除 Rovai 活跃数据中的原文；人类时间线占位不是 Agent MessageView。
+本地 Principal Composer 消息在所有目标仍未 claim 时可撤回。首个目标 claim 原子关闭撤回资格。
+已发布消息在 claim 前可由显式 `camp.read`、`camp.search` 和 `history.search` 读取；主动查询不领取 Delivery 或关闭撤回资格。已 claim 目标通过 `RUN_INPUT` 接收；未 claim 的目标仍不从冻结输入或 quote-source 投影取得原文。撤回成功取消所有 waiting Delivery 并擦除 Rovai 活跃数据中的原文；Agent 后续 `camp.read` 只返回 `Message withdrawn` 状态项，搜索不再命中。
 
 人类执行台读取与 Agent-facing 上下文隔离不同：Camp Open 把未 tombstone 消息关联的当前
 `camp_message_delivery` 全部投影到 `messageDeliveries`，不按消息作者过滤。用户消息没有 `sourceAgentRunId` 仍是
 同一 waiting 队列事实；Renderer 可在 claim 前显示只读排队卡。完整字段与 coverage 边界见
-[Camp Open Projection v23](../contracts/camp-open-projection-v23.md)，展示见
+[Camp Open Projection v24](../contracts/camp-open-projection-v24.md)，展示见
 [Run Process Detail Surface v42](../contracts/run-process-detail-surface-v42.md)。
 
-`RUN_INPUT`、`camp.read`、搜索、线程、reply 展开和结构化引用共享同一消息可见性服务。公共 Camp 历史对所有受认证
+`RUN_INPUT` 与 quote-source 沿用冻结输入可见性；显式 read/search 使用 Camp History v10 的主动查询可见性。公共 Camp 历史对所有受认证
 队员可读；目标 Camp membership 只控制参与、寻址与执行，不是历史 ACL。外层消息可见不代表它引用的 source 可见；
 每条 quote snapshot 在投影时按查看 Agent 和边界重新校验 source。ContextManifest 冻结当前输入和 discovery
 时序证据，但 Run 内的 `camp.read` 始终按调用时最新状态直接解析存续 Camp，不受 Manifest 上下界限制。

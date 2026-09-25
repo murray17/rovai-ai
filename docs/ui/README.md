@@ -47,7 +47,7 @@ Camp 内显式 Markdown 文件链接、共享资源图标、独立文件阅读�
 Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 [Camp 会话工作区](components/conversation-workspace.md#runtime-终态文件变更与-agentrun-文件变化)拥有稳定呈现边界。
 
-MCP 与 Skills 的列表/详情、导入、启停和拖拽合同见 [Capability settings](components/capability-settings.md)。
+当前 Skills 原生只读页、工具箱逐队员配置和会话 `/` 候选见 [Skills、工具箱与会话选择](components/skills-settings.md)。MCP 的列表/详情、导入和编辑见 [Capability settings](components/capability-settings.md)；其中旧 Skills Library 描述仅作历史解释。
 
 使命板、抽屉与完整会话、交付和活动见[使命板](components/mission-board.md)。当前发布显示一级菜单入口，
 以右侧蓝点提示存在未读 Agent 回复的使命；Mobile 仍无使命入口。

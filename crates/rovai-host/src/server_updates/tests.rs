@@ -50,6 +50,7 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     fs::create_dir_all(package.join("web-ui")).unwrap();
     let target = target().unwrap();
     let version = "999.0.0";
+    let current_version = env!("CARGO_PKG_VERSION");
     let old = format!(
         "schema=1\nversion={}\ntarget={target}\n",
         env!("CARGO_PKG_VERSION")
@@ -105,11 +106,17 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     let asset = asset_name(version, target);
     let response = json!({"tag_name":format!("server-v{version}"),"draft":false,"prerelease":false,"name":"Fixture","body":"Changes","published_at":"2026-09-14T00:00:00Z",
         "assets":[{"name":asset,"size":bytes.len()},{"name":"SHA256SUMS","size":100}]});
+    let current_response = json!({"tag_name":format!("server-v{current_version}"),"draft":false,"prerelease":false,"name":"Installed Fixture","body":"Installed changes","published_at":"2026-09-14T00:00:00Z",
+        "assets":[{"name":asset_name(current_version, target),"size":1},{"name":"SHA256SUMS","size":100}]});
     let routes = Arc::new(Mutex::new(HashMap::from([
         ("/channel".to_owned(), b"unpublished".to_vec()),
         (
             format!("/api/server-v{version}"),
             serde_json::to_vec(&response).unwrap(),
+        ),
+        (
+            format!("/api/server-v{current_version}"),
+            serde_json::to_vec(&current_response).unwrap(),
         ),
         (format!("/assets/server-v{version}/{asset}"), bytes.clone()),
         (
@@ -156,6 +163,39 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     updates.call(UpdateRequest::Check {}).await.unwrap();
     wait_status(&updates, "check_failed").await;
     assert_eq!(updates.snapshot()["failureReason"], "release_unpublished");
+    routes
+        .lock()
+        .unwrap()
+        .insert("/channel".into(), current_version.as_bytes().to_vec());
+    updates.call(UpdateRequest::Check {}).await.unwrap();
+    wait_status(&updates, "up_to_date").await;
+    assert_eq!(
+        updates.snapshot()["currentRelease"]["version"],
+        current_version
+    );
+    assert_eq!(
+        updates.snapshot()["currentRelease"]["releaseNotes"],
+        "Installed changes"
+    );
+    assert!(updates.snapshot()["availableRelease"].is_null());
+    routes
+        .lock()
+        .unwrap()
+        .insert("/channel".into(), version.as_bytes().to_vec());
+    updates.call(UpdateRequest::Check {}).await.unwrap();
+    wait_status(&updates, "available").await;
+    assert_eq!(updates.snapshot()["availableRelease"]["version"], version);
+    assert_eq!(
+        updates.snapshot()["currentRelease"]["version"],
+        current_version
+    );
+    routes
+        .lock()
+        .unwrap()
+        .insert("/channel".into(), b"unpublished".to_vec());
+    updates.call(UpdateRequest::Check {}).await.unwrap();
+    wait_status(&updates, "check_failed").await;
+    assert_eq!(updates.snapshot()["availableRelease"]["version"], version);
     routes
         .lock()
         .unwrap()

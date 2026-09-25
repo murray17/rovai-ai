@@ -3,6 +3,23 @@ import type { FilePreviewContextValue } from './FilePreviewContext'
 
 const CURRENT_FILE_OPEN_ERROR = '无法打开该文件'
 
+export function runFileOperationEvidencePath(
+  evidence: Pick<AgentRunExecutionEvidenceView, 'phase' | 'payload'>
+): string | null {
+  if (evidence.phase !== 'completed' || !evidence.payload
+    || typeof evidence.payload !== 'object' || Array.isArray(evidence.payload)) return null
+  const operation = (evidence.payload as Record<string, unknown>).runtimeFileOperation
+  if (!operation || typeof operation !== 'object' || Array.isArray(operation)) return null
+  const value = operation as Record<string, unknown>
+  return value.schemaVersion === 2
+    && value.status === 'available'
+    && (value.operationKind === 'read' || value.operationKind === 'write')
+    && typeof value.path === 'string'
+    && value.path.trim()
+    ? value.path
+    : null
+}
+
 export async function openAgentRunCurrentFilePreview({
   filePreview,
   campId,
@@ -43,16 +60,20 @@ export async function openAgentRunActivityFilePreview({
   campId,
   evidence,
   path,
+  allowLegacyWorkspaceFallback = false,
   onError
 }: {
   filePreview: Pick<FilePreviewContextValue, 'open'> | null
   campId: string
-  evidence?: Pick<AgentRunExecutionEvidenceView, 'agentRunId' | 'executionEpoch'> & {
+  evidence?: Pick<AgentRunExecutionEvidenceView, 'agentRunId' | 'executionEpoch'> & Partial<
+    Pick<AgentRunExecutionEvidenceView, 'id' | 'phase' | 'payload'>
+  > & {
     canonical?: {
       diffProjection?: { sourceEvidenceIds: string[] } | null
     } | null
   }
   path: string
+  allowLegacyWorkspaceFallback?: boolean
   onError(message: string): void
 }): Promise<boolean> {
   if (!filePreview) {
@@ -61,8 +82,16 @@ export async function openAgentRunActivityFilePreview({
   }
   try {
     const diffProjection = evidence?.canonical?.diffProjection
-    const evidenceId = diffProjection?.sourceEvidenceIds[0]
+    const operationPath = evidence?.phase && evidence.payload !== undefined
+      ? runFileOperationEvidencePath({ phase: evidence.phase, payload: evidence.payload })
+      : null
+    const evidenceId = (operationPath === path ? evidence?.id : undefined)
+      ?? diffProjection?.sourceEvidenceIds[0]
     if (diffProjection && !evidenceId) {
+      onError(CURRENT_FILE_OPEN_ERROR)
+      return false
+    }
+    if (operationPath !== null && !evidenceId) {
       onError(CURRENT_FILE_OPEN_ERROR)
       return false
     }
@@ -75,7 +104,13 @@ export async function openAgentRunActivityFilePreview({
           evidenceId,
           rawReference: path
         }
-      : { kind: 'camp_workspace' as const, campId, rawReference: path }
+      : allowLegacyWorkspaceFallback
+        ? { kind: 'camp_workspace' as const, campId, rawReference: path }
+        : null
+    if (!request) {
+      onError(CURRENT_FILE_OPEN_ERROR)
+      return false
+    }
     const outcome = await filePreview.open(
       request,
       undefined,

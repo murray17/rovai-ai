@@ -3,7 +3,7 @@ document_type: ui-interaction-draft
 authority: host-web-mobile-interaction-proposal
 status: implemented
 target_version: v1.66
-last_updated: 2026-09-23
+last_updated: 2026-09-25
 ---
 
 # Mobile WebUI
@@ -140,6 +140,8 @@ Composer 外壳内边距 4px，提示与编辑区同用 6px 起点；提示默�
 | Web 退出 | 只退出当前会话，不停止 Host、渠道或任务 | 只退出当前会话，不停止 Host 或任务 |
 
 Server 更新通过统一 Rust Host 的认证接口完成，使用独立 Server GitHub Release 资产；Desktop 托管不提供更新操作。
+检查结果与运行版本相同时只展示当前日志；仅发现更高版本时显示“新版本／当前版本”页签。切换日志不会改变
+下载目标；下载失败时的官方发布页指向候选版本，没有候选时指向通用发布页。
 协议与停机边界见 [Host Web v2](../contracts/host-web-v2.md#login-presentation-and-server-updates)。正式发布与跨平台原生升级的验收独立记录。
 登录页共用同一组件，按实际 Host 类型分别提示 Token 获取位置；主动退出后恢复初始标题与表单，不显示另一套重新登录页。
 

@@ -45,7 +45,7 @@ selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并�
 
 Command Code 1.64.0 目前只有内部 one-shot headless NDJSON 传输和隔离 fixture 证据，不属于 closed `AdapterKind`、Product Runtime Catalog 或 Settings Preview。其候选 AgentRun 模型输入复用既有 `CharterDeliveryMode::FirstPayload`：Core 按冻结 Context 证据选择新 Session 的 Bootstrap 与 Dynamic Context 合成，普通精确恢复只交付当次 Dynamic Context；受管 Bootstrap 不通过 `--mod` 或共享 `AGENTS.md` 投递。该 Bootstrap 在 Command Code 中是普通用户消息，不能冒称 System/Developer 级指令。合格压缩补发只有在该 Runtime 的信号与恢复行为获得证据后才能启用或宣称有效。
 
-此输入选择已由 [v1.69 模型上下文说明 revision 3](../versions/v1.69/model-context-change-command-code.md)确认；权限、MCP/Skill/Taste 隔离、真实认证、Usage 和逐平台 Golden Flows 仍由[接入清单](../development/runtime-integration-checklist.md)与[研究矩阵](../research/command-code-runtime/parity-matrix.md)逐项验收。正式 Catalog identity 必须满足下述原子准入，不能用已实现的公共 FirstPayload 或 ManagedProcess 代替 Command Code 证据。
+此输入选择曾在 v1.68 基线上由[研究提案 revision 3](../research/command-code-runtime/prompt-guidance-proposal.md)确认；合并后的当前 Context 基线需要新的版本说明和二次确认。权限、MCP/Skill/Taste 隔离、真实认证、Usage 和逐平台 Golden Flows 仍由[接入清单](../development/runtime-integration-checklist.md)与[研究矩阵](../research/command-code-runtime/parity-matrix.md)逐项验收。正式 Catalog identity 必须满足下述原子准入，不能用已实现的公共 FirstPayload 或 ManagedProcess 代替 Command Code 证据。
 
 ## 可执行准入
 

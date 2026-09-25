@@ -27,6 +27,17 @@ const state = {
   startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
 }
 state.preferences.newConversationDefaults.memberAgentIds = fixture.largeRoster.slice(0, 12).map(a => a.agentId)
+function aboutSnapshot() {
+  const snapshot = fixture.updateSnapshot(state.scenario === 'server_no_candidate' ? 'current' : 'normal')
+  if (state.scenario === 'server_download_failed') return {
+    ...snapshot, status: 'download_failed', failureReason: 'download_failed',
+    currentRelease: { version: snapshot.currentVersion, releaseName: 'Rovai AI 0.0.6', releaseDate: null, releaseNotes: '当前版日志' }
+  }
+  if (state.scenario === 'server_no_candidate') return {
+    ...snapshot, status: 'check_failed', failureReason: 'updater_unavailable'
+  }
+  return snapshot
+}
 const channelListeners = new Set(), webListeners = new Set()
 let pendingChannelAction = null
 let pendingStartupInspection = null
@@ -177,7 +188,7 @@ function Fixture() {
         {page === 'channels' && <ChannelSettings agents={fixture.agents} />}
         {page === 'monitoring' && <RuntimeMonitoring />}
         {page === 'diagnostics' && <DiagnosticsCenter onNavigate={setPage} />}
-        {page === 'about' && <AboutUpdatesSettingsView snapshot={fixture.updateSnapshot()} canUpdate loading={false}
+        {page === 'about' && <AboutUpdatesSettingsView snapshot={aboutSnapshot()} product={state.scenario.startsWith('server_') ? 'server' : 'desktop'} canUpdate loading={false}
           loadError={false} actionError={updateError} onCheck={() => {}} onDownload={() => setUpdateError('download')} onInstall={() => {}} />}
       </div></div>
     </main>

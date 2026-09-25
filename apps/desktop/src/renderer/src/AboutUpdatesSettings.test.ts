@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AppUpdateRelease, AppUpdateSnapshot } from '@contracts'
 import { AboutUpdatesSettingsView } from './AboutUpdatesSettings'
+import { displayReleaseNotes } from './release-notes-display'
 import type { AppUpdateActionError } from './useAppUpdates'
 
 const release: AppUpdateRelease = {
@@ -15,6 +16,12 @@ const release: AppUpdateRelease = {
 function snapshot(overrides: Partial<AppUpdateSnapshot> = {}): AppUpdateSnapshot {
   return {
     currentVersion: '0.0.2',
+    currentRelease: {
+      version: '0.0.2',
+      releaseName: 'Rovai AI v0.0.2',
+      releaseDate: null,
+      releaseNotes: '# Rovai AI v0.0.2\n\n- 已安装版本日志'
+    },
     status: 'idle',
     availableRelease: null,
     lastCheckSource: null,
@@ -58,7 +65,10 @@ describe('AboutUpdatesSettingsView', () => {
     expect(markup).toContain('版本 v0.0.2')
     expect(markup).toContain('>检查更新</button>')
     expect(markup).toContain('下载与安装由你决定')
-    expect(markup).not.toContain('更新日志</h2>')
+    expect(markup).toContain('更新日志</h2>')
+    expect(markup).toContain('已安装版本日志')
+    expect(markup.match(/Rovai AI v0\.0\.2/g)).toHaveLength(1)
+    expect(markup).not.toContain('role="tablist"')
     expect(markup).not.toContain('官方 Releases')
   })
 
@@ -75,6 +85,9 @@ describe('AboutUpdatesSettingsView', () => {
     expect(markup).toContain('>重新检查</button>')
     expect(markup).toContain('等待下载确认')
     expect(markup).toContain('Rovai AI 0.0.3')
+    expect(markup).toContain('role="tablist" aria-label="日志版本"')
+    expect(markup).toContain('aria-selected="true" tabindex="0" data-app-update-release-tab="available"')
+    expect(markup).toContain('id="about-release-panel-current" role="tabpanel"')
     expect(markup).toContain('v0.0.3')
     expect(markup).toContain('2026年8月24日')
     expect(markup).toContain('启动自动')
@@ -193,6 +206,28 @@ describe('AboutUpdatesSettingsView', () => {
     expect(unsafe).not.toContain('href="javascript:')
     expect(unsafe).toContain('class="markdown-inert-link"')
     expect(unsafe).toContain('href="https://example.com/notes"')
+  })
+
+  it('removes only a matching leading release title from the displayed copy', () => {
+    const titled = render(snapshot({
+      status: 'available',
+      availableRelease: {
+        ...release,
+        releaseNotes: '# Rovai AI v0.0.3\n\n本版摘要\n\n# Other title'
+      }
+    }))
+    expect(titled).toContain('本版摘要')
+    expect(titled).toContain('Other title')
+    expect(titled).not.toContain('data-markdown-heading="Rovai AI v0.0.3"')
+
+    const differentTitle = render(snapshot({
+      status: 'available',
+      availableRelease: { ...release, releaseNotes: '# Camp 改进\n\n本版摘要' }
+    }))
+    expect(differentTitle).toContain('data-markdown-heading="Camp 改进"')
+
+    const fencedSource = '```md\n# Rovai AI v0.0.3\n```\n\n本版摘要'
+    expect(displayReleaseNotes({ ...release, releaseNotes: fencedSource })).toBe(fencedSource)
   })
 
   it('keeps renderer action failures recoverable without discarding the snapshot', () => {
