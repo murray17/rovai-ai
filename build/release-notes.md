@@ -19,4 +19,4 @@
 - 【功能】**关于与更新页可离线查看当前版本说明。** 发现新版本时，也可以切换查看待更新版本的说明。
 - 【修复】**Server 检查更新不再把当前版本误报为新版本。** 下载失败后的官方发布页链接也会指向正确版本。
 
-感谢 [@MadebyNight](https://github.com/MadebyNight) 提交的 [Windows Claude Code 启动修复](https://github.com/murray17/rovai-ai/pull/507)。
+感谢 [@MadebyNight](https://github.com/MadebyNight) 提交的 [Windows Claude Code 启动修复](https://github.com/murray17/rovai-ai/pull/507)。也感谢 culminate165-落落反馈 Claude Code 的 MCP result 采集问题，帮助我们补上执行详情里的结果展示。
