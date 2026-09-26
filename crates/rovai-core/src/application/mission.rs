@@ -866,7 +866,7 @@ impl Core {
                 .lock()
                 .await
                 .release(&workspace.mission_id);
-            emit_navigation_invalidated(
+            emit_missions_invalidated(
                 &self.output,
                 "mission.workspace.cleanup.finished",
                 Some(&workspace.camp_id),
@@ -1002,7 +1002,7 @@ impl Core {
                         .lock()
                         .await
                         .release(&mission_id);
-                    emit_navigation_invalidated(
+                    emit_missions_invalidated(
                         &self.output,
                         "missions.workspace.cleanup",
                         camp_id.as_deref(),
@@ -1060,7 +1060,7 @@ impl Core {
                     (scheduled, camp_id, pending)
                 };
                 if scheduled {
-                    emit_navigation_invalidated(
+                    emit_missions_invalidated(
                         &self.output,
                         "missions.cleanup.retry",
                         camp_id.as_deref(),
@@ -1308,7 +1308,7 @@ impl Core {
                     self.attachment_views
                         .ensure_empty_camp_ready(&mut database, camp_id)?;
                 }
-                emit_navigation_invalidated(
+                emit_missions_invalidated(
                     &self.output,
                     "missions.create",
                     execution.result.payload["campId"].as_str(),
@@ -1379,7 +1379,7 @@ impl Core {
                 if super::command_result_has_delivery_work(&execution.result.payload) {
                     self.delivery_batch_scheduler_notify.notify_one();
                 }
-                emit_navigation_invalidated(&self.output, &request.method, None);
+                emit_missions_invalidated(&self.output, &request.method, None);
                 Ok(serde_json::to_value(execution.result)?)
             }
             _ => anyhow::bail!("Unsupported Mission operation"),

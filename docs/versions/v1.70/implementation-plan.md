@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.70
 authority: version-implementation-and-verification
 status: in_progress
-last_updated: 2026-09-25
+last_updated: 2026-09-27
 ---
 
 # v1.70 实施计划
@@ -48,3 +48,44 @@ Standards / Spec 双向审核的问题修复后复验。
 全量入口存在独立于此改动的基线失败：`pnpm test` 的两项 benchmark 断言仍引用已失效的 context 测试名和
 v1.67 指纹，已在基线 `573a061f` 的独立源码归档中复现；默认 Rust workspace 的 runtime-platform
 evidence owner 中 macOS register digest 与同一基线文档字节不符。相关输入文件与基线一致，本次不改写冻结证据。
+
+## 侧栏按范围读取（2026-09-27）
+
+按 Principal 修订后的 [D06](decisions.md#v1-70-d06) 实施，取代 Camp 中先前包含持久化分组变化记录的方案。
+保留行、分组、完整快照；复用 Core 事务、camp_view_state 与现有刷新协调器；新增持久化表为 0。
+三项 camp 字段、三个索引、事务触发器及一次回填清单见
+[Storage migration](../../architecture/desktop-navigation-refresh.md#storage-migration)，接口见
+[Navigation Read v1](../../contracts/navigation-read-v1.md)。正常读取不访问 event_log。
+
+- 普通进入不发全局失效，首屏后只验证目标行；已读无变化不写、不发通知，回执直接返回权威行。
+- 状态变化按行，用户活动/成员变化按组，SQL 返回该组前 N 条和总数；删除前取得所属组，删除后补位。
+- 窗口外置顶按 ID 读取；漏通知/未知范围通过摘要完整恢复，保留现有聚焦/20 秒兜底。
+- 使命使用独立失效提示；技能候选改为使用选择器时读取；不新增同步版本、日志或优先队列。
+
+测试准入：新 migration owner `navigation_summary_migration_preserves_tables_backfills_and_rolls_back_with_events`
+独立拥有 schema 124→125 的回填、表名集合不变、receipt 失败整体回滚、事件/摘要同事务及重启边界；必须用 SQLite，
+既有 migration owner 不覆盖这三个事实。最小命令为
+`cargo test -p rovai-core --lib --features extended-tests navigation_summary_migration`。
+新 read owner `navigation_reads_no_history_and_scoped_work_does_not_grow_with_other_groups` 拥有跨组工作量边界，
+在 SQLite authorizer 禁止读取 event_log 时验证行/组/完整/分页/已读；旧 CampOpen 容量 owner 不拥有侧栏查询。
+增加 2,000 个无关 Camp 和 50,000 条历史事件后，行查询保持 320 VM 步，组查询 1,082→1,083 步（索引范围终止比较）。
+最小命令为 `cargo test -p rovai-core --lib --features extended-tests navigation_reads_no_history`。
+排序、已读、通知、窗口/旧响应和删除补位扩展既有 owner；v39 人工替换单个表的混合 fixture 直接验证其迁移边界，
+不将保留后续 receipts 的混合 schema 伪装成可准入的当前数据库。支持来源的完整升级仍由现有 admission/upgrade owner 验证。
+
+验证：默认 Rust workspace 430 项通过（1 项已有 ignore）；Vitest 初轮 214 文件/2,222 项通过，
+同步主线 `762370b1` 后 215 文件/2,235 项通过；类型检查、Desktop/Web 构建通过。
+生产 BusinessApp 的独立 Electron fixture 记录普通 A→B 请求，断言没有全侧栏、分组、使命或技能扫描及重复已读；
+导航外壳、10 项 CampOpen 集成与按范围协调器测试通过。Migration/范围测试及终态/删除通知 seam 定向通过。
+Node 组合中随 schema 升级的 Product Contract Fingerprint 断言更新为 125 并复验。
+
+全量扩展不能报告全绿：剩余 v99 的旧 Bootstrap fixture 与 Task tool 的旧 version 断言，均在未修改基线
+`54a1bb477fedaee26dfb40122a2be7a297ac6038` 的独立源码归档中复现同样失败；未改写旧冻结证据或 Task 合同。
+使命板初轮 4/6 项集成通过，另 2 项停在项目选择器滚动断言，其中真实指针滚动失败亦在同一基线独立复现。
+随后主线修正空项目 fixture 并合入移动端变更，任务分支同步后使命板 6/6 通过，保留首次失败记录。
+这些结果与已通过的切换请求边界分开记录，不将构建或 RPC 耗时当作日常 App 点击到绘制验收。
+
+隔离 Core 复测在同步主线前执行：基线 `54a1bb47` 与本次工作树均用 Debug 构建；同一新建 fixture（342 Camp、18 组、57,000 条
+人工历史事件），每项 30 次请求。完整侧栏中位数 61.76→9.95ms，排在完整侧栏后的打开请求 38.47→13.24ms；
+本次单行/单组分别 0.61/0.87ms。独立 CampOpen 中位数为 1.56→2.95ms，不能宣称打开本身也变快；本次确认的
+收益是移除切换带起的全局历史聚合和无关读取。样本按阶段顺序执行，存在调度/缓存影响；RPC 结果不等于点击到绘制。

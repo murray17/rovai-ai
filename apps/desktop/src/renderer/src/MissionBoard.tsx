@@ -633,7 +633,7 @@ function MissionCleanupNotice() {
       }).catch(error => { if (current && request === sequence) setError(missionError(error)) })
     }
     load()
-    const poll = setInterval(load, 30_000), unsubscribe = client.onEvent?.(event => { if (event.method === 'navigation.invalidated') load() }), invalidated = client.onInvalidated?.(load)
+    const poll = setInterval(load, 30_000), unsubscribe = client.onEvent?.(event => { if (event.method === 'missions.invalidated') load() }), invalidated = client.onInvalidated?.(load)
     return () => { current = false; clearInterval(poll); unsubscribe?.(); invalidated?.() }
   }, [client, notifyError])
   async function retry(workspace: MissionWorkspace) {

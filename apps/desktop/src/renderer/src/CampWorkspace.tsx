@@ -1727,7 +1727,7 @@ export function CampWorkspace({
     status: 'loading' | 'ready' | 'error'
   }>({ candidates: { skills: [], errors: [] }, status: 'loading' })
   const [skillCatalogRefreshing, setSkillCatalogRefreshing] = useState(false)
-  const refreshSkillCatalogRef = useRef<(() => void) | null>(null)
+  const refreshSkillCatalogRef = useRef<((refresh?: boolean) => void) | null>(null)
   const composerEditorRef = useRef<HTMLDivElement>(null)
   const composerHandleRef = useRef<StructuredMentionComposerHandle>(null)
   const composerFileInputRef = useRef<HTMLInputElement>(null)
@@ -2103,9 +2103,12 @@ export function CampWorkspace({
   useEffect(() => {
     let cancelled = false
     let requestSequence = 0
+    let requested = false
     setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading' })
     setSkillCatalogRefreshing(false)
     const loadSkillCatalog = async (refresh = false): Promise<void> => {
+      if (requested && !refresh) return
+      requested = true
       const request = ++requestSequence
       if (refresh) setSkillCatalogRefreshing(true)
       try {
@@ -2124,15 +2127,19 @@ export function CampWorkspace({
         if (!cancelled && request === requestSequence) setSkillCatalogRefreshing(false)
       }
     }
-    void loadSkillCatalog()
-    refreshSkillCatalogRef.current = () => void loadSkillCatalog(true)
-    const unsubscribeInvalidation = client.onInvalidated?.(() => void loadSkillCatalog(true))
+    refreshSkillCatalogRef.current = (refresh = false) => void loadSkillCatalog(refresh)
+    const invalidate = (): void => {
+      requestSequence += 1
+      requested = false
+      setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading' })
+    }
+    const unsubscribeInvalidation = client.onInvalidated?.(invalidate)
     const unsubscribe = client.onEvent?.((event) => {
       if (event.method !== 'runtime.state') return
       const params = event.params !== null && typeof event.params === 'object'
         ? event.params as Record<string, unknown>
         : {}
-      if (params.status === 'ready') void loadSkillCatalog(true)
+      if (params.status === 'ready') invalidate()
     })
     return () => {
       cancelled = true
@@ -5699,7 +5706,8 @@ export function CampWorkspace({
               skillCatalogStatus={composerSkillCatalog.status}
               skillCatalogErrors={composerSkillCatalog.candidates.errors}
               skillCatalogRefreshing={skillCatalogRefreshing}
-              onRefreshSkills={() => refreshSkillCatalogRef.current?.()}
+              onNeedSkills={() => refreshSkillCatalogRef.current?.()}
+              onRefreshSkills={() => refreshSkillCatalogRef.current?.(true)}
               ariaLabel={`给 ${defaultLead?.displayName ?? '默认负责人'} 发消息`}
               placeholder={draftLoadState.state === 'error'
                 ? '输入框暂不可用'

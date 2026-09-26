@@ -1,6 +1,5 @@
 use crate::message_quote::{MessageQuoteSnapshot, QuoteStorage, load_quotes};
 use std::{
-    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
@@ -16,9 +15,7 @@ use crate::{
     camp_attachment::DIRECTORY_MEDIA_TYPE,
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     camp_id::CampId,
-    camp_message_publication::{
-        public_camp_message_event_predicate, public_camp_message_publication_cte,
-    },
+    camp_message_publication::public_camp_message_publication_cte,
     canonical_activity::CanonicalRuntimeActivity,
     command::{canonical_json_digest, project_persisted_command_result_event_payload},
     current_input_skill::CurrentInputSkillResolution,
@@ -31,6 +28,9 @@ use crate::{
     runtime_failure::RuntimeFailureView,
     skill_projection::SkillExposureSnapshot,
 };
+
+mod navigation;
+use navigation::*;
 
 pub const READ_MODEL_SCHEMA_VERSION: i64 = 34;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
@@ -100,6 +100,7 @@ pub struct NavigationCampItem {
     pub last_activity_at: String,
     pub last_activity_global_sequence: i64,
     pub latest_completion_global_sequence: i64,
+    pub last_seen_global_sequence: i64,
     pub version: i64,
 }
 
@@ -147,6 +148,16 @@ pub struct NavigationCampPage {
 pub struct CampViewedAcknowledgement {
     pub camp_id: String,
     pub last_seen_global_sequence: i64,
+    pub changed: bool,
+    pub navigation: NavigationCampRows,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationCampRows {
+    pub group_keys: Vec<String>,
+    pub through_global_sequence: i64,
+    pub camps: Vec<NavigationCampItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -981,10 +992,20 @@ impl ReadModelService {
         group_limits: &BTreeMap<String, usize>,
         client: &crate::draft_client::DraftClient,
     ) -> Result<NavigationSnapshot> {
+        self.navigation_snapshot_for_groups(database, group_limits, None, client)
+    }
+
+    pub fn navigation_snapshot_for_groups(
+        &self,
+        database: &mut Database,
+        group_limits: &BTreeMap<String, usize>,
+        group_keys: Option<&[String]>,
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<NavigationSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let camps = load_navigation_camps(&transaction, client)?;
-        let (quick_chat, projects) = group_navigation_camps(camps, group_limits);
+        let (quick_chat, projects) =
+            load_navigation_groups(&transaction, client, group_limits, group_keys)?;
         transaction.commit()?;
         Ok(NavigationSnapshot {
             schema_version: NAVIGATION_SCHEMA_VERSION,
@@ -1021,18 +1042,14 @@ impl ReadModelService {
         let limit = limit.clamp(1, 200);
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let camps = load_navigation_camps(&transaction, client)?
-            .into_iter()
-            .filter(|camp| match project_path {
-                Some(path) => camp.project_binding_kind == "directory" && camp.project_path == path,
-                None => camp.project_binding_kind == "quick_chat",
-            })
-            .collect::<Vec<_>>();
-        let total_count = camps.len();
+        let key = project_path
+            .map(|path| format!("directory:{path}"))
+            .unwrap_or_else(|| "quick-chat".into());
+        let total_count = navigation_group_count(&transaction, client, &key)?;
         let start = offset.min(total_count);
         let end = start.saturating_add(limit).min(total_count);
         let next_offset = (end < total_count).then_some(end);
-        let camps = camps[start..end].to_vec();
+        let camps = load_navigation_group(&transaction, client, &key, start, limit)?;
         transaction.commit()?;
         Ok(NavigationCampPage {
             schema_version: NAVIGATION_SCHEMA_VERSION,
@@ -1042,6 +1059,22 @@ impl ReadModelService {
             next_offset,
             camps,
         })
+    }
+
+    pub fn navigation_camps(
+        &self,
+        database: &mut Database,
+        camp_ids: &[String],
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<NavigationCampRows> {
+        let tx = database.connection_mut().transaction()?;
+        let result = NavigationCampRows {
+            group_keys: navigation_camp_group_keys(&tx, camp_ids)?,
+            through_global_sequence: current_global_sequence(&tx)?,
+            camps: load_navigation_rows(&tx, client, camp_ids)?,
+        };
+        tx.commit()?;
+        Ok(result)
     }
 
     pub fn find_navigation_camp(
@@ -1071,6 +1104,21 @@ impl ReadModelService {
         camp_id: &str,
         through_global_sequence: i64,
     ) -> Result<CampViewedAcknowledgement> {
+        self.acknowledge_camp_viewed_for_client(
+            database,
+            camp_id,
+            through_global_sequence,
+            &crate::draft_client::DraftClient::default(),
+        )
+    }
+
+    pub fn acknowledge_camp_viewed_for_client(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        through_global_sequence: i64,
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<CampViewedAcknowledgement> {
         if through_global_sequence < 0 {
             anyhow::bail!("Viewed sequence must not be negative");
         }
@@ -1088,10 +1136,11 @@ impl ReadModelService {
             anyhow::bail!("Camp does not exist");
         }
         let now = chrono::Utc::now().to_rfc3339();
-        transaction.execute(
+        let changed = transaction.execute(
             r#"
             INSERT INTO camp_view_state(camp_id, last_seen_global_sequence, updated_at)
-            VALUES (?1, ?2, ?3)
+            SELECT ?1, ?2, ?3
+            WHERE ?2 > COALESCE((SELECT last_seen_global_sequence FROM camp_view_state WHERE camp_id=?1), 0)
             ON CONFLICT(camp_id) DO UPDATE SET
                 last_seen_global_sequence = MAX(
                     camp_view_state.last_seen_global_sequence,
@@ -1103,18 +1152,26 @@ impl ReadModelService {
                     THEN excluded.updated_at
                     ELSE camp_view_state.updated_at
                 END
+            WHERE excluded.last_seen_global_sequence > camp_view_state.last_seen_global_sequence
             "#,
             params![camp_id, through_global_sequence, now],
         )?;
         let last_seen_global_sequence = transaction.query_row(
-            "SELECT last_seen_global_sequence FROM camp_view_state WHERE camp_id = ?1",
+            "SELECT COALESCE((SELECT last_seen_global_sequence FROM camp_view_state WHERE camp_id = ?1), 0)",
             [camp_id],
             |row| row.get(0),
         )?;
+        let navigation = NavigationCampRows {
+            group_keys: navigation_camp_group_keys(&transaction, &[camp_id.to_string()])?,
+            through_global_sequence: current,
+            camps: load_navigation_rows(&transaction, client, &[camp_id.to_string()])?,
+        };
         transaction.commit()?;
         Ok(CampViewedAcknowledgement {
             camp_id: camp_id.to_string(),
             last_seen_global_sequence,
+            changed: changed > 0,
+            navigation,
         })
     }
 
@@ -1741,197 +1798,6 @@ impl ReadModelService {
             events,
         })
     }
-}
-
-fn load_navigation_camps(
-    transaction: &Transaction<'_>,
-    client: &crate::draft_client::DraftClient,
-) -> Result<Vec<NavigationCampItem>> {
-    let publication_predicate = public_camp_message_event_predicate("event_log.event_type");
-    let sql = format!(
-        r#"
-        WITH navigation_activity AS (
-            SELECT
-                event_log.camp_id,
-                MAX(CASE
-                    WHEN {publication_predicate}
-                        AND camp_message.author_type IN ('user', 'external_principal')
-                    THEN event_log.global_sequence
-                END) AS last_activity_sequence,
-                MAX(CASE
-                    WHEN event_log.event_type IN (
-                        'agent_run.succeeded',
-                        'agent_run.failed',
-                        'agent_run.cancelled'
-                    ) OR (
-                        event_log.event_type = 'camp_turn.status_changed'
-                        AND json_extract(event_log.payload_json, '$.status') = 'cancelled'
-                    )
-                    THEN event_log.global_sequence
-                END) AS latest_completion_sequence
-            FROM event_log
-            LEFT JOIN camp_message
-              ON event_log.entity_type = 'camp_message'
-             AND camp_message.id = event_log.entity_id
-            WHERE event_log.camp_id IS NOT NULL
-              AND event_log.global_sequence IS NOT NULL
-              AND ({publication_predicate} OR event_log.event_type IN (
-                  'agent_run.succeeded', 'agent_run.failed', 'agent_run.cancelled',
-                  'camp_turn.status_changed'
-              ))
-            GROUP BY event_log.camp_id
-        )
-        SELECT
-            camp.id,
-            camp.title,
-            camp.project_binding_kind,
-            camp.project_path,
-            lead.id,
-            lead.display_name,
-            COALESCE(navigation_activity.last_activity_sequence, 0),
-            COALESCE(activity_event.created_at, camp.created_at),
-            COALESCE(navigation_activity.latest_completion_sequence, 0),
-            COALESCE(camp_view_state.last_seen_global_sequence, 0),
-            EXISTS(
-                SELECT 1
-                FROM agent_run
-                LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = camp.id
-                  AND agent_run.status IN ('queued', 'running', 'waiting')
-            ),
-            camp.version,
-            camp.activation_state,
-            channel_conversation.provider,
-            channel_conversation.conversation_kind
-        FROM camp
-        LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
-        LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
-        LEFT JOIN agent_profile AS lead ON lead.id = camp.default_lead_agent_id
-        LEFT JOIN navigation_activity ON navigation_activity.camp_id = camp.id
-        LEFT JOIN event_log AS activity_event
-          ON activity_event.global_sequence = navigation_activity.last_activity_sequence
-        LEFT JOIN camp_view_state ON camp_view_state.camp_id = camp.id
-        LEFT JOIN camp_composer_draft ON camp_composer_draft.camp_id = camp.id AND camp_composer_draft.client_id = ?1
-        WHERE camp.deletion_operation_id IS NULL
-          AND NOT EXISTS(SELECT 1 FROM mission WHERE mission.camp_id=camp.id)
-          AND (camp.activation_state = 'active'
-           OR length(trim(COALESCE(camp_composer_draft.body, ''))) > 0
-           OR (camp_composer_draft.source_attachments_json IS NOT NULL AND camp_composer_draft.source_attachments_json <> '[]')
-           OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id AND client_id = ?1))
-        "#
-    );
-    let mut statement = transaction.prepare(&sql)?;
-    let rows = statement.query_map([client.id()], |row| {
-        let default_lead_agent_id = row.get::<_, Option<String>>(4)?;
-        let default_lead_display_name = row.get::<_, Option<String>>(5)?;
-        let latest_completion_global_sequence = row.get::<_, i64>(8)?;
-        let last_seen_global_sequence = row.get::<_, i64>(9)?;
-        let loading = row.get::<_, bool>(10)?;
-        let marker = if loading {
-            "loading"
-        } else if latest_completion_global_sequence > last_seen_global_sequence {
-            "unread_completed"
-        } else {
-            "none"
-        };
-        Ok(NavigationCampItem {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            channel_source: camp_channel_source_from_row(row, 13)?,
-            activation_state: row.get(12)?,
-            project_binding_kind: row.get(2)?,
-            project_path: row.get(3)?,
-            default_lead: default_lead_agent_id.map(|agent_id| NavigationLeadSummary {
-                agent_id,
-                display_name: default_lead_display_name.unwrap_or_default(),
-            }),
-            marker: marker.to_string(),
-            last_activity_at: row.get(7)?,
-            last_activity_global_sequence: row.get(6)?,
-            latest_completion_global_sequence,
-            version: row.get(11)?,
-        })
-    })?;
-    let mut camps = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    camps.sort_by(compare_navigation_camps);
-    Ok(camps)
-}
-
-fn compare_navigation_camps(left: &NavigationCampItem, right: &NavigationCampItem) -> Ordering {
-    right
-        .last_activity_at
-        .cmp(&left.last_activity_at)
-        .then_with(|| {
-            right
-                .last_activity_global_sequence
-                .cmp(&left.last_activity_global_sequence)
-        })
-        .then_with(|| left.id.cmp(&right.id))
-}
-
-fn group_navigation_camps(
-    camps: Vec<NavigationCampItem>,
-    group_limits: &BTreeMap<String, usize>,
-) -> (NavigationCampGroup, Vec<ProjectNavigationGroup>) {
-    // A request only selects a prefix of existing rows; it never determines an allocation size.
-    let limit = |key: &str| {
-        group_limits
-            .get(key)
-            .copied()
-            .unwrap_or(NAVIGATION_RECENT_CAMP_LIMIT)
-            .max(NAVIGATION_RECENT_CAMP_LIMIT)
-    };
-    let mut quick_chat_camps = Vec::new();
-    let mut project_camps = BTreeMap::<String, Vec<NavigationCampItem>>::new();
-    for camp in camps {
-        if camp.project_binding_kind == "directory" {
-            project_camps
-                .entry(camp.project_path.clone())
-                .or_default()
-                .push(camp);
-        } else {
-            quick_chat_camps.push(camp);
-        }
-    }
-    quick_chat_camps.sort_by(compare_navigation_camps);
-    let quick_chat = NavigationCampGroup {
-        total_count: quick_chat_camps.len(),
-        recent_camps: quick_chat_camps
-            .into_iter()
-            .take(limit("quick-chat"))
-            .collect(),
-    };
-
-    let mut projects = project_camps
-        .into_iter()
-        .filter_map(|(project_path, mut camps)| {
-            camps.sort_by(compare_navigation_camps);
-            let representative = camps.first()?.clone();
-            let project_key = format!("directory:{project_path}");
-            let recent_limit = limit(&project_key);
-            Some(ProjectNavigationGroup {
-                project_key,
-                name: project_display_name(&project_path),
-                project_path,
-                last_activity_at: representative.last_activity_at.clone(),
-                last_activity_global_sequence: representative.last_activity_global_sequence,
-                total_count: camps.len(),
-                recent_camps: camps.into_iter().take(recent_limit).collect(),
-            })
-        })
-        .collect::<Vec<_>>();
-    projects.sort_by(|left, right| {
-        right
-            .last_activity_at
-            .cmp(&left.last_activity_at)
-            .then_with(|| {
-                right
-                    .last_activity_global_sequence
-                    .cmp(&left.last_activity_global_sequence)
-            })
-            .then_with(|| left.project_key.cmp(&right.project_key))
-    });
-    (quick_chat, projects)
 }
 
 fn project_display_name(project_path: &str) -> String {
@@ -5733,6 +5599,9 @@ mod slow_tests {
         let older_ack = read_model
             .acknowledge_camp_viewed(&mut database, &camp_id, 1)
             .unwrap();
+        assert!(acknowledged.changed);
+        assert!(!older_ack.changed);
+        assert_eq!(acknowledged.navigation.camps[0].marker, "none");
         assert_eq!(
             older_ack.last_seen_global_sequence,
             completed.through_global_sequence

@@ -106,6 +106,7 @@ export const WEB_OPERATIONS = [
   'automations.run',
   'app.info',
   'navigation.snapshot',
+  'navigation.camps',
   'navigation.groupCamps',
   'navigation.campViewed',
   'camps.exists',

@@ -64,7 +64,7 @@ const populatedProjects=projects.map((project,index)=>({...project,totalCount:1,
 const nav={schemaVersion:3,throughGlobalSequence:10,quickChat:{totalCount:0,recentCamps:[]},projects:populatedProjects}
 const prefs={...DEFAULT_GENERAL_PREFERENCES,newConversationDefaults:{memberAgentIds:profiles.map(a=>a.agentId),defaultLeadAgentId:profiles[0].agentId}}
 const navigationPrefs={schemaVersion:4,pins:[],removedProjects:[],projectOrder:projects.map(p=>p.projectKey),projectNames:{}}
-const changed=()=>events.forEach(fn=>fn({method:'navigation.invalidated',params:{}}))
+const changed=()=>events.forEach(fn=>fn({method:'missions.invalidated',params:{}}))
 const seedScrollableLanes=(count=10)=>{
  if(items.some(item=>item.missionId.startsWith('scroll-')))return
  const states=['needs_you','not_started','in_progress','completed'] as const
@@ -129,6 +129,7 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  if(method==='runtime.installations.list')return installations
  if(method==='memory.hearthReviewItems.list')return []
  if(method==='navigation.snapshot')return nav
+ if(method==='navigation.camps')return {throughGlobalSequence:nav.throughGlobalSequence,groupKeys:[],camps:[]}
  if(method==='navigation.findCamp')return items.find(m=>m.campId===p.campId)?{...snapshot(items.find(m=>m.campId===p.campId)!).camp}:null
  if(method==='camps.exists')return !!m
  if(method==='camps.open'||method==='camps.enter'){
@@ -136,7 +137,7 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
   return structuredClone(snapshot(m!))
  }
  if(method==='camp.messages.around')return {schemaVersion:1,campId:c.campId,anchorMessageId:c.messageId,sourceAvailable:true,messages:structuredClone(snapshot(m!).messages)}
- if(method==='navigation.campViewed')return {campId:c.campId,lastSeenGlobalSequence:c.throughGlobalSequence}
+ if(method==='navigation.campViewed'){if(m)m.hasUnread=false;return {campId:c.campId,lastSeenGlobalSequence:c.throughGlobalSequence,changed:true,navigation:{throughGlobalSequence:c.throughGlobalSequence,groupKeys:[],camps:[]}}}
  if(method==='camp.composerDraft.get'){if(!drafts.has(c.campId))drafts.set(c.campId,{...structuredClone(initialDraft),campId:c.campId,body:'',content:{schemaVersion:1,segments:[]},attachments:[]});return structuredClone(drafts.get(c.campId))}
  if(method==='camp.composerDraft.save'){const d=drafts.get(c.campId);Object.assign(d,{content:c.content,body:c.content.segments.map((s:any)=>s.text??'').join(''),revision:d.revision+1});return structuredClone(d)}
  if(method==='camp.pendingInputs.get')return {campId:c.campId,executionActive:false,items:[],editSession:null,submissionOutcomes:[]}

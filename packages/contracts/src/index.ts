@@ -968,6 +968,8 @@ export interface NavigationCampItem {
   lastActivityAt: string
   lastActivityGlobalSequence: number
   latestCompletionGlobalSequence: number
+  /** Saved read boundary; older clients/fixtures may omit it. */
+  lastSeenGlobalSequence?: number
   version: number
 }
 
@@ -992,6 +994,8 @@ export interface ProjectNavigationGroup {
 export interface NavigationSnapshotRequest {
   /** Full prefix sizes by canonical group key; omitted groups default to five. */
   groupLimits?: Record<string, number>
+  /** Omitted means a complete snapshot; present means only these authoritative groups. */
+  groupKeys?: string[]
 }
 
 export interface NavigationSnapshot {
@@ -1010,9 +1014,17 @@ export interface NavigationCampPage {
   camps: NavigationCampItem[]
 }
 
+export interface NavigationCampRows {
+  throughGlobalSequence: number
+  groupKeys: string[]
+  camps: NavigationCampItem[]
+}
+
 export interface CampViewedAcknowledgement {
   campId: string
   lastSeenGlobalSequence: number
+  changed: boolean
+  navigation: NavigationCampRows
 }
 
 export interface CampMemberFastView {
@@ -3930,6 +3942,7 @@ export type CoreMethod =
   | 'workspaces.validate'
   | 'workspaces.inspect'
   | 'navigation.snapshot'
+  | 'navigation.camps'
   | 'navigation.groupCamps'
   | 'navigation.findCamp'
   | 'navigation.campViewed'

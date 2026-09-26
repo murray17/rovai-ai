@@ -44,3 +44,13 @@ Skills migration 173 及其已安装本地构建的数据合同标记仍为 `v1.
 本项跨版本影响：Version/Contracts/Architecture/UI/文档路由已更新；Decisions 确认无需新增（现有身份和通知模型的
 可逆输入兼容扩展，合同已完整解释）；Runtime Activity、Runtime compatibility、Root README 确认无需更新（无新增
 Runtime、活动或产品入口）。Bootstrap、CLI 教学、Context formatter/选择/预算与冻结证据不变；不新增核心模型上下文格式变更。
+
+## 侧栏读取与会话切换收敛
+
+按 2026-09-26 Principal 评审，实施 [Navigation Read v1](../../contracts/navigation-read-v1.md) 与
+[侧栏刷新架构](../../architecture/desktop-navigation-refresh.md)：Migration 175 在 camp 增加三个摘要字段、
+三个索引并一次回填，目标仍为 v1.70、schema 125。没有新增持久化表或通用增量同步；在线按行/组刷新，
+完整性兜底从摘要恢复完整快照。取舍见 [D06](decisions.md#v1-70-d06)，验证记录见[实施计划](implementation-plan.md)。
+
+跨版本影响：Version、Contracts、Architecture、UI、Decisions 与路由同步；Runtime Activity、Runtime
+compatibility、Root README 无需更新（没有新 Runtime/活动/产品入口），不改变模型上下文与冻结格式。

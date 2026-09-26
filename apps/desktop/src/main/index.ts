@@ -258,6 +258,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.creationPreflight',
   'workspaces.inspect',
   'navigation.snapshot',
+  'navigation.camps',
   'navigation.groupCamps',
   'navigation.findCamp',
   'navigation.campViewed',

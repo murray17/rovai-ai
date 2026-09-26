@@ -101,6 +101,7 @@ export interface StructuredMentionComposerProps {
   skillCatalogStatus?: 'loading' | 'ready' | 'error'
   skillCatalogErrors?: readonly string[]
   skillCatalogRefreshing?: boolean
+  onNeedSkills?(): void
   onRefreshSkills?(): void
   ariaLabel: string
   placeholder?: string
@@ -218,6 +219,7 @@ function ComposerBridge({
   skillCatalogStatus = 'ready',
   skillCatalogErrors = [],
   skillCatalogRefreshing = false,
+  onNeedSkills,
   onRefreshSkills,
   ariaLabel,
   placeholder = '',
@@ -299,6 +301,7 @@ function ComposerBridge({
   const skillQuery = triggerMatch?.kind === 'skill' ? triggerMatch.query : null
   const mentionOpen = triggerMatch?.kind === 'member'
   const skillOpen = triggerMatch?.kind === 'skill'
+  useEffect(() => { if (skillOpen && skillCatalogStatus === 'loading') onNeedSkills?.() }, [skillOpen, skillCatalogStatus, onNeedSkills])
   const mentionOptions = useMemo(
     () => mentionQuery === null ? [] : structuredMentionOptions(members, mentionQuery),
     [members, mentionQuery]
@@ -667,7 +670,7 @@ function renderSkillMenu(
 function atomPresentation(
   node: ComposerAtomNode,
   input: Pick<StructuredMentionComposerProps,
-    'members' | 'skills' | 'onActivateMemberMention'
+    'members' | 'skills' | 'skillCatalogStatus' | 'onActivateMemberMention'
     | 'onActivateAllMembersMention' | 'onActivateSkillMention'>
 ): ComposerAtomPresentation {
   const atom = node.getAtom()
@@ -691,11 +694,14 @@ function atomPresentation(
     }
   }
   const skill = (input.skills ?? []).find((candidate) => candidate.id === atom.skillId)
+  // An unopened catalog has not declared a stored reference unavailable. Keep its
+  // saved label; the Core validates the actual reference when the user sends it.
+  const unavailable = (input.skillCatalogStatus ?? 'ready') === 'ready' && !skill
   return {
     label: `/${skill?.name ?? atom.nameAtSend}`,
-    availability: skill ? 'available' : 'unavailable',
+    availability: unavailable ? 'unavailable' : 'available',
     interactive: Boolean(input.onActivateSkillMention),
-    ariaLabel: skill ? `Skill ${skill.name}` : `Skill ${atom.nameAtSend} 当前不可用`
+    ariaLabel: unavailable ? `Skill ${atom.nameAtSend} 当前不可用` : `Skill ${skill?.name ?? atom.nameAtSend}`
   }
 }
 

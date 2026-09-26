@@ -30,6 +30,7 @@ test('the production App presents the full-window brand loader without weakening
     })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
+    process.stdout.write(`Automatic acceptance userData: ${join(fixture, 'user-data')}; no Core/SQLite/Skill Library/Runtime\n`)
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'),
       join(fixture, 'renderer/index.html'),
@@ -52,6 +53,8 @@ test('the production App presents the full-window brand loader without weakening
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
     assert.ok(report.cases.length >= 8)
+    assert.ok(report.cases.includes('Ordinary Camp switching reads only the target row without unrelated queries'))
+    assert.ok(report.cases.includes('The Skill picker loads its catalog on demand'))
     assert.ok(report.cases.includes('Pending pushes never enter history and memory normalization cannot supersede newer navigation'))
     assert.ok(report.cases.includes('One-click creation success and failure respect newer navigation intent'))
     assert.ok(report.cases.includes('Member history replay selects the requested editor while retaining new-member drafts'))

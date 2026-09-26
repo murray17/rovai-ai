@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-09-24
+last_updated: 2026-09-27
 ---
 
 # Camp Open Read Path 架构
@@ -19,7 +19,7 @@ last_updated: 2026-09-24
 | --- | --- |
 | Main Window Session | 只冻结并返回本地恢复目标与设置位置；不等待 Core，也不保证目标领域数据已经加载 |
 | Renderer startup controller | 快照返回后立即显示候选目标的一级页面框架；候选 Camp 与 committed Camp 分离，只有 enter 成功才提交权威 Camp 内容 |
-| Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
+| Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再确认可见来源并仅更新目标导航行 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
 | Core request ingress | 持续接收请求；有顺序要求的命令与混合操作交给单一 FIFO worker，执行窗口 page/changes 复用既有独立派发任务，不建立优先级调度器或第二套 RPC |
 | Core Camp enter module | 在一次有序 request 中先读 activation state；Pending 直接读取投影，Active 先按原 Envelope 查 receipt 并校验 Lead，有效新 User enter 只读，需要修复时 reconcile 后再读；缺失或 rejected 时 fail closed；不执行取消或文本维护 |
@@ -77,7 +77,7 @@ app click / notification target
   -> Main parses typed response
   -> Renderer atomically commits target Camp ID + project + recent Camp surface
   -> next meaningful paint
-  -> background project restore / campViewed / navigation refresh
+  -> background target row read / observed campViewed / authoritative row update
 
 cold startup
   -> Main Window Session returns a frozen local target
@@ -108,15 +108,15 @@ Camp 和更换 Default Lead 后的纯视图刷新也进入这个 coordinator，�
 未知命令结果所需的定向确认读取不在该合并规则内。
 
 当前 Camp 的 `camps.open` coordinator 与全局 Navigation coordinator 是两个用途不同的 seam：前者维护已打开
-会话的完整内容和 high-water，后者只在 Core post-commit invalidation 后重读侧栏 Snapshot。终态事件可以同时
+会话的完整内容和 high-water，后者按 Core post-commit invalidation 的范围重读目标行或分组。终态事件可以同时
 使二者失效，但不得让当前 Camp refresh 代替后台 Camp marker 收敛，也不得为每个 Camp 建立 Navigation timer。
 全局合并、失败退避、可见性与 20 秒安全刷新见
 [Desktop Navigation Refresh](desktop-navigation-refresh.md)。
 
-Navigation 仍按真实 publication/terminal event 求活动与完成游标；进入聚合前过滤其他事件，避免对维护
-receipt 执行无效 join/group。它和 Camp Open 共用 Core 数据库锁，但不因此把 event_log 变为 Open 的
-业务依赖。可见来源 acknowledge 的去重也不使用全局 cursor 或 Snapshot watermark 作为来源变化，见
-[Notification Episode v8](../contracts/notification-episode-v8.md)。
+Navigation 从 camp 的活动/完成摘要读取，正常刷新不再聚合历史事件。活动摘要在发布/终态事务中更新，
+仅升级时一次回填。普通 enter/open 不全局失效、不触发侧栏完整读取或使命/技能目录查询；初次启动、未知
+范围和完整性恢复仍可读取摘要完整快照。已读只确认已正式展示水位以内的新完成内容，回执返回目标行；
+重复确认不写入。可见通知来源确认仍遵守 [Notification Episode v8](../contracts/notification-episode-v8.md)。
 
 缓存只保存最近的 Camp 业务投影；collection 保持有界，执行详情将实测高度虚拟列表与跨 Camp 保留的有界数据缓存分开。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把

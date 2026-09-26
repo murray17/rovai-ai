@@ -223,3 +223,7 @@ last_updated: 2026-09-25
 - 当前 Agent 附件原路径发布、默认输出与归属理由：[V1.59-D08](../versions/v1.59/decisions.md#v1-59-d08)。
 
 - DeepSeek Harness ACP 接入：[Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md#deepseek-harness-acp)、[平台准入](../contracts/runtime-platform-admission-v2.md#deepseek-harness-增量准入)；理由：[V1.59-D10](../versions/v1.59/decisions.md#v1-59-d10)。
+
+当前侧栏范围读取、Camp 摘要与完整快照恢复的取舍见 [V1.70-D06](../versions/v1.70/decisions.md#v1-70-d06)；
+当前权威为 [Desktop Navigation Refresh](../architecture/desktop-navigation-refresh.md) 与
+[Navigation Read v1](../contracts/navigation-read-v1.md)。

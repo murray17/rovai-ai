@@ -72,7 +72,7 @@ last_updated: 2026-09-25
 - `camps.open` 与 `camps.enter` reconciliation 完成后的投影阶段只读取一致快照，不结算取消或终态、不定稿执行文本，
   也不创建 SQL、Managed Blob 或文件副作用。Pending enter 与有效 Lead 的新 User enter 全程只读；确需修复 Lead 时仅
   原有 reconciliation 命令可以写入，不能承接读取入口移出的维护职责。
-- 影响 Desktop Navigation 投影的 mutation 只在权威提交完成后发 `navigation.invalidated`；该事件不携带可直接应用的状态。Renderer 通过一个全局 generation coordinator 合并事件、focus 与低频安全刷新，串行重读完整 Snapshot，不为每个 Camp 建立 timer，也不让 Overview 附属模块失败关闭 Navigation 恢复。
+- 影响 Desktop Navigation 投影的 mutation 只在权威提交完成后发 `navigation.invalidated`；该事件不携带可直接应用的状态。Renderer 通过一个全局 generation coordinator 合并事件、focus 与低频安全刷新，串行读取目标行、相关组或完整摘要快照；普通切换只处理目标 Camp，正常导航不聚合历史事件，不为每个 Camp 建立 timer，也不让 Overview 附属模块失败关闭 Navigation 恢复。
 - 断连、序列缺口、未知 schema 或派生缓存不确定时，客户端丢弃相关缓存并重新获取 Snapshot，不能靠事件重放猜测权威状态。授权范围必须先于过滤和分页建立。
 - 事件 Read Side 在原批量查询中同时读取 `command.result` 专用列：历史完整 `payload_json` 原样返回，已知
   内部标记严格还原为相同公开 payload；未知标记或损坏专用列 fail closed。还原不得逐事件查询、读取当前

@@ -1,3 +1,4 @@
+import type { NavigationSnapshot } from '@contracts'
 import type { CampCreationPreflight, CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -466,9 +467,12 @@ Object.assign(window, { startupTest: {
         projectBindingKind: 'quick_chat', projectPath: '/fixture/quick-chat', defaultLead: null, marker: 'none',
         lastActivityAt: stamp, lastActivityGlobalSequence: 0, latestCompletionGlobalSequence: 0, version: 1 }))
     } })
-    responses.set('navigation.campViewed', { acknowledged: true })
+    requestHandlers.set('navigation.camps', ({ campIds }) => ({ throughGlobalSequence: 0, groupKeys: ['quick-chat'],
+      camps: (responses.get('navigation.snapshot') as NavigationSnapshot).quickChat.recentCamps.filter(camp => campIds.includes(camp.id)) }))
+    responses.set('navigation.campViewed', { changed: false, navigation: { throughGlobalSequence: 0, groupKeys: ['quick-chat'], camps: [] } })
     responses.set('skills.list', [])
     responses.set('skills.deliveryGroups.list', [])
+    responses.set('skills.candidates', { skills: [], errors: [] })
     responses.set('camps.exists', true)
     requestHandlers.set('camp.composerDraft.get', ({ campId }) => ({ campId, body: '', content: { version: 2, segments: [] },
       revision: 1, attachments: [], replyIntent: null, continuationIntent: null, updatedAt: stamp, expiresAt: null }))
@@ -481,7 +485,25 @@ Object.assign(window, { startupTest: {
     await clickNavigation('返回 App', '.settings-sidebar-back')
     await clickNavigation('导航会话 A', '.camp-nav-open')
     check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 A', 'Camp A is a real authoritative navigation destination')
+    const switchCallStart = calls.length
     await clickNavigation('导航会话 B', '.camp-nav-open')
+    await flush(); await flush()
+    const switchCalls = calls.slice(switchCallStart)
+    check(!switchCalls.some(method => ['navigation.snapshot', 'navigation.groupCamps', 'missions.list', 'skills.candidates', 'navigation.campViewed'].includes(method)),
+      'An ordinary read Camp switch must not read the sidebar, Missions or Skill directories, or acknowledge again')
+    check(switchCalls.includes('navigation.camps'), 'Camp switching validates only the target navigation row')
+    cases.push('Ordinary Camp switching reads only the target row without unrelated queries')
+    const skillReadStart = calls.filter(method => method === 'skills.candidates').length
+    const editor = document.querySelector<HTMLElement>('.structured-mention-editor')!
+    editor.focus()
+    document.execCommand('insertText', false, '/')
+    await flush(); await flush()
+    check(calls.filter(method => method === 'skills.candidates').length === skillReadStart + 1,
+      'Opening the Skill picker loads its catalog once')
+    document.execCommand('selectAll')
+    document.execCommand('delete')
+    await flush()
+    cases.push('The Skill picker loads its catalog on demand')
     check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 B', 'Camp switches share the same history')
     await back(); check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 A', 'Back restores the Camp ID and title')
     const delayedCamp = deferred<unknown>()

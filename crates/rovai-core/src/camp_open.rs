@@ -14,6 +14,7 @@ use crate::{
 pub struct CampOpenOutcome {
     pub projection: CampOpenProjection,
     pub reconcile_duration: Option<Duration>,
+    pub navigation_changed: bool,
     pub projection_duration: Duration,
 }
 
@@ -50,6 +51,7 @@ impl CampOpenService {
             "SELECT EXISTS(SELECT 1 FROM camp JOIN camp_member ON camp_member.camp_id=camp.id AND camp_member.agent_id=camp.default_lead_agent_id JOIN agent_profile ON agent_profile.id=camp_member.agent_id WHERE camp.id=?1 AND camp_member.status='active' AND camp_member.leave_requested_at IS NULL AND agent_profile.profile_status='present')",
             [&camp_id], |row| row.get(0),
         )?;
+        let mut navigation_changed = false;
         let reconcile_duration = if pending
             || (recorded.is_none() && lead_valid && matches!(envelope.actor, ActorRef::User { .. }))
         {
@@ -65,6 +67,8 @@ impl CampOpenService {
                     execution.result.code
                 );
             }
+            navigation_changed =
+                !execution.replayed && execution.result.code == "camp.default_lead_reconciled";
             Some(reconcile_duration)
         };
         let projection_started_at = Instant::now();
@@ -72,6 +76,7 @@ impl CampOpenService {
         Ok(CampOpenOutcome {
             projection,
             reconcile_duration,
+            navigation_changed,
             projection_duration: projection_started_at.elapsed(),
         })
     }
@@ -82,6 +87,7 @@ impl CampOpenService {
         Ok(CampOpenOutcome {
             projection,
             reconcile_duration: None,
+            navigation_changed: false,
             projection_duration: projection_started_at.elapsed(),
         })
     }

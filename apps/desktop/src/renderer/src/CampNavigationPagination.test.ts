@@ -38,18 +38,25 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function harness() {
+function harness(pinnedCampIds: string[] = []) {
   let rows = Array.from({ length: 18 }, (_, index) => camp(index + 1))
   let current: NavigationSnapshot | null = null
   let limits: NavigationGroupLimits = {}
-  const read = vi.fn(async (request: NavigationSnapshotRequest) => snapshot(rows, request.groupLimits))
+  const read = vi.fn(async (request: NavigationSnapshotRequest) => {
+    const next = snapshot(rows, request.groupLimits)
+    if (request.groupKeys) next.projects = next.projects.filter(group => request.groupKeys?.includes(group.projectKey))
+    return next
+  })
+  const readCamps = vi.fn(async (ids: string[]) => ({
+    throughGlobalSequence: 1, groupKeys: ['directory:/repo'], camps: rows.filter(row => ids.includes(row.id))
+  }))
   const commit = vi.fn((next: NavigationSnapshot, nextLimits: NavigationGroupLimits) => {
     current = next
     limits = nextLimits
   })
-  const reader = createNavigationWindowReader(read, commit)
+  const reader = createNavigationWindowReader(read, commit, { readCamps, getPinnedCampIds: () => pinnedCampIds })
   return {
-    reader, read, commit,
+    reader, read, readCamps, commit,
     visibleRows: () => current?.projects[0].recentCamps.slice(0, limits['directory:/repo'] ?? 5) ?? [],
     setRows: (next: NavigationCampItem[]) => { rows = next },
     rows: () => rows,
@@ -75,13 +82,15 @@ describe('authoritative Camp navigation windows', () => {
     h.read.mockImplementationOnce(() => next.promise)
     h.setRows(h.rows().map(row => ({ ...row, marker: 'none' })))
     const expanding = h.reader.resizeGroup('directory:/repo', 15)
-    expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 15 } })
+    expect(h.read).toHaveBeenLastCalledWith({ groupKeys: ['directory:/repo'], groupLimits: { 'directory:/repo': 15 } })
     expect(h.visibleRows()).toHaveLength(5)
     next.resolve(snapshot(h.rows(), { 'directory:/repo': 15 }))
     await expanding
     expect(h.visibleRows()).toHaveLength(15)
     expect(h.visibleRows()[5].marker).toBe('none')
-    expect(h.markup()).not.toContain('camp-marker-loading')
+    expect(h.visibleRows().every(row => row.marker === 'none')).toBe(true)
+    // The unrelated Quick Chat group retains its previous loading state.
+    expect(h.markup()).toContain('camp-marker-loading')
     expect(h.markup(true)).toContain('对话 15')
     h.reader.dispose()
   })
@@ -114,7 +123,7 @@ describe('authoritative Camp navigation windows', () => {
     const h = harness()
     await h.reader.resizeGroup('directory:/repo', 15)
     await h.reader.resizeGroup('quick-chat', 15)
-    expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 15, 'quick-chat': 15 } })
+    expect(h.read).toHaveBeenLastCalledWith({ groupKeys: ['quick-chat'], groupLimits: { 'directory:/repo': 15, 'quick-chat': 15 } })
     const shrinking = h.reader.resizeGroup('directory:/repo', 5)
     expect(h.visibleRows()).toHaveLength(5)
     await shrinking
@@ -171,7 +180,7 @@ describe('authoritative Camp navigation windows', () => {
     await expect(h.reader.resizeGroup('directory:/repo', 15)).rejects.toThrow('temporary Core failure')
     expect(h.visibleRows()).toHaveLength(5)
     await vi.advanceTimersByTimeAsync(1_000)
-    expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 5 } })
+    expect(h.read).toHaveBeenLastCalledWith({ groupKeys: ['directory:/repo'], groupLimits: { 'directory:/repo': 5 } })
     expect(h.visibleRows()).toHaveLength(5)
     await h.reader.resizeGroup('directory:/repo', 15)
     expect(h.visibleRows()).toHaveLength(15)
@@ -188,6 +197,56 @@ describe('authoritative Camp navigation windows', () => {
     expect(h.read).toHaveBeenLastCalledWith({ groupLimits: { 'directory:/repo': 15, 'quick-chat': 15 } })
     expect(h.markup(true)).toContain('对话 15')
     expect(h.markup()).toContain('对话 15')
+    h.reader.dispose()
+  })
+
+  it('switches and completes by row, coalesces known groups, and fills a deleted slot', async () => {
+    vi.useFakeTimers()
+    const h = harness(['camp-18'])
+    await h.reader.refresh('explicit')
+    expect(h.readCamps).toHaveBeenLastCalledWith(['camp-18'])
+    h.read.mockClear()
+    h.readCamps.mockClear()
+    h.setRows(h.rows().map(row => row.id === 'camp-2' ? { ...row, marker: 'unread_completed' } : row))
+    const switched = h.reader.refreshCamps(['camp-1'], 'explicit')
+    const completed = h.reader.invalidate({ scope: 'camp', campId: 'camp-2' })
+    await Promise.all([switched, completed])
+    expect(h.read).not.toHaveBeenCalled()
+    expect(h.readCamps.mock.calls.flatMap(([ids]) => ids)).toEqual(['camp-1', 'camp-2'])
+    expect(h.visibleRows().find(row => row.id === 'camp-2')?.marker).toBe('unread_completed')
+    h.setRows(h.rows().filter(row => row.id !== 'camp-1'))
+    const deletion = h.reader.invalidate({ scope: 'group', groupKeys: ['directory:/repo'] })
+    h.reader.invalidate({ scope: 'group', groupKeys: ['directory:/repo'] })
+    await vi.advanceTimersByTimeAsync(80)
+    await deletion
+    expect(h.read).toHaveBeenCalledTimes(1)
+    expect(h.read).toHaveBeenLastCalledWith({ groupKeys: ['directory:/repo'], groupLimits: {} })
+    expect(h.visibleRows().map(row => row.id)).toEqual(['camp-2', 'camp-3', 'camp-4', 'camp-5', 'camp-6'])
+    // A simultaneous status notification must not expand a different group's read.
+    h.read.mockClear()
+    const reordered = h.reader.invalidate({ scope: 'group', campId: 'camp-2' })
+    const quickStatus = h.reader.invalidate({ scope: 'camp', campId: 'quick-camp-1' })
+    await vi.advanceTimersByTimeAsync(80)
+    await Promise.all([reordered, quickStatus])
+    expect(h.read).toHaveBeenCalledTimes(1)
+    expect(h.read).toHaveBeenLastCalledWith({ groupKeys: ['directory:/repo'], groupLimits: {} })
+    expect(h.readCamps).toHaveBeenLastCalledWith(['quick-camp-1'])
+    await h.reader.refresh('foreground')
+    expect(h.readCamps).toHaveBeenLastCalledWith(['camp-18'])
+    h.reader.dispose()
+  })
+
+  it('does not let an in-flight snapshot undo an authoritative read acknowledgement', async () => {
+    const h = harness()
+    await h.reader.refresh('explicit')
+    const old = deferred<NavigationSnapshot>()
+    h.read.mockImplementationOnce(() => old.promise)
+    const refresh = h.reader.refresh('explicit')
+    h.reader.acceptRows({ throughGlobalSequence: 1, groupKeys: ['directory:/repo'], camps: [{ ...camp(1), lastSeenGlobalSequence: 1 }] })
+    h.setRows([{ ...camp(1), lastSeenGlobalSequence: 1 }, ...h.rows().slice(1)])
+    old.resolve(snapshot([{ ...camp(1), marker: 'unread_completed' }, ...h.rows().slice(1)]))
+    await refresh
+    expect(h.visibleRows()[0]).toMatchObject({ marker: 'none', lastSeenGlobalSequence: 1 })
     h.reader.dispose()
   })
 

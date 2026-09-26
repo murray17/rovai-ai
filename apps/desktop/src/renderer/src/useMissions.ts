@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CoreMethod, MissionRecord, StoredCommandResult } from '@contracts'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CoreEvent, CoreMethod, MissionRecord, StoredCommandResult } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import type { CampClient } from './camp-client'
 import { readErrorMessage } from './error-message'
+import { createNavigationRefreshCoordinator } from './navigation-refresh-coordinator'
 
 export function missionError(error: unknown): string {
   const message = readErrorMessage(error)
@@ -47,6 +48,24 @@ export function unreadMissionCount<T extends Pick<MissionRecord, 'hasUnread'>>(m
   return missions.filter(mission => mission.hasUnread).length
 }
 
+/** Camp reads/acks do not invalidate the Mission board. */
+export function shouldRefreshMissionsForEvent(event: CoreEvent, campIds: ReadonlySet<string>): boolean {
+  if (event.method === 'missions.invalidated') return true
+  const params = event.params && typeof event.params === 'object' ? event.params as Record<string, unknown> : {}
+  if (event.method === 'navigation.invalidated') {
+    const reason = typeof params.reason === 'string' ? params.reason : ''
+    return reason.startsWith('mission.') || reason.startsWith('missions.')
+      || (typeof params.campId === 'string' && campIds.has(params.campId)
+        && reason !== 'navigation.campViewed' && reason !== 'camps.enter')
+  }
+  if (event.method !== 'events.batch' || !Array.isArray(params.events)) return false
+  return params.events.some(value => {
+    const item = value as { eventType?: string; campId?: string }
+    return item.eventType?.startsWith('mission.')
+      || (item.campId && campIds.has(item.campId))
+  })
+}
+
 /** One list owner drives the board, navigation badge, and the current Mission card. */
 export function useMissions(client: CampClient, enabled: boolean) {
   const [missions, setMissions] = useState<MissionRecord[]>([])
@@ -65,23 +84,22 @@ export function useMissions(client: CampClient, enabled: boolean) {
     }
     finally { if (current === generation.current) setLoading(false) }
   }, [client, enabled])
-  const refresh = useCallback(() => load(false), [load])
-  const refreshOrThrow = useCallback(() => load(true), [load])
+  const coordinator = useMemo(() => createNavigationRefreshCoordinator(() => load(true), { debounceMs: 100 }), [load])
+  const missionCampIds = useRef<ReadonlySet<string>>(new Set())
+  missionCampIds.current = new Set(missions.map(mission => mission.campId))
+  const refresh = useCallback(() => coordinator.refresh('explicit').catch(() => undefined), [coordinator])
+  const refreshOrThrow = useCallback(() => coordinator.refresh('explicit'), [coordinator])
   useEffect(() => {
     if (!enabled) return
     void refresh()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const invalidate = () => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => void refresh(), 100)
-    }
-    const event = client.onEvent?.(event => { if (event.method === 'navigation.invalidated' || event.method === 'events.batch') invalidate() })
+    const invalidate = () => { void coordinator.refresh('invalidation').catch(() => undefined) }
+    const event = client.onEvent?.(event => { if (shouldRefreshMissionsForEvent(event, missionCampIds.current)) invalidate() })
     const authorized = client.onInvalidated?.(invalidate)
     const onFocus = () => { if (document.visibilityState === 'visible') invalidate() }
     const poll = setInterval(onFocus, 20_000)
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onFocus)
-    return () => { ++generation.current; if (timer) clearTimeout(timer); clearInterval(poll); event?.(); authorized?.(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus) }
-  }, [client, enabled, refresh])
+    return () => { ++generation.current; coordinator.dispose(); clearInterval(poll); event?.(); authorized?.(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus) }
+  }, [client, enabled, refresh, coordinator])
   return { missions, error, loading, refresh, refreshOrThrow }
 }
