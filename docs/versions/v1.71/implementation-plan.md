@@ -26,11 +26,15 @@ last_updated: 2026-09-27
   owner，终态小点期望替换为已发布 Agent 消息。历史通知读写不变量继续拥有独立旧数据 fixture：从真实 pre-175 schema 提取并重命名旧 CampTurn source adapters，仅为历史水合/ack/retention 构造事实，不恢复生产准入。新增 v175 逆向转换只供历史 migration fixture 使用，不是生产 downgrade。
 - Renderer 沿用 settings/controller/navigation owner，覆盖状态筛选、来源问题、重复提醒、quiet scope、CAS 错误恢复、
   焦点与精确定位。Electron fixture 使用独立临时 userData，不读取日常数据库、不启动真实 Runtime。
+- 审查回归沿用 Mission 命令 owner，验证最新状态已确认时仍显示最新状态，旧未读来源保留独立确认入口；
+  设置 Electron owner 验证状态选项成功、失败与重试后均恢复同一个 checkbox 的焦点，不新增平行测试。
 
 ## 验证记录
 
 已通过定向通知历史/事务/保留 21 项、真实 Mission/Task/Single Chat/Delivery/导航 owner 5 项，Migration owner 另验证末尾 receipt 写入失败后的原子回滚、外键恢复与重启。前端完整 Vitest 214 文件 / 2222 项通过；类型检查与通用文档测试、基于 `af0e8e6f` 的 CI 文档门禁通过。
 
-隔离 Electron 已通过真实设置保存/筛选/失败重试、三组布局、day/night/窄屏、卡片 quiet/队列/计时和精确 Run Portal。
-新增任务/使命导航验收发现 compact 执行预览遮挡目标；已将两类导航纳入既有精确目标面板显露逻辑，复验进行中。
-最终工作区检查、独立审查和 PR 状态仍待记录。未授权日常 App 安装，本次以代码、PR 和隔离验收交付。
+隔离 Electron 两项 owner 已通过真实设置保存/筛选/失败重试、三组布局、day/night/窄屏、卡片 quiet/队列/计时和精确 Run Portal。任务/使命导航现纳入既有 compact 面板显露逻辑，两个目标的打开与焦点均已复验通过；最终浅色、深色和窄布局截图已人工核对。
+
+`cargo test --workspace` 431 项通过、1 项按原有配置忽略，包含私有失败来源与结束失效断言。同步 main `762370b1` 后，`cargo check --workspace`、`cargo fmt --all --check`、`pnpm typecheck` 和 `pnpm build:desktop` 通过。
+
+[PR #549](https://github.com/murray17/rovai-ai/pull/549) 已创建，独立审查与最终 CI 待记录；通过后按 Principal 授权合入。未安装或重启日常 App，本次以代码、PR 和隔离验收交付。

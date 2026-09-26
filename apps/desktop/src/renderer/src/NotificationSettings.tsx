@@ -26,10 +26,12 @@ type SaveStatus = 'idle' | 'saved'
 interface SaveAttempt {
   key: SettingKey
   value: SettingValue
+  controlKey: string
 }
 
 interface PreferenceInteraction {
   key: SettingKey
+  controlKey: string
   scrollTop: number | null
 }
 
@@ -92,7 +94,7 @@ export function NotificationSettings(): React.JSX.Element {
       const panel = document.querySelector<HTMLElement>('.settings-panel-notifications')
       if (panel && interaction.scrollTop !== null) panel.scrollTop = interaction.scrollTop
       document.querySelector<HTMLInputElement>(
-        `[data-notification-preference="${key}"]`
+        `[data-notification-preference="${interaction.controlKey}"]`
       )?.focus({ preventScroll: true })
     })
   }, [])
@@ -118,19 +120,19 @@ export function NotificationSettings(): React.JSX.Element {
 
   useEffect(() => clearSavedStatusTimer, [clearSavedStatusTimer])
 
-  const update = async (key: SettingKey, value: SettingValue): Promise<void> => {
+  const update = async (key: SettingKey, value: SettingValue, controlKey: string = key): Promise<void> => {
     if (!preference || savingKey) return
 
     const previous = preference
     const next = { ...preference, [key]: value }
     let lastKnownCurrent = previous
     const panel = document.querySelector<HTMLElement>('.settings-panel-notifications')
-    interactionRef.current = { key, scrollTop: panel?.scrollTop ?? null }
+    interactionRef.current = { key, controlKey, scrollTop: panel?.scrollTop ?? null }
     clearSavedStatusTimer()
     setPreference(next)
     setSavingKey(key)
     setSaveStatus('idle')
-    setLastAttempt({ key, value })
+    setLastAttempt({ key, value, controlKey })
     setError(null)
     restorePreferenceInteraction(key)
 
@@ -191,8 +193,8 @@ export function NotificationSettings(): React.JSX.Element {
 
   const retryLastSave = (): void => {
     if (!lastAttempt || savingKey) return
-    const { key, value } = lastAttempt
-    void update(key, value)
+    const { key, value, controlKey } = lastAttempt
+    void update(key, value, controlKey)
   }
 
   return (
@@ -220,7 +222,7 @@ export function NotificationSettings(): React.JSX.Element {
             savingKey={savingKey}
             saveStatus={saveStatus}
             error={error}
-            onChange={(key, checked) => void update(key, checked)}
+            onChange={(key, checked, controlKey) => void update(key, checked, controlKey)}
             onRetry={retryLastSave}
           />
         )}
@@ -241,7 +243,7 @@ export function NotificationPreferenceEditor({
   savingKey: SettingKey | null
   saveStatus: SaveStatus
   error: string | null
-  onChange(key: SettingKey, checked: SettingValue): void
+  onChange(key: SettingKey, checked: SettingValue, controlKey?: string): void
   onRetry(): void
 }): React.JSX.Element {
   const headsUpEnabled = preference.headsUpEnabled
@@ -320,7 +322,7 @@ function NotificationScenarioGroup({
   preference: NotificationPreference
   savingKey: SettingKey | null
   headsUpEnabled: boolean
-  onChange(key: SettingKey, checked: SettingValue): void
+  onChange(key: SettingKey, checked: SettingValue, controlKey?: string): void
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState<FilterKey | null>(null)
   const enabledCount = scenario.categories.filter((category) => preference[category.key]).length
@@ -353,11 +355,14 @@ function NotificationScenarioGroup({
           {expanded === category.filter && <div className="notification-filter-options" role="group" aria-label={`${scenario.title}提醒状态`}>
             {STATUS_OPTIONS[category.filter].map(option => <label key={option.value}>
               <input type="checkbox" checked={(preference[category.filter!] as string[]).includes(option.value)}
-                disabled={!headsUpEnabled || !preference[category.key] || Boolean(savingKey)}
+                data-notification-preference={`${category.filter}:${option.value}`}
+                disabled={!headsUpEnabled || !preference[category.key] || Boolean(savingKey && savingKey !== category.filter)}
+                aria-disabled={Boolean(savingKey) || undefined}
+                onClick={event => { if (savingKey) event.preventDefault() }}
                 onChange={event => {
                   const key = category.filter!
                   const next = STATUS_OPTIONS[key].filter(item => item.value === option.value ? event.target.checked : (preference[key] as string[]).includes(item.value)).map(item => item.value)
-                  onChange(key, next as NotificationPreference[FilterKey])
+                  onChange(key, next as NotificationPreference[FilterKey], `${key}:${option.value}`)
                 }} />{option.label}
             </label>)}
           </div>}

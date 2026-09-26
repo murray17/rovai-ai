@@ -56,7 +56,9 @@ A Mission question comes only from the transition's explicit, same-Camp publishe
 mention the user. The existing structured-message summary renderer produces its body; withdrawn/missing content is
 unavailable. Without that link, show only Mission title + “需要你”; never synthesize an explanation. Business action
 availability depends on the exact Mission/Task, not availability of its optional question message. Business Episodes
-display the latest transition while retaining independently addressable historical occurrences.
+display the latest transition while retaining independently addressable historical occurrences. Acknowledging the latest
+transition never changes that display back to an older unread status; the newest remaining historical acknowledgement
+target is exposed as a secondary action, separately from the latest primary subject.
 
 ## Preferences and coalescing
 

@@ -1560,6 +1560,49 @@ fn raw_episode_from_row(row: &Row<'_>) -> rusqlite::Result<RawEpisode> {
     })
 }
 
+// Both inbox and heads-up reads use the same source availability and message projection.
+const OCCURRENCE_PROJECTION_SQL: &str = r#"
+SELECT occurrence.id, occurrence.semantic, occurrence.occurred_at,
+       occurrence.camp_turn_id, occurrence.agent_run_id,
+       occurrence.source_type, occurrence.source_message_id,
+       occurrence.approval_id, occurrence.admitted_attention_revision,
+       occurrence.admitted_change_sequence,
+       CASE WHEN disposition.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END,
+       CASE WHEN disposition.satisfied_at IS NOT NULL THEN 1 ELSE 0 END,
+       CASE WHEN disposition.resolved_at IS NOT NULL THEN 1 ELSE 0 END,
+       CASE
+           WHEN occurrence.source_type = 'round' THEN EXISTS(SELECT 1 FROM notification_round n WHERE n.id=occurrence.source_id AND n.camp_id=occurrence.camp_id)
+           WHEN occurrence.source_type = 'mission' THEN EXISTS(SELECT 1 FROM mission m WHERE m.id=occurrence.source_id AND m.camp_id=occurrence.camp_id)
+           WHEN occurrence.source_type = 'task' THEN EXISTS(SELECT 1 FROM task t WHERE t.id=occurrence.source_id AND t.camp_id=occurrence.camp_id)
+           WHEN occurrence.source_type = 'single_chat_message' THEN EXISTS(SELECT 1 FROM conversation_message m JOIN conversation c ON c.id=m.conversation_id WHERE m.id=occurrence.source_id AND c.camp_id=occurrence.camp_id AND c.ended_at IS NULL)
+           WHEN occurrence.semantic = 'user_mention'
+               THEN CASE WHEN message.id IS NOT NULL
+                              AND message.tombstoned_at IS NULL THEN 1 ELSE 0 END
+           WHEN occurrence.semantic = 'approval_pending'
+               THEN CASE WHEN approval.id IS NOT NULL
+                              AND approval.status = 'pending' THEN 1 ELSE 0 END
+           ELSE CASE
+               WHEN occurrence.source_type = 'agent_run'
+                   THEN CASE WHEN source_run.id IS NOT NULL THEN 1 ELSE 0 END
+               ELSE CASE WHEN turn.id IS NOT NULL THEN 1 ELSE 0 END
+           END
+       END,
+       message.author_id, profile.display_name,
+       CASE WHEN message.tombstoned_at IS NULL THEN message.structured_content_json END
+FROM notification_occurrence AS occurrence
+JOIN notification_occurrence_disposition AS disposition
+  ON disposition.occurrence_id = occurrence.id
+LEFT JOIN camp_message AS message
+  ON message.id = occurrence.source_message_id
+ AND message.camp_id = occurrence.camp_id
+LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
+LEFT JOIN camp_turn AS turn ON turn.id = occurrence.camp_turn_id
+LEFT JOIN agent_run AS source_run
+  ON source_run.id = occurrence.agent_run_id
+ AND COALESCE(source_run.camp_id,(SELECT camp_id FROM camp_turn WHERE id=source_run.camp_turn_id)) = occurrence.camp_id
+LEFT JOIN approval ON approval.id = occurrence.approval_id
+"#;
+
 fn load_heads_up_signal(
     connection: &rusqlite::Connection,
     recipient_user_id: &str,
@@ -1572,49 +1615,7 @@ fn load_heads_up_signal(
     };
     let tuple = connection
         .query_row(
-            r#"
-            SELECT occurrence.id, occurrence.semantic, occurrence.occurred_at,
-                   occurrence.camp_turn_id, occurrence.agent_run_id,
-                   occurrence.source_type, occurrence.source_message_id,
-                   occurrence.approval_id, occurrence.admitted_attention_revision,
-                   occurrence.admitted_change_sequence,
-                   CASE WHEN disposition.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END,
-                   CASE WHEN disposition.satisfied_at IS NOT NULL THEN 1 ELSE 0 END,
-                   CASE WHEN disposition.resolved_at IS NOT NULL THEN 1 ELSE 0 END,
-                   CASE
-                       WHEN occurrence.source_type = 'round' THEN EXISTS(SELECT 1 FROM notification_round n WHERE n.id=occurrence.source_id AND n.camp_id=occurrence.camp_id)
-                       WHEN occurrence.source_type = 'mission' THEN EXISTS(SELECT 1 FROM mission m WHERE m.id=occurrence.source_id AND m.camp_id=occurrence.camp_id)
-                       WHEN occurrence.source_type = 'task' THEN EXISTS(SELECT 1 FROM task t WHERE t.id=occurrence.source_id AND t.camp_id=occurrence.camp_id)
-                       WHEN occurrence.source_type = 'single_chat_message' THEN EXISTS(SELECT 1 FROM conversation_message m JOIN conversation c ON c.id=m.conversation_id WHERE m.id=occurrence.source_id AND c.camp_id=occurrence.camp_id AND c.ended_at IS NULL)
-                       WHEN occurrence.semantic = 'user_mention'
-                           THEN CASE WHEN message.id IS NOT NULL
-                                          AND message.tombstoned_at IS NULL THEN 1 ELSE 0 END
-                       WHEN occurrence.semantic = 'approval_pending'
-                           THEN CASE WHEN approval.id IS NOT NULL
-                                          AND approval.status = 'pending' THEN 1 ELSE 0 END
-                       ELSE CASE
-                           WHEN occurrence.source_type = 'agent_run'
-                               THEN CASE WHEN source_run.id IS NOT NULL THEN 1 ELSE 0 END
-                           ELSE CASE WHEN turn.id IS NOT NULL THEN 1 ELSE 0 END
-                       END
-                   END,
-                   message.author_id, profile.display_name,
-                   CASE WHEN message.tombstoned_at IS NULL THEN message.structured_content_json END
-            FROM notification_occurrence AS occurrence
-            JOIN notification_occurrence_disposition AS disposition
-              ON disposition.occurrence_id = occurrence.id
-            LEFT JOIN camp_message AS message
-              ON message.id = occurrence.source_message_id
-             AND message.camp_id = occurrence.camp_id
-            LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
-            LEFT JOIN camp_turn AS turn ON turn.id = occurrence.camp_turn_id
-            LEFT JOIN agent_run AS source_run
-              ON source_run.id = occurrence.agent_run_id
-             AND COALESCE(source_run.camp_id,(SELECT camp_id FROM camp_turn WHERE id=source_run.camp_turn_id)) = occurrence.camp_id
-            LEFT JOIN approval ON approval.id = occurrence.approval_id
-            WHERE occurrence.episode_id = ?1
-              AND occurrence.admitted_change_sequence = ?2
-            "#,
+            &format!("{OCCURRENCE_PROJECTION_SQL} WHERE occurrence.episode_id = ?1 AND occurrence.admitted_change_sequence = ?2"),
             params![episode_id, change_sequence],
             |row| {
                 Ok((
@@ -1718,49 +1719,7 @@ fn hydrate_episode(
 ) -> Result<NotificationEpisodeView> {
     let kind = NotificationEpisodeKind::parse(&raw.kind)?;
     let mut statement = connection.prepare(
-        r#"
-        SELECT occurrence.id, occurrence.semantic, occurrence.occurred_at,
-               occurrence.camp_turn_id, occurrence.agent_run_id,
-               occurrence.source_type, occurrence.source_message_id,
-               occurrence.approval_id, occurrence.admitted_attention_revision,
-               occurrence.admitted_change_sequence,
-               CASE WHEN disposition.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END,
-               CASE WHEN disposition.satisfied_at IS NOT NULL THEN 1 ELSE 0 END,
-               CASE WHEN disposition.resolved_at IS NOT NULL THEN 1 ELSE 0 END,
-               CASE
-                   WHEN occurrence.source_type = 'round' THEN EXISTS(SELECT 1 FROM notification_round n WHERE n.id=occurrence.source_id AND n.camp_id=occurrence.camp_id)
-                   WHEN occurrence.source_type = 'mission' THEN EXISTS(SELECT 1 FROM mission m WHERE m.id=occurrence.source_id AND m.camp_id=occurrence.camp_id)
-                   WHEN occurrence.source_type = 'task' THEN EXISTS(SELECT 1 FROM task t WHERE t.id=occurrence.source_id AND t.camp_id=occurrence.camp_id)
-                   WHEN occurrence.source_type = 'single_chat_message' THEN EXISTS(SELECT 1 FROM conversation_message m JOIN conversation c ON c.id=m.conversation_id WHERE m.id=occurrence.source_id AND c.camp_id=occurrence.camp_id AND c.ended_at IS NULL)
-                   WHEN occurrence.semantic = 'user_mention'
-                       THEN CASE WHEN message.id IS NOT NULL
-                                      AND message.tombstoned_at IS NULL THEN 1 ELSE 0 END
-                   WHEN occurrence.semantic = 'approval_pending'
-                       THEN CASE WHEN approval.id IS NOT NULL
-                                      AND approval.status = 'pending' THEN 1 ELSE 0 END
-                   ELSE CASE
-                       WHEN occurrence.source_type = 'agent_run'
-                           THEN CASE WHEN source_run.id IS NOT NULL THEN 1 ELSE 0 END
-                       ELSE CASE WHEN turn.id IS NOT NULL THEN 1 ELSE 0 END
-                   END
-               END,
-               message.author_id, profile.display_name,
-               CASE WHEN message.tombstoned_at IS NULL THEN message.structured_content_json END
-        FROM notification_occurrence AS occurrence
-        JOIN notification_occurrence_disposition AS disposition
-          ON disposition.occurrence_id = occurrence.id
-        LEFT JOIN camp_message AS message
-          ON message.id = occurrence.source_message_id
-         AND message.camp_id = occurrence.camp_id
-        LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
-        LEFT JOIN camp_turn AS turn ON turn.id = occurrence.camp_turn_id
-        LEFT JOIN agent_run AS source_run
-          ON source_run.id = occurrence.agent_run_id
-         AND COALESCE(source_run.camp_id,(SELECT camp_id FROM camp_turn WHERE id=source_run.camp_turn_id)) = occurrence.camp_id
-        LEFT JOIN approval ON approval.id = occurrence.approval_id
-        WHERE occurrence.episode_id = ?1
-        ORDER BY occurrence.admitted_attention_revision ASC
-        "#,
+        &format!("{OCCURRENCE_PROJECTION_SQL} WHERE occurrence.episode_id = ?1 ORDER BY occurrence.admitted_attention_revision ASC"),
     )?;
     let rows = statement.query_map([raw.id.as_str()], |row| {
         let semantic: String = row.get(1)?;
@@ -1935,7 +1894,11 @@ fn hydrate_episode(
             })
     }
     .context("primary Notification Occurrence is missing")?;
-    let action_occurrence = attention_occurrence.unwrap_or(display_occurrence);
+    let action_occurrence = if business_kind {
+        display_occurrence
+    } else {
+        attention_occurrence.unwrap_or(display_occurrence)
+    };
     let primary_action = if kind == NotificationEpisodeKind::Approval
         && attention_occurrence.is_some_and(|occurrence| occurrence.resolved)
     {
@@ -1945,10 +1908,21 @@ fn hydrate_episode(
             connection,
             &raw,
             action_occurrence,
-            attention_occurrence.is_some(),
+            action_occurrence.is_active_attention(raw.cleared_through_attention_revision),
         )?
     };
     let mut secondary_actions = Vec::new();
+    if business_kind
+        && let Some(older_attention) = attention_occurrence
+        && older_attention.id != display_occurrence.id
+    {
+        secondary_actions.push(action_for_occurrence(
+            connection,
+            &raw,
+            older_attention,
+            true,
+        )?);
+    }
     if primary_action.kind != NotificationActionKind::OpenCampMessage
         && let Some(mention_occurrence) = unacknowledged_mentions.first().copied()
     {

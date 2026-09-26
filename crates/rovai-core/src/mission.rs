@@ -1535,6 +1535,72 @@ mod tests {
             needs.is_none(),
             "leaving needs_you resolves the old transient source"
         );
+        let completed = changes
+            .changes
+            .iter()
+            .find(|change| {
+                change.heads_up_signal.as_ref().is_some_and(|signal| {
+                    signal.action.subject.as_ref().is_some_and(|subject| {
+                        subject.id == id && subject.status.as_deref() == Some("completed")
+                    })
+                })
+            })
+            .unwrap();
+        let completed_action = &completed.heads_up_signal.as_ref().unwrap().action;
+        let result = notifications
+            .acknowledge(
+                &mut db,
+                &command(crate::notification::AcknowledgeNotificationEpisodeCommand {
+                    episode_id: completed.episode_id.clone(),
+                    observed_episode_version: completed_action.observed_episode_version,
+                    acknowledgement_id: completed_action.acknowledgement_id.clone().unwrap(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(result.result.status, CommandResultStatus::Applied);
+        let inbox = notifications
+            .inbox(
+                &mut db,
+                "local_user",
+                crate::notification::NotificationEpisodeFilter::All,
+                None,
+                100,
+            )
+            .unwrap();
+        let mission_episode = inbox
+            .items
+            .iter()
+            .find(|episode| {
+                episode
+                    .primary_action
+                    .subject
+                    .as_ref()
+                    .is_some_and(|subject| subject.id == id)
+            })
+            .unwrap();
+        assert_eq!(
+            mission_episode
+                .primary_action
+                .subject
+                .as_ref()
+                .unwrap()
+                .status
+                .as_deref(),
+            Some("completed"),
+            "acknowledging completion cannot make an older unread transition the display state"
+        );
+        assert!(mission_episode.primary_action.acknowledgement_id.is_none());
+        assert!(
+            mission_episode.unread,
+            "older transitions retain independent attention"
+        );
+        assert!(mission_episode.secondary_actions.iter().any(|action| {
+            action.acknowledgement_id.is_some()
+                && action
+                    .subject
+                    .as_ref()
+                    .is_some_and(|subject| subject.status.as_deref() == Some("in_progress"))
+        }));
         assert_eq!(
             db.connection()
                 .query_row(
