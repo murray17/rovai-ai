@@ -615,7 +615,7 @@ fn automation_identifier_schema() -> Value {
 fn automation_notify_schema() -> Value {
     json!({
         "type": "array", "maxItems": 2, "uniqueItems": true,
-        "items": {"type": "string", "enum": ["feishu", "dingtalk"]}
+        "items": {"type": "string", "enum": ["feishu", "lark", "dingtalk"]}
     })
 }
 

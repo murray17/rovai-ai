@@ -1,7 +1,7 @@
 import { parse as parseScript, type Expression, type Program } from 'acorn'
 import { parse as parseHtml, type DefaultTreeAdapterMap } from 'parse5'
 import type { FeishuDeveloperIdentity } from './feishu-developer-session'
-import { brandForPortal, openPlatformOrigin } from './feishu-domains'
+import { brandForPortal, openPlatformOrigin, type OpenPlatformDomains } from './feishu-domains'
 import { FeishuSessionError } from './feishu-session-http'
 
 export function record(value: unknown): Record<string, unknown> {
@@ -16,7 +16,11 @@ export function firstString(...values: unknown[]): string | undefined {
   return undefined
 }
 
-export function normalizeFeishuIdentity(raw: unknown, portalUrl: string): FeishuDeveloperIdentity {
+export function normalizeFeishuIdentity(
+  raw: unknown,
+  portalUrl: string,
+  domains: OpenPlatformDomains
+): FeishuDeveloperIdentity {
   const user = record(raw)
   const userId = firstString(user.id, user.userId, user.user_id)
   const userName = firstString(user.name, user.userName, user.user_name, record(user.displayName).value)
@@ -28,7 +32,7 @@ export function normalizeFeishuIdentity(raw: unknown, portalUrl: string): Feishu
     throw new FeishuSessionError('feishu_developer_identity_incomplete', { missingFields })
   }
   const email = firstString(user.email)
-  return { brand: brandForPortal(portalUrl), userId, userName, tenantId, tenantName,
+  return { brand: brandForPortal(portalUrl, domains), userId, userName, tenantId, tenantName,
     ...(email ? { email } : {}) }
 }
 
@@ -38,8 +42,12 @@ export interface FeishuOpenPlatformBootstrap {
   csrfToken: string
 }
 
-export function readOpenPlatformBootstrap(html: string, finalUrl: string): FeishuOpenPlatformBootstrap {
-  const apiOrigin = openPlatformOrigin(finalUrl)
+export function readOpenPlatformBootstrap(
+  html: string,
+  finalUrl: string,
+  domains: OpenPlatformDomains
+): FeishuOpenPlatformBootstrap {
+  const apiOrigin = openPlatformOrigin(finalUrl, domains)
   const fields: Record<string, unknown> = Object.create(null)
   for (const source of inlineScripts(parseHtml(html))) {
     let program: Program
@@ -53,10 +61,10 @@ export function readOpenPlatformBootstrap(html: string, finalUrl: string): Feish
     readStatements(program.body, fields)
   }
   const declaredOrigin = firstString(record(fields.outDomain).larkOpen)
-  if (declaredOrigin && openPlatformOrigin(declaredOrigin) !== apiOrigin) {
+  if (declaredOrigin && openPlatformOrigin(declaredOrigin, domains) !== apiOrigin) {
     throw new FeishuSessionError('feishu_open_platform_origin_rejected')
   }
-  const identity = normalizeFeishuIdentity(fields.user, finalUrl)
+  const identity = normalizeFeishuIdentity(fields.user, finalUrl, domains)
   const csrfToken = firstString(fields.csrfToken)
   if (!csrfToken) throw new FeishuSessionError('feishu_open_platform_bootstrap_incomplete', {
     missingFields: ['csrfToken']

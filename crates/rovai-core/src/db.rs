@@ -292,8 +292,8 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.71";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 125;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 126;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -743,6 +743,7 @@ struct CurrentMigrationState {
     v173: bool,
     v174: bool,
     v175: bool,
+    v176: bool,
 }
 
 impl CurrentMigrationState {
@@ -764,11 +765,19 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v176 {
+            let mut previous = *self;
+            previous.v176 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && self.v175
+                && previous.admits("v1.71", 125, classifier);
+        }
         if self.v175 {
             let mut previous = *self;
             previous.v175 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            return contract == "v1.71"
+                && schema == 125
                 && self.v174
                 && previous.admits("v1.70", 124, classifier);
         }
@@ -3205,6 +3214,7 @@ pub(crate) fn classify_database_contract(
         || (migrations.v173 && !skills_rebuild_schema_matches)
         || (migrations.v174 && !public_history_claim_schema_matches)
         || (migrations.v175 && !notification_model::schema_matches(connection)?)
+        || (migrations.v176 && !lark_channel_v176_schema_matches(connection)?)
         || (migrations.v156
             && !migrations.v157
             && !attachment_paths::schema_matches(connection)?
@@ -3736,6 +3746,23 @@ fn camp_deletion_v169_schema_matches(connection: &Connection) -> rusqlite::Resul
         |row| row.get(0),
     )?;
     Ok(camp_columns == 7 && journal_columns == 4 && indexes == 4)
+}
+
+fn lark_channel_v176_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    connection.query_row(r#"
+        SELECT
+            (SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN (
+                'lark_account', 'lark_owner_identity', 'lark_owner_app_identity',
+                'lark_member_bot', 'lark_member_bot_publication_intent')) = 5
+            AND EXISTS(SELECT 1 FROM pragma_table_info('lark_account')
+                WHERE name='brand' AND type='TEXT' AND "notnull"=1)
+            AND (SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN (
+                'channel_credentials', 'channel_developer_sessions', 'automation_notification_delivery')
+                AND instr(sql, "'lark'") > 0) = 3
+            AND (SELECT count(*) FROM sqlite_schema WHERE type='view' AND name IN (
+                'channel_member_bot_directory', 'channel_owner_app_identity_directory')
+                AND instr(sql, "'lark'") > 0) = 2
+    "#, [], |row| row.get(0))
 }
 
 fn tool_output_v170_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
@@ -4915,7 +4942,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 172),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 173),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 174),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 175)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 175),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 176)
         "#,
         [],
         |row| {
@@ -5026,6 +5054,7 @@ fn load_current_migration_state(
                 v173: row.get(103)?,
                 v174: row.get(104)?,
                 v175: row.get(105)?,
+                v176: row.get(106)?,
             })
         },
     )
@@ -8104,6 +8133,9 @@ impl Database {
             if !self.schema_migration_applied(175)? {
                 migration_step!("migration_175", notification_model::migrate(self));
             }
+            if !self.schema_migration_applied(176)? {
+                migration_step!("migration_176", self.migrate_lark_channel_v176());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -8844,6 +8876,9 @@ impl Database {
         }
         if !self.schema_migration_applied(175)? {
             migration_step!("migration_175", notification_model::migrate(self));
+        }
+        if !self.schema_migration_applied(176)? {
+            migration_step!("migration_176", self.migrate_lark_channel_v176());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -28437,6 +28472,46 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_lark_channel_v176(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.71" && marker.projection_schema_version == 125),
+            "Lark migration requires the exact v1.71/schema 125 source"
+        );
+        transaction.execute_batch(include_str!("lark_channel_v176.sql"))?;
+        transaction.execute_batch(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (176, datetime('now'));
+            UPDATE rovai_data_contract SET contract_version='v1.72', projection_schema_version=126,
+                reset_reason=NULL, updated_at=datetime('now') WHERE singleton=1;",
+        )?;
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&transaction)?,
+                DatabaseContractClassification::Current(_)
+            ),
+            "Lark migration failed current schema admission"
+        );
+        validate_migration_foreign_keys(
+            &transaction,
+            &[
+                "lark_account",
+                "lark_owner_identity",
+                "lark_owner_app_identity",
+                "lark_member_bot",
+                "lark_member_bot_publication_intent",
+                "channel_credentials",
+                "channel_developer_sessions",
+                "automation_notification_delivery",
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_dsh_runtime_v157(&mut self) -> Result<()> {
         self.connection.execute_batch("PRAGMA foreign_keys=OFF;")?;
         let result = (|| -> Result<()> {
@@ -33663,6 +33738,7 @@ pub(crate) fn open_v170_source_for_test(directory: &Path) -> Result<Database> {
 
 #[cfg(test)]
 fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
+    downgrade_current_schema_to_v175_source_for_test(connection);
     #[cfg(feature = "extended-tests")]
     notification_model::downgrade_for_test(connection);
     // Only the old-migration fixtures reverse the three latest migrations.
@@ -33930,6 +34006,39 @@ fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
     .unwrap();
     tx.commit().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v175_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=176)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    let transaction = connection.unchecked_transaction().unwrap();
+    for table in [
+        "lark_account",
+        "lark_member_bot",
+        "lark_owner_identity",
+        "lark_owner_app_identity",
+        "lark_member_bot_publication_intent",
+    ] {
+        let count: i64 = transaction
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "downgrade fixture must not discard Lark rows");
+    }
+    transaction
+        .execute_batch(include_str!("lark_channel_v176_downgrade.sql"))
+        .unwrap();
+    transaction.commit().unwrap();
 }
 
 #[cfg(test)]
@@ -38460,6 +38569,234 @@ mod tests {
     }
 
     #[test]
+    fn lark_migration_preserves_rows_rolls_back_and_clones_the_provider_schema() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v175_source_for_test(database.connection());
+        database.connection().execute_batch(r#"
+            INSERT INTO channel_credentials VALUES('feishu-kept','feishu','member_bot','app-kept','{"appSecret":"fixture"}',1,7,11,12);
+            INSERT INTO channel_developer_sessions VALUES('dingtalk','account-kept','{}','{}',1,8,21,22);
+            INSERT INTO automation_run(id,automation_id,automation_version,trigger_kind,scheduled_for,status,reason,prompt,member_id,project_ref_json,notify_channels_json,timeout_at,created_at,started_at,ended_at,updated_at)
+            VALUES('kept-run','kept-automation',6,'manual','kept-scheduled','failed','timeout','Original instruction','agent_1','{"kind":"quick_chat"}','[]','original-deadline','kept-created','kept-started','kept-ended','kept-updated');
+            INSERT INTO automation_notification_delivery(id,automation_run_id,provider,member_id,payload_json,status,available_at,created_at,updated_at)
+            VALUES('kept-notification','kept-run','feishu','agent_1','{}','pending','a','b','c');
+            INSERT INTO feishu_account(id,identity_digest,display_name,tenant_name,status,created_at,updated_at,brand)
+            VALUES('old-feishu','fixture','Owner','Tenant','connected','a','b','lark');
+            INSERT INTO feishu_member_bot(agent_id,account_id,app_id,bot_display_name,credential_ref,status,created_at,updated_at,published_at)
+            VALUES('agent_1','old-feishu','old-feishu-app','Bot','feishu-kept','published','a','b','c');
+            INSERT INTO feishu_owner_identity VALUES('old-feishu','tenant','principal-feishu','digest',NULL,'a',1,'b','c');
+            INSERT INTO feishu_owner_app_identity VALUES('old-feishu','old-feishu-app','open-digest',NULL,NULL,'a',1,'b','c');
+            INSERT INTO dingtalk_account(id,user_id_digest,corp_id,user_name,corp_name,oauth_profile_ref,status,created_at,updated_at,connected_at,last_verified_at)
+            VALUES('old-dingtalk','digest','corp','Owner','Corp','profile','connected','a','b','c','d');
+            INSERT INTO dingtalk_member_bot VALUES('agent_1','old-dingtalk','unified','old-dingtalk-app','robot','Bot','dingtalk-kept','digest','published',NULL,1,'a','b','c');
+            INSERT INTO dingtalk_owner_app_identity VALUES('old-dingtalk-app','old-dingtalk','corp','digest',1,'a','b');
+            CREATE TEMP TRIGGER reject_lark_receipt BEFORE INSERT ON schema_migration
+            WHEN NEW.version=176 BEGIN SELECT RAISE(ABORT,'fixture Lark receipt failure'); END;
+        "#).unwrap();
+        let snapshot = |connection: &Connection, table: &str| {
+            let mut statement = connection
+                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    (0..row.as_ref().column_count())
+                        .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let tables = [
+            "channel_credentials",
+            "channel_developer_sessions",
+            "automation_notification_delivery",
+            "channel_member_bot_directory",
+            "channel_owner_app_identity_directory",
+        ];
+        let before = tables.map(|table| snapshot(database.connection(), table));
+        assert!(
+            database
+                .migrate_lark_channel_v176()
+                .unwrap_err()
+                .to_string()
+                .contains("fixture Lark receipt failure")
+        );
+        assert!(!database.schema_migration_applied(176).unwrap());
+        assert!(
+            !database
+                .connection()
+                .table_exists(None::<&str>, "lark_account")
+                .unwrap()
+        );
+        assert_eq!(
+            tables.map(|table| snapshot(database.connection(), table)),
+            before
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_lark_receipt")
+            .unwrap();
+        database.migrate_lark_channel_v176().unwrap();
+        assert_eq!(
+            tables.map(|table| snapshot(database.connection(), table)),
+            before
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT count(*) FROM lark_account", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT brand FROM feishu_account WHERE id='old-feishu'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "lark"
+        );
+        for suffix in [
+            "account",
+            "owner_identity",
+            "owner_app_identity",
+            "member_bot",
+            "member_bot_publication_intent",
+        ] {
+            let feishu = format!("feishu_{suffix}");
+            let lark = format!("lark_{suffix}");
+            let canonical_sql = |name: &str| {
+                let sql: String = database
+                    .connection()
+                    .query_row(
+                        "SELECT sql FROM sqlite_schema WHERE name=?1",
+                        [name],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                sql.chars()
+                    .filter(|c| !c.is_whitespace() && *c != '"')
+                    .collect::<String>()
+            };
+            let expected_sql = canonical_sql(&feishu).replace("feishu_", "lark_").replace(
+                "brandTEXTCHECK(brandISNULLORbrandIN('feishu','lark'))",
+                "brandTEXTNOTNULLCHECK(brand='lark')",
+            );
+            assert_eq!(
+                canonical_sql(&lark),
+                expected_sql,
+                "{suffix} CHECK/default/constraint definitions"
+            );
+            let pragma = |kind: &str, name: &str| {
+                let mut statement = database
+                    .connection()
+                    .prepare(&format!("PRAGMA {kind}('{name}')"))
+                    .unwrap();
+                let mut rows = statement
+                    .query_map([], |row| {
+                        (0..row.as_ref().column_count())
+                            .map(|i| {
+                                let value = row.get::<_, rusqlite::types::Value>(i)?;
+                                Ok(match value {
+                                    rusqlite::types::Value::Text(value) => {
+                                        rusqlite::types::Value::Text(
+                                            value.replace("lark_", "feishu_"),
+                                        )
+                                    }
+                                    value => value,
+                                })
+                            })
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                // brand is the sole allowed column-definition difference.
+                if kind == "table_xinfo" && suffix == "account" {
+                    for row in &mut rows {
+                        if row[1] == rusqlite::types::Value::Text("brand".into()) {
+                            row[3] = rusqlite::types::Value::Integer(1);
+                        }
+                    }
+                }
+                rows
+            };
+            assert_eq!(
+                pragma("table_xinfo", &feishu),
+                pragma("table_xinfo", &lark),
+                "{suffix} columns"
+            );
+            assert_eq!(
+                pragma("foreign_key_list", &feishu),
+                pragma("foreign_key_list", &lark),
+                "{suffix} foreign keys"
+            );
+            let indexes = pragma("index_list", &feishu);
+            assert_eq!(indexes, pragma("index_list", &lark), "{suffix} indexes");
+            for index in indexes {
+                let rusqlite::types::Value::Text(name) = &index[1] else {
+                    panic!("index name")
+                };
+                assert_eq!(
+                    pragma("index_info", name),
+                    pragma("index_info", &name.replace("feishu_", "lark_"))
+                );
+            }
+        }
+        database.connection().execute_batch(r#"
+            INSERT INTO channel_credentials VALUES('lark-new','lark','member_bot','app-new','{"appSecret":"fixture"}',1,1,1,1);
+            INSERT INTO channel_developer_sessions VALUES('lark','new-account','{}','{}',1,1,1,1);
+            INSERT INTO automation_notification_delivery(id,automation_run_id,provider,member_id,payload_json,status,available_at,created_at,updated_at)
+            VALUES('lark-notification','kept-run','lark','agent_1','{}','pending','a','b','c');
+        "#).unwrap();
+        database
+            .connection()
+            .execute_batch(
+                "
+            INSERT INTO lark_account SELECT * FROM feishu_account;
+            INSERT INTO lark_member_bot SELECT * FROM feishu_member_bot;
+            INSERT INTO lark_owner_identity SELECT * FROM feishu_owner_identity;
+            INSERT INTO lark_owner_app_identity SELECT * FROM feishu_owner_app_identity;
+        ",
+            )
+            .unwrap();
+        assert!(
+            database
+                .connection()
+                .execute("UPDATE lark_account SET brand='feishu'", [])
+                .is_err()
+        );
+        assert!(
+            database
+                .connection()
+                .execute("UPDATE lark_account SET brand=NULL", [])
+                .is_err()
+        );
+        for view in [
+            "channel_member_bot_directory",
+            "channel_owner_app_identity_directory",
+        ] {
+            let count: i64 = database
+                .connection()
+                .query_row(
+                    &format!("SELECT count(*) FROM {view} WHERE provider='lark'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::Current(_)
+        ));
+    }
+
+    #[test]
     fn current_schema_uses_delivery_first_multi_input_agent_runs() {
         let directory =
             std::env::temp_dir().join(format!("rovai-v160-delivery-schema-{}", Uuid::new_v4()));
@@ -39045,6 +39382,8 @@ mod tests {
         database.migrate_public_context_v172().unwrap();
         database.migrate_skills_rebuild_v173().unwrap();
         database.migrate_public_history_claim_v174().unwrap();
+        notification_model::migrate(&mut database).unwrap();
+        database.migrate_lark_channel_v176().unwrap();
         let successor_run_id = claim_waiting_delivery_batches(&mut database, 1)
             .unwrap()
             .pop()
@@ -39397,6 +39736,7 @@ mod tests {
             v173: version >= 173,
             v174: version >= 174,
             v175: version >= 175,
+            v176: version >= 176,
         }
     }
 
@@ -39591,8 +39931,10 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                174,
+                176,
             ),
+            ("v1.71/schema 125 before Lark", "v1.71", 125, 175),
+            ("v1.70/schema 124 before notifications", "v1.70", 124, 174),
             (
                 "v1.69/schema 123 before public history claim",
                 "v1.69",
@@ -40076,7 +40418,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(175);
+        let current = migration_state_through(176);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -40548,7 +40890,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(174));
+        assert_eq!(state, migration_state_through(176));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")

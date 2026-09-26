@@ -196,7 +196,7 @@ pub(crate) fn camp_channel_source_from_row(
         .and_then(|(provider, conversation_kind)| {
             matches!(
                 (provider.as_str(), conversation_kind.as_str()),
-                ("feishu", "p2p" | "group" | "topic") | ("dingtalk", "p2p" | "group")
+                ("feishu" | "lark", "p2p" | "group" | "topic") | ("dingtalk", "p2p" | "group")
             )
             .then_some(CampChannelSource {
                 provider,

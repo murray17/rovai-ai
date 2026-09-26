@@ -17,6 +17,8 @@ last_updated: 2026-09-25
 
 实施步骤与验收证据见[实施计划](implementation-plan.md)。旧导入记录、受管 Revision、冻结的 Run 和 Native Binding 保留；新的 Skills 路径不再以项目投影或旧 Revision 校验作为准入。旧项目入口不随升级自动删除；诊断与修复提供唯一问题和用户显式触发的统一清理动作。Windows 对九个固定官方 Skill 名称使用 [D04](decisions.md#v1-70-d04) 的显式清理规则，并按 [D05](decisions.md#v1-70-d05) 补足已登记项目中无 observation 的残留目录。
 
+后续：[v1.71](../v1.71/README.md)。
+
 同期交付桌面「关于与更新」页的已安装版本日志：构建时内置的发布说明按运行版本校验并离线展示；新版日志继续复用更新检查结果，可在两版之间切换而不增加在线查询。合同见 [App Update v5](../../contracts/app-update-v5.md)，用户已验收开发包界面。
 
 Skills migration 173 及其已安装本地构建的数据合同标记仍为 `v1.69`／schema 123，公开 Manifest 30／10／7 的含义不重写。独立 historyHint 变更新增 migration **174**：只接受经 Skills 主线结构核验的 173 来源，目标为 `v1.70`／schema **124**、公开 31／10／8。早期分支也使用过同一个 173／标记、却定义不同的 30／9／8；不得误识别并自动升级。historyHint 已随 PR #529 合入；其 Bootstrap 缺失门禁的后续修正和验收状态见[实施计划](implementation-plan.md)。

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.71
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: completed
@@ -17,6 +17,8 @@ last_updated: 2026-09-27
 
 Migration 175 将确切 v1.70/schema 124 升级为 v1.71/schema 125；通知 wire schema 9。历史事实与用户设置保留，
 不补发旧通知。Bootstrap、ContextManifest、Run Facts、工具权限、调度、预算与模型输入均不改变。
+
+后续：[v1.72](../v1.72/README.md)。
 
 ## 跨版本文档影响
 

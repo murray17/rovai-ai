@@ -45,6 +45,7 @@ const MAX_LIST_LIMIT: usize = 50;
 #[serde(rename_all = "snake_case")]
 pub enum AutomationNotifyChannel {
     Feishu,
+    Lark,
     Dingtalk,
 }
 
@@ -52,6 +53,7 @@ impl AutomationNotifyChannel {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Feishu => "feishu",
+            Self::Lark => "lark",
             Self::Dingtalk => "dingtalk",
         }
     }
@@ -63,6 +65,7 @@ impl FromStr for AutomationNotifyChannel {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "feishu" => Ok(Self::Feishu),
+            "lark" => Ok(Self::Lark),
             "dingtalk" => Ok(Self::Dingtalk),
             _ => anyhow::bail!("unsupported Automation notification channel: {value}"),
         }
@@ -1977,7 +1980,7 @@ pub(crate) fn claim_notification_deliveries(
     limit: usize,
     now: &DateTime<Utc>,
 ) -> Result<Vec<ClaimedChannelDelivery>> {
-    if limit == 0 || !matches!(provider, "feishu" | "dingtalk") {
+    if limit == 0 || !matches!(provider, "feishu" | "lark" | "dingtalk") {
         return Ok(Vec::new());
     }
     let now_text = timestamp(*now);
@@ -2031,7 +2034,7 @@ pub(crate) fn claim_notification_deliveries(
             .get("body")
             .and_then(Value::as_str)
             .context("Automation notification has no body")?;
-        let payload = if provider == "feishu" {
+        let payload = if matches!(provider, "feishu" | "lark") {
             json!({
                 "kind": "agent_output",
                 "presentationVersion": 1,
@@ -2165,19 +2168,25 @@ fn notification_target(
     provider: &str,
     member_id: &str,
 ) -> Result<Option<NotificationTarget>> {
-    let sql = if provider == "feishu" {
-        r#"
+    let sql = if let Some(spec) = crate::channel::ChannelProviderSpec::for_provider(provider) {
+        format!(
+            r#"
         SELECT bot.app_id, bot.credential_ref, identity.external_id
-        FROM feishu_member_bot AS bot
-        JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
-        JOIN feishu_owner_app_identity AS app
+        FROM {member_bot} AS bot
+        JOIN {owner_identity} AS owner ON owner.account_id = bot.account_id
+        JOIN {owner_app_identity} AS app
           ON app.account_id = bot.account_id AND app.app_id = bot.app_id
         JOIN external_principal_app_identity AS identity
           ON identity.principal_id = owner.canonical_owner_principal_id
-         AND identity.provider = 'feishu' AND identity.app_id = bot.app_id
+         AND identity.provider = '{provider}' AND identity.app_id = bot.app_id
          AND identity.identity_kind = 'open_id'
         WHERE bot.agent_id = ?1 AND bot.status = 'published'
-        "#
+        "#,
+            member_bot = spec.member_bot,
+            owner_identity = spec.owner_identity,
+            owner_app_identity = spec.owner_app_identity,
+            provider = spec.provider
+        )
     } else {
         r#"
         SELECT bot.app_key, bot.credential_ref, identity.external_id
@@ -2191,9 +2200,10 @@ fn notification_target(
          AND identity.identity_kind = 'user_id'
         WHERE bot.agent_id = ?1 AND bot.status = 'published'
         "#
+        .to_string()
     };
     transaction
-        .query_row(sql, [member_id], |row| {
+        .query_row(&sql, [member_id], |row| {
             Ok(NotificationTarget {
                 app_id: row.get(0)?,
                 credential_ref: row.get(1)?,

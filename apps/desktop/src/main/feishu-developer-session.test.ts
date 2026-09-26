@@ -13,10 +13,13 @@ vi.mock('electron', () => ({ BrowserWindow: electron.BrowserWindow, session: {
   }
 } }))
 import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
+import { FEISHU_LOGIN_PROFILE, LARK_LOGIN_PROFILE, type FeishuLoginProfile } from './feishu-login-protocol'
 
 const user = { id: 'user-1', name: '张三', tenantId: 'tenant-1', tenantName: '示例团队' }
 let portalUser: Record<string, unknown>
 let origin: string
+let loginHost: string
+let cookieRoot: string
 let portalFailure: 'network' | 'expired' | null
 let polling: Record<string, unknown>[]
 let initialize: Record<string, unknown>
@@ -34,8 +37,8 @@ function fakeSession() {
   return {
     clearStorageData: vi.fn(async () => undefined),
     cookies: {
-      get: vi.fn(async () => [{ name: 'session', value: 'cookie-fixture', domain: '.larkoffice.com', path: '/app', secure: true, httpOnly: true, sameSite: 'lax', session: false, expirationDate: 9_999_999_999, hostOnly: false },
-        { name: 'host', value: 'host-cookie-fixture', domain: 'open.larkoffice.com', path: '/', secure: true, httpOnly: false, sameSite: 'strict', session: true, hostOnly: true },
+      get: vi.fn(async () => [{ name: 'session', value: 'cookie-fixture', domain: `.${cookieRoot}`, path: '/app', secure: true, httpOnly: true, sameSite: 'lax', session: false, expirationDate: 9_999_999_999, hostOnly: false },
+        { name: 'host', value: 'host-cookie-fixture', domain: `open.${cookieRoot}`, path: '/', secure: true, httpOnly: false, sameSite: 'strict', session: true, hostOnly: true },
         { name: 'other', value: 'ignored', domain: '.example.org', path: '/', session: true }]),
       set: vi.fn(async (_value: unknown) => { if (failCookieRestore) { failCookieRestore = false; throw new Error('cookie restore failed') } })
     },
@@ -49,19 +52,19 @@ function fakeSession() {
       if (portalFailure === 'network') throw new Error('untrusted network message')
       if (portalFailure === 'expired') {
         if (url.startsWith('https://accounts.')) return new Response('<html></html>')
-        return new Response(null, { status: 302, headers: { location: 'https://accounts.feishu.cn/accounts/page/login' } })
+        return new Response(null, { status: 302, headers: { location: `https://${loginHost}/accounts/page/login` } })
       }
       if (new URL(url).origin !== origin) return new Response(null, { status: 302, headers: { location: `${origin}/app` } })
       return htmlResponse()
     })
   }
 }
-const complete = () => ({ next_step: 'enter_app', step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross?ticket=fixture' } })
-function create(store = new MemoryStore(), profile: Record<string, number> = {}) {
+const complete = () => ({ next_step: 'enter_app', step_info: { cross_login_uri: `https://${loginHost}/cross?ticket=fixture` } })
+function create(store = new MemoryStore(), profile: Record<string, number> = {}, loginProfile: Readonly<FeishuLoginProfile> = FEISHU_LOGIN_PROFILE) {
   const qrDataUrl = vi.fn(async (_payload: string) => 'data:image/png;base64,fixture')
   const diagnostic = vi.fn()
   return { store, qrDataUrl, diagnostic, service: new ElectronFeishuDeveloperSessionService(store, undefined,
-    { profile: { pollIntervalMs: 10, requestTimeoutMs: 100, loginTimeoutMs: 1000, ...profile }, qrDataUrl, diagnostic,
+    { loginProfile, profile: { pollIntervalMs: 10, requestTimeoutMs: 100, loginTimeoutMs: 1000, ...profile }, qrDataUrl, diagnostic,
       request: (session, url, init) => session.fetch(url, init) }) }
 }
 async function login(service: ElectronFeishuDeveloperSessionService, options = {}) {
@@ -70,8 +73,8 @@ async function login(service: ElectronFeishuDeveloperSessionService, options = {
   await vi.advanceTimersByTimeAsync(11)
   return promise
 }
-async function connected() {
-  const fixture = create()
+async function connected(loginProfile: Readonly<FeishuLoginProfile> = FEISHU_LOGIN_PROFILE) {
+  const fixture = create(new MemoryStore(), {}, loginProfile)
   await login(fixture.service)
   await fixture.service.activatePendingLogin(fixture.store.commit(fixture.service.pendingConnection()))
   return fixture
@@ -83,6 +86,8 @@ beforeEach(() => {
   electron.BrowserWindow.mockClear()
   portalUser = { ...user }
   origin = 'https://open.feishu.cn'
+  loginHost = 'accounts.feishu.cn'
+  cookieRoot = 'larkoffice.com'
   portalFailure = null
   polling = []
   initialize = { code: 0, data: { next_step: 'qr_login_polling', step_info: { token: 'qr-token-fixture', status: 1 } } }
@@ -319,14 +324,21 @@ describe('HTTP Feishu developer login and saved sessions', () => {
     expect(await service.inspect()).toMatchObject({ status: 'valid' })
   })
 
-  it.each(['open.feishu.cn', 'open.larkoffice.com', 'open.larksuite.com'])(
-    'uses the final trusted origin for login, restoration and management: %s', async (host) => {
+  it.each([
+    ['open.feishu.cn', FEISHU_LOGIN_PROFILE, 'accounts.feishu.cn', 'larkoffice.com'],
+    ['open.larkoffice.com', FEISHU_LOGIN_PROFILE, 'accounts.feishu.cn', 'larkoffice.com'],
+    ['open.larksuite.com', LARK_LOGIN_PROFILE, 'accounts.larksuite.com', 'larksuite.com']
+  ] as const)(
+    'uses the final trusted origin for login, restoration and management: %s', async (host, loginProfile, loginAt, root) => {
       origin = `https://${host}`
-      const { service, store } = await connected()
-      expect(store.record?.identity.brand).toBe(host === 'open.larksuite.com' ? 'lark' : 'feishu')
+      loginHost = loginAt
+      cookieRoot = root
+      const { service, store } = await connected(loginProfile)
+      expect(store.record?.identity.brand).toBe(loginProfile.domains.brand)
+      expect(store.lastReadProvider).toBe(loginProfile.domains.brand)
       expect(store.record?.session.portalOrigin).toBe(origin)
       expect(store.record?.session.cookies).toHaveLength(2)
-      const restored = create(store).service
+      const restored = create(store, {}, loginProfile).service
       expect(await restored.inspect()).toMatchObject({ status: 'valid' })
       const platform = await restored.openPlatformSession({ expectedIdentity: { userId: 'user-1', tenantId: 'tenant-1' } })
       expect(platform.apiOrigin).toBe(origin)
@@ -335,12 +347,41 @@ describe('HTTP Feishu developer login and saved sessions', () => {
       const [, init] = restoredJar.fetch.mock.calls.at(-1)!
       expect(new Headers(init?.headers).get('referer')).toBe(`${origin}/app`)
       expect(new Headers(init?.headers).get('x-csrf-token')).toBe('csrf-fixture')
-      expect(restoredJar.cookies.set.mock.calls[0][0]).toMatchObject({ domain: '.larkoffice.com', path: '/app', expirationDate: 9_999_999_999, secure: true, httpOnly: true, sameSite: 'lax' })
+      expect(restoredJar.cookies.set.mock.calls[0][0]).toMatchObject({ domain: `.${root}`, path: '/app', expirationDate: 9_999_999_999, secure: true, httpOnly: true, sameSite: 'lax' })
       expect(restoredJar.cookies.set.mock.calls[1][0]).not.toHaveProperty('domain')
       await expect(platform.fetch('https://open.feishu.cn.evil.example/developers/v1/app/create')).rejects.toThrow('feishu_session_url_rejected')
       await service.disconnect()
     }
   )
+
+  it.each([
+    ['Feishu', FEISHU_LOGIN_PROFILE, 'https://open.larksuite.com', 'accounts.feishu.cn'],
+    ['Lark', LARK_LOGIN_PROFILE, 'https://open.feishu.cn', 'accounts.larksuite.com'],
+    ['Lark', LARK_LOGIN_PROFILE, 'https://open.larkoffice.com', 'accounts.larksuite.com']
+  ] as const)('%s rejects a login whose portal lands on %s', async (_name, loginProfile, foreign, loginAt) => {
+    origin = foreign
+    loginHost = loginAt
+    const { service, store } = create(new MemoryStore(), {}, loginProfile)
+    polling.push(complete())
+    const outcome = service.beginLogin().catch((error: Error) => error.message)
+    await vi.advanceTimersByTimeAsync(11)
+    expect(await outcome).toBe('feishu_session_url_rejected')
+    expect(() => service.pendingConnection()).toThrow('feishu_login_pending_session_missing')
+    expect(store.record).toBeNull()
+  })
+
+  it.each([
+    ['Feishu', FEISHU_LOGIN_PROFILE, 'lark'],
+    ['Lark', LARK_LOGIN_PROFILE, 'feishu']
+  ] as const)('%s never restores a saved session of brand %s', async (_name, loginProfile, foreignBrand) => {
+    const store = new MemoryStore()
+    store.record = { provider: 'feishu', accountId: 'account-fixture', revision: 1,
+      identity: { brand: foreignBrand, userId: 'user-1', userName: '张三', tenantId: 'tenant-1', tenantName: '示例团队' },
+      session: { cookies: [] } }
+    const { service } = create(store, {}, loginProfile)
+    expect(await service.inspect()).toEqual({ status: 'invalid', reason: 'expired' })
+    expect(electron.sessions).toHaveLength(0)
+  })
 
   it('rejects identity drift before management and closes old management clients on account switch', async () => {
     const { service, store } = await connected()
@@ -387,7 +428,9 @@ describe('HTTP Feishu developer login and saved sessions', () => {
 
 class MemoryStore {
   record: { provider: 'feishu'; accountId: string; identity: FeishuDeveloperIdentity; session: StoredFeishuDeveloperSession; revision: number } | null = null
-  async read<TIdentity, TSession>() {
+  lastReadProvider: string | null = null
+  async read<TIdentity, TSession>(provider: string) {
+    this.lastReadProvider = provider
     return structuredClone(this.record) as null | { provider: 'feishu'; accountId: string; identity: TIdentity; session: TSession; revision: number }
   }
   async replace(input: { accountId: string; identity: unknown; session: unknown }): Promise<number> {

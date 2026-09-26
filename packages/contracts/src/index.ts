@@ -953,7 +953,7 @@ export interface EditSingleChatPendingInputCommand {
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 
 export type CampChannelSource =
-  | { provider: 'feishu'; conversationKind: 'p2p' | 'group' | 'topic' }
+  | { provider: 'feishu' | 'lark'; conversationKind: 'p2p' | 'group' | 'topic' }
   | { provider: 'dingtalk'; conversationKind: 'p2p' | 'group' }
 
 export interface NavigationCampItem {
@@ -2845,7 +2845,7 @@ export type SettingsSection =
   | 'diagnostics'
   | 'about'
 
-export type ChannelKind = 'feishu' | 'dingtalk'
+export type ChannelKind = 'feishu' | 'lark' | 'dingtalk'
 
 export type ChannelHostStatus = 'unavailable' | 'ready'
 
@@ -3704,7 +3704,7 @@ export interface RejectHearthReviewItemCommand {
   expectedReviewItemVersion: number
 }
 
-export type AutomationNotifyChannel = 'feishu' | 'dingtalk'
+export type AutomationNotifyChannel = 'feishu' | 'lark' | 'dingtalk'
 export type AutomationWeekday =
   | 'monday' | 'tuesday' | 'wednesday' | 'thursday'
   | 'friday' | 'saturday' | 'sunday'
@@ -3912,6 +3912,26 @@ export type CoreMethod =
   | 'channels.feishu.owner.verify'
   | 'channels.feishu.dm.startNew'
   | 'channels.feishu.pendingBinding.resolve'
+  | 'channels.lark.snapshot'
+  | 'channels.lark.account.upsert'
+  | 'channels.lark.account.commitConnection'
+  | 'channels.lark.account.disconnect'
+  | 'channels.lark.account.expire'
+  | 'channels.lark.publicationIntent.create'
+  | 'channels.lark.publicationIntent.advance'
+  | 'channels.lark.publicationIntent.storeCredential'
+  | 'channels.lark.memberBot.upsert'
+  | 'channels.lark.owner.verify'
+  | 'channels.lark.dm.startNew'
+  | 'channels.lark.pendingBinding.resolve'
+  | 'channels.lark.inbound.observe'
+  | 'channels.lark.inbound.finalize'
+  | 'channels.lark.roster.reconcile'
+  | 'channels.lark.deliveries.settle'
+  | 'channels.lark.host.tick'
+  | 'channels.lark.executionConsole.page.authorize'
+  | 'channels.lark.executionConsole.recentOutput.authorize'
+  | 'channels.lark.executionConsole.agentRun.cancel'
   | 'channels.dingtalk.snapshot'
   | 'channels.dingtalk.account.upsert'
   | 'channels.dingtalk.account.commitConnection'

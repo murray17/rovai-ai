@@ -39,6 +39,8 @@ describe('navigation search routing', () => {
     expect(navigationCampSearch('快速对话', [quickChat], projects)).toEqual({ kind: 'text', camps: [quickChat] })
     const channelCamp = { ...target, channelSource: { provider: 'feishu' as const, conversationKind: 'group' as const } }
     expect(navigationCampSearch('飞书群聊', [channelCamp], projects)).toEqual({ kind: 'text', camps: [channelCamp] })
+    const larkCamp = { ...target, channelSource: { provider: 'lark' as const, conversationKind: 'topic' as const } }
+    expect(navigationCampSearch('lArK话题', [channelCamp, larkCamp], projects)).toEqual({ kind: 'text', camps: [larkCamp] })
     const camps = Array.from({ length: 13 }, (_, index) => ({ ...target, id: String(index) }))
     expect(navigationCampSearch('  ', camps, projects)).toEqual({ kind: 'text', camps: camps.slice(0, 12) })
   })

@@ -337,7 +337,8 @@ mod tests {
         assert_eq!(db.connection.query_row("SELECT json_array(heads_up_enabled,turn_completed_heads_up_enabled,version,task_status_heads_up_enabled,mission_statuses_json) FROM notification_preference",[],|r|r.get::<_,String>(0)).unwrap(), "[0,0,7,0,\"[\\\"completed\\\"]\"]");
         assert!(matches!(
             classify_database_contract(&db.connection).unwrap(),
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.71" && marker.projection_schema_version == 125
         ));
         drop(db);
         let reopened = Database::open(&directory).unwrap();

@@ -1363,7 +1363,13 @@ fn process_dispatch_attempt(
             &delivery,
             attempt_id,
             "failed",
-            "recipient_not_in_feishu_roster",
+            if topic_parent_roster_identity(&transaction, &delivery.camp_id)?
+                .is_some_and(|(provider, _, _)| provider == "lark")
+            {
+                "recipient_not_in_lark_roster"
+            } else {
+                "recipient_not_in_feishu_roster"
+            },
             &actor,
             &now,
         )?;
@@ -1960,7 +1966,7 @@ fn topic_parent_roster_identity(
             JOIN channel_conversation AS conversation
               ON conversation.id = binding.channel_conversation_id
             WHERE binding.camp_id = ?1 AND binding.status = 'active'
-              AND conversation.provider = 'feishu'
+              AND conversation.provider IN ('feishu', 'lark')
               AND conversation.conversation_kind = 'topic'
             LIMIT 1
             "#,
@@ -1986,8 +1992,9 @@ pub(crate) fn topic_channel_recipient_is_present(
             SELECT EXISTS(
                 SELECT 1
                 FROM external_group_bot_roster AS roster
-                JOIN feishu_member_bot AS bot
-                  ON bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
+                JOIN channel_member_bot_directory AS bot
+                  ON bot.provider = roster.provider
+                 AND bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
                 WHERE roster.provider = ?1
                   AND roster.tenant_key = ?2 AND roster.chat_id = ?3
                   AND roster.agent_id = ?4 AND roster.status = 'present'
@@ -2002,6 +2009,7 @@ pub(crate) fn topic_channel_recipient_is_present(
 
 pub(crate) fn pending_topic_roster_refreshes(
     transaction: &Transaction<'_>,
+    provider: &str,
 ) -> Result<Vec<TopicRosterRefreshRequest>> {
     let mut statement = transaction.prepare(
         r#"
@@ -2019,7 +2027,7 @@ pub(crate) fn pending_topic_roster_refreshes(
           AND delivery.dispatch_phase = 'attempted_waiting'
           AND delivery.wait_condition = ?1
           AND json_extract(delivery.failure_detail_json, '$.blockerCode') = ?2
-          AND conversation.provider = 'feishu'
+          AND conversation.provider = ?3
           AND conversation.conversation_kind = 'topic'
         GROUP BY conversation.provider, conversation.tenant_key, conversation.chat_id
         ORDER BY conversation.provider, conversation.tenant_key, conversation.chat_id
@@ -2027,7 +2035,11 @@ pub(crate) fn pending_topic_roster_refreshes(
     )?;
     Ok(statement
         .query_map(
-            params![TOPIC_ROSTER_WAIT_CONDITION, TOPIC_ROSTER_SYNC_BLOCKER_CODE],
+            params![
+                TOPIC_ROSTER_WAIT_CONDITION,
+                TOPIC_ROSTER_SYNC_BLOCKER_CODE,
+                provider
+            ],
             |row| {
                 Ok(TopicRosterRefreshRequest {
                     provider: row.get(0)?,
@@ -2528,6 +2540,169 @@ fn rejected_with_details(code: &str, message: &str, details: Value) -> CommandHa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Owns the persisted roster gate, not channel admission or Runtime setup.
+    // A small SQLite fixture exercises the real gate and provider-scoped queries;
+    // the existing channel membership test only covers Camp roster reconciliation.
+    #[test]
+    fn topic_dispatch_waits_for_its_provider_roster_and_checks_its_published_bot() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch(r#"
+            CREATE TABLE channel_conversation(id, provider, tenant_key, chat_id, conversation_kind);
+            CREATE TABLE channel_conversation_binding(camp_id, channel_conversation_id, status);
+            CREATE TABLE external_group_bot_roster_state(provider, tenant_key, chat_id, generation);
+            CREATE TABLE external_group_bot_roster(provider, tenant_key, chat_id, app_id, agent_id, status);
+            CREATE TABLE channel_member_bot_directory(provider, app_id, agent_id, status);
+            CREATE TABLE message_delivery(id, camp_id, status, dispatch_phase, active_dispatch_attempt_id,
+                wait_condition, failure_detail_json, version, updated_at);
+            CREATE TABLE message_delivery_attempt(id, delivery_id, status, wait_condition, failure_detail_json, ended_at);
+            CREATE TABLE event_log(event_id, task_id, turn_id, sequence, event_type, native_method,
+                payload_json, camp_id, entity_type, entity_id, actor_type, actor_id, source_agent_run_id,
+                execution_epoch, created_at);
+        "#).unwrap();
+        let tx = connection.transaction().unwrap();
+        let actor = ActorRef::System {
+            component_id: "message-dispatcher".into(),
+        };
+        let now = "2026-09-27T00:00:00Z";
+        let delivery = |provider: &str| DispatchDelivery {
+            id: provider.into(),
+            camp_id: provider.into(),
+            camp_turn_id: "turn".into(),
+            message_id: "message".into(),
+            camp_message_boundary_sequence: 1,
+            recipient_agent_id: "agent_1".into(),
+            recipient_membership_version_at_admission: 1,
+            task_id: None,
+            assignee_agent_id_at_admission: None,
+            source_agent_run_id: "source".into(),
+            delivery_kind: "agent_message".into(),
+            completion_role: "required".into(),
+            gather_id: None,
+            edge_kind: None,
+            target_parent_agent_run_id: None,
+            return_to_agent_run_id: None,
+            a2a_root_agent_run_id: None,
+            a2a_depth: 0,
+            retry_generation: 0,
+            failure_detail_json: None,
+        };
+        for provider in ["feishu", "lark"] {
+            // Deliberately collide tenant, chat, App and Agent IDs across providers.
+            tx.execute(
+                "INSERT INTO channel_conversation VALUES(?1,?1,'tenant','chat','topic')",
+                [provider],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO channel_conversation_binding VALUES(?1,?1,'active')",
+                [provider],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO external_group_bot_roster_state VALUES(?1,'tenant','chat',4)",
+                [provider],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO external_group_bot_roster VALUES(?1,'tenant','chat','app','agent_1','present')", [provider]).unwrap();
+            tx.execute(
+                "INSERT INTO channel_member_bot_directory VALUES(?1,'app','agent_1',?2)",
+                params![
+                    provider,
+                    if provider == "feishu" {
+                        "published"
+                    } else {
+                        "disabled"
+                    }
+                ],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO message_delivery VALUES(?1,?1,'pending','attempting',?1,NULL,NULL,1,?2)", params![provider, now]).unwrap();
+            tx.execute(
+                "INSERT INTO message_delivery_attempt VALUES(?1,?1,'attempting',NULL,NULL,NULL)",
+                [provider],
+            )
+            .unwrap();
+            assert!(
+                !topic_roster_is_fresh_for_attempt(&tx, &delivery(provider), provider, &actor, now)
+                    .unwrap(),
+                "{provider}"
+            );
+        }
+        for provider in ["feishu", "lark"] {
+            assert_eq!(
+                pending_topic_roster_refreshes(&tx, provider).unwrap(),
+                vec![TopicRosterRefreshRequest {
+                    provider: provider.into(),
+                    tenant_key: "tenant".into(),
+                    chat_id: "chat".into(),
+                    required_roster_generation: 5,
+                }]
+            );
+        }
+        assert!(
+            pending_topic_roster_refreshes(&tx, "dingtalk")
+                .unwrap()
+                .is_empty()
+        );
+        let resume = |provider: &str| {
+            let mut value = delivery(provider);
+            value.failure_detail_json = tx
+                .query_row(
+                    "SELECT failure_detail_json FROM message_delivery WHERE id=?1",
+                    [provider],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            tx.execute("UPDATE message_delivery SET dispatch_phase='attempting',active_dispatch_attempt_id=?1,wait_condition=NULL WHERE id=?1", [provider]).unwrap();
+            tx.execute("UPDATE message_delivery_attempt SET status='attempting',wait_condition=NULL WHERE id=?1", [provider]).unwrap();
+            value
+        };
+        tx.execute(
+            "UPDATE external_group_bot_roster_state SET generation=8 WHERE provider='feishu'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !topic_roster_is_fresh_for_attempt(&tx, &resume("lark"), "lark", &actor, now).unwrap(),
+            "another provider cannot release this gate"
+        );
+        assert_eq!(
+            pending_topic_roster_refreshes(&tx, "lark").unwrap()[0].required_roster_generation,
+            5
+        );
+        tx.execute(
+            "UPDATE external_group_bot_roster_state SET generation=5 WHERE provider='lark'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            topic_roster_is_fresh_for_attempt(&tx, &resume("lark"), "lark", &actor, now).unwrap()
+        );
+        assert!(
+            pending_topic_roster_refreshes(&tx, "lark")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(topic_channel_recipient_is_present(&tx, "feishu", "agent_1").unwrap());
+        assert!(
+            !topic_channel_recipient_is_present(&tx, "lark", "agent_1").unwrap(),
+            "a published Feishu Bot cannot authorize a disabled Lark Bot"
+        );
+        tx.execute(
+            "UPDATE channel_member_bot_directory SET status='published' WHERE provider='lark'",
+            [],
+        )
+        .unwrap();
+        assert!(topic_channel_recipient_is_present(&tx, "lark", "agent_1").unwrap());
+        tx.execute(
+            "UPDATE external_group_bot_roster SET status='absent' WHERE provider='lark'",
+            [],
+        )
+        .unwrap();
+        assert!(!topic_channel_recipient_is_present(&tx, "lark", "agent_1").unwrap());
+        assert!(topic_channel_recipient_is_present(&tx, "feishu", "agent_1").unwrap());
+    }
 
     // Parser/normalization owns the syntax matrix; the Send integration owner
     // separately verifies the atomic notification, routing and replay effects.

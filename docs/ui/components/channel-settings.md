@@ -3,22 +3,28 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-09-13
+last_updated: 2026-09-24
 ---
 
 # 渠道设置
 
 渠道设置是 Owner 在 Rovai 本机维护当前开放渠道连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v16](../../contracts/feishu-channel-v16.md)与
+[Feishu Channel v17](../../contracts/feishu-channel-v17.md)、[Lark Channel v1](../../contracts/lark-channel-v1.md)与
 [DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)；本页只拥有信息层级、交互与可访问性。
 
-当前渠道页同时开放飞书和钉钉管理。两个 Provider 使用同一 Tab、连接、账号、队员 Bot 和管理信息层级；Renderer 只展示
+当前渠道页同时开放飞书、Lark 和钉钉管理，页签顺序固定为飞书、Lark、钉钉。三个 Provider 使用同一 Tab、连接、账号、队员 Bot 和管理信息层级；Renderer 只展示
 typed Snapshot 已提供的 Provider，不制造缺失平台。钉钉已有账号、Bot、发布、重连与受控管理链接按真实状态呈现，Cookie、
 AppSecret、credential、项目绝对路径和控制面原文仍不进入 Renderer。
 
 重新开放以飞书同等体验为目标：产品时机、反馈、失败和恢复应同等清晰；平台没有提供的原生 `@`、reply、附件或
 disclosure 必须明确呈现为限制，不用伪造字段或自制伪原生组件掩盖。管理入口开放不自动扩大这些 Provider 能力。
+
+Lark 与飞书是两个独立 Provider，各自拥有页签、连接、账号和队员 Bot；同一队员可以同时出现在两个页签的已发布列表中。
+Lark 页签使用 Lark 标志与“Lark”名称，未连接时主动作同为“登录开放平台”，二维码 Dialog 标题为“登录 Lark 开放平台”。
+在 [Lark Channel v1](../../contracts/lark-channel-v1.md#8-能力-gate) 的真实租户验收完成前，Lark 页签说明区固定显示
+“Lark 支持尚未完成真实租户验收”，使用说明文字层级而非错误或警告色；它不禁用任何操作。
+Lark 等拉丁名称与相邻汉字之间保留一个空格（如“Lark 连接”“重新连接 Lark”），与 Main 改写的 Provider 文案一致。
 
 ## Desktop 与 Web 操作能力
 
@@ -57,7 +63,7 @@ Dialog、状态点和间距复用现有组件语法。
 账号、企业和 email 过长时换行，窄窗口将账号与操作依次下移，不裁切必要身份信息。
 
 飞书未连接时主动作是“登录开放平台”。连接行只展示真实 `userName`、
-`tenantName`、可选 email 与 Feishu/Lark brand，不显示 controller App 或“平台 Owner/企业”占位值。说明必须明确：
+`tenantName`、可选 email 与所属 Provider 名称（飞书或 Lark），不显示 controller App 或“平台 Owner/企业”占位值。说明必须明确：
 连接只决定以后发布的目标，切换不会迁移或停用已发布 Bot。点击“切换账号”后，当前账号在新二维码成功完成前继续
 有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
 
@@ -203,7 +209,7 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 卡片只在状态、按钮可用性或已展开最近输出窗口变化时更新。永久正文卡继续独立发布，执行卡仍是临时 surface；
 下一轮召回后不留下完成占位。钉钉真正排队时发送排队 AI Card，admission 后与旧执行卡都通过 Robot recall 删除，
 不更新成“已开始”“状态已结束”或“此执行记录已结束”。安全、固定 URL、Token、callback、双身份和串行更新边界由
-[Feishu Channel v16](../../contracts/feishu-channel-v16.md)和
+[Feishu Channel v17](../../contracts/feishu-channel-v17.md)、[Lark Channel v1](../../contracts/lark-channel-v1.md)和
 [DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)拥有。
 
 ## 局域网执行台设置
@@ -230,17 +236,21 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 
 - 首次读取使用页面内 status；无 Snapshot 时提供重试；已有 Snapshot 刷新失败保留旧内容并显示 alert；
 - 所有异步操作使用稳定 busy key，防止双击；失败后恢复原动作；
+- 连接、断开、发布、重试、审批和二维码操作的失败归属发起它的 Provider，只在该 Provider 的页签与发布 Dialog 显示；
+  切换页签不得显示其他 Provider 的操作错误。Snapshot 读取失败影响全部 Provider，仍在所有页签显示；
 - Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；
 - 连接菜单支持 Enter/Space/向下方向键打开、方向键选择、Escape/点击外部关闭，取消不触发渠道操作；菜单关闭不强制重新聚焦入口；
 - 状态不仅靠颜色，始终有文本；loading/failed 通过 `role=status/alert` 公布；
-- 飞书与钉钉 Provider Tab 都使用原生 button/Tab、`aria-selected` 与可见焦点；Host 不可用只禁用下游动作，不禁用 Tab；
+- 飞书、Lark 与钉钉 Provider Tab 都使用原生 button/Tab、`aria-selected` 与可见焦点；Host 不可用只禁用下游动作，不禁用 Tab；
 - Tab 顺序按页面视觉顺序，链接和按钮均可键盘操作，焦点不因 Snapshot 更新跳到页面起点。
 
 ## References
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v16](../../contracts/feishu-channel-v16.md)
+- [Feishu Channel v17](../../contracts/feishu-channel-v17.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
+- [Lark Channel v1](../../contracts/lark-channel-v1.md)
+- [Lark 渠道架构](../../architecture/lark-channel.md)
 - [DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

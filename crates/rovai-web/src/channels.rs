@@ -14,6 +14,7 @@ use std::{future::Future, pin::Pin};
 #[serde(rename_all = "camelCase")]
 pub enum ChannelKind {
     Feishu,
+    Lark,
     Dingtalk,
 }
 
@@ -78,5 +79,49 @@ pub(crate) async fn request(
     match host.call(request).await {
         Ok(snapshot) => Json(json!({"result":snapshot,"error":null})).into_response(),
         Err(code) => error(StatusCode::SERVICE_UNAVAILABLE, code),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn admitted(request: Value) -> bool {
+        serde_json::from_value::<ChannelRequest>(request).is_ok_and(|request| request.valid())
+    }
+
+    #[test]
+    fn lark_is_admitted_for_publish_and_retry_and_round_trips_its_kind() {
+        for operation in ["publish", "retry"] {
+            for kind in ["feishu", "lark", "dingtalk"] {
+                let request = json!({"operation":operation,"kind":kind,"agentId":"agent_1"});
+                assert!(admitted(request.clone()), "{operation} {kind}");
+                let parsed: ChannelRequest = serde_json::from_value(request.clone()).unwrap();
+                assert_eq!(serde_json::to_value(parsed).unwrap(), request);
+            }
+        }
+    }
+
+    #[test]
+    fn select_approver_admits_only_dingtalk() {
+        let select = |kind: &str| json!({"operation":"selectApprover","kind":kind,"agentId":"agent_1","userId":"user_1"});
+        assert!(admitted(select("dingtalk")));
+        assert!(!admitted(select("feishu")));
+        assert!(!admitted(select("lark")));
+    }
+
+    #[test]
+    fn unknown_or_miscased_kinds_are_rejected() {
+        for kind in [
+            json!("Lark"),
+            json!("LARK"),
+            json!("telegram"),
+            json!(""),
+            json!(null),
+            json!(1),
+        ] {
+            let request = json!({"operation":"publish","kind":kind,"agentId":"agent_1"});
+            assert!(!admitted(request), "{kind}");
+        }
     }
 }

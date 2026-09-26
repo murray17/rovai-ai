@@ -8,8 +8,14 @@ import {
 import type { SqliteChannelDeveloperSessionStore } from './channel-credential-store'
 import QRCode from 'qrcode'
 import { normalizeFeishuIdentity, readOpenPlatformBootstrap } from './feishu-developer-identity'
-import { isFeishuCookieDomain, isFeishuLoginUrl, openPlatformOrigin, portalUrlForBrand } from './feishu-domains'
-import { FeishuLoginProtocol, type FeishuLoginProfile } from './feishu-login-protocol'
+import {
+  isFeishuCookieDomain,
+  isFeishuLoginUrl,
+  openPlatformOrigin,
+  portalUrlFor,
+  type OpenPlatformDomains
+} from './feishu-domains'
+import { FEISHU_LOGIN_PROFILE, FeishuLoginProtocol, type FeishuLoginProfile } from './feishu-login-protocol'
 import { requestInFeishuSession } from './feishu-electron-transport'
 import { abortable, FeishuSessionError, FeishuSessionHttp, loginDelay, throwIfAborted, type FeishuRequestDiagnostic } from './feishu-session-http'
 
@@ -50,6 +56,7 @@ export interface FeishuDeveloperSessionService {
 
 export interface FeishuOpenPlatformSession {
   brand: 'feishu' | 'lark'
+  domains: OpenPlatformDomains
   apiOrigin: string
   csrfToken: string
   fetch(input: string, init?: RequestInit): Promise<Response>
@@ -96,7 +103,9 @@ type LoginAttempt = {
 
 type SessionOptions = {
   request?: typeof requestInFeishuSession
-  profile?: Partial<FeishuLoginProfile>
+  // Provider login configuration; its trusted domains also select the storage partition.
+  loginProfile?: Readonly<FeishuLoginProfile>
+  profile?: Partial<Omit<FeishuLoginProfile, 'domains'>>
   qrDataUrl?: (payload: string) => Promise<string>
   diagnostic?: (event: Partial<FeishuRequestDiagnostic> & {
     attemptId: string
@@ -111,6 +120,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   #browserSession: Session | null = null
   readonly #store: Pick<SqliteChannelDeveloperSessionStore, 'read' | 'replace'>
   readonly #protocol: FeishuLoginProtocol
+  readonly #domains: OpenPlatformDomains
   readonly #qrDataUrl: (payload: string) => Promise<string>
   readonly #diagnostic: NonNullable<SessionOptions['diagnostic']>
   readonly #request: typeof requestInFeishuSession
@@ -136,19 +146,21 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     options: SessionOptions = {}
   ) {
     this.#store = store
-    this.#protocol = new FeishuLoginProtocol(options.profile)
+    this.#protocol = new FeishuLoginProtocol(options.profile, options.loginProfile ?? FEISHU_LOGIN_PROFILE)
+    this.#domains = this.#protocol.profile.domains
     this.#request = options.request ?? requestInFeishuSession
     this.#qrDataUrl = options.qrDataUrl ?? ((payload) => QRCode.toDataURL(payload, {
       type: 'image/png', width: 280, margin: 4, errorCorrectionLevel: 'M'
     }))
-    this.#diagnostic = options.diagnostic ?? ((event) => console.info('[feishu-login]', event))
+    this.#diagnostic = options.diagnostic
+      ?? ((event) => console.info(`[${this.#domains.brand}-login]`, event))
   }
 
   async beginLogin(options: LoginOptions = {}): Promise<FeishuDeveloperIdentity> {
     this.#activeAttempt?.controller.abort(new FeishuSessionError('feishu_login_cancelled'))
     const attempt: LoginAttempt = {
       attemptId: randomUUID(), generation: ++this.#loginGeneration,
-      controller: new AbortController(), session: freshSession('login'),
+      controller: new AbortController(), session: freshSession(this.#domains.brand, 'login'),
       flowKey: null, token: null, stage: 'loading_local_session',
       deadline: Date.now() + this.#protocol.profile.loginTimeoutMs, options
     }
@@ -208,13 +220,13 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
       this.#stage(attempt, 'inspecting_identity')
       const pending = await this.#withPhaseTimeout(attempt, this.#protocol.profile.identityTimeoutMs,
         'feishu_login_identity_timeout', async () => {
-          if (isFeishuLoginUrl(portal.finalUrl)) {
+          if (isFeishuLoginUrl(portal.finalUrl, this.#domains)) {
             throw new FeishuSessionError('feishu_login_interaction_required')
           }
           requirePortalResponse(portal.response)
           const html = await abortable(portal.response.text(), signal)
           this.#checkAttempt(attempt)
-          const bootstrap = readOpenPlatformBootstrap(html, portal.finalUrl)
+          const bootstrap = readOpenPlatformBootstrap(html, portal.finalUrl, this.#domains)
           const stored = await abortable(this.#capture(attempt.session, bootstrap.apiOrigin), signal)
           this.#checkAttempt(attempt)
           return {
@@ -292,7 +304,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
       if (!identity || !browserSession) return { status: 'invalid', reason: 'missing' }
       const generation = this.#sessionGeneration
       const signal = this.#sessionAbort.signal
-      const bootstrap = await this.#bootstrap(browserSession, identity.brand, signal)
+      const bootstrap = await this.#bootstrap(browserSession, signal)
       if (generation !== this.#sessionGeneration) return { status: 'unavailable' }
       if (accountIdForStoredIdentity(bootstrap.identity) !== accountIdForStoredIdentity(identity)) {
         return { status: 'invalid', reason: 'identity_changed' }
@@ -350,7 +362,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     const generation = this.#sessionGeneration
     const lifetime = this.#sessionAbort.signal
     const signal = input.signal ? AbortSignal.any([input.signal, lifetime]) : lifetime
-    const bootstrap = await this.#bootstrap(browserSession, identity.brand, signal).catch((error: unknown) => {
+    const bootstrap = await this.#bootstrap(browserSession, signal).catch((error: unknown) => {
       if (input.signal?.aborted) throw new FeishuSessionError('feishu_provisioning_cancelled')
       throw error
     })
@@ -367,7 +379,8 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     }
     const http = this.#http(browserSession)
     return {
-      brand: bootstrap.identity.brand, apiOrigin: bootstrap.apiOrigin, csrfToken: bootstrap.csrfToken,
+      brand: bootstrap.identity.brand, domains: this.#domains, apiOrigin: bootstrap.apiOrigin,
+      csrfToken: bootstrap.csrfToken,
       fetch: async (rawUrl, init = {}) => {
         check()
         const requestSignal = init.signal ? AbortSignal.any([signal, init.signal]) : signal
@@ -392,18 +405,18 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
 
   #http(session: Session, diagnostic?: (event: FeishuRequestDiagnostic) => void): FeishuSessionHttp {
     return new FeishuSessionHttp({ fetch: (url, init) => this.#request(session, String(url), init ?? {}) },
-      this.#protocol.profile.requestTimeoutMs, diagnostic)
+      this.#domains, this.#protocol.profile.requestTimeoutMs, diagnostic)
   }
 
-  async #bootstrap(session: Session, brand: FeishuDeveloperIdentity['brand'], signal: AbortSignal) {
+  async #bootstrap(session: Session, signal: AbortSignal) {
     const { response, finalUrl } = await this.#http(session).request(
-      portalUrlForBrand(brand, this.#portalOrigin), { kind: 'navigation' }, { signal }
+      portalUrlFor(this.#domains, this.#portalOrigin), { kind: 'navigation' }, { signal }
     )
     throwIfAborted(signal)
-    if (isFeishuLoginUrl(finalUrl)) throw new FeishuSessionError('feishu_developer_session_expired')
+    if (isFeishuLoginUrl(finalUrl, this.#domains)) throw new FeishuSessionError('feishu_developer_session_expired')
     requirePortalResponse(response)
     const html = await abortable(response.text(), signal)
-    const bootstrap = readOpenPlatformBootstrap(html, finalUrl)
+    const bootstrap = readOpenPlatformBootstrap(html, finalUrl, this.#domains)
     return bootstrap
   }
 
@@ -449,16 +462,18 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   async #restore(): Promise<void> {
     const generation = this.#sessionGeneration
     const signal = this.#sessionAbort.signal
-    const stored = await abortable(this.#store.read<FeishuDeveloperIdentity, StoredFeishuDeveloperSession>('feishu'), signal)
+    const stored = await abortable(this.#store.read<FeishuDeveloperIdentity, StoredFeishuDeveloperSession>(this.#domains.brand), signal)
     if (generation !== this.#sessionGeneration) return
     if (!stored) { this.#restored = true; return }
-    const origin = openPlatformOrigin(portalUrlForBrand(stored.identity.brand, stored.session.portalOrigin), stored.identity.brand)
-    const identity = normalizeFeishuIdentity(stored.identity, origin)
-    const browserSession = freshSession('restored')
+    // A session captured under the other provider's brand never restores here.
+    if (stored.identity.brand !== this.#domains.brand) throw new FeishuSessionError('feishu_developer_session_expired')
+    const origin = openPlatformOrigin(portalUrlFor(this.#domains, stored.session.portalOrigin), this.#domains)
+    const identity = normalizeFeishuIdentity(stored.identity, origin, this.#domains)
+    const browserSession = freshSession(this.#domains.brand, 'restored')
     try {
       for (const cookie of stored.session.cookies) {
         throwIfAborted(signal)
-        if (!isFeishuCookieDomain(cookie.domain)) continue
+        if (!isFeishuCookieDomain(cookie.domain, this.#domains)) continue
         if (!cookie.session && cookie.expirationDate !== undefined && cookie.expirationDate <= Date.now() / 1_000) continue
         await abortable(browserSession.cookies.set({
           url: cookieUrl(cookie), name: cookie.name, value: cookie.value,
@@ -493,7 +508,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     }
     check()
     const revision = await abortable(this.#store.replace({
-      provider: 'feishu', accountId: accountIdForStoredIdentity(identity),
+      provider: this.#domains.brand, accountId: accountIdForStoredIdentity(identity),
       identity, session, expectedRevision
     }), signal)
     check()
@@ -506,7 +521,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     const cookies = await browserSession.cookies.get({})
     return { portalOrigin, cookies: cookies
       .filter((cookie): cookie is Cookie & { domain: string } => typeof cookie.domain === 'string'
-        && isFeishuCookieDomain(cookie.domain))
+        && isFeishuCookieDomain(cookie.domain, this.#domains))
       .map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain,
         path: cookie.path ?? '/', secure: cookie.secure, httpOnly: cookie.httpOnly,
         sameSite: cookie.sameSite, session: cookie.session, expirationDate: cookie.expirationDate,
@@ -514,8 +529,8 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   }
 }
 
-function freshSession(purpose: string): Session {
-  return electronSession.fromPartition(`rovai-feishu-developer-${purpose}-${randomUUID()}`, { cache: false })
+function freshSession(brand: OpenPlatformDomains['brand'], purpose: string): Session {
+  return electronSession.fromPartition(`rovai-${brand}-developer-${purpose}-${randomUUID()}`, { cache: false })
 }
 
 function requirePortalResponse(response: Response): void {

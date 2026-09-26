@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { FEISHU_DOMAINS } from './feishu-domains'
 import type { FeishuOpenPlatformSession } from './feishu-developer-session'
 import {
   FeishuOpenPlatformApiError,
@@ -1090,6 +1091,7 @@ function fakeSession(
 ): FeishuOpenPlatformSession {
   return {
     brand: 'feishu',
+    domains: FEISHU_DOMAINS,
     apiOrigin: 'https://open.feishu.cn',
     csrfToken: 'csrf-fixture',
     fetch: vi.fn(handler)

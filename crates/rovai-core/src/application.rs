@@ -714,6 +714,79 @@ fn write_database_migration_refusal(
     )
 }
 
+// Request routing owns Host identity; payloads cannot change this mapping.
+fn validate_lark_request_actor(method: &str, params: &Value) -> Result<()> {
+    if method.starts_with("channels.lark.")
+        && (params.get("actor").is_some()
+            || params
+                .get("command")
+                .is_some_and(|command| command.get("actor").is_some()))
+    {
+        anyhow::bail!("channel request actor is owned by Core");
+    }
+    Ok(())
+}
+
+fn channel_request_host_component(method: &str) -> Result<&'static str> {
+    match method {
+        "channels.feishu.account.upsert"
+        | "channels.feishu.account.commitConnection"
+        | "channels.feishu.account.expire"
+        | "channels.feishu.publicationIntent.create"
+        | "channels.feishu.publicationIntent.advance"
+        | "channels.feishu.publicationIntent.storeCredential"
+        | "channels.feishu.memberBot.upsert"
+        | "channels.feishu.owner.verify"
+        | "channels.feishu.dm.startNew"
+        | "channels.feishu.pendingBinding.resolve"
+        | "channels.inbound.observe"
+        | "channels.roster.reconcile"
+        | "channels.inbound.finalize"
+        | "channels.host.tick"
+        | "channels.executionConsole.recentOutput.authorize"
+        | "channels.executionConsole.agentRun.cancel"
+        | "channels.executionConsole.page.authorize"
+        | "channels.deliveries.settle" => Ok(crate::channel::FEISHU_SPEC.host_component),
+        "channels.dingtalk.account.upsert"
+        | "channels.dingtalk.account.commitConnection"
+        | "channels.dingtalk.account.expire"
+        | "channels.dingtalk.publicationIntent.create"
+        | "channels.dingtalk.publicationIntent.advance"
+        | "channels.dingtalk.publicationIntent.storeCredential"
+        | "channels.dingtalk.memberBot.upsert"
+        | "channels.dingtalk.owner.verify"
+        | "channels.dingtalk.dm.startNew"
+        | "channels.dingtalk.pendingBinding.resolve"
+        | "channels.dingtalk.inbound.observe"
+        | "channels.dingtalk.roster.reconcile"
+        | "channels.dingtalk.inbound.finalize"
+        | "channels.dingtalk.host.tick"
+        | "channels.dingtalk.executionConsole.recentOutput.authorize"
+        | "channels.dingtalk.executionConsole.agentRun.cancel"
+        | "channels.dingtalk.executionConsole.page.authorize"
+        | "channels.dingtalk.deliveries.settle" => Ok("dingtalk-channel-host"),
+        "channels.lark.account.upsert"
+        | "channels.lark.account.commitConnection"
+        | "channels.lark.account.expire"
+        | "channels.lark.publicationIntent.create"
+        | "channels.lark.publicationIntent.advance"
+        | "channels.lark.publicationIntent.storeCredential"
+        | "channels.lark.memberBot.upsert"
+        | "channels.lark.owner.verify"
+        | "channels.lark.dm.startNew"
+        | "channels.lark.pendingBinding.resolve"
+        | "channels.lark.inbound.observe"
+        | "channels.lark.roster.reconcile"
+        | "channels.lark.inbound.finalize"
+        | "channels.lark.host.tick"
+        | "channels.lark.executionConsole.recentOutput.authorize"
+        | "channels.lark.executionConsole.agentRun.cancel"
+        | "channels.lark.executionConsole.page.authorize"
+        | "channels.lark.deliveries.settle" => Ok(rovai_core::channel::LARK_SPEC.host_component),
+        _ => anyhow::bail!("request does not identify a channel Host"),
+    }
+}
+
 fn request_runs_outside_main_queue(method: &str) -> bool {
     matches!(
         method,
@@ -6485,6 +6558,7 @@ impl Core {
     }
 
     async fn handle(self: &Arc<Self>, request: &Request) -> Result<Value> {
+        validate_lark_request_actor(&request.method, &request.params)?;
         if request.method.starts_with("skills.") {
             self.subsystems.require("skills")?;
         }
@@ -6765,6 +6839,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let component = match params.command.provider.as_str() {
                     "feishu" => "feishu-channel-host",
+                    "lark" => "lark-channel-host",
                     "dingtalk" => "dingtalk-channel-host",
                     _ => anyhow::bail!("unsupported channel provider"),
                 };
@@ -6788,6 +6863,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let component = match params.command.provider.as_str() {
                     "feishu" => "feishu-channel-host",
+                    "lark" => "lark-channel-host",
                     "dingtalk" => "dingtalk-channel-host",
                     _ => anyhow::bail!("unsupported channel provider"),
                 };
@@ -6803,6 +6879,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let component = match params.command.provider.as_str() {
                     "feishu" => "feishu-channel-host",
+                    "lark" => "lark-channel-host",
                     "dingtalk" => "dingtalk-channel-host",
                     _ => anyhow::bail!("unsupported channel provider"),
                 };
@@ -6819,6 +6896,13 @@ impl Core {
                     ChannelService::default().snapshot(&mut database)?,
                 )?)
             }
+            "channels.lark.snapshot" => {
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                        .snapshot(&mut database)?,
+                )?)
+            }
             "channels.dingtalk.snapshot" => {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -6833,7 +6917,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6848,7 +6932,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6873,7 +6957,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6888,7 +6972,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6903,7 +6987,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6918,7 +7002,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6933,7 +7017,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6948,7 +7032,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6971,7 +7055,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6996,7 +7080,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7013,11 +7097,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.account.upsert" => {
+                let params: UserCommandParams<rovai_core::channel::UpsertLarkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .upsert_feishu_account(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.account.commitConnection" => {
@@ -7028,11 +7128,28 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.account.commitConnection" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::CommitLarkAccountConnectionCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .commit_feishu_account_connection(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.account.disconnect" => {
@@ -7045,6 +7162,18 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.lark.account.disconnect" => {
+                let params: UserCommandParams<rovai_core::channel::DisconnectLarkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                // Disconnect is an Owner action for every provider, never a Host one.
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .disconnect_feishu_account(
+                        &mut database,
+                        &user_command_envelope(params.command_id, params.command),
+                    )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.feishu.account.expire" => {
                 let params: UserCommandParams<ExpireFeishuAccountCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -7053,11 +7182,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.account.expire" => {
+                let params: UserCommandParams<rovai_core::channel::ExpireLarkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .expire_feishu_account(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.publicationIntent.create" => {
@@ -7068,11 +7213,28 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.publicationIntent.create" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::CreateLarkMemberBotPublicationIntentCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .create_member_bot_publication_intent(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.publicationIntent.advance" => {
@@ -7083,11 +7245,28 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.publicationIntent.advance" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::AdvanceLarkMemberBotPublicationIntentCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .advance_member_bot_publication_intent(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.publicationIntent.storeCredential" => {
@@ -7098,11 +7277,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.publicationIntent.storeCredential" => {
+                let params: UserCommandParams<StorePublicationCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .store_publication_credential(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.memberBot.upsert" => {
@@ -7113,11 +7308,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.memberBot.upsert" => {
+                let params: UserCommandParams<rovai_core::channel::UpsertLarkMemberBotCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .upsert_feishu_member_bot(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.owner.verify" => {
@@ -7128,11 +7339,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.owner.verify" => {
+                let params: UserCommandParams<rovai_core::channel::VerifyLarkOwnerCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .verify_feishu_owner(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.dm.startNew" => {
@@ -7151,11 +7378,37 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.dm.startNew" => {
+                let params: UserCommandParams<StartNewFeishuDmCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .start_new_feishu_dm(
+                        &mut database,
+                        &quick_chat_path,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
@@ -7174,11 +7427,35 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.pendingBinding.resolve" => {
+                let params: UserCommandParams<ResolvePendingCampBindingCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                if params.command.action == "quick_chat" {
+                    std::fs::create_dir_all(&quick_chat_path)
+                        .context("failed to prepare the managed Quick Chat directory")?;
+                }
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .resolve_pending_camp_binding(
+                        &mut database,
+                        &quick_chat_path,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
@@ -7223,7 +7500,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7238,7 +7515,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7261,7 +7538,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7277,7 +7554,7 @@ impl Core {
                 let tick = ChannelService::default().host_tick(
                     &mut database,
                     &ActorRef::System {
-                        component_id: "dingtalk-channel-host".to_string(),
+                        component_id: channel_request_host_component(&request.method)?.to_string(),
                     },
                     &params,
                 )?;
@@ -7292,11 +7569,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.inbound.observe" => {
+                let params: UserCommandParams<ObserveChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .observe_inbound(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.roster.reconcile" => {
@@ -7307,11 +7600,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.roster.reconcile" => {
+                let params: UserCommandParams<ReconcileFeishuGroupRosterCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .reconcile_feishu_group_roster(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.inbound.attachments.complete"
@@ -7351,11 +7660,37 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.inbound.finalize" => {
+                let params: UserCommandParams<FinalizeChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .finalize_inbound(
+                        &mut database,
+                        &quick_chat_path,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
@@ -7367,7 +7702,21 @@ impl Core {
                 let tick = ChannelService::default().host_tick(
                     &mut database,
                     &ActorRef::System {
-                        component_id: "feishu-channel-host".to_string(),
+                        component_id: channel_request_host_component(&request.method)?.to_string(),
+                    },
+                    &params,
+                )?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(tick)?)
+            }
+            "channels.lark.host.tick" => {
+                let params: ChannelHostTickRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let tick = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC).host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: channel_request_host_component(&request.method)?.to_string(),
                     },
                     &params,
                 )?;
@@ -7411,11 +7760,7 @@ impl Core {
             | "channels.dingtalk.executionConsole.recentOutput.authorize" => {
                 let params: UserCommandParams<AuthorizeChannelExecutionRecentOutputCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let component_id = if request.method.starts_with("channels.dingtalk.") {
-                    "dingtalk-channel-host"
-                } else {
-                    "feishu-channel-host"
-                };
+                let component_id = channel_request_host_component(&request.method)?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().authorize_execution_recent_output(
                     &mut database,
@@ -7423,20 +7768,67 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.lark.executionConsole.recentOutput.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionRecentOutputCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component_id = channel_request_host_component(&request.method)?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .authorize_execution_recent_output(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            component_id,
+                            None,
+                            params.command,
+                        ),
+                    )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel" => {
                 let params: UserCommandParams<ChannelAgentRunCancelCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let component_id = if request.method.starts_with("channels.dingtalk.") {
-                    "dingtalk-channel-host"
-                } else {
-                    "feishu-channel-host"
-                };
+                let component_id = channel_request_host_component(&request.method)?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().cancel_channel_agent_run(
                     &mut database,
                     &system_command_envelope(params.command_id, component_id, None, params.command),
                 )?;
+                let should_notify = execution.result.status == CommandResultStatus::Applied;
+                let camp_id = execution
+                    .result
+                    .payload
+                    .get("campId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                drop(database);
+                if should_notify {
+                    self.agent_run_cancellation_notify.notify_one();
+                    emit_agent_run_terminal(
+                        &self.output,
+                        camp_id.as_deref(),
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                    self.delivery_batch_scheduler_notify.notify_one();
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.executionConsole.agentRun.cancel" => {
+                let params: UserCommandParams<ChannelAgentRunCancelCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component_id = channel_request_host_component(&request.method)?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .cancel_channel_agent_run(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            component_id,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 let should_notify = execution.result.status == CommandResultStatus::Applied;
                 let camp_id = execution
                     .result
@@ -7464,11 +7856,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.executionConsole.page.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionConsolePageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .authorize_execution_console_page(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.executionConsole.page.authorize" => {
@@ -7479,7 +7887,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7494,11 +7902,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.deliveries.settle" => {
+                let params: UserCommandParams<SettleChannelDeliveryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .settle_delivery(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.deliveries.settle" => {
@@ -7509,7 +7933,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -23951,6 +24375,45 @@ mod tests {
                 text: text.to_string(),
             }],
         }
+    }
+
+    #[test]
+    fn lark_actor_routes_are_closed_and_payload_cannot_supply_authority() {
+        for suffix in [
+            "inbound.observe",
+            "inbound.finalize",
+            "roster.reconcile",
+            "deliveries.settle",
+            "host.tick",
+            "executionConsole.page.authorize",
+            "executionConsole.recentOutput.authorize",
+            "executionConsole.agentRun.cancel",
+        ] {
+            let method = format!("channels.lark.{suffix}");
+            assert_eq!(
+                channel_request_host_component(&method).unwrap(),
+                rovai_core::channel::LARK_SPEC.host_component
+            );
+            assert!(validate_lark_request_actor(&method, &json!({"command": {}})).is_ok());
+            for payload in [
+                json!({"actor": {"kind":"system","componentId":"feishu-channel-host"}}),
+                json!({"command": {"actor": {"kind":"system","componentId":"feishu-channel-host"}}}),
+            ] {
+                assert!(validate_lark_request_actor(&method, &payload).is_err());
+            }
+        }
+        // Disconnect is an Owner command: no Host identity, and a payload still cannot claim one.
+        let disconnect = "channels.lark.account.disconnect";
+        assert!(channel_request_host_component(disconnect).is_err());
+        assert!(validate_lark_request_actor(disconnect, &json!({"command": {}})).is_ok());
+        for payload in [
+            json!({"actor": {"kind":"user","userId":"local-user"}}),
+            json!({"command": {"actor": {"kind":"system","componentId":"lark-channel-host"}}}),
+        ] {
+            assert!(validate_lark_request_actor(disconnect, &payload).is_err());
+        }
+        assert!(channel_request_host_component("channels.lark.futureMutation").is_err());
+        assert!(channel_request_host_component("channels.lark.inbound.observe.extra").is_err());
     }
 
     #[test]

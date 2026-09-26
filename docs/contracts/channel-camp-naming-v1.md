@@ -4,14 +4,14 @@ name: Channel Camp Naming
 version: v1
 status: accepted
 source_version: v1.36
-last_updated: 2026-08-31
+last_updated: 2026-09-27
 ---
 
 # Channel Camp Naming v1
 
 ## 名称权威与生成
 
-飞书私聊、普通群、话题和钉钉私聊、普通群共用普通 Camp 命名流程。创建时使用
+飞书与 Lark 的私聊、普通群、话题，以及钉钉私聊、普通群共用普通 Camp 命名流程。创建时使用
 `title=未命名对话 / name_origin=default`，不把昵称、群名、项目名或“快速对话”设为生成标题。
 首条通过统一原子 admission 的有效 Owner 消息，复用普通 Camp 的 Structured Content 命名函数：
 移除行首连续真实寻址 Mention、规范化空白、限制为 80 个 Unicode scalar，并在同一消息/Turn/Run
@@ -28,7 +28,7 @@ NavigationCampItem、CampSnapshot/Open 的 `camp` 和 NotificationEpisodeView �
 
 ```ts
 type CampChannelSource =
-  | { provider: 'feishu'; conversationKind: 'p2p' | 'group' | 'topic' }
+  | { provider: 'feishu' | 'lark'; conversationKind: 'p2p' | 'group' | 'topic' }
   | { provider: 'dingtalk'; conversationKind: 'p2p' | 'group' }
 ```
 
@@ -46,6 +46,9 @@ Core 在现有读取事务中沿 `camp.id → channel_conversation_binding.camp_
 | feishu | p2p | `【飞书私聊】` |
 | feishu | group | `【飞书群聊】` |
 | feishu | topic | `【飞书话题】` |
+| lark | p2p | `【Lark私聊】` |
+| lark | group | `【Lark群聊】` |
+| lark | topic | `【Lark话题】` |
 | dingtalk | p2p | `【钉钉私聊】` |
 | dingtalk | group | `【钉钉群聊】` |
 
@@ -60,7 +63,7 @@ Core 在现有读取事务中沿 `camp.id → channel_conversation_binding.camp_
 通知来源只在 read hydration 追加，不写 Journal、增加 attention revision 或触发提醒。
 Navigation schema 3、Snapshot schema 34、Open schema 5 与 Notification schema 6 保持不变。
 
-回归覆盖五种来源、首条有效消息、未完成聚合不命名、FIFO 不覆盖手动名、普通 Camp 无前缀、
+回归覆盖八种来源、首条有效消息、未完成聚合不命名、FIFO 不覆盖手动名、普通 Camp 无前缀、
 闭合绑定仍投影、UI formatter 不修改输入、重命名后保留来源与长标题截断。
 
 ## References

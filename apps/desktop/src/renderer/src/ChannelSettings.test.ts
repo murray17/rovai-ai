@@ -12,6 +12,7 @@ import {
   ChannelSettings,
   ChannelSettingsView,
   ExecutionWebSettingsPanel,
+  channelActionErrorFor,
   channelErrorMessage,
   executionWebStatus,
   visibleChannelMembers
@@ -336,6 +337,73 @@ describe('Channel settings', () => {
       .toBe('钉钉登录接口返回了暂不支持的结果，无法继续本次连接。')
   })
 
+  it('orders the three provider tabs as Feishu, Lark, DingTalk and marks only Lark as unqualified', () => {
+    const snapshot = threeProviderSnapshot()
+    const lark = renderToStaticMarkup(createElement(ChannelSettingsView, {
+      agents: [agent('agent-a', 0)], snapshot, selectedKind: 'lark', onConnect: () => undefined
+    }))
+
+    expect(lark.match(/role="tab"/gu)).toHaveLength(3)
+    expect(lark).toContain('3 个可用渠道')
+    const tabs = [...lark.matchAll(/role="tab"[^>]*>.*?<strong>([^<]+)<\/strong>/gu)].map((match) => match[1])
+    expect(tabs).toEqual(['飞书', 'Lark', '钉钉'])
+    expect(lark).toMatch(/channel-provider-tab is-selected[^>]*role="tab"[^>]*aria-selected="true"[^>]*>.*?<strong>Lark<\/strong>/u)
+    expect(lark).toMatch(/channel-mark-lark[^>]*>\s*<img src="[^"]*lark\.svg"/u)
+    expect(lark).toContain('Lark 连接')
+    expect(lark).toContain('class="channel-qualification-note">Lark 支持尚未完成真实租户验收</p>')
+    expect(lark).toContain('Lark 中的 Owner 消息不获得本机管理权限')
+
+    for (const kind of ['feishu', 'dingtalk'] as const) {
+      const other = renderToStaticMarkup(createElement(ChannelSettingsView, {
+        agents: [agent('agent-a', 0)], snapshot, selectedKind: kind, onConnect: () => undefined
+      }))
+      expect(other).not.toContain('channel-qualification-note')
+      expect(other).not.toContain('Lark 支持尚未完成真实租户验收')
+    }
+  })
+
+  it('shows only the selected provider account and Bots when Feishu and Lark are both connected', () => {
+    const snapshot = threeProviderSnapshot()
+    const render = (selectedKind: ChannelKind): string => renderToStaticMarkup(createElement(ChannelSettingsView, {
+      agents: [agent('agent-a', 0)], snapshot, selectedKind, onConnect: () => undefined, onPublish: () => undefined
+    }))
+    const feishu = render('feishu')
+    const lark = render('lark')
+
+    expect(feishu).toContain('飞书租户')
+    expect(feishu).toContain('飞书 Bot')
+    expect(feishu).toContain('href="https://open.feishu.cn/app/cli_feishu/baseinfo"')
+    expect(feishu).not.toContain('Lark 租户')
+    expect(feishu).not.toContain('Lark Bot')
+    expect(feishu).not.toContain('open.larksuite.com')
+
+    expect(lark).toContain('Lark 租户')
+    expect(lark).toContain('Lark Bot')
+    expect(lark).toContain('href="https://open.larksuite.com/app/cli_lark/baseinfo"')
+    expect(lark).toContain('>Lark 管理</a>')
+    expect(lark).not.toContain('飞书租户')
+    expect(lark).not.toContain('飞书 Bot')
+    expect(lark).not.toContain('open.feishu.cn')
+    expect(lark).not.toContain('>飞书管理</a>')
+  })
+
+  it('keeps one provider action failure off every other provider page and dialog', () => {
+    const failure = { kind: 'feishu' as const, message: '飞书连接异常，请稍后重试。' }
+    expect(channelActionErrorFor(failure, 'feishu')).toBe('飞书连接异常，请稍后重试。')
+    expect(channelActionErrorFor(failure, 'lark')).toBeNull()
+    expect(channelActionErrorFor(failure, 'dingtalk')).toBeNull()
+    expect(channelActionErrorFor({ kind: 'lark', message: 'Lark 失败' }, 'feishu')).toBeNull()
+    expect(channelActionErrorFor(null, 'lark')).toBeNull()
+
+    const snapshot = threeProviderSnapshot()
+    const lark = renderToStaticMarkup(createElement(ChannelSettingsView, {
+      agents: [agent('agent-a', 0)], snapshot, selectedKind: 'lark',
+      error: channelActionErrorFor(failure, 'lark')
+    }))
+    expect(lark).not.toContain('role="alert"')
+    expect(lark).not.toContain('飞书连接异常')
+  })
+
   it('keeps only present members in deterministic roster order', () => {
     expect(visibleChannelMembers([
       agent('later', 8),
@@ -346,6 +414,39 @@ describe('Channel settings', () => {
     ]).map((member) => member.agentId)).toEqual(['first', 'same-a', 'same-z', 'later'])
   })
 })
+
+function threeProviderSnapshot(): ChannelSettingsSnapshot {
+  const account = (brand: 'feishu' | 'lark' | 'dingtalk', tenantName: string) => ({
+    accountId: `${brand}-account`, userName: 'Murray', tenantName, brand,
+    connectedAt: '2026-09-24T00:00:00Z', lastVerifiedAt: '2026-09-24T00:00:00Z'
+  })
+  return {
+    schemaVersion: 4,
+    channels: [{
+      kind: 'feishu', displayName: '飞书', hostStatus: 'ready',
+      connection: { status: 'connected', account: account('feishu', '飞书租户') },
+      memberBots: [{
+        agentId: 'agent-a', publicationStatus: 'published', botDisplayName: '飞书 Bot', appId: 'cli_feishu',
+        managementUrl: 'https://open.feishu.cn/app/cli_feishu/baseinfo', failureCode: null
+      }]
+    }, {
+      kind: 'lark', displayName: 'Lark', hostStatus: 'ready',
+      connection: { status: 'connected', account: account('lark', 'Lark 租户') },
+      memberBots: [{
+        agentId: 'agent-a', publicationStatus: 'published', botDisplayName: 'Lark Bot', appId: 'cli_lark',
+        managementUrl: 'https://open.larksuite.com/app/cli_lark/baseinfo', failureCode: null
+      }]
+    }, {
+      kind: 'dingtalk', displayName: '钉钉', hostStatus: 'ready',
+      connection: { status: 'not_connected', account: null },
+      memberBots: []
+    }],
+    pendingBindingCount: 0,
+    bindingIssueCount: 0,
+    activeQrAttempt: null,
+    activeProvisioning: null
+  }
+}
 
 function unavailableSnapshot(): ChannelSettingsSnapshot {
   return {

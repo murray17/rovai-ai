@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.71
-last_updated: 2026-09-25
+current_version: v1.72
+last_updated: 2026-09-27
 ---
 
 # Rovai-ai 版本记录
@@ -224,4 +224,5 @@ last_updated: 2026-09-25
 | v1.69 | `historical` | Camp 主动读取、搜索与撤回占位 | [v1.69/README.md](v1.69/README.md) |
 | v1.70 | `historical` | Skills 资源与模型索引重构；公开 Camp historyHint 冻结额外可见消息判断 | [v1.70/README.md](v1.70/README.md) |
 
-| v1.71 | `current` | 会话、使命与任务提醒；消息关联完成与真实状态来源 | [v1.71/README.md](v1.71/README.md) |
+| v1.71 | `historical` | 会话、使命与任务提醒；消息关联完成与真实状态来源 | [v1.71/README.md](v1.71/README.md) |
+| v1.72 | `current` | Lark 独立渠道：克隆表族、参数化飞书实现、可信域与 SDK 域分离；自动化验收完成，真实租户逐项验收进行中 | [v1.72/README.md](v1.72/README.md) |
