@@ -112,17 +112,14 @@ Reminder settings control only accepted transient heads-up categories. The produ
 not mount the persistent notification drawer, global bell or unread total; the Core notification read
 model stays durable while the visible controller uses only a lightweight high-water baseline.
 
-Notification settings contain one master heads-up switch and exactly four default-on categories:
-待审批、提到你、本轮完成、执行未完成. The last category controls both `turn_failed` and
-`turn_incomplete`, while cards keep their honest distinct copy. Ordinary Agent messages have no
-notification category or setting.
-
-The master heads-up control is the dominant panel. Its four child categories sit below in two open
-scenario groups: “需要响应” contains 待审批 and 提到你; “本轮结果” contains 本轮完成 and
-执行未完成. Turning the master off disables delivery without erasing child choices, and group
-counts describe those choices as retained rather than active. Do not add an “打开通知中心” action or
-repeat the persistence explanation in a separate boundary card. Explain instead that signals arriving
-while the App is not attentive are retained in memory and shown after the user returns.
+Notification settings use one master switch and three business-object groups: 会话, 使命, 任务.
+Conversation contains 待审批、提到你、本轮完成、单聊回复、执行未完成. Mission contains 使命需要你 and
+使命状态变更; Task contains 任务状态变更. Task status is default-off with completed/blocked/cancelled selected;
+Mission status is default-on with completed selected. Status choices expand inline and persist with the same CAS save.
+Conversation spans the two left rows on wide layouts; Mission and Task stack on the right. Stack all three below 960px.
+Master/category disabling retains values and filters. Save errors restore current values, focus and scroll and allow retry.
+The attentive foreground Camp stays quiet for its conversation, Mission and Tasks; leaving does not replay suppressed cards.
+Mission needs-you question copy comes only from an explicit source message. Never invent a question or infer it from an @mention.
 
 Current User Mention creates one immutable Occurrence per source message. Occurrences in one CampTurn
 share a durable Episode card but remain independently acknowledged; the earliest unacknowledged

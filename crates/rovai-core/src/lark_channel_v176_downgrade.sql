@@ -37,7 +37,7 @@ DROP TABLE lark_owner_identity;
 
 DROP TABLE lark_account;
 
-CREATE TABLE channel_credentials_v174 (
+CREATE TABLE channel_credentials_v175 (
                 credential_ref TEXT PRIMARY KEY NOT NULL
                     CHECK(length(trim(credential_ref)) > 0 AND length(credential_ref) <= 128),
                 provider TEXT NOT NULL CHECK(provider IN ('feishu', 'dingtalk')),
@@ -53,11 +53,11 @@ CREATE TABLE channel_credentials_v174 (
                 UNIQUE(provider, credential_kind, remote_app_id)
             );
 
-INSERT INTO channel_credentials_v174 SELECT * FROM channel_credentials;
+INSERT INTO channel_credentials_v175 SELECT * FROM channel_credentials;
 
 DROP TABLE channel_credentials;
 
-ALTER TABLE channel_credentials_v174 RENAME TO channel_credentials;
+ALTER TABLE channel_credentials_v175 RENAME TO channel_credentials;
 
 CREATE INDEX channel_credentials_provider_idx
                 ON channel_credentials(provider);
@@ -65,7 +65,7 @@ CREATE INDEX channel_credentials_provider_idx
 CREATE INDEX channel_credentials_remote_app_idx
                 ON channel_credentials(provider, remote_app_id);
 
-CREATE TABLE channel_developer_sessions_v174 (
+CREATE TABLE channel_developer_sessions_v175 (
                 provider TEXT PRIMARY KEY NOT NULL CHECK(provider IN ('feishu', 'dingtalk')),
                 account_id TEXT NOT NULL
                     CHECK(length(trim(account_id)) > 0 AND length(account_id) <= 128),
@@ -79,13 +79,13 @@ CREATE TABLE channel_developer_sessions_v174 (
                 updated_at INTEGER NOT NULL
             );
 
-INSERT INTO channel_developer_sessions_v174 SELECT * FROM channel_developer_sessions;
+INSERT INTO channel_developer_sessions_v175 SELECT * FROM channel_developer_sessions;
 
 DROP TABLE channel_developer_sessions;
 
-ALTER TABLE channel_developer_sessions_v174 RENAME TO channel_developer_sessions;
+ALTER TABLE channel_developer_sessions_v175 RENAME TO channel_developer_sessions;
 
-CREATE TABLE automation_notification_delivery_v174 (
+CREATE TABLE automation_notification_delivery_v175 (
                 id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
                 automation_run_id TEXT NOT NULL
                     REFERENCES automation_run(id) ON DELETE CASCADE,
@@ -116,15 +116,15 @@ CREATE TABLE automation_notification_delivery_v174 (
                 )
             );
 
-INSERT INTO automation_notification_delivery_v174 SELECT * FROM automation_notification_delivery;
+INSERT INTO automation_notification_delivery_v175 SELECT * FROM automation_notification_delivery;
 
 DROP TABLE automation_notification_delivery;
 
-ALTER TABLE automation_notification_delivery_v174 RENAME TO automation_notification_delivery;
+ALTER TABLE automation_notification_delivery_v175 RENAME TO automation_notification_delivery;
 
 CREATE INDEX automation_notification_claim_idx
                 ON automation_notification_delivery(provider, status, available_at, created_at, id)
                 WHERE status IN ('pending', 'attempting');
 
-DELETE FROM schema_migration WHERE version=175;
-UPDATE rovai_data_contract SET contract_version='v1.70', projection_schema_version=124 WHERE singleton=1;
+DELETE FROM schema_migration WHERE version=176;
+UPDATE rovai_data_contract SET contract_version='v1.71', projection_schema_version=125 WHERE singleton=1;

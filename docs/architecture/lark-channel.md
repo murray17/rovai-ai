@@ -11,7 +11,7 @@ last_updated: 2026-09-24
 Lark 是与飞书、钉钉并列的独立 provider。它与飞书使用同一开放平台协议族和同一 SDK，因此复用飞书的 Host 实现与
 Core 领域逻辑，但拥有自己的 provider 身份、表、请求名、可信域、登录配置和 SDK 域。字段与请求面见
 [Lark Channel v1](../contracts/lark-channel-v1.md)，被继承的行为见 [Feishu Channel v17](../contracts/feishu-channel-v17.md)
-与[飞书渠道架构](feishu-channel.md)，取舍理由见 [V1.71-D01](../versions/v1.71/decisions.md#v1-71-d01)。
+与[飞书渠道架构](feishu-channel.md)，取舍理由见 [V1.72-D01](../versions/v1.72/decisions.md#v1-72-d01)。
 
 ## 组件与权威
 
@@ -75,4 +75,4 @@ Provider 身份、存储、隔离和请求面由自动化测试验收。登录�
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)
 - [渠道设置](../ui/components/channel-settings.md)
-- [V1.71-D01](../versions/v1.71/decisions.md#v1-71-d01)
+- [V1.72-D01](../versions/v1.72/decisions.md#v1-72-d01)

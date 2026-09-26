@@ -46,3 +46,5 @@ Skills migration 173 及其已安装本地构建的数据合同标记仍为 `v1.
 本项跨版本影响：Version/Contracts/Architecture/UI/文档路由已更新；Decisions 确认无需新增（现有身份和通知模型的
 可逆输入兼容扩展，合同已完整解释）；Runtime Activity、Runtime compatibility、Root README 确认无需更新（无新增
 Runtime、活动或产品入口）。Bootstrap、CLI 教学、Context formatter/选择/预算与冻结证据不变；不新增核心模型上下文格式变更。
+
+后续版本：[v1.71](../v1.71/README.md)。本版范围和验收事实冻结。

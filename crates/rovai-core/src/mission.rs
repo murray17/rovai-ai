@@ -528,6 +528,12 @@ impl MissionService {
             tx.execute("UPDATE mission SET status=?2,source_message_id=?3,updated_at=?4 WHERE id=?1",
                 params![input.mission_id,input.status.as_str(),input.source_message_id,chrono::Utc::now().to_rfc3339()])?;
             record_activity(tx, &input.mission_id, "status", &envelope.actor, envelope.execution_epoch, json!({"status":input.status,"sourceMessageId":input.source_message_id}))?;
+            if current.info.status != input.status {
+                crate::notification::record_status_transition(tx, &envelope.actor, crate::notification::StatusTransition {
+                    kind: "mission", id: &input.mission_id, camp_id: &current.camp_id,
+                    status: input.status.as_str(), source_message_id: input.source_message_id.as_deref(),
+                })?;
+            }
             Ok(mutation(&input.mission_id, true))
         })
     }
@@ -1490,6 +1496,17 @@ mod tests {
             .connection()
             .query_row("SELECT COUNT(*) FROM agent_run", [], |row| row.get(0))
             .unwrap();
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT count(*) FROM notification_occurrence WHERE source_type='mission'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0,
+            "user status edits and titles do not notify"
+        );
         for next_status in [
             MissionStatus::NotStarted,
             MissionStatus::InProgress,
@@ -1505,6 +1522,95 @@ mod tests {
             assert_eq!(current.status, next_status);
             assert_eq!(current.source_message_id, None);
         }
+        let notifications = crate::notification::NotificationEpisodeService::default();
+        let changes = notifications
+            .changes_since(&mut db, "local_user", 0, 100)
+            .unwrap();
+        let needs = changes
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .find(|s| s.semantic == crate::notification::NotificationSemantic::MissionNeedsYou);
+        assert!(
+            needs.is_none(),
+            "leaving needs_you resolves the old transient source"
+        );
+        let completed = changes
+            .changes
+            .iter()
+            .find(|change| {
+                change.heads_up_signal.as_ref().is_some_and(|signal| {
+                    signal.action.subject.as_ref().is_some_and(|subject| {
+                        subject.id == id && subject.status.as_deref() == Some("completed")
+                    })
+                })
+            })
+            .unwrap();
+        let completed_action = &completed.heads_up_signal.as_ref().unwrap().action;
+        let result = notifications
+            .acknowledge(
+                &mut db,
+                &command(crate::notification::AcknowledgeNotificationEpisodeCommand {
+                    episode_id: completed.episode_id.clone(),
+                    observed_episode_version: completed_action.observed_episode_version,
+                    acknowledgement_id: completed_action.acknowledgement_id.clone().unwrap(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(result.result.status, CommandResultStatus::Applied);
+        let inbox = notifications
+            .inbox(
+                &mut db,
+                "local_user",
+                crate::notification::NotificationEpisodeFilter::All,
+                None,
+                100,
+            )
+            .unwrap();
+        let mission_episode = inbox
+            .items
+            .iter()
+            .find(|episode| {
+                episode
+                    .primary_action
+                    .subject
+                    .as_ref()
+                    .is_some_and(|subject| subject.id == id)
+            })
+            .unwrap();
+        assert_eq!(
+            mission_episode
+                .primary_action
+                .subject
+                .as_ref()
+                .unwrap()
+                .status
+                .as_deref(),
+            Some("completed"),
+            "acknowledging completion cannot make an older unread transition the display state"
+        );
+        assert!(mission_episode.primary_action.acknowledgement_id.is_none());
+        assert!(
+            mission_episode.unread,
+            "older transitions retain independent attention"
+        );
+        assert!(mission_episode.secondary_actions.iter().any(|action| {
+            action.acknowledgement_id.is_some()
+                && action
+                    .subject
+                    .as_ref()
+                    .is_some_and(|subject| subject.status.as_deref() == Some("in_progress"))
+        }));
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT count(*) FROM notification_occurrence WHERE source_type='mission'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            4
+        );
         let source: String = db
             .connection()
             .query_row(
@@ -1527,6 +1633,34 @@ mod tests {
         state.payload.source_message_id = Some(source.clone());
         let status = service.status(&mut db, &state).unwrap();
         assert_eq!(status.result.payload["changed"], true);
+        let changes = notifications
+            .changes_since(&mut db, "local_user", 0, 100)
+            .unwrap();
+        let signal = changes
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .find(|s| s.semantic == crate::notification::NotificationSemantic::MissionNeedsYou)
+            .unwrap();
+        assert_eq!(
+            signal.mention.as_ref().unwrap().summary.as_deref(),
+            Some("开始使命")
+        );
+        assert_eq!(signal.action.subject.as_ref().unwrap().id, id);
+        assert_eq!(
+            signal.action.kind,
+            crate::notification::NotificationActionKind::OpenMission
+        );
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT count(*) FROM notification_occurrence WHERE source_type='mission'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            5
+        );
         let status_activity_count = service
             .activity(&db, &id, None)
             .unwrap()

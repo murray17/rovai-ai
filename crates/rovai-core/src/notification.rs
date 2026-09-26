@@ -15,9 +15,13 @@ use crate::{
     read_model::{CampChannelSource, camp_channel_source_from_row},
 };
 
+#[path = "notification_sources.rs"]
+mod sources;
+pub(crate) use sources::{StatusTransition, record_status_transition};
+
 const DEFAULT_PAGE_LIMIT: usize = 50;
 const MAX_PAGE_LIMIT: usize = 100;
-const NOTIFICATION_EPISODE_SCHEMA_VERSION: i64 = 8;
+const NOTIFICATION_EPISODE_SCHEMA_VERSION: i64 = 9;
 const MESSAGE_SUMMARY_MAX_SCALARS: usize = 160;
 
 /// Retention only removes inactive, terminal Episodes. A delete first records a remove
@@ -40,13 +44,14 @@ pub(crate) fn maintain_notification_episode_retention(
                 AND occurrence.admitted_attention_revision
                     > episode_disposition.cleared_through_attention_revision
                 AND disposition.acknowledged_at IS NULL
+                AND (occurrence.semantic <> 'mission_needs_you' OR disposition.resolved_at IS NULL)
                 AND (
                     occurrence.semantic <> 'turn_completed'
                     OR disposition.satisfied_at IS NULL
                 )
           )
           AND (
-              kind = 'message'
+              kind IN ('message','round','mission','task','single_chat')
               OR (kind = 'collaboration' AND EXISTS (
                   SELECT 1 FROM notification_occurrence AS occurrence
                   WHERE occurrence.episode_id = notification_episode.id
@@ -79,13 +84,14 @@ pub(crate) fn maintain_notification_episode_retention(
                   AND occurrence.admitted_attention_revision
                       > episode_disposition.cleared_through_attention_revision
                   AND disposition.acknowledged_at IS NULL
+                AND (occurrence.semantic <> 'mission_needs_you' OR disposition.resolved_at IS NULL)
                   AND (
                       occurrence.semantic <> 'turn_completed'
                       OR disposition.satisfied_at IS NULL
                   )
             )
               AND (
-                  candidate.kind = 'message'
+                  candidate.kind IN ('message','round','mission','task','single_chat')
                   OR (candidate.kind = 'collaboration' AND EXISTS (
                       SELECT 1 FROM notification_occurrence AS occurrence
                       WHERE occurrence.episode_id = candidate.id
@@ -139,6 +145,10 @@ pub enum NotificationEpisodeKind {
     Collaboration,
     Message,
     Approval,
+    Round,
+    Mission,
+    Task,
+    SingleChat,
 }
 
 impl NotificationEpisodeKind {
@@ -147,6 +157,10 @@ impl NotificationEpisodeKind {
             "collaboration" => Ok(Self::Collaboration),
             "message" => Ok(Self::Message),
             "approval" => Ok(Self::Approval),
+            "round" => Ok(Self::Round),
+            "mission" => Ok(Self::Mission),
+            "task" => Ok(Self::Task),
+            "single_chat" => Ok(Self::SingleChat),
             _ => anyhow::bail!("unknown Notification Episode kind: {value}"),
         }
     }
@@ -160,6 +174,11 @@ pub enum NotificationSemantic {
     TurnCompleted,
     TurnFailed,
     TurnIncomplete,
+    RoundCompleted,
+    SingleChatReply,
+    MissionNeedsYou,
+    MissionStatusChanged,
+    TaskStatusChanged,
 }
 
 impl NotificationSemantic {
@@ -170,6 +189,11 @@ impl NotificationSemantic {
             "turn_completed" => Ok(Self::TurnCompleted),
             "turn_failed" => Ok(Self::TurnFailed),
             "turn_incomplete" => Ok(Self::TurnIncomplete),
+            "round_completed" => Ok(Self::RoundCompleted),
+            "single_chat_reply" => Ok(Self::SingleChatReply),
+            "mission_needs_you" => Ok(Self::MissionNeedsYou),
+            "mission_status_changed" => Ok(Self::MissionStatusChanged),
+            "task_status_changed" => Ok(Self::TaskStatusChanged),
             _ => anyhow::bail!("unknown Notification semantic: {value}"),
         }
     }
@@ -181,6 +205,9 @@ impl NotificationSemantic {
             Self::TurnIncomplete => 3,
             Self::TurnCompleted => 2,
             Self::UserMention => 1,
+            Self::RoundCompleted | Self::SingleChatReply => 2,
+            Self::MissionNeedsYou => 5,
+            Self::MissionStatusChanged | Self::TaskStatusChanged => 2,
         }
     }
 }
@@ -222,6 +249,8 @@ pub enum NotificationActionKind {
     OpenSingleChat,
     OpenCamp,
     AcknowledgeOnly,
+    OpenMission,
+    OpenTask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -305,6 +334,18 @@ pub struct NotificationSingleChatSource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct NotificationSubject {
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+    pub status: Option<String>,
+    pub source_message_id: Option<String>,
+    pub source_agent_run_id: Option<String>,
+    pub related_run_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotificationActionView {
     pub action_id: String,
     pub kind: NotificationActionKind,
@@ -317,6 +358,8 @@ pub struct NotificationActionView {
     pub acknowledgement_id: Option<String>,
     pub observed_episode_version: i64,
     pub single_chat: Option<NotificationSingleChatSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<NotificationSubject>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -415,6 +458,12 @@ pub struct NotificationPreference {
     pub user_mention_heads_up_enabled: bool,
     pub turn_completed_heads_up_enabled: bool,
     pub turn_incomplete_heads_up_enabled: bool,
+    pub single_chat_heads_up_enabled: bool,
+    pub mission_needs_you_heads_up_enabled: bool,
+    pub mission_status_heads_up_enabled: bool,
+    pub task_status_heads_up_enabled: bool,
+    pub mission_statuses: Vec<String>,
+    pub task_statuses: Vec<String>,
     pub version: i64,
     pub updated_at: String,
 }
@@ -481,6 +530,12 @@ pub struct UpdateNotificationPreferenceCommand {
     pub user_mention_heads_up_enabled: bool,
     pub turn_completed_heads_up_enabled: bool,
     pub turn_incomplete_heads_up_enabled: bool,
+    pub single_chat_heads_up_enabled: bool,
+    pub mission_needs_you_heads_up_enabled: bool,
+    pub mission_status_heads_up_enabled: bool,
+    pub task_status_heads_up_enabled: bool,
+    pub mission_statuses: Vec<String>,
+    pub task_statuses: Vec<String>,
 }
 
 impl sealed::Sealed for UpdateNotificationPreferenceCommand {}
@@ -837,7 +892,7 @@ impl NotificationEpisodeService {
                 let mut statement = transaction.prepare(
                     r#"
                     SELECT occurrence.id, occurrence.semantic, occurrence.source_type,
-                           occurrence.source_id,
+                           CASE WHEN occurrence.source_type IN ('round','single_chat_message') THEN occurrence.agent_run_id ELSE occurrence.source_id END,
                            disposition.resolved_at
                     FROM notification_occurrence AS occurrence
                     JOIN notification_occurrence_disposition AS disposition
@@ -850,6 +905,7 @@ impl NotificationEpisodeService {
                       AND occurrence.admitted_attention_revision
                           > episode_disposition.cleared_through_attention_revision
                       AND disposition.acknowledged_at IS NULL
+                AND (occurrence.semantic <> 'mission_needs_you' OR disposition.resolved_at IS NULL)
                     ORDER BY occurrence.admitted_change_sequence, occurrence.id
                     "#,
                 )?;
@@ -874,8 +930,8 @@ impl NotificationEpisodeService {
                         Ok((id, semantic, source_type, source_id, resolved_at)) => {
                             let visible = match semantic.as_str() {
                                 "user_mention" => visible_message_ids.contains(source_id.as_str()),
-                                "turn_completed" | "turn_failed" | "turn_incomplete" => {
-                                    if source_type == "agent_run" {
+                                "turn_completed" | "turn_failed" | "turn_incomplete" | "round_completed" | "single_chat_reply" => {
+                                    if ["agent_run", "round", "single_chat_message"].contains(&source_type.as_str()) {
                                         visible_agent_run_ids.contains(source_id.as_str())
                                     } else {
                                         visible_camp_turn_ids.contains(source_id.as_str())
@@ -1024,6 +1080,31 @@ impl NotificationEpisodeService {
     ) -> Result<CommandExecution> {
         user_id(&envelope.actor)?;
         self.gateway.execute(database, envelope, |transaction| {
+            let input = &envelope.payload;
+            if input
+                .mission_statuses
+                .iter()
+                .any(|s| !["completed", "in_progress", "not_started"].contains(&s.as_str()))
+                || input.task_statuses.iter().any(|s| {
+                    ![
+                        "pending",
+                        "in_progress",
+                        "blocked",
+                        "completed",
+                        "cancelled",
+                    ]
+                    .contains(&s.as_str())
+                })
+                || input.mission_statuses.iter().collect::<HashSet<_>>().len()
+                    != input.mission_statuses.len()
+                || input.task_statuses.iter().collect::<HashSet<_>>().len()
+                    != input.task_statuses.len()
+            {
+                return Ok(rejected(
+                    "notification_episode.invalid_status_filter",
+                    "Status filters must contain unique supported states",
+                ));
+            }
             let current = load_preference(transaction)?;
             if current.version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
@@ -1041,7 +1122,13 @@ impl NotificationEpisodeService {
                     turn_completed_heads_up_enabled = ?4,
                     turn_incomplete_heads_up_enabled = ?5,
                     version = version + 1,
-                    updated_at = ?6
+                    updated_at = ?6,
+                    single_chat_heads_up_enabled = ?8,
+                    mission_needs_you_heads_up_enabled = ?9,
+                    mission_status_heads_up_enabled = ?10,
+                    task_status_heads_up_enabled = ?11,
+                    mission_statuses_json = ?12,
+                    task_statuses_json = ?13
                 WHERE singleton = 1 AND version = ?7
                 "#,
                 params![
@@ -1052,6 +1139,12 @@ impl NotificationEpisodeService {
                     envelope.payload.turn_incomplete_heads_up_enabled,
                     now,
                     envelope.payload.expected_version,
+                    input.single_chat_heads_up_enabled,
+                    input.mission_needs_you_heads_up_enabled,
+                    input.mission_status_heads_up_enabled,
+                    input.task_status_heads_up_enabled,
+                    serde_json::to_string(&input.mission_statuses)?,
+                    serde_json::to_string(&input.task_statuses)?,
                 ],
             )?;
             let preference = load_preference(transaction)?;
@@ -1125,6 +1218,7 @@ struct RawOccurrence {
 impl RawOccurrence {
     fn is_unread(&self) -> bool {
         !self.acknowledged
+            && (self.semantic != NotificationSemantic::MissionNeedsYou || !self.resolved)
             && (self.semantic != NotificationSemantic::TurnCompleted || !self.satisfied)
     }
 
@@ -1230,6 +1324,7 @@ fn unread_episode_count(
                 AND occurrence.admitted_attention_revision
                     > episode_disposition.cleared_through_attention_revision
                 AND disposition.acknowledged_at IS NULL
+                AND (occurrence.semantic <> 'mission_needs_you' OR disposition.resolved_at IS NULL)
                 AND (
                     occurrence.semantic <> 'turn_completed'
                     OR disposition.satisfied_at IS NULL
@@ -1266,7 +1361,7 @@ fn load_episode_page(
                    episode.created_at, episode.updated_at,
                    episode_disposition.cleared_through_attention_revision,
                    CASE
-                       WHEN episode.kind = 'approval' AND EXISTS (
+                       WHEN episode.kind IN ('approval','mission') AND EXISTS (
                            SELECT 1
                            FROM notification_occurrence AS occurrence
                            JOIN notification_occurrence_disposition AS disposition
@@ -1276,6 +1371,7 @@ fn load_episode_page(
                              AND occurrence.admitted_attention_revision
                                  > episode_disposition.cleared_through_attention_revision
                              AND disposition.resolved_at IS NULL
+                             AND occurrence.semantic IN ('approval_pending','mission_needs_you')
                        ) THEN 500
                        WHEN EXISTS (
                            SELECT 1 FROM notification_occurrence AS occurrence
@@ -1302,7 +1398,7 @@ fn load_episode_page(
                              AND occurrence.admitted_change_sequence <= :through
                              AND occurrence.admitted_attention_revision
                                  > episode_disposition.cleared_through_attention_revision
-                             AND occurrence.semantic = 'turn_completed'
+                             AND occurrence.semantic IN ('turn_completed','round_completed','single_chat_reply','mission_status_changed','task_status_changed')
                              AND disposition.satisfied_at IS NULL
                        ) THEN 200
                        WHEN EXISTS (
@@ -1348,6 +1444,7 @@ fn load_episode_page(
                         AND occurrence.admitted_attention_revision
                             > episode_disposition.cleared_through_attention_revision
                         AND disposition.acknowledged_at IS NULL
+                AND (occurrence.semantic <> 'mission_needs_you' OR disposition.resolved_at IS NULL)
                         AND (
                             occurrence.semantic <> 'turn_completed'
                             OR disposition.satisfied_at IS NULL
@@ -1463,6 +1560,49 @@ fn raw_episode_from_row(row: &Row<'_>) -> rusqlite::Result<RawEpisode> {
     })
 }
 
+// Both inbox and heads-up reads use the same source availability and message projection.
+const OCCURRENCE_PROJECTION_SQL: &str = r#"
+SELECT occurrence.id, occurrence.semantic, occurrence.occurred_at,
+       occurrence.camp_turn_id, occurrence.agent_run_id,
+       occurrence.source_type, occurrence.source_message_id,
+       occurrence.approval_id, occurrence.admitted_attention_revision,
+       occurrence.admitted_change_sequence,
+       CASE WHEN disposition.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END,
+       CASE WHEN disposition.satisfied_at IS NOT NULL THEN 1 ELSE 0 END,
+       CASE WHEN disposition.resolved_at IS NOT NULL THEN 1 ELSE 0 END,
+       CASE
+           WHEN occurrence.source_type = 'round' THEN EXISTS(SELECT 1 FROM notification_round n WHERE n.id=occurrence.source_id AND n.camp_id=occurrence.camp_id)
+           WHEN occurrence.source_type = 'mission' THEN EXISTS(SELECT 1 FROM mission m WHERE m.id=occurrence.source_id AND m.camp_id=occurrence.camp_id)
+           WHEN occurrence.source_type = 'task' THEN EXISTS(SELECT 1 FROM task t WHERE t.id=occurrence.source_id AND t.camp_id=occurrence.camp_id)
+           WHEN occurrence.source_type = 'single_chat_message' THEN EXISTS(SELECT 1 FROM conversation_message m JOIN conversation c ON c.id=m.conversation_id WHERE m.id=occurrence.source_id AND c.camp_id=occurrence.camp_id AND c.ended_at IS NULL)
+           WHEN occurrence.semantic = 'user_mention'
+               THEN CASE WHEN message.id IS NOT NULL
+                              AND message.tombstoned_at IS NULL THEN 1 ELSE 0 END
+           WHEN occurrence.semantic = 'approval_pending'
+               THEN CASE WHEN approval.id IS NOT NULL
+                              AND approval.status = 'pending' THEN 1 ELSE 0 END
+           ELSE CASE
+               WHEN occurrence.source_type = 'agent_run'
+                   THEN CASE WHEN source_run.id IS NOT NULL THEN 1 ELSE 0 END
+               ELSE CASE WHEN turn.id IS NOT NULL THEN 1 ELSE 0 END
+           END
+       END,
+       message.author_id, profile.display_name,
+       CASE WHEN message.tombstoned_at IS NULL THEN message.structured_content_json END
+FROM notification_occurrence AS occurrence
+JOIN notification_occurrence_disposition AS disposition
+  ON disposition.occurrence_id = occurrence.id
+LEFT JOIN camp_message AS message
+  ON message.id = occurrence.source_message_id
+ AND message.camp_id = occurrence.camp_id
+LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
+LEFT JOIN camp_turn AS turn ON turn.id = occurrence.camp_turn_id
+LEFT JOIN agent_run AS source_run
+  ON source_run.id = occurrence.agent_run_id
+ AND COALESCE(source_run.camp_id,(SELECT camp_id FROM camp_turn WHERE id=source_run.camp_turn_id)) = occurrence.camp_id
+LEFT JOIN approval ON approval.id = occurrence.approval_id
+"#;
+
 fn load_heads_up_signal(
     connection: &rusqlite::Connection,
     recipient_user_id: &str,
@@ -1475,45 +1615,7 @@ fn load_heads_up_signal(
     };
     let tuple = connection
         .query_row(
-            r#"
-            SELECT occurrence.id, occurrence.semantic, occurrence.occurred_at,
-                   occurrence.camp_turn_id, occurrence.agent_run_id,
-                   occurrence.source_type, occurrence.source_message_id,
-                   occurrence.approval_id, occurrence.admitted_attention_revision,
-                   occurrence.admitted_change_sequence,
-                   CASE WHEN disposition.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END,
-                   CASE WHEN disposition.satisfied_at IS NOT NULL THEN 1 ELSE 0 END,
-                   CASE WHEN disposition.resolved_at IS NOT NULL THEN 1 ELSE 0 END,
-                   CASE
-                       WHEN occurrence.semantic = 'user_mention'
-                           THEN CASE WHEN message.id IS NOT NULL
-                                          AND message.tombstoned_at IS NULL THEN 1 ELSE 0 END
-                       WHEN occurrence.semantic = 'approval_pending'
-                           THEN CASE WHEN approval.id IS NOT NULL
-                                          AND approval.status = 'pending' THEN 1 ELSE 0 END
-                       ELSE CASE
-                           WHEN occurrence.source_type = 'agent_run'
-                               THEN CASE WHEN source_run.id IS NOT NULL THEN 1 ELSE 0 END
-                           ELSE CASE WHEN turn.id IS NOT NULL THEN 1 ELSE 0 END
-                       END
-                   END,
-                   message.author_id, profile.display_name,
-                   message.structured_content_json
-            FROM notification_occurrence AS occurrence
-            JOIN notification_occurrence_disposition AS disposition
-              ON disposition.occurrence_id = occurrence.id
-            LEFT JOIN camp_message AS message
-              ON message.id = occurrence.source_message_id
-             AND message.camp_id = occurrence.camp_id
-            LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
-            LEFT JOIN camp_turn AS turn ON turn.id = occurrence.camp_turn_id
-            LEFT JOIN agent_run AS source_run
-              ON source_run.id = occurrence.agent_run_id
-             AND source_run.camp_id = occurrence.camp_id
-            LEFT JOIN approval ON approval.id = occurrence.approval_id
-            WHERE occurrence.episode_id = ?1
-              AND occurrence.admitted_change_sequence = ?2
-            "#,
+            &format!("{OCCURRENCE_PROJECTION_SQL} WHERE occurrence.episode_id = ?1 AND occurrence.admitted_change_sequence = ?2"),
             params![episode_id, change_sequence],
             |row| {
                 Ok((
@@ -1578,20 +1680,27 @@ fn load_heads_up_signal(
         author_display_name,
         structured_content_json,
     };
-    if occurrence.semantic != semantic
+    if sources::superseded_heads_up(connection, &occurrence)?
+        || occurrence.semantic != semantic
         || !occurrence.is_active_attention(episode.cleared_through_attention_revision)
-        || (semantic == NotificationSemantic::ApprovalPending && occurrence.resolved)
+        || (matches!(
+            semantic,
+            NotificationSemantic::ApprovalPending | NotificationSemantic::MissionNeedsYou
+        ) && occurrence.resolved)
     {
         return Ok(None);
     }
-    let mention =
-        (semantic == NotificationSemantic::UserMention).then(|| NotificationMentionView {
-            message_id: occurrence.source_message_id.clone().unwrap_or_default(),
-            author_id: occurrence.author_id.clone().unwrap_or_default(),
-            author_display_name: occurrence.author_display_name.clone(),
-            summary: message_summary(connection, &occurrence),
-            available: occurrence.source_available,
-        });
+    let mention = (matches!(
+        semantic,
+        NotificationSemantic::UserMention | NotificationSemantic::MissionNeedsYou
+    ) && occurrence.source_message_id.is_some())
+    .then(|| NotificationMentionView {
+        message_id: occurrence.source_message_id.clone().unwrap_or_default(),
+        author_id: occurrence.author_id.clone().unwrap_or_default(),
+        author_display_name: occurrence.author_display_name.clone(),
+        summary: message_summary(connection, &occurrence),
+        available: occurrence.source_available && occurrence.structured_content_json.is_some(),
+    });
     let action = action_for_occurrence(connection, &episode, &occurrence, true)?;
     if !action.available {
         return Ok(None);
@@ -1610,45 +1719,7 @@ fn hydrate_episode(
 ) -> Result<NotificationEpisodeView> {
     let kind = NotificationEpisodeKind::parse(&raw.kind)?;
     let mut statement = connection.prepare(
-        r#"
-        SELECT occurrence.id, occurrence.semantic, occurrence.occurred_at,
-               occurrence.camp_turn_id, occurrence.agent_run_id,
-               occurrence.source_type, occurrence.source_message_id,
-               occurrence.approval_id, occurrence.admitted_attention_revision,
-               occurrence.admitted_change_sequence,
-               CASE WHEN disposition.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END,
-               CASE WHEN disposition.satisfied_at IS NOT NULL THEN 1 ELSE 0 END,
-               CASE WHEN disposition.resolved_at IS NOT NULL THEN 1 ELSE 0 END,
-               CASE
-                   WHEN occurrence.semantic = 'user_mention'
-                       THEN CASE WHEN message.id IS NOT NULL
-                                      AND message.tombstoned_at IS NULL THEN 1 ELSE 0 END
-                   WHEN occurrence.semantic = 'approval_pending'
-                       THEN CASE WHEN approval.id IS NOT NULL
-                                      AND approval.status = 'pending' THEN 1 ELSE 0 END
-                   ELSE CASE
-                       WHEN occurrence.source_type = 'agent_run'
-                           THEN CASE WHEN source_run.id IS NOT NULL THEN 1 ELSE 0 END
-                       ELSE CASE WHEN turn.id IS NOT NULL THEN 1 ELSE 0 END
-                   END
-               END,
-               message.author_id, profile.display_name,
-               message.structured_content_json
-        FROM notification_occurrence AS occurrence
-        JOIN notification_occurrence_disposition AS disposition
-          ON disposition.occurrence_id = occurrence.id
-        LEFT JOIN camp_message AS message
-          ON message.id = occurrence.source_message_id
-         AND message.camp_id = occurrence.camp_id
-        LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
-        LEFT JOIN camp_turn AS turn ON turn.id = occurrence.camp_turn_id
-        LEFT JOIN agent_run AS source_run
-          ON source_run.id = occurrence.agent_run_id
-         AND source_run.camp_id = occurrence.camp_id
-        LEFT JOIN approval ON approval.id = occurrence.approval_id
-        WHERE occurrence.episode_id = ?1
-        ORDER BY occurrence.occurred_at ASC, occurrence.id ASC
-        "#,
+        &format!("{OCCURRENCE_PROJECTION_SQL} WHERE occurrence.episode_id = ?1 ORDER BY occurrence.admitted_attention_revision ASC"),
     )?;
     let rows = statement.query_map([raw.id.as_str()], |row| {
         let semantic: String = row.get(1)?;
@@ -1721,18 +1792,27 @@ fn hydrate_episode(
         anyhow::bail!("Notification Episode has no Occurrences");
     }
 
-    let primary_semantic = occurrences
-        .iter()
-        .max_by_key(|occurrence| match occurrence.semantic {
-            NotificationSemantic::ApprovalPending => 5,
-            NotificationSemantic::TurnFailed => 4,
-            NotificationSemantic::TurnIncomplete => 3,
-            NotificationSemantic::TurnCompleted if !occurrence.satisfied => 2,
-            NotificationSemantic::UserMention => 1,
-            NotificationSemantic::TurnCompleted => 0,
-        })
-        .map(|occurrence| occurrence.semantic)
-        .context("Notification Episode has no primary semantic")?;
+    let business_kind = matches!(
+        kind,
+        NotificationEpisodeKind::Mission | NotificationEpisodeKind::Task
+    );
+    let primary_semantic = if business_kind {
+        occurrences.last().map(|occurrence| occurrence.semantic)
+    } else {
+        occurrences
+            .iter()
+            .max_by_key(|occurrence| match occurrence.semantic {
+                NotificationSemantic::ApprovalPending => 5,
+                NotificationSemantic::TurnFailed => 4,
+                NotificationSemantic::TurnIncomplete => 3,
+                NotificationSemantic::TurnCompleted if !occurrence.satisfied => 2,
+                NotificationSemantic::UserMention => 1,
+                NotificationSemantic::TurnCompleted => 0,
+                semantic => semantic.priority(),
+            })
+            .map(|occurrence| occurrence.semantic)
+    }
+    .context("Notification Episode has no primary semantic")?;
     let active_attention = occurrences
         .iter()
         .filter(|occurrence| occurrence.is_active_attention(raw.cleared_through_attention_revision))
@@ -1766,19 +1846,27 @@ fn hydrate_episode(
         })
         .copied()
         .collect::<Vec<_>>();
-    let selected_mention = unacknowledged_mentions
-        .first()
-        .copied()
-        .or_else(|| mentions.first().copied());
+    let selected_mention = if primary_semantic == NotificationSemantic::MissionNeedsYou {
+        occurrences
+            .last()
+            .filter(|occurrence| occurrence.source_message_id.is_some())
+    } else {
+        unacknowledged_mentions
+            .first()
+            .copied()
+            .or_else(|| mentions.first().copied())
+    };
     let mention = selected_mention.map(|occurrence| NotificationMentionView {
         message_id: occurrence.source_message_id.clone().unwrap_or_default(),
         author_id: occurrence.author_id.clone().unwrap_or_default(),
         author_display_name: occurrence.author_display_name.clone(),
         summary: message_summary(connection, occurrence),
-        available: occurrence.source_available,
+        available: occurrence.source_available && occurrence.structured_content_json.is_some(),
     });
 
-    let attention_occurrence = if kind == NotificationEpisodeKind::Approval {
+    let attention_occurrence = if business_kind {
+        active_attention.last().copied()
+    } else if kind == NotificationEpisodeKind::Approval {
         active_attention
             .iter()
             .copied()
@@ -1793,16 +1881,24 @@ fn hydrate_episode(
                 .then_with(|| right.id.cmp(&left.id))
         })
     };
-    let display_occurrence = occurrences
-        .iter()
-        .filter(|occurrence| occurrence.semantic == primary_semantic)
-        .min_by(|left, right| {
-            left.occurred_at
-                .cmp(&right.occurred_at)
-                .then_with(|| left.id.cmp(&right.id))
-        })
-        .context("primary Notification Occurrence is missing")?;
-    let action_occurrence = attention_occurrence.unwrap_or(display_occurrence);
+    let display_occurrence = if business_kind {
+        occurrences.last()
+    } else {
+        occurrences
+            .iter()
+            .filter(|occurrence| occurrence.semantic == primary_semantic)
+            .min_by(|left, right| {
+                left.occurred_at
+                    .cmp(&right.occurred_at)
+                    .then_with(|| left.id.cmp(&right.id))
+            })
+    }
+    .context("primary Notification Occurrence is missing")?;
+    let action_occurrence = if business_kind {
+        display_occurrence
+    } else {
+        attention_occurrence.unwrap_or(display_occurrence)
+    };
     let primary_action = if kind == NotificationEpisodeKind::Approval
         && attention_occurrence.is_some_and(|occurrence| occurrence.resolved)
     {
@@ -1812,10 +1908,21 @@ fn hydrate_episode(
             connection,
             &raw,
             action_occurrence,
-            attention_occurrence.is_some(),
+            action_occurrence.is_active_attention(raw.cleared_through_attention_revision),
         )?
     };
     let mut secondary_actions = Vec::new();
+    if business_kind
+        && let Some(older_attention) = attention_occurrence
+        && older_attention.id != display_occurrence.id
+    {
+        secondary_actions.push(action_for_occurrence(
+            connection,
+            &raw,
+            older_attention,
+            true,
+        )?);
+    }
     if primary_action.kind != NotificationActionKind::OpenCampMessage
         && let Some(mention_occurrence) = unacknowledged_mentions.first().copied()
     {
@@ -1924,6 +2031,11 @@ fn reason_views(
         NotificationSemantic::TurnIncomplete,
         NotificationSemantic::TurnCompleted,
         NotificationSemantic::UserMention,
+        NotificationSemantic::RoundCompleted,
+        NotificationSemantic::SingleChatReply,
+        NotificationSemantic::MissionNeedsYou,
+        NotificationSemantic::MissionStatusChanged,
+        NotificationSemantic::TaskStatusChanged,
     ];
     semantics
         .into_iter()
@@ -1947,7 +2059,7 @@ fn reason_views(
                 .filter(|occurrence| !occurrence.acknowledged)
                 .count() as i64;
             let state = match semantic {
-                NotificationSemantic::ApprovalPending => {
+                NotificationSemantic::ApprovalPending | NotificationSemantic::MissionNeedsYou => {
                     if matching.iter().all(|occurrence| occurrence.resolved) {
                         NotificationReasonState::Resolved
                     } else {
@@ -1965,7 +2077,11 @@ fn reason_views(
                 }
                 NotificationSemantic::UserMention
                 | NotificationSemantic::TurnFailed
-                | NotificationSemantic::TurnIncomplete => {
+                | NotificationSemantic::TurnIncomplete
+                | NotificationSemantic::RoundCompleted
+                | NotificationSemantic::SingleChatReply
+                | NotificationSemantic::MissionStatusChanged
+                | NotificationSemantic::TaskStatusChanged => {
                     if unacknowledged_count == 0 {
                         NotificationReasonState::Acknowledged
                     } else {
@@ -2027,6 +2143,52 @@ fn action_for_occurrence(
             acknowledgement_id,
             &occurrence.id,
         ),
+        NotificationSemantic::RoundCompleted => action_view(
+            episode,
+            NotificationActionKind::OpenAgentRun,
+            occurrence.source_available,
+            None,
+            occurrence.agent_run_id.clone(),
+            None,
+            None,
+            acknowledgement_id,
+            &occurrence.id,
+        ),
+        NotificationSemantic::SingleChatReply => action_view(
+            episode,
+            NotificationActionKind::OpenSingleChat,
+            occurrence.source_available,
+            occurrence.camp_turn_id.clone(),
+            occurrence.agent_run_id.clone(),
+            None,
+            None,
+            acknowledgement_id,
+            &occurrence.id,
+        ),
+        NotificationSemantic::MissionNeedsYou | NotificationSemantic::MissionStatusChanged => {
+            action_view(
+                episode,
+                NotificationActionKind::OpenMission,
+                occurrence.source_available,
+                None,
+                occurrence.agent_run_id.clone(),
+                occurrence.source_message_id.clone(),
+                None,
+                acknowledgement_id,
+                &occurrence.id,
+            )
+        }
+        NotificationSemantic::TaskStatusChanged => action_view(
+            episode,
+            NotificationActionKind::OpenTask,
+            occurrence.source_available,
+            None,
+            occurrence.agent_run_id.clone(),
+            None,
+            None,
+            acknowledgement_id,
+            &occurrence.id,
+        ),
         NotificationSemantic::TurnCompleted
         | NotificationSemantic::TurnFailed
         | NotificationSemantic::TurnIncomplete => {
@@ -2059,6 +2221,7 @@ fn action_for_occurrence(
             }
         }
     };
+    action.subject = sources::load_subject(connection, occurrence)?;
     // Resolve the frozen Run destination, including approval occurrences whose own turn is null.
     // Missing private identities fail closed; never fall back to a member's successor conversation.
     let source = connection
@@ -2075,7 +2238,7 @@ fn action_for_occurrence(
            LEFT JOIN agent_profile AS profile ON profile.id = conversation.agent_id
            LEFT JOIN camp_member AS member ON member.camp_id = turn.camp_id
              AND member.agent_id = conversation.agent_id
-           WHERE turn.id = COALESCE(?1, (
+           WHERE turn.id = COALESCE(?1, (SELECT camp_turn_id FROM agent_run WHERE id=?4), (
              SELECT approval_run.camp_turn_id FROM approval
              JOIN action_execution ON action_execution.id = approval.action_id
              JOIN agent_run AS approval_run ON approval_run.id = action_execution.agent_run_id
@@ -2084,7 +2247,8 @@ fn action_for_occurrence(
             params![
                 occurrence.camp_turn_id,
                 occurrence.approval_id,
-                episode.camp_id
+                episode.camp_id,
+                occurrence.agent_run_id
             ],
             |row| {
                 Ok((
@@ -2165,6 +2329,7 @@ fn action_view(
         acknowledgement_id,
         observed_episode_version: episode.version,
         single_chat: None,
+        subject: None,
     }
 }
 
@@ -2199,7 +2364,10 @@ fn load_preference(connection: &rusqlite::Connection) -> Result<NotificationPref
             r#"
             SELECT heads_up_enabled, approval_heads_up_enabled,
                    user_mention_heads_up_enabled, turn_completed_heads_up_enabled,
-                   turn_incomplete_heads_up_enabled, version, updated_at
+                   turn_incomplete_heads_up_enabled, version, updated_at,
+                   single_chat_heads_up_enabled, mission_needs_you_heads_up_enabled,
+                   mission_status_heads_up_enabled, task_status_heads_up_enabled,
+                   mission_statuses_json, task_statuses_json
             FROM notification_preference WHERE singleton = 1
             "#,
             [],
@@ -2212,6 +2380,28 @@ fn load_preference(connection: &rusqlite::Connection) -> Result<NotificationPref
                     turn_incomplete_heads_up_enabled: row.get(4)?,
                     version: row.get(5)?,
                     updated_at: row.get(6)?,
+                    single_chat_heads_up_enabled: row.get(7)?,
+                    mission_needs_you_heads_up_enabled: row.get(8)?,
+                    mission_status_heads_up_enabled: row.get(9)?,
+                    task_status_heads_up_enabled: row.get(10)?,
+                    mission_statuses: serde_json::from_str(&row.get::<_, String>(11)?).map_err(
+                        |e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                11,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        },
+                    )?,
+                    task_statuses: serde_json::from_str(&row.get::<_, String>(12)?).map_err(
+                        |e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                12,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        },
+                    )?,
                 })
             },
         )
@@ -2312,6 +2502,7 @@ mod slow_tests {
 
     fn test_database() -> (std::path::PathBuf, Database) {
         let (database, directory) = crate::test_support::fresh_schema_database_fast();
+        crate::db::notification_model::install_historical_fact_fixture(database.connection());
         (directory, database)
     }
 
@@ -3163,7 +3354,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn batch_agent_run_terminal_notification_navigates_and_acknowledges_exact_run() {
+    fn batch_agent_run_failure_navigates_and_acknowledges_exact_run() {
         let (directory, mut database) = test_database();
         insert_camp(&database, "camp-batch-notification", "Batch notification");
         insert_batch_run(
@@ -3177,7 +3368,7 @@ mod slow_tests {
             .execute(
                 r#"
                 UPDATE agent_run
-                SET status = 'succeeded', version = 2,
+                SET status = 'failed', version = 2,
                     ended_at = '2026-08-01T00:02:00Z',
                     updated_at = '2026-08-01T00:02:00Z'
                 WHERE id = 'run-batch-notification'
@@ -3196,7 +3387,7 @@ mod slow_tests {
                 50,
             )
             .unwrap();
-        assert_eq!(inbox.schema_version, 8);
+        assert_eq!(inbox.schema_version, 9);
         assert_eq!(inbox.items.len(), 1);
         let episode = &inbox.items[0];
         assert_eq!(episode.camp_turn_id, None);
@@ -3217,7 +3408,7 @@ mod slow_tests {
         let changes = service
             .changes_since(&mut database, CURRENT_USER_ID, baseline, 50)
             .unwrap();
-        assert_eq!(changes.schema_version, 8);
+        assert_eq!(changes.schema_version, 9);
         assert!(changes.changes.iter().any(|change| {
             change.heads_up_signal.as_ref().is_some_and(|signal| {
                 signal.action.kind == NotificationActionKind::OpenAgentRun
@@ -3822,3 +4013,7 @@ mod slow_tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "notification_round_tests.rs"]
+mod round_tests;

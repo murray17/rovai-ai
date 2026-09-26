@@ -1,12 +1,12 @@
 ---
 document_type: qualification-record
-version: v1.71
+version: v1.72
 authority: lark-real-tenant-qualification-evidence
 status: in_progress
 last_updated: 2026-09-24
 ---
 
-# v1.71 Lark 真实租户验收记录
+# v1.72 Lark 真实租户验收记录
 
 本记录用于执行 [Lark Channel v1 能力 Gate](../../contracts/lark-channel-v1.md#8-能力-gate)。自动化测试不能替代
 真实 Lark 租户与客户端证据。任何未实际完成或证据不足的项目保持“未验证”，不得据此移除 Renderer 未验收提示，

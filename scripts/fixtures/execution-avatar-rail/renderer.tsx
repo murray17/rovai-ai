@@ -129,6 +129,7 @@ Object.assign(window, { rovai: {
 
 let configureNotificationFixture: (() => void) | null = null
 let focusNotificationRun: ((requestId: number) => void) | null = null
+let focusNotificationSubject: ((kind: 'task' | 'mission', requestId: number) => void) | null = null
 let notificationFixtureEnabled = false
 let latestVisibleNotificationSources: VisibleNotificationSources | null = null
 const visibleNotificationSourceReports: VisibleNotificationSources[] = []
@@ -156,6 +157,7 @@ Object.assign(window, { executionNotificationTest: {
   openExecution: () => previewHarness?.openExecution(),
   hideExecution: () => previewHarness?.hidePane(),
   focusRun: (requestId: number) => focusNotificationRun?.(requestId),
+  focusSubject: (kind: 'task' | 'mission', requestId: number) => focusNotificationSubject?.(kind, requestId),
   state: () => {
     const target = document.querySelector<HTMLElement>('[data-agent-run-id="run-agent-1"]')
     const preview = document.querySelector<HTMLElement>('[data-preview-camp]')
@@ -163,6 +165,8 @@ Object.assign(window, { executionNotificationTest: {
     const viewport = target?.closest<HTMLElement>('.execution-drawer-body') ?? null
     const rect = (element: HTMLElement | null) => element?.getBoundingClientRect().toJSON() ?? null
     return {
+      focusedTask: document.activeElement?.getAttribute('data-task-id'),
+      focusedMission: document.activeElement?.getAttribute('data-mission-id'),
       paneVisible: previewHarness?.paneVisible ?? false,
       activeTabKind: previewHarness?.activeTabKind ?? null,
       compact: document.querySelector('.workspace-grid')?.classList.contains('file-preview-compact') ?? false,
@@ -213,6 +217,7 @@ function Fixture(): React.JSX.Element {
     campTurnId: null,
     active: true
   })
+  focusNotificationSubject = (kind, requestId) => setNotificationFocus({ requestId, kind, subjectId: kind === 'task' ? 'task-rail' : 'mission-rail', campTurnId: null, active: true })
   const snapshot = snapshotFor(count, revision, recipientCount)
   if (longTitleScenario) {
     snapshot.turns = snapshot.agentRuns.map(run => ({ id: run.campTurnId!, triggerType: 'camp_message',
@@ -274,7 +279,7 @@ function Fixture(): React.JSX.Element {
     </aside>
     <AppHeader campTitle={snapshot.camp.title} contextLabel="隔离验收" camp={snapshot} detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
-      <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={agents.slice(0, snapshot.members.length)} busy={false} stopping={false}
+      <CampWorkspace missionBoard={notificationFixtureEnabled ? <section className="mission-intro" data-mission-id="mission-rail" tabIndex={-1}>使命来源</section> : null} snapshot={snapshot} projectName="隔离验收" agents={agents.slice(0, snapshot.members.length)} busy={false} stopping={false}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
         onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} detailEntryHost={entryHost}
         onCancelAgentRun={async run => { setStoppedRuns(current => [...current, run.id]) }}

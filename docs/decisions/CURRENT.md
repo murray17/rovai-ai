@@ -34,9 +34,9 @@ last_updated: 2026-09-25
 - Channel/Automation 复用普通消息：[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)、
   [Scheduled Automation v3](../contracts/scheduled-automation-v3.md)；理由：
   [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)。
-- Delivery-first 终态注意力：[Notification Episode v8](../contracts/notification-episode-v8.md)、
-  [Current User Attention v7](../contracts/current-user-attention-v7.md)；理由：
-  [V1.60-D09](../versions/v1.60/decisions.md#v1-60-d09)。
+- Delivery-first 终态注意力：[Notification Episode v9](../contracts/notification-episode-v9.md)、
+  [Current User Attention v8](../contracts/current-user-attention-v8.md)；理由：
+  [V1.60-D09](../versions/v1.60/decisions.md#v1-60-d09)、[V1.71-D01](../versions/v1.71/decisions.md#v1-71-d01)。
 
 ## Linux Server 发布基线
 
@@ -60,7 +60,7 @@ last_updated: 2026-09-25
 - 渠道/main 数据迁移汇合：[Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)、[原位升级与旧 switch 恢复](../architecture/availability-first-runtime.md#migration-switch)；理由：[V1.36-D06](../versions/v1.36/decisions.md#v1-36-d06)、[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 - 普通升级去整库复制、逐事务恢复与启动重试：[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md#4-migration-and-recovery)；理由：[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 
-- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v8](../contracts/notification-episode-v8.md)。
+- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v9](../contracts/notification-episode-v9.md)。
 - 理由来源：[v0.02](../versions/v0.02/decisions.md)、[v0.06](../versions/v0.06/decisions.md)、[v0.28](../versions/v0.28/decisions.md)、[v0.71](../versions/v0.71/decisions.md)、[V1.31-D01](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D02](../versions/v1.31/decisions.md#v1-31-d02)、[V1.31-D03](../versions/v1.31/decisions.md#v1-31-d03)。
 
 ## Camp、Workspace 与 Attachments
@@ -83,7 +83,7 @@ last_updated: 2026-09-25
 - 当前规范：[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)、[Channel Storage v3](../contracts/channel-storage-v3.md)、[飞书渠道架构](../architecture/feishu-channel.md)、[Feishu Channel v17](../contracts/feishu-channel-v17.md)、[Lark 渠道架构](../architecture/lark-channel.md)、[Lark Channel v1](../contracts/lark-channel-v1.md)、[钉钉渠道架构](../architecture/dingtalk-channel.md)、[DingTalk Channel v13](../contracts/dingtalk-channel-v13.md)、[Camp Membership v2](../contracts/camp-membership-v2.md)、[ContextManifest Evidence v30](../contracts/context-manifest-evidence-v30.md)和[渠道设置](../ui/components/channel-settings.md)。
 - 飞书理由来源：[V1.35-D01（已由 D09 取代）](../versions/v1.35/decisions.md#v1-35-d01)、[V1.35-D02](../versions/v1.35/decisions.md#v1-35-d02)、[V1.35-D03（Topic root structural-parent 部分已由 V1.37-D06 取代）](../versions/v1.35/decisions.md#v1-35-d03)、[V1.35-D04（话题扩张部分已由 D15 取代）](../versions/v1.35/decisions.md#v1-35-d04)、[V1.35-D05](../versions/v1.35/decisions.md#v1-35-d05)、[V1.35-D06](../versions/v1.35/decisions.md#v1-35-d06)、[V1.35-D07](../versions/v1.35/decisions.md#v1-35-d07)、[V1.35-D08](../versions/v1.35/decisions.md#v1-35-d08)、[V1.35-D09（私聊投递部分已由 D12 取代）](../versions/v1.35/decisions.md#v1-35-d09)、[V1.35-D10](../versions/v1.35/decisions.md#v1-35-d10)、[V1.35-D11](../versions/v1.35/decisions.md#v1-35-d11)、[V1.35-D12](../versions/v1.35/decisions.md#v1-35-d12)、[V1.35-D13（终态展示与 view state 已由 D16 取代）](../versions/v1.35/decisions.md#v1-35-d13)、[V1.35-D14（命令展示与 callback 已由 D16 取代）](../versions/v1.35/decisions.md#v1-35-d14)、[V1.35-D15](../versions/v1.35/decisions.md#v1-35-d15)、[V1.35-D16（执行卡正文/分页已由 V1.37-D05 取代）](../versions/v1.35/decisions.md#v1-35-d16)、[V1.37-D05](../versions/v1.37/decisions.md#v1-37-d05)、[V1.37-D06](../versions/v1.37/decisions.md#v1-37-d06)、[V1.37-D08](../versions/v1.37/decisions.md#v1-37-d08)及[V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)。
 - 钉钉与共享渠道存储理由来源：[V1.36-D01（存储由 D04、OAuth 控制面由 D05 取代）](../versions/v1.36/decisions.md#v1-36-d01)、[V1.36-D02](../versions/v1.36/decisions.md#v1-36-d02)、[V1.36-D03](../versions/v1.36/decisions.md#v1-36-d03)、[V1.36-D04](../versions/v1.36/decisions.md#v1-36-d04)、[V1.36-D05](../versions/v1.36/decisions.md#v1-36-d05)、[V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)、[V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)、[V1.37-D11（群目标 ID 相等假设已由 D12 取代）](../versions/v1.37/decisions.md#v1-37-d11)、[V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)、[V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)、[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)、[V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)、[V1.38-D01](../versions/v1.38/decisions.md#v1-38-d01)和[V1.38-D02](../versions/v1.38/decisions.md#v1-38-d02)。
-- Lark 独立 provider、克隆表族、参数化飞书实现与按请求名推导 Host actor 的理由：[V1.71-D01](../versions/v1.71/decisions.md#v1-71-d01)。
+- Lark 独立 provider、克隆表族、参数化飞书实现与按请求名推导 Host actor 的理由：[V1.72-D01](../versions/v1.72/decisions.md#v1-72-d01)。
 
 ## Member identity
 

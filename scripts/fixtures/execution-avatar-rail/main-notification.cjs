@@ -75,12 +75,18 @@ app.whenReady().then(async () => {
     assert.equal(current.previewHidden, false, 'Compact notification navigation must retain the execution pane')
     assert.deepEqual(current.visibleRunIds, ['run-agent-1'])
 
+    await run("window.executionNotificationTest.focusSubject('task', 102)")
+    await waitFor(value => value.focusedTask === 'task-rail' && value.presentedRequests.includes(102), 'Task notification did not open and focus its exact detail')
+    await run("window.executionNotificationTest.focusSubject('mission', 103)")
+    await waitFor(value => value.focusedMission === 'mission-rail' && value.presentedRequests.includes(103), 'Mission notification did not focus its exact introduction')
+
     console.log(JSON.stringify({
       ok: true,
       cases: [
         'right-side Portal Run contributes visible source identity',
         'closed right execution pane reopens for exact notification navigation',
-        'compact layout retains and focuses the notification target'
+        'compact layout retains and focuses the notification target',
+        'Task and Mission notifications focus their exact subject'
       ]
     }))
     window.destroy()

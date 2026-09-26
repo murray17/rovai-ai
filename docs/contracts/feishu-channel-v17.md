@@ -4,7 +4,7 @@ contract: feishu-channel-v17
 authority: feishu-channel-account-provisioning-admission-delivery
 status: accepted
 version: 17
-source_version: v1.71
+source_version: v1.72
 last_updated: 2026-09-24
 ---
 

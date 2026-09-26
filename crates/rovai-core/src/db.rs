@@ -4,6 +4,8 @@ mod attachment_paths;
 mod mission_context;
 #[path = "db_mission_details.rs"]
 mod mission_details;
+#[path = "db_notification_model.rs"]
+pub(crate) mod notification_model;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -46,6 +48,7 @@ use crate::member_avatar::{
 #[cfg(all(test, feature = "extended-tests"))]
 thread_local! {
     static STOP_BEFORE_TASK_VERSIONLESS_MIGRATION_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static STOP_BEFORE_PUBLIC_CONTEXT_MIGRATION_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -289,8 +292,8 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.71";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 125;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 126;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -740,6 +743,7 @@ struct CurrentMigrationState {
     v173: bool,
     v174: bool,
     v175: bool,
+    v176: bool,
 }
 
 impl CurrentMigrationState {
@@ -761,11 +765,19 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v176 {
+            let mut previous = *self;
+            previous.v176 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && self.v175
+                && previous.admits("v1.71", 125, classifier);
+        }
         if self.v175 {
             let mut previous = *self;
             previous.v175 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            return contract == "v1.71"
+                && schema == 125
                 && self.v174
                 && previous.admits("v1.70", 124, classifier);
         }
@@ -3201,7 +3213,8 @@ pub(crate) fn classify_database_contract(
         || (migrations.v172 && !public_context_schema_matches)
         || (migrations.v173 && !skills_rebuild_schema_matches)
         || (migrations.v174 && !public_history_claim_schema_matches)
-        || (migrations.v175 && !lark_channel_v175_schema_matches(connection)?)
+        || (migrations.v175 && !notification_model::schema_matches(connection)?)
+        || (migrations.v176 && !lark_channel_v176_schema_matches(connection)?)
         || (migrations.v156
             && !migrations.v157
             && !attachment_paths::schema_matches(connection)?
@@ -3735,7 +3748,7 @@ fn camp_deletion_v169_schema_matches(connection: &Connection) -> rusqlite::Resul
     Ok(camp_columns == 7 && journal_columns == 4 && indexes == 4)
 }
 
-fn lark_channel_v175_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+fn lark_channel_v176_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
     connection.query_row(r#"
         SELECT
             (SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN (
@@ -4929,7 +4942,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 172),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 173),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 174),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 175)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 175),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 176)
         "#,
         [],
         |row| {
@@ -5040,6 +5054,7 @@ fn load_current_migration_state(
                 v173: row.get(103)?,
                 v174: row.get(104)?,
                 v175: row.get(105)?,
+                v176: row.get(106)?,
             })
         },
     )
@@ -8111,8 +8126,15 @@ impl Database {
             if !self.schema_migration_applied(174)? {
                 migration_step!("migration_174", self.migrate_public_history_claim_v174());
             }
+            #[cfg(all(test, feature = "extended-tests"))]
+            if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
+                return Ok(());
+            }
             if !self.schema_migration_applied(175)? {
-                migration_step!("migration_175", self.migrate_lark_channel_v175());
+                migration_step!("migration_175", notification_model::migrate(self));
+            }
+            if !self.schema_migration_applied(176)? {
+                migration_step!("migration_176", self.migrate_lark_channel_v176());
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -8848,8 +8870,15 @@ impl Database {
         if !self.schema_migration_applied(174)? {
             migration_step!("migration_174", self.migrate_public_history_claim_v174());
         }
+        #[cfg(all(test, feature = "extended-tests"))]
+        if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
+            return Ok(());
+        }
         if !self.schema_migration_applied(175)? {
-            migration_step!("migration_175", self.migrate_lark_channel_v175());
+            migration_step!("migration_175", notification_model::migrate(self));
+        }
+        if !self.schema_migration_applied(176)? {
+            migration_step!("migration_176", self.migrate_lark_channel_v176());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -28430,10 +28459,9 @@ impl Database {
                 matches!(
                     classify_database_contract(&tx)?,
                     DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                        if marker.contract_version == "v1.70"
-                            && marker.projection_schema_version == 124
+                        if marker.contract_version == "v1.70" && marker.projection_schema_version == 124
                 ),
-                "Public history claim migration failed v1.70/schema 124 source admission"
+                "Public history claim migration failed v1.70/schema 124 admission"
             );
             tx.commit()?;
             Ok(())
@@ -28444,20 +28472,20 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_lark_channel_v175(&mut self) -> Result<()> {
+    fn migrate_lark_channel_v176(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         anyhow::ensure!(
             matches!(classify_database_contract(&transaction)?,
             DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                if marker.contract_version == "v1.70" && marker.projection_schema_version == 124),
-            "Lark migration requires the exact v1.70/schema 124 source"
+                if marker.contract_version == "v1.71" && marker.projection_schema_version == 125),
+            "Lark migration requires the exact v1.71/schema 125 source"
         );
-        transaction.execute_batch(include_str!("lark_channel_v175.sql"))?;
+        transaction.execute_batch(include_str!("lark_channel_v176.sql"))?;
         transaction.execute_batch(
-            "INSERT INTO schema_migration(version, applied_at) VALUES (175, datetime('now'));
-            UPDATE rovai_data_contract SET contract_version='v1.71', projection_schema_version=125,
+            "INSERT INTO schema_migration(version, applied_at) VALUES (176, datetime('now'));
+            UPDATE rovai_data_contract SET contract_version='v1.72', projection_schema_version=126,
                 reset_reason=NULL, updated_at=datetime('now') WHERE singleton=1;",
         )?;
         anyhow::ensure!(
@@ -33710,7 +33738,9 @@ pub(crate) fn open_v170_source_for_test(directory: &Path) -> Result<Database> {
 
 #[cfg(test)]
 fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
-    downgrade_current_schema_to_v174_source_for_test(connection);
+    downgrade_current_schema_to_v175_source_for_test(connection);
+    #[cfg(feature = "extended-tests")]
+    notification_model::downgrade_for_test(connection);
     // Only the old-migration fixtures reverse the three latest migrations.
     // Keep the production classifier and migration source checks exact.
     let has_v173: bool = connection
@@ -33979,10 +34009,10 @@ fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v174_source_for_test(connection: &Connection) {
+fn downgrade_current_schema_to_v175_source_for_test(connection: &Connection) {
     let applied: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=175)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=176)",
             [],
             |row| row.get(0),
         )
@@ -34006,7 +34036,7 @@ fn downgrade_current_schema_to_v174_source_for_test(connection: &Connection) {
         assert_eq!(count, 0, "downgrade fixture must not discard Lark rows");
     }
     transaction
-        .execute_batch(include_str!("lark_channel_v175_downgrade.sql"))
+        .execute_batch(include_str!("lark_channel_v176_downgrade.sql"))
         .unwrap();
     transaction.commit().unwrap();
 }
@@ -38347,14 +38377,14 @@ mod tests {
                 if marker.contract_version == "v1.69" && marker.projection_schema_version == 123
         ));
         source.migrate_public_history_claim_v174().unwrap();
-        source.migrate_lark_channel_v175().unwrap();
         assert_eq!(historical_bytes(&source), before);
         assert_eq!(historical_delivery(&source), delivery_before);
         assert_eq!(historical_bootstrap(&source), bootstrap_before);
         assert!(source.schema_migration_applied(174).unwrap());
         assert!(matches!(
             classify_database_contract(source.connection()).unwrap(),
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.70" && marker.projection_schema_version == 124
         ));
         drop(source);
         let reopened = Database::open(&directory).unwrap();
@@ -38541,7 +38571,7 @@ mod tests {
     #[test]
     fn lark_migration_preserves_rows_rolls_back_and_clones_the_provider_schema() {
         let mut database = crate::test_support::seeded_runtime_database_owned();
-        downgrade_current_schema_to_v174_source_for_test(database.connection());
+        downgrade_current_schema_to_v175_source_for_test(database.connection());
         database.connection().execute_batch(r#"
             INSERT INTO channel_credentials VALUES('feishu-kept','feishu','member_bot','app-kept','{"appSecret":"fixture"}',1,7,11,12);
             INSERT INTO channel_developer_sessions VALUES('dingtalk','account-kept','{}','{}',1,8,21,22);
@@ -38560,7 +38590,7 @@ mod tests {
             INSERT INTO dingtalk_member_bot VALUES('agent_1','old-dingtalk','unified','old-dingtalk-app','robot','Bot','dingtalk-kept','digest','published',NULL,1,'a','b','c');
             INSERT INTO dingtalk_owner_app_identity VALUES('old-dingtalk-app','old-dingtalk','corp','digest',1,'a','b');
             CREATE TEMP TRIGGER reject_lark_receipt BEFORE INSERT ON schema_migration
-            WHEN NEW.version=175 BEGIN SELECT RAISE(ABORT,'fixture Lark receipt failure'); END;
+            WHEN NEW.version=176 BEGIN SELECT RAISE(ABORT,'fixture Lark receipt failure'); END;
         "#).unwrap();
         let snapshot = |connection: &Connection, table: &str| {
             let mut statement = connection
@@ -38586,12 +38616,12 @@ mod tests {
         let before = tables.map(|table| snapshot(database.connection(), table));
         assert!(
             database
-                .migrate_lark_channel_v175()
+                .migrate_lark_channel_v176()
                 .unwrap_err()
                 .to_string()
                 .contains("fixture Lark receipt failure")
         );
-        assert!(!database.schema_migration_applied(175).unwrap());
+        assert!(!database.schema_migration_applied(176).unwrap());
         assert!(
             !database
                 .connection()
@@ -38606,7 +38636,7 @@ mod tests {
             .connection()
             .execute_batch("DROP TRIGGER reject_lark_receipt")
             .unwrap();
-        database.migrate_lark_channel_v175().unwrap();
+        database.migrate_lark_channel_v176().unwrap();
         assert_eq!(
             tables.map(|table| snapshot(database.connection(), table)),
             before
@@ -39352,7 +39382,8 @@ mod tests {
         database.migrate_public_context_v172().unwrap();
         database.migrate_skills_rebuild_v173().unwrap();
         database.migrate_public_history_claim_v174().unwrap();
-        database.migrate_lark_channel_v175().unwrap();
+        notification_model::migrate(&mut database).unwrap();
+        database.migrate_lark_channel_v176().unwrap();
         let successor_run_id = claim_waiting_delivery_batches(&mut database, 1)
             .unwrap()
             .pop()
@@ -39705,6 +39736,7 @@ mod tests {
             v173: version >= 173,
             v174: version >= 174,
             v175: version >= 175,
+            v176: version >= 176,
         }
     }
 
@@ -39899,9 +39931,10 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                175,
+                176,
             ),
-            ("v1.70/schema 124 before Lark", "v1.70", 124, 174),
+            ("v1.71/schema 125 before Lark", "v1.71", 125, 175),
+            ("v1.70/schema 124 before notifications", "v1.70", 124, 174),
             (
                 "v1.69/schema 123 before public history claim",
                 "v1.69",
@@ -40385,7 +40418,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(175);
+        let current = migration_state_through(176);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -40857,7 +40890,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(175));
+        assert_eq!(state, migration_state_through(176));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")

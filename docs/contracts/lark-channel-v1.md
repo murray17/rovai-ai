@@ -4,7 +4,7 @@ contract: lark-channel-v1
 authority: lark-channel-provider-identity-storage-login-and-runtime-domain
 status: accepted
 version: 1
-source_version: v1.71
+source_version: v1.72
 last_updated: 2026-09-27
 ---
 

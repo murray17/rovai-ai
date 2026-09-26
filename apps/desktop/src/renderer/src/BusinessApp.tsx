@@ -285,6 +285,7 @@ type ActivateCampOptions = {
   suppressErrors?: boolean
   anchoredMessages?: readonly CampMessageView[]
   anchoredAgentRuns?: readonly AgentRunView[]
+  anchoredTasks?: readonly import('@contracts').TaskView[]
 }
 
 export function activeCampSurfaceNeedsLeaveGuard(
@@ -1118,6 +1119,7 @@ export function BusinessApp({
     campId: string
     messages: readonly CampMessageView[]
     agentRuns: readonly AgentRunView[]
+    tasks: readonly import('@contracts').TaskView[]
   } | null>(null)
   const missionList = useMissions(client, startupStatus === 'resolved')
   const [missionPresentation, setMissionPresentation] = useState<'drawer' | 'full'>('full')
@@ -1783,11 +1785,13 @@ export function BusinessApp({
         setNotificationAnchor(null)
       }
       if ((options.anchoredMessages?.length ?? 0) > 0
-        || (options.anchoredAgentRuns?.length ?? 0) > 0) {
+        || (options.anchoredAgentRuns?.length ?? 0) > 0
+        || (options.anchoredTasks?.length ?? 0) > 0) {
         setNotificationAnchor({
           campId,
           messages: options.anchoredMessages ?? [],
-          agentRuns: options.anchoredAgentRuns ?? []
+          agentRuns: options.anchoredAgentRuns ?? [],
+          tasks: options.anchoredTasks ?? []
         })
       }
       setActiveCampId(campId)
@@ -1864,11 +1868,13 @@ export function BusinessApp({
     if (target?.kind !== 'camp' || target.campId !== campId) return false
     if (viewRef.current === 'camp' && activeCampIdRef.current === campId) {
       if ((options.anchoredMessages?.length ?? 0) > 0
-        || (options.anchoredAgentRuns?.length ?? 0) > 0) {
+        || (options.anchoredAgentRuns?.length ?? 0) > 0
+        || (options.anchoredTasks?.length ?? 0) > 0) {
         setNotificationAnchor({
           campId,
           messages: options.anchoredMessages ?? [],
-          agentRuns: options.anchoredAgentRuns ?? []
+          agentRuns: options.anchoredAgentRuns ?? [],
+          tasks: options.anchoredTasks ?? []
         })
       }
       if (campSnapshotRef.current?.camp.missionId && options.missionPresentation) {
@@ -2995,6 +3001,19 @@ export function BusinessApp({
             throw new Error('这项审批已经处理。')
           }
         }
+        let anchoredTasks: readonly import('@contracts').TaskView[] = []
+        if (action.kind === 'open_mission' || action.kind === 'open_task') {
+          const source = action.subject
+          if (!source || source.kind !== (action.kind === 'open_mission' ? 'mission' : 'task')) {
+            throw new Error('通知缺少原始事项标识。')
+          }
+          const snapshot = await client.request<CampSnapshot>('camps.snapshot', { campId: action.campId })
+          if (snapshot.camp.id !== action.campId
+            || (source.kind === 'mission' ? snapshot.camp.missionId !== source.id : !snapshot.tasks.some(task => task.taskId === source.id))) {
+            throw new Error('原事项已删除或暂时不可用。')
+          }
+          if (source.kind === 'task') anchoredTasks = snapshot.tasks.filter(task => task.taskId === source.id)
+        }
         let anchoredMessages: readonly CampMessageView[] = []
         let anchoredAgentRuns: readonly AgentRunView[] = []
         if (action.kind === 'open_camp_message') {
@@ -3059,7 +3078,9 @@ export function BusinessApp({
           }
           anchoredAgentRuns = [run]
         }
-        const target: NotificationFocusTarget | null = action.kind === 'open_single_chat' && action.singleChat
+        const target: NotificationFocusTarget | null = (action.kind === 'open_mission' || action.kind === 'open_task') && action.subject
+          ? { requestId: ++notificationFocusSequence.current, kind: action.subject.kind === 'mission' ? 'mission' : 'task', subjectId: action.subject.id, campTurnId: null }
+          : action.kind === 'open_single_chat' && action.singleChat
           ? { requestId: ++notificationFocusSequence.current, kind: 'single_chat',
             conversationId: action.singleChat.conversationId, agentRunId: action.singleChat.agentRunId,
             campTurnId: action.campTurnId, approvalId: action.approvalId ?? undefined }
@@ -3101,6 +3122,7 @@ export function BusinessApp({
           reconcileDefaultLead: true,
           suppressErrors: true,
           anchoredMessages,
+          anchoredTasks,
           anchoredAgentRuns
         })
         if (!activated) {
@@ -4722,11 +4744,20 @@ export function campSnapshotWithCurrentAnchor(
     campId: string
     messages?: readonly CampMessageView[]
     agentRuns?: readonly AgentRunView[]
+    tasks?: readonly import('@contracts').TaskView[]
   } | null
 ): CampSnapshot {
   if (anchor?.campId !== campId) return snapshot
+  let withTasks = snapshot
+  if (anchor.tasks?.length) {
+    const tasks = new Map(snapshot.tasks.map(task => [task.taskId, task]))
+    for (const task of anchor.tasks) {
+      if (!tasks.has(task.taskId)) tasks.set(task.taskId, task)
+    }
+    withTasks = { ...snapshot, tasks: [...tasks.values()] }
+  }
   return campSnapshotWithAnchoredAgentRuns(
-    campSnapshotWithAnchoredMessages(snapshot, anchor.messages ?? []),
+    campSnapshotWithAnchoredMessages(withTasks, anchor.messages ?? []),
     anchor.agentRuns ?? []
   )
 }
@@ -4755,6 +4786,10 @@ export function notificationFocusMatchesAction(
   focus: NotificationFocusTarget,
   action: NotificationActionView
 ): boolean {
+  if (focus.kind === 'mission' || focus.kind === 'task') {
+    return action.kind === (focus.kind === 'mission' ? 'open_mission' : 'open_task')
+      && focus.subjectId === action.subject?.id && focus.kind === action.subject?.kind
+  }
   if (focus.kind === 'single_chat') {
     return action.kind === 'open_single_chat'
       && focus.conversationId === action.singleChat?.conversationId
