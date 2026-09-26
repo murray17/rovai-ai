@@ -20,7 +20,7 @@ last_updated: 2026-09-23
 
 资源、重试与准备结果存放在既有 aggregate JSON；不引入第二条消息队列或独立资产生命周期。单条失败有明确提示，
 不会让 Agent 只收到文字继续执行。字段和支持范围见
-[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md#feishu-inbound-attachments)。
+[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md#inbound-attachments)。
 
 字段、状态和恢复合同见 [Feishu Channel v16](../contracts/feishu-channel-v16.md)，当前异步入站/外发语义见
 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)，credential 与 Developer Session 持久化见

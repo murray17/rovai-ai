@@ -1,3 +1,5 @@
+import type { InboundResource } from './channel-inbound-attachments'
+
 export type DingTalkInboundMessage = {
   provider: 'dingtalk'
   appId: string
@@ -12,6 +14,7 @@ export type DingTalkInboundMessage = {
   senderDisplayName: string
   body: string
   attachmentSummaries: Array<{ name: string; mediaType: string | null }>
+  resources: InboundResource[]
   explicitlyAtBot: boolean
   chatbotUserId: string | null
   atUsers: Array<{ staffId: string | null; dingtalkId: string | null }>
@@ -80,6 +83,7 @@ export function normalizeDingTalkRobotMessage(
     senderDisplayName: first(value, 'senderNick') ?? '钉钉用户',
     body: body.trim(),
     attachmentSummaries: messageAttachmentSummaries(value),
+    resources: messageResources(value),
     explicitlyAtBot: !group || value.isInAtList === true || value.isInAtList === 'true',
     chatbotUserId,
     atUsers,
@@ -139,6 +143,42 @@ function messageText(value: Record<string, unknown>): string | null {
   return first(text, 'content', 'text')
     ?? first(content, 'text', 'content')
     ?? first(value, 'content')
+    ?? richTextBody(content)
+}
+
+function richTextBody(content: Record<string, unknown>): string | null {
+  if (!Array.isArray(content.richText)) return null
+  const parts = content.richText.map(item => {
+    const segment = objectOrEmpty(item)
+    return first(segment, 'text') ?? (resourceKind(segment.type) === 'image' ? '[图片]' : '')
+  }).filter(Boolean)
+  return parts.length > 0 ? parts.join('\n') : null
+}
+
+function resourceKind(value: unknown): string | null {
+  const type = typeof value === 'string' ? value.toLowerCase() : ''
+  if (['image', 'picture', 'photo'].includes(type)) return 'image'
+  return ['file', 'audio', 'video', 'folder', 'sticker'].includes(type) ? type : null
+}
+
+function messageResources(value: Record<string, unknown>): InboundResource[] {
+  const content = objectOrEmpty(value.content)
+  const type = first(value, 'msgtype', 'msgType', 'messageType')?.toLowerCase()
+  const candidates = type === 'richtext' && Array.isArray(content.richText)
+    ? content.richText.map(item => objectOrEmpty(item))
+    : [{ ...content, type }]
+  return candidates.flatMap((item, index) => {
+    const kind = resourceKind(item.type)
+    if (!kind) return []
+    const name = first(item, 'fileName', 'filename', 'name')
+      ?? (type !== 'richtext' ? first(value, 'fileName', 'filename', 'name') : null)
+      ?? (kind === 'image' ? '图片' : kind === 'audio' ? '音频' : kind === 'video' ? '视频' : '附件')
+    const downloadCode = first(item, 'downloadCode', 'pictureDownloadCode')
+    // Stable source positions allow multi-Bot callbacks to agree even when their
+    // download grants differ. A missing grant still gates Agent admission and
+    // ends through the normal visible download-failure path.
+    return [{ fileKey: `resource:${index}`, name, kind, ...(downloadCode ? { downloadCode } : {}) }]
+  })
 }
 
 function summarizeMessage(value: Record<string, unknown>): string {
@@ -154,6 +194,9 @@ function messageAttachmentSummaries(
 ): Array<{ name: string; mediaType: string | null }> {
   const content = objectOrEmpty(value.content)
   const msgType = first(value, 'msgtype', 'msgType', 'messageType')?.toLowerCase() ?? ''
+  if (msgType === 'richtext') {
+    return messageResources(value).map(resource => ({ name: resource.name, mediaType: null }))
+  }
   const name = first(value, 'fileName', 'filename', 'name')
     ?? first(content, 'fileName', 'filename', 'name')
   if (!name && !['file', 'image', 'audio', 'video', 'picture', 'photo'].includes(msgType)) return []

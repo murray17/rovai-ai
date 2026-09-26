@@ -1,4 +1,4 @@
-//! Durable Feishu downloads use the existing inbound queue and Camp-owned output.
+//! Durable Channel downloads use the existing inbound queue and Camp-owned output.
 //! No CampMessage/Delivery may be published until every resource has a source ref.
 use super::*;
 use crate::local_attachment_source::{LocalAttachmentSourceRef, observe_agent_source_attachments};
@@ -17,6 +17,8 @@ pub struct InboundResource {
     pub file_key: String,
     pub name: String,
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_code: Option<String>,
 }
 
 pub(super) fn validate_resources(resources: &[InboundResource]) -> Result<()> {
@@ -26,6 +28,13 @@ pub(super) fn validate_resources(resources: &[InboundResource]) -> Result<()> {
     );
     let mut keys = BTreeSet::new();
     for resource in resources {
+        anyhow::ensure!(
+            resource
+                .download_code
+                .as_ref()
+                .is_none_or(|code| !code.is_empty() && code.len() <= 4096),
+            "invalid channel resource download code"
+        );
         anyhow::ensure!(
             !resource.file_key.is_empty() && resource.file_key.len() <= 512,
             "invalid channel resource key"
@@ -106,6 +115,7 @@ pub(super) fn for_request(
 
 pub(super) fn pending(
     db: &rusqlite::Connection,
+    provider: &str,
     app_ids: &[String],
 ) -> Result<Vec<PendingAttachments>> {
     if app_ids.is_empty() {
@@ -116,14 +126,14 @@ pub(super) fn pending(
          FROM channel_turn_request AS request
          JOIN channel_inbound_aggregate AS aggregate ON aggregate.id = request.aggregate_id
          JOIN camp ON camp.id = request.camp_id
-         WHERE request.status = 'queued' AND aggregate.provider = 'feishu'
+         WHERE request.status = 'queued' AND aggregate.provider = ?2
            AND request.ack_app_id IN (SELECT value FROM json_each(?1))
            AND camp.deletion_operation_id IS NULL
            AND json_array_length(aggregate.frozen_payload_json, '$.inboundAttachments.resources') >
                json_array_length(aggregate.frozen_payload_json, '$.inboundAttachments.sources')
          ORDER BY request.created_at, request.id LIMIT 20",
     )?;
-    let rows = statement.query_map([serde_json::to_string(app_ids)?], |row| {
+    let rows = statement.query_map(params![serde_json::to_string(app_ids)?, provider], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -168,9 +178,9 @@ pub fn complete(
 ) -> Result<CommandExecution> {
     let output_base = database.runtime_camp_files_root().to_path_buf();
     DomainCommandGateway.execute(database, envelope, |transaction| {
-        if !matches!(&envelope.actor, ActorRef::System { component_id } if component_id == FEISHU_CHANNEL_HOST_COMPONENT) {
-            return Ok(rejected("channel.host_required", "Only the Feishu Host can complete downloads"));
-        }
+        let Some(provider) = channel_host_provider(&envelope.actor) else {
+            return Ok(rejected("channel.host_required", "Only a trusted Channel Host can complete downloads"));
+        };
         let command = &envelope.payload;
         let row = transaction.query_row(
             "SELECT request.camp_id, request.aggregate_id, aggregate.frozen_payload_json
@@ -179,9 +189,9 @@ pub fn complete(
              JOIN camp ON camp.id = request.camp_id
              JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
              WHERE request.id = ?1 AND request.ack_app_id = ?2 AND request.status = 'queued'
-               AND aggregate.provider = 'feishu' AND binding.status = 'active'
+               AND aggregate.provider = ?3 AND binding.status = 'active'
                AND camp.deletion_operation_id IS NULL",
-            params![command.request_id, command.app_id],
+            params![command.request_id, command.app_id, provider],
             |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))).optional()?;
         let Some((camp_id, aggregate_id, encoded)) = row else {
             return Ok(rejected("channel.attachments.closed", "The message is no longer awaiting attachments"));
@@ -198,7 +208,7 @@ pub fn complete(
         let imported = if let Some(code) = &command.failure_code {
             Err(anyhow::anyhow!("{}", code))
         } else {
-            import_files(&output_base, &camp_id, &command.request_id, &state.resources, &command.files)
+            import_files(&output_base, provider, &camp_id, &command.request_id, &state.resources, &command.files)
         };
         match imported {
             Ok(sources) => { state.sources = sources; state.retry_at = None; }
@@ -238,7 +248,7 @@ fn failure_message(code: &str) -> &'static str {
             "附件超过限制（每条消息合计 100 MB），本条消息未交给队员。请缩小附件后重新发送。"
         }
         "channel.attachments.unsupported" => {
-            "飞书暂不支持下载此类附件，本条消息未交给队员。请改为普通图片或文件重新发送。"
+            "暂不支持下载此类附件，本条消息未交给队员。请改为普通图片或文件重新发送。"
         }
         "channel.attachments.permission_denied" => {
             "机器人无法读取这条消息的附件，本条消息未交给队员。请检查机器人的消息资源权限后重新发送。"
@@ -249,6 +259,7 @@ fn failure_message(code: &str) -> &'static str {
 
 fn import_files(
     base: &Path,
+    provider: &str,
     camp_id: &str,
     request_id: &str,
     resources: &[InboundResource],
@@ -260,7 +271,7 @@ fn import_files(
         "channel attachments are incomplete"
     );
     let root = crate::storage_layout::camp_attachment_output_root(base, camp_id)?
-        .join("feishu")
+        .join(provider)
         .join(format!("{:x}", Sha256::digest(request_id.as_bytes())));
     let mut total = 0_u64;
     let mut sources = Vec::new();

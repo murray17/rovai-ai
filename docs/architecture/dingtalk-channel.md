@@ -205,6 +205,7 @@ Stream callback fast ACK
 → group roster reconcile
 → finalize
 → PendingCampBinding or existing binding FIFO
+→ shared attachment download/import readiness (when resources exist)
 → CollaborationService atomic external-channel admission
 → CampMessage + target Delivery(ies); inbound receipt completed
 → unified Scheduler claim → AgentRun
@@ -214,7 +215,7 @@ Stream callback fast ACK
 安装的 App Bot 才属于支持的群入口；普通成员形态的钉钉普通群/外部群不会投递 Robot Stream callback，Main 不通过成员
 账号或轮询旁路读取。支持群的首次有效消息在原群发送
 一张项目卡，可选择 opaque project ID 或直接建立 Quick Chat，随后处理原消息；绑定不可换绑。Owner 仍是 ExternalPrincipal，不获得本机
-`local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，入站附件只保留名称/媒体类型摘要。
+`local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，引用附件只保留摘要；本条消息中的资源进入共享附件链路。
 
 群 callback 由 exact credential-bound App Stream、已校验的 `robotCode` 与 `isInAtList=true` 共同证明 receiving Bot。
 `chatbotUserId` 与 `atUsers[].dingtalkId` 都是 opaque provider identity，真实 callback 可能使用不同编码，二者不得再做
@@ -223,6 +224,11 @@ callback 立即合并到同一 SQLite aggregate，目标按首次持久观察顺
 Main 正常存活时在 3 秒后提交完整集合；Main 重启错过定时器时，Core 在 deadline 后以非空且相等的 expected/observed
 集合自动封口。两条路径都只能产生一个 durable inbound receipt、一个 CampMessage 与有序目标 Delivery 集；迟到 callback 不重复发布。
 私聊不依赖 `isInAtList` 或 mention identity，继续直接进入 Quick Chat。
+
+附件状态、重试、Core 文件导入与 FIFO 复用 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md#inbound-attachments)。
+钉钉适配器保留 `richText` 的正文与图片次序，用首观察 Bot 的 `downloadCode` 和 `robotCode` 换取 HTTPS 下载地址，
+不向存储地址传递 App token。多 Bot 的 grant 不进入共同内容摘要，原接收 Bot 与资源授权保持绑定。
+同一消息全部附件就绪前不发布 CampMessage 或 Agent Delivery；终止失败由正常 attention 路径提示用户重新发送。
 
 群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
 generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
@@ -240,7 +246,7 @@ Renderer 渠道设置已开放钉钉管理入口：Snapshot 中的飞书、钉�
 | Owner 同组织内部群显式 `@` | enabled；Bot 必须由群“添加机器人”入口安装，普通成员形态的普通群/外部群不产生 Stream callback | 真实群 roster、项目卡和输出验收 |
 | 同消息直接多 Bot | enabled；多个 exact Stream callback durable 合并为一个根请求和有序多个 AgentRun，正常 3 秒封口，重启后按 SQLite deadline 恢复；Renderer 可管理对应 Bot | packaged 桌面端/手机端真实多 Bot callback 与顺序证据继续作为能力验收，不关闭整个管理入口 |
 | 话题/Thread | disabled；`openConvThreadId / openThreadId` 是普通 callback 可能携带的不透明路由元数据，不作为 Topic 证明；只有明确 `threadId / topicId / topicKey` 才拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
-| 入站附件 | summary only；私聊 file/audio/video 虽可能提供 downloadCode，但未建立 Managed Attachment ingress；群 Bot 平台不接收这些类型 | 官方下载、授权、大小/媒体校验和 Managed Attachment ingress 设计 |
+| 入站附件 | 已接入共享下载/Source Ref 准入；支持图片、富文本图文与私聊 file/audio/video；群 Bot 仍不接收普通文件/音频/视频 | 隔离自动回归覆盖；真实租户下载授权、桌面/手机消息类型矩阵仍需验收 |
 | 出站附件 | disabled，明确 unsupported；不借用 custom webhook schema | 已验证 Internal App Robot app-only 原生投递、顺序和可恢复 message identity |
 | AI 状态卡 | enabled；平台内置通用卡片无需用户模板；项目刷新、最近输出展开/收起已在真实桌面客户端验收，停止、固定 URL、排队卡及 execution/queue Robot recall 已接入 | 手机真实投递、URL fragment、SSE、撤回与停止终态矩阵 |
 
