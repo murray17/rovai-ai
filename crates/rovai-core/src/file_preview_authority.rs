@@ -1196,7 +1196,7 @@ mod tests {
     fn open_current_resolves_run_relative_and_external_absolute_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
         let external_file = root.join("external-worktree/src/shared.ts");
-        let external_path = external_file.to_string_lossy().into_owned();
+        let external_path = external_file.to_string_lossy().replace('\\', "/");
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1445,7 +1445,7 @@ mod tests {
     fn direct_camp_run_activity_file_uses_exact_evidence_for_run_and_external_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
         let external_file = root.join("external-worktree/src/shared.ts");
-        let external_path = external_file.to_string_lossy().into_owned();
+        let external_path = external_file.to_string_lossy().replace('\\', "/");
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1685,6 +1685,8 @@ mod tests {
         assert!(is_supported_run_evidence_path("generated.txt"));
         assert!(!is_supported_run_evidence_path("../generated.txt"));
         assert!(!is_supported_run_evidence_path("src/../../generated.txt"));
-        assert!(is_supported_run_evidence_path("/tmp/generated.txt"));
+        assert!(is_supported_run_evidence_path(
+            &crate::test_support::absolute_test_path("/tmp/generated.txt")
+        ));
     }
 }

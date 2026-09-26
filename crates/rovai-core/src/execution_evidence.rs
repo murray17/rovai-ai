@@ -3355,6 +3355,7 @@ fn canonical_activity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Canonical
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::absolute_test_path;
     use crate::{
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
@@ -3681,7 +3682,7 @@ mod tests {
                     "commandActions": [{
                         "type": "read",
                         "name": "test",
-                        "path": "/repo/package.json",
+                        "path": absolute_test_path("/repo/package.json"),
                         "command": "cat /repo/package.json",
                         "providerPrivateState": "must-not-persist"
                     }],
@@ -3697,7 +3698,7 @@ mod tests {
         assert_eq!(normalized["item"]["commandActions"][0]["type"], "read");
         assert_eq!(
             normalized["item"]["commandActions"][0]["path"],
-            "/repo/package.json"
+            absolute_test_path("/repo/package.json")
         );
         assert!(normalized["item"]["commandActions"][0]["command"].is_null());
         assert!(!encoded.contains("hiddenProviderPacket"));
@@ -4165,7 +4166,7 @@ mod tests {
         );
         normalize_runtime_diff_evidence(
             &mut started_payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("claude-code-cli"),
             Some("1.0.100"),
             None,
@@ -4190,7 +4191,7 @@ mod tests {
                     "semanticKind": "exact_mutation",
                     "entries": [{
                         "semantics": "exact_mutation",
-                        "path": "/repo/src/CampWorkspace.tsx",
+                        "path": absolute_test_path("/repo/src/CampWorkspace.tsx"),
                         "oldText": "const enabled = false",
                         "newText": "const enabled = true"
                     }]
@@ -4199,7 +4200,7 @@ mod tests {
         );
         normalize_runtime_diff_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("claude-code-cli"),
             Some("1.0.100"),
             None,
@@ -4244,7 +4245,7 @@ mod tests {
                     "protocolFamily": "pi-jsonl-rpc-v1",
                     "sourceEventKind": "tool_execution_end.completed",
                     "operationKind": "write",
-                    "path": "/repo/src/app.ts"
+                    "path": absolute_test_path("/repo/src/app.ts")
                 },
                 "runtimeDiff": {
                     "adapterKind": "pi",
@@ -4252,27 +4253,27 @@ mod tests {
                     "sourceEventKind": "tool_execution_end.completed",
                     "semanticKind": "pi_edit_patch",
                     "entries": [{
-                        "path": "/repo/src/app.ts",
+                        "path": absolute_test_path("/repo/src/app.ts"),
                         "changeKind": "update",
                         "diff": concat!(
                             "--- /repo/src/app.ts\n",
                             "+++ /repo/src/app.ts\n",
                             "@@ -1 +1,2 @@\n-old\n+new\n+next\n"
-                        )
+                        ).replace("/repo", &absolute_test_path("/repo"))
                     }]
                 }
             }),
         );
         normalize_runtime_file_operation_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("pi"),
             Some("0.84.4"),
             None,
         );
         normalize_runtime_diff_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("pi"),
             Some("0.84.4"),
             None,
@@ -4313,20 +4314,20 @@ mod tests {
                     "protocolFamily": "acp-v1",
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "operationKind": "write",
-                    "path": "/repo/rovai-runtime-validation/qoder-cli.txt"
+                    "path": absolute_test_path("/repo/rovai-runtime-validation/qoder-cli.txt")
                 }
             }),
         );
         normalize_runtime_file_operation_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("qoder-cli"),
             Some("1.1.28"),
             None,
         );
         normalize_runtime_diff_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("qoder-cli"),
             Some("1.1.28"),
             None,
@@ -4352,13 +4353,13 @@ mod tests {
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "operationKind": "write",
                     "changeKind": "add",
-                    "path": "/repo/src/new-file.ts"
+                    "path": absolute_test_path("/repo/src/new-file.ts")
                 }
             }),
         );
         normalize_runtime_file_operation_evidence(
             &mut add_payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("opencode-cli"),
             Some("1.18.20"),
             None,
@@ -4385,16 +4386,18 @@ mod tests {
                     "protocolFamily": "acp-v1",
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "operationKind": "write",
-                    "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html"
+                    "path": absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp/report.html")
                 }
             }),
         );
         normalize_runtime_file_operation_evidence(
             &mut managed_payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("qoder-cli"),
             Some("1.1.28"),
-            Some(Path::new("/rovai/runtime/builtin-tools/process/run-tmp")),
+            Some(Path::new(&absolute_test_path(
+                "/rovai/runtime/builtin-tools/process/run-tmp",
+            ))),
         );
         assert_eq!(
             managed_payload["runtimeFileOperation"]["safeReasonCode"],
@@ -4423,7 +4426,7 @@ mod tests {
                     "commandActions": [{
                         "type": "read",
                         "name": "read",
-                        "path": "/repo/docs/README.md"
+                        "path": absolute_test_path("/repo/docs/README.md")
                     }]
                 }
             });
@@ -4436,7 +4439,7 @@ mod tests {
             );
             normalize_runtime_file_operation_evidence(
                 &mut payload,
-                Some(r#"{"executionRoot":"/repo"}"#),
+                Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
                 Some("codex-cli"),
                 Some("codex-test"),
                 None,
@@ -4449,8 +4452,8 @@ mod tests {
 
         for actions in [
             json!([]),
-            json!([{"type":"read","path":"/repo/a"},{"type":"read","path":"/repo/b"}]),
-            json!([{"type":"read","path":"/repo/a"},{"type":"search","query":"needle"}]),
+            json!([{"type":"read","path":absolute_test_path("/repo/a")},{"type":"read","path":absolute_test_path("/repo/b")}]),
+            json!([{"type":"read","path":absolute_test_path("/repo/a")},{"type":"search","query":"needle"}]),
             json!([{"type":"read","path":""}]),
         ] {
             let source = json!({
@@ -4486,7 +4489,7 @@ mod tests {
                     "protocolFamily": "acp-v1",
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "operationKind": "write",
-                    "path": "/repo/rovai-runtime-validation/kiro-cli.txt"
+                    "path": absolute_test_path("/repo/rovai-runtime-validation/kiro-cli.txt")
                 },
                 "runtimeDiff": {
                     "adapterKind": "kiro-cli",
@@ -4494,7 +4497,7 @@ mod tests {
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "semanticKind": "complete_before_after",
                     "entries": [{
-                        "path": "/rovai-runtime-validation/kiro-cli.txt",
+                        "path": absolute_test_path("/rovai-runtime-validation/kiro-cli.txt"),
                         "oldText": "state=before\n",
                         "newText": "state=after\n"
                     }]
@@ -4503,14 +4506,14 @@ mod tests {
         );
         normalize_runtime_file_operation_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("kiro-cli"),
             Some("kiro-cli 2.18.1"),
             None,
         );
         normalize_runtime_diff_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("kiro-cli"),
             Some("kiro-cli 2.18.1"),
             None,
@@ -4539,7 +4542,7 @@ mod tests {
                     "protocolFamily": "acp-v1",
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "operationKind": "write",
-                    "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html"
+                    "path": absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp/report.html")
                 },
                 "runtimeDiff": {
                     "adapterKind": "kiro-cli",
@@ -4547,24 +4550,26 @@ mod tests {
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "semanticKind": "complete_before_after",
                     "entries": [{
-                        "path": "/report.html",
+                        "path": absolute_test_path("/report.html"),
                         "oldText": "before\n",
                         "newText": "after\n"
                     }]
                 }
             }),
         );
-        let managed_output_root = Path::new("/rovai/runtime/builtin-tools/process/run-tmp");
+        let managed_output_path =
+            absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp");
+        let managed_output_root = Path::new(&managed_output_path);
         normalize_runtime_file_operation_evidence(
             &mut managed_payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("kiro-cli"),
             Some("kiro-cli 2.18.1"),
             Some(managed_output_root),
         );
         normalize_runtime_diff_evidence(
             &mut managed_payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some("kiro-cli"),
             Some("kiro-cli 2.18.1"),
             Some(managed_output_root),
@@ -4586,7 +4591,9 @@ mod tests {
 
     #[test]
     fn terminal_run_snapshot_drops_managed_output_before_it_becomes_durable_evidence() {
-        let managed_output_root = Path::new("/rovai/runtime/builtin-tools/process/run-tmp");
+        let managed_output_path =
+            absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp");
+        let managed_output_root = Path::new(&managed_output_path);
         let mut payload = normalize_public_payload(
             "runtime.file_changes.snapshot",
             &json!({
@@ -4602,13 +4609,13 @@ mod tests {
                         "new file mode 100644\n--- /dev/null\n",
                         "+++ b//rovai/runtime/builtin-tools/process/run-tmp/report.html\n",
                         "@@ -0,0 +1 @@\n+temporary\n"
-                    )
+                    ).replace("/rovai/", &format!("{}/", absolute_test_path("/rovai")))
                 }
             }),
         );
         normalize_runtime_run_diff_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some(managed_output_root),
         );
         let diff = payload["runtimeRunDiff"]["diff"].as_str().unwrap();
@@ -4622,7 +4629,7 @@ mod tests {
         });
         normalize_runtime_run_diff_evidence(
             &mut payload,
-            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(&json!({"executionRoot": absolute_test_path("/repo")}).to_string()),
             Some(managed_output_root),
         );
         assert_eq!(payload["runtimeRunDiff"]["status"], "unavailable");

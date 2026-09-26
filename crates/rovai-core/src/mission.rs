@@ -1696,8 +1696,8 @@ mod tests {
             )
             .unwrap();
         db.connection().execute(
-            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace',?1,?2,?3,'/repo','/repo','/repo/.git','/worktree','/worktree','main','rovai/mission/001','base','owner','ready','created','updated')",
-            params![mission_id, camp_id, host],
+            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace',?1,?2,?3,?4,?4,?5,?6,?6,'main','rovai/mission/001','base','owner','ready','created','updated')",
+            params![mission_id, camp_id, host, crate::test_support::absolute_test_path("/repo"), crate::test_support::absolute_test_path("/repo/.git"), crate::test_support::absolute_test_path("/worktree")],
         ).unwrap();
         let idle = service.get(&db, &mission_id).unwrap().unwrap();
         assert!(idle.workspace_ever_created);
@@ -1746,7 +1746,7 @@ mod tests {
                 &command(CreateMissionCommand {
                     title: "same execution root".into(),
                     description: String::new(),
-                    project_path: "/other/repo".into(),
+                    project_path: crate::test_support::absolute_test_path("/other/repo"),
                     project_binding_kind: ProjectBindingKind::Directory,
                     member_agent_ids: vec!["agent_1".into()],
                     default_lead_agent_id: "agent_1".into(),
@@ -1758,8 +1758,8 @@ mod tests {
         let other_mission_id = other.result.payload["missionId"].as_str().unwrap();
         let other_camp_id = other.result.payload["campId"].as_str().unwrap();
         db.connection().execute(
-            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace-other',?1,?2,?3,'/other/repo','/other/repo','/other/repo/.git','/other-worktree','/other-worktree','main','rovai/mission/002','base','owner','ready','created','updated')",
-            params![other_mission_id, other_camp_id, host],
+            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace-other',?1,?2,?3,?4,?4,?5,?6,?6,'main','rovai/mission/002','base','owner','ready','created','updated')",
+            params![other_mission_id, other_camp_id, host, crate::test_support::absolute_test_path("/other/repo"), crate::test_support::absolute_test_path("/other/repo/.git"), crate::test_support::absolute_test_path("/other-worktree")],
         ).unwrap();
         service
             .start(
@@ -1777,8 +1777,8 @@ mod tests {
         );
         db.connection()
             .execute(
-                "UPDATE agent_run SET workspace_json=json_object('executionRoot','/worktree') WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)",
-                [other_camp_id],
+                "UPDATE agent_run SET workspace_json=json_object('executionRoot',?2) WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)",
+                params![other_camp_id, crate::test_support::absolute_test_path("/worktree")],
             )
             .unwrap();
         assert!(

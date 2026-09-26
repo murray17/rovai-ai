@@ -493,7 +493,7 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn timed_out_bat_probe_cleans_its_complete_process_tree() {
         let directory =
             std::env::temp_dir().join(format!("rovai bat probe timeout {}", uuid::Uuid::new_v4()));
@@ -530,18 +530,26 @@ mod tests {
                 .await
             }
         });
-        let descendant_pid = tokio::time::timeout(Duration::from_secs(2), async {
+        // OS process startup is not the timeout under test. A blocking handshake
+        // inhibits Tokio's automatic clock advance until the descendant exists.
+        let descendant_pid = tokio::task::spawn_blocking(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
             loop {
                 if let Ok(value) = std::fs::read_to_string(&pid_file)
                     && let Ok(pid) = value.trim().parse::<u32>()
                 {
                     break pid;
                 }
-                tokio::task::yield_now().await;
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "batch descendant PID was not published"
+                );
+                std::thread::sleep(Duration::from_millis(10));
             }
         })
         .await
-        .expect("batch descendant PID was not published");
+        .unwrap();
+        tokio::time::resume();
         let error = task
             .await
             .unwrap()

@@ -18,6 +18,9 @@ type Job = {
   executionPlanDigest?: string | null
 }
 type Live = { child: ChildProcess; job: Job; closed: Promise<void>; timer: NodeJS.Timeout | undefined }
+function requestWorkerStop(child: ChildProcess): void {
+  if (child.connected) child.send({ type: 'cancel' }, () => undefined)
+}
 const exec = promisify(execFile)
 const identifier = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)) throw new Error('Invalid evaluation identity')
@@ -147,7 +150,7 @@ export class EvaluationHostService {
     return this.#exclusive(async () => {
       const params = input(value, ['jobId']), jobId = identifier(params.jobId)
       const live = this.#live.get(jobId)
-      if (live) { live.job.reason = 'cancelled_by_owner'; live.child.kill('SIGTERM') }
+      if (live) { live.job.reason = 'cancelled_by_owner'; requestWorkerStop(live.child) }
       return { jobId, cancellationRequested: Boolean(live) }
     })
   }
@@ -179,7 +182,7 @@ export class EvaluationHostService {
           const eligible = enabledOrConsumedOnce && automation?.projectRef.kind === 'directory' && await realpath(automation.projectRef.path) === binding.workspace
           const page = eligible ? await this.core.request<AutomationRunListPage>('automations.runs.list', { automationId: binding.automationId, limit: 50 }) : null
           if (live && !page?.runs.some(run => run.runId === live.job.jobId && run.status === 'running')) {
-            live.job.reason = 'automation_stopped_or_finished'; live.child.kill('SIGTERM')
+            live.job.reason = 'automation_stopped_or_finished'; requestWorkerStop(live.child)
           }
           if (!eligible || this.#live.size) continue
           const run = page?.runs.find(item => item.status === 'running' && item.campId && Date.parse(item.createdAt) >= Date.parse(binding.registeredAt))
@@ -202,7 +205,7 @@ export class EvaluationHostService {
     this.#stopped = true
     await this.#serial
     const live = [...this.#live.values()]
-    for (const item of live) { item.job.reason = 'app_shutdown'; item.child.kill('SIGTERM') }
+    for (const item of live) { item.job.reason = 'app_shutdown'; requestWorkerStop(item.child) }
     await Promise.all(live.map(item => item.closed))
   }
 
@@ -250,13 +253,13 @@ export class EvaluationHostService {
     await this.#publish(job)
     const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${dirname(engine.node)}${sep === '/' ? ':' : ';'}${process.env.PATH ?? ''}` }
     delete env.ROVAI_APP_AUTOMATION_CONTEXT
-    const child = spawn(engine.node, [join(engine.source, 'scripts/eval-host.mjs'), '--job', join(jobDirectory, 'job.json'), '--parent', String(process.pid)], { cwd: engine.source, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(engine.node, [join(engine.source, 'scripts/eval-host.mjs'), '--job', join(jobDirectory, 'job.json'), '--parent', String(process.pid)], { cwd: engine.source, env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
     let log = ''
     child.stdout?.on('data', chunk => { log = (log + String(chunk)).slice(-65536) })
     child.stderr?.on('data', chunk => { log = (log + String(chunk)).slice(-65536) })
     let spawnError: string | null = null
     child.once('error', error => { spawnError = error.message })
-    const timer = frozen.budget.wallSeconds === null ? undefined : setTimeout(() => { job.reason = 'host_budget_exhausted'; child.kill('SIGTERM') }, (frozen.budget.wallSeconds + 120) * 1000)
+    const timer = frozen.budget.wallSeconds === null ? undefined : setTimeout(() => { job.reason = 'host_budget_exhausted'; requestWorkerStop(child) }, (frozen.budget.wallSeconds + 120) * 1000)
     const closed = new Promise<void>(resolveClose => {
       child.once('close', (code, signal) => {
         clearTimeout(timer)

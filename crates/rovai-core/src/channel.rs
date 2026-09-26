@@ -38,6 +38,7 @@ use crate::{
 };
 
 const FEISHU_PROVIDER: &str = "feishu";
+pub mod inbound_attachments;
 const DINGTALK_PROVIDER: &str = "dingtalk";
 const FEISHU_CHANNEL_HOST_COMPONENT: &str = "feishu-channel-host";
 const DINGTALK_CHANNEL_HOST_COMPONENT: &str = "dingtalk-channel-host";
@@ -509,6 +510,8 @@ pub struct ObserveChannelInboundCommand {
     #[serde(default)]
     pub attachment_summaries: Vec<ChannelAttachmentSummaryInput>,
     #[serde(default)]
+    pub resources: Vec<inbound_attachments::InboundResource>,
+    #[serde(default)]
     pub quote: Option<ExternalQuoteInput>,
     pub canonical_agent_ids: Vec<String>,
     pub canonical_mentions_complete: bool,
@@ -552,6 +555,8 @@ pub struct ChannelHostTickRequest {
     pub worker_id: String,
     #[serde(default = "default_delivery_claim_limit")]
     pub limit: usize,
+    #[serde(default)]
+    pub inbound_attachment_app_ids: Vec<String>,
 }
 
 fn default_delivery_claim_limit() -> usize {
@@ -566,6 +571,7 @@ pub struct ChannelHostTickResult {
     pub deliveries: Vec<ClaimedChannelDelivery>,
     pub(crate) roster_refreshes: Vec<crate::message_delivery::TopicRosterRefreshRequest>,
     pub has_outstanding_work: bool,
+    pub inbound_attachments: Vec<inbound_attachments::PendingAttachments>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4716,6 +4722,10 @@ impl ChannelService {
                     "bindingIdAtObservation": observed_binding_id,
                 })
             };
+            let mut payload_identity = payload_identity;
+            if !envelope.payload.resources.is_empty() {
+                payload_identity["resources"] = serde_json::to_value(&envelope.payload.resources)?;
+            }
             let payload_digest = format!("sha256:{}", canonical_json_digest(&payload_identity)?);
             let bot_scope_app_id = if envelope.payload.conversation_kind == "p2p" {
                 envelope.payload.app_id.as_str()
@@ -4923,6 +4933,8 @@ impl ChannelService {
                 "structuredContent": structured_content,
                 "targetAgentIds": target_agent_ids,
                 "acknowledgementAppId": envelope.payload.acknowledgement_app_id,
+                "inboundAttachments": inbound_attachments::InboundAttachments::new(
+                    &envelope.payload.external_message_id, &envelope.payload.resources),
             });
             let deadline = (now + Duration::seconds(AGGREGATION_WINDOW_SECONDS)).to_rfc3339();
             transaction.execute(
@@ -6349,6 +6361,11 @@ impl ChannelService {
                 || channel_host_has_outstanding_work(&transaction, provider)?
                 || crate::automation::has_notification_work(&transaction, provider)?;
             ChannelHostTickResult {
+                inbound_attachments: if provider == FEISHU_PROVIDER {
+                    inbound_attachments::pending(&transaction, &request.inbound_attachment_app_ids)?
+                } else {
+                    Vec::new()
+                },
                 deliveries: claims,
                 roster_refreshes,
                 has_outstanding_work,
@@ -6945,6 +6962,8 @@ struct FrozenInboundPayload {
     structured_content: StructuredCampMessageContent,
     target_agent_ids: Vec<String>,
     acknowledgement_app_id: String,
+    #[serde(default)]
+    inbound_attachments: inbound_attachments::InboundAttachments,
 }
 
 #[derive(Debug)]
@@ -9038,6 +9057,10 @@ fn try_admit_request(
     else {
         return Ok(AdmissionAttempt::Deferred);
     };
+    let attachments = inbound_attachments::for_request(transaction, request_id)?;
+    if !attachments.ready() {
+        return Ok(AdmissionAttempt::Deferred);
+    }
     let content: StructuredCampMessageContent = serde_json::from_str(&content_json)?;
     let targets: Vec<String> = serde_json::from_str(&targets_json)?;
     for agent_id in &targets {
@@ -9092,6 +9115,7 @@ fn try_admit_request(
     let result = CollaborationService::default().admit_external_channel_message(
         transaction,
         ExternalChannelAdmissionInput {
+            source_attachments: attachments.sources,
             camp_id: camp_id.clone(),
             external_principal_id: principal_id,
             body: String::new(),
@@ -9227,7 +9251,11 @@ fn insert_queue_ack_delivery(
             "kind": "queue_ack",
             "queuePosition": queue_position,
             "status": "queued",
-            "text": "Rovai 已接收，正在排队",
+            "text": if inbound_attachments::for_request(transaction, request_id)?.ready() {
+                "Rovai 已接收，正在排队"
+            } else {
+                "Rovai 已接收，正在下载附件，完成后交给队员"
+            },
         }),
         now,
     )
@@ -11260,6 +11288,11 @@ fn assemble_external_content(
 }
 
 fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<()> {
+    inbound_attachments::validate_resources(&command.resources)?;
+    anyhow::ensure!(
+        command.resources.is_empty() || command.provider == FEISHU_PROVIDER,
+        "channel resource downloads currently require Feishu"
+    );
     if !matches!(
         command.provider.as_str(),
         FEISHU_PROVIDER | DINGTALK_PROVIDER
@@ -12629,6 +12662,431 @@ mod tests {
     };
 
     #[test]
+    fn inbound_attachments_gate_atomic_admission_and_survive_retry_without_duplicate_messages() {
+        use crate::local_attachment_source::LocalAttachmentSourceRef;
+        use inbound_attachments::{CompleteAttachmentsCommand, InboundResource};
+        // Owns the durable channel queue -> filesystem -> CampMessage/Delivery seam.
+        // Existing text-only admission tests cannot prove this readiness fence.
+        for scenario in ["ready", "retry", "failed", "deleted", "folder"] {
+            let mut database = seeded_runtime_database_owned();
+            let service = ChannelService::default();
+            connect_account(&service, &mut database);
+            publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+            let quick = quick_chat_path(&database);
+            let mut observation = observation_command(
+                "cli_app_1",
+                "image-message",
+                "image-chat",
+                "",
+                "p2p",
+                "Please read these attachments",
+                &[("agent_1", "cli_app_1")],
+                true,
+            );
+            observation.resources = vec![
+                InboundResource {
+                    file_key: "img_key".into(),
+                    name: "参考图.png".into(),
+                    kind: "image".into(),
+                },
+                InboundResource {
+                    file_key: "file_key".into(),
+                    name: "说明.txt".into(),
+                    kind: if scenario == "folder" {
+                        "folder"
+                    } else {
+                        "file"
+                    }
+                    .into(),
+                },
+            ];
+            let observed = service
+                .observe_inbound(
+                    &mut database,
+                    &host_envelope("images-observe", observation.clone()),
+                )
+                .unwrap();
+            let aggregate_id = observed.result.payload["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let replay = service
+                .observe_inbound(
+                    &mut database,
+                    &host_envelope("images-observe-again", observation),
+                )
+                .unwrap();
+            assert_eq!(replay.result.payload["aggregateId"], aggregate_id);
+            let finalized = service
+                .finalize_inbound(
+                    &mut database,
+                    &quick,
+                    &host_envelope(
+                        "images-finalize",
+                        FinalizeChannelInboundCommand { aggregate_id },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(finalized.result.status, CommandResultStatus::Accepted);
+            let pending =
+                inbound_attachments::pending(database.connection(), &["cli_app_1".into()]).unwrap();
+            assert_eq!(pending.len(), 1, "{scenario}: {}", finalized.result.payload);
+            let request = &pending[0];
+            let camp_id: String = database
+                .connection()
+                .query_row(
+                    "SELECT camp_id FROM channel_turn_request WHERE id=?1",
+                    [&request.request_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let count = |database: &Database| {
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM camp_message WHERE camp_id=?1",
+                        [&camp_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(count(&database), 0);
+            assert!(claim_waiting_runs(&mut database).is_empty());
+            let source = quick.join("image.download");
+            image::RgbaImage::new(1, 1)
+                .save_with_format(&source, image::ImageFormat::Png)
+                .unwrap();
+            let png = std::fs::read(&source).unwrap();
+            let text = quick.join("file.download");
+            std::fs::write(&text, b"full file contents").unwrap();
+            let mut command = CompleteAttachmentsCommand {
+                request_id: request.request_id.clone(),
+                app_id: request.app_id.clone(),
+                attempt: 0,
+                files: vec![
+                    source.to_string_lossy().into_owned(),
+                    text.to_string_lossy().into_owned(),
+                ],
+                failure_code: None,
+            };
+            if scenario == "deleted" {
+                database
+                    .connection()
+                    .execute(
+                        "UPDATE camp SET deletion_operation_id='deleting' WHERE id=?1",
+                        [&camp_id],
+                    )
+                    .unwrap();
+                let completed = inbound_attachments::complete(
+                    &mut database,
+                    &host_envelope("images-late", command),
+                )
+                .unwrap();
+                assert_eq!(completed.result.code, "channel.attachments.closed");
+                let output = crate::storage_layout::camp_attachment_output_root(
+                    database.runtime_camp_files_root(),
+                    &camp_id,
+                )
+                .unwrap();
+                assert!(!output.join("feishu").exists());
+                continue;
+            }
+            if matches!(scenario, "retry" | "failed" | "folder") {
+                command.files.clear();
+                command.failure_code = Some(
+                    if scenario == "folder" {
+                        "channel.attachments.unsupported"
+                    } else {
+                        "channel.attachments.download_failed"
+                    }
+                    .into(),
+                );
+                let failures = if scenario == "failed" { 3 } else { 1 };
+                for attempt in 0..failures {
+                    command.attempt = attempt;
+                    let completed = inbound_attachments::complete(
+                        &mut database,
+                        &host_envelope(&format!("images-failure-{attempt}"), command.clone()),
+                    )
+                    .unwrap();
+                    assert_eq!(completed.result.status, CommandResultStatus::Applied);
+                    assert_eq!(count(&database), 0);
+                    if scenario == "folder" {
+                        assert!(completed.result.payload["retryAt"].is_null());
+                    }
+                    database.connection().execute(
+                        "UPDATE channel_inbound_aggregate SET frozen_payload_json=json_set(frozen_payload_json,'$.inboundAttachments.retryAt',NULL)", []).unwrap();
+                }
+                if scenario != "retry" {
+                    let status: String = database
+                        .connection()
+                        .query_row(
+                            "SELECT status FROM channel_turn_request WHERE id=?1",
+                            [&request.request_id],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(status, "failed");
+                    assert!(
+                        inbound_attachments::pending(database.connection(), &["cli_app_1".into()])
+                            .unwrap()
+                            .is_empty()
+                    );
+                    let attention: String = database.connection().query_row("SELECT json_extract(payload_json,'$.text') FROM channel_delivery WHERE request_id=?1 AND delivery_kind='attention'",
+                        [&request.request_id], |r| r.get(0)).unwrap();
+                    assert!(attention.contains(if scenario == "folder" {
+                        "请改为普通图片或文件重新发送"
+                    } else {
+                        "附件下载失败"
+                    }));
+                    assert!(claim_waiting_runs(&mut database).is_empty());
+                    continue;
+                }
+                // A fresh read after failure uses the durable retry generation.
+                let recovered =
+                    inbound_attachments::pending(database.connection(), &["cli_app_1".into()])
+                        .unwrap();
+                assert_eq!(recovered[0].attempt, 1);
+                let stale = inbound_attachments::complete(
+                    &mut database,
+                    &host_envelope("images-stale", command.clone()),
+                )
+                .unwrap();
+                assert_eq!(stale.result.code, "channel.attachments.replayed");
+                command.attempt = 1;
+                command.files = vec![
+                    source.to_string_lossy().into_owned(),
+                    text.to_string_lossy().into_owned(),
+                ];
+                command.failure_code = None;
+            }
+            let completed = inbound_attachments::complete(
+                &mut database,
+                &host_envelope("images-complete", command.clone()),
+            )
+            .unwrap();
+            assert_eq!(completed.result.payload["ready"], true);
+            // Native Host may lose a reply and replay with a new command id.
+            let replay = inbound_attachments::complete(
+                &mut database,
+                &host_envelope("images-complete-again", command),
+            )
+            .unwrap();
+            assert_eq!(replay.result.code, "channel.attachments.replayed");
+            std::fs::remove_file(&source).unwrap();
+            std::fs::remove_file(&text).unwrap();
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: FEISHU_CHANNEL_HOST_COMPONENT.into(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "images-host".into(),
+                        inbound_attachment_app_ids: Vec::new(),
+                        limit: 20,
+                    },
+                )
+                .unwrap();
+            assert_eq!(count(&database), 1);
+            let encoded: String = database
+                .connection()
+                .query_row(
+                    "SELECT source_attachments_json FROM camp_message WHERE camp_id=?1",
+                    [&camp_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let sources: Vec<LocalAttachmentSourceRef> = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(sources.len(), 2);
+            assert_eq!(std::fs::read(&sources[0].source_path).unwrap(), png);
+            assert_eq!(
+                std::fs::read(&sources[1].source_path).unwrap(),
+                b"full file contents"
+            );
+            assert_eq!(sources[0].media_type.as_deref(), Some("image/png"));
+            assert_eq!(sources[0].display_name, "参考图.png");
+            let (message_id, boundary): (String, i64) = database
+                .connection()
+                .query_row(
+                    "SELECT id, sequence FROM camp_message WHERE camp_id=?1",
+                    [&camp_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            let transaction = database.connection_mut().transaction().unwrap();
+            let projection = crate::context::project_batch_run_input_for_claim(
+                &transaction,
+                &camp_id,
+                "agent_1",
+                boundary,
+                &[message_id],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(
+                projection["messages"][0]["attachments"][0]["path"],
+                sources[0].source_path
+            );
+            assert_eq!(
+                projection["messages"][0]["attachments"][1]["path"],
+                sources[1].source_path
+            );
+            transaction.rollback().unwrap();
+            assert_eq!(claim_waiting_runs(&mut database).len(), 1);
+        }
+    }
+
+    #[test]
+    fn inbound_attachments_filter_available_bots_before_limit_and_keep_conversation_fifo() {
+        use inbound_attachments::{CompleteAttachmentsCommand, InboundResource};
+        // Owns the Host eligibility -> queued SQL window -> FIFO admission seam.
+        // Twenty unavailable requests must not hide the next Bot's attachments.
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        publish_bot(&service, &mut database, "agent_2", "cli_app_2");
+        let quick = quick_chat_path(&database);
+        // Bot B's second message lets us finish its download first and prove
+        // that filtering download candidates does not reorder Camp admission.
+        for index in 0..22 {
+            let (agent_id, app_id, chat_id) = if index < 20 {
+                ("agent_1", "cli_app_1", "offline-chat")
+            } else {
+                ("agent_2", "cli_app_2", "online-chat")
+            };
+            let message_id = format!("attachment-{index:02}");
+            let mut observation = observation_command(
+                app_id,
+                &message_id,
+                chat_id,
+                "",
+                "p2p",
+                &message_id,
+                &[(agent_id, app_id)],
+                true,
+            );
+            observation.resources = vec![InboundResource {
+                file_key: format!("file-{index}"),
+                name: "note.txt".into(),
+                kind: "file".into(),
+            }];
+            let observed = service
+                .observe_inbound(
+                    &mut database,
+                    &host_envelope(&format!("observe-{index}"), observation),
+                )
+                .unwrap();
+            let aggregate_id = observed.result.payload["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let finalized = service
+                .finalize_inbound(
+                    &mut database,
+                    &quick,
+                    &host_envelope(
+                        &format!("finalize-{index}"),
+                        FinalizeChannelInboundCommand {
+                            aggregate_id: aggregate_id.clone(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(finalized.result.status, CommandResultStatus::Accepted);
+            database
+                .connection()
+                .execute(
+                    "UPDATE channel_turn_request SET created_at=?2 WHERE aggregate_id=?1",
+                    params![aggregate_id, format!("2026-09-23T00:00:{index:02}Z")],
+                )
+                .unwrap();
+        }
+        let actor = ActorRef::System {
+            component_id: FEISHU_CHANNEL_HOST_COMPONENT.into(),
+        };
+        let mut tick_request = ChannelHostTickRequest {
+            worker_id: "attachment-host".into(),
+            limit: 20,
+            inbound_attachment_app_ids: Vec::new(),
+        };
+        let idle = service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap();
+        assert!(idle.inbound_attachments.is_empty());
+        assert!(idle.has_outstanding_work);
+        tick_request.inbound_attachment_app_ids = vec!["cli_app_2".into()];
+        let pending = service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap()
+            .inbound_attachments;
+        assert_eq!(
+            pending
+                .iter()
+                .map(|item| item.message_id.as_str())
+                .collect::<Vec<_>>(),
+            ["attachment-20", "attachment-21"]
+        );
+        assert!(pending.iter().all(|item| item.app_id == "cli_app_2"));
+        let source = quick.join("download.txt");
+        std::fs::write(&source, "complete bytes").unwrap();
+        let messages = |database: &Database| {
+            query_rows(
+                database.connection(),
+                "SELECT body FROM camp_message ORDER BY sequence",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+        };
+        for index in [1, 0] {
+            let request = &pending[index];
+            let completed = inbound_attachments::complete(
+                &mut database,
+                &host_envelope(
+                    &format!("complete-{index}"),
+                    CompleteAttachmentsCommand {
+                        request_id: request.request_id.clone(),
+                        app_id: request.app_id.clone(),
+                        attempt: 0,
+                        files: vec![source.to_string_lossy().into_owned()],
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap();
+            assert_eq!(completed.result.payload["ready"], true);
+            service
+                .host_tick(&mut database, &actor, &tick_request)
+                .unwrap();
+            if index == 1 {
+                assert!(messages(&database).is_empty());
+                assert!(claim_waiting_runs(&mut database).is_empty());
+            } else {
+                let published = messages(&database);
+                assert_eq!(published.len(), 1);
+                assert!(published[0].ends_with("attachment-20"));
+                assert_eq!(claim_waiting_runs(&mut database).len(), 1);
+            }
+        }
+        // Reconnection must expose Bot A's untouched backlog in original order.
+        tick_request.inbound_attachment_app_ids = vec!["cli_app_1".into(), "cli_app_2".into()];
+        let recovered = service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap()
+            .inbound_attachments;
+        assert_eq!(recovered.len(), 20);
+        for (index, request) in recovered.iter().enumerate() {
+            assert_eq!(request.message_id, format!("attachment-{index:02}"));
+            assert_eq!(request.attempt, 0);
+        }
+        let published = messages(&database);
+        assert_eq!(published.len(), 2);
+        assert!(published[1].ends_with("attachment-21"));
+    }
+
+    #[test]
     fn host_ticks_are_ephemeral_and_reject_untrusted_or_invalid_requests() {
         // This owner exercises the public maintenance interface against SQLite:
         // repeated polls must not grow either command receipts or domain events.
@@ -12636,6 +13094,7 @@ mod tests {
         let service = ChannelService::default();
         let request = ChannelHostTickRequest {
             worker_id: "maintenance-test-worker".to_string(),
+            inbound_attachment_app_ids: Vec::new(),
             limit: 20,
         };
         let event_count = |database: &Database| -> i64 {
@@ -12660,7 +13119,7 @@ mod tests {
                 assert_eq!(
                     serde_json::to_value(tick).unwrap(),
                     json!({
-                        "deliveries": [], "rosterRefreshes": [],
+                        "deliveries": [], "rosterRefreshes": [], "inboundAttachments": [],
                         "hasOutstandingWork": false,
                     })
                 );
@@ -12691,6 +13150,7 @@ mod tests {
                         &actor,
                         &ChannelHostTickRequest {
                             worker_id: worker_id.to_string(),
+                            inbound_attachment_app_ids: Vec::new(),
                             limit,
                         }
                     )
@@ -13887,6 +14347,7 @@ mod tests {
             sender_union_id: Some("union_user".to_string()),
             sender_display_name: "小明".to_string(),
             body: body.to_string(),
+            resources: Vec::new(),
             attachment_summaries: Vec::new(),
             quote: None,
             canonical_agent_ids: targets
@@ -14112,6 +14573,7 @@ mod tests {
                             },
                             &ChannelHostTickRequest {
                                 worker_id: worker_id.clone(),
+                                inbound_attachment_app_ids: Vec::new(),
                                 limit: 20,
                             },
                         )
@@ -14540,7 +15002,7 @@ mod tests {
     // dependents; a blank-schema fixture cannot prove that FK cascades kept them.
     #[test]
     fn pending_picker_upgrade_keeps_history_rolls_back_failure_and_reuses_the_old_card() {
-        let mut database = seeded_runtime_database_owned();
+        let mut database = crate::test_support::seeded_runtime_database_v170_owned();
         let service = ChannelService::default();
         connect_account(&service, &mut database);
         publish_bot(&service, &mut database, "agent_1", "cli_app_1");
@@ -14559,61 +15021,65 @@ mod tests {
         assert_eq!(bound.result.code, "channel.binding.resolved");
         let mut pending = pending_workspace_picker(&service, &mut database, "topic", "oc_upgrade");
         crate::db::downgrade_current_schema_to_v131_source_for_test(database.connection());
+        // Compare the same source-schema columns across upgrade and rollback.
+        // Later migrations may add fields without changing retained history.
+        let source_columns = [
+            "camp",
+            "camp_message",
+            "camp_turn",
+            "agent_run",
+            "channel_conversation_binding",
+            "pending_camp_binding",
+            "pending_camp_message",
+            "channel_delivery",
+        ]
+        .map(|table| {
+            let columns = database
+                .connection()
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .into_iter()
+                .filter(|column| {
+                    column != "retry_suppression_json"
+                        && column != "source_attachments_json"
+                        && !(table == "camp_turn" && column == "kind")
+                        && !(table == "agent_run"
+                            && matches!(
+                                column.as_str(),
+                                "response_delivery"
+                                    | "operation_policy"
+                                    | "operation_policy_version"
+                                    | "destination_conversation_id"
+                            ))
+                        && column != "workspace_preparing_at"
+                        && column != "automation_run_id"
+                        && column != "quotes_json"
+                        && column != "quote_trash_json"
+                        && !(table == "camp_message"
+                            && matches!(
+                                column.as_str(),
+                                "origin_kind" | "recall_state" | "withdrawn_by_id" | "withdrawn_at"
+                            ))
+                        && !(table == "agent_run"
+                            && matches!(
+                                column.as_str(),
+                                "camp_id"
+                                    | "anchor_message_id"
+                                    | "current_public_tail_sequence"
+                                    | "task_version_at_admission"
+                            ))
+                        && !(table == "channel_delivery" && column == "channel_binding_id")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            (table, columns)
+        });
         let snapshot = |connection: &rusqlite::Connection| {
-            [
-                "camp",
-                "camp_message",
-                "camp_turn",
-                "agent_run",
-                "channel_conversation_binding",
-                "pending_camp_binding",
-                "pending_camp_message",
-                "channel_delivery",
-            ]
-            .map(|table| {
-                let columns = connection
-                    .prepare(&format!("PRAGMA table_info({table})"))
-                    .unwrap()
-                    .query_map([], |row| row.get::<_, String>(1))
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap()
-                    .into_iter()
-                    .filter(|column| {
-                        column != "retry_suppression_json"
-                            && column != "source_attachments_json"
-                            && !(table == "camp_turn" && column == "kind")
-                            && !(table == "agent_run"
-                                && matches!(
-                                    column.as_str(),
-                                    "response_delivery"
-                                        | "operation_policy"
-                                        | "operation_policy_version"
-                                        | "destination_conversation_id"
-                                ))
-                            && column != "workspace_preparing_at"
-                            && column != "automation_run_id"
-                            && column != "quotes_json"
-                            && column != "quote_trash_json"
-                            && !(table == "camp_message"
-                                && matches!(
-                                    column.as_str(),
-                                    "origin_kind"
-                                        | "recall_state"
-                                        | "withdrawn_by_id"
-                                        | "withdrawn_at"
-                                ))
-                            && !(table == "agent_run"
-                                && matches!(
-                                    column.as_str(),
-                                    "camp_id"
-                                        | "anchor_message_id"
-                                        | "current_public_tail_sequence"
-                                ))
-                            && !(table == "channel_delivery" && column == "channel_binding_id")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            source_columns.each_ref().map(|(table, columns)| {
                 let mut statement = connection
                     .prepare(&format!("SELECT {columns} FROM {table} ORDER BY 1, 2"))
                     .unwrap();
@@ -15290,6 +15756,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "dingtalk-console-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -15426,6 +15893,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "dingtalk-promoted-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -15525,6 +15993,7 @@ mod tests {
         };
         let request = ChannelHostTickRequest {
             worker_id: "dingtalk-test-worker".to_string(),
+            inbound_attachment_app_ids: Vec::new(),
             limit: 10,
         };
         let collecting = service.host_tick(&mut database, &actor, &request).unwrap();
@@ -15753,6 +16222,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "dingtalk-multi-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 10,
                 },
             )
@@ -16887,6 +17357,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17163,6 +17634,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17213,6 +17685,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17464,6 +17937,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17534,6 +18008,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17707,6 +18182,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "exact-cancel-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17874,6 +18350,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-opening-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -17913,6 +18390,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-live-refresh-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -17975,6 +18453,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-live-followup-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18027,6 +18506,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-pending-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18040,6 +18520,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-other-provider-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18106,6 +18587,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-digest-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18149,6 +18631,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-restart-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18200,6 +18683,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-repeat-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18254,6 +18738,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-quiescent-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18680,6 +19165,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "binding-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -18743,6 +19229,7 @@ mod tests {
         };
         let poll = ChannelHostTickRequest {
             worker_id: "replacement-worker".to_string(),
+            inbound_attachment_app_ids: Vec::new(),
             limit: 20,
         };
         let lease_state =
@@ -19008,6 +19495,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "legacy-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19168,6 +19656,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "obsolete-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19210,6 +19699,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "recovered-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19265,6 +19755,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "current-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19368,6 +19859,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "sent-obsolete-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19410,6 +19902,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "updated-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -20081,6 +20574,7 @@ mod tests {
                 sender_union_id: None,
                 sender_display_name: "小明".to_string(),
                 body: "继续".to_string(),
+                resources: Vec::new(),
                 attachment_summaries: Vec::new(),
                 quote: Some(ExternalQuoteInput {
                     sender_display_name: "小红".to_string(),

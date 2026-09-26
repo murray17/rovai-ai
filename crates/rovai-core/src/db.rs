@@ -33621,6 +33621,16 @@ fn downgrade_current_schema_to_v151_source_for_test(connection: &Connection) {
     }
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
+pub(crate) fn open_v170_source_for_test(directory: &Path) -> Result<Database> {
+    STOP_BEFORE_TASK_VERSIONLESS_MIGRATION_FOR_TEST.with(|flag| {
+        flag.set(true);
+        let result = Database::open(directory);
+        flag.set(false);
+        result
+    })
+}
+
 #[cfg(test)]
 fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
     // Only the old-migration fixtures reverse the three latest migrations.

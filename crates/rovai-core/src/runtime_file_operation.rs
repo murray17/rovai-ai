@@ -164,6 +164,7 @@ pub fn operation_from_evidence(payload: &Value) -> Option<RuntimeFileOperationRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::absolute_test_path;
     use serde_json::json;
 
     #[test]
@@ -175,10 +176,10 @@ mod tests {
                     "protocolFamily": "acp-v1",
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "operationKind": "write",
-                    "path": "/repo/src/app.ts"
+                    "path": absolute_test_path("/repo/src/app.ts")
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("kimi-code-cli"),
         )
         .expect("candidate should exist")
@@ -200,10 +201,10 @@ mod tests {
                         "sourceEventKind": "session/update.tool_call_update.completed",
                         "operationKind": "write",
                         "changeKind": change_kind,
-                        "path": "/repo/src/app.ts"
+                        "path": absolute_test_path("/repo/src/app.ts")
                     }
                 }),
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some("opencode-cli"),
             )
             .expect("candidate should exist")
@@ -222,10 +223,10 @@ mod tests {
                         "sourceEventKind": "session/update.tool_call_update.completed",
                         "operationKind": operation_kind,
                         "changeKind": change_kind,
-                        "path": "/repo/src/app.ts"
+                        "path": absolute_test_path("/repo/src/app.ts")
                     }
                 }),
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some("opencode-cli"),
             )
             .expect("candidate should exist");
@@ -245,26 +246,30 @@ mod tests {
                     "path": "../outside.txt"
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("qoder-cli"),
-            Some(Path::new("/rovai/runtime/builtin-tools/process/run-tmp")),
+            Some(Path::new(&absolute_test_path(
+                "/rovai/runtime/builtin-tools/process/run-tmp",
+            ))),
         )
         .expect("candidate should exist")
         .expect("cross-root writes should remain visible");
-        assert_eq!(result.path, "/outside.txt");
+        assert_eq!(result.path, absolute_test_path("/outside.txt"));
 
         for (path, expected) in [
             (
-                "/rovai/runtime/builtin-tools/process/run-tmp",
+                absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp"),
                 Err(RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT),
             ),
             (
-                "/rovai/runtime/builtin-tools/process/run-tmp/report.html",
+                absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp/report.html"),
                 Err(RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT),
             ),
             (
-                "/rovai/runtime/builtin-tools/process/run-tmp-copy/report.html",
-                Ok("/rovai/runtime/builtin-tools/process/run-tmp-copy/report.html"),
+                absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp-copy/report.html"),
+                Ok(absolute_test_path(
+                    "/rovai/runtime/builtin-tools/process/run-tmp-copy/report.html",
+                )),
             ),
         ] {
             let result = admit_runtime_file_operation_with_managed_output_root(
@@ -277,9 +282,11 @@ mod tests {
                         "path": path
                     }
                 }),
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some("qoder-cli"),
-                Some(Path::new("/rovai/runtime/builtin-tools/process/run-tmp")),
+                Some(Path::new(&absolute_test_path(
+                    "/rovai/runtime/builtin-tools/process/run-tmp",
+                ))),
             )
             .expect("candidate should exist")
             .map(|admitted| admitted.path.as_str().to_string());
@@ -288,7 +295,7 @@ mod tests {
                     .as_ref()
                     .map(String::as_str)
                     .map_err(|reason| *reason),
-                expected
+                expected.as_deref().map_err(|reason| *reason)
             );
         }
     }
@@ -317,7 +324,7 @@ mod tests {
                         "path": path
                     }
                 }),
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some("qoder-cli"),
             )
             .expect("candidate should exist");
@@ -374,10 +381,10 @@ mod tests {
                         "protocolFamily": protocol,
                         "sourceEventKind": source,
                         "operationKind": "read",
-                        "path": "/repo/docs/README.md"
+                        "path": absolute_test_path("/repo/docs/README.md")
                     }
                 }),
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some(adapter),
             )
             .expect("candidate should exist")
@@ -393,10 +400,10 @@ mod tests {
                     "protocolFamily": "codex-app-server",
                     "sourceEventKind": "activity.commandExecution.read",
                     "operationKind": "write",
-                    "path": "/repo/docs/README.md"
+                    "path": absolute_test_path("/repo/docs/README.md")
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("codex-cli"),
         )
         .expect("candidate should exist");
@@ -428,10 +435,10 @@ mod tests {
                         "protocolFamily": "acp-v1",
                         "sourceEventKind": "session/update.tool_call_update.completed",
                         "operationKind": "write",
-                        "path": "/repo/src/app.ts"
+                        "path": absolute_test_path("/repo/src/app.ts")
                     }
                 }),
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some(adapter.as_str()),
             )
             .expect("candidate should exist")

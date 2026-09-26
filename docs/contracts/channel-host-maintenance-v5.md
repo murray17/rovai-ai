@@ -5,7 +5,7 @@ authority: channel-host-adaptive-maintenance-and-quiescence
 status: accepted
 version: 5
 source_version: v1.38
-last_updated: 2026-09-02
+last_updated: 2026-09-26
 ---
 
 # Channel Host Maintenance v5
@@ -17,11 +17,17 @@ last_updated: 2026-09-02
 
 ## 1. Tick 响应与静默判定
 
-`channels.host.tick` 与 `channels.dingtalk.host.tick` 的请求仍为：
+`channels.host.tick` 与 `channels.dingtalk.host.tick` 共享 `workerId` 和 `limit`。
+飞书 Host 另传当前已建立托管连接、可处理附件的 App ID：
 
 ```json
-{ "workerId": "host-worker", "limit": 20 }
+{ "workerId": "host-worker", "limit": 20, "inboundAttachmentAppIds": ["cli_connected_bot"] }
 ```
+
+`inboundAttachmentAppIds` 只筛选附件下载候选，不改变 Delivery claim、维护或 outstanding 判定。
+省略或空数组表示本次没有可处理附件的 Bot；钉钉可省略。Core 先按请求的 acknowledgement App 匹配该集合，
+再按原顺序取最多 20 条，避免未连接 Bot 占满窗口。未选中的请求保留原状态和重试次数，恢复连接后可继续下载；
+消息发布仍遵守各会话的 FIFO。
 
 响应必填布尔字段保持不变：
 
@@ -29,6 +35,7 @@ last_updated: 2026-09-02
 {
   "deliveries": [],
   "rosterRefreshes": [],
+  "inboundAttachments": [],
   "hasOutstandingWork": false
 }
 ```
@@ -76,6 +83,11 @@ active 门禁；已经休眠的 Host 不得被这些事件重新激活。渠道�
 
 Delivery settlement 必须追泵，以便 Core 结算 exact Request 并提升 FIFO；若 retry settlement 返回 `availableAt`，
 Main 还需在该时刻安排 one-shot，不得把 2–32 秒退避延长到兜底周期。
+
+飞书入站附件使用同一 queued Request 与 Host tick，响应的 `inboundAttachments` 返回待下载资源；钉钉返回空数组。
+Main 以最多两个后台任务处理，按 Request 去重，不占住串行 pump；完成后唤醒 pump，`retryAt` 安排 one-shot。
+Host 停止时取消未完成下载并清理临时文件；持久 queued 状态由下一次启动恢复。详细字段、重试和消息准入见
+[Channel Message Bridge v1](channel-message-bridge-v1.md#feishu-inbound-attachments)。
 
 同一时间最多执行一个 provider pump。执行期间收到的唤醒必须合并为一次后续 pump，不能因“当前正在执行”而丢弃。
 Core event 和本地 Notify 只负责提早唤醒，不承担不丢失保证，也不成为持久队列。

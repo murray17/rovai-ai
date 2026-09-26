@@ -2510,9 +2510,14 @@ mod tests {
             .await
             .unwrap();
         fs::remove_file(cwd.join("remove.txt")).unwrap();
+        let special_name = if cfg!(windows) {
+            "space 中文 file"
+        } else {
+            "tab\t中文\nfile"
+        };
         for (name, body) in [
             ("new.txt", b"new\n".as_slice()),
-            ("tab\t中文\nfile", b"special\n"),
+            (special_name, b"special\n"),
             ("empty", b""),
             ("binary", b"a\0b"),
         ] {
@@ -2561,7 +2566,7 @@ mod tests {
             "renamed.txt",
             "remove.txt",
             "new.txt",
-            "tab\t中文\nfile",
+            special_name,
             "empty",
             "binary",
         ] {

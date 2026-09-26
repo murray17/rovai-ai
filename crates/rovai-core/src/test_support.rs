@@ -231,6 +231,14 @@ pub(crate) fn seeded_runtime_database_owned() -> OwnedTestDatabase {
     )
 }
 
+#[cfg(feature = "extended-tests")]
+pub(crate) fn seeded_runtime_database_v170_owned() -> OwnedTestDatabase {
+    let directory = unique_directory("seeded-v170");
+    let database = crate::db::open_v170_source_for_test(&directory).unwrap();
+    configure_test_runtime(&database, &["agent_1", "agent_2", "agent_3"]);
+    OwnedTestDatabase::new(database, directory)
+}
+
 pub(crate) fn seeded_runtime_database_fast() -> (Database, PathBuf) {
     clone_template(
         SEEDED_RUNTIME_TEMPLATE.get_or_init(|| build_template("seeded-template", true)),
@@ -408,5 +416,15 @@ mod slow_tests {
 
         let template = SEEDED_RUNTIME_TEMPLATE.get().unwrap();
         assert_clean_template(&template.directory, &template.database_path);
+    }
+}
+
+/// Absolute synthetic path for fixtures that do not access the filesystem.
+pub(crate) fn absolute_test_path(path: &str) -> String {
+    assert!(path.starts_with('/'));
+    if cfg!(windows) {
+        format!("C:{path}")
+    } else {
+        path.to_owned()
     }
 }

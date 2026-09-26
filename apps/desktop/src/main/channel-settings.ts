@@ -20,6 +20,10 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
+import {
+  feishuInboundResources, withFeishuInboundFiles, feishuAttachmentFailureCode,
+  type PendingFeishuAttachments
+} from './feishu-inbound-attachments'
 import { canAdvanceFeishuLoginStage, feishuLoginFailureDetail } from '../shared/feishu-login-progress'
 import type {
   ChannelCredentialStore,
@@ -304,6 +308,8 @@ export class ChannelSettingsService {
   #activeProvisioningAbort: AbortController | null = null
   #started = false
   #stopped = false
+  #inboundDownloads = new Set<string>()
+  #inboundAbort = new AbortController()
   #nextRosterSweepAt = 0
   #nextAggregateRecoveryAt = 0
   #sessionStatus: 'valid' | 'invalid' | 'unavailable' | 'unknown' = 'unknown'
@@ -339,6 +345,7 @@ export class ChannelSettingsService {
     if (!this.#dependencies || this.#started) return
     this.#started = true
     this.#stopped = false
+    this.#inboundAbort = new AbortController()
     const sessionCheckGeneration = ++this.#sessionCheckGeneration
     try {
       const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
@@ -373,6 +380,7 @@ export class ChannelSettingsService {
 
   async stop(): Promise<void> {
     this.#stopped = true
+    this.#inboundAbort.abort()
     this.#sessionCheckGeneration += 1
     this.#sessionStatus = 'unknown'
     this.#activeQrAbort?.abort()
@@ -1707,6 +1715,7 @@ export class ChannelSettingsService {
         name: resource.fileName || resource.type,
         mediaType: resource.type
       })),
+      resources: feishuInboundResources(message),
       quote,
       canonicalAgentIds,
       canonicalMentionsComplete,
@@ -2188,9 +2197,11 @@ export class ChannelSettingsService {
       deliveries: ClaimedChannelDelivery[]
       rosterRefreshes: TopicRosterRefreshRequest[]
       hasOutstandingWork: boolean
+      inboundAttachments?: PendingFeishuAttachments[]
     }>('channels.host.tick', {
       workerId: HOST_WORKER_ID,
-      limit: 20
+      limit: 20,
+      inboundAttachmentAppIds: [...this.#managedChannels.keys()]
     })
     const rosterRefreshes = Array.isArray(tick.rosterRefreshes)
       ? tick.rosterRefreshes
@@ -2211,9 +2222,50 @@ export class ChannelSettingsService {
       ? tick.deliveries
       : []
     for (const delivery of deliveries) await this.#deliver(delivery)
+    for (const pending of tick.inboundAttachments ?? []) {
+      if (this.#stopped) break
+      if (this.#inboundDownloads.has(pending.requestId)) continue
+      if (this.#inboundDownloads.size >= 2) break
+      if (pending.retryAt && Date.parse(pending.retryAt) > this.#now()) {
+        this.#hostPump?.wakeAt(pending.retryAt)
+        continue
+      }
+      const managed = this.#managedChannels.get(pending.appId)
+      if (!managed) continue
+      this.#inboundDownloads.add(pending.requestId)
+      let retryDelay = 0
+      void this.#downloadInboundAttachments(managed, pending, this.#inboundAbort.signal)
+        .catch(() => { retryDelay = 5_000 })
+        .finally(() => {
+          this.#inboundDownloads.delete(pending.requestId)
+          if (!this.#stopped) {
+            if (retryDelay) this.#hostPump?.wakeAfter(retryDelay)
+            else this.#hostPump?.wake()
+          }
+        })
+    }
     return tick.hasOutstandingWork === true
       || rosterRefreshes.length > 0
       || deliveries.length > 0
+  }
+
+  async #downloadInboundAttachments(
+    managed: ManagedChannel, pending: PendingFeishuAttachments, signal: AbortSignal
+  ): Promise<void> {
+    const complete = (files: string[], failureCode: string | null): Promise<StoredCommandResult> => {
+      signal.throwIfAborted()
+      return this.#commandWithId('channels.inbound.attachments.complete', randomUUID(), {
+        requestId: pending.requestId, appId: pending.appId, attempt: pending.attempt, files, failureCode
+      }, false)
+    }
+    let result: StoredCommandResult
+    try {
+      result = await withFeishuInboundFiles(managed.channel, pending, files => complete(files, null), signal)
+    } catch (error) {
+      if (signal.aborted) return
+      result = await complete([], feishuAttachmentFailureCode(error))
+    }
+    if (typeof result.payload.retryAt === 'string') this.#hostPump?.wakeAt(result.payload.retryAt)
   }
 
   async #deliver(delivery: ClaimedChannelDelivery): Promise<void> {

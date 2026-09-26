@@ -7314,6 +7314,22 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.inbound.attachments.complete" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::inbound_attachments::CompleteAttachmentsCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::channel::inbound_attachments::complete(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.inbound.finalize" => {
                 let params: UserCommandParams<FinalizeChannelInboundCommand> =
                     serde_json::from_value(request.params.clone())?;

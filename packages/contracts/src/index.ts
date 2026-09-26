@@ -3914,6 +3914,7 @@ export type CoreMethod =
   | 'channels.inbound.observe'
   | 'channels.roster.reconcile'
   | 'channels.inbound.finalize'
+  | 'channels.inbound.attachments.complete'
   | 'channels.host.tick'
   | 'channels.executionConsole.source'
   | 'channels.executionConsole.page.authorize'

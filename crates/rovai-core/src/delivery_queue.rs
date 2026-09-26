@@ -2157,7 +2157,7 @@ mod tests {
         fixture.enqueue("projected-2", "review this");
         let first_source = json!([{
             "id": "00000000-0000-4000-8000-000000000001",
-            "sourcePath": "/tmp/source-one.txt",
+            "sourcePath": crate::test_support::absolute_test_path("/tmp/source-one.txt"),
             "displayName": "source-one.txt",
             "kind": "file",
             "mediaType": "text/plain",
@@ -2165,7 +2165,7 @@ mod tests {
         }]);
         let second_source = json!([{
             "id": "00000000-0000-4000-8000-000000000002",
-            "sourcePath": "/tmp/source-two.txt",
+            "sourcePath": crate::test_support::absolute_test_path("/tmp/source-two.txt"),
             "displayName": "source-two.txt",
             "kind": "file",
             "mediaType": "text/plain",
@@ -2250,8 +2250,14 @@ mod tests {
         )
         .unwrap();
         let messages = projection["messages"].as_array().unwrap();
-        assert_eq!(messages[0]["attachments"][0]["path"], "/tmp/source-one.txt");
-        assert_eq!(messages[1]["attachments"][0]["path"], "/tmp/source-two.txt");
+        assert_eq!(
+            messages[0]["attachments"][0]["path"],
+            crate::test_support::absolute_test_path("/tmp/source-one.txt")
+        );
+        assert_eq!(
+            messages[1]["attachments"][0]["path"],
+            crate::test_support::absolute_test_path("/tmp/source-two.txt")
+        );
         assert_eq!(messages[1]["quotes"][0]["text"], "secret");
         assert_eq!(messages[1]["skills"][0]["name"], "review-code");
         assert_eq!(
