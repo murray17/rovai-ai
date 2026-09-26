@@ -1,3 +1,5 @@
+import type { PendingChannelAttachments } from './channel-inbound-attachments'
+import { withDingTalkInboundFiles, dingtalkAttachmentFailureCode } from './dingtalk-inbound-attachments'
 import { createHash, randomUUID } from 'node:crypto'
 import type {
   AgentProfile,
@@ -313,6 +315,8 @@ export class DingTalkChannelSettingsService {
   readonly #stream: DingTalkStreamRegistry
   readonly #listeners = new Set<() => void>()
   readonly #apis = new Map<string, DingTalkOpenApiClient>()
+  readonly #inboundDownloads = new Set<string>()
+  #inboundAbort = new AbortController()
   readonly #failures = new Map<string, string>()
   readonly #dmHints = new Map<string, number>()
   readonly #inboundBatch = new Map<string, Map<string, {
@@ -363,6 +367,7 @@ export class DingTalkChannelSettingsService {
 
   async start(): Promise<void> {
     this.#stopped = false
+    if (this.#inboundAbort.signal.aborted) this.#inboundAbort = new AbortController()
     const sessionCheckGeneration = ++this.#sessionCheckGeneration
     const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
     const credentialsByRef = new Map(publishedCredentials
@@ -388,6 +393,7 @@ export class DingTalkChannelSettingsService {
 
   async stop(): Promise<void> {
     this.#stopped = true
+    this.#inboundAbort.abort()
     this.#sessionCheckGeneration += 1
     this.#sessionStatus = 'unknown'
     this.#activeQrAbort?.abort()
@@ -1198,7 +1204,7 @@ export class DingTalkChannelSettingsService {
       if (message.conversationKind === 'p2p') await this.#sendNonOwnerHint(message)
       return false
     }
-    if (message.conversationKind === 'p2p' && message.body === '/new') {
+    if (message.conversationKind === 'p2p' && message.body === '/new' && message.resources.length === 0) {
       await this.#command('channels.dingtalk.dm.startNew', {
         provider: 'dingtalk',
         appId: message.appId,
@@ -1225,6 +1231,7 @@ export class DingTalkChannelSettingsService {
       senderDisplayName: message.senderDisplayName,
       body: message.body,
       attachmentSummaries: message.attachmentSummaries,
+      resources: message.resources,
       quote: message.quote,
       canonicalAgentIds: [...agentIds],
       canonicalMentionsComplete,
@@ -1454,15 +1461,61 @@ export class DingTalkChannelSettingsService {
     const tick = await this.#dependencies.core.request<{
       deliveries: ClaimedDelivery[]
       hasOutstandingWork: boolean
+      inboundAttachments?: PendingChannelAttachments[]
     }>('channels.dingtalk.host.tick', {
       workerId: WORKER_ID,
-      limit: 20
+      limit: 20,
+      inboundAttachmentAppIds: snapshot.memberBots
+        .filter(bot => bot.status === 'published' && this.#apis.has(bot.appKey))
+        .map(bot => bot.appKey)
     })
     const deliveries = Array.isArray(tick.deliveries)
       ? tick.deliveries
       : []
     for (const delivery of deliveries) await this.#deliver(delivery)
+    for (const pending of tick.inboundAttachments ?? []) {
+      if (this.#stopped) break
+      if (this.#inboundDownloads.has(pending.requestId)) continue
+      if (this.#inboundDownloads.size >= 2) break
+      if (pending.retryAt && Date.parse(pending.retryAt) > Date.now()) {
+        this.#hostPump.wakeAt(pending.retryAt)
+        continue
+      }
+      const bot = snapshot.memberBots.find(candidate => candidate.appKey === pending.appId)
+      const api = this.#apis.get(pending.appId)
+      if (!bot || bot.status !== 'published' || !api) continue
+      this.#inboundDownloads.add(pending.requestId)
+      let retryDelay = 0
+      void this.#downloadInboundAttachments(api, bot.robotCode, pending, this.#inboundAbort.signal)
+        .catch(() => { retryDelay = 5_000 })
+        .finally(() => {
+          this.#inboundDownloads.delete(pending.requestId)
+          if (!this.#stopped) {
+            if (retryDelay) this.#hostPump.wakeAfter(retryDelay)
+            else this.#hostPump.wake()
+          }
+        })
+    }
     return tick.hasOutstandingWork === true || deliveries.length > 0
+  }
+
+  async #downloadInboundAttachments(
+    api: DingTalkOpenApiClient, robotCode: string, pending: PendingChannelAttachments, signal: AbortSignal
+  ): Promise<void> {
+    const complete = (files: string[], failureCode: string | null): Promise<StoredCommandResult> => {
+      signal.throwIfAborted()
+      return this.#commandWithId('channels.dingtalk.inbound.attachments.complete', randomUUID(), {
+        requestId: pending.requestId, appId: pending.appId, attempt: pending.attempt, files, failureCode
+      }, false)
+    }
+    let result: StoredCommandResult
+    try {
+      result = await withDingTalkInboundFiles(api, robotCode, pending, files => complete(files, null), signal)
+    } catch (error) {
+      if (signal.aborted) return
+      result = await complete([], dingtalkAttachmentFailureCode(error))
+    }
+    if (typeof result.payload.retryAt === 'string') this.#hostPump.wakeAt(result.payload.retryAt)
   }
 
   async #deliver(delivery: ClaimedDelivery): Promise<void> {

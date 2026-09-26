@@ -90,6 +90,20 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+## 渠道入站附件
+
+本次不新增 Rust fixture owner；扩展 `channel::tests` 的既有附件准入与队列测试为飞书/钉钉矩阵，保留原有
+ready、retry、failed、deleted、folder 和 20＋2/FIFO 输入，并新增跨 Provider 下载候选/完成拒绝断言。
+修复前钉钉资源在 observe 被拒绝、tick 不返回附件、complete 只接受飞书 Host；这属于同一个持久队列到
+CampMessage/Delivery 的 seam，继续使用现有隔离 SQLite/文件 fixture。钉钉多 Bot owner 同时验证文本和图文，
+两个接收 Bot 使用不同 downloadCode 时仍冻结首观察 Bot 的 grant，绑定选择和下载完成后仅派发一次。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib channel::tests::`。
+
+Main 的现有 normalizer owner 覆盖官方 picture/richText/file/audio/video 字段；新增钉钉下载适配器测试拥有
+Open API grant 兑换、独立 CDN 请求无 token、取消与丢失 grant 的 seam；共同字节限制和临时文件清理由既有
+飞书下载测试继续覆盖。Host 既有 fixture 扩展文件成功、folder 明确失败和 receiving Bot 选择，不运行真实模型
+或使用日常账号凭据。真实租户收发与权限验收仍须单独记录。
+
 ## 测试层级
 
 ### DeepSeek Harness ACP

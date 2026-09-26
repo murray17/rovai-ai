@@ -4724,7 +4724,16 @@ impl ChannelService {
             };
             let mut payload_identity = payload_identity;
             if !envelope.payload.resources.is_empty() {
-                payload_identity["resources"] = serde_json::to_value(&envelope.payload.resources)?;
+                let mut resources = envelope.payload.resources.clone();
+                if dingtalk_group_aggregate {
+                    // Download grants are scoped to each receiving Bot. Compare
+                    // stable resource order/metadata and keep the first Bot's
+                    // grants frozen together with its acknowledgement App.
+                    for resource in &mut resources {
+                        resource.download_code = None;
+                    }
+                }
+                payload_identity["resources"] = serde_json::to_value(resources)?;
             }
             let payload_digest = format!("sha256:{}", canonical_json_digest(&payload_identity)?);
             let bot_scope_app_id = if envelope.payload.conversation_kind == "p2p" {
@@ -6361,11 +6370,11 @@ impl ChannelService {
                 || channel_host_has_outstanding_work(&transaction, provider)?
                 || crate::automation::has_notification_work(&transaction, provider)?;
             ChannelHostTickResult {
-                inbound_attachments: if provider == FEISHU_PROVIDER {
-                    inbound_attachments::pending(&transaction, &request.inbound_attachment_app_ids)?
-                } else {
-                    Vec::new()
-                },
+                inbound_attachments: inbound_attachments::pending(
+                    &transaction,
+                    provider,
+                    &request.inbound_attachment_app_ids,
+                )?,
                 deliveries: claims,
                 roster_refreshes,
                 has_outstanding_work,
@@ -11289,10 +11298,6 @@ fn assemble_external_content(
 
 fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<()> {
     inbound_attachments::validate_resources(&command.resources)?;
-    anyhow::ensure!(
-        command.resources.is_empty() || command.provider == FEISHU_PROVIDER,
-        "channel resource downloads currently require Feishu"
-    );
     if !matches!(
         command.provider.as_str(),
         FEISHU_PROVIDER | DINGTALK_PROVIDER
@@ -12667,30 +12672,52 @@ mod tests {
         use inbound_attachments::{CompleteAttachmentsCommand, InboundResource};
         // Owns the durable channel queue -> filesystem -> CampMessage/Delivery seam.
         // Existing text-only admission tests cannot prove this readiness fence.
-        for scenario in ["ready", "retry", "failed", "deleted", "folder"] {
+        for (provider, scenario) in
+            [FEISHU_PROVIDER, DINGTALK_PROVIDER]
+                .into_iter()
+                .flat_map(|provider| {
+                    ["ready", "retry", "failed", "deleted", "folder"]
+                        .map(|scenario| (provider, scenario))
+                })
+        {
+            let app_id = if provider == FEISHU_PROVIDER {
+                "cli_app_1"
+            } else {
+                "ding-app-agent_1"
+            };
             let mut database = seeded_runtime_database_owned();
             let service = ChannelService::default();
-            connect_account(&service, &mut database);
-            publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+            if provider == FEISHU_PROVIDER {
+                connect_account(&service, &mut database);
+                publish_bot(&service, &mut database, "agent_1", app_id);
+            } else {
+                connect_dingtalk_account(&service, &mut database);
+                publish_dingtalk_bot(&service, &mut database, "agent_1");
+            }
             let quick = quick_chat_path(&database);
             let mut observation = observation_command(
-                "cli_app_1",
+                app_id,
                 "image-message",
                 "image-chat",
                 "",
                 "p2p",
                 "Please read these attachments",
-                &[("agent_1", "cli_app_1")],
+                &[("agent_1", app_id)],
                 true,
             );
+            if provider == DINGTALK_PROVIDER {
+                use_dingtalk_observation_identity(&mut observation);
+            }
             observation.resources = vec![
                 InboundResource {
                     file_key: "img_key".into(),
+                    download_code: None,
                     name: "参考图.png".into(),
                     kind: "image".into(),
                 },
                 InboundResource {
                     file_key: "file_key".into(),
+                    download_code: None,
                     name: "说明.txt".into(),
                     kind: if scenario == "folder" {
                         "folder"
@@ -12703,7 +12730,7 @@ mod tests {
             let observed = service
                 .observe_inbound(
                     &mut database,
-                    &host_envelope("images-observe", observation.clone()),
+                    &provider_host_envelope(provider, "images-observe", observation.clone()),
                 )
                 .unwrap();
             let aggregate_id = observed.result.payload["aggregateId"]
@@ -12713,7 +12740,7 @@ mod tests {
             let replay = service
                 .observe_inbound(
                     &mut database,
-                    &host_envelope("images-observe-again", observation),
+                    &provider_host_envelope(provider, "images-observe-again", observation),
                 )
                 .unwrap();
             assert_eq!(replay.result.payload["aggregateId"], aggregate_id);
@@ -12721,7 +12748,8 @@ mod tests {
                 .finalize_inbound(
                     &mut database,
                     &quick,
-                    &host_envelope(
+                    &provider_host_envelope(
+                        provider,
                         "images-finalize",
                         FinalizeChannelInboundCommand { aggregate_id },
                     ),
@@ -12729,7 +12757,8 @@ mod tests {
                 .unwrap();
             assert_eq!(finalized.result.status, CommandResultStatus::Accepted);
             let pending =
-                inbound_attachments::pending(database.connection(), &["cli_app_1".into()]).unwrap();
+                inbound_attachments::pending(database.connection(), provider, &[app_id.into()])
+                    .unwrap();
             assert_eq!(pending.len(), 1, "{scenario}: {}", finalized.result.payload);
             let request = &pending[0];
             let camp_id: String = database
@@ -12769,6 +12798,26 @@ mod tests {
                 ],
                 failure_code: None,
             };
+            let other_provider = if provider == FEISHU_PROVIDER {
+                DINGTALK_PROVIDER
+            } else {
+                FEISHU_PROVIDER
+            };
+            assert!(
+                inbound_attachments::pending(
+                    database.connection(),
+                    other_provider,
+                    &[app_id.into()]
+                )
+                .unwrap()
+                .is_empty()
+            );
+            let cross_provider = inbound_attachments::complete(
+                &mut database,
+                &provider_host_envelope(other_provider, "cross-provider-complete", command.clone()),
+            )
+            .unwrap();
+            assert_eq!(cross_provider.result.code, "channel.attachments.closed");
             if scenario == "deleted" {
                 database
                     .connection()
@@ -12779,7 +12828,7 @@ mod tests {
                     .unwrap();
                 let completed = inbound_attachments::complete(
                     &mut database,
-                    &host_envelope("images-late", command),
+                    &provider_host_envelope(provider, "images-late", command),
                 )
                 .unwrap();
                 assert_eq!(completed.result.code, "channel.attachments.closed");
@@ -12788,7 +12837,7 @@ mod tests {
                     &camp_id,
                 )
                 .unwrap();
-                assert!(!output.join("feishu").exists());
+                assert!(!output.join(provider).exists());
                 continue;
             }
             if matches!(scenario, "retry" | "failed" | "folder") {
@@ -12806,7 +12855,11 @@ mod tests {
                     command.attempt = attempt;
                     let completed = inbound_attachments::complete(
                         &mut database,
-                        &host_envelope(&format!("images-failure-{attempt}"), command.clone()),
+                        &provider_host_envelope(
+                            provider,
+                            &format!("images-failure-{attempt}"),
+                            command.clone(),
+                        ),
                     )
                     .unwrap();
                     assert_eq!(completed.result.status, CommandResultStatus::Applied);
@@ -12828,9 +12881,13 @@ mod tests {
                         .unwrap();
                     assert_eq!(status, "failed");
                     assert!(
-                        inbound_attachments::pending(database.connection(), &["cli_app_1".into()])
-                            .unwrap()
-                            .is_empty()
+                        inbound_attachments::pending(
+                            database.connection(),
+                            provider,
+                            &[app_id.into()]
+                        )
+                        .unwrap()
+                        .is_empty()
                     );
                     let attention: String = database.connection().query_row("SELECT json_extract(payload_json,'$.text') FROM channel_delivery WHERE request_id=?1 AND delivery_kind='attention'",
                         [&request.request_id], |r| r.get(0)).unwrap();
@@ -12844,12 +12901,12 @@ mod tests {
                 }
                 // A fresh read after failure uses the durable retry generation.
                 let recovered =
-                    inbound_attachments::pending(database.connection(), &["cli_app_1".into()])
+                    inbound_attachments::pending(database.connection(), provider, &[app_id.into()])
                         .unwrap();
                 assert_eq!(recovered[0].attempt, 1);
                 let stale = inbound_attachments::complete(
                     &mut database,
-                    &host_envelope("images-stale", command.clone()),
+                    &provider_host_envelope(provider, "images-stale", command.clone()),
                 )
                 .unwrap();
                 assert_eq!(stale.result.code, "channel.attachments.replayed");
@@ -12862,14 +12919,14 @@ mod tests {
             }
             let completed = inbound_attachments::complete(
                 &mut database,
-                &host_envelope("images-complete", command.clone()),
+                &provider_host_envelope(provider, "images-complete", command.clone()),
             )
             .unwrap();
             assert_eq!(completed.result.payload["ready"], true);
             // Native Host may lose a reply and replay with a new command id.
             let replay = inbound_attachments::complete(
                 &mut database,
-                &host_envelope("images-complete-again", command),
+                &provider_host_envelope(provider, "images-complete-again", command),
             )
             .unwrap();
             assert_eq!(replay.result.code, "channel.attachments.replayed");
@@ -12879,7 +12936,12 @@ mod tests {
                 .host_tick(
                     &mut database,
                     &ActorRef::System {
-                        component_id: FEISHU_CHANNEL_HOST_COMPONENT.into(),
+                        component_id: if provider == FEISHU_PROVIDER {
+                            FEISHU_CHANNEL_HOST_COMPONENT
+                        } else {
+                            DINGTALK_CHANNEL_HOST_COMPONENT
+                        }
+                        .into(),
                     },
                     &ChannelHostTickRequest {
                         worker_id: "images-host".into(),
@@ -12939,22 +13001,39 @@ mod tests {
 
     #[test]
     fn inbound_attachments_filter_available_bots_before_limit_and_keep_conversation_fifo() {
+        for provider in [FEISHU_PROVIDER, DINGTALK_PROVIDER] {
+            assert_attachment_provider_queue_filtering(provider);
+        }
+    }
+
+    fn assert_attachment_provider_queue_filtering(provider: &str) {
         use inbound_attachments::{CompleteAttachmentsCommand, InboundResource};
         // Owns the Host eligibility -> queued SQL window -> FIFO admission seam.
         // Twenty unavailable requests must not hide the next Bot's attachments.
+        let (app_one, app_two) = if provider == FEISHU_PROVIDER {
+            ("cli_app_1", "cli_app_2")
+        } else {
+            ("ding-app-agent_1", "ding-app-agent_2")
+        };
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
-        connect_account(&service, &mut database);
-        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
-        publish_bot(&service, &mut database, "agent_2", "cli_app_2");
+        if provider == FEISHU_PROVIDER {
+            connect_account(&service, &mut database);
+            publish_bot(&service, &mut database, "agent_1", app_one);
+            publish_bot(&service, &mut database, "agent_2", app_two);
+        } else {
+            connect_dingtalk_account(&service, &mut database);
+            publish_dingtalk_bot(&service, &mut database, "agent_1");
+            publish_dingtalk_bot(&service, &mut database, "agent_2");
+        }
         let quick = quick_chat_path(&database);
         // Bot B's second message lets us finish its download first and prove
         // that filtering download candidates does not reorder Camp admission.
         for index in 0..22 {
             let (agent_id, app_id, chat_id) = if index < 20 {
-                ("agent_1", "cli_app_1", "offline-chat")
+                ("agent_1", app_one, "offline-chat")
             } else {
-                ("agent_2", "cli_app_2", "online-chat")
+                ("agent_2", app_two, "online-chat")
             };
             let message_id = format!("attachment-{index:02}");
             let mut observation = observation_command(
@@ -12967,15 +13046,19 @@ mod tests {
                 &[(agent_id, app_id)],
                 true,
             );
+            if provider == DINGTALK_PROVIDER {
+                use_dingtalk_observation_identity(&mut observation);
+            }
             observation.resources = vec![InboundResource {
                 file_key: format!("file-{index}"),
+                download_code: None,
                 name: "note.txt".into(),
                 kind: "file".into(),
             }];
             let observed = service
                 .observe_inbound(
                     &mut database,
-                    &host_envelope(&format!("observe-{index}"), observation),
+                    &provider_host_envelope(provider, &format!("observe-{index}"), observation),
                 )
                 .unwrap();
             let aggregate_id = observed.result.payload["aggregateId"]
@@ -12986,7 +13069,8 @@ mod tests {
                 .finalize_inbound(
                     &mut database,
                     &quick,
-                    &host_envelope(
+                    &provider_host_envelope(
+                        provider,
                         &format!("finalize-{index}"),
                         FinalizeChannelInboundCommand {
                             aggregate_id: aggregate_id.clone(),
@@ -13004,7 +13088,12 @@ mod tests {
                 .unwrap();
         }
         let actor = ActorRef::System {
-            component_id: FEISHU_CHANNEL_HOST_COMPONENT.into(),
+            component_id: if provider == FEISHU_PROVIDER {
+                FEISHU_CHANNEL_HOST_COMPONENT
+            } else {
+                DINGTALK_CHANNEL_HOST_COMPONENT
+            }
+            .into(),
         };
         let mut tick_request = ChannelHostTickRequest {
             worker_id: "attachment-host".into(),
@@ -13016,7 +13105,7 @@ mod tests {
             .unwrap();
         assert!(idle.inbound_attachments.is_empty());
         assert!(idle.has_outstanding_work);
-        tick_request.inbound_attachment_app_ids = vec!["cli_app_2".into()];
+        tick_request.inbound_attachment_app_ids = vec![app_two.into()];
         let pending = service
             .host_tick(&mut database, &actor, &tick_request)
             .unwrap()
@@ -13028,7 +13117,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["attachment-20", "attachment-21"]
         );
-        assert!(pending.iter().all(|item| item.app_id == "cli_app_2"));
+        assert!(pending.iter().all(|item| item.app_id == app_two));
         let source = quick.join("download.txt");
         std::fs::write(&source, "complete bytes").unwrap();
         let messages = |database: &Database| {
@@ -13044,7 +13133,8 @@ mod tests {
             let request = &pending[index];
             let completed = inbound_attachments::complete(
                 &mut database,
-                &host_envelope(
+                &provider_host_envelope(
+                    provider,
                     &format!("complete-{index}"),
                     CompleteAttachmentsCommand {
                         request_id: request.request_id.clone(),
@@ -13071,7 +13161,7 @@ mod tests {
             }
         }
         // Reconnection must expose Bot A's untouched backlog in original order.
-        tick_request.inbound_attachment_app_ids = vec!["cli_app_1".into(), "cli_app_2".into()];
+        tick_request.inbound_attachment_app_ids = vec![app_one.into(), app_two.into()];
         let recovered = service
             .host_tick(&mut database, &actor, &tick_request)
             .unwrap()
@@ -14383,13 +14473,17 @@ mod tests {
             targets,
             canonical_mentions_complete,
         );
+        use_dingtalk_observation_identity(&mut command);
+        command
+    }
+
+    fn use_dingtalk_observation_identity(command: &mut ObserveChannelInboundCommand) {
         command.provider = DINGTALK_PROVIDER.to_string();
         command.tenant_key = "ding-corp-1".to_string();
         command.sender_external_user_id = "owner-staff-1".to_string();
         command.sender_open_id = None;
         command.sender_user_id = Some("owner-staff-1".to_string());
         command.sender_union_id = None;
-        command
     }
 
     fn seed_project(database: &Database, suffix: &str) -> std::path::PathBuf {
@@ -16075,6 +16169,31 @@ mod tests {
 
     #[test]
     fn dingtalk_multi_bot_callbacks_form_one_ordered_durable_request() {
+        for with_attachments in [false, true] {
+            assert_dingtalk_multi_bot_callback_admission(with_attachments);
+        }
+    }
+
+    fn assert_dingtalk_multi_bot_callback_admission(with_attachments: bool) {
+        let observe = |app_id: &str,
+                       message: &str,
+                       chat: &str,
+                       kind: &str,
+                       body: &str,
+                       targets: &[(&str, &str)],
+                       complete: bool| {
+            let mut command =
+                dingtalk_observation_command(app_id, message, chat, kind, body, targets, complete);
+            if with_attachments {
+                command.resources = vec![inbound_attachments::InboundResource {
+                    file_key: "resource:0".into(),
+                    name: "参考图.png".into(),
+                    kind: "image".into(),
+                    download_code: Some(format!("grant-for-{app_id}")),
+                }];
+            }
+            command
+        };
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_dingtalk_account(&service, &mut database);
@@ -16104,7 +16223,7 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-first",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_2",
                         "ding-multi-message",
                         "ding-multi-group",
@@ -16125,7 +16244,7 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-second",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_1",
                         "ding-multi-message",
                         "ding-multi-group",
@@ -16146,7 +16265,7 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-complete",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_2",
                         "ding-multi-message",
                         "ding-multi-group",
@@ -16213,8 +16332,54 @@ mod tests {
             DINGTALK_PROVIDER,
         );
         assert_eq!(resolved.result.code, "channel.binding.resolved");
+        let mut early_deliveries = Vec::new();
+        if with_attachments {
+            assert!(claim_waiting_runs(&mut database).is_empty());
+            let pending = inbound_attachments::pending(
+                database.connection(),
+                DINGTALK_PROVIDER,
+                &["ding-app-agent_2".into()],
+            )
+            .unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(
+                pending[0].resources[0].download_code.as_deref(),
+                Some("grant-for-ding-app-agent_2")
+            );
+            let source = multi_quick_chat_path.join("download.png");
+            image::RgbaImage::new(1, 1).save(&source).unwrap();
+            let completion = inbound_attachments::complete(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-attachments",
+                    inbound_attachments::CompleteAttachmentsCommand {
+                        request_id: pending[0].request_id.clone(),
+                        app_id: pending[0].app_id.clone(),
+                        attempt: 0,
+                        files: vec![source.to_string_lossy().into_owned()],
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap();
+            assert_eq!(completion.result.payload["ready"], true);
+            early_deliveries = service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: DINGTALK_CHANNEL_HOST_COMPONENT.into(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "dingtalk-multi-worker".into(),
+                        inbound_attachment_app_ids: Vec::new(),
+                        limit: 10,
+                    },
+                )
+                .unwrap()
+                .deliveries;
+        }
         assert_eq!(claim_waiting_runs(&mut database).len(), 2);
-        let dispatched = service
+        let mut dispatched = service
             .host_tick(
                 &mut database,
                 &ActorRef::System {
@@ -16227,6 +16392,7 @@ mod tests {
                 },
             )
             .unwrap();
+        dispatched.deliveries.extend(early_deliveries);
         assert_eq!(
             dispatched
                 .deliveries
@@ -16278,7 +16444,7 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-late-replay",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_1",
                         "ding-multi-message",
                         "ding-multi-group",

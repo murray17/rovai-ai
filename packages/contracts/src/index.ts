@@ -3902,6 +3902,7 @@ export type CoreMethod =
   | 'channels.dingtalk.pendingBinding.resolve'
   | 'channels.dingtalk.cardActionContext'
   | 'channels.dingtalk.inbound.observe'
+  | 'channels.dingtalk.inbound.attachments.complete'
   | 'channels.dingtalk.roster.reconcile'
   | 'channels.dingtalk.inbound.finalize'
   | 'channels.dingtalk.host.tick'
