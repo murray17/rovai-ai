@@ -1,23 +1,8 @@
-import { createWriteStream } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Transform } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 import type { LarkChannel, NormalizedMessage, RawMessageEvent } from '@larksuiteoapi/node-sdk'
+import { withChannelInboundFiles, type InboundResource, type PendingChannelAttachments } from './channel-inbound-attachments'
 
-export type InboundResource = { fileKey: string; name: string; kind: string }
-export type PendingFeishuAttachments = {
-  requestId: string
-  appId: string
-  messageId: string
-  resources: InboundResource[]
-  attempt: number
-  retryAt: string | null
-}
-
-const MAX_BYTES = 100 * 1024 * 1024
-const DOWNLOAD_TIMEOUT_MS = 60_000
+export type { InboundResource } from './channel-inbound-attachments'
+export type PendingFeishuAttachments = PendingChannelAttachments
 
 export function feishuInboundResources(message: NormalizedMessage): InboundResource[] {
   const resources: InboundResource[] = message.resources.map(resource => ({
@@ -57,56 +42,27 @@ export async function withFeishuInboundFiles<T>(
   consume: (files: string[]) => Promise<T>,
   signal?: AbortSignal
 ): Promise<T> {
-  if (pending.resources.some(resource => ['sticker', 'folder'].includes(resource.kind))) {
-    throw new Error('channel.attachments.unsupported')
-  }
-  const directory = await mkdtemp(join(tmpdir(), 'rovai-feishu-inbound-'))
-  const controller = new AbortController()
-  const abort = (): void => controller.abort()
-  signal?.addEventListener('abort', abort, { once: true })
-  if (signal?.aborted) controller.abort()
-  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
-  let total = 0
-  try {
-    const files: string[] = []
-    for (const [ordinal, resource] of pending.resources.entries()) {
-      controller.signal.throwIfAborted()
-      const download = channel.rawClient.im.v1.messageResource.get({
-        path: { message_id: pending.messageId, file_key: resource.fileKey },
-        params: { type: resource.kind === 'image' ? 'image' : 'file' }
+  return withChannelInboundFiles(pending, async (resource, downloadSignal) => {
+    const download = channel.rawClient.im.v1.messageResource.get({
+      path: { message_id: pending.messageId, file_key: resource.fileKey },
+      params: { type: resource.kind === 'image' ? 'image' : 'file' }
+    })
+    // The SDK does not expose AbortSignal. Close late responses without writing.
+    const response = await new Promise<Awaited<typeof download>>((resolve, reject) => {
+      const abort = (): void => reject(new Error('channel.attachments.download_failed'))
+      downloadSignal.addEventListener('abort', abort, { once: true })
+      void download.then(result => {
+        downloadSignal.removeEventListener('abort', abort)
+        if (downloadSignal.aborted) {
+          try { result.getReadableStream().destroy() } catch { /* Already closed by SDK. */ }
+        } else resolve(result)
+      }, error => {
+        downloadSignal.removeEventListener('abort', abort)
+        reject(error)
       })
-      // The SDK doesn't expose AbortSignal on this API. A late response is closed
-      // without writing, and the local deadline also covers body streaming.
-      const response = await new Promise<Awaited<typeof download>>((resolve, reject) => {
-        const abort = (): void => reject(new Error('channel.attachments.download_failed'))
-        controller.signal.addEventListener('abort', abort, { once: true })
-        void download.then(result => {
-          controller.signal.removeEventListener('abort', abort)
-          if (controller.signal.aborted) {
-            try { result.getReadableStream().destroy() } catch { /* SDK may have already closed it. */ }
-          } else resolve(result)
-        }, error => {
-          controller.signal.removeEventListener('abort', abort)
-          reject(error)
-        })
-      })
-      const path = join(directory, `${ordinal}.download`)
-      await pipeline(response.getReadableStream(), new Transform({
-        transform(chunk: Buffer, _encoding, callback) {
-          total += chunk.length
-          callback(total > MAX_BYTES ? new Error('channel.attachments.too_large') : null, chunk)
-        }
-      }), createWriteStream(path, { flags: 'wx' }), { signal: controller.signal })
-      files.push(path)
-    }
-    clearTimeout(timer)
-    return await consume(files)
-  } finally {
-    clearTimeout(timer)
-    controller.abort()
-    signal?.removeEventListener('abort', abort)
-    await rm(directory, { recursive: true, force: true })
-  }
+    })
+    return response.getReadableStream()
+  }, consume, signal)
 }
 
 export function feishuAttachmentFailureCode(error: unknown): string {

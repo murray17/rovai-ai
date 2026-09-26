@@ -12,20 +12,20 @@ last_updated: 2026-09-26
 
 继承 [v4](channel-host-maintenance-v4.md) 的封闭 tick、Main Actor、单事务维护、provider-scoped outstanding、
 无 poll receipt、FIFO、取消收口、suppression、delivery lease、迟到 sent、按需 watchdog 和 terminal/retry one-shot。
-本版只收紧飞书 Host 的 Core event 快路径，并把飞书历史群 roster sweep 移出启动恢复热路径；钉钉行为不变，
+本版收紧飞书 Host 的 Core event 快路径，并把飞书历史群 roster sweep 移出启动恢复热路径；钉钉事件与 roster 行为不变，
 不增加通用 WorkItem、deadline journal、持久映射或第二份权威状态。
 
 ## 1. Tick 响应与静默判定
 
 `channels.host.tick` 与 `channels.dingtalk.host.tick` 共享 `workerId` 和 `limit`。
-飞书 Host 另传当前已建立托管连接、可处理附件的 App ID：
+两个 Host 都传当前可处理附件的 App ID：飞书来自托管连接，钉钉来自已发布且凭据已加载的 App client。
 
 ```json
 { "workerId": "host-worker", "limit": 20, "inboundAttachmentAppIds": ["cli_connected_bot"] }
 ```
 
 `inboundAttachmentAppIds` 只筛选附件下载候选，不改变 Delivery claim、维护或 outstanding 判定。
-省略或空数组表示本次没有可处理附件的 Bot；钉钉可省略。Core 先按请求的 acknowledgement App 匹配该集合，
+省略或空数组表示本次没有可处理附件的 Bot。Core 先按 Host provider 和请求的 acknowledgement App 匹配该集合，
 再按原顺序取最多 20 条，避免未连接 Bot 占满窗口。未选中的请求保留原状态和重试次数，恢复连接后可继续下载；
 消息发布仍遵守各会话的 FIFO。
 
@@ -84,10 +84,10 @@ active 门禁；已经休眠的 Host 不得被这些事件重新激活。渠道�
 Delivery settlement 必须追泵，以便 Core 结算 exact Request 并提升 FIFO；若 retry settlement 返回 `availableAt`，
 Main 还需在该时刻安排 one-shot，不得把 2–32 秒退避延长到兜底周期。
 
-飞书入站附件使用同一 queued Request 与 Host tick，响应的 `inboundAttachments` 返回待下载资源；钉钉返回空数组。
+飞书与钉钉入站附件使用同一 queued Request 与 Host tick，响应的 `inboundAttachments` 只返回当前 provider 可处理的待下载资源。
 Main 以最多两个后台任务处理，按 Request 去重，不占住串行 pump；完成后唤醒 pump，`retryAt` 安排 one-shot。
 Host 停止时取消未完成下载并清理临时文件；持久 queued 状态由下一次启动恢复。详细字段、重试和消息准入见
-[Channel Message Bridge v1](channel-message-bridge-v1.md#feishu-inbound-attachments)。
+[Channel Message Bridge v1](channel-message-bridge-v1.md#inbound-attachments)。
 
 同一时间最多执行一个 provider pump。执行期间收到的唤醒必须合并为一次后续 pump，不能因“当前正在执行”而丢弃。
 Core event 和本地 Notify 只负责提早唤醒，不承担不丢失保证，也不成为持久队列。

@@ -7314,7 +7314,8 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "channels.inbound.attachments.complete" => {
+            "channels.inbound.attachments.complete"
+            | "channels.dingtalk.inbound.attachments.complete" => {
                 let params: UserCommandParams<
                     rovai_core::channel::inbound_attachments::CompleteAttachmentsCommand,
                 > = serde_json::from_value(request.params.clone())?;
@@ -7323,7 +7324,11 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        if request.method == "channels.dingtalk.inbound.attachments.complete" {
+                            "dingtalk-channel-host"
+                        } else {
+                            "feishu-channel-host"
+                        },
                         None,
                         params.command,
                     ),

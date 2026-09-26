@@ -1,3 +1,5 @@
+import { readFile, access } from 'node:fs/promises'
+import type { PendingChannelAttachments } from './channel-inbound-attachments'
 import { describe, expect, it, vi } from 'vitest'
 import type { CoreClient } from './core-client'
 import {
@@ -84,6 +86,38 @@ describe('DingTalk channel account connection', () => {
       inspection.resolve(null)
       await starting
       await fixture.service.stop()
+    }
+  })
+
+  it.each(['file', 'folder'])('settles a queued %s through the attachment pump with its receiving Bot', async kind => {
+    let saved: string[] = []
+    const complete = vi.fn(async (command: Record<string, unknown>) => {
+      expect(command).toMatchObject({ requestId: 'request', appId: 'ding-app-a', attempt: 0 })
+      if (kind === 'file') {
+        saved = command.files as string[]
+        expect(command.failureCode).toBeNull()
+        expect(await readFile(saved[0], 'utf8')).toBe('actual downloaded bytes')
+      } else {
+        expect(command).toMatchObject({ files: [], failureCode: 'channel.attachments.unsupported' })
+      }
+    })
+    const fixture = completedBotFixture({
+      credentialPresent: true, completeAttachments: complete,
+      attachments: [{ requestId: 'request', appId: 'ding-app-a', messageId: 'message', attempt: 0, retryAt: null,
+        resources: [{ fileKey: 'resource:0', name: 'resource', kind, downloadCode: 'receiving-grant' }] }]
+    })
+    const download = vi.spyOn(fixture.api, 'messageFileDownloadUrl').mockResolvedValue('https://storage.example/file')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('actual downloaded bytes')))
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(complete).toHaveBeenCalledOnce())
+      if (kind === 'file') {
+        expect(download).toHaveBeenCalledWith({ robotCode: 'robot-a', downloadCode: 'receiving-grant', signal: expect.any(AbortSignal) })
+        await vi.waitFor(async () => { for (const path of saved) await expect(access(path)).rejects.toThrow() })
+      } else expect(download).not.toHaveBeenCalled()
+    } finally {
+      await fixture.service.stop()
+      vi.unstubAllGlobals()
     }
   })
 
@@ -879,6 +913,8 @@ function completedBotFixture(options: {
   emptyFrozenAppId?: boolean
   beforeApp?: 'created' | 'account_verified'
   deliveries?: Array<Record<string, unknown>>
+  attachments?: PendingChannelAttachments[]
+  completeAttachments?: (command: Record<string, unknown>) => Promise<void>
 } = {}) {
   const owner = identity('corp-a', 'owner-a')
   const activeOwner = options.otherAccount ? identity('corp-other', 'owner-other') : owner
@@ -909,6 +945,8 @@ function completedBotFixture(options: {
   } : null
   let rejectedWrites = options.rejectCredentialWrites ?? 0
   const pendingDeliveries = [...(options.deliveries ?? [])]
+  const pendingAttachments = [...(options.attachments ?? [])]
+  let apiAvailable = false
   const commands: string[] = []
   const commandPayloads: Array<{ method: string; command: Record<string, unknown> }> = []
   const core = {
@@ -925,10 +963,12 @@ function completedBotFixture(options: {
       commands.push(method)
       commandPayloads.push({ method, command })
       if (method === 'channels.dingtalk.host.tick') {
-        expect(params).toEqual({ workerId: expect.any(String), limit: 20 })
+        expect(params).toEqual({ workerId: expect.any(String), limit: 20,
+          inboundAttachmentAppIds: !options.beforeApp && apiAvailable ? [bot.appKey] : [] })
         const delivery = pendingDeliveries.shift()
-        return { deliveries: delivery ? [delivery] : [], rosterRefreshes: [] }
+        return { deliveries: delivery ? [delivery] : [], rosterRefreshes: [], inboundAttachments: pendingAttachments.splice(0) }
       }
+      if (method === 'channels.dingtalk.inbound.attachments.complete') await options.completeAttachments?.(command)
       if (method === 'channels.dingtalk.publicationIntent.storeCredential') {
         if (rejectedWrites-- > 0) return { status: 'rejected', code: 'channel_storage_fixture_failed' }
         if (options.beforeApp) expect(command.credentialRef).toMatch(/^dingtalk-/u)
@@ -992,7 +1032,7 @@ function completedBotFixture(options: {
     provisioner: { create: provision },
     avatarSource: { resolve: async () => ({ pngBytes: new Uint8Array([1, 2, 3]) }) },
     streamRegistry: stream,
-    createApiClient: () => api
+    createApiClient: () => { apiAvailable = true; return api }
   })
   return { service, core, commands, commandPayloads, api, provision, streamStart, verifyCard,
     welcomeCard, developerSession,
