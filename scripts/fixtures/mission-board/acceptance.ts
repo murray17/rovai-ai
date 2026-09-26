@@ -560,16 +560,16 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   const notifiedEditor = document.getElementById('camp-message')
   button('展开为完整会话').click()
   await until(() => document.querySelector('.mission-full'), 'Notified Mission can expand')
+  const notificationReads = qa.calls.filter((call:any) => call.method === 'notifications.changesSince').length
   qa.admitMissionNotification(notifiedMission.missionId, 'open_camp')
-  await until(() => document.querySelector('.notification-heads-up-open'), 'Same-Mission notification appears')
-  document.querySelector<HTMLButtonElement>('.notification-heads-up-open')!.click()
-  await until(() => document.querySelector('.mission-drawer'), 'Same-Mission notification restores the drawer from full presentation')
-  check(document.getElementById('camp-message') === notifiedEditor, 'Same-Mission notification preserves the mounted Composer')
-  check(!document.querySelector('.mission-board-page')?.hasAttribute('hidden'), 'Same-Mission notification also shows the board')
-  button('关闭使命抽屉').click()
+  await until(() => qa.calls.filter((call:any) => call.method === 'notifications.changesSince').length > notificationReads, 'Same-Mission notification is consumed')
+  await frames()
+  check(!document.querySelector('.notification-heads-up-open') && !!document.querySelector('.mission-full'), 'An attentive user already reading this Mission does not receive a redundant heads-up')
+  check(document.getElementById('camp-message') === notifiedEditor, 'Same-Mission attention preserves the mounted Composer')
+  button('返回使命板').click()
   await until(() => !document.querySelector('.mission-workspace-host'), 'Notified drawer closes back to the board')
   check(qa.errors.length === 0, qa.errors.join('\n'))
-  cases.push('notifications open Mission drawers over the board, including the already active full Mission, and retain exact message focus')
+  cases.push('notifications open Mission drawers at the exact source while the already active full Mission stays quiet')
 
   const cleanupMission = qa.items.find((item:any) => item.title === '基于最新内容编辑')
   const cleanupCard = Array.from(document.querySelectorAll<HTMLElement>('.mission-board-card')).find(node => node.textContent?.includes(cleanupMission.title))!

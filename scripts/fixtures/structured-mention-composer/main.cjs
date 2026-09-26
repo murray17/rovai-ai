@@ -304,7 +304,7 @@ app.whenReady().then(async () => {
       assert.match(copied.html, /white-space: pre-wrap/)
     })
 
-    await run('structured paste restores valid references and visibly degrades missing ones', async () => {
+    await run('structured paste degrades missing members and preserves missing Skill source identity', async () => {
       const pasted = {
         version: 2,
         segments: [
@@ -320,7 +320,8 @@ app.whenReady().then(async () => {
       await frames()
       await expectSegments([
         { kind: 'atom', atom: { type: 'member', agentId: 'agent-a' } },
-        { kind: 'text', text: ' @离队成员 /old-skill' }
+        { kind: 'text', text: ' @离队成员 ' },
+        { kind: 'atom', atom: { type: 'skill', skillId: 'missing-skill', nameAtSend: 'old-skill' } }
       ])
     })
 
@@ -351,7 +352,7 @@ app.whenReady().then(async () => {
       assert.equal(current.pastedFileCount, 1)
     })
 
-    await run('catalog presentation refresh does not dirty or save the Draft', async () => {
+    await run('catalog presentation refresh preserves outside focus and does not save the Draft', async () => {
       await reset({
         version: 2,
         segments: [{
@@ -360,8 +361,11 @@ app.whenReady().then(async () => {
         }]
       })
       const before = await state(true)
+      await evaluate(`(() => { const button = document.createElement('button'); button.id = 'outside-composer'; button.textContent = '主菜单'; document.body.append(button); button.focus() })()`)
       await evaluate('window.composerTest.renameMember("新名字")')
       await frames()
+      assert.equal(await evaluate('document.activeElement.id'), 'outside-composer')
+      await evaluate('document.getElementById("outside-composer").remove()')
       const after = await state(false)
       assert.deepEqual(after.atomLabels, ['@新名字'])
       assert.equal(after.localVersion, before.localVersion)

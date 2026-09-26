@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-09-22
+last_updated: 2026-09-26
 ---
 
 # App Shell 与统一侧栏
@@ -56,7 +56,7 @@ Desktop 与宽屏 WebUI 的置顶 Camp 在标题左侧显示 17px 对话图标�
 每个 Camp 行右侧始终保留 12×12px 状态槽：正在打开或运行时显示 loading，否则有新回复时显示 7px
 `--conversation-unread` 蓝点，无状态时留空；loading 与未读同时成立时只显示 loading，未读事实及可访问名称继续保留。
 状态变化不得移动标题或改变长标题的可用宽度。MobileUI 使用同一状态 DOM，蓝点为 6px，并沿用 20px
-列表会话图标、44px 会话行与 48px Project 行；底栏“对话”图标保持 21px。
+列表会话图标、44px 会话行与 48px Project 行；手机入口由统一左侧抽屉承载，不再显示底栏。
 会话图标统一采用 24×24 画布、1.7 描边的横向圆角气泡与短尾，单线条、无填充、无阴影；其他导航图标不变。
 
 自动生成的 Camp 标题不把开头连续的真实队员 Mention / 所有队员 Mention 当作标题内容；只保留
@@ -222,8 +222,12 @@ App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；
 设置侧栏分三组：
 
 - 应用：通用、外观、提醒；
-- 能力：Skills、MCP、运行时、远程连接、渠道；Desktop 与 Web 共用此顺序，独立 Server 隐藏渠道。
+- 能力：MCP、Skills、工具箱、运行时、远程连接、渠道；Desktop 与 Web 共用此顺序，独立 Server 隐藏渠道。
 - 支持：运行监控、诊断与修复、关于与更新。
+
+手机使用同一分类定义的分组总览与独立分类页，不显示设置搜索。总览和分类区分浏览器历史条目；
+返回总览恢复滚动与来源焦点。全局抽屉持续提供五个一级入口、项目/会话与底部设置，详见
+[Mobile WebUI](../host-web-mobile.md)。
 
 返回 App 后恢复原一级页面；当前 Main Window Session 内记住最后设置分类，全新安装默认“通用”。更新
 徽标的临时深链不覆盖该记忆；“关于与更新”行在有可操作 release 时显示同语义、非交互的状态徽标。设置

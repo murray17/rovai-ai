@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from 'react'
-import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type Ref } from 'react'
+import { NavigationIcon } from './NavigationIcon'
+import { PanelToggleIcon } from './PanelToggleIcon'
 
 // Presentation only. Host capabilities and editing identity still come from CampClient.
 const MobileLayout = createContext(false)
@@ -14,6 +15,21 @@ export function useMobileViewport(enabled: boolean): boolean {
   return enabled && matches
 }
 export const useMobileLayout = (): boolean => useContext(MobileLayout)
+
+/** Animate the existing page without remounting its editors or scroll containers. */
+export function useMobilePageTransition(mobile: boolean, page: string) {
+  const surface = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    if (!mobile || document.documentElement.dataset.motionPreference === 'reduce'
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const animation = surface.current?.animate([
+      { opacity: .65, transform: 'translateX(12px)' },
+      { opacity: 1, transform: 'translateX(0)' }
+    ], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' })
+    return () => animation?.cancel()
+  }, [mobile, page])
+  return surface
+}
 
 export function MobileLayoutProvider({ value, children }: { value: boolean; children: ReactNode }): React.JSX.Element {
   useEffect(() => {
@@ -45,16 +61,19 @@ export function MobileBack({ onClick, label = '返回' }: { onClick(): void; lab
   return <button className="mobile-icon-button mobile-back" type="button" aria-label={label} onClick={onClick}><NavigationIcon name="arrow-left" /></button>
 }
 
-export type MobileRoot = 'compose' | 'members' | 'memory' | 'automations' | 'settings'
-const roots: Array<{ view: MobileRoot; label: string; icon: NavigationIconName }> = [
-  { view: 'compose', label: '对话', icon: 'messages' },
-  { view: 'members', label: '队员', icon: 'users' },
-  { view: 'memory', label: '记忆', icon: 'brain' },
-  { view: 'automations', label: '定时', icon: 'calendar-clock' },
-  { view: 'settings', label: '设置', icon: 'settings' }
-]
-export function MobileNavigation({ view, disabled, onNavigate }: { view: MobileRoot; disabled: boolean; onNavigate(view: MobileRoot): void }): React.JSX.Element {
-  return <nav className="mobile-bottom-navigation" aria-label="主要页面">
-    {roots.map(item => <button key={item.view} type="button" disabled={disabled} aria-current={view === item.view ? 'page' : undefined} onClick={() => onNavigate(item.view)}><NavigationIcon name={item.icon} /><span>{item.label}</span></button>)}
-  </nav>
+export function MobilePageHeader({ title, onOpenMenu, menuOpen, triggerRef, children }: {
+  title: string
+  onOpenMenu(trigger: HTMLButtonElement): void
+  menuOpen: boolean
+  triggerRef?: Ref<HTMLButtonElement>
+  children?: ReactNode
+}): React.JSX.Element {
+  return <header className="mobile-page-heading app-root-heading">
+    <button ref={triggerRef} className="mobile-icon-button mobile-conversation-list-open" type="button"
+      aria-label="打开主菜单" aria-expanded={menuOpen} aria-controls={menuOpen ? 'mobile-app-menu' : undefined} onClick={event => onOpenMenu(event.currentTarget)}>
+      <PanelToggleIcon side="left" visible={false} />
+    </button>
+    <h1>{title}</h1>
+    {children && <div>{children}</div>}
+  </header>
 }

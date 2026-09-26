@@ -5268,6 +5268,10 @@ export function CampWorkspace({
               memberCount={campInspectorMembers(snapshot.members).length}
               singleChatVisible={singleChatVisible}
               onOpenSingleChat={onOpenSingleChat}
+              onOpenMissionActivity={mobile && snapshot.camp.missionId && filePreview ? () => {
+                onCloseInspector(); onCloseSingleChat()
+                filePreview.openMissionActivity(snapshot.camp.missionId!)
+              } : undefined}
               onOpen={(tab) => {
                 if (tab === 'execution' && executionPlacement === 'right') {
                   onCloseInspector()

@@ -24,6 +24,27 @@ const camp = (campId: string): NavigationTarget => ({ kind: 'camp', campId })
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
 describe('browser navigation adapter', () => {
+  it('keeps mobile settings overview distinct from its remembered section through Back and refresh', async () => {
+    const host = browser()
+    const navigation = createDesktopNavigation(async (_target, tx) => { tx.commit() }, createBrowserNavigationHistory('phone', host))
+    const stop = navigation.connect()
+    const overview: NavigationTarget = { kind: 'settings', section: 'runtime', overview: true }
+    const detail: NavigationTarget = { kind: 'settings', section: 'runtime' }
+    navigation.reset({ kind: 'missions' })
+    await navigation.replace(overview)
+    await navigation.push(detail)
+    expect(navigation.getSnapshot().entries).toEqual([overview, detail])
+    host.history.go(-1); await settle()
+    expect(host.history.state.rovai.target).toEqual(overview)
+    stop()
+    const restored = createDesktopNavigation(async (_target, tx) => { tx.commit() }, createBrowserNavigationHistory('phone', host))
+    const disconnect = restored.connect()
+    expect(await restored.restore()).toBe(true)
+    expect(restored.getSnapshot()).toEqual({ entries: [overview, detail], index: 0 })
+    expect(await restored.forward()).toBe(true)
+    expect(host.history.state.rovai.target).toEqual(detail)
+    disconnect()
+  })
   it('repairs the displayed page during native Back without cancelling the newer destination', async () => {
     const host = browser()
     let release: (() => void) | undefined

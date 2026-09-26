@@ -1,7 +1,8 @@
 import { newCommandId } from '../../shared/command-id'
 import type { BusinessEnvironment } from './business-environment'
 import { AppHeader } from './AppHeader'
-import { MobileBack, MobileLayoutProvider, MobileNavigation, useMobileViewport, type MobileRoot } from './MobileLayout'
+import { MobileLayoutProvider, MobilePageHeader, useMobilePageTransition, useMobileViewport } from './MobileLayout'
+import { MobileSettingsLayout } from './MobileSettingsLayout'
 export { AppHeader } from './AppHeader'
 import { CurrentUserProfileProvider } from './CurrentUserProfile'
 import { readErrorMessage } from './error-message'
@@ -1014,6 +1015,11 @@ export function BusinessApp({
   const [mobileSettingsList, setMobileSettingsList] = useState(false)
   const [mobileConversationDrawerOpen, setMobileConversationDrawerOpen] = useState(false)
   const mobileConversationListButtonRef = useRef<HTMLButtonElement>(null)
+  const mobileMenuScroll = useRef(0)
+  const openMobileMenu = (trigger: HTMLButtonElement): void => {
+    mobileConversationListButtonRef.current = trigger
+    setMobileConversationDrawerOpen(true)
+  }
   const initialTarget: RestorableLocation = initialStartupSnapshot
     ? startupTargetFromSnapshot(initialStartupSnapshot) : { kind: 'quick_chat' }
   type NavigationContext = { campOptions?: ActivateCampOptions; beforeCommit?: () => void; prepared?: boolean; memberPrepared?: boolean }
@@ -1087,6 +1093,7 @@ export function BusinessApp({
   const [onboardingError, setOnboardingError] = useState<string | null>(null)
   const [locationSaveError, setLocationSaveError] = useState<string | null>(null)
   const [view, setView] = useState<View>(() => startupView(initialTarget))
+  const mobilePageRef = useMobilePageTransition(mobile, view)
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(
     initialTarget.kind === 'members' ? initialTarget.agentId : null
   )
@@ -1112,7 +1119,7 @@ export function BusinessApp({
     messages: readonly CampMessageView[]
     agentRuns: readonly AgentRunView[]
   } | null>(null)
-  const missionList = useMissions(client, !mobile && startupStatus === 'resolved')
+  const missionList = useMissions(client, startupStatus === 'resolved')
   const [missionPresentation, setMissionPresentation] = useState<'drawer' | 'full'>('full')
   const [missionOpenRequest, setMissionOpenRequest] = useState(0)
   const [newMissionOpen, setNewMissionOpen] = useState(false)
@@ -2781,7 +2788,7 @@ export function BusinessApp({
       : nextView === 'camp' && activeCampId ? { kind: 'camp', campId: activeCampId }
       : nextView === 'settings' ? { kind: 'settings', section: settingsSection }
       : { kind: 'quick_chat' }
-    void desktopNavigation.push(target)
+    void (mobile ? desktopNavigation.replace(target) : desktopNavigation.push(target))
   }
 
   const configureMemberRuntime = (agentId: string): void => {
@@ -2847,13 +2854,13 @@ export function BusinessApp({
       context?.beforeCommit?.()
       setNotificationFocus(null)
       switch (target.kind) {
-        case 'settings': setSettingsSection(target.section); setView('settings'); break
+        case 'settings': setSettingsSection(target.section); setMobileSettingsList(target.overview === true); setView('settings'); break
         case 'members':
           membersViewRef.current?.showSelectedMember()
           setSelectedMemberId(target.agentId); setMemberTab(target.tab); setView('members'); break
         case 'memory': setMemoryTarget(target); setView('memory'); break
         case 'automations': setView('automations'); break
-        case 'missions': setView(mobile ? 'compose' : 'missions'); break
+        case 'missions': setView('missions'); break
         case 'quick_chat': setView('compose'); break
       }
     }
@@ -2874,7 +2881,21 @@ export function BusinessApp({
 
   const openSettings = (): void => {
     const rememberedSection = generalPreferences?.lastSettingsSection ?? 'general'
-    void navigateToSettings(rememberedSection)
+    if (mobile) void desktopNavigation.replace({ kind: 'settings', section: rememberedSection, overview: true })
+    else void navigateToSettings(rememberedSection)
+  }
+
+  const returnToMobileSettings = (): void => {
+    const { entries, index } = desktopNavigation.getSnapshot()
+    const previous = entries[index - 1]
+    if (previous?.kind === 'settings' && previous.overview) void desktopNavigation.back()
+    else void desktopNavigation.replace({ kind: 'settings', section: settingsSection, overview: true })
+  }
+
+  const returnToMissions = (): void => {
+    const { entries, index } = desktopNavigation.getSnapshot()
+    if (mobile && entries[index - 1]?.kind === 'missions') void desktopNavigation.back()
+    else chooseView('missions')
   }
 
   const openUpdateSettings = async (
@@ -4057,17 +4078,11 @@ export function BusinessApp({
     )
   }
 
-  const navigateMobileRoot = (target: MobileRoot): void => {
-    setMobileConversationDrawerOpen(false)
-    if (target === 'settings') setMobileSettingsList(true)
-    chooseView(target === 'compose' && activeCampId ? 'camp' : target)
-  }
-
   const renderNavigation = (drawer = false): React.JSX.Element => <CampNavigation
     navigationId={drawer ? 'mobile-conversation-navigation' : 'global-navigation'}
     platform={client.platform}
-    footer={drawer ? <MobileNavigation view="compose" disabled={startupStatus !== 'resolved' || shuttingDown} onNavigate={navigateMobileRoot} /> : sidebarFooter}
-    view={drawer ? 'compose' : view === 'camp' && missionCamp ? 'missions' : view}
+    footer={sidebarFooter}
+    view={view === 'camp' && missionCamp ? 'missions' : view}
     state={startupStatus === 'resolved' ? navigationState : 'loading'}
     navigation={displayNavigation}
     groupLimits={navigationGroupLimits}
@@ -4084,13 +4099,13 @@ export function BusinessApp({
     onNewConversation={() => { setMobileConversationDrawerOpen(false); beginNewConversation() }}
     onMembers={() => { setMobileConversationDrawerOpen(false); chooseView('members') }}
     onAutomations={() => { setMobileConversationDrawerOpen(false); chooseView('automations') }}
-    onMissions={mobile ? undefined : () => chooseView('missions')}
+    onMissions={() => { setMobileConversationDrawerOpen(false); chooseView('missions') }}
     unreadMissionCount={unreadMissionCount(missionList.missions)}
     onMemory={() => { setMobileConversationDrawerOpen(false); chooseView('memory') }}
     pendingMemoryCount={pendingMemoryCount}
-    onSettings={() => { setMobileConversationDrawerOpen(false); setMobileSettingsList(true); openSettings() }}
-    onOpenUpdates={() => void openUpdateSettings()}
-    onSettingsSectionChange={(section) => { setMobileSettingsList(false); chooseSettingsSection(section) }}
+    onSettings={() => { setMobileConversationDrawerOpen(false); openSettings() }}
+    onOpenUpdates={() => { setMobileConversationDrawerOpen(false); void openUpdateSettings() }}
+    onSettingsSectionChange={chooseSettingsSection}
     onSettingsBack={closeSettings}
     onOpenProject={() => { setMobileConversationDrawerOpen(false); void openProject() }}
     onSelectProject={(project) => {
@@ -4131,20 +4146,22 @@ export function BusinessApp({
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
     <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
     <NavigationShell platform={client.platform} settings={view === 'settings'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
-      {renderNavigation()}
+      {!mobile && renderNavigation()}
+      {!startupGateVisible && mobile && ['compose', 'members', 'memory', 'automations'].includes(view) && <MobilePageHeader
+        title={({ compose: '新对话', members: '队员', memory: '记忆', automations: '定时任务' } as Record<string, string>)[view]}
+        onOpenMenu={openMobileMenu} menuOpen={mobileConversationDrawerOpen} triggerRef={mobileConversationListButtonRef} />}
       {!startupGateVisible && view === 'camp' && !missionCamp && <AppHeader
         campTitle={activeCampTitle || '对话'}
         contextLabel={activeCampContextLabel}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         detailEntryHostRef={setCampDetailEntryHost}
         onFocusApprovals={focusCampApprovals}
-        onOpenConversationList={mobile ? () => setMobileConversationDrawerOpen(true) : undefined}
+        onOpenConversationList={mobile ? openMobileMenu : undefined}
         conversationListButtonRef={mobileConversationListButtonRef}
       />}
       {windowDragPage && <WindowDragStrip page={windowDragPage} />}
 
-      <main className={`content ${pageContentClassName[missionDrawer ? 'missions' : view]}${missionCamp && view === 'camp' ? ' mission-active-content' : ''}`}>
-        {mobile && view === 'settings' && !mobileSettingsList && <div className="mobile-settings-back"><MobileBack label="返回设置" onClick={() => setMobileSettingsList(true)} /><span>设置</span></div>}
+      <main ref={mobilePageRef} className={`content ${pageContentClassName[missionDrawer ? 'missions' : view]}${missionCamp && view === 'camp' ? ' mission-active-content' : ''}`}>
         {startupGateVisible && startupStatus === 'waiting' && (
           <StartupGate
             waiting
@@ -4168,18 +4185,18 @@ export function BusinessApp({
           />
         )}
 
-        {!startupGateVisible && !mobile && <MissionBoard missions={missionList.missions} projects={displayNavigation?.projects ?? []} loading={missionList.loading} error={missionList.error}
+        {!startupGateVisible && <MissionBoard missions={missionList.missions} projects={displayNavigation?.projects ?? []} loading={missionList.loading} error={missionList.error}
           hidden={view !== 'missions' && !missionDrawer} selectedId={missionDrawer ? activeMission?.missionId : undefined} onRefresh={missionList.refresh}
+          onOpenMenu={openMobileMenu} menuOpen={mobileConversationDrawerOpen} menuTriggerRef={mobileConversationListButtonRef}
           onNew={() => { setNewMissionOpen(true) }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }}/>} 
-        {!startupGateVisible && mobile && view === 'camp' && missionCamp && <section className="mission-mobile-unavailable"><h2>请在电脑上打开此使命</h2><button className="quiet-button" onClick={() => chooseView('compose')}>返回</button></section>}
-        {!startupGateVisible && !mobile && view === 'camp' && missionCamp && !activeMission && <section className="mission-section-empty" role={missionList.error ? 'alert' : 'status'}><p>{missionList.error || (missionList.loading ? '正在读取使命…' : '此使命当前不可用。')}</p>{!missionList.loading && <button className="quiet-button" onClick={() => void missionList.refresh()}>重试</button>}</section>}
-        {!startupGateVisible && generalPreferences && view === 'camp' && !(mobile && missionCamp) && (!missionCamp || activeMission) && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
-          <MissionSurface key={activeCampId} enabled={!!activeMission} full={!missionDrawer} onExpand={() => setMissionPresentation('full')} onClose={() => chooseView('missions')}>
+        {!startupGateVisible && view === 'camp' && missionCamp && !activeMission && <section className="mission-section-empty" role={missionList.error ? 'alert' : 'status'}><p>{missionList.error || (missionList.loading ? '正在读取使命…' : '此使命当前不可用。')}</p>{!missionList.loading && <button className="quiet-button" onClick={() => void missionList.refresh()}>重试</button>}<button className="quiet-button" onClick={returnToMissions}>返回使命板</button></section>}
+        {!startupGateVisible && generalPreferences && view === 'camp' && (!missionCamp || activeMission) && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
+          <MissionSurface key={activeCampId} enabled={!!activeMission} full={!missionDrawer} onExpand={() => setMissionPresentation('full')} onClose={returnToMissions}>
           {activeMission && <MissionHeader mission={activeMission} drawer={missionDrawer} camp={visibleCampSnapshot} projectName={activeCampProject?.name ?? activeCampContextLabel}
             openRequest={missionOpenRequest} onExpand={() => setMissionPresentation('full')} onFold={() => setMissionPresentation('drawer')}
             executionTakesPreviewPriority={generalPreferences.executionConsolePlacement === 'right'
               && visibleCampSnapshot.agentRuns.some((run) => run.status === 'running')}
-            onClose={() => chooseView('missions')} onFocusApprovals={focusCampApprovals} detailEntryHostRef={setCampDetailEntryHost}/>}
+            onClose={returnToMissions} onFocusApprovals={focusCampApprovals} detailEntryHostRef={setCampDetailEntryHost}/>}
           <CampWorkspace
             key={activeCampId}
             missionBoard={activeMission ? <MissionIntro mission={activeMission} projects={displayNavigation?.projects ?? []}/> : null}
@@ -4297,6 +4314,9 @@ export function BusinessApp({
         )}
 
         {!startupGateVisible && view === 'settings' && (
+          <MobileSettingsLayout overview={mobileSettingsList} section={settingsSection} appearance={appearance}
+            menuOpen={mobileConversationDrawerOpen} triggerRef={mobileConversationListButtonRef}
+            onOpenMenu={openMobileMenu} onBack={returnToMobileSettings} onSectionChange={chooseSettingsSection}>
           <SettingsView
             preferencesApi={uiPreferences.generalPreferences}
             nativeSettings={environment.desktop && { windowControls: environment.desktop.windowControls }}
@@ -4320,6 +4340,7 @@ export function BusinessApp({
             }}
             onAppearanceChange={changeAppearancePreferences}
           />
+          </MobileSettingsLayout>
         )}
 
         {!startupGateVisible && view === 'members' && (
@@ -4372,18 +4393,30 @@ export function BusinessApp({
               )
         )}
       </main>
-      {mobile && view !== 'camp' && view !== 'missions' && <MobileNavigation view={view} disabled={startupStatus !== 'resolved' || shuttingDown} onNavigate={navigateMobileRoot} />}
 
-      {mobile && <Dialog.Root open={mobileConversationDrawerOpen && view === 'camp'} onOpenChange={setMobileConversationDrawerOpen}>
+      {mobile && <Dialog.Root open={mobileConversationDrawerOpen} onOpenChange={setMobileConversationDrawerOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="mobile-conversation-scrim" />
-          <Dialog.Content className="mobile-conversation-drawer" aria-describedby={undefined} onCloseAutoFocus={(event) => {
+          <Dialog.Content id="mobile-app-menu" className="mobile-conversation-drawer app-menu" aria-describedby={undefined} tabIndex={-1}
+            onOpenAutoFocus={event => {
+              event.preventDefault()
+              const menu = document.getElementById('mobile-app-menu')
+              const list = menu?.querySelector<HTMLElement>('.navigation-scroll')
+              if (list) list.scrollTop = mobileMenuScroll.current
+              menu?.focus()
+            }}
+            onScrollCapture={event => { if (event.target instanceof HTMLElement && event.target.classList.contains('navigation-scroll')) mobileMenuScroll.current = event.target.scrollTop }}
+            onCloseAutoFocus={(event) => {
             event.preventDefault()
-            mobileConversationListButtonRef.current?.focus({ preventScroll: true })
+            const trigger = mobileConversationListButtonRef.current
+            const visibleTrigger = trigger?.getClientRects().length ? trigger
+              : [...document.querySelectorAll<HTMLButtonElement>('.app-shell [aria-label="打开主菜单"]')].find(button => button.getClientRects().length)
+            visibleTrigger?.focus({ preventScroll: true })
           }}>
-            <Dialog.Title className="sr-only">会话列表</Dialog.Title>
+            <header className="app-menu-heading"><Dialog.Title>Rovai AI</Dialog.Title>
+              <Dialog.Close asChild><button className="mobile-icon-button" type="button" aria-label="关闭主菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></Dialog.Close>
+            </header>
             {renderNavigation(true)}
-            <Dialog.Close asChild><button className="mobile-icon-button mobile-conversation-drawer-close" type="button" aria-label="关闭会话列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></Dialog.Close>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>}
@@ -4406,14 +4439,14 @@ export function BusinessApp({
           activationState: campActivationStateForCreation('dialog')
         }, enableOneClick)}
       />
-      {!mobile && <NewConversationDialog purpose="mission" open={newMissionOpen} recovery={missionCreation.current?.command ?? null} recoveryAttachments={missionCreation.current?.attachments ?? []}
+      <NewConversationDialog purpose="mission" open={newMissionOpen} recovery={missionCreation.current?.command ?? null} recoveryAttachments={missionCreation.current?.attachments ?? []}
         initialWorkspace={currentProjectWorkspace(displayNavigation, currentProject)}
         initialSelection={generalPreferences?.newConversationDefaults ?? null}
         projects={displayNavigation?.projects ?? []} missionTagCatalog={[...new Set(missionList.missions.flatMap(mission => mission.tags))]} preflight={campCreationPreflight} agents={agents}
         busy={busy === 'create-mission'} projectAccessReady={removedProjectAuthorityReady}
         onOpenChange={open => { if (!busy) setNewMissionOpen(open) }}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory} onWorkspaceSelected={workspace => restoreNavigationProject(workspace.projectPath)}
-        onCreate={createMission}/>} 
+        onCreate={createMission}/>
       <NotificationAttentionController
         enabled={startupStatus === 'resolved'}
         activeCampId={activeCampId}
@@ -4421,7 +4454,6 @@ export function BusinessApp({
           && campSnapshot?.camp.id === activeCampId
           && !newConversationOpen
           && !newMissionOpen
-          && !(mobile && missionCamp)
           && !shuttingDown}
         navigationActive={notificationFocus !== null}
         onNavigate={navigateFromNotification}
