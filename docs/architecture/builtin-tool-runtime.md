@@ -422,6 +422,9 @@ executable integrity 校验。每个 Run 最多自动 rebind 一次；第二次�
 
 Session Charter 只说明：
 
+- 公开 Camp 正文直接以 `Rovai-ai Session Charter` 为标题，不再包含 `Authority boundaries` 小标题；
+  用简短规则介绍自己与队友、当前 `RUN_INPUT.messages` 的 body／quotes／skills／attachments、Principal、
+  Task 责任、当前证据和已有用户工作保护；引用本身不产生执行请求；
 - CLI contract 标题固定为 `Rovai Built-in CLI Contract`，不显示应用 release/version；
 - 使用 bundled `rovai`；
 - 本地 `rovai` CLI 中的完整固定业务命令 catalog；operation 不清楚时使用根帮助，本次 invocation 所需
@@ -433,11 +436,12 @@ Session Charter 只说明：
   新的未解决 Principal 决定、回答或行动，或履行其明确要求的重要结果通知时才使用 `--to-principal`；
 - Agent addressing 不是 CC；acknowledgement、agreement、thanks、closure、standby、no-new-information、
   repeated conclusion 或 courtesy reply 不得创建新 Agent routing；
+- 只有确实无法在收到另一位 Agent 的回复前继续推进时，结束当前 Run，不反复轮询 Camp history；收到回复后再继续。
+  该规则在通用正文末尾出现一次，CLI Contract 不重复；
 - Core 可能在 successful zero-send 且 Adapter final boundary 可靠时执行 Missing-Send Recovery，但它不
   保证完整最终结论公开，也不应被 Agent 当作省略 `rovai send` 的正常路径；
 - Task responsibility definition belongs to the User or current Camp Default Lead；
 - Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
-- Core 在每次 invocation 重做授权，任何模型可见 ID/fact 都不是 authorization token；
 - Dynamic Context 可以按确定性容量省略 section 或完整消息，但不裁剪已选择消息正文。public
   `SHARED_CONVERSATION` 使用 Profile v8 的 Camp+Agent accepted 增量窗口，保留自身消息和原始顺序；超过
   15 条时返回最新 15 条及 `omittedCount + historyReadCursor`；
@@ -451,7 +455,7 @@ closed 或尚未绑定的会话不追加。已有 Binding 从 Blob 复用冻结 
 精确文本见 [Send v22](../contracts/camp-message-send-v22.md)。
 
 Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send、Memory
-治理或 polling 操作指导。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
+治理或具体 polling 操作指导；上面的等待队友回复时结束 Run 是通用停止条件。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
 与复杂 recovery 属于窄触发 `cli-operations` official Skill；Memory 治理属于
 `memory-stewardship`。特别是
 `task create --help` 面向 User/Default Lead 说明只持久化跨 Run/交接的独立责任，并优先推进已有

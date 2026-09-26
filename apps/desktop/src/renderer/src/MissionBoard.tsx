@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type Ref } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import type { AgentProfile, CampOpenProjection, MissionDelivery, MissionRecord, MissionStatus, MissionUpdate, MissionWorkspace, ProjectNavigationGroup } from '@contracts'
@@ -6,6 +6,7 @@ import { useCampClient, type CampClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { DialogControlIcon } from './AppDialog'
 import { NavigationIcon } from './NavigationIcon'
+import { MobilePageHeader, useMobileLayout } from './MobileLayout'
 import { MissionIcon } from './MissionIcon'
 import { Avatar, CompactDialog, Icon, LabelsEditor, MissionAvatars, MissionContextMenu, MissionFilter, MissionPeopleProvider, MissionPopover, MissionRoster, MissionTags, StatusIcon, FilterStateIcon, TagColorDot, statuses, type ContextPosition } from './MissionControls'
 import { RunningText } from './RunningText'
@@ -329,10 +330,17 @@ function MissionDelete({ mission, onDelete, onClose }: { mission: MissionRecord;
   </CompactDialog>
 }
 
-export function MissionBoard({ missions, projects, loading, error, selectedId, hidden, onRefresh, onNew, onOpen }: {
-  missions: MissionRecord[]; projects: ProjectNavigationGroup[]; loading: boolean; error: string | null; selectedId?: string; hidden?: boolean; onRefresh(): Promise<void>; onNew(): void; onOpen(m: MissionRecord): void
+export function MissionBoard({ missions, projects, loading, error, selectedId, hidden, onRefresh, onNew, onOpen, onOpenMenu = () => undefined, menuOpen = false, menuTriggerRef }: {
+  missions: MissionRecord[]; projects: ProjectNavigationGroup[]; loading: boolean; error: string | null; selectedId?: string; hidden?: boolean; onRefresh(): Promise<void>; onNew(): void; onOpen(m: MissionRecord): void; onOpenMenu?(trigger: HTMLButtonElement): void; menuOpen?: boolean; menuTriggerRef?: Ref<HTMLButtonElement>
 }) {
   const actions = useMissionActions()
+  const mobile = useMobileLayout()
+  const [searchOpen, setSearchOpen] = useState(false)
+  const mobileOffsets = useRef<Partial<Record<MissionStatus, number>>>({})
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null)
+  const held = useRef(false)
+  const cancelPress = (): void => { if (press.current) clearTimeout(press.current.timer); press.current = null }
+  useEffect(() => { if (hidden) cancelPress(); return cancelPress }, [hidden])
   const [query, setQuery] = useState(''), [stateFilter, setStateFilter] = useState<string[]>([]), [tags, setTags] = useState<string[]>([]), [projectFilter, setProjectFilter] = useState<string[]>([]), [view, setView] = useState<'board' | 'list'>('board')
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -341,6 +349,9 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
   const [activeLane, setActiveLane] = useState<MissionStatus>('needs_you')
   const [scrolledLanes, setScrolledLanes] = useState<Partial<Record<MissionStatus, boolean>>>({})
   const boardScroll = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (mobile && boardScroll.current) boardScroll.current.scrollTop = mobileOffsets.current[activeLane] ?? 0
+  }, [activeLane, mobile])
   const laneScrolls = useRef(new Map<MissionStatus, HTMLDivElement>())
   const laneScrollMemory = useRef(new Map<MissionStatus, number>())
   const boardHorizontalMemory = useRef(0)
@@ -359,7 +370,7 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
   }, [])
   const catalog = [...new Set(missions.flatMap(m => m.tags))].sort((a, b) => a.localeCompare(b, 'zh-CN'))
   const paths = [...new Set(missions.map(m => m.projectPath))]
-  const filtered = missions.filter(m => (!stateFilter.length || stateFilter.includes(m.status)) && (!tags.length || tags.some(t => m.tags.includes(t))) && (!projectFilter.length || projectFilter.includes(m.projectPath)) && `${m.title}\n${m.description}\n${m.tags.join(' ')}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+  const filtered = missions.filter(m => (mobile || !stateFilter.length || stateFilter.includes(m.status)) && (!tags.length || tags.some(t => m.tags.includes(t))) && (!projectFilter.length || projectFilter.includes(m.projectPath)) && `${m.title}\n${m.description}\n${m.tags.join(' ')}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   const visibleStatuses = statuses.filter(status => !stateFilter.length || stateFilter.includes(status.id))
   const updateActiveLane = (): void => {
     const host = boardScroll.current
@@ -390,6 +401,8 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
   }, [view])
   useLayoutEffect(() => {
     laneScrollMemory.current.clear()
+    mobileOffsets.current = {}
+    if (mobile && boardScroll.current) boardScroll.current.scrollTop = 0
     laneScrolls.current.forEach(lane => { lane.scrollTop = 0 })
     updateActiveLane()
   }, [query, stateFilter.join('\u0000'), tags.join('\u0000'), projectFilter.join('\u0000')])
@@ -465,11 +478,25 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
       if (!(event.target instanceof Element) || event.target.closest('button,a,input') || window.getSelection()?.toString()) return
       event.currentTarget.querySelector<HTMLButtonElement>('.mission-card-open')?.focus({ preventScroll: true }); onOpen(m)
     }
-    return <article key={m.missionId} data-mission-id={m.missionId} aria-busy={cleanupFeedback === 'cleaning' || undefined} className={`mission-board-card${selectedId === m.missionId ? ' selected' : ''}${draggingId === m.missionId ? ' is-dragging' : ''}${m.hasUnread ? ' is-unread' : ''}`} onClick={openFromContainer} onContextMenu={e => actions.menu(m, e)} draggable
+    return <article key={m.missionId} data-mission-id={m.missionId} aria-busy={cleanupFeedback === 'cleaning' || undefined} className={`mission-board-card${selectedId === m.missionId ? ' selected' : ''}${draggingId === m.missionId ? ' is-dragging' : ''}${m.hasUnread ? ' is-unread' : ''}`} onClick={openFromContainer} onContextMenu={e => { cancelPress(); actions.menu(m, e) }} draggable={!mobile}
+      onPointerDown={event => {
+        held.current = false
+        if (!mobile || event.pointerType === 'mouse' || !event.isPrimary) return
+        cancelPress()
+        const target = event.currentTarget, x = event.clientX, y = event.clientY
+        press.current = { x, y, timer: setTimeout(() => {
+          press.current = null; held.current = true
+          target.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }))
+        }, 480) }
+      }}
+      onPointerMove={event => { if (press.current && Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 10) cancelPress() }}
+      onPointerUp={cancelPress} onPointerCancel={cancelPress}
+      onClickCapture={event => { if (held.current) { held.current = false; event.preventDefault(); event.stopPropagation() } }}
       onDragStart={event => { setDraggingId(m.missionId); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', m.missionId) }}
       onDragEnd={stopDragging}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || e.key === 'F10' && e.shiftKey) { e.preventDefault(); const bounds = e.currentTarget.getBoundingClientRect(); e.currentTarget.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: bounds.left, clientY: bounds.bottom })) } }}>
+      onKeyDown={e => { held.current = false; if (e.key === 'ContextMenu' || e.key === 'F10' && e.shiftKey) { e.preventDefault(); const bounds = e.currentTarget.getBoundingClientRect(); e.currentTarget.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: bounds.left, clientY: bounds.bottom })) } }}>
       <div className="mission-card-meta"><span>{`M-${String(m.number).padStart(3, '0')}`}</span><div className="mission-card-top-actions"><MissionRunning mission={m} pageHidden={pageHidden}/></div></div>
+      {mobile && <button type="button" className="mobile-context-trigger" aria-label={`${m.title}的操作`} onClick={event => actions.menu(m, event)}>操作</button>}
       <button className="mission-card-open" onClick={() => onOpen(m)}><h3>{m.title}</h3></button>
       <div className="mission-project-tags"><span className="mission-card-project" title={displayProjectPath(m.projectPath)}><NavigationIcon name="folder-open"/>{missionProject(m, projects)}</span><MissionTags tags={m.tags}/></div>
       <div className="mission-card-footer"><MissionAvatars m={m} compact onClick={e => actions.roster(m, e)}/>{m.hasUnread && <span className="mission-unread-message" role="img" aria-label="有未读回复" title="有未读回复；与执行状态独立"><span className="mission-unread-dot" aria-hidden="true"/><span aria-hidden="true">未读</span></span>}<time dateTime={m.updatedAt} title={new Date(m.updatedAt).toLocaleString()}>{missionDate(m.updatedAt)}</time></div>
@@ -478,6 +505,35 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
       )}
     </article>
   }
+  if (mobile) return <section className="mission-board-page mobile-mission-board" hidden={hidden} aria-label="使命板">
+    <MobilePageHeader title="使命板" onOpenMenu={onOpenMenu} menuOpen={menuOpen} triggerRef={menuTriggerRef}>
+      <button className="mission-new mission-new-entry" onClick={onNew}><Icon name="plus" />新使命</button>
+    </MobilePageHeader>
+    <div className="mobile-mission-toolbar">
+      {searchOpen ? <><label className="mobile-mission-search"><NavigationIcon name="search" /><input autoFocus aria-label="搜索使命" placeholder="搜索使命…" value={query} onChange={event => setQuery(event.target.value)} /></label><button type="button" onClick={() => { setSearchOpen(false); setQuery('') }}>取消</button></> : <>
+        <MissionFilter label="项目" icon={<NavigationIcon name="folder-open" />} values={projectFilter} onChange={setProjectFilter} options={paths.map(path => ({ id: path, keywords: path, icon: <NavigationIcon name="folder-open" />, label: missionProject(missions.find(m => m.projectPath === path)!, projects) }))} />
+        <MissionFilter label="标签" icon={<Icon name="tag" />} values={tags} onChange={setTags} options={catalog.map(tag => ({ id: tag, label: tag, icon: <TagColorDot tag={tag} /> }))} />
+        {!!(tags.length + projectFilter.length) && <button type="button" className="mobile-icon-button" aria-label="清除筛选" onClick={() => { setTags([]); setProjectFilter([]) }}><DialogControlIcon name="close" /></button>}
+        <button type="button" className="mobile-icon-button mobile-mission-search-trigger" aria-label="搜索使命" onClick={() => setSearchOpen(true)}><NavigationIcon name="search" /></button>
+      </>}
+    </div>
+    <nav className="mission-status-tabs" aria-label="使命状态">{statuses.map(status => <button type="button" key={status.id} aria-pressed={activeLane === status.id} onClick={() => {
+      cancelPress()
+      if (boardScroll.current) mobileOffsets.current[activeLane] = boardScroll.current.scrollTop
+      setActiveLane(status.id)
+    }}><StatusIcon status={status.id} /><span>{status.label}</span><small>{filtered.filter(m => m.status === status.id).length}</small></button>)}</nav>
+    <MissionCleanupNotice />
+    <div className="mobile-mission-list" ref={boardScroll} onScroll={cancelPress} aria-label={`${statuses.find(s => s.id === activeLane)?.label}的使命`}>
+      {error && <div className="mission-load-error" role="alert"><span>{error}</span><button onClick={() => void onRefresh()}>重试</button></div>}
+      {loading && !missions.length ? <p className="mission-section-empty" role="status">正在读取使命…</p> : <>
+        {filtered.filter(m => m.status === activeLane).map(card)}
+        {!filtered.some(m => m.status === activeLane) && !error && <div className="mission-mobile-empty">
+          <MissionIcon /><h2>{query || tags.length || projectFilter.length ? '没有匹配的使命' : !missions.length ? '从一个目标开始' : `暂无${statuses.find(s => s.id === activeLane)?.label}的使命`}</h2>
+          {query || tags.length || projectFilter.length ? <button type="button" className="quiet-button" onClick={() => { setQuery(''); setTags([]); setProjectFilter([]) }}>清除筛选</button> : <button type="button" className="mission-new" onClick={onNew}><Icon name="plus" />新使命</button>}
+        </div>}
+      </>}
+    </div>
+  </section>
   return <section className="mission-board-content mission-board-page" hidden={hidden} aria-label="使命板">
     <header className="mission-page-header"><div><h1>使命板</h1><p>设定目标，与队伍一起推进。</p></div><button className="mission-new mission-new-entry" onClick={onNew}><Icon name="plus"/>新使命</button></header>
     <div className="mission-toolbar"><div className="mission-filter-group">

@@ -2,6 +2,7 @@ export * from '../../shared/execution-presentation/safe-markdown-model'
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
+import { decodeString } from 'micromark-util-decode-string'
 import { parseFileReference } from '../../file-preview-reference'
 
 export type MarkdownNode = {
@@ -17,6 +18,18 @@ export type MarkdownNode = {
 const safeMarkdownParser = unified()
   .use(remarkParse)
   .use(remarkGfm, { singleTilde: false })
+
+// Check decoded Markdown text as well as raw source: an entity such as &#82;
+// must never turn ordinary text into a trusted structured-content placeholder.
+export function markdownInlineContentPrefix(source: string): string {
+  // Decode the entire source independently of block syntax. Inserting mentions
+  // can turn a definition or HTML region into visible text. Removing escapes
+  // deliberately overestimates collisions, including across segment boundaries.
+  const decoded = decodeString(source.replaceAll('\\', ''))
+  let prefix = 'ROVAICURRENTUSER'
+  while (source.includes(prefix) || decoded.includes(prefix)) prefix += 'X'
+  return prefix
+}
 
 const omittedNodeTypes = new Set([
   'definition',

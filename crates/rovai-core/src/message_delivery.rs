@@ -10,8 +10,8 @@ use crate::{
     agent_identity::parse_agent_id,
     agent_profile::resolve_frozen_runtime,
     camp_content::{
-        StructuredCampMessageSegment, canonical_content_digest, normalize_content,
-        render_current_plain_text,
+        AGENT_PRINCIPAL_DISPLAY_NAME, StructuredCampMessageSegment, canonical_content_digest,
+        normalize_content, render_current_plain_text,
     },
     collaboration::{append_domain_event, build_effective_config},
     command::{ActorRef, CommandHandlerResult, EntityReference, canonical_json_digest},
@@ -180,6 +180,7 @@ struct AddressingOffender {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InlineAddressing {
     occurrences: Vec<InlineAddressingOccurrence>,
+    principal_occurrences: Vec<std::ops::Range<usize>>,
     malformed: Vec<String>,
 }
 
@@ -230,23 +231,18 @@ pub fn persist_queued_agent_message(
     }
 
     let automatic_addressing = request.agent_addressing_mode == AgentAddressingMode::Automatic;
-    let active_agents = if automatic_addressing {
-        load_active_camp_agents(transaction, request.camp_id)?
-    } else {
-        Vec::new()
-    };
+    // PublicOnly still recognizes Principal in a mixed leading mention cluster;
+    // member identities participate in parsing, never in routing in that mode.
+    let active_agents = load_active_camp_agents(transaction, request.camp_id)?;
     let active_agent_ids = active_agents
         .iter()
         .map(|agent| agent.agent_id.clone())
         .collect::<HashSet<_>>();
-    let inline = if automatic_addressing {
-        parse_inline_addressing(request.body, &active_agents)
-    } else {
-        InlineAddressing {
-            occurrences: Vec::new(),
-            malformed: Vec::new(),
-        }
-    };
+    let mut inline = parse_inline_addressing(request.body, &active_agents);
+    if !automatic_addressing {
+        inline.occurrences.clear();
+        inline.malformed.clear();
+    }
     let explicit_order = if automatic_addressing {
         stable_unique(
             request
@@ -381,6 +377,7 @@ pub fn persist_queued_agent_message(
     let content = structured_content_from_inline_addressing(
         request.body,
         &inline.occurrences,
+        &inline.principal_occurrences,
         request.mention_user,
     );
     let projected_body = render_current_plain_text(transaction, &content)?;
@@ -1366,7 +1363,13 @@ fn process_dispatch_attempt(
             &delivery,
             attempt_id,
             "failed",
-            "recipient_not_in_feishu_roster",
+            if topic_parent_roster_identity(&transaction, &delivery.camp_id)?
+                .is_some_and(|(provider, _, _)| provider == "lark")
+            {
+                "recipient_not_in_lark_roster"
+            } else {
+                "recipient_not_in_feishu_roster"
+            },
             &actor,
             &now,
         )?;
@@ -1963,7 +1966,7 @@ fn topic_parent_roster_identity(
             JOIN channel_conversation AS conversation
               ON conversation.id = binding.channel_conversation_id
             WHERE binding.camp_id = ?1 AND binding.status = 'active'
-              AND conversation.provider = 'feishu'
+              AND conversation.provider IN ('feishu', 'lark')
               AND conversation.conversation_kind = 'topic'
             LIMIT 1
             "#,
@@ -1989,8 +1992,9 @@ pub(crate) fn topic_channel_recipient_is_present(
             SELECT EXISTS(
                 SELECT 1
                 FROM external_group_bot_roster AS roster
-                JOIN feishu_member_bot AS bot
-                  ON bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
+                JOIN channel_member_bot_directory AS bot
+                  ON bot.provider = roster.provider
+                 AND bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
                 WHERE roster.provider = ?1
                   AND roster.tenant_key = ?2 AND roster.chat_id = ?3
                   AND roster.agent_id = ?4 AND roster.status = 'present'
@@ -2005,6 +2009,7 @@ pub(crate) fn topic_channel_recipient_is_present(
 
 pub(crate) fn pending_topic_roster_refreshes(
     transaction: &Transaction<'_>,
+    provider: &str,
 ) -> Result<Vec<TopicRosterRefreshRequest>> {
     let mut statement = transaction.prepare(
         r#"
@@ -2022,7 +2027,7 @@ pub(crate) fn pending_topic_roster_refreshes(
           AND delivery.dispatch_phase = 'attempted_waiting'
           AND delivery.wait_condition = ?1
           AND json_extract(delivery.failure_detail_json, '$.blockerCode') = ?2
-          AND conversation.provider = 'feishu'
+          AND conversation.provider = ?3
           AND conversation.conversation_kind = 'topic'
         GROUP BY conversation.provider, conversation.tenant_key, conversation.chat_id
         ORDER BY conversation.provider, conversation.tenant_key, conversation.chat_id
@@ -2030,7 +2035,11 @@ pub(crate) fn pending_topic_roster_refreshes(
     )?;
     Ok(statement
         .query_map(
-            params![TOPIC_ROSTER_WAIT_CONDITION, TOPIC_ROSTER_SYNC_BLOCKER_CODE],
+            params![
+                TOPIC_ROSTER_WAIT_CONDITION,
+                TOPIC_ROSTER_SYNC_BLOCKER_CODE,
+                provider
+            ],
             |row| {
                 Ok(TopicRosterRefreshRequest {
                     provider: row.get(0)?,
@@ -2270,6 +2279,7 @@ fn stable_unique(values: impl IntoIterator<Item = String>) -> Vec<String> {
 fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> InlineAddressing {
     let bytes = body.as_bytes();
     let mut occurrences = Vec::new();
+    let mut principal_occurrences = Vec::new();
     let mut malformed = Vec::new();
     let mut index = 0_usize;
     let mut fenced = false;
@@ -2309,8 +2319,9 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
             continue;
         }
         let token_start = body[..index]
-            .rfind(char::is_whitespace)
-            .map(|position| position + 1)
+            .char_indices()
+            .rfind(|(_, character)| character.is_whitespace())
+            .map(|(position, character)| position + character.len_utf8())
             .unwrap_or(0);
         if body[token_start..index].contains("://") {
             index += 1;
@@ -2357,6 +2368,17 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
             continue;
         }
 
+        // Principal is a reserved human identity, independent of member names.
+        if let Some(remainder) = body[index + 1..].strip_prefix(AGENT_PRINCIPAL_DISPLAY_NAME)
+            && (remainder.is_empty() || remainder.chars().next().is_some_and(char::is_whitespace))
+        {
+            let end_byte = index + 1 + AGENT_PRINCIPAL_DISPLAY_NAME.len();
+            principal_occurrences.push(index..end_byte);
+            line_cluster_end = Some(end_byte);
+            index = end_byte;
+            continue;
+        }
+
         if let Some((agent_id, end_byte)) = match_display_name_mention(body, index, active_agents) {
             occurrences.push(InlineAddressingOccurrence {
                 agent_id: agent_id.to_string(),
@@ -2374,6 +2396,7 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
     }
     InlineAddressing {
         occurrences,
+        principal_occurrences,
         malformed,
     }
 }
@@ -2449,30 +2472,52 @@ fn match_display_name_mention<'a>(
 fn structured_content_from_inline_addressing(
     body: &str,
     occurrences: &[InlineAddressingOccurrence],
+    principal_occurrences: &[std::ops::Range<usize>],
     mention_user: bool,
 ) -> Vec<StructuredCampMessageSegment> {
-    let mut content = Vec::with_capacity(
-        occurrences
-            .len()
-            .saturating_mul(2)
-            .saturating_add(if mention_user { 2 } else { 1 }),
-    );
-    if mention_user {
+    let mut mentions = occurrences
+        .iter()
+        .map(|occurrence| {
+            (
+                occurrence.start_byte..occurrence.end_byte,
+                StructuredCampMessageSegment::MemberMention {
+                    agent_id: occurrence.agent_id.clone(),
+                },
+            )
+        })
+        .chain(principal_occurrences.iter().map(|range| {
+            (
+                range.clone(),
+                StructuredCampMessageSegment::CurrentUserMention {
+                    user_id: CURRENT_USER_ID.to_string(),
+                },
+            )
+        }))
+        .collect::<Vec<_>>();
+    mentions.sort_by_key(|(range, _)| range.start);
+    let mut content = Vec::with_capacity(mentions.len().saturating_mul(2).saturating_add(2));
+    if mention_user && principal_occurrences.is_empty() {
         content.push(StructuredCampMessageSegment::CurrentUserMention {
             user_id: CURRENT_USER_ID.to_string(),
         });
     }
     let mut cursor = 0_usize;
-    for occurrence in occurrences {
-        if cursor < occurrence.start_byte {
+    for (range, mention) in mentions {
+        if cursor < range.start {
             content.push(StructuredCampMessageSegment::Text {
-                text: body[cursor..occurrence.start_byte].to_string(),
+                text: body[cursor..range.start].to_string(),
             });
         }
-        content.push(StructuredCampMessageSegment::MemberMention {
-            agent_id: occurrence.agent_id.clone(),
-        });
-        cursor = occurrence.end_byte;
+        // The existing leading CurrentUser projection supplies one separator.
+        // Consume that authored separator so explicit and inline sends share
+        // the same stored shape, without rewriting historical projections.
+        let leading_principal = range.start == 0
+            && matches!(
+                mention,
+                StructuredCampMessageSegment::CurrentUserMention { .. }
+            );
+        content.push(mention);
+        cursor = range.end + usize::from(leading_principal && body[range.end..].starts_with(' '));
     }
     if cursor < body.len() {
         content.push(StructuredCampMessageSegment::Text {
@@ -2495,6 +2540,252 @@ fn rejected_with_details(code: &str, message: &str, details: Value) -> CommandHa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Owns the persisted roster gate, not channel admission or Runtime setup.
+    // A small SQLite fixture exercises the real gate and provider-scoped queries;
+    // the existing channel membership test only covers Camp roster reconciliation.
+    #[test]
+    fn topic_dispatch_waits_for_its_provider_roster_and_checks_its_published_bot() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch(r#"
+            CREATE TABLE channel_conversation(id, provider, tenant_key, chat_id, conversation_kind);
+            CREATE TABLE channel_conversation_binding(camp_id, channel_conversation_id, status);
+            CREATE TABLE external_group_bot_roster_state(provider, tenant_key, chat_id, generation);
+            CREATE TABLE external_group_bot_roster(provider, tenant_key, chat_id, app_id, agent_id, status);
+            CREATE TABLE channel_member_bot_directory(provider, app_id, agent_id, status);
+            CREATE TABLE message_delivery(id, camp_id, status, dispatch_phase, active_dispatch_attempt_id,
+                wait_condition, failure_detail_json, version, updated_at);
+            CREATE TABLE message_delivery_attempt(id, delivery_id, status, wait_condition, failure_detail_json, ended_at);
+            CREATE TABLE event_log(event_id, task_id, turn_id, sequence, event_type, native_method,
+                payload_json, camp_id, entity_type, entity_id, actor_type, actor_id, source_agent_run_id,
+                execution_epoch, created_at);
+        "#).unwrap();
+        let tx = connection.transaction().unwrap();
+        let actor = ActorRef::System {
+            component_id: "message-dispatcher".into(),
+        };
+        let now = "2026-09-27T00:00:00Z";
+        let delivery = |provider: &str| DispatchDelivery {
+            id: provider.into(),
+            camp_id: provider.into(),
+            camp_turn_id: "turn".into(),
+            message_id: "message".into(),
+            camp_message_boundary_sequence: 1,
+            recipient_agent_id: "agent_1".into(),
+            recipient_membership_version_at_admission: 1,
+            task_id: None,
+            assignee_agent_id_at_admission: None,
+            source_agent_run_id: "source".into(),
+            delivery_kind: "agent_message".into(),
+            completion_role: "required".into(),
+            gather_id: None,
+            edge_kind: None,
+            target_parent_agent_run_id: None,
+            return_to_agent_run_id: None,
+            a2a_root_agent_run_id: None,
+            a2a_depth: 0,
+            retry_generation: 0,
+            failure_detail_json: None,
+        };
+        for provider in ["feishu", "lark"] {
+            // Deliberately collide tenant, chat, App and Agent IDs across providers.
+            tx.execute(
+                "INSERT INTO channel_conversation VALUES(?1,?1,'tenant','chat','topic')",
+                [provider],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO channel_conversation_binding VALUES(?1,?1,'active')",
+                [provider],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO external_group_bot_roster_state VALUES(?1,'tenant','chat',4)",
+                [provider],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO external_group_bot_roster VALUES(?1,'tenant','chat','app','agent_1','present')", [provider]).unwrap();
+            tx.execute(
+                "INSERT INTO channel_member_bot_directory VALUES(?1,'app','agent_1',?2)",
+                params![
+                    provider,
+                    if provider == "feishu" {
+                        "published"
+                    } else {
+                        "disabled"
+                    }
+                ],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO message_delivery VALUES(?1,?1,'pending','attempting',?1,NULL,NULL,1,?2)", params![provider, now]).unwrap();
+            tx.execute(
+                "INSERT INTO message_delivery_attempt VALUES(?1,?1,'attempting',NULL,NULL,NULL)",
+                [provider],
+            )
+            .unwrap();
+            assert!(
+                !topic_roster_is_fresh_for_attempt(&tx, &delivery(provider), provider, &actor, now)
+                    .unwrap(),
+                "{provider}"
+            );
+        }
+        for provider in ["feishu", "lark"] {
+            assert_eq!(
+                pending_topic_roster_refreshes(&tx, provider).unwrap(),
+                vec![TopicRosterRefreshRequest {
+                    provider: provider.into(),
+                    tenant_key: "tenant".into(),
+                    chat_id: "chat".into(),
+                    required_roster_generation: 5,
+                }]
+            );
+        }
+        assert!(
+            pending_topic_roster_refreshes(&tx, "dingtalk")
+                .unwrap()
+                .is_empty()
+        );
+        let resume = |provider: &str| {
+            let mut value = delivery(provider);
+            value.failure_detail_json = tx
+                .query_row(
+                    "SELECT failure_detail_json FROM message_delivery WHERE id=?1",
+                    [provider],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            tx.execute("UPDATE message_delivery SET dispatch_phase='attempting',active_dispatch_attempt_id=?1,wait_condition=NULL WHERE id=?1", [provider]).unwrap();
+            tx.execute("UPDATE message_delivery_attempt SET status='attempting',wait_condition=NULL WHERE id=?1", [provider]).unwrap();
+            value
+        };
+        tx.execute(
+            "UPDATE external_group_bot_roster_state SET generation=8 WHERE provider='feishu'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !topic_roster_is_fresh_for_attempt(&tx, &resume("lark"), "lark", &actor, now).unwrap(),
+            "another provider cannot release this gate"
+        );
+        assert_eq!(
+            pending_topic_roster_refreshes(&tx, "lark").unwrap()[0].required_roster_generation,
+            5
+        );
+        tx.execute(
+            "UPDATE external_group_bot_roster_state SET generation=5 WHERE provider='lark'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            topic_roster_is_fresh_for_attempt(&tx, &resume("lark"), "lark", &actor, now).unwrap()
+        );
+        assert!(
+            pending_topic_roster_refreshes(&tx, "lark")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(topic_channel_recipient_is_present(&tx, "feishu", "agent_1").unwrap());
+        assert!(
+            !topic_channel_recipient_is_present(&tx, "lark", "agent_1").unwrap(),
+            "a published Feishu Bot cannot authorize a disabled Lark Bot"
+        );
+        tx.execute(
+            "UPDATE channel_member_bot_directory SET status='published' WHERE provider='lark'",
+            [],
+        )
+        .unwrap();
+        assert!(topic_channel_recipient_is_present(&tx, "lark", "agent_1").unwrap());
+        tx.execute(
+            "UPDATE external_group_bot_roster SET status='absent' WHERE provider='lark'",
+            [],
+        )
+        .unwrap();
+        assert!(!topic_channel_recipient_is_present(&tx, "lark", "agent_1").unwrap());
+        assert!(topic_channel_recipient_is_present(&tx, "feishu", "agent_1").unwrap());
+    }
+
+    // Parser/normalization owns the syntax matrix; the Send integration owner
+    // separately verifies the atomic notification, routing and replay effects.
+    #[test]
+    fn principal_alias_uses_leading_clusters_and_merges_explicit_attention() {
+        let agents = vec![
+            ActiveCampAgent {
+                agent_id: "agent_2".into(),
+                display_name: "爱丽丝".into(),
+            },
+            ActiveCampAgent {
+                agent_id: "agent_3".into(),
+                display_name: "Principal".into(),
+            },
+        ];
+        for (body, principal_count, member_count) in [
+            ("@Principal 请确认", 1, 0),
+            ("  @Principal 请确认", 1, 0),
+            ("\u{3000}@Principal 请确认", 1, 0),
+            ("@Principal\u{a0}@Principal 请确认", 2, 0),
+            ("\t@Principal 请确认", 1, 0),
+            ("    @Principal 请确认", 1, 0),
+            ("开头\n@Principal 请确认\n末行", 1, 0),
+            ("开头\n\t@Principal", 1, 0),
+            ("@爱丽丝 @Principal 请确认", 1, 1),
+            ("@Principal @爱丽丝 请确认", 1, 1),
+            ("@agent_2 @Principal 请确认", 1, 1),
+            ("@Principal @Principal 请确认", 2, 0),
+            ("讨论 @Principal 的含义", 0, 0),
+            ("@爱丽丝 请问 @Principal", 0, 1),
+            ("@不存在 @Principal 请确认", 0, 0),
+            ("@principal 请确认", 0, 0),
+            ("@PrincipalExtra 请确认", 0, 0),
+            ("@Principal，请确认", 0, 0),
+            ("\\@Principal 请确认", 0, 0),
+            ("> @Principal 请确认", 0, 0),
+            ("- @Principal 请确认", 0, 0),
+            ("https://example.test/@Principal", 0, 0),
+            ("`@Principal 请确认`", 0, 0),
+            ("```text\n@Principal 请确认\n```", 0, 0),
+        ] {
+            let parsed = parse_inline_addressing(body, &agents);
+            assert_eq!(
+                parsed.principal_occurrences.len(),
+                principal_count,
+                "{body}"
+            );
+            assert_eq!(parsed.occurrences.len(), member_count, "{body}");
+            for range in &parsed.principal_occurrences {
+                assert_eq!(&body[range.clone()], "@Principal");
+            }
+        }
+        for explicit in [false, true] {
+            let body = "@Principal 请确认";
+            let parsed = parse_inline_addressing(body, &agents);
+            let content = structured_content_from_inline_addressing(
+                body,
+                &parsed.occurrences,
+                &parsed.principal_occurrences,
+                explicit,
+            );
+            assert_eq!(
+                content,
+                vec![
+                    StructuredCampMessageSegment::CurrentUserMention {
+                        user_id: CURRENT_USER_ID.into()
+                    },
+                    StructuredCampMessageSegment::Text {
+                        text: "请确认".into()
+                    },
+                ]
+            );
+            assert_eq!(
+                crate::camp_content::render_plain_text_with_current_user(
+                    &content,
+                    |_| None,
+                    "Murray✨"
+                )
+                .unwrap(),
+                "@Murray✨ 请确认"
+            );
+        }
+    }
 
     #[test]
     fn strict_inline_parser_ignores_literal_regions_and_preserves_source_order() {
@@ -2613,11 +2904,7 @@ https://example.test/@agent_7
             );
         }
 
-        for body in [
-            "@爱丽丝 @不存在 请处理",
-            "@爱丽丝 @Principal 请处理",
-            "@爱丽丝 @不存在 @鲍勃 请处理",
-        ] {
+        for body in ["@爱丽丝 @不存在 请处理", "@爱丽丝 @不存在 @鲍勃 请处理"] {
             let parsed = parse_inline_addressing(body, &active_agents);
             assert_eq!(
                 parsed
@@ -2631,7 +2918,8 @@ https://example.test/@agent_7
         }
 
         let principal_first = parse_inline_addressing("@Principal @爱丽丝 请处理", &active_agents);
-        assert!(principal_first.occurrences.is_empty());
+        assert_eq!(principal_first.occurrences[0].agent_id, "agent_6");
+        assert_eq!(principal_first.principal_occurrences, vec![0..10]);
         assert!(principal_first.malformed.is_empty());
 
         for body in [

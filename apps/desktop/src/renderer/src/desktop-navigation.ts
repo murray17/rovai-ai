@@ -10,7 +10,7 @@ export type MemoryNavigationTarget = {
 
 export type NavigationTarget = Exclude<RestorableLocation, { kind: 'memory' }>
   | MemoryNavigationTarget
-  | { kind: 'settings'; section: SettingsSection }
+  | { kind: 'settings'; section: SettingsSection; overview?: true }
   | { kind: 'automations' }
   | { kind: 'missions' }
 
@@ -28,7 +28,7 @@ export function sameNavigationDestination(a: NavigationTarget, b: NavigationTarg
   if (a.kind !== b.kind) return false
   switch (a.kind) {
     case 'camp': return b.kind === 'camp' && a.campId === b.campId
-    case 'settings': return b.kind === 'settings' && a.section === b.section
+    case 'settings': return b.kind === 'settings' && a.section === b.section && a.overview === b.overview
     case 'members': return b.kind === 'members' && a.agentId === b.agentId && a.tab === b.tab
     case 'memory': return b.kind === 'memory' && a.memoryId === b.memoryId
     default: return true

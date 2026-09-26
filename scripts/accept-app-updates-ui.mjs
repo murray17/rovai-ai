@@ -56,7 +56,7 @@ try {
     outputDir,
     verified: {
       isolatedPackagedApplication: true,
-      packagedVersion: '0.3.2',
+      packagedVersion: '0.4.0',
       typedIdleUpdaterSnapshot: true,
       bundledCurrentRelease: true,
       duplicateReleaseTitleRemoved: true,
@@ -95,14 +95,14 @@ async function openAboutUpdates(cdp) {
   assert(selected, 'About & Updates Settings entry was unavailable')
   await waitForSelector(cdp, '.about-updates-settings')
   await waitForExpression(cdp,
-    `document.querySelector('.about-identity p > span:first-child')?.textContent === '版本 v0.3.2'`)
+    `document.querySelector('.about-identity p > span:first-child')?.textContent === '版本 v0.4.0'`)
 }
 
 async function assertAboutUpdates(cdp, context) {
   const updaterSnapshot = await evaluate(cdp, 'window.rovai.appUpdates.get()', true)
-  assert(updaterSnapshot?.currentVersion === '0.3.2'
-    && updaterSnapshot.currentRelease?.version === '0.3.2'
-    && updaterSnapshot.currentRelease.releaseNotes?.startsWith('# Rovai AI v0.3.2\n')
+  assert(updaterSnapshot?.currentVersion === '0.4.0'
+    && updaterSnapshot.currentRelease?.version === '0.4.0'
+    && updaterSnapshot.currentRelease.releaseNotes?.startsWith('# Rovai AI v0.4.0\n')
     && updaterSnapshot.status === 'idle'
     && updaterSnapshot.availableRelease === null
     && updaterSnapshot.lastCheckSource === null
@@ -130,7 +130,7 @@ async function assertAboutUpdates(cdp, context) {
       releaseVisible: Boolean(surface?.querySelector('.about-release-section')),
       releaseVersion: surface?.querySelector('.about-release-section')?.dataset.appUpdateReleaseVersion,
       releaseNotesText: surface?.querySelector('.about-release-notes')?.textContent ?? '',
-      repeatedReleaseTitle: Boolean(surface?.querySelector('[data-markdown-heading="Rovai AI v0.3.2"]')),
+      repeatedReleaseTitle: Boolean(surface?.querySelector('[data-markdown-heading="Rovai AI v0.4.0"]')),
       fallbackVisible: Boolean(surface?.querySelector('.about-update-fallback')),
       globalPromptVisible: Boolean(document.querySelector('.app-update-prompt')),
       forbiddenCopy: /校验 hash|等待当前任务|自动开始下载/.test(surface?.textContent ?? ''),
@@ -143,14 +143,14 @@ async function assertAboutUpdates(cdp, context) {
   assert(state.heading === '关于与更新', `${context} omitted the page heading`)
   assert(state.description === '自动检查新版本，下载与安装由你决定。',
     `${context} used the wrong description`)
-  assert(state.product === 'Rovai AI' && state.version === '版本 v0.3.2',
+  assert(state.product === 'Rovai AI' && state.version === '版本 v0.4.0',
     `${context} used the wrong product/version: ${JSON.stringify(state)}`)
   assert(state.action === '检查更新' && state.actionTag === 'BUTTON' && state.actionFocused,
     `${context} did not expose a keyboard-focusable check action`)
   assert(state.statusRole === 'status' && state.source.includes('GitHub Release'),
     `${context} omitted updater status/source evidence`)
-  assert(state.releaseVisible && state.releaseVersion === '0.3.2'
-    && state.releaseNotesText.includes('删除 Camp 更快')
+  assert(state.releaseVisible && state.releaseVersion === '0.4.0'
+    && state.releaseNotesText.includes('Skills 的管理方式')
     && !state.repeatedReleaseTitle,
     `${context} omitted or duplicated bundled release notes: ${JSON.stringify(state)}`)
   assert(!state.progressVisible

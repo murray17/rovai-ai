@@ -39,7 +39,7 @@ const criteria = [
     test('crates/rovai-core/src/context.rs', 'public_history_is_readable_without_target_camp_membership_or_live_recheck')
   ]),
   criterion('CCC-010', 'ContextManifest and Formatter versions match the current context contract', [
-    test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
+    test('crates/rovai-core/src/context_contract.rs', 'binding_contract_rotates_existing_sessions_for_new_charter')
   ]),
   criterion(
     'CCC-011',

@@ -5,10 +5,10 @@ import { collectProductContractFingerprint } from './product-contract.mjs'
 test('Product Contract Fingerprint reads code/build authority and marks unavailable data explicitly', async () => {
   const fingerprint = await collectProductContractFingerprint()
   assert.equal(fingerprint.dataContractVersion.value, 'v1.71')
-  assert.equal(fingerprint.dataContractSchemaVersion.value, 124)
+  assert.equal(fingerprint.dataContractSchemaVersion.value, 125)
   assert.equal(fingerprint.campSnapshotSchemaVersion.value, 34)
-  assert.equal(fingerprint.contextManifestVersion.value, 30)
-  assert.equal(fingerprint.contextFormatterVersion.value, 30)
+  assert.equal(fingerprint.contextManifestVersion.value, 31)
+  assert.equal(fingerprint.contextFormatterVersion.value, 31)
   assert.equal(fingerprint.contextDeliveryProfileVersion.value, 10)
   assert.equal(fingerprint.durableTaskContract.value.version, 5)
   assert.equal(fingerprint.builtInTransportVersion.value, 32)

@@ -597,7 +597,28 @@ pub fn project_structured_quote_text(
                 format!("{prefix} \n\n{projected}")
             });
         }
-        return render(content, &mut member_name).map(|text| text.replace("\r\n", "\n"));
+        // Project an opaque token through Markdown, then restore the literal
+        // profile name. Escaping the name before parsing is insufficient in
+        // code blocks, where escapes themselves are visible. Exclude decoded
+        // source collisions as well as raw ones before inserting the token.
+        let source = markdown(content, &mut member_name)?;
+        let projected_source = project_quote_text(&source);
+        let mut token = "ROVAICURRENTUSER".to_string();
+        while source.contains(&token) || projected_source.contains(&token) {
+            token.push('X');
+        }
+        let mut body = String::new();
+        for (index, part) in content.iter().enumerate() {
+            if matches!(part, Segment::CurrentUserMention { .. }) {
+                body.push_str(&token);
+                if index == 0 && content.len() > 1 {
+                    body.push(' ');
+                }
+            } else {
+                body.push_str(&markdown(std::slice::from_ref(part), &mut member_name)?);
+            }
+        }
+        return Ok(project_quote_text(&body).replace(&token, &format!("@{current_user}")));
     }
     let mut prefix_length = 0;
     for (index, part) in content.iter().enumerate() {
@@ -646,6 +667,7 @@ pub fn project_quote_text(body: &str) -> String {
     let mut boundary = 0usize;
     let mut image_depth = 0usize;
     let mut cell = false;
+    let mut code_block_start = None;
     for event in Parser::new_ext(&body, options) {
         match event {
             Event::Start(Tag::Image { .. }) => {
@@ -667,10 +689,27 @@ pub fn project_quote_text(body: &str) -> String {
                 boundary = boundary.max(1);
                 cell = false;
             }
+            Event::Start(Tag::CodeBlock(_)) => {
+                code_block_start = Some(output.len());
+                if !output.is_empty() {
+                    boundary = boundary.max(2);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                // SafeMarkdown's code element ends nonempty code with a newline,
+                // including indented code whose source ends without one.
+                if code_block_start
+                    .take()
+                    .is_some_and(|start| output.len() > start)
+                    && !output.ends_with('\n')
+                {
+                    output.push('\n');
+                }
+                boundary = boundary.max(2);
+            }
             Event::Start(
                 Tag::Paragraph
                 | Tag::Heading { .. }
-                | Tag::CodeBlock(_)
                 | Tag::BlockQuote(_)
                 | Tag::List(_)
                 | Tag::Item
@@ -683,7 +722,6 @@ pub fn project_quote_text(body: &str) -> String {
             Event::End(
                 TagEnd::Paragraph
                 | TagEnd::Heading(_)
-                | TagEnd::CodeBlock
                 | TagEnd::BlockQuote(_)
                 | TagEnd::List(_)
                 | TagEnd::Item

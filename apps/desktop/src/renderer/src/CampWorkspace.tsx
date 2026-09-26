@@ -12,6 +12,7 @@ import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import { dismissMessageQuoteSelection } from './message-quote-selection'
 import { currentUserDisplayName } from '@contracts'
 import { CurrentUserAvatar, useCurrentUserProfile } from './CurrentUserProfile'
+import { markdownInlineContentPrefix } from './safe-markdown-model'
 import { ExecutionLatestContext, ExecutionReadingContext, useExecutionWindow } from './useExecutionWindow'
 import { ReturnToLatest } from './ReturnToLatest'
 import { prefersReducedMotion } from './reduced-motion'
@@ -5267,6 +5268,10 @@ export function CampWorkspace({
               memberCount={campInspectorMembers(snapshot.members).length}
               singleChatVisible={singleChatVisible}
               onOpenSingleChat={onOpenSingleChat}
+              onOpenMissionActivity={mobile && snapshot.camp.missionId && filePreview ? () => {
+                onCloseInspector(); onCloseSingleChat()
+                filePreview.openMissionActivity(snapshot.camp.missionId!)
+              } : undefined}
               onOpen={(tab) => {
                 if (tab === 'execution' && executionPlacement === 'right') {
                   onCloseInspector()
@@ -9297,6 +9302,21 @@ export function StructuredMessageBody({
       </div>
     )
   }
+  if (renderLeadingCurrentUserMarkdown && content.some((segment) => segment.kind === 'current_user_mention')) {
+    const source = structuredCampContentMarkdownText(content, members)
+    const prefix = markdownInlineContentPrefix(source)
+    // Every CurrentUser occurrence has the same identity. Keep its placeholder
+    // identical too, so Markdown reference labels match Core's quote projection.
+    const token = `${prefix}END`
+    const inlineContent = { [token]: <CurrentUserMentionToken onActivate={onActivateCurrentUserMention} /> }
+    const markdown = content.map((segment, index) => {
+      if (segment.kind !== 'current_user_mention') {
+        return structuredCampContentMarkdownText([segment], members)
+      }
+      return token + (index === 0 && content.length > 1 ? ' ' : '')
+    }).join('')
+    return <SafeMarkdown onFileReference={onFileReference} inlineContent={inlineContent}>{markdown}</SafeMarkdown>
+  }
   const Tag = inline ? 'span' : 'p'
   return (
     <Tag className="structured-message-body">
@@ -10059,6 +10079,7 @@ function RunExecutionContent({
               campId={campId}
               step={step as ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }}
               runStatus={run.status}
+              completeEvidence={completeEvidence.byFileOperationToolId.get(step.id)}
               onFileOpenError={onFileOpenError}
             />
           )

@@ -13,9 +13,9 @@ const canonical = (id: string, shell: boolean): CanonicalRuntimeActivityView => 
   presentationHint: shell ? '运行命令' : 'memory.write', phase: 'terminal', outcome: 'succeeded',
   sourceAuthority: shell ? 'runtime' : 'core', credibility: shell ? 'runtime_structured' : 'core_verified',
   coverageLevel: 'fine_grained', sourceEvidenceIds: [], firstEvidenceSequence: shell ? 1 : 2,
-  lastEvidenceSequence: shell ? 4 : 3, revision: 1
+  lastEvidenceSequence: shell ? 1 : 2, revision: 1
 })
-const evidence: AgentRunExecutionEvidenceView[] = [false, true].map(shell => ({
+const evidence: AgentRunExecutionEvidenceView[] = [true, false].map(shell => ({
   id: shell ? 'shell-evidence' : 'core-evidence', agentRunId: 'fixture-run', sequence: shell ? 1 : 2,
   executionEpoch: 1, kind: shell ? 'command' : 'tool_result', phase: 'completed',
   eventType: shell ? 'activity.completed' : 'runtime.action', canonical: canonical(shell ? 'shell-1' : 'core-1', shell),
@@ -36,11 +36,11 @@ window.rovai = {
   }
 } as unknown as typeof window.rovai
 const root = createRoot(document.getElementById('root')!)
-function render(theme = 'day', partial = false): void {
+function render(theme = 'day'): void {
   document.documentElement.dataset.theme = theme
   root.render(<main style={{ padding: 24, maxWidth: 760, margin: 'auto' }}>
     <p>模拟数据 · Command View 隔离验收</p>
-    <ToolActivityGroup campId="fixture-camp" runId="fixture-run" runStatus="succeeded" partial={partial}
+    <ToolActivityGroup campId="fixture-camp" runId="fixture-run" runStatus="succeeded"
       liveTail={false} cancelling={false} items={items} completeEvidence={selectCompleteExecutionEvidence(evidence)}
       onFileOpenError={message => { throw new Error(message) }} />
   </main>)

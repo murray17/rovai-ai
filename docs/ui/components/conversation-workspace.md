@@ -590,9 +590,10 @@ Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ comm
 和多行输入，沿用 Shell Evidence 的按条惰性读取。Core 操作身份、图标和状态保持不变；不新增入参存储。
 缺少可靠关联时回退对应 `rovai` CLI 名称和同一 operation 的 Core 公共 `canonicalInput`，省略投影辅助事实和
 由消息面拥有的 Send 正文或历史 Gather 正文；没有可显示入参时为无箭头静态行，不借用其他调用的结果。
-纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；混合命令、帮助、
+纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；单记录生命周期
+改用同 Run、同 epoch、紧邻序号和精确结果 digest 证明关联。混合命令、帮助、
 提前失败或不确定关联保留。底层 Evidence 和 Canonical 身份不变。完整规则见
-[Built-in 入参与载体展示](../../contracts/run-process-detail-surface-v34.md)。
+[Run Process Detail Surface v42](../../contracts/run-process-detail-surface-v42.md)。
 
 新 operation 的 started/progress/terminal 按稳定 Evidence ID 合并为一行；Renderer 只接受更高
 `revision/changeSequence`，不以记录数量或固定展示 `sequence` 判断内容是否变化。终态后的输入补齐、结果更新和
@@ -711,7 +712,8 @@ Canonical Activity 的 presentation row，明确 add 显示“新增”，其他
 已经持久化的历史卡片不重算。临时文件经 `rovai send --file` 发布后，附件由独立的 Camp Attachment UI 呈现。
 
 文件操作使用阅读文件或笔形 16px 图标。动作词和文件名始终横向单行排列，之间固定保留 5px 间距；空间不足时仅文件名显示省略号，动作词与状态保持完整，完整路径保留在 title 与可访问名称中。执行抽屉与其他执行面使用同一布局。文件名以虚线底线按钮展示。canonical diff 修改文件行优先用 exact Run Activity Evidence 授权，并以来源 AgentRun
-的 `executionRoot` 解析；历史 Run 缺少有效执行根时才回退 Camp 项目，缺少 Evidence identity 的历史 presentation
+的 `executionRoot` 解析；无 Diff 的终态 Read/Write 行使用同一 Run Activity 来源，以该 Evidence 已准入的
+文件操作路径校验并按 Run 根解析。历史 Run 缺少有效执行根时才回退 Camp 项目，缺少 Evidence identity 的历史 Diff presentation
 保留当前 Camp workspace 兼容回退。鼠标或键盘点击后成功才提交预览导航；失败只在当前页显示 danger Toast `无法打开该文件`，不创建或切换
 预览页。写入行有 Diff 时，除文件名预览链接外，动作文字、图标、统计、空白和右侧箭头都属于同一个
 可展开摘要，提供 hover/focus 反馈并控制原有 Diff；键盘可聚焦摘要并用 Enter/Space 切换。文件预览与

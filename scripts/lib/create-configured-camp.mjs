@@ -23,17 +23,14 @@ export async function createConfiguredCampAndSend(request, input) {
     throw new Error(`Configured Camp creation failed: ${JSON.stringify(createResult)}`)
   }
 
-  const currentDraft = await request('camp.composerDraft.get', { campId })
   const content = composerDocumentForAddress(input.address ?? { mode: 'default' }, input.body)
-  const savedDraft = await request('camp.composerDraft.save', {
-    campId,
-    expectedRevision: currentDraft.revision,
-    content
-  })
   const sent = await request('camp.messages.send', {
     commandId: input.commandId,
     campId,
-    draftRevision: savedDraft.revision,
+    content,
+    sourceAttachments: [],
+    quotes: [],
+    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: input.purpose,

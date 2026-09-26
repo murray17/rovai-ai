@@ -5,7 +5,7 @@ import {BusinessApp} from '../../../apps/desktop/src/renderer/src/BusinessApp'
 import {CampClientProvider} from '../../../apps/desktop/src/renderer/src/camp-client'
 import {CurrentUserProfileContext} from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import {createReviewModel} from '../../../scripts/fixtures/host-web-parity/model'
-import {initial, initialDraft, agents, installations, now} from '../../../scripts/fixtures/host-web-parity/data'
+import {initial, initialDraft, agents, installations, navigation, now} from '../../../scripts/fixtures/host-web-parity/data'
 import {DEFAULT_GENERAL_PREFERENCES} from '../../../apps/desktop/src/shared/general-preferences-model'
 import {DEFAULT_APPEARANCE} from '../../../apps/desktop/src/shared/appearance'
 import {applyAppearanceSnapshot} from '../../../apps/desktop/src/renderer/src/theme'
@@ -53,13 +53,15 @@ function snapshot(m:MissionRecord):CampOpenProjection {
  if(snapshots.has(m.campId)) return snapshots.get(m.campId)
  const s=JSON.parse(JSON.stringify(initial).replaceAll(initial.camp.id,m.campId))
  s.camp={...s.camp,id:m.campId,missionId:m.missionId,title:m.title,activationState:'active',projectPath:m.projectPath}
- s.schemaVersion=7
+ s.schemaVersion=8
  const collection=(n:number)=>({totalCount:n,loadedCount:n,omittedCount:0,complete:true})
- s.coverage={tasks:collection(s.tasks.length),messages:{...collection(s.messages.length),hasEarlier:false,oldestLoadedSequence:s.messages[0]?.sequence??null,newestLoadedSequence:s.messages.at(-1)?.sequence??null},turns:collection(s.turns.length),agentRuns:collection(s.agentRuns.length),executionEvidence:collection(s.executionEvidence.length),approvals:collection(s.approvals.length)}
+ s.coverage={tasks:collection(s.tasks.length),messages:{...collection(s.messages.length),hasEarlier:false,oldestLoadedSequence:s.messages[0]?.sequence??null,newestLoadedSequence:s.messages.at(-1)?.sequence??null},messageDeliveries:collection(s.messageDeliveries.length),turns:collection(s.turns.length),agentRuns:collection(s.agentRuns.length),approvals:collection(s.approvals.length)}
  snapshots.set(m.campId,s);return s
 }
 const projects=[{projectKey:'directory:/workspace/rovai-ai',projectPath:'/workspace/rovai-ai',name:'rovai-ai',lastActivityAt:now,lastActivityGlobalSequence:0,totalCount:0,recentCamps:[]},...Array.from({length:14},(_,i)=>({projectKey:`directory:/workspace/sample-${i+1}`,projectPath:`/workspace/sample-${i+1}`,name:`示例项目 ${String(i+1).padStart(2,'0')}`,lastActivityAt:now,lastActivityGlobalSequence:0,totalCount:0,recentCamps:[]}))]
-const nav={schemaVersion:3,throughGlobalSequence:10,quickChat:{totalCount:0,recentCamps:[]},projects}
+// Empty project groups are pruned by the real navigation owner. Seed an ordinary Camp in each picker project.
+const populatedProjects=projects.map((project,index)=>({...project,totalCount:1,recentCamps:[{...navigation(initial).projects[0].recentCamps[0],id:`fixture-project-camp-${index}`,title:`${project.name} 的普通对话`,projectPath:project.projectPath}]}))
+const nav={schemaVersion:3,throughGlobalSequence:10,quickChat:{totalCount:0,recentCamps:[]},projects:populatedProjects}
 const prefs={...DEFAULT_GENERAL_PREFERENCES,newConversationDefaults:{memberAgentIds:profiles.map(a=>a.agentId),defaultLeadAgentId:profiles[0].agentId}}
 const navigationPrefs={schemaVersion:4,pins:[],removedProjects:[],projectOrder:projects.map(p=>p.projectKey),projectNames:{}}
 const changed=()=>events.forEach(fn=>fn({method:'navigation.invalidated',params:{}}))

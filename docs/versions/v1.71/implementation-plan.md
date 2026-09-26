@@ -236,3 +236,20 @@ ContextManifest Evidence 也升到 v30。按 Issue #523 “版本号顺位继承
 S1 不新增测试，以既有飞书与钉钉测试不改断言全绿作为行为不变的证据。S2 新增的测试只覆盖新边界：结构等价、跨
 provider 隔离、错误 provider 拒绝、actor 路由、中立表重建与 Charter 负向断言；它们无法由既有断言表达。新测试扩展
 `channel.rs` 与 `db.rs` 已有的渠道和迁移测试 owner，不建立平行 fixture。
+
+
+## 2026-09-27 合并主线与审查修复
+
+对齐主线 `af0e8e6f`：保留 public history claim Migration 174，Lark 建表顺延为 Migration 175，数据合同为
+v1.71 / schema 125；ContextManifest/Formatter 沿用主线 31。降级 fixture 按相反顺序还原，旧迁移与结构检查继续保留。
+主线的飞书持久入站下载保持飞书范围，Lark 不进入尚无消费者的下载队列。
+
+- 话题派发：补齐 Lark roster 身份、按 provider 隔离的 Host 刷新请求、发布状态和成员存在性校验。
+- 标题：共享 `CampChannelSource`/formatter 增加 Lark 三种来源；搜索可匹配前缀，重命名不写入前缀。
+- 新增测试 owner：`message_delivery::tests::topic_dispatch_waits_for_its_provider_roster_and_checks_its_published_bot`。
+  它以最小 SQLite fixture 验证持久等待到放行的状态转换和跨 provider 冲突；现有 channel membership 测试只验证
+  Camp roster 同步，不能证明派发等待门禁。修复前 Lark 首次派发直接放行，且 Bot 查询错误依赖飞书表。
+  最小命令：`cargo test -p rovai-core --lib topic_dispatch_waits_for_its_provider_roster_and_checks_its_published_bot`。
+- 标题与导航搜索扩展现有表驱动/搜索测试；迁移测试保留原有回滚、数据保留和结构等价断言，更新实际来源为 174。
+
+最终验证结果在提交前记录；真实租户未验收项保持原状态。

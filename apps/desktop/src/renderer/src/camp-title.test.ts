@@ -7,6 +7,9 @@ describe('Camp display titles', () => {
     [{ provider: 'feishu', conversationKind: 'p2p' }, '飞书私聊'],
     [{ provider: 'feishu', conversationKind: 'group' }, '飞书群聊'],
     [{ provider: 'feishu', conversationKind: 'topic' }, '飞书话题'],
+    [{ provider: 'lark', conversationKind: 'p2p' }, 'Lark私聊'],
+    [{ provider: 'lark', conversationKind: 'group' }, 'Lark群聊'],
+    [{ provider: 'lark', conversationKind: 'topic' }, 'Lark话题'],
     [{ provider: 'dingtalk', conversationKind: 'p2p' }, '钉钉私聊'],
     [{ provider: 'dingtalk', conversationKind: 'group' }, '钉钉群聊']
   ]

@@ -8,6 +8,20 @@ last_updated: 2026-09-24
 
 # 飞书渠道架构
 
+## 入站资源下载与 Agent 附件
+
+飞书消息中的图片、文件和富文本图片先归一化为资源描述，随现有多 Bot 聚合持久化。Core 完成对话绑定后，将
+请求保留在现有 FIFO，附件未就绪时不发布消息或派发 Agent。Host 从 tick 取得下载任务，通过官方消息资源接口
+读取字节；网络工作在最多两个后台任务中执行，不阻塞执行卡更新和其他消息维护。
+
+下载暂存只由 Host 持有。Core 在正常 Command Gateway 内检查 Request、绑定、重试代次和对话删除状态，再将文件
+写入现有 Camp 默认输出目录并记录 Source Ref。准备齐全后，现有 Collaboration seam 一次发布消息和 Delivery，
+后续 Context、图片预览、历史读取和 Camp 删除使用已有附件机制。Core 不持有飞书凭据，Host 不直接写数据库。
+
+资源、重试与准备结果存放在既有 aggregate JSON；不引入第二条消息队列或独立资产生命周期。单条失败有明确提示，
+不会让 Agent 只收到文字继续执行。字段和支持范围见
+[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md#feishu-inbound-attachments)。
+
 字段、状态和恢复合同见 [Feishu Channel v17](../contracts/feishu-channel-v17.md)，当前异步入站/外发语义见
 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见

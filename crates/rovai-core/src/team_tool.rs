@@ -3070,6 +3070,40 @@ mod tests {
         assert!(replay.replayed);
         assert_eq!(replay.result.payload["agentAddressingMode"], "public_only");
         assert_eq!(replay.result.payload["messageId"], message_id);
+
+        let mut mixed = fixture.public_send_invocation(
+            "public-only-inline-principal",
+            "\u{3000}@爱丽丝\u{a0}@鲍勃 @Principal @Principal 谢谢",
+            &[],
+        );
+        mixed.input.public_only = true;
+        let sent = service
+            .send_public_message(&mut fixture.database, &mixed)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+        let mixed_id = sent.result.payload["messageId"].as_str().unwrap();
+        let (content_json, attention_count, delivery_count): (String, i64, i64) = fixture.database.connection().query_row(
+            "SELECT structured_content_json,
+                (SELECT COUNT(*) FROM notification_occurrence WHERE source_message_id = message.id AND semantic = 'user_mention'),
+                (SELECT COUNT(*) FROM camp_message_delivery WHERE message_id = message.id)
+             FROM camp_message AS message WHERE id = ?1",
+            [mixed_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&content_json).unwrap(),
+            json!([
+                {"kind": "text", "text": "\u{3000}@爱丽丝\u{a0}@鲍勃 "},
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": " "},
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": " 谢谢"}
+            ])
+        );
+        assert_eq!(attention_count, 1);
+        assert_eq!(delivery_count, 0);
     }
 
     #[cfg(feature = "slow-tests")]
@@ -3109,7 +3143,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT message.body, message.structured_content_json,
-                       (SELECT COUNT(*) FROM message_delivery
+                       (SELECT COUNT(*) FROM camp_message_delivery
                         WHERE message_id = message.id)
                 FROM camp_message AS message
                 WHERE message.id = ?1
@@ -3161,7 +3195,9 @@ mod tests {
             serde_json::from_str::<Value>(&content_json).unwrap(),
             json!([
                 {"kind": "member_mention", "agentId": "agent_2"},
-                {"kind": "text", "text": " @Principal 请处理"}
+                {"kind": "text", "text": " "},
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": " 请处理"}
             ])
         );
     }
@@ -3291,86 +3327,92 @@ mod tests {
 
     #[test]
     fn current_user_attention_is_orthogonal_atomic_and_replay_safe() {
-        let mut fixture = Fixture::new();
-        let service = TeamToolService::default();
-        let before_deliveries: i64 = fixture
-            .database
-            .connection()
-            .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        let mut invocation = fixture.public_send_invocation(
-            "public-current-user-attention",
-            "Please choose A or B",
-            &[],
-        );
-        invocation.input.mention_user = true;
+        for (source_body, explicit, public_only) in [
+            ("Please choose A or B", true, false),
+            ("@Principal Please choose A or B", false, false),
+            ("@Principal Please choose A or B", true, false),
+            ("@Principal Please choose A or B", false, true),
+            ("@Principal Please choose A or B", true, true),
+        ] {
+            let mut fixture = Fixture::new();
+            let service = TeamToolService::default();
+            let before_deliveries: i64 = fixture
+                .database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            let mut invocation =
+                fixture.public_send_invocation("public-current-user-attention", source_body, &[]);
+            invocation.input.mention_user = explicit;
+            invocation.input.public_only = public_only;
 
-        let sent = service
-            .send_public_message(&mut fixture.database, &invocation)
-            .unwrap();
-        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
-        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
-        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
-        let message_id = sent.result.payload["messageId"].as_str().unwrap();
-        let (body, content_json): (String, String) = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT body, structured_content_json FROM camp_message WHERE id = ?1",
-                [message_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(body, "@你 Please choose A or B");
-        assert_eq!(
-            serde_json::from_str::<Value>(&content_json).unwrap(),
-            json!([
-                {"kind": "current_user_mention", "userId": "local_user"},
-                {"kind": "text", "text": "Please choose A or B"}
-            ])
-        );
-        let notification: (String, String, String) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT semantic, recipient_user_id, source_message_id
-                FROM notification_occurrence
-                WHERE semantic = 'user_mention'
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(notification.0, "user_mention");
-        assert_eq!(notification.1, "local_user");
-        assert_eq!(notification.2, message_id);
-        let after_deliveries: i64 = fixture
-            .database
-            .connection()
-            .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(after_deliveries, before_deliveries);
+            let sent = service
+                .send_public_message(&mut fixture.database, &invocation)
+                .unwrap();
+            assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+            assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+            assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+            let message_id = sent.result.payload["messageId"].as_str().unwrap();
+            let (body, content_json): (String, String) = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT body, structured_content_json FROM camp_message WHERE id = ?1",
+                    [message_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(body, "@你 Please choose A or B");
+            assert_eq!(
+                serde_json::from_str::<Value>(&content_json).unwrap(),
+                json!([
+                    {"kind": "current_user_mention", "userId": "local_user"},
+                    {"kind": "text", "text": "Please choose A or B"}
+                ])
+            );
+            let notification: (String, String, String) = fixture
+                .database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT semantic, recipient_user_id, source_message_id
+                    FROM notification_occurrence
+                    WHERE semantic = 'user_mention'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(notification.0, "user_mention");
+            assert_eq!(notification.1, "local_user");
+            assert_eq!(notification.2, message_id);
+            let after_deliveries: i64 = fixture
+                .database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(after_deliveries, before_deliveries);
 
-        let replay = service
-            .send_public_message(&mut fixture.database, &invocation)
-            .unwrap();
-        assert!(replay.replayed);
-        assert_eq!(replay.result.payload["messageId"], message_id);
-        let notification_count: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM notification_occurrence WHERE semantic = 'user_mention'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(notification_count, 1);
+            let replay = service
+                .send_public_message(&mut fixture.database, &invocation)
+                .unwrap();
+            assert!(replay.replayed);
+            assert_eq!(replay.result.payload["messageId"], message_id);
+            let notification_count: i64 = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM notification_occurrence WHERE semantic = 'user_mention'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(notification_count, 1);
+        }
     }
 
     #[cfg(feature = "slow-tests")]

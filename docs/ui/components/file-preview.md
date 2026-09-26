@@ -273,7 +273,10 @@ HTML 原生解析文档/资源相对路径与站点根相对路径，自动加�
 ## 更新与错误
 
 执行过程中的阅读／新增／编辑文件名是显式文件入口：只有虚线底线的 basename 可点击，完整路径保留在 title 和
-可访问名称中。它复用 `camp_workspace` 来源校验，并采用成功后提交导航；Main open 和 Renderer 首屏内容读取都成功后
+可访问名称中。带可靠 Diff 的文件行和有已准入路径的终态 Read/Write 文件操作行使用 exact
+`run_activity_file` 证据；终态 Read/Write 缺少证据身份时不打开文件，缺少身份的历史 Diff
+presentation 保留 `camp_workspace` 兼容入口。
+它们均采用成功后提交导航；Main open 和 Renderer 首屏内容读取都成功后
 才显示／激活目标 Tab 和预览 Pane。文件已移动、删除、无权或读取失败时，当前页只显示红色 Toast `无法打开该文件`，不创建失败预览页、不切换
 当前 Tab、不替换已有 ready 内容，也不抢焦点；不支持应用内预览的类型同样不从这类入口启动系统应用或显示目录。
 精确事务与资源清理边界见

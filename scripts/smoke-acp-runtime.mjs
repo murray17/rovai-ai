@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { isDeepStrictEqual } from 'node:util'
+import { DatabaseSync } from 'node:sqlite'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import {
   composerDocumentForAddress,
@@ -285,13 +286,13 @@ try {
         })
     const commandResult = sent.commandResult ?? sent
     const campId = camp?.id ?? commandResult.payload?.campId
-    const agentRunId = commandResult.payload?.agentRunIds?.[0]
-    if (commandResult.status !== 'accepted' || !campId || !agentRunId) {
+    if (commandResult.status !== 'accepted' || !campId || !commandResult.payload?.campMessageId) {
       throw new Error(`AgentRun intake failed: ${JSON.stringify(sent)}`)
     }
     if (!camp) {
       camp = { id: campId, defaultLeadAgentId: profile.agentId }
     }
+    const agentRunId = await waitForMessageRun(request, camp.id, commandResult.payload.campMessageId)
     const deadline = Date.now() + 180_000
     let snapshot
     let agentRun
@@ -370,8 +371,11 @@ try {
           completionRole: 'required'
         }
       )
-      const commandRunId = commandRequest.commandResult?.payload?.agentRunIds?.[0]
-      if (!commandRunId) throw new Error(`ACP command-output AgentRun was not accepted: ${JSON.stringify(commandRequest)}`)
+      const commandResult = commandRequest.commandResult ?? commandRequest
+      if (commandResult.status !== 'accepted' || !commandResult.payload?.campMessageId) {
+        throw new Error(`ACP command-output AgentRun was not accepted: ${JSON.stringify(commandRequest)}`)
+      }
+      const commandRunId = await waitForMessageRun(request, camp.id, commandResult.payload.campMessageId)
       const commandApprovals = new Set()
       const commandDeadline = Date.now() + 180_000
       let commandSnapshot
@@ -460,6 +464,10 @@ try {
         nativeSessionContinued: commandStart.params.nativeThreadId === results.at(-1).nativeSessionId,
         warmHostReused: commandStart.params.hostInstanceId === results.at(-1).hostInstanceId,
         hostInstanceId: commandStart.params.hostInstanceId
+      }
+      if (plainTwoTurn) {
+        verifyBootstrapEvidenceReused(dataDir, agentRunId, commandRunId)
+        results.at(-1).bootstrapEvidenceReused = true
       }
       if (compactionAcceptance) {
         const runId = commandRunId.replaceAll("'", "''")
@@ -837,18 +845,60 @@ try {
 }
 
 async function sendExistingCampMessage(request, campId, body, execution) {
-  const draft = await request('camp.composerDraft.get', { campId })
-  const saved = await request('camp.composerDraft.save', {
-    campId,
-    expectedRevision: draft.revision,
-    content: composerDocumentForAddress({ mode: 'default' }, body)
-  })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),
     campId,
-    draftRevision: saved.revision,
+    content: composerDocumentForAddress({ mode: 'default' }, body),
+    sourceAttachments: [],
+    quotes: [],
+    replyToCampMessageId: null,
     execution
   })
+}
+
+async function waitForMessageRun(request, campId, messageId) {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const snapshot = await request('camps.snapshot', { campId })
+    const run = snapshot.agentRuns.find((candidate) =>
+      candidate.inputMessageIds?.includes(messageId) || candidate.anchorMessageId === messageId
+    )
+    if (run) return run.id
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+  }
+  throw new Error(`Camp message ${messageId} did not dispatch an AgentRun`)
+}
+
+function verifyBootstrapEvidenceReused(dataDir, firstRunId, secondRunId) {
+  const database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
+  try {
+    const rows = database.prepare(`
+      SELECT delivery.agent_run_id AS runId, delivery.status,
+             delivery.native_binding_id AS bindingId,
+             delivery.bootstrap_redelivery_present AS redeliveryPresent,
+             manifest.bootstrap_evidence_id AS evidenceId
+      FROM runtime_input_delivery AS delivery
+      JOIN context_manifest AS manifest ON manifest.id = delivery.context_manifest_id
+      WHERE delivery.agent_run_id IN (?, ?)
+      ORDER BY delivery.agent_run_id
+    `).all(firstRunId, secondRunId)
+    const evidenceCount = rows.length === 2
+      ? database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM native_session_bootstrap_evidence
+        WHERE native_binding_id = ?
+      `).get(rows[0].bindingId)?.count
+      : null
+    if (rows.length !== 2
+        || rows.some((row) => row.status !== 'accepted' || row.redeliveryPresent !== 0)
+        || rows[0].bindingId !== rows[1].bindingId
+        || rows[0].evidenceId !== rows[1].evidenceId
+        || evidenceCount !== 1) {
+      throw new Error(`Bootstrap evidence was not reused across accepted inputs: ${JSON.stringify({ rows, evidenceCount })}`)
+    }
+  } finally {
+    database.close()
+  }
 }
 
 async function runFileOperationMatrix({ request, events, campId, adapterKind, projectRoot }) {

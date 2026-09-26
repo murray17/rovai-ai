@@ -58,8 +58,6 @@ app.whenReady().then(async () => {
     await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     writeFileSync(join(dirname(userData), `${theme}.png`), (await window.webContents.capturePage()).toPNG())
   }
-  await run("commandViewFixture.render('night', true)")
-  await until("document.querySelector('.tool-group-summary').getAttribute('aria-label') === '已载入 1 项执行记录'")
   console.log(JSON.stringify({ ok: true, toolRows: 1, contentReads: 2, originalMultilineContent: true, retry: true, keyboard: true, themes: 2 }))
   app.quit()
 }).catch(error => { console.error(error); app.exit(1) })

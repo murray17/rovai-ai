@@ -521,20 +521,24 @@ fingerprint 同时包含内核与独立 Node；PATH 中的社区
 CLI 不属于这个 Product Runtime。Core 内的协议翻译负责原生 NDJSON、Session/Input/Turn/Tool identity 与 callback，
 已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU；Host 复用以 Camp 为授权边界。Node prelude 的
 pipe-owned companion 在 Unix 补充回收原生 detached Bash 进程组；Windows 由原子 Job 拥有全部后代，
-以 Job 空集确认退出，不使用 Unix companion。生命周期细节由 Runtime Launch v42 拥有。
+以 Job 空集确认退出，不使用 Unix companion。生命周期细节由 Runtime Launch v44 拥有。
 内部 ACP shape 不改变公开协议来源。有原生后台任务的 Host 保留 Session/成员关联，禁止跨成员复用和空闲/容量回收；
 后台结果走原 Run 的已登记 Evidence 归属，前台 Run 与 CLI 授权正常结束。普通 Probe 沿用原生 HOME/存储，
 只隔离临时 cwd/socket，且不发送生成请求；Probe 实测与 Adapter 能力及发布资格分开。
 
-模型与凭据由官方配置拥有；终端 `.zcode/cli/config.json` 不存在时读取 App `.zcode/v2/config.json`，
-并沿用 App 的 Provider family 选择。账号与 BYOK 共用只读 runtimeModel，App 完整目录经内存 registry RPC 加载。
-不建立 Rovai provider 配置，不解密登录文件。Start Plan 的 App 内临时人机验证、账号刷新和 Team Plan 动态凭据
-尚未接入；配置加载通过不能作为账号生成通过的证据。原生失败终态发布脱敏错误，不因 `error` 状态误触发断线恢复。
-个人 Coding Plan 的原生签名凭据由官方内核处理；Start Plan 的验证回调显式报告未应用并给出操作指引。
-该差异是当前 Host 的认证覆盖范围，不是取消账号配置接入或宣称 app-server 协议不支持账号认证。
+模型与凭据由官方配置拥有。带 `config/provider/zcode-builtin.json` 的新版 App 内核使用 Provider Registry：
+Host 注入官方 bundled/personal Provider Config 路径，初始化读取 `workspace/readPresentation`，
+创建 Session 时传 `ModelSelection`，显式切换时使用 `session/setModel`；旧版仍沿用只读
+`runtimeModel`、App `.zcode/v2/config.json` 的 family 选择与 `workspace/updateProviderRegistry`。
+两条路径都不建立 Rovai provider 配置或解密登录文件。新版 app-server 不自动取得桌面 App 的账号
+Provider snapshot；当前可独立验收的路径是官方 personal Provider Config 中的 BYOK。
+Start Plan 的账号同步、App 内临时人机验证、账号刷新和 Team Plan 动态凭据尚未接入；
+配置加载或无消息 Session Probe 不能作为账号生成通过的证据。原生失败终态发布脱敏错误，
+不因 `error` 状态误触发断线恢复。旧版个人 Coding Plan 的签名凭据由官方内核处理；
+Start Plan 的验证回调仍显式报告未应用并给出操作指引。
 图片沿用授权附件路径，由原生 Read 转为模型图片内容；Read 保持读取活动，不形成 Files Changed 或修改 Diff。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；
 warm resume 不刷新 MCP，所以集合变化不能沿用旧 Host。协议、FirstPayload、权限、Usage 与保留能力见
-[Runtime Launch v42](../contracts/runtime-launch-and-verification-v42.md)。平台资格与 Machine Ready 分开维护。
+[Runtime Launch v44](../contracts/runtime-launch-and-verification-v44.md)。平台资格与 Machine Ready 分开维护。
 
 Windows x64 与 macOS arm64 分别以平台专属冻结证据标记 Qualified；macOS x64 同时开放为可执行 Preview，
 没有 Intel Mac 真机资格。管理页不显示测试、试运行或实验性标签，保留机器检查、错误和具体能力限制；

@@ -63,7 +63,7 @@ test('Native Server default and custom roots retain data and token, reject anoth
   }
   const wait = promise => Promise.race([promise, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Server entry step timed out')), 20000); timer.unref() })])
   const call = async (host, token, operation, params = {}) => {
-    const login = await fetch(`${host.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: token }) })
+    const login = await fetch(`${host.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: token }) })
     assert.equal(login.status, 200)
     const session = await login.json()
     const deadline = Date.now() + 15_000
@@ -126,7 +126,7 @@ test('Native Server default and custom roots retain data and token, reject anoth
       await access(join(data, 'rovai.sqlite')); await access(join(data, 'mcp.json')); await access(join(data, 'skills')); await access(join(data, 'logs/server.log'))
       const instances = await readdir(join(data, 'instances')); assert.equal(instances.length, 1)
       await access(join(data, 'instances', instances[0], 'runtime-files/.runtime-camp-files-root.json'))
-      const loginBeforeExit = await fetch(`${first.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: token }) })
+      const loginBeforeExit = await fetch(`${first.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: token }) })
       assert.equal(loginBeforeExit.status, 200)
       const durableSession = await loginBeforeExit.json()
       const before = await call(first, token, 'navigation.snapshot')

@@ -420,8 +420,9 @@ fn project_items(
 }
 
 // A compact presentation association keeps a digest-bound exact Agent-output proof available
-// when the enclosed Core activity is on the adjacent page. Historical rows retain their exact
-// result comparison. The renderer still checks that the command is a pure CLI carrier.
+// when the Core activity is on another page. A coalesced Shell row may be immediately before or
+// after its Core row, depending on callback order; older multi-row lifetimes still enclose the
+// Core sequence. The renderer also checks that the command is a pure CLI carrier.
 fn supporting_builtin_operation(
     connection: &Connection,
     item: &AgentRunExecutionEvidenceView,
@@ -431,12 +432,21 @@ fn supporting_builtin_operation(
     }) else {
         return Ok(None);
     };
-    let command = item
-        .payload
-        .pointer("/item/command")
-        .or_else(|| item.payload.get("command"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    // Runtime adapters expose the same Shell command in different public input
+    // shapes. TRAE CLI uses the runtime.action input string.
+    let command = [
+        "/item/command",
+        "/command",
+        "/input",
+        "/input/command",
+        "/input/commandLine",
+        "/input/CommandLine",
+        "/input/cmd",
+    ]
+    .into_iter()
+    .filter_map(|path| item.payload.pointer(path).and_then(Value::as_str))
+    .find(|command| !command.trim().is_empty())
+    .unwrap_or_default();
     if !command.contains("rovai") {
         return Ok(None);
     }
@@ -480,7 +490,9 @@ fn supporting_builtin_operation(
          JOIN agent_run_execution_evidence e ON e.id = source.value
          WHERE c.agent_run_id = ?1 AND c.execution_epoch = ?2
            AND c.source_authority = 'core' AND c.credibility = 'core_verified'
-           AND c.first_evidence_sequence > ?3 AND c.last_evidence_sequence < ?4
+           AND ((c.first_evidence_sequence > ?3 AND c.last_evidence_sequence < ?4)
+             OR (?3 = ?4 AND c.first_evidence_sequence = c.last_evidence_sequence
+               AND (c.last_evidence_sequence + 1 = ?3 OR ?3 + 1 = c.first_evidence_sequence)))
            AND e.event_type = 'runtime.action' ORDER BY e.sequence DESC",
     )?;
     let candidates = statement.query_map(

@@ -254,6 +254,15 @@ impl SessionEvents {
             translated.messages.push(json!({"method":"_zcode/inputAccepted","params":{"sessionId":session,"inputId":payload["inputId"]}}));
             return Ok(translated);
         }
+        if self.turn.is_none()
+            && matches!(kind, "turn.completed" | "turn.failed")
+            && payload["inputId"].as_str() == self.input.as_deref()
+            && let Some(turn) = event["turnId"].as_str().filter(|turn| !turn.is_empty())
+        {
+            // Native model creation can fail after sendText acceptance and
+            // before turn.started. The matching inputId still owns its terminal.
+            self.turn = Some(turn.to_string());
+        }
         if !self.owns_turn(event["turnId"].as_str()) {
             return Ok(translated);
         }
@@ -514,6 +523,26 @@ fn structured_patch(path: &str, display: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_creation_failure_before_turn_started_settles_exact_input() {
+        let mut state = SessionEvents::new(0);
+        state.begin("input-1").unwrap();
+        let failed = json!({"sessionId":"s1","seq":1,"turnId":"t1","type":"turn.failed",
+            "payload":{"inputId":"input-1","turnPhase":"model_creation",
+                "error":{"message":"PRIVATE_KEY"}}});
+        assert!(state.receive(&failed).unwrap().terminal.unwrap().is_err());
+        let mut other = SessionEvents::new(0);
+        other.begin("input-1").unwrap();
+        failed_with_foreign_input(&mut other);
+    }
+
+    fn failed_with_foreign_input(state: &mut SessionEvents) {
+        let foreign = json!({"sessionId":"s1","seq":1,"turnId":"t1","type":"turn.failed",
+            "payload":{"inputId":"input-2","turnPhase":"model_creation",
+                "error":{"message":"PRIVATE_KEY"}}});
+        assert!(state.receive(&foreign).unwrap().terminal.is_none());
+    }
 
     // New protocol owner: foreign/replayed events must never become effects of
     // the active input, and only a correlated success terminal permits Final.

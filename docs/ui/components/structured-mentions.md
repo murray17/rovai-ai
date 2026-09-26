@@ -140,8 +140,10 @@ Current User Mention 从 Desktop 当前个人资料解析名称；保存后历�
 保存资料后，已打开卡片同步刷新。点击外部或 Escape 关闭；键盘打开时焦点进入卡片，Escape 将焦点返回触发点。
 沿用队员信息卡的视口避让和单卡片互斥，选中文字时不因点击误打开。
 
-Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内结构化前缀；其余权威 Structured Content
-继续通过 sanitized GFM 呈现。正文里的 Agent Mention 在该路径只投影可见文本，显示名先按 Markdown literal
+Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解析位置；全部从当前用户资料读取昵称，
+保留所在位置及周围 sanitized GFM。前缀继续复用既有呈现；非前缀和重复提及通过来源无碰撞的内部占位与可信 UI 绑定，
+碰撞检查覆盖完整原始文本及独立于块语法的实体解码视图，缩进区域也显示真实昵称。
+不按字面名称解析 Markdown，不把昵称拼成 Markdown。正文里的 Agent Mention 在该路径只投影可见文本，显示名先按 Markdown literal
 转义并折叠换行，不能注入链接、标题、代码或表格结构。
 
 ## Authority and regression

@@ -1389,7 +1389,10 @@ impl AcpHost {
             let bridge = crate::zcode::transport::start(
                 stdin,
                 stdout,
-                crate::zcode::NativeConfig::load(cwd)?,
+                crate::zcode::NativeConfig::load_for_executable(
+                    cwd,
+                    Path::new(&frozen_runtime.executable_path),
+                )?,
                 // Session RPCs use the protocol spelling, not Rust's Win32
                 // verbatim spelling. The bridge must compare that same key.
                 PathBuf::from(acp_protocol_path(cwd)),
@@ -4570,8 +4573,13 @@ pub(crate) fn runtime_compatibility_digest(
             json!(crate::dsh::native_configuration_digest(&execution_root)?);
     }
     if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
-        compatibility["zcodeNativeConfigurationDigest"] =
-            json!(crate::zcode::NativeConfig::load(&execution_root)?.digest);
+        compatibility["zcodeNativeConfigurationDigest"] = json!(
+            crate::zcode::NativeConfig::load_for_executable(
+                &execution_root,
+                Path::new(&frozen_runtime.executable_path),
+            )?
+            .digest
+        );
     }
     canonical_json_digest(&compatibility)
 }
@@ -4633,8 +4641,13 @@ pub(crate) fn freeze_native_session_compatibility(
         );
     }
     if adapter_kind == AdapterKind::ZcodeApp {
-        compatibility["zcodeNativeConfigurationDigest"] =
-            json!(crate::zcode::NativeConfig::load(&execution_root)?.digest);
+        compatibility["zcodeNativeConfigurationDigest"] = json!(
+            crate::zcode::NativeConfig::load_for_executable(
+                &execution_root,
+                Path::new(&frozen_runtime.executable_path),
+            )?
+            .digest
+        );
     }
     let compatibility_digest = canonical_json_digest(&compatibility)?;
     let compatibility_flow = if is_grok

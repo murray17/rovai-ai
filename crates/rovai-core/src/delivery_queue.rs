@@ -8,7 +8,7 @@ use crate::{
     camp_content::StructuredCampMessageContent,
     collaboration::build_effective_config,
     context::{
-        project_batch_run_input_for_claim, runtime_max_context_payload_bytes,
+        project_batch_run_input_for_claim, public_history_hint, runtime_max_context_payload_bytes,
         serialized_batch_run_input_len,
     },
     context_contract::PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION,
@@ -41,6 +41,7 @@ struct BatchPrefixSelection {
     count: usize,
     first_too_large: bool,
     skill_selection: SkillSelectionSnapshot,
+    has_additional_public_messages: bool,
 }
 
 pub(crate) fn enqueue_message_deliveries(
@@ -375,11 +376,21 @@ pub fn claim_waiting_delivery_batches(database: &mut Database, limit: i64) -> Re
             if waiting.is_empty() {
                 continue;
             }
+            let previous_public_boundary: i64 = transaction.query_row(
+                "SELECT last_accepted_public_boundary_sequence FROM conversation WHERE id = ?1",
+                [&conversation_id],
+                |row| row.get(0),
+            )?;
+            anyhow::ensure!(
+                previous_public_boundary <= camp_public_tail,
+                "Accepted Public Context Boundary is ahead of the claim boundary"
+            );
             let max_payload_bytes = runtime_max_context_payload_bytes(&runtime);
             let selection = select_batch_prefix(
                 &transaction,
                 &camp_id,
                 &agent_id,
+                previous_public_boundary,
                 camp_public_tail,
                 &runtime,
                 std::path::Path::new(cleanup_execution_root),
@@ -402,6 +413,8 @@ pub fn claim_waiting_delivery_batches(database: &mut Database, limit: i64) -> Re
                 anchor_message_id,
                 camp_public_tail,
                 conversation_tail,
+                previous_public_boundary,
+                selection.has_additional_public_messages,
                 &effective_config,
                 workspace.as_ref(),
                 &runtime,
@@ -489,6 +502,7 @@ fn select_batch_prefix(
     transaction: &Transaction<'_>,
     camp_id: &str,
     agent_id: &str,
+    previous_public_boundary: i64,
     camp_public_tail: i64,
     runtime: &FrozenAgentRuntimeConfig,
     execution_root: &std::path::Path,
@@ -529,27 +543,75 @@ fn select_batch_prefix(
             &message_ids,
             &skill_links,
         )?;
-        if serialized_batch_run_input_len(&run_input)? > max_payload_bytes {
+        let has_additional_public_messages = has_additional_public_messages(
+            transaction,
+            camp_id,
+            agent_id,
+            previous_public_boundary,
+            camp_public_tail,
+            &message_ids,
+        )?;
+        let hint_bytes =
+            public_history_hint(previous_public_boundary, has_additional_public_messages).len();
+        if serialized_batch_run_input_len(&run_input)?.saturating_add(hint_bytes)
+            > max_payload_bytes
+        {
             return Ok(match previous_selection {
-                Some(skill_selection) => BatchPrefixSelection {
+                Some((skill_selection, has_additional_public_messages)) => BatchPrefixSelection {
                     count: count - 1,
                     first_too_large: false,
                     skill_selection,
+                    has_additional_public_messages,
                 },
                 None => BatchPrefixSelection {
                     count: 1,
                     first_too_large: true,
                     skill_selection,
+                    has_additional_public_messages,
                 },
             });
         }
-        previous_selection = Some(skill_selection);
+        previous_selection = Some((skill_selection, has_additional_public_messages));
     }
+    let (skill_selection, has_additional_public_messages) =
+        previous_selection.context("Delivery claim selected an empty input batch")?;
     Ok(BatchPrefixSelection {
         count: waiting.len(),
         first_too_large: false,
-        skill_selection: previous_selection.unwrap_or_default(),
+        skill_selection,
+        has_additional_public_messages,
     })
+}
+
+fn has_additional_public_messages(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    agent_id: &str,
+    previous_public_boundary: i64,
+    camp_public_tail: i64,
+    selected_message_ids: &[String],
+) -> Result<bool> {
+    let selected_ids_json = serde_json::to_string(selected_message_ids)?;
+    Ok(transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM camp_message AS message
+            WHERE message.camp_id = ?1
+              AND message.sequence > ?2 AND message.sequence <= ?3
+              AND message.tombstoned_at IS NULL
+              AND NOT (message.author_type = 'agent' AND message.author_id = ?4)
+              AND message.id NOT IN (SELECT value FROM json_each(?5))
+        )
+        "#,
+        params![
+            camp_id,
+            previous_public_boundary,
+            camp_public_tail,
+            agent_id,
+            selected_ids_json
+        ],
+        |row| row.get(0),
+    )?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -562,6 +624,8 @@ fn insert_batch_run(
     anchor_message_id: &str,
     camp_public_tail: i64,
     conversation_tail: i64,
+    previous_public_boundary: i64,
+    has_additional_public_messages: bool,
     effective_config: &Value,
     workspace: Option<&AgentRunWorkspace>,
     runtime: &FrozenAgentRuntimeConfig,
@@ -600,7 +664,9 @@ fn insert_batch_run(
             runtime_initial_reported_version, runtime_initial_executable_fingerprint,
             invocation_kind, permission_semantics,
             skill_selection_snapshot_json, skill_selection_snapshot_digest,
-            camp_id, anchor_message_id, current_public_tail_sequence
+            camp_id, anchor_message_id, current_public_tail_sequence,
+            claim_previous_public_boundary_sequence,
+            claim_has_additional_public_messages
         ) VALUES (
             ?1, NULL, ?2, NULL,
             NULL, ?3, ?4, ?5,
@@ -611,7 +677,7 @@ fn insert_batch_run(
             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
             ?26, ?27, ?28, ?16, ?17,
             'batch', 'runtime_managed_v2', ?29, ?30,
-            ?31, ?32, ?4
+            ?31, ?32, ?4, ?33, ?34
         )
         "#,
         params![
@@ -647,6 +713,8 @@ fn insert_batch_run(
             skill_selection_digest,
             camp_id,
             anchor_message_id,
+            previous_public_boundary,
+            has_additional_public_messages,
         ],
     )?;
     for (ordinal, delivery) in selected.iter().enumerate() {
@@ -734,6 +802,7 @@ mod tests {
         current_input_skill::{CurrentInputSkillLink, parse_skill_selection_snapshot},
         message_quote::{QuoteSelection, QuoteStorage, capture_quote, store_quotes},
     };
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
     use serde_json::json;
 
     struct Fixture {
@@ -908,6 +977,68 @@ mod tests {
             delivery.delivery_id
         }
 
+        fn publish_visible_without_delivery(
+            &mut self,
+            message_id: &str,
+            author_type: &str,
+            author_id: &str,
+        ) {
+            let transaction = self.database.connection_mut().transaction().unwrap();
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction
+                .execute(
+                    "UPDATE camp SET last_message_sequence = last_message_sequence + 1, version = version + 1, updated_at = ?2 WHERE id = ?1",
+                    params![self.camp_id, now],
+                )
+                .unwrap();
+            let sequence: i64 = transaction
+                .query_row(
+                    "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                    [&self.camp_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id, body,
+                        structured_content_json, content_digest,
+                        address_mode, addressed_agent_ids_json,
+                        effective_recipient_ids_json, recipient_presentation_json,
+                        origin_kind, recall_state, version, created_at, updated_at
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, ?5, 'visible history',
+                        '[{"kind":"text","text":"visible history"}]', ?6,
+                        'explicit', '[]', '[]', '{}', 'agent', 'closed',
+                        1, ?7, ?7
+                    )
+                    "#,
+                    params![
+                        message_id,
+                        self.camp_id,
+                        sequence,
+                        author_type,
+                        author_id,
+                        format!("sha256:{message_id}"),
+                        now
+                    ],
+                )
+                .unwrap();
+            transaction.commit().unwrap();
+        }
+
+        fn frozen_history_result(&self, run_id: &str) -> (i64, bool) {
+            self.database
+                .connection()
+                .query_row(
+                    "SELECT claim_previous_public_boundary_sequence, claim_has_additional_public_messages FROM agent_run WHERE id = ?1",
+                    [run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        }
+
         fn set_delivery_created_at(&self, message_id: &str, created_at: &str) {
             self.database
                 .connection()
@@ -1064,6 +1195,231 @@ mod tests {
             )
             .unwrap();
         assert_eq!(closed, 2);
+    }
+
+    #[test]
+    fn history_claim_excludes_every_selected_input_and_own_messages() {
+        let mut fixture = Fixture::new();
+        fixture.enqueue("selected-one", "first input");
+        fixture.publish_visible_without_delivery("own-one", "agent", "agent_1");
+        fixture.enqueue("selected-two", "second input");
+        let run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(fixture.frozen_history_result(&run_id), (0, false));
+        let input_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run_input WHERE agent_run_id = ?1",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(input_count, 2);
+    }
+
+    #[test]
+    fn history_claim_sees_unaddressed_visible_messages_and_withdrawn_placeholders() {
+        for state in ["closed", "withdrawn"] {
+            let mut fixture = Fixture::new();
+            fixture.publish_visible_without_delivery("other-recipient", "agent", "agent_2");
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE camp_message SET recall_state = ?1 WHERE id = 'other-recipient'",
+                    [state],
+                )
+                .unwrap();
+            fixture.enqueue("selected", "claim this");
+            let run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
+                .unwrap()
+                .pop()
+                .unwrap();
+            assert_eq!(fixture.frozen_history_result(&run_id), (0, true));
+        }
+    }
+
+    #[test]
+    fn history_claim_skips_tombstones_and_uses_previous_accepted_boundary() {
+        let mut fixture = Fixture::new();
+        fixture.publish_visible_without_delivery("older", "agent", "agent_2");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE conversation SET last_accepted_public_boundary_sequence = 1 WHERE id = 'delivery-queue-agent-1'",
+                [],
+            )
+            .unwrap();
+        fixture.publish_visible_without_delivery("tombstone", "agent", "agent_2");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = datetime('now') WHERE id = 'tombstone'",
+                [],
+            )
+            .unwrap();
+        fixture.enqueue("selected", "claim this");
+        let run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(fixture.frozen_history_result(&run_id), (1, false));
+        fixture.publish_visible_without_delivery("later", "agent", "agent_2");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE conversation SET last_accepted_public_boundary_sequence = 4 WHERE id = 'delivery-queue-agent-1'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(fixture.frozen_history_result(&run_id), (1, false));
+    }
+
+    #[test]
+    fn history_claim_does_not_depend_on_waiting_deliveries_or_reuse_stale_boundary() {
+        let mut fixture = Fixture::new();
+        fixture.enqueue("selected", "claim this");
+        let run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(fixture.frozen_history_result(&run_id), (0, false));
+        let now = chrono::Utc::now().to_rfc3339();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'succeeded', ended_at = ?1, updated_at = ?1 WHERE id = ?2",
+                params![now, run_id],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE conversation SET last_accepted_public_boundary_sequence = 1 WHERE id = 'delivery-queue-agent-1'",
+                [],
+            )
+            .unwrap();
+        fixture.publish_visible_without_delivery("unclaimed", "agent", "agent_2");
+        fixture.enqueue("next", "claim this");
+        let successor = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(fixture.frozen_history_result(&successor), (1, true));
+        assert_eq!(fixture.frozen_history_result(&run_id), (0, false));
+    }
+
+    #[test]
+    fn history_query_failure_rolls_back_every_claim_in_the_transaction() {
+        let mut fixture = Fixture::new();
+        fixture.enqueue("selected", "claim this");
+        fixture
+            .database
+            .connection()
+            .authorizer(Some(|context: AuthContext<'_>| match context.action {
+                AuthAction::Read {
+                    table_name: "json_each",
+                    ..
+                } => Authorization::Deny,
+                _ => Authorization::Allow,
+            }))
+            .unwrap();
+        let result = claim_waiting_delivery_batches(&mut fixture.database, 1);
+        fixture
+            .database
+            .connection()
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        assert!(
+            result.is_err(),
+            "a failed history query must abort the claim: {result:?}"
+        );
+        assert_eq!(fixture.batch_run_count(), 0);
+        let delivery: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, claimed_agent_run_id FROM camp_message_delivery WHERE message_id = 'selected'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(delivery, ("waiting".to_string(), None));
+        let recall_state: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT recall_state FROM camp_message WHERE id = 'selected'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recall_state, "recallable");
+    }
+
+    #[test]
+    fn history_query_accepts_selected_ids_beyond_sqlite_parameter_limit() {
+        let mut fixture = Fixture::new();
+        fixture.publish_visible_without_delivery("visible", "agent", "agent_2");
+        let mut selected_ids = (0..1_100)
+            .map(|index| format!("selected-{index}"))
+            .collect::<Vec<_>>();
+        let transaction = fixture.database.connection_mut().transaction().unwrap();
+        assert!(
+            has_additional_public_messages(
+                &transaction,
+                &fixture.camp_id,
+                "agent_1",
+                0,
+                1,
+                &selected_ids,
+            )
+            .unwrap()
+        );
+        selected_ids.push("visible".to_string());
+        assert!(
+            !has_additional_public_messages(
+                &transaction,
+                &fixture.camp_id,
+                "agent_1",
+                0,
+                1,
+                &selected_ids,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn history_claim_checks_beyond_camp_read_page() {
+        let mut fixture = Fixture::new();
+        fixture.publish_visible_without_delivery("earlier", "agent", "agent_2");
+        for index in 0..105 {
+            fixture.enqueue(&format!("input-{index}"), "small");
+        }
+        let run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let input_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run_input WHERE agent_run_id = ?1",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(input_count > 100);
+        assert_eq!(fixture.frozen_history_result(&run_id), (0, true));
     }
 
     #[test]
@@ -1735,6 +2091,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining, 1);
+        assert_eq!(constrained.frozen_history_result(&run_id), (0, true));
 
         let mut defaulted = Fixture::new();
         defaulted.enqueue("default-capacity-1", &"a".repeat(5_000));
@@ -1753,6 +2110,44 @@ mod tests {
             )
             .unwrap();
         assert_eq!(claimed_inputs, 2);
+        assert_eq!(defaulted.frozen_history_result(&run_id), (0, false));
+    }
+
+    #[test]
+    fn oversized_first_input_keeps_context_payload_too_large_failure() {
+        let mut fixture = Fixture::new();
+        fixture.enqueue("oversized-first", &"large input ".repeat(10_000));
+        let run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let status: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, last_error_code FROM agent_run WHERE id = ?1",
+                [&run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            status,
+            (
+                "failed".to_string(),
+                Some("context_payload_too_large".to_string())
+            )
+        );
+        assert_eq!(fixture.frozen_history_result(&run_id), (0, false));
+        let delivery_status: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status FROM camp_message_delivery WHERE message_id = 'oversized-first'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(delivery_status, "failed");
     }
 
     #[test]
@@ -1762,7 +2157,7 @@ mod tests {
         fixture.enqueue("projected-2", "review this");
         let first_source = json!([{
             "id": "00000000-0000-4000-8000-000000000001",
-            "sourcePath": "/tmp/source-one.txt",
+            "sourcePath": crate::test_support::absolute_test_path("/tmp/source-one.txt"),
             "displayName": "source-one.txt",
             "kind": "file",
             "mediaType": "text/plain",
@@ -1770,7 +2165,7 @@ mod tests {
         }]);
         let second_source = json!([{
             "id": "00000000-0000-4000-8000-000000000002",
-            "sourcePath": "/tmp/source-two.txt",
+            "sourcePath": crate::test_support::absolute_test_path("/tmp/source-two.txt"),
             "displayName": "source-two.txt",
             "kind": "file",
             "mediaType": "text/plain",
@@ -1855,8 +2250,14 @@ mod tests {
         )
         .unwrap();
         let messages = projection["messages"].as_array().unwrap();
-        assert_eq!(messages[0]["attachments"][0]["path"], "/tmp/source-one.txt");
-        assert_eq!(messages[1]["attachments"][0]["path"], "/tmp/source-two.txt");
+        assert_eq!(
+            messages[0]["attachments"][0]["path"],
+            crate::test_support::absolute_test_path("/tmp/source-one.txt")
+        );
+        assert_eq!(
+            messages[1]["attachments"][0]["path"],
+            crate::test_support::absolute_test_path("/tmp/source-two.txt")
+        );
         assert_eq!(messages[1]["quotes"][0]["text"], "secret");
         assert_eq!(messages[1]["skills"][0]["name"], "review-code");
         assert_eq!(

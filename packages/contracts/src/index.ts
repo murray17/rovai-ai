@@ -953,7 +953,7 @@ export interface EditSingleChatPendingInputCommand {
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 
 export type CampChannelSource =
-  | { provider: 'feishu'; conversationKind: 'p2p' | 'group' | 'topic' }
+  | { provider: 'feishu' | 'lark'; conversationKind: 'p2p' | 'group' | 'topic' }
   | { provider: 'dingtalk'; conversationKind: 'p2p' | 'group' }
 
 export interface NavigationCampItem {
@@ -3934,6 +3934,7 @@ export type CoreMethod =
   | 'channels.inbound.observe'
   | 'channels.roster.reconcile'
   | 'channels.inbound.finalize'
+  | 'channels.inbound.attachments.complete'
   | 'channels.host.tick'
   | 'channels.executionConsole.source'
   | 'channels.executionConsole.page.authorize'

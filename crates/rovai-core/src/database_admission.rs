@@ -1314,6 +1314,7 @@ mod tests {
             ("WAL", AuthorityNamespace::Rovai),
         ] {
             let directory = TestDirectory::new("crashed-writer");
+            crate::platform::private_storage::prepare_private_directory(&directory.0).unwrap();
             let database = crate::test_support::fresh_schema_database_fast_at(&directory.0);
             database.connection().execute_batch(
                 "CREATE TABLE admission_recovery_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL);",
@@ -1410,17 +1411,18 @@ mod tests {
             return;
         };
         let directory = PathBuf::from(directory);
-        let lease = CoreDataDirLease::acquire(&directory).unwrap();
-        let AdmissionAssessment::AdmittedExisting(ticket) =
-            DatabaseAdmission::assess(&lease).unwrap()
-        else {
-            panic!("crash writer requires an admitted current authority");
-        };
-        let database = crate::db::Database::open_admitted(*ticket).unwrap();
+        // Only the parent exercises Core admission. This child owns a live SQLite
+        // write transaction; opening Core here makes its handshake depend on
+        // unrelated startup work when the full test suite runs concurrently.
+        let path = directory.join(if directory.join("lumen.sqlite").exists() {
+            "lumen.sqlite"
+        } else {
+            "rovai.sqlite"
+        });
+        let database = Connection::open(path).unwrap();
         let mode = std::env::var("ROVAI_SQLITE_CRASH_TEST_JOURNAL_MODE").unwrap();
         assert!(matches!(mode.as_str(), "DELETE" | "WAL"));
         database
-            .connection()
             .execute_batch(&format!(
             "PRAGMA journal_mode = {mode}; PRAGMA synchronous = FULL; PRAGMA wal_autocheckpoint = 0;
              PRAGMA cache_size = 5; PRAGMA cache_spill = ON;

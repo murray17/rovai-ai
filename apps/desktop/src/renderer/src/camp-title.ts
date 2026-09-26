@@ -2,6 +2,7 @@ import type { CampChannelSource } from '@contracts'
 
 const CHANNEL_LABELS = {
   feishu: { p2p: '飞书私聊', group: '飞书群聊', topic: '飞书话题' },
+  lark: { p2p: 'Lark私聊', group: 'Lark群聊', topic: 'Lark话题' },
   dingtalk: { p2p: '钉钉私聊', group: '钉钉群聊' }
 } as const
 

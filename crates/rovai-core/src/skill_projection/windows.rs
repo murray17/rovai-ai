@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     fs, io,
     path::{Component, Path, PathBuf},
     thread,
@@ -372,6 +373,54 @@ pub(super) fn remove_managed_copy(
     }
     remove_owned_tree(entry_path, operation_id)?;
     delete_observation(database, execution_root, group_key, &skill.id)
+}
+
+pub(super) fn is_plain_legacy_directory(path: &Path) -> bool {
+    windows_file_tree::open_path_without_following(path)
+        .and_then(|opened| windows_file_tree::inspect_node(&opened))
+        .is_ok_and(|metadata| metadata.kind == NodeKind::Directory)
+}
+
+/// Only explicit legacy cleanup uses the closed official-name fallback. Walk from the
+/// admitted root through retained handles so a changed Skills parent cannot redirect
+/// deletion outside the recorded project.
+pub(super) fn remove_legacy_named_copy(
+    execution_root: &Path,
+    group_key: SkillDeliveryGroupKey,
+    skill_name: &str,
+    entry_path: &Path,
+) -> Result<()> {
+    anyhow::ensure!(
+        execution_root
+            .join(group_key.relative_path())
+            .join(skill_name)
+            == entry_path,
+        "legacy Skill copy path does not match its recorded root, group and name"
+    );
+    let mut parent = windows_file_tree::open_path_without_following(execution_root)?;
+    for component in group_key.relative_path().components() {
+        let Component::Normal(name) = component else {
+            anyhow::bail!("legacy Skill copy parent path is not normalized");
+        };
+        anyhow::ensure!(
+            windows_file_tree::inspect_node(&parent)?.kind == NodeKind::Directory,
+            "legacy Skill copy parent is not a plain directory"
+        );
+        parent = windows_file_tree::open_child_without_following(&parent, name)?;
+    }
+    anyhow::ensure!(
+        windows_file_tree::inspect_node(&parent)?.kind == NodeKind::Directory,
+        "legacy Skill copy parent is not a plain directory"
+    );
+    let operation_id = Uuid::new_v4().to_string();
+    retry_sharing(&operation_id, || {
+        let entry = windows_file_tree::open_child_for_removal(&parent, OsStr::new(skill_name))?;
+        anyhow::ensure!(
+            windows_file_tree::inspect_node(&entry)?.kind == NodeKind::Directory,
+            "legacy Skill copy entry is not a plain directory"
+        );
+        remove_owned_node(entry)
+    })
 }
 
 pub(super) fn audit_temporary_paths(
@@ -2087,6 +2136,183 @@ mod tests {
                 fs::read_to_string(entry.join("SKILL.md")).unwrap(),
                 "project-owned bytes"
             );
+        }
+
+        #[cfg(feature = "slow-tests")]
+        #[test]
+        fn explicit_legacy_cleanup_uses_official_names_for_shadowed_windows_copies() {
+            let paths = TestPaths::new("rovai-windows-legacy-named-cleanup");
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&paths.data);
+            let library = SkillLibraryService::new(paths.library.clone()).unwrap();
+            let official = library
+                .install_bundled_skill_for_test(&mut database, "analyze-agent-codebase")
+                .unwrap();
+            library
+                .set_enabled(
+                    &mut database,
+                    &user_envelope(SetSkillEnabledCommand {
+                        skill_id: official.id.clone(),
+                        expected_version: official.version,
+                        enabled: true,
+                    }),
+                )
+                .unwrap();
+            let official = library.get(&database, &official.id).unwrap().unwrap();
+            library
+                .set_group_assignments(
+                    &mut database,
+                    &user_envelope(SetSkillGroupAssignmentsCommand {
+                        skill_id: official.id.clone(),
+                        expected_version: official.version,
+                        group_keys: vec![
+                            SkillDeliveryGroupKey::ClaudeCompatible,
+                            SkillDeliveryGroupKey::Codex,
+                            SkillDeliveryGroupKey::Zcode,
+                        ],
+                    }),
+                )
+                .unwrap();
+
+            let other_name = "project-owned-skill";
+            write_source(&paths.source, other_name, "imported bytes");
+            let imported = import_skill(&mut database, &library, &paths.source, other_name, None);
+            let shadowed = paths.root.join(".claude/skills/analyze-agent-codebase");
+            let other = paths.root.join(".codex/skills").join(other_name);
+            let not_a_directory = paths.root.join(".zcode/skills/analyze-agent-codebase");
+            fs::create_dir_all(&shadowed).unwrap();
+            fs::create_dir_all(&other).unwrap();
+            fs::create_dir_all(not_a_directory.parent().unwrap()).unwrap();
+            fs::write(shadowed.join("SKILL.md"), "project copy").unwrap();
+            fs::write(other.join("SKILL.md"), "user copy").unwrap();
+            fs::write(&not_a_directory, "regular file").unwrap();
+            SkillProjectionReconciler
+                .reconcile_root(
+                    &mut database,
+                    &library,
+                    &paths.root,
+                    &[
+                        SkillDeliveryGroupKey::ClaudeCompatible,
+                        SkillDeliveryGroupKey::Codex,
+                        SkillDeliveryGroupKey::Zcode,
+                    ],
+                )
+                .unwrap();
+            let root = canonical_path_text(&paths.root);
+            let shadowed_observation = direct_observation(
+                &database,
+                &root,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+                &official.id,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(shadowed_observation.state, "shadowed");
+            assert!(shadowed_observation.operation_id.is_none());
+            assert!(shadowed_observation.entry_identity.is_none());
+            assert_eq!(
+                direct_observation(&database, &root, SkillDeliveryGroupKey::Codex, &imported.id)
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                "shadowed"
+            );
+
+            // Model a surviving copy whose old NTFS identity no longer matches the DB.
+            let managed = Path::new(&root).join(".codex/skills/analyze-agent-codebase");
+            database
+                .connection()
+                .execute(
+                    "UPDATE skill_projection_observation SET entry_identity = ?1 \
+                     WHERE execution_root = ?2 AND group_key = 'codex' AND skill_id = ?3",
+                    params![
+                        "0000000000000000-00000000000000000000000000000000",
+                        &root,
+                        &official.id,
+                    ],
+                )
+                .unwrap();
+            assert!(matches!(
+                inspect_entry(&database, &library, &managed).unwrap(),
+                EntryState::ProjectOwned("managed_target_corrupted")
+            ));
+
+            let report = SkillProjectionReconciler
+                .cleanup_legacy_entries(&mut database, &library)
+                .unwrap();
+            assert_eq!(report.removed, 2);
+            assert_eq!(report.retained_unverified, 2);
+            assert_eq!(report.remaining, 2);
+            assert!(!shadowed.exists());
+            assert!(!managed.exists());
+            assert_eq!(
+                fs::read_to_string(other.join("SKILL.md")).unwrap(),
+                "user copy"
+            );
+            assert_eq!(
+                fs::read_to_string(&not_a_directory).unwrap(),
+                "regular file"
+            );
+            assert_eq!(
+                SkillProjectionReconciler
+                    .cleanup_legacy_entries(&mut database, &library)
+                    .unwrap()
+                    .remaining,
+                2
+            );
+        }
+
+        #[cfg(feature = "slow-tests")]
+        #[test]
+        fn explicit_legacy_cleanup_finds_unobserved_official_copies_in_known_groups() {
+            let paths = TestPaths::new("rovai-windows-unobserved-dsh-cleanup");
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&paths.data);
+            let library = SkillLibraryService::new(paths.library.clone()).unwrap();
+            SkillProjectionReconciler
+                .reconcile_root(&mut database, &library, &paths.root, &[])
+                .unwrap();
+
+            let dsh_skills = paths.root.join(".dsh/skills");
+            for name in [
+                "cli-operations",
+                "memory-stewardship",
+                "project-owned-skill",
+            ] {
+                let entry = dsh_skills.join(name);
+                fs::create_dir_all(&entry).unwrap();
+                fs::write(entry.join("SKILL.md"), name).unwrap();
+            }
+            let zcode_entry = paths.root.join(".zcode/skills/review-duo");
+            fs::create_dir_all(&zcode_entry).unwrap();
+            fs::write(zcode_entry.join("SKILL.md"), "review-duo").unwrap();
+            let unregistered_entry = paths.source.join(".dsh/skills/cli-operations");
+            fs::create_dir_all(&unregistered_entry).unwrap();
+            fs::write(unregistered_entry.join("SKILL.md"), "unregistered").unwrap();
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM skill_projection_observation",
+                        [],
+                        |row| { row.get::<_, i64>(0) }
+                    )
+                    .unwrap(),
+                0
+            );
+
+            let count_before = SkillProjectionReconciler
+                .legacy_entry_count(&database)
+                .unwrap();
+            let report = SkillProjectionReconciler
+                .cleanup_legacy_entries(&mut database, &library)
+                .unwrap();
+            assert_eq!(count_before, 3);
+            assert_eq!(report.removed, 3);
+            assert_eq!(report.remaining, 0);
+            assert!(!dsh_skills.join("cli-operations").exists());
+            assert!(!dsh_skills.join("memory-stewardship").exists());
+            assert!(!zcode_entry.exists());
+            assert!(dsh_skills.join("project-owned-skill/SKILL.md").exists());
+            assert!(unregistered_entry.join("SKILL.md").exists());
         }
 
         #[test]

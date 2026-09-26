@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rename, rm, writeFile, readFile, access } from 'node:fs/promises'
+import { PassThrough, Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -25,6 +26,7 @@ import type {
   FeishuDeveloperSessionInspection
 } from './feishu-developer-session'
 import type { FeishuMemberBotProvisioner } from './feishu-member-bot-provisioner'
+import type { PendingFeishuAttachments } from './feishu-inbound-attachments'
 
 function channelCore(
   handler: (method: string, params: unknown) => unknown | Promise<unknown>
@@ -200,6 +202,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   createMessage: ReturnType<typeof vi.fn>
   replyMessage: ReturnType<typeof vi.fn>
   getMessage: ReturnType<typeof vi.fn>
+  getResource: ReturnType<typeof vi.fn>
   getChatMode: ReturnType<typeof vi.fn>
   isInChat: Map<string, ReturnType<typeof vi.fn>>
 } {
@@ -210,6 +213,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   const createMessage = vi.fn(async () => ({ code: 0, data: { message_id: 'om_output' } }))
   const replyMessage = vi.fn(async () => ({ code: 0, data: { message_id: 'om_output_reply' } }))
   const getMessage = vi.fn(async () => ({ code: 0, data: { items: [] as unknown[] } }))
+  const getResource = vi.fn(async () => ({ getReadableStream: () => Readable.from(['resource']) }))
   const getChatMode = vi.fn(async (_chatId: string): Promise<'p2p' | 'group' | 'topic'> => 'group')
   const isInChat = new Map<string, ReturnType<typeof vi.fn>>()
   const createChannel = vi.fn((options: { appId: string }) => {
@@ -231,6 +235,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       rawClient: {
         im: { v1: {
           message: { create: createMessage, reply: replyMessage, get: getMessage },
+          messageResource: { get: getResource },
           chatMembers: {
             isInChat: observeMembership
           }
@@ -247,6 +252,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
     createMessage,
     replyMessage,
     getMessage,
+    getResource,
     getChatMode,
     isInChat
   }
@@ -316,6 +322,150 @@ function normalizedMessage(input: {
 }
 
 describe('channel settings service', () => {
+  it('recovers pending attachment downloads without blocking the pump or submitting partial inputs', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    const stream = new PassThrough()
+    harness.getResource.mockResolvedValue({ getReadableStream: () => stream })
+    let completed = false
+    let downloaded: string[] = []
+    let ticks = 0
+    const service = new ChannelSettingsService({
+      ...inertInterval(),
+      credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }),
+      createChannel: harness.createChannel,
+      core: channelCore(async (method, raw) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+          botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+          failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+        }, {
+          agentId: 'agent-offline', accountId: 'account-1', brand: 'feishu', appId: 'cli_offline',
+          botDisplayName: '未连接队员', credentialRef: 'missing-credential', status: 'published',
+          failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+        }] })
+        if (method === 'channels.host.tick') {
+          expect(raw).toMatchObject({ inboundAttachmentAppIds: ['cli_a'] })
+          ticks += 1
+          return { deliveries: [], hasOutstandingWork: !completed, inboundAttachments: completed ? [] : [{
+            requestId: 'queued-request', appId: 'cli_a', messageId: 'received-message', attempt: 0,
+            retryAt: null, resources: [{ fileKey: 'img_key', kind: 'image', name: 'image' }]
+          }] }
+        }
+        if (method === 'channels.inbound.attachments.complete') {
+          const command = (raw as { command: { files: string[]; failureCode: string | null } }).command
+          expect(command.failureCode).toBeNull()
+          downloaded = command.files
+          expect(await readFile(downloaded[0], 'utf8')).toBe('complete image bytes')
+          completed = true
+          return { status: 'applied', payload: { ready: true, retryAt: null } }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    try {
+      await service.start()
+      await vi.waitFor(() => expect(harness.getResource).toHaveBeenCalledTimes(1))
+      expect(completed).toBe(false)
+      // A channel wake while bytes are still streaming must not start a duplicate.
+      const priorTicks = ticks
+      await harness.handlers.get('cli_a:message')!(normalizedMessage({
+        messageId: 'wake', senderUserId: 'owner-user-id', content: 'hello'
+      }))
+      await vi.waitFor(() => expect(ticks).toBeGreaterThan(priorTicks))
+      expect(harness.getResource).toHaveBeenCalledTimes(1)
+      stream.end('complete image bytes')
+      await vi.waitFor(() => expect(completed).toBe(true))
+      await vi.waitFor(async () => {
+        for (const path of downloaded) await expect(access(path)).rejects.toThrow()
+      })
+    } finally { stream.destroy(); await service.stop() }
+  })
+
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])('$kind keeps rich-post resources within its supported download queue', async (profile) => {
+    const hostMethod = (name: string): string => `${profile.hostMethodPrefix}${name}`
+    let observed = false
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    let pending: PendingFeishuAttachments | null = null
+    let resources: PendingFeishuAttachments['resources'] = []
+    let attention = false
+    let settled = false
+    const notice = '飞书暂不支持下载此类附件，本条消息未交给队员。请改为普通图片或文件重新发送。'
+    const service = new ChannelSettingsService({
+      ...inertInterval(),
+      profile,
+      credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }, () => profile.kind),
+      createChannel: harness.createChannel,
+      core: channelCore((method, raw) => {
+        const command = (raw as { command?: Record<string, unknown> } | undefined)?.command ?? {}
+        if (method === `${profile.methodPrefix}owner.verify`) {
+          return { status: 'applied', payload: { classification: 'owner' } }
+        }
+        if (method === `${profile.methodPrefix}snapshot`) return coreSnapshot({ memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', brand: profile.kind, appId: 'cli_a',
+          botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+          failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+        }] })
+        if (method === hostMethod('inbound.observe')) {
+          expect(command.body).toBe('请读取这个文件夹')
+          observed = true
+          expect(command.resources).toEqual(profile.kind === 'feishu'
+            ? [{ fileKey: 'folder_key', name: '资料', kind: 'folder' }] : [])
+          resources = command.resources as PendingFeishuAttachments['resources']
+          return { status: 'accepted', payload: { aggregateId: 'folder-aggregate', readyToFinalize: true } }
+        }
+        if (method === hostMethod('inbound.finalize')) {
+          pending = resources.length ? { requestId: 'folder-request', appId: 'cli_a', messageId: 'folder-message',
+            attempt: 0, retryAt: null, resources } : null
+          return { status: 'accepted', payload: {} }
+        }
+        if (method === hostMethod('host.tick')) {
+          const deliveries = attention ? [{
+            deliveryId: 'folder-attention', requestId: 'folder-request', deliveryKind: 'attention',
+            targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_test', topicKey: '',
+            conversationKind: 'p2p', attemptCount: 1, updateMessageId: null,
+            recipientOpenId: null, payload: { text: notice }
+          }] : []
+          attention = false
+          return { deliveries, inboundAttachments: pending ? [pending] : [],
+            hasOutstandingWork: pending !== null || deliveries.length > 0 }
+        }
+        if (method === 'channels.inbound.attachments.complete') {
+          expect(command).toMatchObject({ requestId: 'folder-request', files: [],
+            failureCode: 'channel.attachments.unsupported' })
+          pending = null
+          attention = true
+          return { status: 'applied', payload: { ready: false, retryAt: null } }
+        }
+        if (method === hostMethod('deliveries.settle')) {
+          expect(command).toMatchObject({ deliveryId: 'folder-attention', outcome: 'sent' })
+          settled = true
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    try {
+      await service.start()
+      await harness.handlers.get('cli_a:message')!(normalizedMessage({
+        messageId: 'folder-message', senderUserId: 'owner-user-id', content: '请读取这个文件夹',
+        rawContentType: 'post', rawEncodedContent: JSON.stringify({ title: '',
+          content: [[{ tag: 'text', text: '请读取这个文件夹' }]],
+          files: [{ file_key: 'folder_key', file_name: '资料', is_folder: true }]
+        })
+      }))
+      expect(observed).toBe(true)
+      if (profile.kind === 'lark') {
+        expect(pending).toBeNull()
+        expect(harness.getResource).not.toHaveBeenCalled()
+        return
+      }
+      await vi.waitFor(() => expect(settled).toBe(true))
+      expect(harness.getResource).not.toHaveBeenCalled()
+      expect(harness.send).toHaveBeenCalledWith('oc_test', {
+        card: expect.objectContaining({ body: { elements: [{ tag: 'markdown', content: notice }] } })
+      }, undefined)
+    } finally { await service.stop() }
+  })
+
   it('does not expire a connected account when startup inspection throws a transient error', async () => {
     const session = developerSession()
     session.inspect.mockRejectedValue(new Error('ERR_INTERNET_DISCONNECTED'))
@@ -2961,7 +3111,7 @@ describe('channel settings service', () => {
         }
         if (method === 'channels.host.tick') {
           calls.push({ method, command })
-          expect(rawParams).toEqual({ workerId: expect.any(String), limit: 20 })
+          expect(rawParams).toEqual({ workerId: expect.any(String), limit: 20, inboundAttachmentAppIds: ['cli_a'] })
           if (refreshRequested) {
             return { deliveries: [], rosterRefreshes: [], hasOutstandingWork: true }
           }

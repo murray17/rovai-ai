@@ -2,7 +2,7 @@
 //! session transport. The child is the official App kernel, never an ACP package.
 
 use super::{
-    NativeConfig,
+    NativeConfig, NativeProtocol,
     events::{NativeTurnFailure, RUNTIME_HEADERS_UNAVAILABLE, SessionEvents},
 };
 use anyhow::{Context, Result, bail};
@@ -47,7 +47,7 @@ pub async fn probe(
         }
     }
     let root = Root(super::private_runtime_root("rvzp")?);
-    let mut config = NativeConfig::load(&std::env::current_dir()?)?;
+    let mut config = NativeConfig::load_for_executable(&std::env::current_dir()?, executable)?;
     // Native login and BYOK both resolve here. Report setup guidance before spawning.
     config.runtime_model(None)?;
     config.value["mcp"] = json!({"enabled":false,"servers":{}});
@@ -162,6 +162,7 @@ pub async fn confirm_owner_cleanup(
 
 struct Session {
     events: SessionEvents,
+    model_reasoning_defaults: HashMap<String, String>,
     terminal: Option<Reply>,
     cancelled: bool,
     cancel_input: Option<String>,
@@ -235,9 +236,18 @@ where
                     {
                         let result = if message.get("error").is_some() {
                             // Native errors can echo a model configuration containing secrets.
-                            Err(anyhow::anyhow!(
+                            let native_message = message["error"]["message"]
+                                .as_str()
+                                .unwrap_or_default();
+                            Err(anyhow::anyhow!(if message["error"]["code"] == -32601 {
+                                "Official ZCode method not found; bundled protocol is incompatible"
+                            } else if native_message.contains("Provider Registry")
+                                && native_message.contains("Model")
+                            {
+                                "ZCode Provider Registry has no usable model; configure a personal BYOK provider in official ZCode"
+                            } else {
                                 "Official ZCode rejected the protocol request"
-                            ))
+                            }))
                         } else {
                             Ok(message.get("result").cloned().unwrap_or(Value::Null))
                         };
@@ -490,19 +500,31 @@ impl Bridge {
     async fn dispatch(&self, method: &str, params: &Value) -> Result<Value> {
         match method {
             "initialize" => {
-                if let Some(registry) = self.config.app_provider_registry()? {
-                    let applied = self.call("workspace/updateProviderRegistry", json!({"workspace":self.workspace(),"registry":registry,"includeWorkspaceState":false})).await?;
-                    if applied["appliedProviderRevision"] != self.config.digest
-                        || !matches!(applied["status"].as_str(), Some("applied" | "unchanged"))
-                        || applied["providerCount"].as_u64()
-                            != registry["providers"]
-                                .as_array()
-                                .map(|providers| providers.len() as u64)
-                    {
-                        bail!("ZCode App provider registry was not confirmed");
+                if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                    let presentation = self
+                        .call(
+                            "workspace/readPresentation",
+                            json!({"workspace":self.workspace()}),
+                        )
+                        .await?;
+                    if presentation["workspace"] != self.workspace() {
+                        bail!("ZCode workspace presentation identity mismatch");
                     }
+                } else {
+                    if let Some(registry) = self.config.app_provider_registry()? {
+                        let applied = self.call("workspace/updateProviderRegistry", json!({"workspace":self.workspace(),"registry":registry,"includeWorkspaceState":false})).await?;
+                        if applied["appliedProviderRevision"] != self.config.digest
+                            || !matches!(applied["status"].as_str(), Some("applied" | "unchanged"))
+                            || applied["providerCount"].as_u64()
+                                != registry["providers"]
+                                    .as_array()
+                                    .map(|providers| providers.len() as u64)
+                        {
+                            bail!("ZCode App provider registry was not confirmed");
+                        }
+                    }
+                    self.call("workspace/readState", json!({"workspace":self.workspace(),"runtimeModel":self.config.runtime_model(None)?})).await?;
                 }
-                self.call("workspace/readState", json!({"workspace":self.workspace(),"runtimeModel":self.config.runtime_model(None)?})).await?;
                 Ok(json!({"protocolVersion":1,"agentInfo":{"name":"ZCode"},
                     "agentCapabilities":{"loadSession":false,"sessionCapabilities":{"resume":{}},"mcpCapabilities":{"http":true,"sse":true}},"authMethods":[]}))
             }
@@ -515,15 +537,30 @@ impl Bridge {
                 // Deferred native creation does not generate a title or run the
                 // model. The first input remains the Core-owned Bootstrap.
                 let snapshot = if method == "session/new" {
-                    self.call("session/create", json!({"workspace":self.workspace(),"persistence":"deferred",
-                        "mode":self.mode,"runtimeModel":runtime_model,"mcpServers":servers,"titleGenerationEnabled":false})).await?
+                    let mut create = json!({"workspace":self.workspace(),"persistence":"deferred",
+                        "mode":self.mode,"mcpServers":servers,"titleGenerationEnabled":false});
+                    if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                        if !runtime_model["model"].is_null() {
+                            create["model"] = runtime_model["model"].clone();
+                            if let Some(level) =
+                                runtime_model["model"]["options"]["reasoningLevel"].as_str()
+                            {
+                                // 0.16.9's create path converts ModelSelection to a
+                                // provider/model string; thoughtLevel is its separate
+                                // initial reasoning setting.
+                                create["thoughtLevel"] = json!(level);
+                            }
+                        }
+                    } else {
+                        create["runtimeModel"] = runtime_model;
+                    }
+                    self.call("session/create", create).await?
                 } else {
-                    self.call(
-                        "session/resume",
-                        json!({"sessionId":params["sessionId"],"workspace":self.workspace(),
-                        "runtimeModel":runtime_model,"mcpServers":servers}),
-                    )
-                    .await?
+                    let mut resume = json!({"sessionId":params["sessionId"],"workspace":self.workspace(),"mcpServers":servers});
+                    if self.config.protocol() == NativeProtocol::Legacy {
+                        resume["runtimeModel"] = runtime_model;
+                    }
+                    self.call("session/resume", resume).await?
                 };
                 let session_id = snapshot
                     .pointer("/session/sessionId")
@@ -534,6 +571,18 @@ impl Bridge {
                     bail!("ZCode exact resume mismatch");
                 }
                 let subscription = self.call("session/subscribe", json!({"sessionId":session_id,"deliveryKind":"desktop-continuous","includeSnapshot":false})).await?;
+                let model_reasoning_defaults = snapshot
+                    .pointer("/settings/model/available")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|choice| {
+                        let provider = choice.pointer("/ref/providerId")?.as_str()?;
+                        let model = choice.pointer("/ref/modelId")?.as_str()?;
+                        let level = choice.pointer("/reasoning/defaultLevel")?.as_str()?;
+                        Some((format!("{provider}/{model}"), level.to_string()))
+                    })
+                    .collect();
                 self.sessions.lock().await.insert(
                     session_id.to_string(),
                     Session {
@@ -543,6 +592,7 @@ impl Bridge {
                                 .and_then(Value::as_u64)
                                 .unwrap_or(0),
                         ),
+                        model_reasoning_defaults,
                         terminal: None,
                         cancelled: false,
                         cancel_input: None,
@@ -573,13 +623,40 @@ impl Bridge {
                 if key != "model" {
                     bail!("Unsupported ZCode model option");
                 }
-                let runtime_model = self.config.runtime_model(Some(selected))?;
-                let applied = self.call("session/setModel", json!({"sessionId":session_id,"model":runtime_model["model"],"runtimeModel":runtime_model})).await?;
-                if applied
+                let mut runtime_model = self.config.runtime_model(Some(selected))?;
+                let applied = if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                    let level = self
+                        .sessions
+                        .lock()
+                        .await
+                        .get(session_id)
+                        .and_then(|session| session.model_reasoning_defaults.get(selected))
+                        .cloned();
+                    if runtime_model["model"]["options"]["reasoningLevel"].is_null()
+                        && let Some(level) = level
+                    {
+                        runtime_model["model"]["options"] = json!({"reasoningLevel":level});
+                    }
+                    self.call(
+                        "session/setModel",
+                        json!({"sessionId":session_id,"model":runtime_model["model"]}),
+                    )
+                    .await?
+                } else {
+                    self.call("session/setModel", json!({"sessionId":session_id,"model":runtime_model["model"],"runtimeModel":runtime_model})).await?
+                };
+                let current = applied
                     .pointer("/model/current")
-                    .or_else(|| applied.pointer("/settings/model/current"))
-                    != Some(&runtime_model["model"])
-                {
+                    .or_else(|| applied.pointer("/settings/model/current"));
+                let confirmed = if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                    current.is_some_and(|current| {
+                        current["providerId"] == runtime_model["model"]["providerId"]
+                            && current["modelId"] == runtime_model["model"]["modelId"]
+                    })
+                } else {
+                    current == Some(&runtime_model["model"])
+                };
+                if !confirmed {
                     bail!("ZCode model selection was not confirmed");
                 }
                 Ok(json!({}))
@@ -1017,6 +1094,8 @@ mod tests {
                 "models":{"model":{}}}}}),
             digest: "fixture".into(),
             app_config: false,
+            protocol: NativeProtocol::Legacy,
+            default_selection: None,
         };
         let (native, adapter) = tokio::io::duplex(64 * 1024);
         let (native_read, native_write) = tokio::io::split(native);
@@ -1117,6 +1196,107 @@ mod tests {
                 );
             } else {
                 assert!(response.get("error").is_none(), "{response}");
+            }
+        }
+        peer.abort();
+    }
+
+    // The 0.16.9 worker rejects the old registry/readState and runtimeModel
+    // fields. This facade test owns that wire boundary; the real kernel Probe
+    // separately verifies its model catalog and process startup.
+    #[tokio::test]
+    async fn provider_registry_protocol_uses_native_model_selection() {
+        let config = NativeConfig {
+            value: json!({}),
+            digest: "modern-fixture".into(),
+            app_config: false,
+            protocol: NativeProtocol::ProviderRegistry,
+            default_selection: Some(json!({"providerId":"fixture","modelId":"model",
+                "options":{"reasoningLevel":"disabled"}})),
+        };
+        let (native, adapter) = tokio::io::duplex(64 * 1024);
+        let (native_read, native_write) = tokio::io::split(native);
+        let (adapter_read, adapter_write) = tokio::io::split(adapter);
+        let peer = tokio::spawn(async move {
+            let mut reader = BufReader::new(native_read);
+            let writer: Mutex<Writer> = Mutex::new(Box::new(native_write));
+            let mut frame = Vec::new();
+            let model = json!({"providerId":"fixture","modelId":"model"});
+            let snapshot = json!({"session":{"sessionId":"s1"},"settings":{"model":{
+                "current":model,"available":[{"ref":model,"label":"Fixture model",
+                    "reasoning":{"defaultLevel":"enabled","levels":[{"value":"enabled","label":"Enabled"}]}}]}}});
+            while let Some(request) = read_frame(&mut reader, &mut frame).await.unwrap() {
+                let params = &request["params"];
+                let result = match request["method"].as_str().unwrap() {
+                    "workspace/readPresentation" => {
+                        json!({"workspace":params["workspace"],"mode":"build","slashCommands":[]})
+                    }
+                    "session/create" => {
+                        assert!(params.get("runtimeModel").is_none());
+                        assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
+                        assert_eq!(params["thoughtLevel"], "disabled");
+                        snapshot.clone()
+                    }
+                    "session/resume" => {
+                        assert!(params.get("runtimeModel").is_none());
+                        assert_eq!(params["sessionId"], "s1");
+                        snapshot.clone()
+                    }
+                    "session/setModel" => {
+                        assert!(params.get("runtimeModel").is_none());
+                        assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
+                        json!({"settings":{"model":{"current":model}}})
+                    }
+                    "session/subscribe" => json!({"eventSeq":0}),
+                    "session/setMode" => json!({}),
+                    method => panic!("unexpected modern native method {method}"),
+                };
+                write_frame(&writer, &json!({"id":request["id"],"result":result}))
+                    .await
+                    .unwrap();
+            }
+        });
+        let stream = start(
+            adapter_write,
+            adapter_read,
+            config,
+            PathBuf::from("/fixture"),
+            "build".into(),
+        );
+        let (read, write) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read);
+        let writer: Mutex<Writer> = Mutex::new(Box::new(write));
+        let mut frame = Vec::new();
+        for (id, method, params) in [
+            (1, "initialize", json!({})),
+            (2, "session/new", json!({"cwd":"/fixture"})),
+            (
+                3,
+                "session/set_model",
+                json!({"sessionId":"s1","modelId":"fixture/model"}),
+            ),
+            (
+                4,
+                "session/resume",
+                json!({"cwd":"/fixture","sessionId":"s1"}),
+            ),
+        ] {
+            write_frame(&writer, &json!({"id":id,"method":method,"params":params}))
+                .await
+                .unwrap();
+            let response =
+                tokio::time::timeout(Duration::from_secs(5), read_frame(&mut reader, &mut frame))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(response["id"], id);
+            assert!(response.get("error").is_none(), "{response}");
+            if id == 2 || id == 4 {
+                assert_eq!(
+                    response["result"]["models"]["currentModelId"],
+                    "fixture/model"
+                );
             }
         }
         peer.abort();

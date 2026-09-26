@@ -140,6 +140,55 @@ describe('command disclosure presentation', () => {
     })
   })
 
+  it('keeps a non-truncated operation-only file Evidence available to its Command row', () => {
+    const evidence = {
+      id: 'write-evidence',
+      agentRunId: 'direct-camp-run',
+      executionEpoch: 1,
+      sequence: 1,
+      eventType: 'runtime.action',
+      kind: 'tool_call',
+      phase: 'completed',
+      payload: {
+        runtimeFileOperation: {
+          schemaVersion: 2, status: 'available', operationKind: 'write',
+          path: 'docs/versions/v1.69/proposal.md'
+        }
+      },
+      contentBlobId: null,
+      contentByteCount: 512,
+      isTruncated: false,
+      occurredAt: '2026-09-24T00:00:00Z',
+      canonical: {
+        operationId: 'write-proposal',
+        classifierVersion: 'activity-v4',
+        activityDomain: 'file',
+        semanticKind: 'file.write',
+        toolName: 'Write',
+        presentationHint: null,
+        phase: 'terminal',
+        outcome: 'succeeded',
+        sourceAuthority: 'runtime',
+        credibility: 'runtime_structured',
+        coverageLevel: 'fine_grained',
+        sourceEvidenceIds: ['write-evidence'],
+        firstEvidenceSequence: 1,
+        lastEvidenceSequence: 1,
+        revision: 1
+      }
+    } satisfies AgentRunExecutionEvidenceView
+    const laterOutput = {
+      ...evidence,
+      id: 'write-output',
+      sequence: 2,
+      payload: {},
+      isTruncated: true
+    } satisfies AgentRunExecutionEvidenceView
+    const selected = selectCompletePresentableExecutionEvidence([evidence, laterOutput])
+    expect(selected.byToolId.get('write-proposal')).toBe(laterOutput)
+    expect(selected.byFileOperationToolId.get('write-proposal')).toBe(evidence)
+  })
+
   it.each(['terminal', 'file-read', 'file-write', 'web'] as ActivityIconKind[])(
     'selects the same %s instruction for both the current title and icon', icon => {
       const markup = renderGroup([tool('old', 'terminal', 'completed'), tool('current', icon, 'running'), tool('later', 'unknown', 'completed')])

@@ -4,7 +4,7 @@ contract: skills-rebuild-v1
 authority: skills-source-configuration-selection-and-model-index
 status: accepted
 version: 1
-last_updated: 2026-09-24
+last_updated: 2026-09-25
 ---
 
 # Skills Rebuild v1
@@ -61,4 +61,4 @@ Settings 的 `nativeSkills.list/read` 只读所选 Runtime 的用户级来源；
 
 新 Bootstrap v5/Formatter 5 独立冻结平台 section；Charter revision 13 原字节不改。新非 batch Formatter/Manifest 27 与 Profile 7、新公开 batch 30 与 Profile 10 冻结动态 section、Selection/Resolution、每消息链接和整个 payload。旧 v4 Binding 不热插入平台段；旧非 batch v26/6/5 与公开 v29/9/7 只用历史证据恢复，公开 v28 及更早不派发。新 Run 不再创建项目 SkillProjection；升级和 Core 启动不扫描或清理旧项目入口。旧入口继续凭 observation 从原生候选中排除。
 
-`diagnostics.check` 只按 `skill_projection_observation` 统计旧入口，在受管内容组输出唯一 `legacy-skill-entries` 检查；检查不访问项目文件，也不执行清理。只有用户点击该问题的“清理旧入口”才调用 `skills.cleanupLegacyEntries`。命令按 observation 的精确 `entry_path` 分组，执行前复核路径与组、Skill/Revision、受管目标、root `active`、可访问性和运行中 Run；未确认、不可访问、在用入口保留。已不存在的入口只移除失效 observation，确认归属的入口只移除精确文件或 Windows 受管副本；不调用 `remove_execution_root`，不写 `access_state`，不删除项目根或 Skills 目录。返回移除、失效、三类保留与剩余计数；重复执行不得扩大删除范围。Renderer 随后重新运行完整诊断，并在同一问题和摘要显示新结果。
+`diagnostics.check` 只按 `skill_projection_observation` 统计旧入口，在受管内容组输出唯一 `legacy-skill-entries` 检查；检查不访问项目文件，也不执行清理。只有用户点击该问题的“清理旧入口”才调用 `skills.cleanupLegacyEntries`。命令按 observation 的精确 `entry_path` 分组，执行前复核路径与组、已登记 Skill 名称、root `active`、可访问性和运行中 Run。Windows 对名称为 `analyze-agent-codebase`、`campfire`、`cli-operations`、`grill-duo`、`grill-duo-with-docs`、`member-studio`、`memory-stewardship`、`review-duo`、`worktree` 的已登记普通目录，以名称代替旧 operation／file identity／digest 证据；入口、Skills 父目录和子树中的 reparse point 不准入。其他入口继续复核 Skill/Revision 与受管目标，未确认、不可访问、在用入口保留。已不存在的入口只移除失效 observation；准入的入口只移除精确文件或 Windows 副本，不调用 `remove_execution_root`，不写 `access_state`，不删除项目根或 Skills 目录。返回移除、失效、三类保留与剩余计数；重复执行不得扩大删除范围。Renderer 随后重新运行完整诊断，并在同一问题和摘要显示新结果。

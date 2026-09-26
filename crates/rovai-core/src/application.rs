@@ -7623,6 +7623,22 @@ impl Core {
                     )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.inbound.attachments.complete" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::inbound_attachments::CompleteAttachmentsCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::channel::inbound_attachments::complete(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.inbound.finalize" => {
                 let params: UserCommandParams<FinalizeChannelInboundCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -15762,20 +15778,23 @@ impl Core {
             }
             Err(error) => return Err(error),
         };
+        // Freeze Bootstrap against the prepared Binding before recording the
+        // native Session ID. Once bound, a missing evidence row is a continuity
+        // violation and ContextService must reject materialization.
+        let bootstrap = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_session_bootstrap(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                charter_delivery_mode,
+            )?
+        };
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await
             .context("failed to bind ACP Native Session")?;
         if execution.runtime.adapter_kind == AdapterKind::DeepseekHarness {
-            let bootstrap = {
-                let mut database = self.database.lock().await;
-                ContextService.prepare_session_bootstrap(
-                    &mut database,
-                    &ManagedBlobStore::new(&self.data_dir),
-                    &execution.agent_run_id,
-                    execution.execution_epoch,
-                    CharterDeliveryMode::ManagedSystemPrompt,
-                )?
-            };
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
                     != binding_credential.native_binding_generation

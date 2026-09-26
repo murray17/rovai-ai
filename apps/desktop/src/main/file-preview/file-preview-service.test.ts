@@ -50,6 +50,11 @@ async function fixture(): Promise<{
 }> {
   const root = await mkdtemp(join(tmpdir(), 'rovai-file-preview-'))
   directories.push(root)
+  // Keep the host user's home out of synthetic path-presentation assertions.
+  // Home-relative behavior is covered by tests that explicitly override this.
+  const home = await mkdtemp(join(tmpdir(), 'rovai-preview-home-'))
+  directories.push(home)
+  vi.mocked(homedir).mockReturnValue(home)
   const authority: FilePreviewSourceAuthority = {
     async resolve(request) {
       if (request.kind !== 'camp_workspace' && request.kind !== 'message_reference') return null

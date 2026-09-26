@@ -41,6 +41,18 @@ const MANAGED_GIT_EXCLUDE_MARKERS: [(&str, &str); 3] = [
         "# END LUMEN MANAGED SKILL PROJECTIONS",
     ),
 ];
+#[cfg(windows)]
+const WINDOWS_LEGACY_NAMED_CLEANUP_SKILLS: [&str; 9] = [
+    "analyze-agent-codebase",
+    "campfire",
+    "cli-operations",
+    "grill-duo",
+    "grill-duo-with-docs",
+    "member-studio",
+    "memory-stewardship",
+    "review-duo",
+    "worktree",
+];
 #[cfg(unix)]
 const MANAGED_TEMP_PREFIX: &str = ".rovai-skill-projection-";
 
@@ -82,6 +94,11 @@ struct LegacyEntryObservation {
     skill_name: String,
     entry_path: String,
     delivered_via_group_key: Option<SkillDeliveryGroupKey>,
+}
+
+struct LegacyEntryGroup {
+    observations: Vec<LegacyEntryObservation>,
+    persisted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -213,13 +230,21 @@ enum ReconcileRepairPolicy {
 pub struct SkillProjectionReconciler;
 
 impl SkillProjectionReconciler {
-    /// This count reads only dispatch records. It never visits a project or schedules cleanup.
+    /// Windows also counts fixed-name copies in registered project roots when their old
+    /// dispatch records are gone. Counting never mutates a project.
     pub fn legacy_entry_count(&self, database: &Database) -> Result<usize> {
-        Ok(database.connection().query_row(
-            "SELECT COUNT(DISTINCT entry_path) FROM skill_projection_observation",
-            [],
-            |row| row.get::<_, i64>(0),
-        )? as usize)
+        #[cfg(windows)]
+        {
+            Ok(legacy_entry_groups(database)?.len())
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(database.connection().query_row(
+                "SELECT COUNT(DISTINCT entry_path) FROM skill_projection_observation",
+                [],
+                |row| row.get::<_, i64>(0),
+            )? as usize)
+        }
     }
 
     /// Invoked only by the explicit Diagnostics action. In particular, this never changes
@@ -230,15 +255,10 @@ impl SkillProjectionReconciler {
         library: &SkillLibraryService,
     ) -> Result<LegacySkillCleanupReport> {
         let mut report = LegacySkillCleanupReport::default();
-        let mut grouped = BTreeMap::<String, Vec<LegacyEntryObservation>>::new();
-        for observation in legacy_entry_observations(database)? {
-            grouped
-                .entry(observation.entry_path.clone())
-                .or_default()
-                .push(observation);
-        }
+        let grouped = legacy_entry_groups(database)?;
 
-        for observations in grouped.values() {
+        for group in grouped.values() {
+            let observations = &group.observations;
             let classification = classify_legacy_entry(database, library, observations);
             match classification {
                 LegacyEntryClassification::ActiveRun => report.retained_active_run += 1,
@@ -266,7 +286,9 @@ impl SkillProjectionReconciler {
                                 "legacy Skill cleanup is unsupported on this platform"
                             ));
                             if removal.is_ok() {
-                                delete_legacy_observations(database, observations)?;
+                                if group.persisted {
+                                    delete_legacy_observations(database, observations)?;
+                                }
                                 report.removed += 1;
                             } else {
                                 report.retained_inaccessible += 1;
@@ -278,7 +300,9 @@ impl SkillProjectionReconciler {
                         }
                         LegacyEntryClassification::Unverified => report.retained_unverified += 1,
                         LegacyEntryClassification::Missing => {
-                            delete_legacy_observations(database, observations)?;
+                            if group.persisted {
+                                delete_legacy_observations(database, observations)?;
+                            }
                             report.already_missing += 1;
                         }
                     }
@@ -1447,6 +1471,89 @@ enum LegacyEntryClassification {
     Unverified,
 }
 
+fn legacy_entry_groups(database: &Database) -> Result<BTreeMap<String, LegacyEntryGroup>> {
+    let mut grouped = BTreeMap::<String, LegacyEntryGroup>::new();
+    for observation in legacy_entry_observations(database)? {
+        grouped
+            .entry(observation.entry_path.clone())
+            .or_insert_with(|| LegacyEntryGroup {
+                observations: Vec::new(),
+                persisted: true,
+            })
+            .observations
+            .push(observation);
+    }
+    #[cfg(windows)]
+    add_unobserved_windows_named_entries(database, &mut grouped)?;
+    Ok(grouped)
+}
+
+#[cfg(windows)]
+fn add_unobserved_windows_named_entries(
+    database: &Database,
+    grouped: &mut BTreeMap<String, LegacyEntryGroup>,
+) -> Result<()> {
+    let mut known_paths = grouped
+        .keys()
+        .map(|path| path.to_lowercase())
+        .collect::<BTreeSet<_>>();
+    let mut statement = database.connection().prepare(
+        "SELECT execution_root FROM skill_projection_root_state \
+         WHERE access_state = 'active' ORDER BY execution_root",
+    )?;
+    let roots = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for execution_root in roots {
+        if validate_persisted_execution_root(&execution_root).is_err() {
+            continue;
+        }
+        let root = Path::new(&execution_root);
+        if !matches!(fs::symlink_metadata(root), Ok(metadata) if metadata.is_dir())
+            || root.canonicalize().ok().as_deref() != Some(root)
+        {
+            continue;
+        }
+        for group_key in SkillDeliveryGroupKey::ALL {
+            let skills_root = root.join(group_key.relative_path());
+            if !matches!(fs::symlink_metadata(&skills_root), Ok(metadata) if metadata.is_dir())
+                || skills_root.canonicalize().ok().as_deref() != Some(skills_root.as_path())
+            {
+                continue;
+            }
+            for skill_name in WINDOWS_LEGACY_NAMED_CLEANUP_SKILLS {
+                let entry = skills_root.join(skill_name);
+                if fs::symlink_metadata(&entry).is_err() {
+                    continue;
+                }
+                let entry_path = entry
+                    .to_str()
+                    .context("legacy Skill entry path must be Unicode")?
+                    .to_string();
+                if !known_paths.insert(entry_path.to_lowercase()) {
+                    continue;
+                }
+                grouped.insert(
+                    entry_path.clone(),
+                    LegacyEntryGroup {
+                        observations: vec![LegacyEntryObservation {
+                            execution_root: execution_root.clone(),
+                            group_key,
+                            skill_id: String::new(),
+                            revision_id: String::new(),
+                            skill_name: skill_name.to_string(),
+                            entry_path,
+                            delivered_via_group_key: None,
+                        }],
+                        persisted: false,
+                    },
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn legacy_entry_observations(database: &Database) -> Result<Vec<LegacyEntryObservation>> {
     let mut statement = database.connection().prepare(
         r#"
@@ -1598,6 +1705,23 @@ fn classify_legacy_entry(
     }) {
         return LegacyEntryClassification::Unverified;
     }
+    #[cfg(windows)]
+    if is_windows_legacy_named_cleanup_skill(first) {
+        return match fs::symlink_metadata(path) {
+            Ok(metadata)
+                if metadata.is_dir()
+                    && !metadata.file_type().is_symlink()
+                    && windows_projection::is_plain_legacy_directory(path) =>
+            {
+                LegacyEntryClassification::Owned
+            }
+            Ok(_) => LegacyEntryClassification::Unverified,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                LegacyEntryClassification::Missing
+            }
+            Err(_) => LegacyEntryClassification::Inaccessible,
+        };
+    }
     match inspect_entry(database, library, path) {
         Ok(EntryState::Managed(actual))
             if actual.skill_id == first.skill_id && actual.revision_id == first.revision_id =>
@@ -1610,6 +1734,11 @@ fn classify_legacy_entry(
         }
         Err(_) => LegacyEntryClassification::Inaccessible,
     }
+}
+
+#[cfg(windows)]
+fn is_windows_legacy_named_cleanup_skill(observation: &LegacyEntryObservation) -> bool {
+    WINDOWS_LEGACY_NAMED_CLEANUP_SKILLS.contains(&observation.skill_name.as_str())
 }
 
 fn delete_legacy_observations(
@@ -1643,6 +1772,14 @@ fn remove_legacy_windows_copy(
                     .unwrap_or(observation.group_key)
         })
         .context("legacy Skill copy has no direct dispatch observation")?;
+    if is_windows_legacy_named_cleanup_skill(direct) {
+        return windows_projection::remove_legacy_named_copy(
+            Path::new(&direct.execution_root),
+            direct.group_key,
+            &direct.skill_name,
+            entry_path,
+        );
+    }
     let skill = library
         .list(database)?
         .into_iter()

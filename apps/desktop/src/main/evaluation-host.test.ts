@@ -6,6 +6,8 @@ import type { AutomationView, CoreMethod } from '@contracts'
 import { EvaluationHostService } from './evaluation-host'
 import { digest } from '../../../../packages/evaluation/src/daily'
 
+// These integration tests hash the real Node executable and launch real workers.
+// Use the same 20s budget for setup, terminal observation and process cleanup.
 // Synthetic worker result: proves Host ownership/lifecycle only, never Agent quality.
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'rovai-evaluation-host-test-')), source = join(root, 'source'), workspace = join(root, 'workspace')
@@ -15,6 +17,7 @@ async function fixture() {
   await writeFile(join(source, 'pnpm-lock.yaml'), 'fixture: true')
   await copyFile(resolve('scripts/eval-host.mjs'), join(source, 'scripts/eval-host.mjs'))
   await copyFile(resolve('scripts/eval-wait.mjs'), join(source, 'scripts/eval-wait.mjs'))
+  await copyFile(resolve('scripts/lib/windows-process-table.mjs'), join(source, 'scripts/lib/windows-process-table.mjs'))
   await copyFile(resolve('scripts/lib/eval-host-build-path.mjs'), join(source, 'scripts/lib/eval-host-build-path.mjs'))
   await writeFile(join(source, 'scripts/lib/context-weekly.mjs'), "export { runPlan as runWeekly } from './context-evaluation.mjs'\n")
   await writeFile(join(source, 'scripts/lib/context-evaluation.mjs'), `
@@ -88,7 +91,7 @@ it('does no Core queries or writes until configured; freezes installation and ma
     await writeFile(join(f.source, 'scripts/lib/context-evaluation.mjs'), '// changed')
     await expect(f.service.start({ ...params, jobId: 'manual-2' }, 'gate')).rejects.toThrow('installation changed')
   } finally { await f.close() }
-})
+}, 20000)
 
 it('binds an existing Automation and consumes each accepted run once, exposing only the matching Camp receipt', async () => {
   const f = await fixture()
@@ -115,9 +118,9 @@ it('binds an existing Automation and consumes each accepted run once, exposing o
     await symlink(outside, join(f.workspace, 'escape'))
     await expect(f.service.schedule({ automationId: 'automation-1', plan, output: join(f.workspace, 'escape/reports') })).rejects.toThrow('inside')
   } finally { await f.close() }
-})
+}, 20000)
 
-it('stops the actual worker and its detached descendant on cancellation, retaining an interrupted attempt', async () => {
+it.each(['cancel', 'stop'] as const)('stops the actual worker and its detached descendant on %s, retaining an interrupted attempt', async (operation) => {
   const f = await fixture()
   try {
     await f.service.configure({ source: f.source, node: process.execPath })
@@ -125,10 +128,11 @@ it('stops the actual worker and its detached descendant on cancellation, retaini
     await f.service.start({ jobId: 'cancel-1', plan: await f.plan('weekly', { pause: true, budget: { wallSeconds: null }, execution: { judgeSeconds: null } }), output }, 'weekly')
     await expect.poll(async () => readFile(join(output, 'fixture-child.pid'), 'utf8').catch(() => null)).not.toBeNull()
     const pid = Number(await readFile(join(output, 'fixture-child.pid'), 'utf8'))
-    await f.service.cancel({ jobId: 'cancel-1' })
+    if (operation === 'cancel') await f.service.cancel({ jobId: 'cancel-1' })
+    else await f.service.stop()
     await expect.poll(async () => (await f.service.status({ jobId: 'cancel-1' }) as { state: string }).state, { timeout: 15000 }).toBe('interrupted')
     expect(() => process.kill(pid, 0)).toThrow()
-    expect(await f.service.status({ jobId: 'cancel-1' })).toMatchObject({ reason: 'cancelled_by_owner', reportStatus: null })
+    expect(await f.service.status({ jobId: 'cancel-1' })).toMatchObject({ reason: operation === 'cancel' ? 'cancelled_by_owner' : 'app_shutdown', reportStatus: null })
   } finally { await f.close() }
 }, 20000)
 
@@ -151,4 +155,4 @@ it('publishes configuration drift as a terminal failure and never relaunches a j
     expect(await restarted.status({ jobId: 'drift-1' })).toMatchObject({ state: 'interrupted', reason: 'app_restarted' })
     await restarted.stop()
   } finally { await f.close() }
-})
+}, 20000)

@@ -5,7 +5,7 @@ authority: lark-channel-provider-identity-storage-login-and-runtime-domain
 status: accepted
 version: 1
 source_version: v1.71
-last_updated: 2026-09-24
+last_updated: 2026-09-27
 ---
 
 # Lark Channel v1
@@ -18,7 +18,7 @@ PendingCampBinding 与项目卡、Quick Chat 与 `/new`、群 roster、执行卡
 
 共享边界不变：[Channel Message Bridge v1](channel-message-bridge-v1.md)、
 [Channel Storage v3](channel-storage-v3.md)、[Channel Host Maintenance v5](channel-host-maintenance-v5.md)、
-[Camp Membership v2](camp-membership-v2.md)与 [ContextManifest Evidence v30](context-manifest-evidence-v30.md)。
+[Camp Membership v2](camp-membership-v2.md)与 [ContextManifest Evidence v31](context-manifest-evidence-v31.md)。
 
 ## 1. Provider 身份
 
@@ -145,6 +145,16 @@ Lark 的重连类失败码 `lark_session_expired`、`lark_developer_session_expi
 两个 Provider 的连接、切换、断开、过期、发布与重试相互独立。任一 Host 启动失败不阻止另一 Host 与钉钉 Host 启动；
 协调器聚合 Snapshot 时保持 Provider 顺序为飞书、Lark、钉钉。
 
+Lark Camp 的来源前缀为 `【Lark私聊】`、`【Lark群聊】`、`【Lark话题】`，由共享 formatter 展示并参与
+搜索；重命名仍只保存原始标题，详见 [Channel Camp Naming v1](channel-camp-naming-v1.md)。
+
+话题消息派发前，必须按 `provider + tenant_key + chat_id` 等待本渠道的新一代群 Bot roster，并确认接收队员的
+本渠道 Bot 已发布且仍在群内。Host tick 只返回自身 provider 的刷新请求；另一 provider 的同名租户、群、App
+或队员事实不能放行本次派发。Bot 不在群内时，Lark 的派发失败码为 `recipient_not_in_lark_roster`。
+
+主线新增的持久入站资源下载仍仅供国内飞书使用；Lark 保留原有附件摘要输入，不能进入飞书的下载等待队列。
+此边界不改变 Lark 既有的显式文件外发。
+
 ## 7. 模型上下文
 
 本版不改变任何模型可见内容。Lark 绑定的 Camp 不注入飞书文件交付提示；判断该提示的条件仍精确匹配
@@ -172,7 +182,7 @@ Bot 只能通过 Lark 渠道新建。
 ## 10. 验证
 
 - Core：结构等价测试；Lark 与飞书各自单 connected 账号且互不影响；错误 provider 请求被拒绝且无部分写入；
-  8 个 actor 绑定请求使用 `lark-channel-host`；目录视图返回 Lark Bot；三张中立表接受 `lark` 并保留旧行；
+  8 个 actor 绑定请求使用 `lark-channel-host`；目录视图返回 Lark Bot；话题 roster 刷新、发布状态和成员存在性按 provider 隔离；三张中立表接受 `lark` 并保留旧行；
   Lark 绑定 Camp 的 Charter 不含飞书文件交付提示。
 - Main：两个渠道服务实例并存；Lark 实例注入 Lark 登录配置、`Domain.Lark` 与 `channels.lark.*` 方法名；
   所有 SDK 构造点的 domain 断言；可信域拒绝对方站点；一个实例启动失败不影响另一个。

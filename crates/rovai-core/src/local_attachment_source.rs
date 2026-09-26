@@ -742,7 +742,7 @@ mod tests {
     fn source_ref_json_is_closed_and_pathless_view_is_stable() {
         let source_ref = LocalAttachmentSourceRef {
             id: Uuid::new_v4().to_string(),
-            source_path: "/tmp/example.txt".to_string(),
+            source_path: crate::test_support::absolute_test_path("/tmp/example.txt"),
             display_name: "example.txt".to_string(),
             kind: LocalAttachmentKind::File,
             media_type: Some("text/plain".to_string()),

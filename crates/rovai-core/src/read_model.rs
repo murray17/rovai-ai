@@ -6412,6 +6412,148 @@ mod slow_tests {
                 .is_none()
         );
 
+        // New lifecycle storage assigns one sequence to each operation. The
+        // completed Shell row follows its Core invocation rather than enclosing
+        // it, and a page containing only the Shell still carries the association.
+        for (id, sequence, event_type, kind, payload) in [
+            (
+                "single-core",
+                95,
+                "runtime.action",
+                "tool_result",
+                json!({"canonicalTool": "team.get_task", "sourceAuthority": "core", "agentOutputDigest": response_digest, "coreEnvelope": {"ok": true, "operation": "team.get_task"}}),
+            ),
+            (
+                "single-shell",
+                96,
+                "activity.completed",
+                "command",
+                json!({"resultDigest": response_digest, "item": {"id": "single-carrier", "type": "commandExecution", "command": "rovai task get --task-id fixture-task", "status": "completed"}}),
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, ?4, ?5, 'completed', ?6, 100, 0, ?7)",
+                params![id, agent_run_id, sequence, event_type, kind, payload.to_string(), now],
+            ).unwrap();
+        }
+        for (id, domain, authority, credibility, sequence) in [
+            ("single-core", "tool", "core", "core_verified", 95),
+            ("single-shell", "shell", "runtime", "runtime_structured", 96),
+        ] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?7, 1, ?8, ?8)",
+                params![agent_run_id, id, domain, credibility, authority, format!("[\"{id}\"]"), sequence, now],
+            ).unwrap();
+        }
+        let single =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(97), 1)
+                .unwrap();
+        assert_eq!(single.evidence[0].sequence, 96);
+        assert_eq!(
+            single.evidence[0].payload["executionWindowBuiltinOperation"],
+            "team.get_task"
+        );
+        database.connection().execute(
+            "UPDATE agent_run_execution_evidence SET payload_preview_json = json_set(payload_preview_json, '$.resultDigest', 'different') WHERE id = 'single-shell'", [],
+        ).unwrap();
+        let distinct_single =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(97), 1)
+                .unwrap();
+        assert!(
+            distinct_single.evidence[0]
+                .payload
+                .get("executionWindowBuiltinOperation")
+                .is_none()
+        );
+
+        // Some Runtimes persist the Shell started event first and update that
+        // same row at completion. Its one sequence then precedes the Core row.
+        for (id, sequence, event_type, kind, payload) in [
+            (
+                "early-shell",
+                97,
+                "activity.completed",
+                "command",
+                json!({"resultDigest": response_digest, "item": {"id": "early-carrier", "type": "commandExecution", "command": "rovai task get --task-id fixture-task", "status": "completed"}}),
+            ),
+            (
+                "late-core",
+                98,
+                "runtime.action",
+                "tool_result",
+                json!({"canonicalTool": "team.get_task", "sourceAuthority": "core", "agentOutputDigest": response_digest, "coreEnvelope": {"ok": true, "operation": "team.get_task"}}),
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, ?4, ?5, 'completed', ?6, 100, 0, ?7)",
+                params![id, agent_run_id, sequence, event_type, kind, payload.to_string(), now],
+            ).unwrap();
+        }
+        for (id, domain, authority, credibility, sequence) in [
+            ("early-shell", "shell", "runtime", "runtime_structured", 97),
+            ("late-core", "tool", "core", "core_verified", 98),
+        ] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?7, 1, ?8, ?8)",
+                params![agent_run_id, id, domain, credibility, authority, format!("[\"{id}\"]"), sequence, now],
+            ).unwrap();
+        }
+        let early =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(98), 1)
+                .unwrap();
+        assert_eq!(early.evidence[0].sequence, 97);
+        assert_eq!(
+            early.evidence[0].payload["executionWindowBuiltinOperation"],
+            "team.get_task"
+        );
+
+        // TRAE CLI reports the Shell command in runtime.action input, while
+        // the window omits the Core envelope from its public summary.
+        let trae_digest =
+            crate::command::canonical_json_digest(&json!({"taskId": "trae-task"})).unwrap();
+        for (id, sequence, kind, payload) in [
+            (
+                "trae-shell",
+                99,
+                "tool_result",
+                json!({"kind": "execute", "input": "rovai task get --task-id trae-task", "resultDigest": trae_digest, "status": "completed"}),
+            ),
+            (
+                "trae-core",
+                100,
+                "tool_result",
+                json!({"canonicalTool": "team.get_task", "sourceAuthority": "core", "agentOutputDigest": trae_digest, "coreEnvelope": {"ok": true, "operation": "team.get_task"}}),
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, 'runtime.action', ?4, 'completed', ?5, 100, 0, ?6)",
+                params![id, agent_run_id, sequence, kind, payload.to_string(), now],
+            ).unwrap();
+        }
+        for (id, domain, authority, credibility, sequence) in [
+            ("trae-shell", "shell", "runtime", "runtime_structured", 99),
+            ("trae-core", "tool", "core", "core_verified", 100),
+        ] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?7, 1, ?8, ?8)",
+                params![agent_run_id, id, domain, credibility, authority, format!("[\"{id}\"]"), sequence, now],
+            ).unwrap();
+        }
+        let trae =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(100), 1)
+                .unwrap();
+        assert_eq!(trae.evidence[0].sequence, 99);
+        assert_eq!(
+            trae.evidence[0].payload["executionWindowBuiltinOperation"],
+            "team.get_task"
+        );
+
         // Historical Runs still resolve their Camp through CampTurn after the
         // delivery-first batch model moved new Runs to agent_run.camp_id.
         database

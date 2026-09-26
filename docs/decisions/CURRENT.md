@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-09-24
+last_updated: 2026-09-25
 ---
 
 # 当前规范与决定理由导航
@@ -72,7 +72,7 @@ last_updated: 2026-09-24
 
 ## Camp 文件预览
 
-- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v19](../contracts/file-preview-v19.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
+- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v20](../contracts/file-preview-v20.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
 - 窗口保留与刷新取舍：[V1.59-D07](../versions/v1.59/decisions.md#v1-59-d07)。
 - HTML 运行环境理由：[V1.58-D07](../versions/v1.58/decisions.md#v1-58-d07)。
 - 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)、[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)、[V1.42-D01](../versions/v1.42/decisions.md#v1-42-d01)、[V1.51-D01](../versions/v1.51/decisions.md#v1-51-d01)、[V1.51-D02](../versions/v1.51/decisions.md#v1-51-d02)、[V1.52-D01](../versions/v1.52/decisions.md#v1-52-d01)及[V1.55-D01](../versions/v1.55/decisions.md#v1-55-d01)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案与 [V1.39-D05](../versions/v1.39/decisions.md#v1-39-d05) 的 inline-code 存在性探测已被替代。
@@ -145,9 +145,9 @@ last_updated: 2026-09-24
 
 ## Skills、MCP 与 Built-ins
 
-当前 Skills 来源与模型冻结的取舍见 [V1.70-D01](../versions/v1.70/decisions.md#v1-70-d01) 和 [V1.70-D02](../versions/v1.70/decisions.md#v1-70-d02)；旧项目入口改为显式清理的理由见 [V1.70-D03](../versions/v1.70/decisions.md#v1-70-d03)。旧 Library/项目投递仅作为历史恢复与用户显式处理的证据。
+当前 Skills 来源与模型冻结的取舍见 [V1.70-D01](../versions/v1.70/decisions.md#v1-70-d01) 和 [V1.70-D02](../versions/v1.70/decisions.md#v1-70-d02)；旧项目入口改为显式清理的理由见 [V1.70-D03](../versions/v1.70/decisions.md#v1-70-d03)，Windows 固定官方名称和无 observation 副本的准入见 [V1.70-D04](../versions/v1.70/decisions.md#v1-70-d04)与[V1.70-D05](../versions/v1.70/decisions.md#v1-70-d05)。旧 Library/项目投递仅作为历史恢复与用户显式处理的证据。
 
-- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skills 架构](../architecture/skills.md)、[Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)、[Skill Content Preview v1](../contracts/skill-content-preview-v1.md)和[Capability settings](../ui/components/capability-settings.md)。
+- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skills 架构](../architecture/skills.md)、[Skills Rebuild v2](../contracts/skills-rebuild-v2.md)、[Diagnostics Center v2](../contracts/diagnostics-center-v2.md)、[Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)、[Windows Skill Projection v2](../contracts/windows-skill-projection-v2.md)、[Skill Content Preview v1](../contracts/skill-content-preview-v1.md)和[Capability settings](../ui/components/capability-settings.md)。
 - 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.27-D04](../versions/v1.27/decisions.md#v1-27-d04)、[V1.28-D03](../versions/v1.28/decisions.md#v1-28-d03)。
 - Pi `.pi/skills` 只由原生 ResourceLoader 发现、Rovai 不追加路径或验证 catalog 的理由：[V1.44-D01](../versions/v1.44/decisions.md#v1-44-d01)；当前 Pi External MCP Unsupported 与旧 bridge clean removal 理由：[V1.39-D09](../versions/v1.39/decisions.md#v1-39-d09)。
 

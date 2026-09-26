@@ -1229,3 +1229,27 @@ Read 活动可查询，不产生 Files Changed 或修改 Diff；重启 Core 后�
 当前边界先交付 Preview：个人 Coding Plan 原生凭据透传、Start Plan 验证回调明确拒绝。Z.ai/BigModel 的
 配置回归覆盖签名凭据不改写、显式套餐选择、禁用态与公开目录脱敏；个人 Coding Plan 仍无真实订阅验收，
 Start Plan 仍无成功模型回复，不因允许交付而提升能力证据或平台资格。
+
+### 2026-09-25：官方 App 3.14.3 / 内核 0.16.9 协议迁移
+
+本机 macOS arm64 的官方 ZCode 3.14.3／内核 0.16.9 已移除旧版
+`workspace/updateProviderRegistry`、`workspace/readState` 与 Session `runtimeModel` 字段。
+新版路径读取 App bundle 与 personal Provider Config，使用 `workspace/readPresentation`、
+原生 `ModelSelection` 和独立 `thoughtLevel`；缺少新版 bundled 配置的旧版继续走历史协议。
+Windows 与 Linux 的 bundle 资源路径由确定性布局测试覆盖；本轮没有 Windows 3.14.3 真机安装或执行验收，
+不能把本机通过外推为 Windows 同版通过。
+
+隔离 HOME／ZCode storage／Core data／Skill Library 使用用户授权的本机 Claude API 代理作为临时 BYOK Provider，
+普通 `runtime.product.check` 返回 ready 并列出 `proxy/gpt-6-sol`，没有发送 Prompt。随后真实 Camp
+对随机 nonce 的首轮回复匹配并以 succeeded 结束；停止 Core 后用同一隔离数据重启，观察到原生
+`session/resume`，第二轮 nonce 回复也匹配并以 succeeded 结束。两轮 Core 均以 0 退出，临时数据已清理。
+这证明新版协议下的该 BYOK 配置、正式投递与冷恢复，不代表 Start Plan 账号生成或其他 Provider 已验收。
+
+同一隔离夹具在修复前暴露两处失败：Core 先绑定 Native Session 后冻结 Bootstrap，使首轮投递失败；
+新版 `session/create` 将 `ModelSelection` 转成不含 options 的字符串，导致必需的 reasoning level 丢失。
+修复后分别在绑定前冻结 Bootstrap，并把默认 `reasoningLevel` 独立传给原生 `thoughtLevel`。
+模型创建在 `turn.started` 前失败时的精确 inputId 收口另有定向测试；本轮成功生成不证明所有失败路径均完成真实服务验收。
+
+本机日常 ZCode 目前选择 Start Plan。新版独立 app-server 不自动收到官方桌面 App 的账号 Provider snapshot，
+并且人机验证回调未接入，因此该账号不能因 BYOK 成功而标为已验收。旧版 Windows x64 资格证据仍绑定
+当时的官方版本和协议，不构成新版 Windows 结果。

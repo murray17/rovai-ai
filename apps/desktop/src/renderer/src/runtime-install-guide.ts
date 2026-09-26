@@ -48,7 +48,7 @@ const GUIDES: Partial<Record<AdapterKind, RuntimeInstallGuide>> = {
   'trae-cn-cli': { docs: 'https://www.trae.cn/' },
   'kimi-code-cli': { docs: 'https://github.com/MoonshotAI/kimi-cli' },
   'grok-build': { docs: 'https://docs.x.ai/build/overview' },
-  'deepseek-harness': { docs: 'https://github.com/deepseek-ai/deepseek-harness', command: 'npm install -g @deepseek-ai/dsh@0.1.5-rc.2', launch: 'dsh web', connectModel: true },
+  'deepseek-harness': { docs: 'https://github.com/deepseek-ai/deepseek-harness', command: 'npm install -g @deepseek-ai/dsh@latest', launch: 'dsh web', connectModel: true },
   'zcode-app': { docs: 'https://zcode.z.ai/en/docs/install' },
   'antigravity-app': { docs: 'https://antigravity.google/', desktop: true },
   pi: { docs: 'https://github.com/earendil-works/pi' }

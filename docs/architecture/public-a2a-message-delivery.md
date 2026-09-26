@@ -8,8 +8,8 @@ last_updated: 2026-09-24
 
 # Public Camp Message、Delivery 与 AgentRun
 
-本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v23](../contracts/camp-message-send-v23.md)、
-[Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 29](../contracts/context-manifest-evidence-v29.md)
+本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v24](../contracts/camp-message-send-v24.md)、
+[Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 30](../contracts/context-manifest-evidence-v30.md)
 与 [Camp History v10](../contracts/camp-history-v10.md)。Single Chat 不使用本主链。
 
 ## 三类事实
@@ -58,9 +58,10 @@ Runtime 配置。Scheduler 获得执行资格时，在一个事务中：
 3. 读取当前 Runtime、模型、模式、工作区、工具与权限配置；
 4. 用本次 Runtime payload capacity 和正式 `RUN_INPUT.messages[]` 投影/序列化结果，从队首选取能完整交付的
    最大连续前缀，不跳过任何中间项；每条消息按自身 ID 投影正文、quotes、source attachments 与 Skills；
-5. 创建一个 batch AgentRun 和有序 AgentRunInput；
-6. 以最后一条输入作为 Run anchor，冻结 ContextManifest 和实际执行配置；
-7. 把所选 Delivery 原子改为 claimed 并绑定该 Run。
+5. 在同一事务内用上次有效接受边界、本次公屏尾、最终选择的全部输入 ID 和当前 Agent，对可见公屏历史做无分页上限的 `EXISTS`；排除已选输入和自己写的消息，查询失败回滚 claim；完整 `historyHint` 文本纳入容量预算；
+6. 创建一个 batch AgentRun 和有序 AgentRunInput，在 Run 内冻结该边界和额外消息判断；
+7. 以最后一条输入作为 Run anchor，冻结 ContextManifest 和实际执行配置；
+8. 把所选 Delivery 原子改为 claimed 并绑定该 Run。
 
 用户、Agent、Mission、Automation 与 Channel 来源使用同一规则，不形成批次边界。新消息不会追加到已冻结 Run。
 commit 前崩溃只留下 waiting Delivery；commit 后恢复同一 Run。设置变化影响未 claim 消息，不改变既有 Run。
@@ -125,3 +126,9 @@ outcome-unknown 输入绝不重新入队。
 Migration 172/schema 122 只扩展新公开 Formatter/Manifest 29、Profile 9 与 Run Facts 7 的写入约束，
 保留旧业务行及审计原字节。旧格式执行不再继续派发或恢复，也不转换、双读或自动重播；需要继续工作时
 建立新执行，必要时使用新 Session。新格式 Run 的 `historyHint` 和输入保持冻结。
+
+## 正文 Principal 寻址
+
+Agent Send 在共享解析模块识别行首连续提及中的稳定 `@Principal`，并与显式 `mentionUser` 合并为当前用户结构化身份。
+PublicOnly 只抑制 Agent 路由，仍允许用户提及；通知沿用当前原子、消息局部和幂等投影。显示名称由当前用户资料解析，
+不持久化到身份字段。精确位置、排除规则与未改变的 Runtime final/quote 来源见 [Send v24](../contracts/camp-message-send-v24.md)。

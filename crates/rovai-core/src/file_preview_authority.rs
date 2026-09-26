@@ -14,6 +14,7 @@ use crate::{
     managed_blob::ManagedBlobStore,
     managed_skills::{TOOLBOX_SKILLS, managed_skills_root},
     runtime_diff::CommandDiffProjection,
+    runtime_file_operation,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -530,11 +531,12 @@ fn run_activity_authorizes_file(
     evidence_id: &str,
     path: &str,
 ) -> Result<bool> {
-    let projection_json = database
+    let authorization = database
         .connection()
         .query_row(
             r#"
-            SELECT activity.diff_projection_json
+            SELECT activity.diff_projection_json, evidence.payload_preview_json,
+                   evidence.phase, activity.outcome
             FROM agent_run_execution_evidence AS evidence
             JOIN agent_run ON agent_run.id = evidence.agent_run_id
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -572,25 +574,44 @@ fn run_activity_authorizes_file(
                 canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
             ],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
         )
         .optional()
-        .context("failed to resolve the Run activity file projection")?
-        .flatten();
-    let Some(projection_json) = projection_json else {
+        .context("failed to resolve the Run activity file projection")?;
+    let Some((projection_json, payload_json, evidence_phase, activity_outcome)) = authorization
+    else {
         return Ok(false);
     };
-    let projection: CommandDiffProjection = serde_json::from_str(&projection_json)
-        .context("Run activity file projection is invalid")?;
-    Ok(projection.status == "available"
-        && projection
-            .source_evidence_ids
-            .iter()
-            .any(|candidate| candidate == evidence_id)
-        && projection
-            .entries
-            .as_ref()
-            .is_some_and(|entries| entries.iter().any(|entry| entry.path == path)))
+    if let Some(projection_json) = projection_json {
+        let projection: CommandDiffProjection = serde_json::from_str(&projection_json)
+            .context("Run activity file projection is invalid")?;
+        if projection.status == "available"
+            && projection
+                .source_evidence_ids
+                .iter()
+                .any(|candidate| candidate == evidence_id)
+            && projection
+                .entries
+                .as_ref()
+                .is_some_and(|entries| entries.iter().any(|entry| entry.path == path))
+        {
+            return Ok(true);
+        }
+    }
+    if evidence_phase != "completed" || activity_outcome != "succeeded" {
+        return Ok(false);
+    }
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_json).context("Run activity file evidence is invalid")?;
+    Ok(runtime_file_operation::operation_from_evidence(&payload)
+        .is_some_and(|operation| operation.path == path))
 }
 
 fn run_activity_file(
@@ -1175,7 +1196,7 @@ mod tests {
     fn open_current_resolves_run_relative_and_external_absolute_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
         let external_file = root.join("external-worktree/src/shared.ts");
-        let external_path = external_file.to_string_lossy().into_owned();
+        let external_path = external_file.to_string_lossy().replace('\\', "/");
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1281,6 +1302,142 @@ mod tests {
                 "a mismatched Run activity locator must fail closed"
             );
         }
+        let operation_path = "src/operation-only.ts";
+        let project_root: PathBuf = database
+            .connection()
+            .query_row(
+                "SELECT project_path FROM camp WHERE id = 'preview-camp'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map(PathBuf::from)
+            .unwrap();
+        std::fs::create_dir_all(project_root.join("src")).unwrap();
+        std::fs::create_dir_all(execution_root.join("src")).unwrap();
+        std::fs::write(project_root.join(operation_path), "project\n").unwrap();
+        std::fs::write(execution_root.join(operation_path), "mission\n").unwrap();
+        let operation_evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                "preview-run",
+                1,
+                "runtime.action",
+                &json!({
+                    "eventId": "preview-operation-event",
+                    "toolCallId": "preview-operation-tool",
+                    "status": "completed",
+                    "kind": "edit",
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": "write",
+                        "path": operation_path
+                    }
+                }),
+            )
+            .unwrap()
+            .expect("path-only file evidence should be recorded");
+        let ResolvedFilePreviewSource::FileTarget {
+            root_path,
+            raw_reference,
+            ..
+        } = resolve_run_activity_file(
+            &database,
+            &data_dir,
+            "preview-run",
+            1,
+            &operation_evidence.evidence.id,
+            operation_path,
+        )
+        .expect("the exact path-only file operation should resolve in the Run worktree")
+        else {
+            panic!("Run file operation should resolve a file target")
+        };
+        assert_eq!(Path::new(&root_path), execution_root);
+        assert_eq!(raw_reference, operation_path);
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&root_path).join(&raw_reference)).unwrap(),
+            "mission\n",
+            "the operation-only row must not open the Camp project's same-named file"
+        );
+        let read_evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                "preview-run",
+                1,
+                "runtime.action",
+                &json!({
+                    "eventId": "preview-read-event",
+                    "toolCallId": "preview-read-tool",
+                    "status": "completed",
+                    "kind": "read",
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": "read",
+                        "path": operation_path
+                    }
+                }),
+            )
+            .unwrap()
+            .expect("path-only read evidence should be recorded");
+        let ResolvedFilePreviewSource::FileTarget { root_path, .. } = resolve_run_activity_file(
+            &database,
+            &data_dir,
+            "preview-run",
+            1,
+            &read_evidence.evidence.id,
+            operation_path,
+        )
+        .expect("the exact path-only read should resolve in the Run worktree") else {
+            panic!("Run read operation should resolve a file target")
+        };
+        assert_eq!(Path::new(&root_path), execution_root);
+        for (run_id, epoch, path) in [
+            ("other-run", 1, operation_path),
+            ("preview-run", 2, operation_path),
+            ("preview-run", 1, "src/not-reported.ts"),
+            ("preview-run", 1, "../operation-only.ts"),
+        ] {
+            assert!(
+                resolve_run_activity_file(
+                    &database,
+                    &data_dir,
+                    run_id,
+                    epoch,
+                    &operation_evidence.evidence.id,
+                    path,
+                )
+                .is_none(),
+                "path-only evidence must not authorize another Run, epoch or path"
+            );
+        }
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run_execution_evidence
+                 SET payload_preview_json=json_set(
+                   payload_preview_json, '$.runtimeFileOperation.status', 'unavailable'
+                 ) WHERE id=?1",
+                [&operation_evidence.evidence.id],
+            )
+            .unwrap();
+        assert!(
+            resolve_run_activity_file(
+                &database,
+                &data_dir,
+                "preview-run",
+                1,
+                &operation_evidence.evidence.id,
+                operation_path,
+            )
+            .is_none(),
+            "an unavailable operation must not authorize a file"
+        );
         clean_run_workspace_fixture(database, data_dir, root);
     }
 
@@ -1288,7 +1445,7 @@ mod tests {
     fn direct_camp_run_activity_file_uses_exact_evidence_for_run_and_external_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
         let external_file = root.join("external-worktree/src/shared.ts");
-        let external_path = external_file.to_string_lossy().into_owned();
+        let external_path = external_file.to_string_lossy().replace('\\', "/");
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1528,6 +1685,8 @@ mod tests {
         assert!(is_supported_run_evidence_path("generated.txt"));
         assert!(!is_supported_run_evidence_path("../generated.txt"));
         assert!(!is_supported_run_evidence_path("src/../../generated.txt"));
-        assert!(is_supported_run_evidence_path("/tmp/generated.txt"));
+        assert!(is_supported_run_evidence_path(
+            &crate::test_support::absolute_test_path("/tmp/generated.txt")
+        ));
     }
 }

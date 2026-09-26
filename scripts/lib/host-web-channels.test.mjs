@@ -60,7 +60,7 @@ test('Hosted channels use the closed parent adapter and survive browser logout a
     assert.equal(entry.headers.get('cache-control'), 'no-store')
     assert.match(await entry.text(), /name="rovai-host-kind" content="desktop"/)
     const login = async () => {
-      const reply = await fetch(`${web.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: web.administratorToken }) })
+      const reply = await fetch(`${web.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: web.administratorToken }) })
       assert.equal(reply.status, 200)
       const result = await reply.json(); assert.equal(result.channels, 'desktop'); return result
     }

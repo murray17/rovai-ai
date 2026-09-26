@@ -2,7 +2,7 @@
 document_type: ui-contract
 authority: mission-renderer-presentation
 status: accepted
-last_updated: 2026-09-20
+last_updated: 2026-09-26
 ---
 
 # Mission board
@@ -15,8 +15,11 @@ Desktop and wide Web expose one 使命板 navigation entry between 记忆 and �
 When one or more Missions have unread Agent replies, a blue dot sits at the entry's right edge and is vertically
 centered; the accessible label includes the number of Missions with unread replies, but the visual indicator never
 renders a numeral. The indicator follows Core-owned `MissionRecord.hasUnread`, independent of Mission status and
-running Agents. Ordinary project/recent/pin navigation does not duplicate Mission Camps. Mobile has no Mission
-entry; a Mission deep link directs the user to desktop.
+running Agents. Ordinary project/recent/pin navigation does not duplicate Mission Camps. Mobile exposes the same
+entry in its main drawer, with four status selectors and one scrolling card list. Its full Camp view returns to
+the board from the left panel button; an open file/activity preview returns to the conversation first. Long press
+opens shared card actions instead of drag-and-drop. Mobile creation/editing uses the same forms in a bottom sheet.
+See [Mobile WebUI](../host-web-mobile.md#使命板) for the phone presentation and validation boundary.
 
 Cards open from their entire surface, including keyboard activation. Card actions have no visible ellipsis;
 right click or Shift+F10 opens the same accessible menu. The metadata label uses the stable public number

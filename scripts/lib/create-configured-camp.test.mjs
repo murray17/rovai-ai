@@ -6,7 +6,7 @@ import {
   createConfiguredCampAndSend
 } from './create-configured-camp.mjs'
 
-test('configured Camp helper saves an explicit recipient as ComposerDocument V2', async () => {
+test('configured Camp helper sends an explicit recipient as ComposerDocument V2', async () => {
   const calls = []
   const request = async (method, params = {}) => {
     calls.push({ method, params })
@@ -19,10 +19,9 @@ test('configured Camp helper saves an explicit recipient as ComposerDocument V2'
         }
       case 'camps.create':
         return { status: 'applied', payload: { campId: 'camp_test' } }
-      case 'camp.composerDraft.get':
-        return { campId: 'camp_test', revision: 7 }
-      case 'camp.composerDraft.save':
-        assert.equal(params.expectedRevision, 7)
+      case 'camp.messages.send':
+        assert.equal(params.commandId, 'command_test')
+        assert.equal(params.campId, 'camp_test')
         assert.deepEqual(params.content, {
           version: 2,
           segments: [
@@ -30,9 +29,9 @@ test('configured Camp helper saves an explicit recipient as ComposerDocument V2'
             { kind: 'text', text: ' Run the acceptance case' }
           ]
         })
-        return { campId: 'camp_test', revision: 8 }
-      case 'camp.messages.send':
-        assert.equal(params.draftRevision, 8)
+        assert.deepEqual(params.sourceAttachments, [])
+        assert.deepEqual(params.quotes, [])
+        assert.equal(params.replyToCampMessageId, null)
         return {
           commandResult: {
             status: 'accepted',
@@ -55,8 +54,6 @@ test('configured Camp helper saves an explicit recipient as ComposerDocument V2'
   assert.deepEqual(calls.map(({ method }) => method), [
     'camps.creationPreflight',
     'camps.create',
-    'camp.composerDraft.get',
-    'camp.composerDraft.save',
     'camp.messages.send'
   ])
 })

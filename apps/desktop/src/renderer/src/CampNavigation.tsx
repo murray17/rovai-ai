@@ -193,7 +193,8 @@ export function CampNavigation({
 }): JSX.Element {
   const client = useCampClient()
   const mobile = useMobileLayout()
-  const navigationCollapsed = useNavigationCollapsed()
+  const collapsed = useNavigationCollapsed()
+  const navigationCollapsed = !mobile && collapsed
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
   const [action, setAction] = useState<NavigationAction>(null)
@@ -344,12 +345,7 @@ export function CampNavigation({
 
   return (
     <>
-      <aside id={navigationId} className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
-        {mobile && view !== 'settings' && <header className="mobile-page-heading"><h1>对话</h1><div>
-          <button className="mobile-icon-button" type="button" aria-label="选择工作目录" disabled={state !== 'ready'} onClick={onOpenProject}><NavigationIcon name="folder-open" /></button>
-          <button className="mobile-icon-button" type="button" aria-label="搜索对话" onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
-          <button className="mobile-icon-button" type="button" aria-label="新建对话" disabled={state !== 'ready' || creatingConversation} onClick={onNewConversation}><NavigationIcon name="circle-plus" /></button>
-        </div></header>}
+      <aside id={navigationId} className={`unified-sidebar ${view === 'settings' && !mobile ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={view === 'settings' && !mobile ? '设置分类' : '全局导航'}>
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
@@ -369,7 +365,7 @@ export function CampNavigation({
             <span><strong>Rovai AI</strong></span>
           </span>
         </div>
-        {view === 'settings'
+        {view === 'settings' && !mobile
           ? (
               settingsNavigation ?? <SettingsSidebarNavigation
                 groups={SETTINGS_SIDEBAR_GROUPS.map(group => ({ ...group, items: group.items.filter(item => item.key !== 'channels' || client.channels) }))}
@@ -399,7 +395,7 @@ export function CampNavigation({
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="brain" /></span><span className="rail-label">记忆</span>
                     {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
                   </button>
-                  {!mobile && <button
+                  <button
                     className={`rail-button ${view === 'missions' ? 'active' : ''}`}
                     type="button"
                     aria-current={view === 'missions' ? 'page' : undefined}
@@ -409,7 +405,7 @@ export function CampNavigation({
                   >
                     <span className="rail-glyph" aria-hidden="true"><MissionIcon /></span><span className="rail-label">使命板</span>
                     {unreadMissionCount > 0 && <i className="mission-rail-badge-dot" aria-hidden="true" />}
-                  </button>}
+                  </button>
                   <button className={`rail-button ${view === 'automations' ? 'active' : ''}`} type="button" aria-current={view === 'automations' ? 'page' : undefined} aria-label="定时任务" title="定时任务" onClick={onAutomations}>
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="calendar-clock" /></span><span className="rail-label">定时任务</span>
                   </button>
@@ -419,6 +415,10 @@ export function CampNavigation({
                 </button>
 
       <div className="navigation-scroll">
+        {mobile && <header className="mobile-navigation-heading"><h2>对话</h2><div>
+          <button className="mobile-icon-button" type="button" aria-label="选择工作目录" disabled={state !== 'ready'} onClick={onOpenProject}><NavigationIcon name="folder-open" /></button>
+          <button className="mobile-icon-button" type="button" aria-label="搜索对话" onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
+        </div></header>}
         {(pinnedCamps.length > 0 || pinnedProjects.length > 0) && (
           <section className="pinned-navigation" aria-labelledby="pinned-heading">
             <div className="sidebar-group-title navigation-section-title">
@@ -544,9 +544,10 @@ export function CampNavigation({
         {footer}
         <div className="sidebar-settings-entry" role="group" aria-label="设置与应用更新">
           <button
-            className="rail-button sidebar-settings-main"
+            className={`rail-button sidebar-settings-main${mobile && view === 'settings' ? ' active' : ''}`}
+            aria-current={mobile && view === 'settings' ? 'page' : undefined}
             type="button"
-            aria-label="设置，打开上次保留的设置页面"
+            aria-label={mobile ? '设置' : '设置，打开上次保留的设置页面'}
             onClick={() => {
               onSettings()
             }}
@@ -703,13 +704,6 @@ export function SettingsSidebarNavigation<Section extends string>({
   onSectionChange(section: Section): void
   onBack(): void
 }): JSX.Element {
-  const mobile = useMobileLayout()
-  const [query, setQuery] = useState('')
-  const search = query.trim().toLocaleLowerCase()
-  const visibleGroups = search
-    ? groups.map((group) => ({ ...group, items: group.items.filter((item) => item.label.toLocaleLowerCase().includes(search)) }))
-      .filter((group) => group.items.length > 0)
-    : groups
   return (
     <div className="settings-sidebar-navigation">
       <div className="settings-sidebar-heading">
@@ -722,13 +716,8 @@ export function SettingsSidebarNavigation<Section extends string>({
           <span>应用级偏好与本机能力</span>
         </div>
       </div>
-      {mobile && <label className="mobile-settings-search">
-        <NavigationIcon name="search" />
-        <span className="sr-only">搜索设置</span>
-        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索设置" />
-      </label>}
       <nav className="settings-sidebar-menu" aria-label="设置页面">
-        {visibleGroups.map((group) => {
+        {groups.map((group) => {
           const headingId = `settings-sidebar-group-${group.key}`
           return (
             <section className="settings-sidebar-group" aria-labelledby={headingId} key={group.key}>
@@ -761,7 +750,6 @@ export function SettingsSidebarNavigation<Section extends string>({
           )
         })}
       </nav>
-      {mobile && visibleGroups.length === 0 && <p className="mobile-settings-search-empty" role="status">没有匹配的设置</p>}
     </div>
   )
 }
