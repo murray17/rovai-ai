@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, mkdir, realpath, readFile, writeFile, rm } from 'node:fs/promises'
+import { access, cp, mkdtemp, mkdir, realpath, readFile, writeFile, rm } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -57,7 +57,9 @@ test('phone workbench uses shared navigation, schedules and per-tab drafts', { t
     const result = await host.request('camps.create', { commandId: crypto.randomUUID(), name: 'Mobile 验收对话', workspace: null, memberAgentIds: [member.agentId], defaultLeadAgentId: member.agentId, collaborationMode: 'peer' })
     assert.equal(result.status, 'applied')
     const campId = result.payload.campId
-    const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: process.env.ROVAI_WEB_UI ?? join(repository, 'out/web') })
+    const uiDirectory = join(fixture, 'web')
+    await cp(process.env.ROVAI_WEB_UI ?? join(repository, 'out/web'), uiDirectory, { recursive: true })
+    const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory })
     browser = await launchAcceptanceBrowser({ executable, args: ['--headless=new', `--user-data-dir=${join(fixture, 'chrome')}`, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', 'about:blank'] })
     await browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
     await browser.send('Emulation.setTouchEmulationEnabled', { enabled: true })
@@ -474,7 +476,8 @@ test('phone workbench uses shared navigation, schedules and per-tab drafts', { t
     await browser.wait(`document.querySelector('.mobile-mission-list .mission-card-open')?.textContent==='手机使命验收'`)
     assert.equal((await host.request('missions.get', { missionId: mission.missionId })).status, 'needs_you')
     await browser.evaluate(`document.querySelector('.mission-board-card .mobile-context-trigger').focus()`)
-    await browser.key('Enter')
+    await browser.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' })
+    await browser.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
     await browser.wait(`!!document.querySelector('.mission-action-menu')`)
     await browser.click(`[...document.querySelectorAll('.mission-action-menu [role=menuitem]')].find(e=>e.textContent.trim()==='编辑')`)
     await browser.wait(`!!document.querySelector('.mission-edit-dialog')`)
@@ -487,7 +490,7 @@ test('phone workbench uses shared navigation, schedules and per-tab drafts', { t
     const freshMember = await host.request('members.get', { agentId: member.agentId })
     const configured = await host.request('members.runtime.set', { commandId: crypto.randomUUID(), command: {
       agentId: member.agentId, expectedVersion: freshMember.version, adapterKind: 'codex-cli',
-      model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
+      model: { mode: 'runtime_default' },
       permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
     } })
     assert.equal(configured.status, 'applied', JSON.stringify(configured))
@@ -511,6 +514,20 @@ test('phone workbench uses shared navigation, schedules and per-tab drafts', { t
     assert.equal((await host.request('camps.snapshot', { campId: uiCreated.campId })).agentRuns.length, 0)
     assert.equal((await host.request('camps.snapshot', { campId: mission.campId })).agentRuns.length, 0)
 
+    stage = 'mission night and landscape navigation'
+    await browser.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }, { name: 'prefers-reduced-motion', value: 'reduce' }] })
+    await browser.wait(`document.documentElement.dataset.theme==='night'`)
+    await capture('mission-board-night')
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true })
+    await browser.wait(`document.documentElement.dataset.mobileWeb==='true' && innerWidth===844`)
+    await capture('mission-board-landscape')
+    await browser.click(byLabel('打开主菜单'))
+    await browser.wait(`!!document.querySelector('#mobile-app-menu')`)
+    assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('#mobile-app-menu')).animationName`), 'none', 'reduced motion disables the drawer transition')
+    await capture('app-menu-landscape-night')
+    await browser.key('Escape')
+    await browser.wait(`!document.querySelector('#mobile-app-menu') && document.activeElement?.getAttribute('aria-label')==='打开主菜单'`)
+
     assert.deepEqual(browser.errors, [])
     assert.equal((await host.request('camps.snapshot', { campId })).agentRuns.length, 0)
     await writeFile(join(output, 'validation.json'), JSON.stringify({
@@ -523,7 +540,12 @@ test('phone workbench uses shared navigation, schedules and per-tab drafts', { t
         'selected-conversation-uses-complete-row',
         'project-picker-hides-host-terminology-and-path-input-by-default',
         'mobile-empty-camp-hides-brand-and-configuration-tags',
-        'mobile-starter-suggestions-are-collapsed-and-title-only'
+        'mobile-starter-suggestions-are-collapsed-and-title-only',
+        'mission-create-edit-status-use-real-host-without-starting-runtime',
+        'mission-conversation-and-preview-return-retain-draft-and-board-status',
+        'mission-long-press-and-keyboard-actions-stay-inside-phone-viewport',
+        'settings-12-categories-no-index-search-and-runtime-row-alignment',
+        'app-drawer-landscape-reduced-motion-and-focus-return'
       ],
       checks
     }, null, 2))
@@ -629,7 +651,9 @@ test('standalone Server phone settings expose update controls, initial login and
   const output = process.env.ROVAI_MOBILE_OUTPUT ?? join(fixture, 'evidence')
   await mkdir(output, { recursive: true })
   console.log(JSON.stringify({ channel: 'automatic_acceptance', dataDir, skillLibraryRoot: join(dataDir, 'skills'), mcpConfigPath: join(dataDir, 'mcp.json'), chromeProfile: join(fixture, 'chrome'), runtime: false }))
-  const child = spawn(process.env.ROVAI_SERVER_BIN ?? join(repository, 'target/debug/rovai-server'), ['--data-dir', dataDir, '--web-ui', process.env.ROVAI_WEB_UI ?? join(repository, 'out/web'), '--listen', '127.0.0.1:0'], { cwd: fixture, stdio: ['ignore', 'pipe', 'pipe'] })
+  const uiDirectory = join(fixture, 'web')
+  await cp(process.env.ROVAI_WEB_UI ?? join(repository, 'out/web'), uiDirectory, { recursive: true })
+  const child = spawn(process.env.ROVAI_SERVER_BIN ?? join(repository, 'target/debug/rovai-server'), ['--data-dir', dataDir, '--web-ui', uiDirectory, '--listen', '127.0.0.1:0'], { cwd: fixture, stdio: ['ignore', 'pipe', 'pipe'] })
   let log = ''; let readyResolve, readyReject
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject })
   const collect = data => { log = (log + data).slice(-16000); if (log.includes('· Ready')) readyResolve() }

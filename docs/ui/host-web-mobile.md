@@ -124,6 +124,7 @@ Composer 外壳内边距 4px，提示与编辑区同用 6px 起点；提示默�
 一次显示一个状态的卡片列表，各状态保留自己的滚动位置；列表返回时保留状态和筛选条件。
 轻点卡片打开完整使命会话，长按约 480ms 打开同一操作菜单，移动超过 10px、取消触摸或滚动会取消长按。
 不启用手机拖拽，状态、编辑、队长、标签和删除继续通过共享动作完成；键盘和辅助技术保留操作入口。
+操作分类在同一弹层内进入和返回，不向屏幕右侧展开多级菜单。
 
 使命会话左上角的面板按钮返回使命板；文件或活动预览打开时先返回对话。真实消息复制/回复保持原样，
 右上角保留“任务、队员、单聊”，使命额外提供“活动”以访问交付和记录。进入手机使命时不自动打开活动预览。
@@ -176,7 +177,8 @@ Server 更新通过统一 Rust Host 的认证接口完成，使用独立 Server 
 [独立 Server 验证](../versions/v1.59/evidence/mobile-compact/server-validation.json)。
 最终紧凑稿的包级检查和本机安装交接见[验收记录](../versions/v1.59/evidence/mobile-compact/README.md)。
 
-`pnpm build:web` 后运行 `pnpm test:host-web-mobile`；需要本机已构建的 `rovai-host`、`rovai-server` 和 macOS Chrome。
+`pnpm build:web` 后运行 `pnpm test:host-web-mobile`；需要本机已构建的 `rovai-host`、`rovai-server`、macOS Chrome 和已安装的 Codex CLI。
+新建使命用例在隔离数据内配置队员使用 Runtime 默认模型，只保存使命，并断言没有启动 Run。
 `ROVAI_MOBILE_OUTPUT=<绝对路径>` 可保留截图与 JSON。测试使用隔离数据根、Skill Library、MCP config 和浏览器目录，
 日志记录绝对位置，不使用日常 App 数据，也不启动真实 Runtime。
 
