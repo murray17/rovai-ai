@@ -89,6 +89,39 @@ describe('DingTalk inbound normalization', () => {
       mediaType: 'application/pdf'
     }])
     expect(message.explicitlyAtBot).toBe(true)
+    expect(message.resources).toEqual([{ fileKey: 'resource:0', name: 'report.pdf', kind: 'file' }])
+  })
+
+  it.each(['picture', 'file', 'audio', 'video'])('retains an actual %s resource separately from its summary', msgtype => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'attachment', senderCorpId: 'corp', senderStaffId: 'owner',
+      conversationType: '1', msgtype,
+      content: { fileName: 'original-name', downloadCode: 'private-grant' }
+    }, binding)
+    expect(message.resources).toEqual([{
+      fileKey: 'resource:0', name: 'original-name',
+      kind: msgtype === 'picture' ? 'image' : msgtype, downloadCode: 'private-grant'
+    }])
+    expect(JSON.stringify({ body: message.body, summaries: message.attachmentSummaries })).not.toContain('private-grant')
+  })
+
+  it('keeps rich text and image order, supports the legacy picture grant, and does not download quoted images', () => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'rich-message', senderCorpId: 'corp', senderStaffId: 'owner',
+      conversationType: '2', conversationId: 'group', isInAtList: true,
+      msgtype: 'richText', content: { richText: [
+        { text: '前文' }, { type: 'picture', pictureDownloadCode: 'legacy-grant' },
+        { text: '后文' }, { type: 'picture', downloadCode: 'new-grant' }
+      ] },
+      quote: { msgtype: 'picture', content: { downloadCode: 'quoted-grant' } }
+    }, binding)
+    expect(message.body).toBe('前文\n[图片]\n后文\n[图片]')
+    expect(message.resources).toEqual([
+      { fileKey: 'resource:1', name: '图片', kind: 'image', downloadCode: 'legacy-grant' },
+      { fileKey: 'resource:3', name: '图片', kind: 'image', downloadCode: 'new-grant' }
+    ])
+    expect(message.quote?.attachmentSummaries).toHaveLength(1)
+    expect(JSON.stringify(message)).not.toContain('quoted-grant')
   })
 
   it('does not mistake private callback routing metadata for a group topic', () => {

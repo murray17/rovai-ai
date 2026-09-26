@@ -10,6 +10,12 @@ export type DingTalkCardDeliveryIdentity = {
   recallMessageId: string
 }
 
+export class DingTalkOpenApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+  }
+}
+
 export class DingTalkOpenApiClient {
   readonly #appKey: string
   readonly #appSecret: string
@@ -20,6 +26,19 @@ export class DingTalkOpenApiClient {
     this.#appKey = input.appKey
     this.#appSecret = input.appSecret
     this.#apiOrigin = input.apiOrigin ?? DEFAULT_API_ORIGIN
+  }
+
+  async messageFileDownloadUrl(input: {
+    robotCode: string
+    downloadCode: string
+    signal: AbortSignal
+  }): Promise<string> {
+    const response = await this.#request('/v1.0/robot/messageFiles/download', {
+      method: 'POST',
+      body: JSON.stringify({ robotCode: input.robotCode, downloadCode: input.downloadCode }),
+      signal: input.signal
+    })
+    return requiredString(response, 'downloadUrl')
   }
 
   async uploadImage(bytes: Buffer, fileName: string): Promise<string> {
@@ -200,31 +219,31 @@ export class DingTalkOpenApiClient {
   }
 
   async #request(path: string, init: RequestInit): Promise<Record<string, unknown>> {
-    const token = await this.#token()
+    const token = await this.#token(init.signal ?? undefined)
     const headers = new Headers(init.headers)
     if (!(init.body instanceof FormData)) headers.set('content-type', 'application/json')
     headers.set('x-acs-dingtalk-access-token', token)
     const response = await fetch(new URL(path, this.#apiOrigin), {
       ...init,
       headers,
-      signal: AbortSignal.timeout(30_000)
+      signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(init.signal ? [init.signal] : [])])
     })
     const body = await response.json().catch(() => null)
     if (!response.ok || !body || typeof body !== 'object' || Array.isArray(body)) {
-      throw new Error(`dingtalk_open_api_http_${response.status}`)
+      throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status)
     }
     const value = body as Record<string, unknown>
     if (containsBusinessFailure(value)) {
       const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode') ?? 'failed'
-      throw new Error(`dingtalk_open_api_${code}`)
+      throw new DingTalkOpenApiError(`dingtalk_open_api_${code}`, response.status)
     }
     if (value.code && value.code !== '0' && value.code !== 0) {
-      throw new Error(`dingtalk_open_api_${String(value.code)}`)
+      throw new DingTalkOpenApiError(`dingtalk_open_api_${String(value.code)}`, response.status)
     }
     return value
   }
 
-  async #token(): Promise<string> {
+  async #token(signal?: AbortSignal): Promise<string> {
     if (this.#accessToken && this.#accessToken.expiresAt > Date.now() + 60_000) {
       return this.#accessToken.value
     }
@@ -232,10 +251,10 @@ export class DingTalkOpenApiClient {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ appKey: this.#appKey, appSecret: this.#appSecret }),
-      signal: AbortSignal.timeout(20_000)
+      signal: AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])])
     })
     const body = await response.json().catch(() => null) as Record<string, unknown> | null
-    if (!response.ok || !body) throw new Error('dingtalk_app_access_token_failed')
+    if (!response.ok || !body) throw new DingTalkOpenApiError('dingtalk_app_access_token_failed', response.status)
     const value = requiredString(body, 'accessToken')
     const expiresIn = typeof body.expireIn === 'number' ? body.expireIn : 7_200
     this.#accessToken = { value, expiresAt: Date.now() + expiresIn * 1_000 }

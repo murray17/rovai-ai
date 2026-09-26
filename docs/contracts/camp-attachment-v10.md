@@ -55,10 +55,10 @@ HTML 依赖按实际来源边界解析。刷新失败保留已加载内容并说
 
 ## 文件归属与删除
 
-飞书入站下载由 Host 暂存后，经 Core 写入本 Camp 默认输出目录的 `feishu/` 子目录，作为普通 Source Ref 发布。
+飞书与钉钉入站下载由 Host 暂存后，经 Core 写入本 Camp 默认输出目录的 `feishu/` 或 `dingtalk/` 子目录，作为普通 Source Ref 发布。
 这属于远端资源首次落地；不改变本地用户/Agent 现有路径不复制的规则。目录下未发布的中间文件同属 Camp，
 删除走相同生命周期，不沿外部源引用清理。投递准入与重试见
-[Channel Message Bridge v1](channel-message-bridge-v1.md#feishu-inbound-attachments)。
+[Channel Message Bridge v1](channel-message-bridge-v1.md#inbound-attachments)。
 
 Camp 拥有自己的默认输出目录，包括未发布、已修改文件。删除 Camp 同时删除该目录及历史自有附件，外部引用仅删除记录。
 不能沿 sourcePath 删除文件；别的 Camp 引用同文件不阻止拥有者删除，失效是接受的引用语义。

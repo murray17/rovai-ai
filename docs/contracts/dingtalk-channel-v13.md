@@ -5,7 +5,7 @@ authority: dingtalk-developer-login-protocol-and-identity
 status: accepted
 version: 13
 source_version: v1.58
-last_updated: 2026-09-12
+last_updated: 2026-09-26
 ---
 
 # DingTalk Channel v13
@@ -69,3 +69,12 @@ Migration 150 从 `v1.57/schema 99` 升级到 `v1.58/schema 100`，仅允许 din
 协议与 Transport 测试拥有字段、编码、重定向、未知状态、超长响应、请求/正文超时的输入矩阵；Web Session 测试拥有串行状态、
 刷新、取消、有限身份重试与阶段期限；Main/Core/Renderer 验证 pending 提交、身份空名、占位、保存取消保护和数据迁移回滚。
 官方匿名初始化的网络 Probe、模拟 SSO、真实手机确认与租户交互是不同证据，不能互相替代。
+
+## 当前入站附件边界
+
+入站附件改由 [Channel Message Bridge v1](channel-message-bridge-v1.md#inbound-attachments) 拥有，取代继承 v12 的
+summary-only 门禁：图片、富文本图文及私聊普通文件、音频、视频进入共享持久下载、Source Ref 和消息准入链路。
+本次只提供文件字节，不承诺语音转写或视频理解。文件夹、贴纸等已识别的不支持资源走明确失败提示；不降级为纯文字执行。
+群聊仍受 Robot callback 的类型边界限制，引用附件仍为摘要，出站附件与其他原有能力门禁不变。
+下载凭据固定归属首观察 Bot；多 Bot 合并不能用另一 Bot 的临时 grant 替换，也不能将凭据差异当作正文冲突。
+授权、范围与真实租户验证边界见共享合同，账号扫码机制不提供附件下载授权。

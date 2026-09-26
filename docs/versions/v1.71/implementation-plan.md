@@ -240,9 +240,9 @@ provider 隔离、错误 provider 拒绝、actor 路由、中立表重建与 Cha
 
 ## 2026-09-27 合并主线与审查修复
 
-对齐主线 `af0e8e6f`：保留 public history claim Migration 174，Lark 建表顺延为 Migration 175，数据合同为
+对齐主线 `762370b1`（包括 #548 钉钉入站附件）：保留 public history claim Migration 174，Lark 建表顺延为 Migration 175，数据合同为
 v1.71 / schema 125；ContextManifest/Formatter 沿用主线 31。降级 fixture 按相反顺序还原，旧迁移与结构检查继续保留。
-主线的飞书持久入站下载保持飞书范围，Lark 不进入尚无消费者的下载队列。
+主线的持久入站下载保持飞书、钉钉范围，Lark 不进入尚无消费者的下载队列。
 
 - 话题派发：补齐 Lark roster 身份、按 provider 隔离的 Host 刷新请求、发布状态和成员存在性校验。
 - 标题：共享 `CampChannelSource`/formatter 增加 Lark 三种来源；搜索可匹配前缀，重命名不写入前缀。
