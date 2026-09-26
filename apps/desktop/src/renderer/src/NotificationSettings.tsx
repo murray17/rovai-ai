@@ -11,17 +11,25 @@ export type NotificationPreferenceKey =
   | 'userMentionHeadsUpEnabled'
   | 'turnCompletedHeadsUpEnabled'
   | 'turnIncompleteHeadsUpEnabled'
+  | 'singleChatHeadsUpEnabled'
+  | 'missionNeedsYouHeadsUpEnabled'
+  | 'missionStatusHeadsUpEnabled'
+  | 'taskStatusHeadsUpEnabled'
+
+type FilterKey = 'missionStatuses' | 'taskStatuses'
+type SettingKey = NotificationPreferenceKey | FilterKey
+type SettingValue = boolean | NotificationPreference[FilterKey]
 
 type CategoryPreferenceKey = Exclude<NotificationPreferenceKey, 'headsUpEnabled'>
 type SaveStatus = 'idle' | 'saved'
 
 interface SaveAttempt {
-  key: NotificationPreferenceKey
-  value: boolean
+  key: SettingKey
+  value: SettingValue
 }
 
 interface PreferenceInteraction {
-  key: NotificationPreferenceKey
+  key: SettingKey
   scrollTop: number | null
 }
 
@@ -29,57 +37,42 @@ interface NotificationCategory {
   key: CategoryPreferenceKey
   label: string
   description: string
+  filter?: FilterKey
 }
 
 interface NotificationScenario {
   id: string
   title: string
-  description: string
   categories: readonly NotificationCategory[]
 }
 
 const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
-  {
-    id: 'response',
-    title: '需要响应',
-    description: '新的请求或明确提到你的消息。',
-    categories: [
-      {
-        key: 'approvalHeadsUpEnabled',
-        label: '待审批',
-        description: '公共会话或单聊有权限请求时提醒'
-      },
-      {
-        key: 'userMentionHeadsUpEnabled',
-        label: '提到你',
-        description: '队员在公共会话中明确提到你'
-      }
-    ]
-  },
-  {
-    id: 'outcome',
-    title: '本轮结果',
-    description: '包含公共会话与单聊。正在查看的对话完成时不弹出提醒。',
-    categories: [
-      {
-        key: 'turnCompletedHeadsUpEnabled',
-        label: '本轮完成',
-        description: '其他会话或单聊完成时提醒'
-      },
-      {
-        key: 'turnIncompleteHeadsUpEnabled',
-        label: '执行未完成',
-        description: '公共会话或单聊失败、未完成时提醒'
-      }
-    ]
-  }
+  { id: 'conversation', title: '会话', categories: [
+    { key: 'approvalHeadsUpEnabled', label: '待审批', description: '公共会话或单聊有权限请求时提醒' },
+    { key: 'userMentionHeadsUpEnabled', label: '提到你', description: '队员在公共会话中明确提到你' },
+    { key: 'turnCompletedHeadsUpEnabled', label: '本轮完成', description: '本次消息引发的全部协作结束后，只提醒一次' },
+    { key: 'singleChatHeadsUpEnabled', label: '单聊回复', description: '队员在单聊中完成回复时提醒' },
+    { key: 'turnIncompleteHeadsUpEnabled', label: '执行未完成', description: '公共会话或单聊失败、未完成时提醒' }
+  ] },
+  { id: 'mission', title: '使命', categories: [
+    { key: 'missionNeedsYouHeadsUpEnabled', label: '使命需要你', description: '使命进入“需要你”状态时提醒' },
+    { key: 'missionStatusHeadsUpEnabled', label: '使命状态变更', description: '使命进入所选状态时提醒', filter: 'missionStatuses' }
+  ] },
+  { id: 'task', title: '任务', categories: [
+    { key: 'taskStatusHeadsUpEnabled', label: '任务状态变更', description: '任务进入所选状态时提醒', filter: 'taskStatuses' }
+  ] }
 ]
+
+const STATUS_OPTIONS: Record<FilterKey, readonly { value: string; label: string }[]> = {
+  missionStatuses: [{ value: 'completed', label: '已完成' }, { value: 'in_progress', label: '进行中' }, { value: 'not_started', label: '未开始' }],
+  taskStatuses: [{ value: 'completed', label: '已完成' }, { value: 'blocked', label: '受阻' }, { value: 'cancelled', label: '已取消' }, { value: 'in_progress', label: '进行中' }, { value: 'pending', label: '待开始' }]
+}
 
 export function NotificationSettings(): React.JSX.Element {
   const client = useCampClient()
   const [preference, setPreference] = useState<NotificationPreference | null>(null)
   const [loading, setLoading] = useState(true)
-  const [savingKey, setSavingKey] = useState<NotificationPreferenceKey | null>(null)
+  const [savingKey, setSavingKey] = useState<SettingKey | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [lastAttempt, setLastAttempt] = useState<SaveAttempt | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -92,7 +85,7 @@ export function NotificationSettings(): React.JSX.Element {
     savedStatusTimerRef.current = null
   }, [])
 
-  const restorePreferenceInteraction = useCallback((key: NotificationPreferenceKey): void => {
+  const restorePreferenceInteraction = useCallback((key: SettingKey): void => {
     const interaction = interactionRef.current
     if (!interaction || interaction.key !== key) return
     window.requestAnimationFrame(() => {
@@ -125,7 +118,7 @@ export function NotificationSettings(): React.JSX.Element {
 
   useEffect(() => clearSavedStatusTimer, [clearSavedStatusTimer])
 
-  const update = async (key: NotificationPreferenceKey, value: boolean): Promise<void> => {
+  const update = async (key: SettingKey, value: SettingValue): Promise<void> => {
     if (!preference || savingKey) return
 
     const previous = preference
@@ -152,7 +145,13 @@ export function NotificationSettings(): React.JSX.Element {
             approvalHeadsUpEnabled: next.approvalHeadsUpEnabled,
             userMentionHeadsUpEnabled: next.userMentionHeadsUpEnabled,
             turnCompletedHeadsUpEnabled: next.turnCompletedHeadsUpEnabled,
-            turnIncompleteHeadsUpEnabled: next.turnIncompleteHeadsUpEnabled
+            turnIncompleteHeadsUpEnabled: next.turnIncompleteHeadsUpEnabled,
+            singleChatHeadsUpEnabled: next.singleChatHeadsUpEnabled,
+            missionNeedsYouHeadsUpEnabled: next.missionNeedsYouHeadsUpEnabled,
+            missionStatusHeadsUpEnabled: next.missionStatusHeadsUpEnabled,
+            taskStatusHeadsUpEnabled: next.taskStatusHeadsUpEnabled,
+            missionStatuses: next.missionStatuses,
+            taskStatuses: next.taskStatuses
           }
         }
       )
@@ -239,10 +238,10 @@ export function NotificationPreferenceEditor({
   onRetry
 }: {
   preference: NotificationPreference
-  savingKey: NotificationPreferenceKey | null
+  savingKey: SettingKey | null
   saveStatus: SaveStatus
   error: string | null
-  onChange(key: NotificationPreferenceKey, checked: boolean): void
+  onChange(key: SettingKey, checked: SettingValue): void
   onRetry(): void
 }): React.JSX.Element {
   const headsUpEnabled = preference.headsUpEnabled
@@ -265,7 +264,7 @@ export function NotificationPreferenceEditor({
               {headsUpEnabled ? '已开启' : '已关闭'}
             </span>
           </div>
-          <p>新动态以浮层提醒，不打断输入；离开应用期间的事项保留，重新开启时不补弹旧提醒。</p>
+          <p>正在查看的会话保持安静，包含它的使命和任务；重新开启提醒时不补弹旧消息。</p>
         </div>
         <div className="notification-master-control">
           <span
@@ -319,22 +318,22 @@ function NotificationScenarioGroup({
 }: {
   scenario: NotificationScenario
   preference: NotificationPreference
-  savingKey: NotificationPreferenceKey | null
+  savingKey: SettingKey | null
   headsUpEnabled: boolean
-  onChange(key: NotificationPreferenceKey, checked: boolean): void
+  onChange(key: SettingKey, checked: SettingValue): void
 }): React.JSX.Element {
+  const [expanded, setExpanded] = useState<FilterKey | null>(null)
   const enabledCount = scenario.categories.filter((category) => preference[category.key]).length
 
   return (
-    <section className="notification-scenario" aria-labelledby={`notification-scenario-${scenario.id}`}>
+    <section className={`notification-scenario notification-scenario-${scenario.id}`} aria-labelledby={`notification-scenario-${scenario.id}`}>
       <header className="notification-scenario-heading">
         <h3 id={`notification-scenario-${scenario.id}`}>{scenario.title}</h3>
         <span>{enabledCount} / {scenario.categories.length} 项{headsUpEnabled ? '已开启' : '已保留'}</span>
       </header>
-      <p className="notification-scenario-description">{scenario.description}</p>
       {scenario.categories.map((category) => (
+        <div className="notification-preference-row" key={category.key}>
         <NotificationSwitch
-          key={category.key}
           label={category.label}
           description={category.description}
           checked={preference[category.key]}
@@ -343,6 +342,27 @@ function NotificationScenarioGroup({
           preferenceKey={category.key}
           onChange={(checked) => onChange(category.key, checked)}
         />
+        {category.filter && <div className="notification-status-filter">
+          <button type="button" className="notification-filter-toggle" aria-expanded={expanded === category.filter}
+            disabled={!headsUpEnabled || !preference[category.key] || Boolean(savingKey)}
+            data-notification-preference={category.filter}
+            onClick={() => setExpanded(expanded === category.filter ? null : category.filter ?? null)}>
+            <span>{STATUS_OPTIONS[category.filter].filter(option => (preference[category.filter!] as string[]).includes(option.value)).map(option => option.label).join('、') || '未选择状态'}</span>
+            <span>{expanded === category.filter ? '收起' : '选择状态'}</span>
+          </button>
+          {expanded === category.filter && <div className="notification-filter-options" role="group" aria-label={`${scenario.title}提醒状态`}>
+            {STATUS_OPTIONS[category.filter].map(option => <label key={option.value}>
+              <input type="checkbox" checked={(preference[category.filter!] as string[]).includes(option.value)}
+                disabled={!headsUpEnabled || !preference[category.key] || Boolean(savingKey)}
+                onChange={event => {
+                  const key = category.filter!
+                  const next = STATUS_OPTIONS[key].filter(item => item.value === option.value ? event.target.checked : (preference[key] as string[]).includes(item.value)).map(item => item.value)
+                  onChange(key, next as NotificationPreference[FilterKey])
+                }} />{option.label}
+            </label>)}
+          </div>}
+        </div>}
+        </div>
       ))}
     </section>
   )
@@ -401,10 +421,21 @@ export function preferenceFromUnknown(value: unknown): NotificationPreference | 
     || typeof candidate.userMentionHeadsUpEnabled !== 'boolean'
     || typeof candidate.turnCompletedHeadsUpEnabled !== 'boolean'
     || typeof candidate.turnIncompleteHeadsUpEnabled !== 'boolean'
+    || typeof candidate.singleChatHeadsUpEnabled !== 'boolean'
+    || typeof candidate.missionNeedsYouHeadsUpEnabled !== 'boolean'
+    || typeof candidate.missionStatusHeadsUpEnabled !== 'boolean'
+    || typeof candidate.taskStatusHeadsUpEnabled !== 'boolean'
+    || !validStatusFilter(candidate.missionStatuses, 'missionStatuses')
+    || !validStatusFilter(candidate.taskStatuses, 'taskStatuses')
     || typeof candidate.version !== 'number'
     || typeof candidate.updatedAt !== 'string'
   ) return null
   return candidate as NotificationPreference
+}
+
+function validStatusFilter(value: unknown, key: FilterKey): boolean {
+  return Array.isArray(value) && new Set(value).size === value.length
+    && value.every(status => STATUS_OPTIONS[key].some(option => option.value === status))
 }
 
 function assertPreference(value: unknown): NotificationPreference {

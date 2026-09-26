@@ -34,7 +34,7 @@ last_updated: 2026-09-22
 | [Runtime Catalog Boundaries](runtime-catalog-boundaries.md) | 可执行 Product Runtime Catalog、机器 Availability 与 Renderer-only Settings Preview 的权威分层、准入和晋升边界 |
 | [Runtime Monitoring](runtime-monitoring.md) | 五表 clean-break Usage metering、内存 parser/buffer、短 Flush、稀疏 Rollup、单 Snapshot 与 Renderer 边界 |
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
-| [Notification Episode](notification-episodes.md) | Occurrence/Disposition/Episode/Change Journal 原子投影、可见来源精确确认、read hydration、并发边界与保留 |
+| [Notification Episode](notification-episodes.md) | 消息关联的整轮完成、Mission/Task 状态来源、Occurrence/Disposition/Episode/Journal 原子投影与精确确认 |
 | [Online Memory Capture](online-memory-capture.md) | best-effort Skill discovery、complete exact-Scope View、copyable target、active body aggregate quota、durable rejection、Agent Memory Facade、原子 Supersession、隔离 Hearth Review、formal publication、clean break 与 Forget 闭包 |
 | [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、退出时 AgentRun 全量取消、Scheduler/maintenance 共同监督、分层 deadline、route reap 与 Desktop-local Composer/child-exit 边界 |
 | [Public Camp Message、Delivery 与 AgentRun](public-a2a-message-delivery.md) | 公共消息、per-target waiting Delivery、claim 时创建多输入 Run、实时可见性、精确 Stop、隔离与 Channel/Automation 复用 |

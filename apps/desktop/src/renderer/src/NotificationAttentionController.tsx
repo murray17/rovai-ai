@@ -14,6 +14,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { VisibleNotificationSources } from './CampWorkspace'
+import { preferenceFromUnknown } from './NotificationSettings'
 import { formatCampTitle } from './camp-title'
 
 export const NOTIFICATION_RECOVERY_INTERVAL_MS = 30_000
@@ -98,6 +99,22 @@ export function applyNotificationHeadsUpChanges(
       signal: change.headsUpSignal,
       changeSequence: change.changeSequence
     }
+    const dominatedBy = (higher: NotificationHeadsUpEntry, lower: NotificationHeadsUpEntry): boolean => {
+      if (higher.episode.camp.id !== lower.episode.camp.id) return false
+      if (higher.signal.semantic === 'mission_needs_you' && lower.signal.semantic === 'user_mention') {
+        return Boolean(higher.signal.action.subject?.sourceMessageId
+          && higher.signal.action.subject.sourceMessageId === lower.signal.action.messageId)
+      }
+      if (higher.signal.semantic === 'mission_status_changed' && higher.signal.action.subject?.status === 'completed'
+        && lower.signal.semantic === 'round_completed') {
+        return Boolean(higher.signal.action.subject.sourceAgentRunId
+          && lower.signal.action.subject?.relatedRunIds.includes(higher.signal.action.subject.sourceAgentRunId))
+      }
+      return false
+    }
+    if ([...nextEntries, ...overflowEntries].some(entry => dominatedBy(entry, next))) continue
+    nextEntries = nextEntries.filter(entry => !dominatedBy(next, entry))
+    overflowEntries = overflowEntries.filter(entry => !dominatedBy(next, entry))
     const identity = next.signal.action.acknowledgementId
     const existingIndex = nextEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
     const existingOverflowIndex = overflowEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
@@ -117,7 +134,7 @@ export function applyNotificationHeadsUpChanges(
 }
 
 function headsUpPriority(semantic: NotificationSemantic): number {
-  return { approval_pending: 5, turn_failed: 4, turn_incomplete: 3, user_mention: 2, turn_completed: 1 }[semantic]
+  return { approval_pending: 5, mission_needs_you: 5, turn_failed: 4, turn_incomplete: 3, user_mention: 2, turn_completed: 1, round_completed: 1, single_chat_reply: 1, mission_status_changed: 2, task_status_changed: 1 }[semantic]
 }
 
 export function filterVisibleNotificationHeadsUp(
@@ -136,7 +153,7 @@ export function filterVisibleNotificationHeadsUp(
       && (source.conversationId ?? null) === (action.singleChat?.conversationId ?? null)
       && ((entry.signal.semantic === 'approval_pending' && action.approvalId !== null && source.approvalIds.includes(action.approvalId))
         || (entry.signal.semantic === 'user_mention' && action.messageId !== null && source.messageIds.includes(action.messageId))
-        || (['turn_completed', 'turn_failed', 'turn_incomplete'].includes(entry.signal.semantic)
+        || (['turn_completed', 'round_completed', 'single_chat_reply', 'turn_failed', 'turn_incomplete'].includes(entry.signal.semantic)
           && ((action.agentRunId !== null && source.agentRunIds.includes(action.agentRunId))
             || (action.campTurnId !== null && source.campTurnIds.includes(action.campTurnId))))))
   }
@@ -175,7 +192,7 @@ function filterHeadsUpByPreference(
   preference: NotificationPreference
 ): NotificationHeadsUpState {
   const retainsSignal = (entry: NotificationHeadsUpEntry): boolean => (
-    shouldShowHeadsUp(entry.signal.semantic, preference)
+    shouldShowHeadsUp(entry.signal, preference)
   )
   return {
     entries: current.entries.filter(retainsSignal),
@@ -196,7 +213,7 @@ export async function readNotificationChangePages(
   let candidateCursor = startCursor
   for (let page = 0; page < maximumPages; page += 1) {
     const batch = await requestPage(candidateCursor)
-    if (batch.schemaVersion !== 8) throw new Error('提醒增量合同不兼容。')
+    if (batch.schemaVersion !== 9) throw new Error('提醒增量合同不兼容。')
     if (batch.requestedAfterChangeSequence !== candidateCursor) {
       throw new Error('提醒增量游标边界不一致。')
     }
@@ -235,7 +252,22 @@ export function notificationHeadsUpPresentation(
     case 'turn_incomplete':
       return { label: '执行未完成', message: '本轮未完成，请查看详情' }
     case 'turn_completed':
-      return { label: '等待你的下一步', message: '本轮已完成' }
+    case 'round_completed':
+      return { label: '本轮完成', message: '本轮已完成' }
+    case 'single_chat_reply':
+      return { label: '单聊回复', message: `${signal.action.singleChat?.agentDisplayName ?? '队员'}已回复` }
+    case 'mission_needs_you': {
+      const title = signal.action.subject?.title || '使命'
+      const question = signal.mention?.available && signal.action.subject?.sourceMessageId === signal.mention.messageId ? signal.mention.summary : null
+      return { label: '使命需要你', message: `使命「${title}」需要你${question ? `：${question}` : ''}` }
+    }
+    case 'mission_status_changed':
+    case 'task_status_changed': {
+      const kind = signal.semantic === 'mission_status_changed' ? '使命' : '任务'
+      const subject = signal.action.subject
+      const status = { completed: '已完成', in_progress: '进行中', not_started: '未开始', pending: '待开始', blocked: '受阻', cancelled: '已取消' }[subject?.status ?? ''] ?? '状态已更新'
+      return { label: `${kind}状态变更`, message: `${kind}「${subject?.title || kind}」${status}` }
+    }
     case 'user_mention':
       return {
         label: '提到你',
@@ -349,7 +381,7 @@ export function NotificationAttentionController({
       'notifications.inbox',
       { filter: 'unread', limit: 1 }
     )
-    if (inbox.schemaVersion !== 8) throw new Error('提醒基线合同不兼容。')
+    if (inbox.schemaVersion !== 9) throw new Error('提醒基线合同不兼容。')
     setHasUnreadAttention(inbox.unreadCount > 0)
     return inbox
   }, [])
@@ -486,7 +518,7 @@ export function NotificationAttentionController({
         headsUpChanges.push(
           !quietCurrentCamp
             && effectivePreference
-            && shouldShowHeadsUp(signal.semantic, effectivePreference)
+            && shouldShowHeadsUp(signal, effectivePreference)
             ? change
             : { ...change, headsUpSignal: null }
         )
@@ -871,25 +903,28 @@ function useWindowAttentive(): boolean {
   return attentive
 }
 
-function shouldShowHeadsUp(
-  semantic: NotificationSemantic,
+export function shouldShowHeadsUp(
+  signal: NotificationHeadsUpSignal,
   preference: NotificationPreference
 ): boolean {
   if (!preference.headsUpEnabled) return false
-  if (semantic === 'approval_pending') return preference.approvalHeadsUpEnabled
-  if (semantic === 'user_mention') return preference.userMentionHeadsUpEnabled
-  if (semantic === 'turn_completed') return preference.turnCompletedHeadsUpEnabled
-  return preference.turnIncompleteHeadsUpEnabled
+  switch (signal.semantic) {
+    case 'approval_pending': return preference.approvalHeadsUpEnabled
+    case 'user_mention': return preference.userMentionHeadsUpEnabled
+    case 'turn_completed':
+    case 'round_completed': return preference.turnCompletedHeadsUpEnabled
+    case 'single_chat_reply': return preference.singleChatHeadsUpEnabled
+    case 'mission_needs_you': return preference.missionNeedsYouHeadsUpEnabled
+    case 'mission_status_changed': return preference.missionStatusHeadsUpEnabled
+      && (preference.missionStatuses as string[]).includes(signal.action.subject?.status ?? '')
+    case 'task_status_changed': return preference.taskStatusHeadsUpEnabled
+      && (preference.taskStatuses as string[]).includes(signal.action.subject?.status ?? '')
+    default: return preference.turnIncompleteHeadsUpEnabled
+  }
 }
 
 function validPreference(value: NotificationPreference): boolean {
-  return typeof value.headsUpEnabled === 'boolean'
-    && typeof value.approvalHeadsUpEnabled === 'boolean'
-    && typeof value.userMentionHeadsUpEnabled === 'boolean'
-    && typeof value.turnCompletedHeadsUpEnabled === 'boolean'
-    && typeof value.turnIncompleteHeadsUpEnabled === 'boolean'
-    && typeof value.version === 'number'
-    && typeof value.updatedAt === 'string'
+  return preferenceFromUnknown(value) !== null
 }
 
 function commandFailure(result: StoredCommandResult): string {

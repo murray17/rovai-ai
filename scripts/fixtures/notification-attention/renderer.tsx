@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { NotificationEpisodeChange, NotificationEpisodeView, NotificationSemantic, NotificationActionView } from '@contracts'
+import { NotificationSettings } from '../../../apps/desktop/src/renderer/src/NotificationSettings'
 import { NotificationAttentionController } from '../../../apps/desktop/src/renderer/src/NotificationAttentionController'
 import type { VisibleNotificationSources } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -11,8 +12,10 @@ const listeners = new Set<(event: { method: string }) => void>()
 const journal: NotificationEpisodeChange[] = []
 const acknowledgements: unknown[] = []
 const navigations: NotificationActionView[] = []
-const preference = { headsUpEnabled: true, approvalHeadsUpEnabled: true, userMentionHeadsUpEnabled: true,
-  turnCompletedHeadsUpEnabled: true, turnIncompleteHeadsUpEnabled: true, version: 1, updatedAt: '2026-09-07' }
+let preference = { headsUpEnabled: true, approvalHeadsUpEnabled: true, userMentionHeadsUpEnabled: true,
+  turnCompletedHeadsUpEnabled: true, turnIncompleteHeadsUpEnabled: true, singleChatHeadsUpEnabled: true, missionNeedsYouHeadsUpEnabled: true, missionStatusHeadsUpEnabled: true, taskStatusHeadsUpEnabled: false, missionStatuses: ['completed'], taskStatuses: ['completed','blocked','cancelled'], version: 1, updatedAt: '2026-09-07' }
+let showSettings: (visible: boolean) => void
+let failPreferenceSave = false
 let setSources: (source: VisibleNotificationSources | null) => void
 let sequence = 0
 const read = () => ({ campId: 'camp-other', surfaceVisible: true, snapshotSequence: 0,
@@ -20,8 +23,15 @@ const read = () => ({ campId: 'camp-other', surfaceVisible: true, snapshotSequen
 Object.assign(window, { rovai: {
   request: async (method: string, request: any) => {
     if (method === 'notifications.preference.get') return preference
-    if (method === 'notifications.inbox') return { schemaVersion: 8, throughChangeSequence: sequence, unreadCount: journal.length, items: [], nextCursor: null }
-    if (method === 'notifications.changesSince') return { schemaVersion: 8, requestedAfterChangeSequence: request.afterChangeSequence,
+    if (method === 'notifications.preference.update') {
+      if (failPreferenceSave) { failPreferenceSave = false; throw new Error('测试保存失败') }
+      if (request.command.expectedVersion !== preference.version) return { status: 'rejected', code: 'conflict', payload: preference }
+      const { expectedVersion, ...next } = request.command
+      preference = { ...next, version: expectedVersion + 1, updatedAt: new Date().toISOString() }
+      return { status: 'applied', code: 'saved', payload: preference }
+    }
+    if (method === 'notifications.inbox') return { schemaVersion: 9, throughChangeSequence: sequence, unreadCount: journal.length, items: [], nextCursor: null }
+    if (method === 'notifications.changesSince') return { schemaVersion: 9, requestedAfterChangeSequence: request.afterChangeSequence,
       nextChangeSequence: sequence, throughChangeSequence: sequence, retainedFloorChangeSequence: 0,
       hasMore: false, resetRequired: false, changes: journal.filter(change => change.changeSequence > request.afterChangeSequence) }
     if (method === 'notifications.acknowledge' || method === 'notifications.acknowledgeVisibleSources') {
@@ -51,6 +61,9 @@ function admit(semantic: NotificationSemantic, privateId: string | null = null, 
 function Fixture() {
   const [sources, updateSources] = useState<VisibleNotificationSources | null>(read())
   setSources = updateSources
+  const [settings, setSettings] = useState(false)
+  showSettings = setSettings
+  if (settings) return <main className="settings-panel settings-panel-notifications" style={{ padding: 28, height: '100vh', overflow: 'auto' }}><NotificationSettings /></main>
   return <main style={{ padding: 40 }}><h1>通知交互验证</h1><input id="draft" aria-label="消息草稿" defaultValue="继续阅读" />
     <NotificationAttentionController enabled activeCampId={sources?.campId ?? 'camp-other'} activeCampVisible navigationActive={false}
       visibleSources={sources?.conversationId ? null : sources} singleChatSources={sources?.conversationId ? sources : null}
@@ -61,6 +74,9 @@ function Fixture() {
 }
 Object.assign(window, { notificationTest: {
   admit,
+  settings: (visible: boolean) => showSettings(visible),
+  preference: () => preference,
+  failPreferenceSave: () => { failPreferenceSave = true },
   source: (conversationId: string | null, visible = true, turnVisible = false) => setSources({ ...read(), campId: 'camp-target',
     conversationId, surfaceVisible: visible, campTurnIds: turnVisible ? ['turn-target'] : [] }),
   away: () => setSources(read()),

@@ -4,6 +4,8 @@ mod attachment_paths;
 mod mission_context;
 #[path = "db_mission_details.rs"]
 mod mission_details;
+#[path = "db_notification_model.rs"]
+pub(crate) mod notification_model;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -46,6 +48,7 @@ use crate::member_avatar::{
 #[cfg(all(test, feature = "extended-tests"))]
 thread_local! {
     static STOP_BEFORE_TASK_VERSIONLESS_MIGRATION_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static STOP_BEFORE_PUBLIC_CONTEXT_MIGRATION_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -289,8 +292,8 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.70";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 124;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.71";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 125;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -739,6 +742,7 @@ struct CurrentMigrationState {
     v172: bool,
     v173: bool,
     v174: bool,
+    v175: bool,
 }
 
 impl CurrentMigrationState {
@@ -760,11 +764,19 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v175 {
+            let mut previous = *self;
+            previous.v175 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && self.v174
+                && previous.admits("v1.70", 124, classifier);
+        }
         if self.v174 {
             let mut previous = *self;
             previous.v174 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            return contract == "v1.70"
+                && schema == 124
                 && self.v173
                 && previous.admits("v1.69", 123, classifier);
         }
@@ -3192,6 +3204,7 @@ pub(crate) fn classify_database_contract(
         || (migrations.v172 && !public_context_schema_matches)
         || (migrations.v173 && !skills_rebuild_schema_matches)
         || (migrations.v174 && !public_history_claim_schema_matches)
+        || (migrations.v175 && !notification_model::schema_matches(connection)?)
         || (migrations.v156
             && !migrations.v157
             && !attachment_paths::schema_matches(connection)?
@@ -4901,7 +4914,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 171),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 172),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 173),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 174)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 174),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 175)
         "#,
         [],
         |row| {
@@ -5011,6 +5025,7 @@ fn load_current_migration_state(
                 v172: row.get(102)?,
                 v173: row.get(103)?,
                 v174: row.get(104)?,
+                v175: row.get(105)?,
             })
         },
     )
@@ -8082,6 +8097,13 @@ impl Database {
             if !self.schema_migration_applied(174)? {
                 migration_step!("migration_174", self.migrate_public_history_claim_v174());
             }
+            #[cfg(all(test, feature = "extended-tests"))]
+            if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
+                return Ok(());
+            }
+            if !self.schema_migration_applied(175)? {
+                migration_step!("migration_175", notification_model::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -8815,6 +8837,13 @@ impl Database {
         }
         if !self.schema_migration_applied(174)? {
             migration_step!("migration_174", self.migrate_public_history_claim_v174());
+        }
+        #[cfg(all(test, feature = "extended-tests"))]
+        if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
+            return Ok(());
+        }
+        if !self.schema_migration_applied(175)? {
+            migration_step!("migration_175", notification_model::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -28394,9 +28423,10 @@ impl Database {
             anyhow::ensure!(
                 matches!(
                     classify_database_contract(&tx)?,
-                    DatabaseContractClassification::Current(_)
+                    DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                        if marker.contract_version == "v1.70" && marker.projection_schema_version == 124
                 ),
-                "Public history claim migration failed current schema admission"
+                "Public history claim migration failed v1.70/schema 124 admission"
             );
             tx.commit()?;
             Ok(())
@@ -33633,6 +33663,8 @@ pub(crate) fn open_v170_source_for_test(directory: &Path) -> Result<Database> {
 
 #[cfg(test)]
 fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
+    #[cfg(feature = "extended-tests")]
+    notification_model::downgrade_for_test(connection);
     // Only the old-migration fixtures reverse the three latest migrations.
     // Keep the production classifier and migration source checks exact.
     let has_v173: bool = connection
@@ -38242,7 +38274,8 @@ mod tests {
         assert!(source.schema_migration_applied(174).unwrap());
         assert!(matches!(
             classify_database_contract(source.connection()).unwrap(),
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.70" && marker.projection_schema_version == 124
         ));
         drop(source);
         let reopened = Database::open(&directory).unwrap();
@@ -39363,6 +39396,7 @@ mod tests {
             v172: version >= 172,
             v173: version >= 173,
             v174: version >= 174,
+            v175: version >= 175,
         }
     }
 
@@ -40042,7 +40076,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(174);
+        let current = migration_state_through(175);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;

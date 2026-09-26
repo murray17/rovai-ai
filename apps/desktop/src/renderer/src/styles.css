@@ -9295,3 +9295,19 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .file-preview-html-version[hidden] { display: none; }
 
 .file-preview-reading-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+
+/* Notification settings follow the business object groups. */
+.notification-scenario-conversation { grid-row: span 2; }
+.notification-preference-row { min-width: 0; }
+.notification-status-filter { padding: 0 12px 10px; background: var(--workspace-surface-raised); border-radius: 0 0 9px 9px; }
+.notification-filter-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 0 0; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--muted); text-align: left; font-size: 11px; cursor: pointer; }
+.notification-filter-toggle span:last-child { flex-shrink: 0; color: var(--workspace-steel-ink); }
+.notification-filter-toggle:disabled { opacity: .45; cursor: default; }
+.notification-filter-options { display: flex; flex-wrap: wrap; gap: 10px 16px; padding-top: 12px; }
+.notification-filter-options label { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 11px; }
+.notification-filter-options input { accent-color: var(--workspace-steel); }
+.notification-preference-row:has(.notification-status-filter) .notification-switch { border-radius: 9px 9px 0 0; }
+@media (max-width: 959px) {
+  .settings-panel-notifications .notification-scenario-grid { grid-template-columns: minmax(0, 1fr); }
+  .notification-scenario-conversation { grid-row: auto; }
+}

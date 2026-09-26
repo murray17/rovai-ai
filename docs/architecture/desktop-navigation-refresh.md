@@ -74,7 +74,8 @@ Navigation 的 `lastActivityAt` / `lastActivityGlobalSequence` 只由已发布�
 没有已发布用户消息时使用 Camp 的 `created_at` 和 sequence 0；Renderer-local 输入、未发送附件、查看和重命名
 不改变这个初始排序时间。时间降序、global sequence 降序、Camp ID 升序的确定性比较规则保持不变。
 
-`latestCompletionGlobalSequence`、loading 与完成未读 marker 继续独立读取 Run/Turn 事实与查看水位；
+`latestCompletionGlobalSequence` 沿用 wire 名称但读取非撤回 Agent 消息的首次发布水位，`unread_completed` 表示新回复；
+loading 继续独立读取 Run 事实。Run 终态本身不产生新回复小点，查看水位保持单调；
 状态刷新不能借用用户消息排序水位，否则后台完成提示会丢失。Core Project 聚合使用组内最近用户消息字段，
 Sidecar 已保存的 Project 顺序仍按下文的本机偏好规则保持稳定。
 

@@ -2552,6 +2552,12 @@ impl CollaborationService {
                     "assigneeAgentId": projected.assignee_agent_id,
                 }),
             )?;
+            if original.status != projected.status {
+                crate::notification::record_status_transition(transaction, &envelope.actor, crate::notification::StatusTransition {
+                    kind: "task", id: &envelope.payload.task_id, camp_id: &projected.camp_id,
+                    status: projected.status.as_str(), source_message_id: None,
+                })?;
+            }
             let detail = load_task_detail(
                 transaction,
                 &envelope.payload.task_id,
@@ -6346,6 +6352,19 @@ pub(crate) fn end_camp_membership(
             "#,
             params![task_id, now],
         )?;
+        if previous_status != "pending" {
+            crate::notification::record_status_transition(
+                transaction,
+                actor,
+                crate::notification::StatusTransition {
+                    kind: "task",
+                    id: &task_id,
+                    camp_id,
+                    status: "pending",
+                    source_message_id: None,
+                },
+            )?;
+        }
         append_domain_event(
             transaction,
             "task.assignee_membership_ended",
@@ -11349,6 +11368,38 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(lead_update.result.status, CommandResultStatus::Applied);
+        let task_signals = crate::notification::NotificationEpisodeService::default()
+            .changes_since(&mut database, "local_user", 0, 100)
+            .unwrap();
+        let task_signals = task_signals
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .filter(|s| s.semantic == crate::notification::NotificationSemantic::TaskStatusChanged)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            task_signals.len(),
+            1,
+            "a title edit does not duplicate the blocked transition"
+        );
+        assert_eq!(
+            task_signals[0].action.subject.as_ref().unwrap().id,
+            owned_id
+        );
+        assert_eq!(
+            task_signals[0]
+                .action
+                .subject
+                .as_ref()
+                .unwrap()
+                .status
+                .as_deref(),
+            Some("blocked")
+        );
+        assert_eq!(
+            task_signals[0].action.kind,
+            crate::notification::NotificationActionKind::OpenTask
+        );
 
         let lead_created = service
             .create_task(
