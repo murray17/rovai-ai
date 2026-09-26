@@ -252,4 +252,20 @@ v1.71 / schema 125；ContextManifest/Formatter 沿用主线 31。降级 fixture 
   最小命令：`cargo test -p rovai-core --lib topic_dispatch_waits_for_its_provider_roster_and_checks_its_published_bot`。
 - 标题与导航搜索扩展现有表驱动/搜索测试；迁移测试保留原有回滚、数据保留和结构等价断言，更新实际来源为 174。
 
-最终验证结果在提交前记录；真实租户未验收项保持原状态。
+本轮验证代码为 `c80c48a8`（含主线 `762370b1`），结果如下；真实租户未验收项保持原状态。
+
+| 验证 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | 通过 |
+| `pnpm exec vitest run --maxWorkers=2` | 219 个文件、2311 项通过；高并发两轮分别出现 2、3 项超时，定点复跑及降低并发后的全量均通过，未修改超时阈值或禁用用例 |
+| `pnpm build:desktop` | Web、Main、Preload、Renderer 构建通过 |
+| `cargo test --workspace -- --test-threads=4` | 434 项通过、1 项既有忽略，无失败 |
+| `cargo test -p rovai-core --features extended-tests --lib -- channel::tests:: db::tests::lark_migration db::tests::v171_ db::tests::v172_ db::tests::v173_ db::tests::current_migration_state_admission_matrix db::tests::database_contract_preflight` | 41 项通过，包含飞书、钉钉、Lark 渠道回归、迁移 171–175 衔接、结构等价、回滚和历史数据保留 |
+| `cargo test -p rovai-core --features extended-tests --lib lark_actor_routes_are_closed_and_payload_cannot_supply_authority` | 1 项通过 |
+| `cargo fmt --all --check` | 通过 |
+| `node --test scripts/benchmark/protocol/product-contract.test.mjs scripts/lib/channel-camp-naming.test.mjs` | 2 项通过；命名验收使用独立临时 userData 和 Skill Library |
+| `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=762370b1a741c4942aed9a130941acbbf72b4990 pnpm docs:check:ci` | 10 项文档测试及全部通用门禁通过 |
+| Standards / Spec 独立复核 | 两条检查线均通过；同步 #548 后补查未发现新增问题 |
+
+本轮没有运行真实 Lark 租户操作，也未把既有能力 Gate 改为已验证。
+
