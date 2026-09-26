@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.71
 authority: version-implementation-and-verification
-status: in_progress
+status: completed
 last_updated: 2026-09-27
 ---
 
@@ -37,4 +37,10 @@ last_updated: 2026-09-27
 
 `cargo test --workspace` 431 项通过、1 项按原有配置忽略，包含私有失败来源与结束失效断言。同步 main `762370b1` 后，`cargo check --workspace`、`cargo fmt --all --check`、`pnpm typecheck` 和 `pnpm build:desktop` 通过。
 
-[PR #549](https://github.com/murray17/rovai-ai/pull/549) 已创建，独立审查与最终 CI 待记录；通过后按 Principal 授权合入。未安装或重启日常 App，本次以代码、PR 和隔离验收交付。
+## 独立审查与交付
+
+两轴审查以 `af0e8e6f...2e2e017a` 为固定范围。规范轴发现状态选项保存后的焦点恢复问题及两条读取路径重复来源可用性 SQL；需求轴发现最新状态已确认后主展示可能退回旧未读状态。
+
+`b45c7e15` 修复上述问题：保存与失败重试保留具体 checkbox 身份，共用来源投影 SQL，业务通知的最新展示与旧来源确认分离。两个审查者分别复核，均无剩余问题。修订后通知 21 项及 Mission 状态回归通过，设置类型检查、3 项单测和隔离 Electron 焦点回归通过。
+
+代码实现、独立审查与本地验收已完成；[PR #549](https://github.com/murray17/rovai-ai/pull/549) 记录最终远端 CI 与主线合入状态，按 Principal 已授予的权限合入。未安装或重启日常 App，本次以代码、PR 和隔离验收交付。
