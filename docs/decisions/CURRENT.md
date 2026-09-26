@@ -34,9 +34,9 @@ last_updated: 2026-09-25
 - Channel/Automation 复用普通消息：[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)、
   [Scheduled Automation v3](../contracts/scheduled-automation-v3.md)；理由：
   [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)。
-- Delivery-first 终态注意力：[Notification Episode v8](../contracts/notification-episode-v8.md)、
-  [Current User Attention v7](../contracts/current-user-attention-v7.md)；理由：
-  [V1.60-D09](../versions/v1.60/decisions.md#v1-60-d09)。
+- Delivery-first 终态注意力：[Notification Episode v9](../contracts/notification-episode-v9.md)、
+  [Current User Attention v8](../contracts/current-user-attention-v8.md)；理由：
+  [V1.60-D09](../versions/v1.60/decisions.md#v1-60-d09)、[V1.71-D01](../versions/v1.71/decisions.md#v1-71-d01)。
 
 ## Linux Server 发布基线
 
@@ -60,7 +60,7 @@ last_updated: 2026-09-25
 - 渠道/main 数据迁移汇合：[Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)、[原位升级与旧 switch 恢复](../architecture/availability-first-runtime.md#migration-switch)；理由：[V1.36-D06](../versions/v1.36/decisions.md#v1-36-d06)、[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 - 普通升级去整库复制、逐事务恢复与启动重试：[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md#4-migration-and-recovery)；理由：[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 
-- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v8](../contracts/notification-episode-v8.md)。
+- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v9](../contracts/notification-episode-v9.md)。
 - 理由来源：[v0.02](../versions/v0.02/decisions.md)、[v0.06](../versions/v0.06/decisions.md)、[v0.28](../versions/v0.28/decisions.md)、[v0.71](../versions/v0.71/decisions.md)、[V1.31-D01](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D02](../versions/v1.31/decisions.md#v1-31-d02)、[V1.31-D03](../versions/v1.31/decisions.md#v1-31-d03)。
 
 ## Camp、Workspace 与 Attachments

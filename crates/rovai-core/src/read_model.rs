@@ -16,9 +16,7 @@ use crate::{
     camp_attachment::DIRECTORY_MEDIA_TYPE,
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     camp_id::CampId,
-    camp_message_publication::{
-        public_camp_message_event_predicate, public_camp_message_publication_cte,
-    },
+    camp_message_publication::public_camp_message_publication_cte,
     canonical_activity::CanonicalRuntimeActivity,
     command::{canonical_json_digest, project_persisted_command_result_event_payload},
     current_input_skill::CurrentInputSkillResolution,
@@ -1747,39 +1745,15 @@ fn load_navigation_camps(
     transaction: &Transaction<'_>,
     client: &crate::draft_client::DraftClient,
 ) -> Result<Vec<NavigationCampItem>> {
-    let publication_predicate = public_camp_message_event_predicate("event_log.event_type");
+    let publication = crate::camp_message_publication::public_camp_message_publication_cte();
     let sql = format!(
         r#"
-        WITH navigation_activity AS (
-            SELECT
-                event_log.camp_id,
-                MAX(CASE
-                    WHEN {publication_predicate}
-                        AND camp_message.author_type IN ('user', 'external_principal')
-                    THEN event_log.global_sequence
-                END) AS last_activity_sequence,
-                MAX(CASE
-                    WHEN event_log.event_type IN (
-                        'agent_run.succeeded',
-                        'agent_run.failed',
-                        'agent_run.cancelled'
-                    ) OR (
-                        event_log.event_type = 'camp_turn.status_changed'
-                        AND json_extract(event_log.payload_json, '$.status') = 'cancelled'
-                    )
-                    THEN event_log.global_sequence
-                END) AS latest_completion_sequence
-            FROM event_log
-            LEFT JOIN camp_message
-              ON event_log.entity_type = 'camp_message'
-             AND camp_message.id = event_log.entity_id
-            WHERE event_log.camp_id IS NOT NULL
-              AND event_log.global_sequence IS NOT NULL
-              AND ({publication_predicate} OR event_log.event_type IN (
-                  'agent_run.succeeded', 'agent_run.failed', 'agent_run.cancelled',
-                  'camp_turn.status_changed'
-              ))
-            GROUP BY event_log.camp_id
+        WITH {publication}, navigation_activity AS (
+            SELECT message.camp_id,
+                MAX(CASE WHEN message.author_type IN ('user','external_principal') THEN publication.global_sequence END) AS last_activity_sequence,
+                MAX(CASE WHEN message.author_type='agent' AND message.tombstoned_at IS NULL THEN publication.global_sequence END) AS latest_completion_sequence
+            FROM camp_message message JOIN public_camp_message_publication publication ON publication.message_id=message.id
+            GROUP BY message.camp_id
         )
         SELECT
             camp.id,
@@ -5638,7 +5612,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn navigation_completion_marker_is_persistent_and_view_ack_is_monotonic() {
+    fn navigation_reply_marker_requires_publication_and_view_ack_is_monotonic() {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-marker-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_at(&directory);
@@ -5710,6 +5684,14 @@ mod slow_tests {
             )
             .unwrap();
 
+        let terminal_only = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(
+            terminal_only.projects[0].recent_camps[0].marker, "none",
+            "Run failure is not a new reply"
+        );
+        database.connection().execute("INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,structured_content_json,content_digest,address_mode,addressed_agent_ids_json,version,created_at,updated_at)
+          VALUES('published-reply',?1,2,'agent','agent_1','reply','[{\"kind\":\"text\",\"text\":\"reply\"}]','reply','default','[]',1,?2,?2)",params![camp_id,now]).unwrap();
+        database.connection().execute("INSERT INTO event_log(event_id,event_type,payload_json,camp_id,entity_type,entity_id,actor_type,actor_id,created_at) VALUES('reply-publication','camp_message.sent','{}',?1,'camp_message','published-reply','system','test-runtime',?2)",params![camp_id,now]).unwrap();
         let completed = read_model.navigation_snapshot(&mut database).unwrap();
         let item = &completed.projects[0].recent_camps[0];
         assert_eq!(item.marker, "unread_completed");

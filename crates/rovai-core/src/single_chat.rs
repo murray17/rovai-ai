@@ -3272,7 +3272,7 @@ mod tests {
             .iter()
             .filter_map(|change| change.heads_up_signal.as_ref())
             .find(|signal| {
-                signal.semantic == crate::notification::NotificationSemantic::TurnCompleted
+                signal.semantic == crate::notification::NotificationSemantic::SingleChatReply
             })
             .unwrap();
         let source = signal.action.single_chat.as_ref().unwrap();
@@ -3412,6 +3412,62 @@ mod tests {
             )
             .unwrap();
         assert_eq!(leaked, 0);
+        let (failed_conversation, _) = open(
+            &service,
+            &mut database,
+            &camp_id,
+            "single-chat-open-failure",
+        );
+        let failed_send = send(
+            &service,
+            &mut database,
+            &camp_id,
+            &failed_conversation,
+            "single-chat-send-failure",
+        );
+        let failed_run = failed_send.result.payload["agentRunId"].as_str().unwrap();
+        database.connection().execute("UPDATE agent_run SET status='failed',ended_at=datetime('now'),updated_at=datetime('now') WHERE id=?1",[failed_run]).unwrap();
+        let changes = notifications
+            .changes_since(&mut database, "local_user", through, 100)
+            .unwrap();
+        let failure = changes
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .find(|s| s.semantic == crate::notification::NotificationSemantic::TurnFailed)
+            .unwrap();
+        assert_eq!(
+            failure.action.single_chat.as_ref().unwrap().agent_run_id,
+            failed_run
+        );
+        assert_eq!(
+            failure.action.single_chat.as_ref().unwrap().conversation_id,
+            failed_conversation
+        );
+        let failure_id = failure.action.acknowledgement_id.clone().unwrap();
+        service
+            .end(
+                &mut database,
+                &user_envelope(
+                    "single-chat-close-failure",
+                    Some(&camp_id),
+                    EndSingleChatCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: failed_conversation,
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(database.connection().query_row("SELECT resolved_at IS NOT NULL FROM notification_occurrence_disposition WHERE occurrence_id=?1",[failure_id],|r|r.get::<_,bool>(0)).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT count(*) FROM notification_round", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "private work never admits a public round"
+        );
     }
 
     #[test]

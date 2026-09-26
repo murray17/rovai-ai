@@ -2459,7 +2459,7 @@ export interface EventBatch {
   events: DomainEventView[]
 }
 
-export type NotificationEpisodeKind = 'collaboration' | 'message' | 'approval'
+export type NotificationEpisodeKind = 'collaboration' | 'message' | 'approval' | 'round' | 'mission' | 'task' | 'single_chat'
 
 export type NotificationSemantic =
   | 'approval_pending'
@@ -2467,6 +2467,11 @@ export type NotificationSemantic =
   | 'turn_completed'
   | 'turn_failed'
   | 'turn_incomplete'
+  | 'round_completed'
+  | 'single_chat_reply'
+  | 'mission_needs_you'
+  | 'mission_status_changed'
+  | 'task_status_changed'
 
 export type NotificationEpisodeFilter = 'all' | 'unread'
 
@@ -2486,6 +2491,8 @@ export type NotificationActionKind =
   | 'open_single_chat'
   | 'open_camp'
   | 'acknowledge_only'
+  | 'open_mission'
+  | 'open_task'
 
 export interface NotificationReasonView {
   semantic: NotificationSemantic
@@ -2509,6 +2516,16 @@ export interface NotificationSingleChatSource {
   agentRunId: string
 }
 
+export interface NotificationSubject {
+  kind: 'round' | 'mission' | 'task'
+  id: string
+  title: string
+  status: string | null
+  sourceMessageId: string | null
+  sourceAgentRunId: string | null
+  relatedRunIds: string[]
+}
+
 export interface NotificationActionView {
   actionId: string
   kind: NotificationActionKind
@@ -2521,6 +2538,7 @@ export interface NotificationActionView {
   acknowledgementId: string | null
   observedEpisodeVersion: number
   singleChat?: NotificationSingleChatSource | null
+  subject?: NotificationSubject | null
 }
 
 export interface NotificationEpisodeView {
@@ -2552,7 +2570,7 @@ export interface NotificationEpisodeView {
 }
 
 export interface NotificationEpisodeInbox {
-  schemaVersion: 8
+  schemaVersion: 9
   throughChangeSequence: number
   unreadCount: number
   items: NotificationEpisodeView[]
@@ -2603,7 +2621,7 @@ export type NotificationHeadsUpInvalidation =
   }
 
 export interface NotificationEpisodeChangeBatch {
-  schemaVersion: 8
+  schemaVersion: 9
   requestedAfterChangeSequence: number
   nextChangeSequence: number
   throughChangeSequence: number
@@ -2618,6 +2636,12 @@ export interface NotificationPreference {
   userMentionHeadsUpEnabled: boolean
   turnCompletedHeadsUpEnabled: boolean
   turnIncompleteHeadsUpEnabled: boolean
+  singleChatHeadsUpEnabled: boolean
+  missionNeedsYouHeadsUpEnabled: boolean
+  missionStatusHeadsUpEnabled: boolean
+  taskStatusHeadsUpEnabled: boolean
+  missionStatuses: Exclude<MissionStatus, 'needs_you'>[]
+  taskStatuses: TaskStatus[]
   version: number
   updatedAt: string
 }

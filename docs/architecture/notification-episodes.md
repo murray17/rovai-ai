@@ -10,7 +10,7 @@ last_updated: 2026-09-20
 ## 组件关系
 
 ```text
-CampMessage / CampTurn / AgentRun / Approval source transaction
+CampMessage / AgentRun / Delivery / Mission / Task / Approval source transaction
   └─ Notification write projection
        ├─ immutable Occurrence
        ├─ mutable Occurrence Disposition
@@ -107,8 +107,8 @@ cascade 和 Journal trigger 收口。
 ## References
 
 - [通知事实与投影](foundational-invariants.md#core-notifications)
-- [Notification Episode v8](../contracts/notification-episode-v8.md)
-- [Current User Attention v7](../contracts/current-user-attention-v7.md)
+- [Notification Episode v9](../contracts/notification-episode-v9.md)
+- [Current User Attention v8](../contracts/current-user-attention-v8.md)
 
 
 ## 公屏与单聊注意力
@@ -121,3 +121,18 @@ cascade 和 Journal trigger 收口。
 Delivery-first batch Run 由 Migration 164 增加 `agent_run` Occurrence source；不创建 CampTurn。Renderer 的
 `open_agent_run` 动作先打开对应承载位置，再选择成员并定位 exact Run；右侧位置显式打开 Execution 标签，紧凑
 布局保留该目标面板。只有 Portal 内该执行节点实际可见才回报确认。
+
+
+## 本轮与业务状态来源
+
+[Notification Episode v9](../contracts/notification-episode-v9.md) 由全部消息输入和产出关联形成通知专属图。
+`notification_round` 只记录成功结算的连通分量与相关 Run，不参与 claim、预算、权限或 Context。
+Run 成功、Delivery 结算和消息发布都可触发检查；waiting/claimed 或任何非成功分支阻止成功提醒。
+`notification_round_probe` 是同事务触发入口，提交时为空，不是后台队列。旧 CampTurn 终态 producer 退出，
+历史 Occurrence 保留；新 Single Chat 回复使用私有最终消息与原 Conversation/Run。
+
+Mission/Task command 的真实状态变化同事务调用通知 source adapter；同状态、只改 sourceMessageId 和用户自己的
+状态操作不新增通知。Mission 离开 needs_you 会通过 Disposition 解决旧问题，问题文本只水合显式消息正文。
+偏好与状态筛选只控制瞬时呈现；按相同 sourceMessageId、完成状态 actor Run 与已完成图成员关系合并重复卡片。
+当前 Mission/Task 标题在读取时水合，原状态与来源仍是不可变事实。新回复小点另由非撤回 Agent 消息首次发布水位
+决定，与终态成功或精确通知确认独立。

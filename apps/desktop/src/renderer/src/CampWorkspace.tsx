@@ -957,7 +957,8 @@ export type NotificationFocusTarget = {
   requestId: number
   conversationId?: string
   agentRunId?: string
-  kind: 'approval' | 'camp_turn' | 'agent_run' | 'camp_message' | 'single_chat'
+  kind: 'approval' | 'camp_turn' | 'agent_run' | 'camp_message' | 'single_chat' | 'mission' | 'task'
+  subjectId?: string
   campTurnId: string | null
   messageId?: string
   approvalId?: string
@@ -3299,6 +3300,12 @@ export function CampWorkspace({
   useEffect(() => {
     if (!notificationFocus?.active || ['approval', 'single_chat'].includes(notificationFocus.kind)) return
     setConversationView('conversation')
+    if (notificationFocus.kind === 'task' && notificationFocus.subjectId) {
+      setFocusedTaskId(notificationFocus.subjectId)
+      setTaskFocusRequest(notificationFocus.requestId)
+      openInspector('tasks')
+      return
+    }
     if (notificationFocus.kind !== 'agent_run' || !notificationFocus.agentRunId) return
     if (preparedNotificationAgentRunRequest.current === notificationFocus.requestId) return
     const run = snapshot.agentRuns.find((candidate) => candidate.id === notificationFocus.agentRunId)
@@ -3347,6 +3354,15 @@ export function CampWorkspace({
     }
     const present = (): void => {
       if (notificationFocus.kind === 'approval') {
+        return
+      }
+      if (notificationFocus.kind === 'task' || notificationFocus.kind === 'mission') {
+        const id = notificationFocus.subjectId
+        const target = id ? document.querySelector<HTMLElement>(notificationFocus.kind === 'task'
+          ? `.task-detail[data-task-id="${CSS.escape(id)}"]`
+          : `.mission-intro[data-mission-id="${CSS.escape(id)}"]`) : null
+        if (target && target.getClientRects().length > 0) presentTarget(target)
+        else frame = window.requestAnimationFrame(present)
         return
       }
       if (notificationFocus.kind === 'camp_message') {
@@ -4478,7 +4494,7 @@ export function CampWorkspace({
       <FilePreviewWorkspace
       >
         <RevealNotificationConversation active={!!notificationFocus?.active
-          && (notificationFocus.kind === 'camp_message' || notificationFocus.kind === 'camp_turn')}
+          && ['camp_message', 'camp_turn', 'mission', 'task'].includes(notificationFocus.kind)}
           onHidePreview={filePreview?.hidePane} />
         <section
           className="timeline-pane"

@@ -349,7 +349,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Message Send v5 (historical)](camp-message-send-v5.md) | v4 Core 效果与 wire 不变；收窄 `mentionUser` / `--to-user` 的消息局部使用边界，但正文不解析显示名 alias |
 | [Camp Message Send v4 (historical)](camp-message-send-v4.md) | v3 显式 Agent 寻址/caller return 加初版 `--to-user`、Structured Current User Mention 与原子通知 |
 | [Camp Message Send v4 Errata](camp-message-send-v4-errata.md) | 历史 v4 Current User Attention 生命周期与 locator-present exact verification 勘误；其修正已由 v5 继承 |
-| [Notification Episode v8（当前）](notification-episode-v8.md) | Schema 8 wire 不变；当前前台 Camp 全语义静默且不改变精确已读 |
+| [Notification Episode v9（当前）](notification-episode-v9.md) | Schema 9；整轮完成、单聊回复、使命/任务状态、独立偏好与精确事项动作 |
+| [Notification Episode v8（历史）](notification-episode-v8.md) | Schema 8 wire 不变；当前前台 Camp 全语义静默且不改变精确已读 |
 | [Notification Episode v7（历史）](notification-episode-v7.md) | Schema 8；batch AgentRun 精确来源、导航与可见确认；历史 CampTurn 继续兼容 |
 | [Notification Episode v6（历史）](notification-episode-v6.md) | Schema 7；精确单聊来源与导航、当前阅读区抑制、单卡队列和剩余时间暂停 |
 | [Notification Episode v5（历史）](notification-episode-v5.md) | v4 生命周期不变；camp 增加只读 channelSource，schema 6 与原始 title 不变 |
@@ -357,7 +358,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Notification Episode v3 (historical)](notification-episode-v3.md) | v2 精确 signal 加 Journal acknowledgement/Clear/remove invalidation、顺序式队列归约与 reset 清空；不含普通会话可见来源确认 |
 | [Notification Episode v2 (historical)](notification-episode-v2.md) | v1 三层模型加 Active Attention、exact HeadsUpSignal、事务式 Renderer cursor、pending-first Approval 与 acknowledge-only action；不含 signal 入队后的精确失效合同 |
 | [Notification Episode v1 (historical)](notification-episode-v1.md) | 初版 immutable Occurrence、separate Disposition、materialized Episode、minimal Change Journal、bounded write、typed action、heads-up 与 retention |
-| [Current User Attention v7（当前）](current-user-attention-v7.md) | 当前前台 Camp 不弹浮层；精确来源已读独立；三位置 AgentRun 共用 Portal 定位与观察 |
+| [Current User Attention v8（当前）](current-user-attention-v8.md) | 三组设置、同来源合并、业务事项精确导航和发布消息新回复小点 |
+| [Current User Attention v7（历史）](current-user-attention-v7.md) | 当前前台 Camp 不弹浮层；精确来源已读独立；三位置 AgentRun 共用 Portal 定位与观察 |
 | [Current User Attention v6（历史）](current-user-attention-v6.md) | 公屏 / 单聊边界不变；新增 exact AgentRun 可见来源与执行台定位 |
 | [Current User Attention v5（历史）](current-user-attention-v5.md) | 公屏 / 单聊独立可见来源，抑制与已读分离 |
 | [Current User Attention v4（历史）](current-user-attention-v4.md) | v3 逐来源确认加普通进入会话后的精确可见即已读，不要求通知动作或 DOM 焦点 |

@@ -1195,6 +1195,51 @@ mod tests {
             )
             .unwrap();
         assert_eq!(closed, 2);
+        // One integration seam: all co-claimed inputs publish, then the Run and its
+        // deliveries settle in the real schema, producing one typed round source.
+        let tx = fixture.database.connection_mut().transaction().unwrap();
+        for message in ["message-1", "message-2"] {
+            tx.execute("INSERT INTO event_log(event_id,event_type,payload_json,camp_id,entity_type,entity_id,actor_type,actor_id,created_at) VALUES(?1,'camp_message.sent','{}',?2,'camp_message',?3,'user','local_user',datetime('now'))",params![Uuid::new_v4().to_string(),fixture.camp_id,message]).unwrap();
+        }
+        tx.execute(
+            "UPDATE agent_run SET status='succeeded',ended_at=datetime('now') WHERE id=?1",
+            [run_id],
+        )
+        .unwrap();
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM notification_round", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        settle_run_deliveries(
+            &tx,
+            run_id,
+            "succeeded",
+            None,
+            &chrono::Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let notifications = crate::notification::NotificationEpisodeService::default();
+        let changes = notifications
+            .changes_since(&mut fixture.database, "local_user", 0, 100)
+            .unwrap();
+        let signals = changes
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .collect::<Vec<_>>();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(
+            signals[0].semantic,
+            crate::notification::NotificationSemantic::RoundCompleted
+        );
+        assert_eq!(signals[0].action.agent_run_id.as_ref(), Some(run_id));
+        assert_eq!(
+            signals[0].action.subject.as_ref().unwrap().related_run_ids,
+            vec![run_id.clone()]
+        );
     }
 
     #[test]

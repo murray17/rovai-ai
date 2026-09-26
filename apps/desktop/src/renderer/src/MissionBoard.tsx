@@ -674,7 +674,7 @@ export function MissionIntro({ mission: m, projects }: { mission: MissionRecord;
     return () => observer.disconnect()
   }, [m.description])
   return <>
-    <section className="mission-intro" aria-label="会话使命">
+    <section className="mission-intro" aria-label="会话使命" data-mission-id={m.missionId} tabIndex={-1}>
       <div className="mission-intro-top"><span><MissionIcon/>使命</span><span className="mission-status-readonly"><StatusIcon status={m.status}/>{statuses.find(s => s.id === m.status)?.label}</span></div>
       <h2>{m.title}</h2>{m.description && <p ref={description} className={`mission-description${expanded ? ' expanded' : ''}`}>{m.description}</p>}
       {canExpand && <button className="mission-description-toggle" aria-expanded={expanded} onClick={() => setExpanded(v => !v)}>{expanded ? '收起描述' : '展开描述'}<Icon name="chevron"/></button>}

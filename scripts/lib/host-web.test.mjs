@@ -512,7 +512,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const external = await fileCall(first, 'open', { kind: 'camp_workspace', campId: fileCampId, rawReference: externalPath })
     assert.equal(external.ok, true, JSON.stringify(external))
     const preference = await call(first, 'notifications.preference.get')
-    const preferenceParams = { commandId: crypto.randomUUID(), command: { expectedVersion: preference.version, headsUpEnabled: !preference.headsUpEnabled, ...Object.fromEntries(['approvalHeadsUpEnabled', 'userMentionHeadsUpEnabled', 'turnCompletedHeadsUpEnabled', 'turnIncompleteHeadsUpEnabled'].map(key => [key, preference[key]])) } }
+    const preferenceParams = { commandId: crypto.randomUUID(), command: { expectedVersion: preference.version, headsUpEnabled: !preference.headsUpEnabled, ...Object.fromEntries(['approvalHeadsUpEnabled', 'userMentionHeadsUpEnabled', 'turnCompletedHeadsUpEnabled', 'turnIncompleteHeadsUpEnabled','singleChatHeadsUpEnabled','missionNeedsYouHeadsUpEnabled','missionStatusHeadsUpEnabled','taskStatusHeadsUpEnabled','missionStatuses','taskStatuses'].map(key => [key, preference[key]])) } }
     const changedPreference = await call(first, 'notifications.preference.update', preferenceParams)
     assert.equal(changedPreference.status, 'applied')
     assert.deepEqual((await call(second, 'notifications.preference.get')).headsUpEnabled, !preference.headsUpEnabled)
