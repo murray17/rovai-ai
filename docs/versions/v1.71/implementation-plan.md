@@ -268,4 +268,3 @@ v1.71 / schema 125；ContextManifest/Formatter 沿用主线 31。降级 fixture 
 | Standards / Spec 独立复核 | 两条检查线均通过；同步 #548 后补查未发现新增问题 |
 
 本轮没有运行真实 Lark 租户操作，也未把既有能力 Gate 改为已验证。
-
