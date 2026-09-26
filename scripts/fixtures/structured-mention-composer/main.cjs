@@ -304,7 +304,7 @@ app.whenReady().then(async () => {
       assert.match(copied.html, /white-space: pre-wrap/)
     })
 
-    await run('structured paste restores valid references and visibly degrades missing ones', async () => {
+    await run('structured paste degrades missing members and preserves missing Skill source identity', async () => {
       const pasted = {
         version: 2,
         segments: [
@@ -320,7 +320,8 @@ app.whenReady().then(async () => {
       await frames()
       await expectSegments([
         { kind: 'atom', atom: { type: 'member', agentId: 'agent-a' } },
-        { kind: 'text', text: ' @离队成员 /old-skill' }
+        { kind: 'text', text: ' @离队成员 ' },
+        { kind: 'atom', atom: { type: 'skill', skillId: 'missing-skill', nameAtSend: 'old-skill' } }
       ])
     })
 

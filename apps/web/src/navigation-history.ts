@@ -101,7 +101,7 @@ function isTarget(value: unknown): value is NavigationTarget {
     case 'camp': return typeof target.campId === 'string'
     case 'members': return (target.agentId === null || typeof target.agentId === 'string') && ['identity', 'runtime', 'skills', 'mcp'].includes(String(target.tab))
     case 'memory': return target.memoryId === null || typeof target.memoryId === 'string'
-    case 'settings': return typeof target.section === 'string'
+    case 'settings': return typeof target.section === 'string' && (target.overview === undefined || target.overview === true)
     default: return false
   }
 }

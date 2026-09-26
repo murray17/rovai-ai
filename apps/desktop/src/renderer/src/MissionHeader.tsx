@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import type { CampSnapshot, MissionRecord } from '@contracts'
 import { AppHeader } from './AppHeader'
+import { useMobileLayout } from './MobileLayout'
 import { DialogControlIcon } from './AppDialog'
 import { Icon } from './MissionControls'
 import { useFilePreview } from './FilePreviewContext'
@@ -11,6 +12,7 @@ export function MissionHeader({ mission, drawer, projectName, camp, openRequest,
   onExpand(): void; onFold(): void; onClose(): void; onFocusApprovals(): void
   detailEntryHostRef(host: HTMLDivElement | null): void
 }): React.JSX.Element {
+  const mobile = useMobileLayout()
   const preview = useFilePreview()
   const activityTab = preview.tabs.find(tab => tab.kind === 'mission_activity')
   const activitySelected = preview.paneVisible && preview.activeTabId === activityTab?.id
@@ -18,14 +20,19 @@ export function MissionHeader({ mission, drawer, projectName, camp, openRequest,
   executionPriorityOnOpen.current = executionTakesPreviewPriority
   // Presentation changes do not remount this header or reset the selected tab.
   useLayoutEffect(() => {
+    if (mobile) return
     preview.openMissionActivity(mission.missionId)
     if (executionPriorityOnOpen.current) preview.openExecution()
   }, [
+    mobile,
     mission.missionId,
     openRequest,
     preview.openExecution,
     preview.openMissionActivity
   ])
+  if (mobile) return <AppHeader campTitle={mission.title} contextLabel={projectName} camp={camp}
+    detailEntryHostRef={detailEntryHostRef} onFocusApprovals={onFocusApprovals}
+    onOpenConversationList={onClose} conversationListLabel="返回使命板" />
   return <AppHeader campTitle={mission.title} contextLabel={projectName} camp={camp} detailEntryHostRef={detailEntryHostRef}
     onFocusApprovals={onFocusApprovals} hideTitle={drawer}
     leading={<div className="mission-session-leading">

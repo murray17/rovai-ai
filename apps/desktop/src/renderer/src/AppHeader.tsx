@@ -16,6 +16,7 @@ export function AppHeader({
   onBack,
   onOpenConversationList,
   conversationListButtonRef,
+  conversationListLabel = '打开主菜单',
   leading,
   hideTitle = false,
   conversationActions,
@@ -27,8 +28,9 @@ export function AppHeader({
   detailEntryHostRef?(host: HTMLDivElement | null): void
   onFocusApprovals(): void
   onBack?(): void
-  onOpenConversationList?(): void
+  onOpenConversationList?(trigger: HTMLButtonElement): void
   conversationListButtonRef?: Ref<HTMLButtonElement>
+  conversationListLabel?: string
   leading?: ReactNode
   hideTitle?: boolean
   conversationActions?: ReactNode
@@ -58,8 +60,8 @@ export function AppHeader({
           ref={conversationListButtonRef}
           className="mobile-icon-button mobile-conversation-list-open"
           type="button"
-          aria-label={previewVisible ? '返回对话' : '打开会话列表'}
-          onClick={previewVisible ? filePreview!.hidePane : onOpenConversationList}
+          aria-label={previewVisible ? '返回对话' : conversationListLabel}
+          onClick={event => previewVisible ? filePreview!.hidePane() : onOpenConversationList(event.currentTarget)}
         >{previewVisible
           ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
           : <PanelToggleIcon side="left" visible={false} />}</button>}

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { AppDialogGlyph, DialogControlIcon } from './AppDialog'
+import { useMobileLayout } from './MobileLayout'
 import { useCapabilitySplitter } from './useCapabilitySplitter'
 export { DEFAULT_CAPABILITY_WIDTH, defaultCapabilityWidth, capabilityListWidth } from './useCapabilitySplitter'
 
@@ -40,18 +41,19 @@ export function CapabilityWorkspace({
   header?: ReactNode
   libraryEmpty?: boolean
 }): React.JSX.Element {
+  const mobile = useMobileLayout()
   const detail = useRef<HTMLDivElement>(null)
   const previousSelection = useRef<string | null>(null)
   const [showDetail, setShowDetail] = useState(false)
   const id = useId()
   const { root, compact, separator } = useCapabilitySplitter(WIDTH_KEY, `${id}-list ${id}-detail`, !libraryEmpty)
   useEffect(() => {
-    if (selectionKey && previousSelection.current !== selectionKey) {
+    if (selectionKey && previousSelection.current !== selectionKey && (!mobile || previousSelection.current !== null)) {
       setShowDetail(true)
       if (detail.current) detail.current.scrollTop = 0
     }
     previousSelection.current = selectionKey
-  }, [selectionKey])
+  }, [selectionKey, mobile])
   return (
     <div
       ref={root}

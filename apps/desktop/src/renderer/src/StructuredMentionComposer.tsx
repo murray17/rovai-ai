@@ -11,7 +11,8 @@ import {
   $isTextNode,
   $nodesOfType,
   CLEAR_HISTORY_COMMAND,
-  HISTORY_PUSH_TAG
+  HISTORY_PUSH_TAG,
+  SKIP_DOM_SELECTION_TAG
 } from 'lexical'
 import {
   forwardRef,
@@ -404,9 +405,10 @@ function ComposerBridge({
       editor,
       (node) => atomPresentation(node, callbacks.current)
     )
+    // Refreshing member/Skill labels must not move focus out of an open menu.
     editor.update(() => {
       for (const atom of $nodesOfType(ComposerAtomNode)) atom.markDirty()
-    }, { tag: ROVAI_ATOM_PRESENTATION_TAG })
+    }, { tag: [ROVAI_ATOM_PRESENTATION_TAG, SKIP_DOM_SELECTION_TAG] })
   }, [bindings, editor, members, skills])
 
   useLayoutEffect(() => {
