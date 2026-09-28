@@ -13,6 +13,7 @@ import {
   MemberRuntimeParameters,
   draftFromDefaults,
   displayableInstallationModels,
+  explicitSelection,
   liveCatalogIsAtLeastAsRecent,
   modelCatalogStatusCopy,
   runtimeDraftForMember,
@@ -74,6 +75,46 @@ describe('runtime model catalog source', () => {
     expect(liveCatalogIsAtLeastAsRecent(unavailable, cached.cache)).toBe(false)
     expect(liveCatalogIsAtLeastAsRecent(refreshed, unavailableCache)).toBe(true)
     expect(liveCatalogIsAtLeastAsRecent(unavailable, unavailableCache)).toBe(true)
+  })
+})
+
+describe('explicit model changes', () => {
+  const installation = runtimeInstallation('codex-cli')
+  const cache = installation.modelCatalog
+  const model = {
+    ...installation.snapshot!.models[0],
+    id: 'runtime/next',
+    options: [{
+      ...installation.snapshot!.models[0].options[0],
+      values: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }],
+      defaultValue: 'low'
+    }]
+  }
+
+  it('carries only explicit key and value pairs supported by the new model', () => {
+    expect(explicitSelection(model, {
+      mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'high' }
+    }, cache)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: { reasoning_effort: 'high' } })
+    expect(explicitSelection(model, {
+      mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'xhigh' }
+    }, cache)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: {} })
+    expect(explicitSelection({ ...model, options: [] }, {
+      mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'high' }
+    }, cache)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: {} })
+    expect(explicitSelection(model, {
+      mode: 'explicit', modelId: 'runtime/model', options: { effort: 'high' }
+    }, cache)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: {} })
+    expect(explicitSelection(model, { mode: 'runtime_default' }, cache)).toEqual({
+      mode: 'explicit', modelId: 'runtime/next', options: {}
+    })
+  })
+
+  it('retains an explicit value while an expired historical catalog cannot verify the new model', () => {
+    expect(explicitSelection({ ...model, options: [] }, {
+      mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'high' }
+    }, { ...cache, status: 'expired' })).toEqual({
+      mode: 'explicit', modelId: 'runtime/next', options: { reasoning_effort: 'high' }
+    })
   })
 })
 

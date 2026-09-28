@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-member-identity
 status: accepted
-last_updated: 2026-09-24
+last_updated: 2026-09-28
 ---
 
 # 队员身份与图像
@@ -56,6 +56,16 @@ last_updated: 2026-09-24
 文件系统访问、审批、权限模式等字段继续服从原 Runtime schema、原始选项和默认值；可用性、模型缓存和
 平台冻结状态仍来自 Core。视觉排序不改变初始选择：默认模型不写入显式模型 ID，选择固定模型也不自动填入
 推理强度；选择“跟随模型默认值”删除对应 override。
+
+同一 Runtime 内从显式模型切换到另一显式模型时，只迁移旧配置中明确设置、且目标模型目录项以相同参数
+`key` 和枚举 `value` 支持的覆盖值；不复制旧模型的默认值，也不把不支持的强度降档。目标模型的可校验
+目录项明确不提供强度选项时移除该覆盖值与字段；原本跟随模型默认值则继续跟随新模型默认值。重选当前模型不触发草稿修改。
+切到 Runtime Default 时不携带覆盖值，再选显式模型也不恢复旧值。
+
+目录是否可用于校验沿用 Core 投影，Renderer 不自行计算 TTL。达到或超过 24 小时、但仍满足同一环境和
+身份的历史展示条件的目录可以形成草稿，不能据此判定新模型是否支持覆盖值；此时先保留显式覆盖值。
+目录异步刷新只更新能力展示，不自动改写草稿；刷新后若值失效，显示当前目录未提供并让用户调整，保存
+与实际执行仍遵守 Core 的既有校验和拒绝语义。
 
 DeepSeek Harness 的两个权限字段以原生名称作为主标签：`sandbox_mode` 与 `approval_policy`。选项也逐字显示
 `read-only | workspace-write | danger-full-access` 和 `ask | never`；中文解释只放在同一选项的次级说明中。

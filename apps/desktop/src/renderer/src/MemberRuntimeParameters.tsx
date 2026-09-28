@@ -575,12 +575,13 @@ function RuntimeModelPicker({
   }
 
   const selectModel = (value: string): void => {
+    if (value === selectedValue) return
     if (value === 'runtime_default') {
       onChange({ ...draft, model: { mode: 'runtime_default' } })
       return
     }
     const model = models.find((candidate) => candidate.id === value)
-    if (model) onChange({ ...draft, model: explicitSelection(model) })
+    if (model) onChange({ ...draft, model: explicitSelection(model, draft.model, cache) })
   }
 
   const statusCopy = modelCatalogStatusCopy(cache, {
@@ -708,11 +709,26 @@ export function modelCatalogStatusCopy(
   return ''
 }
 
-function explicitSelection(model: ModelDescriptor): ModelSelection {
+export function explicitSelection(
+  model: ModelDescriptor,
+  previous: ModelSelection,
+  cache: RuntimeModelCatalogCache
+): ModelSelection {
+  const previousOptions = previous.mode === 'explicit' ? previous.options : {}
+  // Expired history can form a draft, but cannot prove that an override is unsupported.
+  const options = modelCatalogIsServiceable(cache)
+    ? Object.fromEntries(Object.entries(previousOptions).filter(([key, value]) => (
+        typeof value === 'string'
+        && model.options.some((option) => (
+          option.key === key
+          && option.values.some((choice) => choice.value === value)
+        ))
+      )))
+    : { ...previousOptions }
   return {
     mode: 'explicit',
     modelId: model.id,
-    options: {}
+    options
   }
 }
 

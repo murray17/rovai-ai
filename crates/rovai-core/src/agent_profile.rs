@@ -5100,6 +5100,51 @@ fn runtime_configuration_issue(
     Ok(None)
 }
 
+#[cfg(test)]
+#[test]
+fn model_option_validation_rejects_preserved_effort_after_catalog_refresh() {
+    let models = vec![ModelDescriptor {
+        id: "gpt-next".to_string(),
+        display_name: "GPT Next".to_string(),
+        description: None,
+        runtime_metadata: None,
+        is_default: false,
+        hidden: false,
+        deprecated: false,
+        options: vec![ModelOptionDescriptor {
+            key: "reasoning_effort".to_string(),
+            label: "Reasoning effort".to_string(),
+            value_type: "enum".to_string(),
+            values: vec![ValueChoice {
+                value: "low".to_string(),
+                label: "Low".to_string(),
+            }],
+            default_value: Some("low".to_string()),
+            scope: RuntimeOptionScope::Run,
+        }],
+    }];
+    let binding = ResolvedRuntimeBinding {
+        adapter_kind: AdapterKind::CodexCli,
+        installation_id: "test-codex".to_string(),
+        model: ModelSelection::Explicit {
+            model_id: "gpt-next".to_string(),
+            options: json!({"reasoning_effort": "high"}),
+        },
+        permissions: AdapterPermissionConfig {
+            adapter_kind: AdapterKind::CodexCli,
+            schema_version: 1,
+            values: json!({}),
+        },
+    };
+
+    let issue =
+        runtime_configuration_issue(&serde_json::to_string(&models).unwrap(), 1, "[]", &binding)
+            .unwrap()
+            .expect("the refreshed model does not support the preserved value");
+    assert_eq!(issue.code, "runtime_model_option_invalid");
+    assert_eq!(issue.payload["value"], "high");
+}
+
 fn member_runtime_defaults_for_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
