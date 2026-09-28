@@ -10,6 +10,7 @@ pub const CONTEXT_MANIFEST_VERSION: i64 = 27;
 pub const PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION: i64 = 31;
 pub const PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION: i64 = 31;
 
+#[cfg(test)]
 pub(crate) fn native_binding_context_contract() -> Value {
     json!({
         "nativeSessionBootstrap": NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,

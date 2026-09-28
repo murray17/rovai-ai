@@ -1878,7 +1878,6 @@ mod tests {
                             title: "Collaborative task".to_string(),
                             description: "Exercise A2A execution".to_string(),
                             assignee_agent_id: "agent_1".to_string(),
-                            ..Default::default()
                         },
                     ),
                 )
@@ -4022,7 +4021,6 @@ mod tests {
                             title: "Target-owned source identity task".to_string(),
                             description: "Freeze the Public A2A sender identity".to_string(),
                             assignee_agent_id: "agent_2".to_string(),
-                            ..Default::default()
                         },
                     ),
                 )
@@ -4460,7 +4458,6 @@ Use this exact public input @agent_2";
                         title: "Frozen notice task".to_string(),
                         description: "Exercise exact Run Fact bytes".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -5337,7 +5334,6 @@ Use this exact public input @agent_2";
                 title: "Persistent follow-up".to_string(),
                 description: "Track this across runs".to_string(),
                 assignee_agent_id: "agent_1".to_string(),
-                ..Default::default()
             },
         );
         let created = service
@@ -5360,7 +5356,6 @@ Use this exact public input @agent_2";
                 title: "Different payload".to_string(),
                 description: String::new(),
                 assignee_agent_id: "agent_1".to_string(),
-                ..Default::default()
             },
         );
         assert!(
@@ -5435,7 +5430,6 @@ Use this exact public input @agent_2";
                         title: "Muwa private assignment".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -6193,7 +6187,6 @@ Use this exact public input @agent_2";
                 title: "Must not exist".to_string(),
                 description: String::new(),
                 assignee_agent_id: "agent_1".to_string(),
-                ..Default::default()
             },
         );
         let allowed = service

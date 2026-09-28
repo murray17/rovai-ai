@@ -117,7 +117,9 @@ impl SkillSelectionSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Default)]
 pub enum RunSkillAvailabilityView {
+    #[default]
     Missing,
     Present {
         active: bool,
@@ -126,11 +128,6 @@ pub enum RunSkillAvailabilityView {
         #[serde(rename = "matchingGroupKeys")]
         matching_group_keys: Vec<String>,
     },
-}
-impl Default for RunSkillAvailabilityView {
-    fn default() -> Self {
-        Self::Missing
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

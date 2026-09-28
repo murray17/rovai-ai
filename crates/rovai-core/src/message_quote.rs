@@ -257,23 +257,21 @@ pub(crate) fn load_agent_visible_camp_quotes_with_claimed_sources(
     let quotes = load_quotes(connection, QuoteStorage::CampMessage, owner_message_id)?;
     quotes
         .into_iter()
-        .filter_map(|quote| {
+        .map(|quote| {
             if quote.source.scope != "camp"
                 || quote.source.camp_id != camp_id
                 || quote.source.conversation_id.is_some()
             {
-                return Some(Ok(None));
+                return Ok(None);
             }
-            Some(
-                camp_quote_source_is_visible(
-                    connection,
-                    &quote,
-                    viewer_agent_id,
-                    fence,
-                    claimed_source_message_ids.contains(&quote.source.message_id),
-                )
-                .map(|visible| visible.then_some(quote)),
+            camp_quote_source_is_visible(
+                connection,
+                &quote,
+                viewer_agent_id,
+                fence,
+                claimed_source_message_ids.contains(&quote.source.message_id),
             )
+            .map(|visible| visible.then_some(quote))
         })
         .collect::<Result<Vec<_>>>()
         .map(|quotes| quotes.into_iter().flatten().collect())

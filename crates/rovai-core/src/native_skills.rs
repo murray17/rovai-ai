@@ -241,14 +241,14 @@ impl NativeSkillDiscovery {
             if let Some(flight) = cache.inflight.get(key) {
                 Arc::clone(flight)
             } else {
-                if !refresh {
-                    if let Some(index) = cache.entries.iter().position(|entry| entry.key == key) {
-                        let entry = cache.entries.remove(index).expect("cached index exists");
-                        if entry.scanned_at.elapsed() < DIRECTORY_CACHE_TTL {
-                            let value = entry.value.clone();
-                            cache.entries.push_back(entry);
-                            return value;
-                        }
+                if !refresh
+                    && let Some(index) = cache.entries.iter().position(|entry| entry.key == key)
+                {
+                    let entry = cache.entries.remove(index).expect("cached index exists");
+                    if entry.scanned_at.elapsed() < DIRECTORY_CACHE_TTL {
+                        let value = entry.value.clone();
+                        cache.entries.push_back(entry);
+                        return value;
                     }
                 }
                 let flight = Arc::new(OnceLock::new());
@@ -308,10 +308,8 @@ impl NativeSkillDiscoveryRequest<'_> {
             ensure!(project.is_absolute(), "project path is not absolute");
         }
         let mut roots = user_roots(adapter, &home, configuration);
-        if !user_only {
-            if let Some(project) = &project {
-                roots.extend(project_roots(adapter, project));
-            }
+        if !user_only && let Some(project) = &project {
+            roots.extend(project_roots(adapter, project));
         }
         let (disabled_paths, disabled_names, config_errors) =
             codex_disabled_skill_folders(adapter, &home, project.as_deref(), configuration);

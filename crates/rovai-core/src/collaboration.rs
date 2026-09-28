@@ -4058,7 +4058,7 @@ fn queue_camp_message_and_runs(
     let structured_content_json = serde_json::to_string(input.structured_content)?;
     let source_attachments_json = serialize_source_attachments(input.source_attachments)?;
     let content_digest = canonical_content_digest(input.structured_content)?;
-    let origin_kind = input.origin_kind.unwrap_or_else(|| match author_type {
+    let origin_kind = input.origin_kind.unwrap_or(match author_type {
         "agent" => "agent",
         "external_principal" => "channel",
         "user" if matches!(input.actor, ActorRef::User { .. }) => "local_composer",
@@ -8842,7 +8842,6 @@ mod slow_tests {
                         title: "随 Camp 删除".to_string(),
                         description: "验证从属 Task 不残留".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -10652,7 +10651,6 @@ mod slow_tests {
                         title: "  实现轻量 Task  ".to_string(),
                         description: "  不自动唤醒任何队员  ".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -10956,7 +10954,6 @@ mod slow_tests {
                     title: command_id.to_string(),
                     description: format!("description:{command_id}"),
                     assignee_agent_id: assignee_agent_id.to_string(),
-                    ..Default::default()
                 },
             )
         };
@@ -11156,7 +11153,6 @@ mod slow_tests {
                     title: command_id.to_string(),
                     description: String::new(),
                     assignee_agent_id: assignee_agent_id.to_string(),
-                    ..Default::default()
                 },
             )
         };
@@ -11304,7 +11300,6 @@ mod slow_tests {
                         title: "普通 Agent 不得创建".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_1".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -11415,7 +11410,6 @@ mod slow_tests {
                         title: "Lead 定义责任".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_1".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -11522,7 +11516,6 @@ mod slow_tests {
                         title: "一次性准入".to_string(),
                         description: "Task 后续变化不得撤销已经接受的执行".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -11652,7 +11645,6 @@ mod slow_tests {
                         title: "成员删除时释放".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_4".to_string(),
-                        ..Default::default()
                     },
                 ),
             )

@@ -73,6 +73,25 @@ export async function runPlan(planFile, directory) {
     async close() { await service.stop(); await rm(root, { recursive: true, force: true }) } }
 }
 
+async function processHasLiveExecution(pid: number): Promise<boolean> {
+  try { process.kill(pid, 0) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+    throw error
+  }
+  // An orphaned process may remain as a zombie until the CI host reaps it.
+  // It has exited and can no longer execute, although kill(pid, 0) succeeds.
+  if (process.platform === 'linux') {
+    const stat = await readFile(`/proc/${pid}/stat`, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (stat === null) return false
+    if (/^\d+ \(.+\) [ZX] /.test(stat)) return false
+  }
+  return true
+}
+
 it('does no Core queries or writes until configured; freezes installation and manual job identity independently of Gate verdict', async () => {
   const f = await fixture()
   try {
@@ -131,7 +150,7 @@ it.each(['cancel', 'stop'] as const)('stops the actual worker and its detached d
     if (operation === 'cancel') await f.service.cancel({ jobId: 'cancel-1' })
     else await f.service.stop()
     await expect.poll(async () => (await f.service.status({ jobId: 'cancel-1' }) as { state: string }).state, { timeout: 15000 }).toBe('interrupted')
-    expect(() => process.kill(pid, 0)).toThrow()
+    await expect.poll(() => processHasLiveExecution(pid), { timeout: 5000 }).toBe(false)
     expect(await f.service.status({ jobId: 'cancel-1' })).toMatchObject({ reason: operation === 'cancel' ? 'cancelled_by_owner' : 'app_shutdown', reportStatus: null })
   } finally { await f.close() }
 }, 20000)

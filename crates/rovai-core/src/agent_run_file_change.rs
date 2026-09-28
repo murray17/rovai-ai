@@ -2517,7 +2517,7 @@ mod tests {
         assert_eq!(refreshed.card.revision, original_card.revision + 1);
         assert_eq!(refreshed.files[0].evidence_file_id, original_file_id);
         assert_eq!(refreshed.files[0].additions, Some(1));
-        assert_eq!(
+        assert!(
             database
                 .connection()
                 .query_row(
@@ -2526,7 +2526,6 @@ mod tests {
                     |row| row.get::<_, bool>(0),
                 )
                 .unwrap(),
-            true,
             "replaced projection details must become a recoverable GC candidate"
         );
 

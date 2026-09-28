@@ -17,7 +17,7 @@ pub struct ContextDeliveryProfile {
 
 impl ContextDeliveryProfile {
     pub fn validate(self) -> Result<Self> {
-        if !matches!(self.profile_version, 5 | 6 | 7 | 8 | 9 | 10) {
+        if !matches!(self.profile_version, 5..=10) {
             anyhow::bail!("unsupported Context Delivery Profile version");
         }
         if self.max_public_messages == 0

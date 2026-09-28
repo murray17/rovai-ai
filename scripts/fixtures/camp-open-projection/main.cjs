@@ -115,8 +115,8 @@ app.whenReady().then(async () => {
         await state()
         await run('document.querySelector("button[aria-label^=打开][aria-label*=执行过程]").click()')
         await state()
-        assert.equal(await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded")'), 'false')
-        await run('document.querySelector(".execution-history-toggle").click()')
+        assert.equal(await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded")'), 'true',
+          'opening a terminal Run selects its history and reveals the focused Run')
         await state()
         await run(`[...document.querySelectorAll('.execution-history-list .execution-run-toggle')]
           .filter(button => button.getAttribute('aria-expanded') === 'false').forEach(button => button.click())`)

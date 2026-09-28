@@ -4415,7 +4415,10 @@ mod slow_tests {
             .to_string_lossy()
             .to_string();
         SkillProjectionReconciler
-            .synchronize_removed_execution_roots(&mut database, &[actual_removed.clone()])
+            .synchronize_removed_execution_roots(
+                &mut database,
+                std::slice::from_ref(&actual_removed),
+            )
             .unwrap();
 
         assert!(

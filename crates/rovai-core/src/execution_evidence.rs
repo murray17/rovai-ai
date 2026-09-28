@@ -4979,10 +4979,7 @@ mod tests {
             .read_full_payload(&database, &blob_store, &camp_id, &evidence.id)
             .unwrap();
         let saved_output = full_payload["item"]["aggregatedOutput"].as_str().unwrap();
-        assert_eq!(
-            saved_output.as_bytes().len(),
-            PERSISTED_TOOL_OUTPUT_LIMIT_BYTES
-        );
+        assert_eq!(saved_output.len(), PERSISTED_TOOL_OUTPUT_LIMIT_BYTES);
         assert!(!full_payload.to_string().contains(discarded_output_marker));
         assert!(full_payload.to_string().contains("DIFF_REMAINS_READABLE"));
         let (payload_preview, result_preview, result_blob_id): (String, Option<String>, Option<String>) =

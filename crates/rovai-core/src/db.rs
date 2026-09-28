@@ -50183,7 +50183,6 @@ mod tests {
                         title: "will be reset".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_1".to_string(),
-                        ..Default::default()
                     },
                 },
             )

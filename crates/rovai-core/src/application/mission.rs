@@ -664,15 +664,14 @@ impl Core {
         if verified_worktree
             .as_ref()
             .is_some_and(|verified| verified.requires_managed_branch())
+            && expected_oid.is_none()
         {
-            if expected_oid.is_none() {
-                timings.identity_and_safety_ms = identity_started_at.elapsed().as_millis();
-                return Err(MissionWorkspaceCleanupFailure::new(
-                    anyhow::anyhow!("mission.workspace_branch_missing"),
-                    false,
-                    &timings,
-                ));
-            }
+            timings.identity_and_safety_ms = identity_started_at.elapsed().as_millis();
+            return Err(MissionWorkspaceCleanupFailure::new(
+                anyhow::anyhow!("mission.workspace_branch_missing"),
+                false,
+                &timings,
+            ));
         }
         workspace.cleanup_expected_branch_oid = expected_oid.clone();
         workspace.cleanup_branch_removed |= expected_oid.is_none();

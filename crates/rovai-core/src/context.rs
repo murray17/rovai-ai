@@ -1090,12 +1090,11 @@ impl ContextService {
         let context_manifest_version =
             batch_context_manifest_version.unwrap_or(CONTEXT_MANIFEST_VERSION);
         let context_formatter_version = batch_context_manifest_version
-            .map(|version| {
+            .inspect(|&version| {
                 debug_assert!(matches!(
                     version,
                     29 | 30 | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
                 ));
-                version
             })
             .unwrap_or(CONTEXT_FORMATTER_VERSION);
         let run_facts_schema_version = if snapshot.invocation_kind == "batch" {
@@ -4440,6 +4439,22 @@ fn frozen_batch_context_manifest_version(
     Ok(version)
 }
 
+type BatchMessageRow = (
+    String,
+    i64,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+);
+
+type BatchMessageSkillMentions = (Vec<String>, Vec<(String, String)>);
+
 fn load_batch_model_context<R: ContextReadConnection>(
     database: &R,
     snapshot: &RunSnapshot,
@@ -4450,20 +4465,7 @@ fn load_batch_model_context<R: ContextReadConnection>(
         max_message_body_chars: usize::MAX,
         ..profile
     };
-    let load_messages = |rows: Vec<(
-        String,
-        i64,
-        String,
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-    )>|
-     -> Result<Vec<SharedMessage>> {
+    let load_messages = |rows: Vec<BatchMessageRow>| -> Result<Vec<SharedMessage>> {
         rows.into_iter()
             .map(
                 |(
@@ -4577,7 +4579,7 @@ fn load_batch_model_context<R: ContextReadConnection>(
 
 fn batch_message_skill_mentions(
     structured_content_json: &str,
-) -> Result<(Vec<String>, Vec<(String, String)>)> {
+) -> Result<BatchMessageSkillMentions> {
     let content = serde_json::from_str::<StructuredCampMessageContent>(structured_content_json)
         .context("CampMessage Structured Content is invalid")?;
     let mut seen_names = HashSet::new();
@@ -11448,7 +11450,6 @@ mod slow_tests {
                             title: format!("Durable responsibility {index}"),
                             description: "must not enter the compact projection".to_string(),
                             assignee_agent_id: "agent_1".to_string(),
-                            ..Default::default()
                         },
                     },
                 )

@@ -1146,7 +1146,7 @@ pub struct ChannelService {
 impl Default for ChannelService {
     fn default() -> Self {
         Self {
-            gateway: DomainCommandGateway::default(),
+            gateway: DomainCommandGateway,
             spec: &FEISHU_SPEC,
         }
     }
@@ -1155,7 +1155,7 @@ impl Default for ChannelService {
 impl ChannelService {
     pub(crate) fn for_spec(spec: &'static ChannelProviderSpec) -> Self {
         Self {
-            gateway: DomainCommandGateway::default(),
+            gateway: DomainCommandGateway,
             spec,
         }
     }
@@ -2452,7 +2452,7 @@ impl ChannelService {
             let account_version =
                 persist_feishu_account(self.spec, transaction, &envelope.payload.account)?;
             Ok(CommandHandlerResult::applied(
-                &self.spec.code("account.connection_committed"),
+                self.spec.code("account.connection_committed"),
                 json!({
                     "accountId": envelope.payload.account.account_id,
                     "version": account_version,
@@ -2828,7 +2828,7 @@ impl ChannelService {
                 |row| row.get(0),
             )?;
             Ok(CommandHandlerResult::applied(
-                &spec.code("account.connected"),
+                spec.code("account.connected"),
                 json!({ "accountId": envelope.payload.account_id, "version": version }),
                 Some(EntityReference {
                     entity_type: spec.code("account").to_string(),
@@ -2895,7 +2895,7 @@ impl ChannelService {
                 [],
             )?;
             Ok(CommandHandlerResult::applied(
-                &spec.code("account.disconnected"),
+                spec.code("account.disconnected"),
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
                 None,
             ))
@@ -2959,7 +2959,7 @@ impl ChannelService {
                 [],
             )?;
             Ok(CommandHandlerResult::applied(
-                &spec.code("account.session_expired"),
+                spec.code("account.session_expired"),
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
                 None,
             ))
@@ -3329,7 +3329,7 @@ impl ChannelService {
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
-                &spec.code("member_bot_publication_intent.created"),
+                spec.code("member_bot_publication_intent.created"),
                 json!({
                     "publicationIntentId": envelope.payload.publication_intent_id,
                     "version": 1,
@@ -3565,7 +3565,7 @@ impl ChannelService {
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
-                &spec.code("member_bot_publication_intent.advanced"),
+                spec.code("member_bot_publication_intent.advanced"),
                 json!({
                     "publicationIntentId": envelope.payload.publication_intent_id,
                     "state": envelope.payload.state,
@@ -4192,7 +4192,7 @@ impl ChannelService {
                 |row| row.get(0),
             )?;
             Ok(CommandHandlerResult::applied(
-                &spec.code("member_bot.published"),
+                spec.code("member_bot.published"),
                 json!({ "agentId": envelope.payload.agent_id, "version": version }),
                 Some(EntityReference {
                     entity_type: spec.code("member_bot").to_string(),
@@ -6593,7 +6593,7 @@ impl ChannelService {
                 remaining,
                 &now,
             )?);
-            let roster_refreshes = if ChannelProviderSpec::for_provider(&provider).is_some() {
+            let roster_refreshes = if ChannelProviderSpec::for_provider(provider).is_some() {
                 crate::message_delivery::pending_topic_roster_refreshes(&transaction, provider)?
             } else {
                 Vec::new()
@@ -7546,7 +7546,7 @@ fn validate_owner_identity_input(
     if provider == DINGTALK_PROVIDER && user_id.is_none() {
         anyhow::bail!("a DingTalk sender userId is required");
     }
-    if ChannelProviderSpec::for_provider(&provider).is_some()
+    if ChannelProviderSpec::for_provider(provider).is_some()
         && open_id.is_none()
         && user_id.is_none()
         && union_id.is_none()
@@ -11831,7 +11831,7 @@ fn build_observed_external_content(
     // Only the published Camp content drops textual copies of its actual
     // target Bots; structured MemberMentions already address those targets.
     let mut bot_names = bot_names.into_iter().collect::<Vec<_>>();
-    bot_names.sort_by(|left, right| right.chars().count().cmp(&left.chars().count()));
+    bot_names.sort_by_key(|name| std::cmp::Reverse(name.chars().count()));
     let mut canonical = command.clone();
     canonical.body = remove_dingtalk_target_mentions(&command.body, &bot_names);
     build_external_content(&canonical, target_agent_ids)
@@ -12308,7 +12308,7 @@ fn validated_credential_payload(provider: &str, value: &Value) -> Result<Value> 
         .as_object()
         .context("credential payload must be an object")?;
     let app_secret = required_json_string(object, "appSecret", 16_384)?;
-    if ChannelProviderSpec::for_provider(&provider).is_some() {
+    if ChannelProviderSpec::for_provider(provider).is_some() {
         if object.len() != 1 {
             anyhow::bail!("Feishu credential payload has unsupported fields");
         }
@@ -12345,7 +12345,7 @@ fn validate_developer_session_documents(
     if serde_json::to_vec(session)?.len() > 1_048_576 {
         anyhow::bail!("developer session exceeds the storage limit");
     }
-    if ChannelProviderSpec::for_provider(&provider).is_some() {
+    if ChannelProviderSpec::for_provider(provider).is_some() {
         for (key, maximum) in [
             ("brand", 16),
             ("userId", 512),
@@ -13051,7 +13051,7 @@ fn store_feishu_publication_credential(
         ],
     )?;
     Ok(CommandHandlerResult::applied(
-        &spec.code("publication_intent.credential_stored"),
+        spec.code("publication_intent.credential_stored"),
         json!({
             "publicationIntentId": command.publication_intent_id,
             "credentialRef": command.credential_ref,

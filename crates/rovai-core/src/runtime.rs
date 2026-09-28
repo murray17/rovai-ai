@@ -1210,10 +1210,10 @@ impl ExecutionRuntimeService {
                 "UPDATE camp_turn SET cancel_requested_at = COALESCE(cancel_requested_at, ?2), cancel_request_command_id = COALESCE(cancel_request_command_id, ?3) WHERE id = ?1",
                 params![turn_id, now, command_id],
             )?;
-            settle_abortive_camp_turn_in_tx(&transaction, &turn_id, "camp_deleted", &actor, &now)?;
+            settle_abortive_camp_turn_in_tx(transaction, &turn_id, "camp_deleted", &actor, &now)?;
         }
         for run_id in batch_run_ids {
-            settle_abortive_agent_run_in_tx(&transaction, &run_id, "camp_deleted", &actor, &now)?;
+            settle_abortive_agent_run_in_tx(transaction, &run_id, "camp_deleted", &actor, &now)?;
         }
         transaction.execute(
             r#"
@@ -7423,7 +7423,7 @@ mod tests {
             .restart_native_session(&mut database, &envelope)
             .unwrap();
         assert!(replay.replayed);
-        let state: (
+        type RestartedConversationState = (
             String,
             String,
             i64,
@@ -7432,7 +7432,8 @@ mod tests {
             Option<String>,
             Option<String>,
             Option<String>,
-        ) = database
+        );
+        let state: RestartedConversationState = database
             .connection()
             .query_row(
                 r#"
