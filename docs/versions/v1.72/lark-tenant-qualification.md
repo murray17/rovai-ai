@@ -3,7 +3,7 @@ document_type: qualification-record
 version: v1.72
 authority: lark-real-tenant-qualification-evidence
 status: in_progress
-last_updated: 2026-09-27
+last_updated: 2026-09-29
 ---
 
 # v1.72 Lark 真实租户验收记录
@@ -109,3 +109,10 @@ last_updated: 2026-09-27
 
 最终结论：**未验证**。只有所有必需项均为“通过”、失败记录有明确处置且完整门禁通过后，才能在后续版本提出解除
 Lark 能力 Gate；本记录本身不修改合同状态。
+
+## 2026-09-29 维护者补充口述
+
+维护者在 v0.4.1 发布准备中确认，已在真实 Lark 租户手工测试扫码连接、Bot 发布、私聊、群聊、多 Bot、
+图片和文件、与飞书同时连接，以及重启恢复，结果均为通过。这是维护者的场景级确认；尚未提供每项的
+执行步骤、构建 commit、客户端版本、脱敏截图或日志，也未覆盖上表全部异常与拒绝分支的可复核证据。
+因此原 Q1–Q4 逐项状态和能力 Gate 暂不改为“通过”；后续将这些证据归档后再按合同解除提示。
