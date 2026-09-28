@@ -24620,7 +24620,7 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     use std::fs;
 
-    #[cfg(feature = "slow-tests")]
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     fn text_composer_document(text: &str) -> ComposerDocument {
         ComposerDocument {
             version: rovai_core::camp_content::COMPOSER_DOCUMENT_VERSION,

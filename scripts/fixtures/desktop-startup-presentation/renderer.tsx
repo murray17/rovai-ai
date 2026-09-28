@@ -77,6 +77,7 @@ function api(path = ''): unknown {
       if (path.split('.').at(-1)?.startsWith('on')) return () => undefined
       if (path === 'supervisor.getSnapshot') return initialSupervisor.promise
       if (path === 'desktopSession.getStartupSnapshot') { calls.push(path); return localSession.promise }
+      if (path === 'desktopSession.getInterfaceLanguage') { calls.push(path); return Promise.resolve('zh-CN') }
       if (path === 'currentUserProfile.get') return Promise.resolve({ displayName: '', avatarDataUrl: null })
       if (path === 'appearance.get') return Promise.resolve({ ...DEFAULT_APPEARANCE, resolvedTheme: appearanceTheme })
       if (path === 'generalPreferences.get') return Promise.resolve({ schemaVersion: 4,
@@ -184,8 +185,9 @@ function recoveryFrame(kind: string) {
 }
 
 function noAuthority() {
-  // Preview retention is a Main-owned cache update and does not access Core authority.
-  check(calls.every(call => ['desktopSession.getStartupSnapshot', 'filePreview.updateRetention'].includes(call)), `Pre-ready authority calls: ${calls.join(', ')}`)
+  // Session state, interface language and preview retention are Main-owned
+  // local reads; none enter Core authority before admission.
+  check(calls.every(call => ['desktopSession.getStartupSnapshot', 'desktopSession.getInterfaceLanguage', 'filePreview.updateRetention'].includes(call)), `Pre-ready authority calls: ${calls.join(', ')}`)
 }
 
 Object.assign(window, { startupTest: {
@@ -793,7 +795,7 @@ Object.assign(window, { startupTest: {
     await openMembers()
     const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')]
     check(items.length === 4 && items[0].hasAttribute('data-disabled') && items[2].hasAttribute('data-disabled'), 'Unavailable teammates stay visible and disabled')
-    check(items[0].textContent?.includes('未配置运行时') && items[2].textContent?.includes('运行时不可用'), 'Unavailable labels distinguish missing config from unavailable runtime')
+    check(items[0].textContent?.includes('未配置智能体') && items[2].textContent?.includes('智能体不可用'), 'Unavailable labels distinguish missing config from unavailable agent')
     check(items[1].textContent?.includes('可用') && items[3].textContent?.includes('可用'), 'Usable teammates share one availability label')
     items[0].click()
     items[2].click()
