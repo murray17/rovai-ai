@@ -321,6 +321,34 @@ impl NewAuthorityOpen<'_> {
 }
 
 impl<'lease> MigrationAuthorityTicket<'lease> {
+    pub(crate) fn matches_macos_provenance_refresh(
+        &self,
+        previous: &MigrationAuthorityOpen<'_>,
+    ) -> bool {
+        let (
+            MigrationTicketState::Upgrade {
+                namespace: current_namespace,
+                artifacts: current_artifacts,
+                source_contract: current_contract,
+                source_receipts: current_receipts,
+            },
+            MigrationAuthorityOpen::Upgrade {
+                namespace: previous_namespace,
+                artifacts: previous_artifacts,
+                source_contract: previous_contract,
+                source_receipts: previous_receipts,
+                ..
+            },
+        ) = (&self.state, previous)
+        else {
+            return false;
+        };
+        current_namespace == previous_namespace
+            && current_contract == previous_contract
+            && current_receipts == previous_receipts
+            && previous_artifacts.macos_provenance_only_change(current_artifacts)
+    }
+
     pub(crate) fn into_migration(
         self,
     ) -> Result<MigrationAuthorityOpen<'lease>, TicketValidationError> {
@@ -368,6 +396,31 @@ impl<'lease> MigrationAuthorityTicket<'lease> {
 }
 
 impl MigrationAuthorityOpen<'_> {
+    pub(crate) fn macos_provenance_transition_observed(&self) -> bool {
+        let Self::Upgrade {
+            lease,
+            namespace,
+            artifacts,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        if !matches!(lease.revalidate_identity(), Ok(true)) {
+            return false;
+        }
+        let Ok(observed) = observe_all(lease) else {
+            return false;
+        };
+        let other = observed.namespace(match namespace {
+            AuthorityNamespace::Rovai => AuthorityNamespace::Lumen,
+            AuthorityNamespace::Lumen => AuthorityNamespace::Rovai,
+        });
+        other.main.is_none()
+            && other.authoritative_sidecars().is_empty()
+            && artifacts.macos_provenance_only_change(observed.namespace(*namespace))
+    }
+
     /// Writes may change bytes and WAL state, never the authority's namespace or
     /// main-file object. Use this fence around reassessment after our commits.
     pub(crate) fn revalidate_migrated_identity(&self) -> Result<(), TicketValidationError> {
@@ -440,12 +493,13 @@ impl DatabaseAdmission {
     pub fn assess<'lease>(
         lease: &'lease CoreDataDirLease,
     ) -> Result<AdmissionAssessment<'lease>, AdmissionInfrastructureError> {
-        Self::assess_with_recovery(lease, true)
+        Self::assess_with_recovery(lease, true, true)
     }
 
     fn assess_with_recovery<'lease>(
         lease: &'lease CoreDataDirLease,
         allow_recovery: bool,
+        allow_macos_provenance_refresh: bool,
     ) -> Result<AdmissionAssessment<'lease>, AdmissionInfrastructureError> {
         if !lease.revalidate_identity().map_err(|error| {
             AdmissionInfrastructureError::filesystem(
@@ -561,7 +615,13 @@ impl DatabaseAdmission {
                             )));
                         }
                         match recover_sqlite_journal(lease, &observed, namespace, recovery) {
-                            Ok(()) => return Self::assess_with_recovery(lease, false),
+                            Ok(()) => {
+                                return Self::assess_with_recovery(
+                                    lease,
+                                    false,
+                                    allow_macos_provenance_refresh,
+                                );
+                            }
                             Err(ObservationFailure::Blocked(block)) => {
                                 return Ok(AdmissionAssessment::Blocked(Box::new(block)));
                             }
@@ -581,6 +641,13 @@ impl DatabaseAdmission {
             Err(ObservationFailure::Infrastructure(error)) => return Err(error),
         };
         if !artifacts.matches_read_probe(&refreshed) {
+            if allow_macos_provenance_refresh && artifacts.macos_provenance_only_change(&refreshed)
+            {
+                // macOS may attach its one-time provenance xattr while SQLite
+                // probes an older App's database. Discard the stale observation
+                // and issue a new ticket only after a full fresh admission.
+                return Self::assess_with_recovery(lease, allow_recovery, false);
+            }
             return Ok(AdmissionAssessment::Blocked(Box::new(
                 AuthorityBlock::IdentityChanged {
                     target: artifacts.main_path(),
@@ -662,6 +729,16 @@ struct ObservedArtifact {
     kind: AuthorityArtifactKind,
     path: PathBuf,
     identity: ArtifactIdentity,
+    #[cfg(target_os = "macos")]
+    macos_provenance: Option<MacosProvenanceStamp>,
+    #[cfg(target_os = "macos")]
+    macos_file_security: (u32, u32, u32),
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy)]
+struct MacosProvenanceStamp {
+    present: bool,
 }
 
 impl ObservedArtifact {
@@ -738,6 +815,64 @@ impl NamespaceArtifactSet {
             .flatten()
             .map(ObservedArtifact::summary)
             .collect()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_provenance_only_change(&self, other: &Self) -> bool {
+        let (Some(before), Some(after)) = (&self.main, &other.main) else {
+            return false;
+        };
+        let same_mtime = |left: &str, right: &str| {
+            let left = left.split(':').collect::<Vec<_>>();
+            let right = right.split(':').collect::<Vec<_>>();
+            left.len() == 4 && right.len() == 4 && left[..2] == right[..2]
+        };
+        let same_sidecar = |left: &Option<ObservedArtifact>, right: &Option<ObservedArtifact>| {
+            left.as_ref().map(|artifact| &artifact.identity)
+                == right.as_ref().map(|artifact| &artifact.identity)
+        };
+        let rebuildable_empty_wal = matches!(
+            (&self.wal, &other.wal),
+            (None, None)
+                | (
+                    None,
+                    Some(ObservedArtifact {
+                        identity: ArtifactIdentity { byte_length: 0, .. },
+                        ..
+                    })
+                )
+                | (
+                    Some(ObservedArtifact {
+                        identity: ArtifactIdentity { byte_length: 0, .. },
+                        ..
+                    }),
+                    None
+                )
+                | (
+                    Some(ObservedArtifact {
+                        identity: ArtifactIdentity { byte_length: 0, .. },
+                        ..
+                    }),
+                    Some(ObservedArtifact {
+                        identity: ArtifactIdentity { byte_length: 0, .. },
+                        ..
+                    })
+                )
+        );
+        self.namespace == other.namespace
+            && before.identity.object == after.identity.object
+            && before.identity.byte_length == after.identity.byte_length
+            && same_mtime(&before.identity.state_key, &after.identity.state_key)
+            && before.macos_provenance.is_some_and(|stamp| !stamp.present)
+            && after.macos_provenance.is_some_and(|stamp| stamp.present)
+            && before.macos_file_security == after.macos_file_security
+            && (same_sidecar(&self.wal, &other.wal) || rebuildable_empty_wal)
+            && same_sidecar(&self.rollback_journal, &other.rollback_journal)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn macos_provenance_only_change(&self, _other: &Self) -> bool {
+        false
     }
 }
 
@@ -890,6 +1025,14 @@ fn observe_artifact(
             &error,
         ))
     })?;
+    #[cfg(target_os = "macos")]
+    let macos_provenance = if kind == AuthorityArtifactKind::Main {
+        macos_provenance_present(&path)
+            .ok()
+            .map(|present| MacosProvenanceStamp { present })
+    } else {
+        None
+    };
     Ok(Some(ObservedArtifact {
         namespace,
         kind,
@@ -899,7 +1042,42 @@ fn observe_artifact(
             byte_length: metadata.len(),
             state_key: artifact_state_key(&metadata),
         },
+        #[cfg(target_os = "macos")]
+        macos_provenance,
+        #[cfg(target_os = "macos")]
+        macos_file_security: {
+            use std::os::unix::fs::MetadataExt;
+            (metadata.mode(), metadata.uid(), metadata.gid())
+        },
     }))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_provenance_present(path: &Path) -> io::Result<bool> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))?;
+    // A size-only query never reads or changes the attribute's value.
+    let result = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            c"com.apple.provenance".as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+        )
+    };
+    if result >= 0 {
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ENOATTR) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
 }
 
 #[cfg(unix)]
@@ -1564,6 +1742,46 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(!before.matches_read_probe(&changed), "changed {kind:?}");
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+            assert!(
+                !nonempty_wal
+                    .main
+                    .as_ref()
+                    .unwrap()
+                    .macos_provenance
+                    .unwrap()
+                    .present
+            );
+            let path = CString::new(main.as_os_str().as_bytes()).unwrap();
+            let value = [1_u8, 2_u8];
+            assert_eq!(
+                unsafe {
+                    libc::setxattr(
+                        path.as_ptr(),
+                        c"com.apple.provenance".as_ptr(),
+                        value.as_ptr().cast(),
+                        value.len(),
+                        0,
+                        0,
+                    )
+                },
+                0
+            );
+            let tagged = observe_namespace(&lease, AuthorityNamespace::Rovai)
+                .ok()
+                .unwrap();
+            assert!(!nonempty_wal.authority_unchanged(&tagged));
+            assert!(nonempty_wal.macos_provenance_only_change(&tagged));
+            std::fs::write(&main, b"changed authority").unwrap();
+            let changed = observe_namespace(&lease, AuthorityNamespace::Rovai)
+                .ok()
+                .unwrap();
+            assert!(!nonempty_wal.macos_provenance_only_change(&changed));
         }
     }
 

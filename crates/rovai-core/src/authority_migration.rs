@@ -99,6 +99,7 @@ impl AuthorityMigrationRunner {
             runtime_camp_files_root,
             runtime_camp_files_root_identity_digest,
             &mut progress,
+            true,
         )
     }
 }
@@ -108,6 +109,7 @@ fn run_with_progress_inner(
     runtime_camp_files_root: &Path,
     runtime_camp_files_root_identity_digest: &str,
     progress: &mut dyn FnMut(AuthorityMigrationProgress),
+    allow_macos_provenance_refresh: bool,
 ) -> Result<Database, DatabaseMigrationError> {
     let open = ticket
         .into_migration()
@@ -130,6 +132,7 @@ fn run_with_progress_inner(
             runtime_camp_files_root,
             runtime_camp_files_root_identity_digest,
             progress,
+            allow_macos_provenance_refresh,
         ),
     }
 }
@@ -187,6 +190,7 @@ fn continue_after_reassessment(
             runtime_camp_files_root,
             runtime_camp_files_root_identity_digest,
             progress,
+            true,
         ),
         AdmissionAssessment::Initializable(_) => Err(DatabaseMigrationError::operation(
             "authority_migration_reassessment_lost_authority",
@@ -205,6 +209,7 @@ fn migrate_upgrade_in_place(
     runtime_camp_files_root: &Path,
     runtime_camp_files_root_identity_digest: &str,
     progress: &mut dyn FnMut(AuthorityMigrationProgress),
+    allow_macos_provenance_refresh: bool,
 ) -> Result<Database, DatabaseMigrationError> {
     let MigrationAuthorityOpen::Upgrade {
         lease,
@@ -215,7 +220,7 @@ fn migrate_upgrade_in_place(
         unreachable!("upgrade path is selected by the ticket")
     };
     progress(phase(AuthorityMigrationPhase::OpeningAuthority));
-    Database::migrate_admitted_authority(
+    let migration = Database::migrate_admitted_authority(
         &open,
         runtime_camp_files_root,
         runtime_camp_files_root_identity_digest,
@@ -233,7 +238,36 @@ fn migrate_upgrade_in_place(
             };
             progress(phase(next));
         },
-    )?;
+    );
+    if let Err(error) = migration {
+        if allow_macos_provenance_refresh
+            && error.code() == "authority_contract_changed"
+            && matches!(
+                error.authority_block(),
+                Some(AuthorityBlock::IdentityChanged { .. })
+            )
+            && open.macos_provenance_transition_observed()
+        {
+            // The strict ticket did its job. A new macOS provenance xattr is
+            // metadata-only, but the old ticket cannot be reused: re-admit the
+            // same source and receipts once before any application migration.
+            progress(phase(AuthorityMigrationPhase::Reassessing));
+            let reassessment =
+                DatabaseAdmission::assess(lease).map_err(DatabaseMigrationError::from_admission)?;
+            if let AdmissionAssessment::RequiresMigration(ticket) = reassessment
+                && ticket.matches_macos_provenance_refresh(&open)
+            {
+                return run_with_progress_inner(
+                    *ticket,
+                    runtime_camp_files_root,
+                    runtime_camp_files_root_identity_digest,
+                    progress,
+                    false,
+                );
+            }
+        }
+        return Err(error);
+    }
     progress(phase(AuthorityMigrationPhase::Reassessing));
     let database = continue_after_reassessment(
         lease,
@@ -1549,6 +1583,86 @@ mod tests {
             drop(lease);
             std::fs::remove_dir_all(directory).unwrap();
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data() {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+        let directory =
+            std::env::temp_dir().join(format!("rovai-migration-provenance-{}", Uuid::new_v4()));
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name = '保留的队员' WHERE id = 'agent_1'",
+                [],
+            )
+            .unwrap();
+        crate::db::downgrade_current_schema_to_v125_source_for_test(database.connection());
+        let root = database.runtime_camp_files_root().to_path_buf();
+        let root_identity = database
+            .runtime_camp_files_root_identity_digest()
+            .to_string();
+        drop(database);
+
+        let lease = CoreDataDirLease::acquire(&directory).unwrap();
+        let AdmissionAssessment::RequiresMigration(ticket) =
+            DatabaseAdmission::assess(&lease).unwrap()
+        else {
+            panic!("older authority must require migration");
+        };
+        let main = CString::new(directory.join("rovai.sqlite").as_os_str().as_bytes()).unwrap();
+        let mut attached = false;
+        let mut reassessments = 0;
+        let migrated = AuthorityMigrationRunner::run_with_progress(
+            *ticket,
+            &root,
+            &root_identity,
+            |progress| {
+                if progress.phase == AuthorityMigrationPhase::OpeningAuthority && !attached {
+                    let value = [1_u8, 2_u8];
+                    assert_eq!(
+                        unsafe {
+                            libc::setxattr(
+                                main.as_ptr(),
+                                c"com.apple.provenance".as_ptr(),
+                                value.as_ptr().cast(),
+                                value.len(),
+                                0,
+                                0,
+                            )
+                        },
+                        0
+                    );
+                    attached = true;
+                }
+                if progress.phase == AuthorityMigrationPhase::Reassessing {
+                    reassessments += 1;
+                }
+            },
+        )
+        .unwrap();
+        assert!(attached);
+        assert_eq!(reassessments, 2, "one retry and one final reassessment");
+        let display_name: String = migrated
+            .connection()
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(display_name, "保留的队员");
+        assert!(matches!(
+            classify_database_contract(migrated.connection()).unwrap(),
+            DatabaseContractClassification::Current(_)
+        ));
+
+        drop(migrated);
+        drop(lease);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
