@@ -1895,8 +1895,14 @@ impl CollaborationService {
             WHERE run.camp_id = ?1 AND conversation.agent_id = ?2
               AND run.invocation_kind = 'batch'
               AND run.status IN ('queued', 'running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM agent_run_input AS input
+                  JOIN camp_message_delivery AS delivery ON delivery.id = input.delivery_id
+                  WHERE input.agent_run_id = run.id
+                    AND delivery.recipient_membership_version_at_admission = ?3
+              )
             "#,
-            params![camp_id, agent_id],
+            params![camp_id, agent_id, membership_version],
             |row| row.get(0),
         )?;
         let non_terminal_agent_run_count =
@@ -1926,8 +1932,9 @@ impl CollaborationService {
                     COALESCE(SUM(status = 'claimed'), 0)
                 FROM camp_message_delivery
                 WHERE camp_id = ?1 AND recipient_agent_id = ?2
+                  AND recipient_membership_version_at_admission = ?3
                 "#,
-            params![camp_id, agent_id],
+            params![camp_id, agent_id, membership_version],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let pending_delivery_count = legacy_pending_delivery_count + batch_pending_delivery_count;
@@ -6112,11 +6119,20 @@ pub(crate) fn end_camp_membership(
               AND conversation.agent_id = ?2
               AND run.invocation_kind = 'batch'
               AND run.status IN ('queued', 'running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM agent_run_input AS input
+                  JOIN camp_message_delivery AS delivery ON delivery.id = input.delivery_id
+                  WHERE input.agent_run_id = run.id
+                    AND delivery.recipient_membership_version_at_admission = ?3
+              )
             ORDER BY run.created_at, run.id
             "#,
         )?;
         statement
-            .query_map(params![camp_id, agent_id], |row| row.get::<_, String>(0))?
+            .query_map(
+                params![camp_id, agent_id, current_membership_version],
+                |row| row.get::<_, String>(0),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     affected_run_ids.extend(batch_run_ids);
@@ -6129,8 +6145,9 @@ pub(crate) fn end_camp_membership(
         SET status = 'cancelled', failure_code = 'recipient_membership_ended',
             ended_at = ?3, version = version + 1, updated_at = ?3
         WHERE camp_id = ?1 AND recipient_agent_id = ?2 AND status = 'waiting'
+          AND recipient_membership_version_at_admission = ?4
         "#,
-        params![camp_id, agent_id, now],
+        params![camp_id, agent_id, now, current_membership_version],
     )?;
 
     let changed = transaction.execute(
@@ -6825,8 +6842,9 @@ mod slow_tests {
         assert_eq!(first.result.status, CommandResultStatus::Accepted);
         assert!(replay.replayed);
         assert_eq!(row_count(&database, "camp_message"), 1);
-        assert_eq!(row_count(&database, "camp_turn"), 1);
-        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
 
         drop(database);
@@ -7434,7 +7452,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn initial_execution_atomically_freezes_the_requested_camp_turn_budget() {
+    fn legacy_execution_budget_does_not_create_a_turn_for_claimed_delivery_work() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
@@ -7466,60 +7484,23 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
-        let camp_turn_id = accepted.result.payload["campTurnId"].as_str().unwrap();
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["schemaVersion"],
-            1
-        );
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["elapsedSeconds"],
-            300
-        );
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["maxAgentRunResponsibilities"],
-            3
-        );
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["maxAcceptedA2a"],
-            2
-        );
-        let snapshot = ReadModelService
-            .camp_snapshot(&mut database, &camp_id)
-            .unwrap();
-        let turn = snapshot
-            .turns
-            .iter()
-            .find(|turn| turn.id == camp_turn_id)
-            .unwrap();
-        assert_eq!(turn.execution_budget.schema_version, 1);
-        assert_eq!(turn.execution_budget.elapsed_seconds, Some(300));
-        assert_eq!(turn.execution_budget.max_agent_run_responsibilities, 3);
-        assert_eq!(turn.execution_budget.max_accepted_a2a, 2);
-        assert_eq!(
-            turn.execution_budget.allocated_agent_run_responsibilities,
-            1
-        );
-        assert_eq!(turn.execution_budget.accepted_a2a, 0);
-        assert_eq!(turn.execution_budget.exhausted_at, None);
-        let accepted_at =
-            chrono::DateTime::parse_from_rfc3339(&turn.execution_budget.accepted_at).unwrap();
-        let deadline_at = chrono::DateTime::parse_from_rfc3339(
-            turn.execution_budget.deadline_at.as_deref().unwrap(),
-        )
-        .unwrap();
-        assert_eq!((deadline_at - accepted_at).num_seconds(), 300);
+        assert!(accepted.result.payload.get("campTurnId").is_none());
+        assert!(accepted.result.payload.get("executionBudget").is_none());
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn initial_execution_rejects_a_root_fanout_that_cannot_fit_without_partial_send_state() {
+    fn legacy_execution_budget_does_not_restrict_delivery_fanout() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
-        let rejected = service
+        let accepted = service
             .send_test_camp_message(
                 &mut database,
                 &user_envelope(
@@ -7546,19 +7527,18 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(rejected.result.code, "camp_turn.execution_budget_invalid");
-        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 2);
         assert_eq!(row_count(&database, "camp_turn"), 0);
-        assert_eq!(row_count(&database, "agent_run"), 0);
-        assert_eq!(row_count(&database, "conversation"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 2);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn failed_multi_target_admission_removes_every_new_conversation() {
+    fn multi_target_send_admits_waiting_deliveries_without_ready_runtime() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let created = service
@@ -7579,7 +7559,7 @@ mod slow_tests {
             .as_str()
             .unwrap()
             .to_string();
-        let rejected = service
+        let accepted = service
             .send_test_camp_message(
                 &mut database,
                 &user_envelope(
@@ -7604,9 +7584,9 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(row_count(&database, "conversation"), 0);
-        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 2);
         assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 0);
         drop(database);
@@ -8549,7 +8529,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn legacy_pending_execution_intents_do_not_gate_message_or_run_admission() {
+    fn legacy_pending_execution_intents_do_not_gate_delivery_admission() {
         let (mut database, directory) = test_database();
         let collaboration = CollaborationService::default();
         let camp_id =
@@ -8603,7 +8583,8 @@ mod slow_tests {
             .unwrap();
         assert_eq!(cancelled.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_message"), 1);
-        assert_eq!(row_count(&database, "camp_turn"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 1);
 
         let mismatched_command = command("pending-mismatch", "原始请求");
@@ -8633,8 +8614,9 @@ mod slow_tests {
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_message"), 2);
-        assert_eq!(row_count(&database, "camp_turn"), 2);
-        assert_eq!(row_count(&database, "agent_run"), 2);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 2);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 1);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -9531,7 +9513,8 @@ mod slow_tests {
                        run.skill_selection_snapshot_json,
                        run.skill_selection_snapshot_digest
                 FROM camp_message AS message
-                JOIN agent_run AS run ON run.trigger_camp_message_id = message.id
+                JOIN agent_run_input AS input ON input.message_id = message.id
+                JOIN agent_run AS run ON run.id = input.agent_run_id
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -9667,15 +9650,15 @@ mod slow_tests {
             .unwrap();
         assert_eq!(result.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "agent_run"), 3);
-        let run_creation_boundaries: i64 = database
+        let delivery_recipients: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(DISTINCT created_at) FROM agent_run",
+                "SELECT COUNT(DISTINCT recipient_agent_id) FROM camp_message_delivery",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(run_creation_boundaries, 1);
+        assert_eq!(delivery_recipients, 3);
         let (mode, addressed): (String, String) = database
             .connection()
             .query_row(
@@ -9904,7 +9887,8 @@ mod slow_tests {
         assert_eq!(row_count(&database, "prepared_attachment"), 0);
         assert_eq!(row_count(&database, "camp_message"), 1);
         assert_eq!(row_count(&database, "message_attachment"), 1);
-        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 0);
         let (body, content_json): (String, String) = database
             .connection()
             .query_row(
@@ -9915,11 +9899,6 @@ mod slow_tests {
             .unwrap();
         assert_eq!(body, "");
         assert_eq!(content_json, "[]");
-        let purpose: String = database
-            .connection()
-            .query_row("SELECT purpose FROM agent_run", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(purpose, "Camp attachment-only message");
         let (stored_id, stored_path, stored_digest): (String, String, String) = database
             .connection()
             .query_row(
@@ -10507,7 +10486,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn one_fanout_trigger_creates_one_turn_and_independent_frozen_runs() {
+    fn one_fanout_trigger_claims_independent_deliveries() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id =
@@ -10563,60 +10542,23 @@ mod slow_tests {
         assert_eq!(first.result.status, CommandResultStatus::Accepted);
         assert!(replay.replayed);
         assert_eq!(row_count(&database, "camp_message"), 2);
-        assert_eq!(row_count(&database, "camp_turn"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 2);
-        let frozen_runs: i64 = database
+        let deliveries = database
             .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM agent_run
-                WHERE status = 'queued'
-                  AND input_ready_at IS NOT NULL
-                  AND initial_camp_context_through_sequence = 2
-                  AND initial_conversation_context_through_sequence = 0
-                  AND trigger_camp_message_id IS NOT NULL
-                  AND trigger_conversation_message_id IS NULL
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(frozen_runs, 2);
-        let frozen_configs = database
-            .connection()
-            .prepare("SELECT effective_config_json FROM agent_run ORDER BY conversation_id")
+            .prepare("SELECT recipient_agent_id, status FROM camp_message_delivery ORDER BY recipient_agent_id")
             .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert!(frozen_configs.iter().all(|config| {
-            let config = serde_json::from_str::<Value>(config).unwrap();
-            config["schemaVersion"] == 3 && config.get("memberIdentity").is_none()
-        }));
-        database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_profile
-                SET display_name = '稍后生效的名称', team_role = '稍后生效的角色',
-                    professional_responsibilities = '稍后生效的职责',
-                    personality_traits_json = '["稍后生效"]',
-                    working_principles = '稍后生效的准则', growth_topic = '稍后生效的课题'
-                WHERE id = 'agent_1'
-                "#,
-                [],
-            )
-            .unwrap();
-        let frozen_after_profile_edit = database
-            .connection()
-            .prepare("SELECT effective_config_json FROM agent_run ORDER BY conversation_id")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert_eq!(frozen_after_profile_edit, frozen_configs);
+        assert_eq!(
+            deliveries,
+            vec![
+                ("agent_1".to_string(), "claimed".to_string()),
+                ("agent_2".to_string(), "claimed".to_string()),
+            ]
+        );
         let materialized_messages: i64 = database
             .connection()
             .query_row(
@@ -11500,7 +11442,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn accepted_task_linked_run_keeps_frozen_admission_after_task_changes() {
+    fn queued_run_remains_dispatchable_after_task_changes() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id =
@@ -11561,7 +11503,7 @@ mod slow_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(admission.as_deref(), Some("agent_2"));
+        assert_eq!(admission, None);
 
         let reassigned = service
             .update_task(
@@ -11604,7 +11546,7 @@ mod slow_tests {
         assert!(candidates.iter().any(|candidate| {
             candidate.agent_run_id == agent_run_id
                 && candidate.agent_id == "agent_2"
-                && candidate.task_id.as_deref() == Some(task_id.as_str())
+                && candidate.task_id.is_none()
         }));
 
         let frozen_after: (Option<String>, String) = database
@@ -11615,10 +11557,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(
-            frozen_after,
-            (Some("agent_2".to_string()), "queued".to_string())
-        );
+        assert_eq!(frozen_after, (None, "queued".to_string()));
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

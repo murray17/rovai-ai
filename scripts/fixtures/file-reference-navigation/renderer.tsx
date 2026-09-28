@@ -134,7 +134,7 @@ function Workspace({ surface }: { surface: FixtureSurface }): React.JSX.Element 
       <button id="toggle-preview" onClick={() => preview.paneVisible ? preview.hidePane() : preview.showPane()}>文件预览</button>
       <FilePreviewTabs />
     </header>
-    <CampWorkspace snapshot={surface === 'wide-message' ? wideSnapshot : snapshot} projectName="fixture" agents={[]} busy={false} stopping={false}
+    <CampWorkspace snapshot={surface === 'wide-message' ? wideSnapshot : snapshot} initialComposerDraft={draft} projectName="fixture" agents={[]} busy={false} stopping={false}
       onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}}
       onResolveApproval={() => {}} onStop={() => {}} inspectorVisible={false} worldMapEnabled={false}
       onNotify={(message) => notices.push(message)} />
