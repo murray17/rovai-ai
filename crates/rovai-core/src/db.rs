@@ -51212,16 +51212,21 @@ mod tests {
                 r#"
                 PRAGMA foreign_keys = OFF;
                 DROP TABLE skill_projection_observation;
-                DROP TABLE skill_group_assignment;
                 DROP TABLE skill_revision;
                 DROP TABLE skill;
                 ALTER TABLE context_manifest DROP COLUMN skill_exposure_json;
                 ALTER TABLE context_manifest DROP COLUMN skill_exposure_digest;
-                DELETE FROM schema_migration WHERE version IN (19, 49);
+                DELETE FROM schema_migration WHERE version = 19;
                 PRAGMA foreign_keys = ON;
                 "#,
             )
             .expect("test should restore the pre-v19 schema");
+        // A source with only the v19 receipt removed is not an admitted upgrade
+        // source for today's full migration runner. Exercise the historical step
+        // directly, then require the repaired current database to reopen.
+        database
+            .migrate_skill_library_v19()
+            .expect("v19 should restore its owned schema and receipt");
         drop(database);
 
         let reopened = Database::open(&directory).expect("v19 database should reopen");

@@ -5004,7 +5004,7 @@ mod slow_tests {
                     SetSkillEnabledCommand {
                         skill_id: original.id.clone(),
                         expected_version: original.version,
-                        enabled: false,
+                        enabled: true,
                     },
                 ),
             )
@@ -5014,7 +5014,7 @@ mod slow_tests {
             .unwrap_err();
         assert!(error.to_string().contains("changed during preparation"));
         let current = service.get(&database, &original.id).unwrap().unwrap();
-        assert!(!current.enabled);
+        assert!(current.enabled);
         assert_eq!(current.version, original.version + 1);
         assert_eq!(current.current_revision.id, original.current_revision.id);
         service

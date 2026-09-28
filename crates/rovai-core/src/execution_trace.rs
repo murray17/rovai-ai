@@ -52,8 +52,8 @@ impl TraceExportParams {
     }
 }
 
-// A CampTurn owns its A2A descendants. Excluding an Automation identity therefore
-// excludes the whole execution tree, while retaining ordinary user automations.
+// Legacy CampTurns retain their Automation scope. Batch Runs have no CampTurn;
+// their Camp scope is carried directly on AgentRun.
 const SCOPE: &str = r#"
 WITH eligible_turns AS (
     SELECT t.id, t.camp_id, a.id AS automation_run_id, a.automation_id
@@ -66,7 +66,7 @@ WITH eligible_turns AS (
 
 const RUNS: &str = r#"
 SELECT json_object(
-    'agentRunId', r.id, 'campId', t.camp_id, 'campTurnId', t.id,
+    'agentRunId', r.id, 'campId', COALESCE(r.camp_id, t.camp_id), 'campTurnId', t.id,
     'automationId', t.automation_id, 'automationRunId', t.automation_run_id,
     'status', r.status, 'waitReason', r.wait_reason,
     'createdAt', r.created_at, 'inputReadyAt', r.input_ready_at,
@@ -83,8 +83,13 @@ SELECT json_object(
     'evidenceCount', (SELECT COUNT(*) FROM agent_run_execution_evidence e WHERE e.agent_run_id = r.id),
     'evidenceChangeSequence', r.execution_evidence_change_sequence
 )
-FROM agent_run r JOIN eligible_turns t ON t.id = r.camp_turn_id
-WHERE julianday(r.created_at) < julianday(:until)
+FROM agent_run r LEFT JOIN eligible_turns t ON t.id = r.camp_turn_id
+WHERE (t.id IS NOT NULL OR (
+       r.invocation_kind = 'batch'
+       AND (json_array_length(:camps) = 0 OR r.camp_id IN (SELECT value FROM json_each(:camps)))
+       AND r.camp_id NOT IN (SELECT value FROM json_each(:excluded_camps))
+       AND json_array_length(:excluded_automations) = 0))
+  AND julianday(r.created_at) < julianday(:until)
   AND (r.ended_at IS NULL OR julianday(r.ended_at) >= julianday(:since))
 ORDER BY r.created_at, r.id LIMIT :row_limit
 "#;
@@ -134,7 +139,7 @@ ORDER BY e.global_sequence LIMIT :row_limit
 
 const TOOLS: &str = r#"
 SELECT json_object(
-    'agentRunId', a.agent_run_id, 'campId', t.camp_id, 'campTurnId', t.id,
+    'agentRunId', a.agent_run_id, 'campId', COALESCE(r.camp_id, t.camp_id), 'campTurnId', t.id,
     'automationId', t.automation_id, 'executionEpoch', a.execution_epoch,
     'operationId', a.operation_id, 'classifierVersion', a.classifier_version,
     'activityDomain', a.activity_domain, 'semanticKind', a.semantic_kind,
@@ -152,7 +157,7 @@ SELECT json_object(
         THEN json_extract(COALESCE(original_e.payload_preview_json, last_e.payload_preview_json), '$.errorCode') ELSE NULL END
 )
 FROM canonical_runtime_activity a
-JOIN agent_run r ON r.id = a.agent_run_id JOIN eligible_turns t ON t.id = r.camp_turn_id
+JOIN agent_run r ON r.id = a.agent_run_id LEFT JOIN eligible_turns t ON t.id = r.camp_turn_id
 LEFT JOIN agent_run_execution_evidence first_e
     ON first_e.agent_run_id = a.agent_run_id AND first_e.sequence = a.first_evidence_sequence
 LEFT JOIN agent_run_execution_evidence last_e
@@ -165,7 +170,12 @@ LEFT JOIN agent_run_execution_evidence original_e ON original_e.id = (
       AND json_extract(e.payload_preview_json, '$.idempotentReplay') = 0
     ORDER BY e.sequence LIMIT 1
 )
-WHERE a.classifier_version = :classifier
+WHERE (t.id IS NOT NULL OR (
+       r.invocation_kind = 'batch'
+       AND (json_array_length(:camps) = 0 OR r.camp_id IN (SELECT value FROM json_each(:camps)))
+       AND r.camp_id NOT IN (SELECT value FROM json_each(:excluded_camps))
+       AND json_array_length(:excluded_automations) = 0))
+  AND a.classifier_version = :classifier
   AND a.activity_domain IN ('shell', 'file', 'tool')
   AND (first_e.occurred_at IS NULL OR julianday(first_e.occurred_at) < julianday(:until))
   AND (last_e.occurred_at IS NULL OR a.phase <> 'terminal'

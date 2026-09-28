@@ -2284,14 +2284,14 @@ mod tests {
         #[cfg(unix)]
         let body = match mode {
             "normal" => format!(
-                "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"{session_id}\",\"result\":\"ok\"}}'\n"
+                "#!/bin/sh\n/bin/cat >/dev/null\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"{session_id}\",\"result\":\"ok\"}}'\n"
             ),
             "blocked" => format!(
-                "#!/bin/sh\nprintf ready > '{}'\nsleep 30\ncat >/dev/null\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"{session_id}\",\"result\":\"ok\"}}'\n",
+                "#!/bin/sh\nprintf ready > '{}'\n/bin/sleep 30\n/bin/cat >/dev/null\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"{session_id}\",\"result\":\"ok\"}}'\n",
                 marker.display()
             ),
             "stdin-error" => "#!/bin/sh\nexit 7\n".to_string(),
-            "output-error" => "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"stream_event\",\"session_id\":\"wrong-session\",\"event\":{\"type\":\"message_start\"}}'\nsleep 30\n".to_string(),
+            "output-error" => "#!/bin/sh\n/bin/cat >/dev/null\nprintf '%s\\n' '{\"type\":\"stream_event\",\"session_id\":\"wrong-session\",\"event\":{\"type\":\"message_start\"}}'\n/bin/sleep 30\n".to_string(),
             "spawn-error" => "#!/no-such-claude-interpreter\n".to_string(),
             _ => unreachable!(),
         };
@@ -2923,7 +2923,7 @@ mod tests {
                 format!(
                     r#"#!/bin/sh
     printf '%s\n' "$@" > "$0.argv"
-    cat >/dev/null
+    /bin/cat >/dev/null
     printf '%s\n' '{{"type":"stream_event","session_id":"{session_id}","event":{{"type":"message_start"}}}}'
     printf '%s\n' '{{"type":"result","subtype":"error","is_error":true,"result":"API Error: 529 overloaded; api_key=private-key","session_id":"{session_id}"}}'
     exit 1

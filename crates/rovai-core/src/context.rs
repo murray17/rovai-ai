@@ -11215,11 +11215,11 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             (manifest_version, formatter_version, facts_version),
-            (30, 30, 8)
+            (31, 31, 8)
         );
         assert_eq!(
             serde_json::from_str::<Value>(&profile_json).unwrap(),
-            json!({"profileVersion":9,"maxSelfActiveTasks":8})
+            json!({"profileVersion":10,"maxSelfActiveTasks":8})
         );
         assert_eq!(
             serde_json::from_str::<Value>(&shared_evidence).unwrap(),
@@ -11588,7 +11588,7 @@ mod slow_tests {
                 )
                 .unwrap();
         }
-        let body = "B".repeat(7_500);
+        let body = "B".repeat(7_000);
         budget_fixture
             .database
             .connection()
@@ -11650,7 +11650,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn context_manifest_freezes_skills_and_ignores_unrequested_historical_mcp() {
+    fn context_manifest_freezes_legacy_skill_omission_and_ignores_historical_mcp() {
         let mut fixture = fixture();
         let library =
             SkillLibraryService::new(fixture.directory.join("managed-skill-library")).unwrap();
@@ -11774,14 +11774,7 @@ mod slow_tests {
             )
             .unwrap();
         let exposure = prepared;
-        assert_eq!(exposure.snapshot.skills.len(), 1);
-        assert!(
-            exposure
-                .snapshot
-                .skills
-                .iter()
-                .all(|skill| skill.status == "ready")
-        );
+        assert!(exposure.snapshot.skills.is_empty());
         let materialized = ContextService
             .materialize_with_skill_exposure(
                 &mut fixture.database,
@@ -11815,25 +11808,13 @@ mod slow_tests {
             exposure.snapshot
         );
         assert_eq!(persisted.1, exposure.digest);
-        let expected_skill_path = std::path::Path::new(
-            exposure.snapshot.skills[0]
-                .entry_path
-                .as_deref()
-                .expect("ready exposure needs an entry path"),
-        )
-        .join("SKILL.md")
-        .to_string_lossy()
-        .into_owned();
         let run_input: Value = first_context
             .rendered_payload
             .split_once("[RUN_INPUT]\n")
             .and_then(|(_, suffix)| suffix.split_once("\n[/RUN_INPUT]"))
             .map(|(json, _)| serde_json::from_str(json).unwrap())
             .unwrap();
-        assert_eq!(
-            run_input["messages"][0]["skills"],
-            json!([{"name": official.name, "path": expected_skill_path}])
-        );
+        assert!(run_input["messages"][0]["skills"].is_null());
         let recipient_display_name: String = fixture
             .database
             .connection()
@@ -13091,12 +13072,12 @@ mod slow_tests {
         assert!(
             prepared
                 .runtime_payload
-                .contains("MEMBER_IDENTITY is the sole self-identity projection")
+                .contains("MEMBER_IDENTITY describes you")
         );
         assert!(
             prepared
                 .runtime_payload
-                .contains("COLLABORATION_STATE describes peers only")
+                .contains("COLLABORATION_STATE describes your peers")
         );
         assert!(prepared.rendered_payload.contains("[COLLABORATION_STATE]"));
         assert!(!prepared.rendered_payload.contains("\"schemaVersion\""));

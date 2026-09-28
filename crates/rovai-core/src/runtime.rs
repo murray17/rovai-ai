@@ -8738,9 +8738,7 @@ mod tests {
             execution_lease_expires_at: Option<String>,
             terminal_resolution_source: Option<String>,
             terminal_reason_code: Option<String>,
-            turn_status: String,
-            aggregate_reason_code: Option<String>,
-            turn_cancel_requested_at: Option<String>,
+            delivery_status: String,
         }
 
         for wait_reason in ["approval"] {
@@ -8749,7 +8747,7 @@ mod tests {
                     directory,
                     mut database,
                     _camp_id,
-                    camp_turn_id,
+                    _camp_turn_id,
                     agent_run_id,
                     execution_epoch,
                 ) = claimed_run_for_planned_shutdown("required");
@@ -8789,14 +8787,13 @@ mod tests {
                                agent_run.execution_lease_expires_at,
                                agent_run.terminal_resolution_source,
                                agent_run.terminal_reason_code,
-                               camp_turn.status,
-                               camp_turn.aggregate_reason_code,
-                               camp_turn.cancel_requested_at
+                               camp_message_delivery.status
                         FROM agent_run
-                        JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                        WHERE agent_run.id = ?1 AND camp_turn.id = ?2
+                        JOIN camp_message_delivery
+                          ON camp_message_delivery.claimed_agent_run_id = agent_run.id
+                        WHERE agent_run.id = ?1
                         "#,
-                        params![agent_run_id, camp_turn_id],
+                        params![agent_run_id],
                         |row| {
                             Ok(WaitingTerminalState {
                                 run_status: row.get(0)?,
@@ -8807,9 +8804,7 @@ mod tests {
                                 execution_lease_expires_at: row.get(5)?,
                                 terminal_resolution_source: row.get(6)?,
                                 terminal_reason_code: row.get(7)?,
-                                turn_status: row.get(8)?,
-                                aggregate_reason_code: row.get(9)?,
-                                turn_cancel_requested_at: row.get(10)?,
+                                delivery_status: row.get(8)?,
                             })
                         },
                     )
@@ -8828,13 +8823,7 @@ mod tests {
                     state.terminal_reason_code.as_deref(),
                     Some(expected_terminal_reason)
                 );
-                assert_eq!(state.turn_status, "failed");
-                assert_eq!(
-                    state.aggregate_reason_code.as_deref(),
-                    (outcome == RuntimeTerminalOutcome::Cancelled)
-                        .then_some("required_run_incomplete")
-                );
-                assert!(state.turn_cancel_requested_at.is_none());
+                assert_eq!(state.delivery_status, "failed");
 
                 drop(database);
                 std::fs::remove_dir_all(directory).unwrap();
@@ -8895,8 +8884,8 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {
-        let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
+    async fn planned_shutdown_optional_cancelled_still_settles_its_delivery() {
+        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("optional");
         let permit = planned_terminal_permit(
             &agent_run_id,
@@ -8919,28 +8908,23 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(settlement.camp_turn_status, "completed");
-        let turn: (String, Option<String>, Option<String>) = database
+        assert_eq!(settlement.camp_turn_status, "cancelled");
+        let delivery_status: String = database
             .connection()
             .query_row(
-                r#"
-                SELECT status, aggregate_reason_code, cancel_requested_at
-                FROM camp_turn WHERE id = ?1
-                "#,
-                [&camp_turn_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                "SELECT status FROM camp_message_delivery WHERE claimed_agent_run_id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(turn.0, "completed");
-        assert!(turn.1.is_none());
-        assert!(turn.2.is_none());
+        assert_eq!(delivery_status, "cancelled");
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(feature = "slow-tests")]
-    async fn planned_shutdown_optional_failed_does_not_block_turn_completion() {
-        let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
+    async fn planned_shutdown_optional_failed_still_settles_its_delivery() {
+        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("optional");
         let permit = planned_terminal_permit(
             &agent_run_id,
@@ -8953,7 +8937,7 @@ mod tests {
                 &mut database,
                 &permit,
                 &PlannedShutdownAbortiveTerminal {
-                    agent_run_id,
+                    agent_run_id: agent_run_id.clone(),
                     execution_epoch,
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
@@ -8964,28 +8948,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(settlement.agent_run_status, "failed");
-        assert_eq!(settlement.camp_turn_status, "completed");
-        let turn: (String, Option<String>, Option<String>) = database
+        assert_eq!(settlement.camp_turn_status, "failed");
+        let delivery_status: String = database
             .connection()
             .query_row(
-                r#"
-                SELECT status, aggregate_reason_code, cancel_requested_at
-                FROM camp_turn WHERE id = ?1
-                "#,
-                [&camp_turn_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                "SELECT status FROM camp_message_delivery WHERE claimed_agent_run_id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(turn.0, "completed");
-        assert!(turn.1.is_none());
-        assert!(turn.2.is_none());
+        assert_eq!(delivery_status, "failed");
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(feature = "slow-tests")]
     async fn planned_shutdown_failed_uses_abortive_terminal_source_without_camp_cancellation() {
-        let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
+        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("required");
         let permit = planned_terminal_permit(
             &agent_run_id,
@@ -9010,42 +8989,27 @@ mod tests {
             .unwrap();
         assert_eq!(settlement.agent_run_status, "failed");
         assert_eq!(settlement.camp_turn_status, "failed");
-        let state: (
-            String,
-            Option<String>,
-            Option<String>,
-            String,
-            Option<String>,
-        ) = database
+        let state: (String, Option<String>, Option<String>, String) = database
             .connection()
             .query_row(
                 r#"
                 SELECT agent_run.status,
                        agent_run.terminal_resolution_source,
                        agent_run.terminal_reason_code,
-                       camp_turn.status,
-                       camp_turn.cancel_requested_at
+                       camp_message_delivery.status
                 FROM agent_run
-                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                WHERE agent_run.id = ?1 AND camp_turn.id = ?2
+                JOIN camp_message_delivery
+                  ON camp_message_delivery.claimed_agent_run_id = agent_run.id
+                WHERE agent_run.id = ?1
                 "#,
-                params![agent_run_id, camp_turn_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
+                params![agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(state.0, "failed");
         assert_eq!(state.1.as_deref(), Some("runtime_terminal"));
         assert_eq!(state.2.as_deref(), Some("planned_shutdown_failed"));
         assert_eq!(state.3, "failed");
-        assert!(state.4.is_none());
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -9744,11 +9708,12 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT agent_run.status, camp_turn.status,
+                SELECT agent_run.status, camp_message_delivery.status,
                        agent_run.started_at, agent_run.starting_git_observation_json,
                        agent_run.last_error_code
                 FROM agent_run
-                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN camp_message_delivery
+                  ON camp_message_delivery.claimed_agent_run_id = agent_run.id
                 WHERE agent_run.id = ?1
                 "#,
                 [&run_id],
@@ -10400,10 +10365,13 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_turn_id = queued.result.payload["campTurnId"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        assert_eq!(
+            queued.result.payload["agentRunIds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
         database
             .connection()
             .execute(
@@ -10431,8 +10399,8 @@ mod tests {
         let queued_count: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM agent_run WHERE camp_turn_id = ?1 AND status = 'queued'",
-                [&camp_turn_id],
+                "SELECT COUNT(*) FROM agent_run WHERE camp_id = ?1 AND status = 'queued'",
+                [&camp_id],
                 |row| row.get(0),
             )
             .unwrap();
@@ -10518,21 +10486,18 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(completed.result.status, CommandResultStatus::Applied);
-            assert_eq!(
-                completed.result.payload["campTurnStatus"],
-                if index == 0 { "running" } else { "completed" }
-            );
+            assert!(completed.result.payload["campTurnStatus"].is_null());
         }
 
-        let turn_status: String = database
+        let settled_deliveries: i64 = database
             .connection()
             .query_row(
-                "SELECT status FROM camp_turn WHERE id = ?1",
-                [&camp_turn_id],
+                "SELECT COUNT(*) FROM camp_message_delivery WHERE camp_id = ?1 AND status = 'settled'",
+                [&camp_id],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(turn_status, "completed");
+        assert_eq!(settled_deliveries, 2);
         let automatic_final_outputs: i64 = database
             .connection()
             .query_row(
@@ -10616,12 +10581,12 @@ mod tests {
             super::planned_shutdown_failed_clears_live_waiting_state().await;
         }
         #[tokio::test]
-        async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {
-            super::planned_shutdown_optional_cancelled_does_not_block_turn_completion().await;
+        async fn planned_shutdown_optional_cancelled_still_settles_its_delivery() {
+            super::planned_shutdown_optional_cancelled_still_settles_its_delivery().await;
         }
         #[tokio::test]
-        async fn planned_shutdown_optional_failed_does_not_block_turn_completion() {
-            super::planned_shutdown_optional_failed_does_not_block_turn_completion().await;
+        async fn planned_shutdown_optional_failed_still_settles_its_delivery() {
+            super::planned_shutdown_optional_failed_still_settles_its_delivery().await;
         }
         #[tokio::test]
         async fn planned_shutdown_failed_uses_abortive_terminal_source_without_camp_cancellation() {

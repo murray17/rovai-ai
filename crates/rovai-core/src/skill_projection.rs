@@ -4178,7 +4178,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn new_run_reconciles_latest_skill_state_while_an_older_run_continues() {
+    fn new_run_does_not_reconcile_legacy_projection_while_an_older_run_continues() {
         let root = temporary_directory("rovai-projection-new-run-latest");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
@@ -4218,7 +4218,11 @@ mod slow_tests {
             .prepare_skill_exposure(&mut database, &library, "projection-run-new", 1)
             .unwrap();
         assert!(prepared.snapshot.skills.is_empty());
-        assert!(fs::symlink_metadata(root.join(".codex/skills/analyze-agent-codebase")).is_err());
+        assert!(
+            root.join(".codex/skills/analyze-agent-codebase")
+                .canonicalize()
+                .is_ok()
+        );
         let runs: (String, String) = database
             .connection()
             .query_row(
@@ -4235,7 +4239,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn new_run_projects_the_latest_revision_without_waiting_for_an_older_agent() {
+    fn new_run_does_not_project_a_new_revision_into_an_older_execution_root() {
         let root = temporary_directory("rovai-projection-new-revision");
         let source = temporary_directory("rovai-projection-source");
         let data = temporary_directory("rovai-projection-db");
@@ -4287,11 +4291,8 @@ mod slow_tests {
         let updated = library.get(&database, &original.id).unwrap().unwrap();
 
         assert_ne!(updated.current_revision.id, original.current_revision.id);
-        assert_eq!(
-            exposure.snapshot.skills[0].revision_id,
-            updated.current_revision.id
-        );
-        assert_ne!(entry.canonicalize().unwrap(), original_target);
+        assert!(exposure.snapshot.skills.is_empty());
+        assert_eq!(entry.canonicalize().unwrap(), original_target);
         let active_run_count: i64 = database
             .connection()
             .query_row(

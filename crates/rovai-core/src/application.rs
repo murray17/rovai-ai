@@ -24620,6 +24620,25 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     use std::fs;
 
+    #[cfg(feature = "slow-tests")]
+    fn test_git_binary() -> PathBuf {
+        // Parallel Runtime tests replace the process-wide active command path.
+        // These Git fixtures need a stable host utility independent of that state.
+        #[cfg(unix)]
+        for path in [
+            "/usr/bin/git",
+            "/opt/homebrew/bin/git",
+            "/usr/local/bin/git",
+        ] {
+            let candidate = PathBuf::from(path);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        crate::runtime_discovery::resolve_active_command_path("git")
+            .expect("Git is required for Mission fixture tests")
+    }
+
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     fn text_composer_document(text: &str) -> ComposerDocument {
         ComposerDocument {
@@ -27619,7 +27638,7 @@ done
     }
 
     #[test]
-    fn pi_qualified_platform_enters_discovery_and_dispatch_with_bound_evidence() {
+    fn pi_platform_enters_discovery_and_dispatch_with_platform_appropriate_evidence() {
         let enabled = current_platform_enabled_runtime_kinds();
         assert!(enabled.contains(&AdapterKind::Pi));
         assert!(!enabled.contains(&AdapterKind::CursorAgent));
@@ -27627,8 +27646,9 @@ done
 
         let admission = current_runtime_platform_admission(AdapterKind::Pi).unwrap();
         assert!(admission.allows_runtime_use());
-        assert!(admission.is_qualified());
-        assert!(admission.evidence_revision().is_some());
+        let qualified = HostPlatformKey::current() != Some(HostPlatformKey::LinuxX64);
+        assert_eq!(admission.is_qualified(), qualified);
+        assert_eq!(admission.evidence_revision().is_some(), qualified);
     }
 
     #[test]
@@ -28331,8 +28351,7 @@ done
         let root = fs::canonicalize(&root).unwrap();
         let source = root.join("source");
         fs::create_dir_all(&source).unwrap();
-        let git_path = crate::runtime_discovery::resolve_active_command_path("git")
-            .expect("Git is required for the real Mission dispatch test");
+        let git_path = test_git_binary();
         let git = |arguments: &[&str]| {
             let output = std::process::Command::new(&git_path)
                 .arg("-C")
@@ -28916,8 +28935,7 @@ done
         fs::create_dir_all(&source).unwrap();
         let root = fs::canonicalize(&root).unwrap();
         let source = fs::canonicalize(&source).unwrap();
-        let git_path = crate::runtime_discovery::resolve_active_command_path("git")
-            .expect("Git is required for the Mission deletion race regression");
+        let git_path = test_git_binary();
         let git = |arguments: &[&str]| {
             let output = std::process::Command::new(&git_path)
                 .arg("-C")
