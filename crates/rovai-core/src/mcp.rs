@@ -2010,7 +2010,13 @@ mod slow_tests {
         for existing_parent in [false, true] {
             let (root, store) = temporary_store("empty-default");
             if existing_parent {
+                #[cfg(unix)]
                 fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+                #[cfg(windows)]
+                crate::platform::private_storage::prepare_private_directory(
+                    store.path().parent().unwrap(),
+                )
+                .unwrap();
             }
             assert_eq!(
                 store.migrate_pre_release_config().unwrap(),
@@ -2701,13 +2707,25 @@ mod slow_tests {
         // preservation together as the owner of existing-config ACL admission.
         for (automatic, valid_config) in [(false, true), (true, true), (true, false)] {
             let (root, store) = temporary_store("windows-permission-repair");
-            fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+            let parent = store.path().parent().unwrap();
+            crate::platform::private_storage::prepare_private_directory(parent).unwrap();
             let bytes = if valid_config {
                 canonical_bytes(&McpConfigFile::empty()).unwrap()
             } else {
                 b"{broken".to_vec()
             };
-            fs::write(store.path(), &bytes).unwrap();
+            create_private_bytes(store.path(), &bytes).unwrap();
+            // GitHub's elevated Windows runner may assign Administrators as
+            // owner to std::fs-created objects. Keep this fixture owned by the
+            // current user while making only its DACL inherit for repair.
+            for path in [parent, store.path()] {
+                let output = std::process::Command::new("icacls")
+                    .arg(path)
+                    .arg("/inheritance:e")
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "icacls failed: {output:?}");
+            }
             assert!(store.inspect(&agents()).unwrap().permission_issue);
             // Inspection must not repair either the directory or the file.
             assert!(
