@@ -48285,6 +48285,16 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        // This v99 fixture verifies preservation of the legacy manifest and
+        // attachment receipts. Materialization now creates v5 Bootstrap
+        // evidence, which cannot exist in the v98 source schema.
+        database
+            .connection()
+            .execute(
+                "UPDATE native_session_bootstrap_evidence SET contract_version='native_session_bootstrap_v3', bootstrap_formatter_version=3 WHERE id=(SELECT bootstrap_evidence_id FROM context_manifest WHERE id=?1)",
+                [&manifest_id],
+            )
+            .unwrap();
         view.remove_camp_view(&mut database, &camp_id).unwrap();
         drop(view);
         downgrade_current_schema_to_v98_source_for_test(database.connection());
@@ -48620,7 +48630,8 @@ mod tests {
             .migrate_unified_attachment_publication_v102()
             .unwrap();
         let view = CampAttachmentViewStore::for_test(&database).unwrap();
-        view.reconcile(&mut database, &attachment_store).unwrap();
+        view.reconcile_camp(&mut database, &attachment_store, &camp_id)
+            .unwrap();
         assert_eq!(
             database
                 .connection()

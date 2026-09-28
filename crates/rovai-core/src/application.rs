@@ -28240,7 +28240,7 @@ done
             camp_id: &str,
             agent_run_id: &str,
             evidence_id: &str,
-            expected_output: &str,
+            expected_explanation: &str,
         ) {
             let open_service = service.clone();
             let event_service = service.clone();
@@ -28305,8 +28305,8 @@ done
                 );
             }
             assert_eq!(
-                replies[3].result.as_ref().unwrap()["payload"]["item"]["aggregatedOutput"],
-                expected_output,
+                replies[3].result.as_ref().unwrap()["payload"]["explanation"],
+                expected_explanation,
                 "getContent must return the full managed Blob while Mission Git is blocked"
             );
         }
@@ -28455,41 +28455,19 @@ done
                 [&agent_run_id],
             )
             .unwrap();
-        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(573_647));
-        ExecutionEvidenceService
-            .record_runtime_event(
-                &mut database,
-                &ManagedBlobStore::new(&data_dir),
-                &agent_run_id,
-                1,
-                "activity.started",
-                &json!({
-                    "item": {
-                        "id": "command-1",
-                        "type": "commandExecution",
-                        "command": "git status",
-                        "status": "inProgress",
-                    }
-                }),
-            )
-            .unwrap()
-            .unwrap();
+        // Tool output is bounded before persistence. A plan explanation uses
+        // the ordinary managed-Blob path that this concurrency test reads.
+        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
         let evidence = ExecutionEvidenceService
             .record_runtime_event(
                 &mut database,
                 &ManagedBlobStore::new(&data_dir),
                 &agent_run_id,
                 1,
-                "activity.completed",
+                "runtime.plan",
                 &json!({
-                    "item": {
-                        "id": "command-1",
-                        "type": "commandExecution",
-                        "command": "git status",
-                        "status": "completed",
-                        "exitCode": 0,
-                        "aggregatedOutput": secret.clone(),
-                    }
+                    "explanation": secret,
+                    "plan": [],
                 }),
             )
             .unwrap()

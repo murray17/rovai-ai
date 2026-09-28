@@ -14,7 +14,7 @@ test('ordinary browser embeds isolated preview sites and uses the shared diagnos
   const chrome = process.env.ROVAI_TEST_CHROME ?? (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : '/usr/bin/google-chrome')
   if (!await access(chrome).then(() => true, () => false)) { t.skip('Chrome is not installed; browser acceptance did not run'); return }
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-html-browser-'))
-  let child, socket, server
+  let child, childClosed, socket, server
   const sites = []
   try {
     for (const [name, entry, platform] of [['site','packages/html-preview/src/site.ts','node'],['source','packages/html-preview/src/file-source.ts','node'],['host','scripts/fixtures/html-preview/browser-host.ts','browser']]) {
@@ -33,6 +33,7 @@ test('ordinary browser embeds isolated preview sites and uses the shared diagnos
     const files = await realpath(join(root,'scripts/fixtures/html-preview'))
     for (const file of ['history.html','canvas.html','assets.html']) sites.push(await HtmlPreviewSite.create({generation:'browser',hostOrigin,entryPath:`/${file}`,validate:async()=>{},openResource:createPreviewFileSource(files,join(files,file),true)}))
     child = spawn(chrome,['--headless=new',`--user-data-dir=${join(fixture,'browser-data')}`,'--no-first-run','--no-default-browser-check','--remote-debugging-port=0',...(process.platform === 'linux' ? ['--no-sandbox'] : []),'about:blank'],{stdio:['ignore','pipe','pipe']})
+    childClosed = once(child, 'close')
     let errors=''
     const endpoint = await new Promise((resolve,reject) => {
       const timer=setTimeout(()=>reject(new Error(errors || 'Chrome did not start')),15000)
@@ -61,9 +62,10 @@ test('ordinary browser embeds isolated preview sites and uses the shared diagnos
     await call('Browser.close').catch(()=>{})
   } finally {
     socket?.close(); child?.kill('SIGKILL')
+    if (childClosed) await childClosed
     await Promise.all(sites.map(site=>site.close()))
     if(server) {server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
     if(process.env.ROVAI_KEEP_HTML_PREVIEW_FIXTURE==='1')console.log(`Browser fixture: ${fixture}`)
-    else await rm(fixture,{recursive:true,force:true})
+    else await rm(fixture,{recursive:true,force:true,maxRetries:5,retryDelay:100})
   }
 })
