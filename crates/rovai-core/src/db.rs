@@ -52604,7 +52604,8 @@ mod tests {
             .execute_batch(
                 r#"
                 PRAGMA foreign_keys = OFF;
-                ALTER TABLE agent_run DROP COLUMN task_version_at_admission;
+                -- v171 already removed this column from the current fixture;
+                -- the v65 migration below must recreate it from the older shape.
                 ALTER TABLE agent_run DROP COLUMN assignee_agent_id_at_admission;
                 DROP INDEX task_camp_status_created_idx;
                 DROP INDEX task_camp_assignee_status_idx;
