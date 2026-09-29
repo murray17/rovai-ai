@@ -14,7 +14,7 @@ import { previewPathIsVisible, previewTabLabel, previewTabLabels } from './file-
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
 import { selectPreviewContents } from './file-preview-selection'
-import { UiText, uiAttribute } from './interface-language'
+import { UiText, uiAttribute, useInterfaceLanguage } from './interface-language'
 
 function FilePathButton({
   path,
@@ -480,8 +480,9 @@ export function FilePreviewPaneContent({ visible, missionActivity, executionHost
   missionActivity?: React.ReactNode
   executionHostRef?(element: HTMLDivElement | null): void
 }): React.JSX.Element {
+  const language = useInterfaceLanguage()
   const { tabs, activeTabId, paneVisible } = useFilePreview()
-  const tabLabels = useMemo(() => previewTabLabels(tabs), [tabs])
+  const tabLabels = useMemo(() => previewTabLabels(tabs, language), [tabs, language])
   return (
     <section id={visible ? "file-preview-pane" : undefined} className="file-preview-pane" hidden={!paneVisible} aria-label={uiAttribute("文件预览")}>
       {tabs.length === 0 && <div className="file-preview-empty">
@@ -496,7 +497,7 @@ export function FilePreviewPaneContent({ visible, missionActivity, executionHost
         hidden={!visible || tab.id !== activeTabId}
         role="tabpanel"
         tabIndex={0}
-        aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab)}
+        aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab, language)}
         aria-labelledby={`file-preview-tab-${tab.id}`}
       >
         {tab.kind === 'execution'

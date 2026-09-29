@@ -35,6 +35,7 @@ import {
 } from './ComposerAtomNode'
 import { ComposerTypeaheadPlugin } from './ComposerTypeaheadPlugin'
 import { MemberAvatar } from './MemberAvatar'
+import { NavigationIcon } from './NavigationIcon'
 import {
   RovaiComposerExtension,
   setComposerExtensionRuntime,
@@ -188,7 +189,9 @@ export function StructuredMentionOptionAvatar({
   option: StructuredMentionOption
 }): JSX.Element {
   if (option.kind === 'all_members') {
-    return <span className="mention-avatar" aria-hidden="true">@</span>
+    return <span className="mention-avatar" aria-hidden="true">
+      <NavigationIcon name="users" />
+    </span>
   }
   if (option.kind === 'invite_other' || option.kind === 'back_to_camp') {
     return <span className="mention-avatar mention-action-avatar" aria-hidden="true">

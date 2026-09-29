@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type { AgentProfile, CheckoutState, MissionActivity, MissionChangedFile, MissionDelivery as Delivery, MissionFileDiff, MissionRecord, MissionWorkspaceChangesView } from '@contracts'
 import { useCampClient } from './camp-client'
 import { AttachmentCard } from './AttachmentCard'
-import { Icon, statuses } from './MissionControls'
+import { Icon, useMissionStatuses } from './MissionControls'
 import { missionCommand, missionError } from './useMissions'
 import { readErrorMessage } from './error-message'
 import { missionDate } from './MissionBoard'
@@ -600,7 +600,7 @@ function MissionDiff({files, selected, baseSha, snapshotReady, snapshotEpoch, ca
   </Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 
-function activityText(item: MissionActivity): string {
+function activityText(item: MissionActivity, statuses: ReturnType<typeof useMissionStatuses>): string {
   if (item.kind === 'created') return uiAttribute("创建了使命")
   if (item.kind === 'started') return uiAttribute("开始了使命")
   if (item.kind === 'status') return uiAttribute("将状态改为“{0}”", String(statuses.find(s => s.id === item.changes.status)?.label ?? item.changes.status))
@@ -611,10 +611,11 @@ function activityText(item: MissionActivity): string {
   return uiAttribute("更新了{0}", String(fields.join('、')))
 }
 export function MissionActivityPanel({ mission, agents, onSource }: {mission: MissionRecord; agents: AgentProfile[]; onSource(id: string): void}) {
+  const statuses = useMissionStatuses()
   const client = useCampClient(), [items, setItems] = useState<MissionActivity[]>([]), [loading, setLoading] = useState(true), [more, setMore] = useState(false), [error, setError] = useState(''), [retry, setRetry] = useState(0)
   useEffect(() => { let current=true; setLoading(true); void client.request<MissionActivity[]>('missions.activity', {missionId: mission.missionId}).then(items => {if(current) {setItems(items); setMore(items.length===100); setError('')}}).catch(error => {if(current) setError(missionError(error))}).finally(() => {if(current) setLoading(false)}); return () => {current=false} }, [client, mission.missionId, mission.updatedAt, retry])
   async function earlier() {setLoading(true); try {const next=await client.request<MissionActivity[]>('missions.activity',{missionId:mission.missionId,before:items.at(-1)?.id}); setItems(items => [...items,...next.filter(next=>!items.some(item=>item.id===next.id))]); setMore(next.length===100); setError('')}catch(error){setError(missionError(error))}finally{setLoading(false)}}
-  return <section className="mission-activity-panel" aria-label={uiAttribute("使命活动")}><h3><UiText zh={"使命历史"} /></h3>{items.map(item => <div className="mission-history-row" key={item.id}><Icon name="history"/><div><p><strong>{item.actorType==='user' ? uiAttribute("你") : agents.find(a=>a.agentId===item.actorId)?.displayName ?? uiAttribute('队员')}</strong> {activityText(item)}</p><time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{missionDate(item.createdAt)}</time>{typeof item.changes.sourceMessageId==='string' && <button className="mission-source-link" onClick={()=>onSource(item.changes.sourceMessageId as string)}><UiText zh={"查看说明"} /></button>}</div></div>)}
+  return <section className="mission-activity-panel" aria-label={uiAttribute("使命活动")}><h3><UiText zh={"使命历史"} /></h3>{items.map(item => <div className="mission-history-row" key={item.id}><Icon name="history"/><div><p><strong>{item.actorType==='user' ? uiAttribute("你") : agents.find(a=>a.agentId===item.actorId)?.displayName ?? uiAttribute('队员')}</strong> {activityText(item, statuses)}</p><time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{missionDate(item.createdAt)}</time>{typeof item.changes.sourceMessageId==='string' && <button className="mission-source-link" onClick={()=>onSource(item.changes.sourceMessageId as string)}><UiText zh={"查看说明"} /></button>}</div></div>)}
     {error && <div className="mission-load-error" role="alert"><span>{error}</span><button onClick={()=>setRetry(v=>v+1)}><UiText zh={"重试"} /></button></div>}{loading && <p className="mission-section-empty" role="status"><UiText zh={"正在读取历史…"} /></p>}{more && <button className="compact-cancel" disabled={loading} onClick={()=>void earlier()}><UiText zh={"查看更早活动"} /></button>}
   </section>
 }

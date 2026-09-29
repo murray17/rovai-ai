@@ -128,6 +128,10 @@ def main():
                 assert time.monotonic() < deadline, 'Server subsystems did not become ready'
                 time.sleep(0.1)
             checks.append('private_service_umask_and_execution_subsystems')
+            toolbox = call(origin, session['token'], 'toolbox.list')
+            assert len(toolbox) == 5 and all(skill['sourceError'] is None for skill in toolbox), toolbox
+            assert (data / 'skills' / 'cli-operations' / 'SKILL.md').is_file()
+            checks.append('bundled_skills_available_from_installed_archive')
             config = call(origin, session['token'], 'mcp.config.get')
             created = call(origin, session['token'], 'mcp.servers.create', {
                 'expectedConfigDigest': config['configDigest'],

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
-import type { AgentRunExecutionEvidenceView, AgentRunView } from '@contracts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AgentRunExecutionEvidenceView, AgentRunView, GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
 import {
   CompactionEventRow,
   ExecutionToolGroupStateContext,
@@ -10,8 +10,10 @@ import {
   selectCompletePresentableExecutionEvidence
 } from './ExecutionToolGroup'
 import type { ToolProgressItem } from './execution-tool-grouping'
-import type { ActivityIconKind } from './ui-model'
+import { runtimeCompactionDetailText, runtimeCompactionTitle, type ActivityIconKind, type RuntimeCompactionDisplayItem } from './ui-model'
 import { openAgentRunActivityFilePreview } from './agent-run-file-preview'
+import { changeInterfaceLanguage, translateUi } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
 const tool = (id: string, iconKind: ActivityIconKind, status: ToolProgressItem['step']['status']): ToolProgressItem => ({
   kind: 'tool', key: `tool:${id}`, step: {
@@ -28,6 +30,90 @@ const renderGroup = (items: ToolProgressItem[], expanded = false, liveTail = fal
       cancelling={cancelling} completeEvidence={{ byToolId: new Map() }} onFileOpenError={() => {}} />
   </ExecutionToolGroupStateContext.Provider>
 )
+
+describe('localized execution summaries', () => {
+  const preferences = {
+    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
+      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
+    })
+  } as GeneralPreferencesApi
+
+  afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
+
+  it.each([1, 2, 128])('translates the visible and accessible summary with count %i', async count => {
+    await changeInterfaceLanguage(preferences, 'en')
+    const items = Array.from({ length: count }, (_, index) => tool(String(index), 'terminal', 'completed'))
+    const label = `Completed ${count} ${count === 1 ? 'step' : 'steps'}`
+    const english = renderGroup(items)
+    expect(english).toContain(`<strong>${label}</strong>`)
+    expect(english).toContain(`aria-label="${label}"`)
+    expect(english).not.toContain('已完成')
+
+    await changeInterfaceLanguage(preferences, 'zh-CN')
+    const chinese = renderGroup(items)
+    expect(chinese).toContain(`<strong>已完成 ${count} 个步骤</strong>`)
+    expect(chinese).toContain(`aria-label="已完成 ${count} 个步骤"`)
+  })
+
+  it('keeps counting all settled operations, including failed and stopped steps', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    const markup = renderGroup([
+      tool('done', 'terminal', 'completed'),
+      tool('failed', 'terminal', 'failed'),
+      tool('stopped', 'terminal', 'stopped')
+    ], false, false, 'cancelled')
+    expect(markup).toContain('<strong>Completed 3 steps</strong>')
+    expect(markup).toContain('aria-label="Completed 3 steps"')
+  })
+
+  it('keeps active and live-tail commands instead of showing a completed count', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    for (const status of ['running', 'waiting', 'completed'] as const) {
+      const item = tool('current', 'terminal', status)
+      item.step.title = '等待审批'
+      const markup = renderGroup([item], false, true)
+      expect(markup).toMatch(/<span>[^<]*等待审批<\/span>/)
+      expect(markup).not.toContain('Completed 1 step')
+    }
+  })
+
+  it('localizes compaction phases and metrics while preserving the runtime summary', async () => {
+    const compaction: RuntimeCompactionDisplayItem = {
+      id: 'compact', phase: 'started', completionEvidence: null,
+      adapterKind: 'codex-cli',
+      tokens: { before: 128_420, after: 61_208, current: 61_208, contextWindow: 200_000, usagePercent: 30.6 },
+      messages: { compacted: 37 }, elapsedMs: 1_420,
+      summaryText: '用户原文 · keep as written'
+    }
+    const english = (chinese: string): string => translateUi('en', chinese)
+    await changeInterfaceLanguage(preferences, 'en')
+    const markup = renderToStaticMarkup(<CompactionEventRow campId="camp" runId="run" runStatus="running" compaction={compaction} />)
+    expect(markup).toContain('Compacting context · Codex · 128.4K → 61.2K')
+    expect(markup).not.toContain('正在压缩会话上下文')
+    expect(runtimeCompactionTitle({ ...compaction, phase: 'imminent' }, english)).toContain('Preparing to compact context')
+    expect(runtimeCompactionTitle({ ...compaction, phase: 'completed' }, english)).toContain('Context compaction')
+    expect(runtimeCompactionTitle({ ...compaction, phase: 'completed', completionEvidence: 'post_compaction_boundary' }, english))
+      .toContain('Using compacted context')
+    expect(runtimeCompactionDetailText(compaction, english)).toBe([
+      'Before: 128,420 tokens',
+      'After: 61,208 tokens',
+      'Current: 61,208 tokens',
+      'Context window: 200,000 tokens',
+      'Reduced by: 67,212 tokens · 52.3%',
+      'Context used: 30.6%',
+      'Messages compacted: 37',
+      'Duration: 1.42 s',
+      '',
+      'Conversation summary',
+      '',
+      '用户原文 · keep as written'
+    ].join('\n'))
+
+    await changeInterfaceLanguage(preferences, 'zh-CN')
+    expect(renderToStaticMarkup(<CompactionEventRow campId="camp" runId="run" runStatus="running" compaction={compaction} />))
+      .toContain('正在压缩会话上下文')
+  })
+})
 
 describe('command disclosure presentation', () => {
   it('states permanent Tool output loss without offering a full-result recovery path', () => {

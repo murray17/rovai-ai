@@ -111,7 +111,9 @@ describe('StructuredMentionComposer V2', () => {
     expect(memberMarkup).toContain('class="member-avatar mention-avatar"')
     expect(memberMarkup).toContain('class="member-avatar-image"')
     expect(allMembersMarkup).toContain('class="mention-avatar"')
-    expect(allMembersMarkup).toContain('>@</span>')
+    expect(allMembersMarkup).toContain('data-navigation-icon="users"')
+    expect(allMembersMarkup).toContain('<circle cx="9" cy="7" r="4"')
+    expect(allMembersMarkup).not.toContain('>@</span>')
   })
 
   it('uses the catalog-backed team role as the member candidate description', () => {

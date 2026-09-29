@@ -15,7 +15,7 @@ use std::{
 use tokio::{io::AsyncWriteExt, sync::Notify};
 
 const CHANNEL: &str =
-    "https://raw.githubusercontent.com/murray17/rovai-ai/main/scripts/server-channel.txt";
+    "https://raw.githubusercontent.com/murray17/rovai-ai/main/scripts/server-release-tag.txt";
 const RELEASES: &str = "https://github.com/murray17/rovai-ai/releases/download";
 const API: &str = "https://api.github.com/repos/murray17/rovai-ai/releases/tags";
 const MAX_ARCHIVE: u64 = 1024 * 1024 * 1024;
@@ -44,12 +44,13 @@ struct State {
 #[derive(Clone)]
 struct Release {
     version: String,
+    tag: String,
     size: u64,
 }
 
 impl ServerUpdates {
     pub(crate) fn new(data: &Path, arguments: Vec<String>) -> Result<Self> {
-        let root = std::env::current_exe()?
+        let root = std::fs::canonicalize(std::env::current_exe()?)?
             .parent()
             .context("Server executable directory")?
             .to_owned();
@@ -149,15 +150,15 @@ impl ServerUpdates {
     async fn check(&self) -> Result<()> {
         let client = client()?;
         let channel = bounded(&client, &self.0.sources.channel, 128).await?;
-        let version = std::str::from_utf8(&channel)?.trim();
-        if version == "unpublished" {
+        let tag = std::str::from_utf8(&channel)?.trim();
+        if tag == "unpublished" {
             self.failure("check", "release_unpublished");
             return Ok(());
         }
-        let coordinates = version_numbers(version).context("invalid_release")?;
+        let (version, coordinates) = release_coordinates(tag).context("invalid_release")?;
         let response = bounded(
             &client,
-            &format!("{}/server-v{version}", self.0.sources.api),
+            &format!("{}/{tag}", self.0.sources.api),
             2 * 1024 * 1024,
         )
         .await?;
@@ -165,7 +166,7 @@ impl ServerUpdates {
         ensure!(
             release["draft"] == false
                 && release["prerelease"] == false
-                && release["tag_name"] == format!("server-v{version}"),
+                && release["tag_name"] == tag,
             "invalid_release"
         );
         let target = target().context("updater_unavailable")?;
@@ -205,6 +206,7 @@ impl ServerUpdates {
         }
         state.release = available.then(|| Release {
             version: version.into(),
+            tag: tag.into(),
             size,
         });
         let _ = std::fs::remove_file(self.0.data.join("updates/last-failure.txt"));
@@ -217,7 +219,7 @@ impl ServerUpdates {
         rovai_core::platform::prepare_private_directory(&directory)?;
         let result = async {
             let client = client()?;
-            let base = format!("{}/server-v{}", self.0.sources.releases, release.version);
+            let base = format!("{}/{}", self.0.sources.releases, release.tag);
             let checksums = bounded(&client, &format!("{base}/SHA256SUMS"), 1024 * 1024).await?;
             let digest = checksum(std::str::from_utf8(&checksums)?, &name)?;
             tokio::fs::write(directory.join("SHA256SUMS"), &checksums).await?;
@@ -386,6 +388,12 @@ fn version_numbers(value: &str) -> Option<[u64; 3]> {
         })
         .collect::<Option<Vec<_>>>()?;
     parts.try_into().ok()
+}
+fn release_coordinates(tag: &str) -> Option<(&str, [u64; 3])> {
+    let version = tag
+        .strip_prefix("server-v")
+        .or_else(|| tag.strip_prefix('v'))?;
+    Some((version, version_numbers(version)?))
 }
 fn checksum(text: &str, name: &str) -> Result<String> {
     let matches: Vec<_> = text

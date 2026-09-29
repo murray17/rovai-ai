@@ -89,7 +89,8 @@ export function executionHasActiveCompaction(items: ExecutionProgressItem[]): bo
 export function toolActivityGroupPresentation(
   items: ToolProgressItem[],
   runStatus: AgentRunView['status'],
-  isLiveTail = false
+  isLiveTail = false,
+  formatCompletedSteps: (count: number) => string = (count) => `已完成 ${count} 个步骤`
 ): ToolActivityGroupPresentation {
   const statuses = items.map((item) => activityStatusForAgentRun(item.step.status, runStatus))
   let activeIndex = -1
@@ -149,7 +150,7 @@ export function toolActivityGroupPresentation(
     status = 'recorded'
     statusLabel = failed > 0 ? '已记录，含失败操作' : '已记录'
   }
-  const primary = `已完成 ${total} 个步骤`
+  const primary = formatCompletedSteps(total)
 
   return {
     status,

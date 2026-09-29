@@ -22,6 +22,8 @@ test('Native installer verifies before switching, safely repeats, retains data, 
   mkdirSync(join(payload, 'web-ui'), { recursive: true }); mkdirSync(data, { recursive: true })
   writeFileSync(join(data, 'sentinel'), 'existing business data')
   writeFileSync(join(payload, 'web-ui/index.html'), 'first matching UI')
+  mkdirSync(join(payload, 'skills/cli-operations'), { recursive: true })
+  writeFileSync(join(payload, 'skills/cli-operations/SKILL.md'), '---\nname: cli-operations\ndescription: Fixture.\n---\n')
   writeFileSync(join(payload, 'package-info'), `schema=1\nversion=${version}\ntarget=${target}\n`)
   // On Unix the package/installer seam uses a tiny native-shell executable;
   // actual Rust/Core/data lifecycle is independently owned by server-entry.
@@ -47,6 +49,11 @@ test('Native installer verifies before switching, safely repeats, retains data, 
     writeFileSync(first.archive, Buffer.concat([valid, Buffer.from('corrupted')]))
     const corrupt = install(); assert.notEqual(corrupt.status, 0); assert.match(corrupt.stderr, /checksum mismatch/i)
     assert.equal(readFileSync(join(prefix, 'current/web-ui/index.html'), 'utf8'), 'first matching UI')
+    rmSync(join(payload, 'skills/cli-operations/SKILL.md'))
+    archiveServerPackage(payload, release, { version, target })
+    const missingSkill = install(); assert.notEqual(missingSkill.status, 0); assert.match(missingSkill.stderr, /Incomplete package|bundled Skills mismatch/i)
+    assert.equal(readFileSync(join(prefix, 'current/web-ui/index.html'), 'utf8'), 'first matching UI')
+    writeFileSync(join(payload, 'skills/cli-operations/SKILL.md'), '---\nname: cli-operations\ndescription: Fixture.\n---\n')
     writeFileSync(join(payload, 'web-ui/index.html'), 'replacement matching UI')
     archiveServerPackage(payload, release, { version, target }); success()
     assert.equal(readFileSync(join(prefix, 'current/web-ui/index.html'), 'utf8'), 'replacement matching UI')
@@ -54,7 +61,7 @@ test('Native installer verifies before switching, safely repeats, retains data, 
     // Package coordinates are checked after checksum and before installation.
     writeFileSync(join(payload, 'package-info'), `schema=1\nversion=${version}\ntarget=wrong-platform\n`)
     archiveServerPackage(payload, release, { version, target })
-    const mismatch = install(); assert.notEqual(mismatch.status, 0); assert.match(mismatch.stderr, /target mismatch|target, or WebUI mismatch/i)
+    const mismatch = install(); assert.notEqual(mismatch.status, 0); assert.match(mismatch.stderr, /target mismatch|target, WebUI, or bundled Skills mismatch/i)
     assert.equal(readFileSync(join(prefix, 'current/web-ui/index.html'), 'utf8'), 'replacement matching UI')
     if (!windows) {
       // Even a correctly checksummed archive cannot install symlink members.

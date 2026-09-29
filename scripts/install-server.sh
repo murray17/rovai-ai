@@ -4,6 +4,7 @@ set -eu
 umask 077
 fail() { printf 'Rovai Server: %s\n' "$*" >&2; exit 1; }
 version=latest
+release_tag=
 from_dir=
 prefix="${HOME:?Current account HOME is required}/.local/share/rovai-server"
 bin_dir="$HOME/.local/bin"
@@ -39,17 +40,28 @@ trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 if [ "$version" = latest ]; then
   [ -z "$from_dir" ] || fail '--from-dir requires --version'
-  download 'https://raw.githubusercontent.com/murray17/rovai-ai/main/scripts/server-channel.txt' "$staging/channel"
-  version=$(cat "$staging/channel")
-  [ "$version" != unpublished ] || fail 'No official native Server release is published yet. The installation was not changed.'
+  download 'https://raw.githubusercontent.com/murray17/rovai-ai/main/scripts/server-release-tag.txt' "$staging/channel"
+  release_tag=$(cat "$staging/channel")
+  [ "$release_tag" != unpublished ] || fail 'No official native Server release is published yet. The installation was not changed.'
+  case "$release_tag" in
+    server-v*) version=${release_tag#server-v};;
+    v*) version=${release_tag#v};;
+    *) fail 'Invalid Server release tag';;
+  esac
+else
+  case "$version" in
+    0.4.0|0.4.1) release_tag="server-v$version";;
+    *) release_tag="v$version";;
+  esac
 fi
 printf '%s\n' "$version" | LC_ALL=C grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$' || fail 'Invalid Server version'
+case "$release_tag" in "v$version"|"server-v$version") ;; *) fail 'Invalid Server release tag';; esac
 asset="rovai-server-$version-$target.tar.gz"
 if [ -n "$from_dir" ]; then
   cp "$from_dir/$asset" "$staging/$asset"
   cp "$from_dir/SHA256SUMS" "$staging/SHA256SUMS"
 else
-  release="https://github.com/murray17/rovai-ai/releases/download/server-v$version"
+  release="https://github.com/murray17/rovai-ai/releases/download/$release_tag"
   download "$release/$asset" "$staging/$asset"
   download "$release/SHA256SUMS" "$staging/SHA256SUMS"
 fi
@@ -68,7 +80,7 @@ LC_ALL=C awk 'substr($0,1,1)!="-" && substr($0,1,1)!="d" { bad=1 } END { exit ba
 tar -xzf "$staging/$asset" -C "$staging"
 payload="$staging/rovai-server"
 grep -qx "version=$version" "$payload/package-info" && grep -qx "target=$target" "$payload/package-info" || fail 'Package version or target mismatch'
-[ -f "$payload/web-ui/index.html" ] && [ -x "$payload/rovai-server" ] || fail 'Incomplete package'
+[ -f "$payload/web-ui/index.html" ] && [ -f "$payload/skills/cli-operations/SKILL.md" ] && [ -x "$payload/rovai-server" ] || fail 'Incomplete package'
 [ "$("$payload/rovai-server" --version)" = "rovai-server $version" ] || fail 'Host/package version mismatch'
 # Claim only a new directory or an installation already owned by this installer.
 if [ -e "$prefix" ] || [ -L "$prefix" ]; then

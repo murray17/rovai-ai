@@ -110,24 +110,36 @@ pub fn bundled_skill_resources() -> Result<PathBuf> {
         ensure!(path.is_absolute(), "bundled Skills root must be absolute");
         return Ok(path);
     }
-    let executable = std::env::current_exe().context("cannot locate Core executable")?;
-    if let Some(resources) = executable
-        .parent()
-        .and_then(Path::parent)
-        .map(|parent| parent.join("skills"))
-        .filter(|path| path.join("cli-operations").join("SKILL.md").is_file())
-    {
-        return Ok(resources);
+    let executable =
+        fs::canonicalize(std::env::current_exe().context("cannot locate Core executable")?)
+            .context("cannot resolve Core executable")?;
+    if let Some(directory) = executable.parent() {
+        // Native Server keeps skills next to its binaries; Desktop places bin/
+        // and skills/ under the same Resources directory.
+        let mut candidates = vec![directory.join("skills")];
+        if let Some(parent) = directory.parent() {
+            candidates.push(parent.join("skills"));
+        }
+        for resources in candidates {
+            if resources.join("cli-operations").join("SKILL.md").is_file() {
+                return Ok(resources);
+            }
+        }
     }
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("skills");
-    ensure!(
-        source.join("cli-operations").join("SKILL.md").is_file(),
-        "bundled Skill resources are unavailable"
-    );
-    Ok(source)
+    #[cfg(debug_assertions)]
+    {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("skills");
+        ensure!(
+            source.join("cli-operations").join("SKILL.md").is_file(),
+            "bundled Skill resources are unavailable"
+        );
+        Ok(source)
+    }
+    #[cfg(not(debug_assertions))]
+    anyhow::bail!("bundled Skill resources are unavailable")
 }
 
 impl ManagedSkills {

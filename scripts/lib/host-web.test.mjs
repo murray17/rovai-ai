@@ -517,7 +517,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(changedPreference.status, 'applied')
     assert.deepEqual((await call(second, 'notifications.preference.get')).headsUpEnabled, !preference.headsUpEnabled)
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'notifications.preference.update', params: preferenceParams })).result, changedPreference)
-    assert.equal((await call(first, 'notifications.inbox', { filter: 'unread', limit: 1 })).schemaVersion, 8)
+    assert.equal((await call(first, 'notifications.inbox', { filter: 'unread', limit: 1 })).schemaVersion, 9)
     const exported = await call(first, 'diagnostics.export')
     assert.equal(exported.format, 'rovai-diagnostics-v5')
     assert.equal(JSON.stringify(exported).includes(administrator), false)

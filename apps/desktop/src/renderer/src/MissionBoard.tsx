@@ -8,7 +8,7 @@ import { DialogControlIcon } from './AppDialog'
 import { NavigationIcon } from './NavigationIcon'
 import { MobilePageHeader, useMobileLayout } from './MobileLayout'
 import { MissionIcon } from './MissionIcon'
-import { Avatar, CompactDialog, Icon, LabelsEditor, MissionAvatars, MissionContextMenu, MissionFilter, MissionPeopleProvider, MissionPopover, MissionRoster, MissionTags, StatusIcon, FilterStateIcon, TagColorDot, statuses, type ContextPosition } from './MissionControls'
+import { Avatar, CompactDialog, Icon, LabelsEditor, MissionAvatars, MissionContextMenu, MissionFilter, MissionPeopleProvider, MissionPopover, MissionRoster, MissionTags, StatusIcon, FilterStateIcon, TagColorDot, useMissionStatuses, type ContextPosition } from './MissionControls'
 import { RunningText } from './RunningText'
 import { MissionCommandRejected, missionCommand, missionError } from './useMissions'
 import { MemberAvatar } from './MemberAvatar'
@@ -335,6 +335,7 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
   missions: MissionRecord[]; projects: ProjectNavigationGroup[]; loading: boolean; error: string | null; selectedId?: string; hidden?: boolean; onRefresh(): Promise<void>; onNew(): void; onOpen(m: MissionRecord): void; onOpenMenu?(trigger: HTMLButtonElement): void; menuOpen?: boolean; menuTriggerRef?: Ref<HTMLButtonElement>
 }) {
   const actions = useMissionActions()
+  const statuses = useMissionStatuses()
   const mobile = useMobileLayout()
   const [searchOpen, setSearchOpen] = useState(false)
   const mobileOffsets = useRef<Partial<Record<MissionStatus, number>>>({})
@@ -660,6 +661,7 @@ function MissionCleanupNotice() {
 
 export function MissionIntro({ mission: m, projects }: { mission: MissionRecord; projects: ProjectNavigationGroup[] }) {
   const actions = useMissionActions(), [expanded, setExpanded] = useState(false), [canExpand, setCanExpand] = useState(false), [attachmentError, setAttachmentError] = useState('')
+  const statuses = useMissionStatuses()
   const description = useRef<HTMLParagraphElement>(null)
   const starting = actions.busyId === m.missionId
   useLayoutEffect(() => {

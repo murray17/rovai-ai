@@ -1,6 +1,16 @@
 # Deployment documentation delivery notes
 
-## Scope and source versions
+## Server 0.4.1 bridge publication
+
+The current Server download is `server-v0.4.1`, built from main commit `446633fcb15303e28fbceaa3bcb76d28be19b2ba`. Desktop `v0.4.1` retains its original source commit and update assets. The two tags share a version number but have different source SHAs; the bridge does not replace the Desktop release.
+
+This release adds the bundled Skills to each native archive and resolves Web UI resources through the installed command link. An isolated macOS arm64 package test read all five bundled toolbox Skills from an installed archive. An upgrade test used the actual published 0.4.0 macOS arm64 archive, retained an existing camp message in the 0.4.1 Web workspace, and restored the stopped 0.4.0 backup successfully. These checks exercise the package and data boundary; they do not claim a real model request from the final published archive or qualify every Agent.
+
+[The native release run](https://github.com/murray17/rovai-ai/actions/runs/36537915148) passed on macOS arm64/x64, Windows x64 and Linux x64. Ubuntu 22.04 (glibc 2.35), Debian 12 (glibc 2.36) and Ubuntu 24.04 (glibc 2.39) then installed and exercised the **same** Linux archive, including packaged Skill reading, authenticated Web operations, restart and persisted data. All three reports bind the same Linux package manifest SHA-256, `8ea11585f0355e87a4d003a3aa2c9851edd304b9b2b3e0cf3f3126f63c69f45c`; their `runtimeQualification` field is `false`.
+
+The capture record below describes the original 0.4.0 documentation pass. Its failure screenshot remains historical evidence and is not presented as a 0.4.1 result.
+
+## Original 0.4.0 capture: scope and source versions
 
 - Documentation and website assets only; no App, Server, network implementation, domain, DNS, or release workflow changes.
 - Desktop: public `v0.4.1`, source `ab6f67fb76c41f1758b04cc728eeb95fb6a17227`.
