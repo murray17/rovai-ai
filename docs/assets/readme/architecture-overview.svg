@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="650" viewBox="0 0 960 650" role="img" aria-labelledby="title desc">
+  <title id="title">How Rovai connects the team to its tools</title>
+  <desc id="desc">Desktop and browser clients connect to a selected Rovai Host and Core instance. Channels integrate through Desktop. The Host saves team state and dispatches work to installed Agents. Agents work with project files on the host and configured model services.</desc>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6.6" refY="4" orient="auto"><path d="M1 1 7 4 1 7" fill="none" stroke="#64748b" stroke-width="1.4"/></marker></defs>
+  <style>
+    text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;fill:#1f2328;text-anchor:middle}
+    .box{fill:#fff;stroke:#d0d7de;stroke-width:1.5;rx:9}
+    .host{fill:#f1f5f8;stroke:#8096aa;stroke-width:1.6;rx:9}
+    .title{font-size:18px;font-weight:600}
+    .sub{font-size:13px;fill:#59636e}
+    .edge{fill:none;stroke:#64748b;stroke-width:1.5;marker-end:url(#arrow)}
+    .label{font-size:12px;fill:#59636e;paint-order:stroke;stroke:#fff;stroke-width:8;stroke-linejoin:round}
+  </style>
+  <rect width="960" height="650" rx="12" fill="#fff"/>
+  <rect class="box" x="35" y="38" width="220" height="76"/>
+  <text class="title" x="145" y="69">Feishu / DingTalk</text><text class="sub" x="145" y="92">Desktop integration</text>
+  <rect class="box" x="355" y="38" width="250" height="76"/>
+  <text class="title" x="480" y="69">Rovai Desktop</text><text class="sub" x="480" y="92">Native workspace</text>
+  <rect class="box" x="705" y="38" width="220" height="76"/>
+  <text class="title" x="815" y="69">Browser</text><text class="sub" x="815" y="92">Computer or mobile device</text>
+  <path class="edge" d="M255 76H355"/><text class="label" x="304" y="59">messages</text>
+  <path class="edge" d="M480 114V210"/><text class="label" x="480" y="164">local access</text>
+  <path class="edge" d="M815 114V258H605"/><text class="label" x="815" y="178">authenticated</text><text class="label" x="815" y="198">Web access</text>
+  <rect class="host" x="355" y="210" width="250" height="96"/>
+  <text class="title" x="480" y="244">Rovai Host + Core</text><text class="sub" x="480" y="267">One selected instance</text><text class="sub" x="480" y="288">Desktop or standalone Server</text>
+  <rect class="box" x="35" y="210" width="220" height="96"/>
+  <text class="title" x="145" y="244">Team state</text><text class="sub" x="145" y="267">Teammates · Conversations</text><text class="sub" x="145" y="288">Tasks · Missions · Memory</text>
+  <path class="edge" d="M355 258H255"/><text class="label" x="306" y="242">save</text>
+  <path class="edge" d="M480 306V388"/><text class="label" x="480" y="351">dispatch work · observe execution</text>
+  <rect class="box" x="330" y="388" width="300" height="76"/>
+  <text class="title" x="480" y="420">Installed coding Agents</text><text class="sub" x="480" y="443">Native tools, authentication and models</text>
+  <path class="edge" d="M405 464V503H255V535"/><text class="label" x="267" y="493">read · edit · run checks</text>
+  <path class="edge" d="M555 464V503H705V535"/><text class="label" x="709" y="493">model requests and responses</text>
+  <rect class="box" x="105" y="535" width="300" height="76"/>
+  <text class="title" x="255" y="567">Host project files</text><text class="sub" x="255" y="590">Code · Documents · Git</text>
+  <rect class="box" x="555" y="535" width="300" height="76"/>
+  <text class="title" x="705" y="567">Configured model services</text><text class="sub" x="705" y="590">According to each Agent's configuration</text>
+  <text class="sub" x="480" y="638">Each instance keeps its own data. Agents and project files live on that host.</text>
+</svg>

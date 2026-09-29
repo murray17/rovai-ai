@@ -1,0 +1,8 @@
+flowchart TB
+  channels["Feishu / DingTalk · Desktop integration"] -->|messages| desktop["Rovai Desktop"]
+  desktop -->|local access| host["Rovai Host + Core · one selected Desktop or Server instance"]
+  browser["Browser · computer or mobile device"] -->|authenticated Web access| host
+  host -->|save| state["Team state: teammates, conversations, tasks, missions, memory"]
+  host -->|dispatch work and observe execution| agents["Installed coding Agents"]
+  agents -->|read, edit, run checks| files["Host project files"]
+  agents -->|model requests and responses| models["Configured model services"]

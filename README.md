@@ -4,9 +4,9 @@
 
 ### Assemble a team of agents that grows together.
 
-Rovai AI is like an Agent guild of your own, where you can recruit members with different personalities and roles.<br>
-Together, they explore, discuss, and act on real tasks — building<br>
-team chemistry and collaborative memory along the way.
+A workspace for long-lived coding-agent teams.<br>
+Bring your installed Agents into shared conversations, divide the work,<br>
+inspect execution and file changes, and keep useful knowledge for the next task.
 
 <p>
   <a href="https://github.com/murray17/rovai-ai/releases"><img src="https://img.shields.io/badge/macOS-arm64%20%2B%20x64-111111?logo=apple&logoColor=white" alt="macOS arm64 + x64"></a>
@@ -19,292 +19,127 @@ team chemistry and collaborative memory along the way.
 
 <p>
   <a href="https://rovai.dev/"><strong>Website</strong></a>
-  ·
-  <a href="https://rovai.dev/download/"><strong>Download</strong></a>
-  ·
-  <a href="https://rovai.dev/docs/"><strong>Documentation</strong></a>
-  ·
-  <a href="https://rovai.dev/docs/quickstart.html"><strong>Quick Start</strong></a>
-  ·
-  <a href="#see-a-team-come-together"><strong>How It Works</strong></a>
-  ·
-  <a href="#design-philosophy"><strong>Design Philosophy</strong></a>
+  · <a href="https://rovai.dev/download/"><strong>Download</strong></a>
+  · <a href="https://rovai.dev/docs/"><strong>Docs</strong></a>
+  · <a href="https://github.com/murray17/rovai-ai/releases"><strong>Releases</strong></a>
 </p>
 
-<p>
-  <strong>English</strong> | <a href="README.zh-CN.md">简体中文</a>
-</p>
+<p><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></p>
 
 </div>
 
----
+<p align="center"><a href="docs/assets/readme/workspace-a2a-right.png"><img src="docs/assets/readme/workspace-a2a-right.png" alt="Cheese hands an independent review back to Dingding through Rovai, followed by the final delivery and completed execution steps" width="100%"></a></p>
 
-## The story often begins like this
+<details>
+<summary>Other execution layouts</summary>
 
-You ask GPT to help draft a plan.
+**Bottom panel**
 
-Halfway through, it stops speaking plainly. You hand the answer to another model and ask
-what GPT was actually trying to say, then bring in a third to poke holes in the plan — and in the end,
-you still have to decide which one to trust.
+<p align="center"><a href="docs/assets/readme/workspace-a2a-bottom.png"><img src="docs/assets/readme/workspace-a2a-bottom.png" alt="Bottom panel" width="100%"></a></p>
 
-Every switch means explaining the roles and pasting the context all over again.<br>
-When the discussion ends, no one remembers why the decision was made.
+**Floating panel**
 
-> **A team should not have to get to know one another all over again every time it sets out.**
+<p align="center"><a href="docs/assets/readme/workspace-a2a-floating.png"><img src="docs/assets/readme/workspace-a2a-floating.png" alt="Floating panel" width="100%"></a></p>
 
-In Rovai, you are the team's **Principal**.
+</details>
 
-You can draw inspiration from the games, films, and stories you love, then recruit long-lived
-members with different personalities and roles:
+## Work together, from the first request to the next task
 
-**Some explore, some challenge, some move the work forward, and some remember the road the team
-has traveled.**
+Start with one teammate, then bring in another when the work needs a second perspective. Keep their roles, conversations, unfinished tasks, and useful agreements available when you return.
 
-They discuss and act on the same task, carrying important decisions, disagreements, and
-ways of working into the next journey.
+| Capability | What you can do |
+| --- | --- |
+| **[Lasting teammates](https://rovai.dev/docs/members.html)** | Give each teammate a name, role, responsibilities, and working principles. Choose their Agent, model, and permissions separately. |
+| **[Shared conversations](https://rovai.dev/docs/collaboration.html)** | Address the right teammates, exchange findings, and hand off work. Open a separate one-on-one conversation when you need a focused discussion. |
+| **[Visible execution](https://rovai.dev/docs/execution.html)** | Follow tool activity, respond to approvals, preview files, and inspect changes alongside the conversation. |
+| **[Ongoing work](https://rovai.dev/docs/missions.html)** | Track larger goals on the Mission board, schedule recurring work, and save agreements as collaborative memory. |
+| **[Skills and tools](https://rovai.dev/docs/skills.html)** | Use native Skills, configure Rovai collaboration tools, and connect MCP services supported by your Agent. |
+| **[Remote access](https://rovai.dev/docs/remote.html)** | Return to your workspace through a browser. Connect Desktop teammates to external messaging channels. |
 
-When they first meet, they are only agents with different roles.
+## Keep your teammates. Choose how they work.
 
-**After completing a few missions together, they gradually begin to feel like a team.**
+A teammate's identity stays with the team across projects. An implementer and a reviewer can have different responsibilities, use different Agents, and keep their own ways of working.
 
----
+Connect installed coding Agents such as **Codex CLI, Claude Code, Pi Coding Agent, DeepSeek Harness, and OpenCode**. Model choices, permissions, Skills, and MCP capabilities depend on the Agent and host platform.
 
-## See a team come together
+<p align="center"><a href="docs/assets/readme/teammates-agents.png"><img src="docs/assets/readme/teammates-agents.png" alt="Four English demo teammates configured with Codex CLI, Claude Code, Pi Coding Agent, and DeepSeek Harness; Dingding’s profile and permissions are open" width="100%"></a></p>
 
-This time, four adventurers answered the call:
+[Teammates and configuration](https://rovai.dev/docs/members.html) · [Agents and models](https://rovai.dev/docs/agents.html) · [Platform compatibility](https://rovai.dev/docs/compatibility.html)
 
-> **Dingding, the wandering scholar** — apparently, that's what foxes say;<br>
-> **Cheese, who loves to argue** — uh, a snow leopard;<br>
-> **Gugu the owl** — always finding an angle no one else considered;<br>
-> **Bunny, the illustrator** — sketching what the party sees along the way.
+## Keep longer work in view
 
-They arrive with different temperaments and talents, meeting for the first time in the same
-**Camp**.
+Use the Mission board for a goal you will return to: improving a download flow, preparing a release, or working through a project review. Choose a project and team, continue in its conversation, and inspect the accumulated file changes and delivery.
 
-### The first gathering
+Tasks record responsibility; execution records show what ran. Finishing a run, completing a mission, and merging code are separate actions.
 
-The party's first step is not to scatter and start working immediately. It is to learn who
-everyone is, what this journey is about, and who should speak first.
+<p align="center"><a href="docs/assets/readme/missions.png"><img src="docs/assets/readme/missions.png" alt="An Orbit mission with its goal, project, and team filled in" width="100%"></a></p>
 
-<p align="center">
-  <img
-    src="docs/assets/readme/camp-conversation.png"
-    alt="Rovai AI Camp conversation view with the conversation, execution console, members, and Tasks"
-    width="900"
-  >
-</p>
+[Mission board](https://rovai.dev/docs/missions.html) · [Tasks and ownership](https://rovai.dev/docs/tasks.html) · [Scheduled work](https://rovai.dev/docs/automations.html) · [Collaborative memory](https://rovai.dev/docs/memory.html)
 
-### How they work together
+## Continue from another device
 
-<table align="center" width="900">
-  <tr>
-    <td align="center" width="33%">
-      <a href="docs/assets/readme/recruit-member.png">
-        <img
-          src="docs/assets/readme/recruit-member.png"
-          alt="Recruit a member in Rovai AI"
-          width="273"
-        >
-      </a>
-      <br>
-      <strong>Recruit a Member</strong>
-    </td>
-    <td align="center" width="33%">
-      <a href="docs/assets/readme/grill-duo.png">
-        <img
-          src="docs/assets/readme/grill-duo.png"
-          alt="Paired questioning in Rovai AI"
-          width="273"
-        >
-      </a>
-      <br>
-      <strong>Paired Questioning</strong>
-    </td>
-    <td align="center" width="33%">
-      <a href="docs/assets/readme/campfire.png">
-        <img
-          src="docs/assets/readme/campfire.png"
-          alt="A Campfire discussion in Rovai AI"
-          width="273"
-        >
-      </a>
-      <br>
-      <strong>Campfire Discussion</strong>
-    </td>
-  </tr>
-</table>
+Enable Web access in Rovai Desktop, or run an independent Rovai Server on your own host. Open the workspace in a browser to continue the conversation and follow the work. Agents and project files stay on the host you connect to; separate instances keep separate data.
 
-<p align="center">
-  <sub>Click any image to view the full screenshot.</sub>
-</p>
+Rovai Desktop also connects to **Feishu and DingTalk**, so you can send requests and receive results in those channels. See the channel guide for setup and availability.
 
-At their first gathering, they are simply lone adventurers with different personalities and roles.
+<p align="center"><a href="docs/assets/readme/remote-access.png"><img src="docs/assets/readme/remote-access.png" alt="Reference layout of Rovai's mobile conversation and Desktop Channels settings" width="100%"></a></p>
 
-Through repeated discussions, actions, and handoffs, they gradually learn how those
-differences fit together.
+[Deployment and remote access](https://rovai.dev/docs/remote.html) · [Channels](https://rovai.dev/docs/channels.html)
 
----
+## Get started
 
-## Quick Start
+| Where you want to work | Start here |
+| --- | --- |
+| **On your desktop** | [Download Rovai Desktop](https://rovai.dev/download/) for macOS Apple Silicon, macOS Intel, or Windows x64. Follow the installation and upgrade notes for your release. |
+| **On your own server** | [Install Rovai Server](https://rovai.dev/docs/server-install.html). Server packages, host requirements, release limitations, and setup are documented separately. |
 
-### 1. Install Rovai AI
+1. **Prepare one Agent.** Install and sign in to a supported coding Agent on the host, then check it in **Settings → Agents**.
+2. **Choose a teammate.** Set their Agent, model, and permissions. One teammate is enough to get started.
+3. **Give it a small task.** Open a project conversation, ask the teammate to explain the project, and inspect the execution before assigning a change.
 
-#### Desktop installers (recommended)
+[Complete quick start](https://rovai.dev/docs/quickstart.html) · [Try a two-teammate workflow](https://rovai.dev/docs/collaboration.html)
 
-Download the installer for your device from
-the [official download page](https://rovai.dev/download/), which lists Desktop and Server packages separately.
-[GitHub Releases](https://github.com/murray17/rovai-ai/releases) contains all release notes and assets.
+## How it fits together
 
-| Platform | Release asset | Installation |
-|---|---|---|
-| **macOS · Apple Silicon** | A `.dmg` whose filename includes `arm64` | Open the DMG, drag Rovai AI into `Applications`, then launch it from the Applications folder |
-| **macOS · Intel** | A `.dmg` whose filename includes `x64` | Open the DMG, drag Rovai AI into `Applications`, then launch it from the Applications folder |
-| **Windows · x64 — unsigned** | An `.exe` installer explicitly labeled for Windows x64 | Run the per-user installer and follow the setup wizard |
+Rovai keeps the team's collaboration state and coordinates execution. The coding Agents perform the work using their own tools, authentication, and configured model services.
 
-The Windows x64 installer is currently unsigned. Windows SmartScreen may show an unknown publisher
-warning. Download the installer only from the official Rovai AI GitHub Release.
+<p align="center"><a href="docs/assets/readme/architecture-overview.svg"><img src="docs/assets/readme/architecture-overview.svg" alt="Desktop and browser clients connect to one Rovai Host and Core instance, which stores team state and coordinates installed Agents working with host files and configured model services" width="100%"></a></p>
 
-For first launch and release-specific upgrade instructions, see
-[Download and install](https://rovai.dev/docs/installation.html).
-To connect from a browser or install an independent Server, start with
-[Deployment and remote access](https://rovai.dev/docs/remote.html).
+Desktop and standalone Server share the Host implementation. Each instance has its own data and environment; connecting through a browser does not migrate or synchronize them. Channel integration is provided by Desktop.
 
-#### Run from source (for developers)
+[How work moves through Rovai](https://rovai.dev/docs/mechanism.html) · [Engineering architecture](https://github.com/murray17/rovai-ai/blob/main/docs/architecture/README.md)
 
-For source installation, environment setup, isolated data directories, and build instructions,
-see the [**Developer Guide**](docs/development/README.md) *(Chinese)*.
+## Documentation and development
 
-The shortest development path is:
+| You want to… | Read |
+| --- | --- |
+| Learn to use Rovai | [English documentation](https://rovai.dev/docs/) · [中文文档](https://rovai.dev/zh/docs/) |
+| Configure your tools | [Agents](https://rovai.dev/docs/agents.html) · [Skills](https://rovai.dev/docs/skills.html) · [MCP](https://rovai.dev/docs/mcp.html) |
+| Connect another device | [Desktop Web](https://rovai.dev/docs/desktop-web.html) · [Server installation](https://rovai.dev/docs/server-install.html) · [Connection options](https://rovai.dev/docs/remote.html) |
+| Build from source or contribute | [Developer guide](https://github.com/murray17/rovai-ai/blob/main/docs/development/README.md) · [Architecture](https://github.com/murray17/rovai-ai/blob/main/docs/architecture/README.md) · [Compatibility evidence](https://github.com/murray17/rovai-ai/blob/main/docs/runtime-compatibility.md) |
 
-```bash
+The engineering guides are primarily in Chinese. Start with the developer guide for environment setup and isolated development data, then:
+
+```sh
 git clone https://github.com/murray17/rovai-ai.git
 cd rovai-ai
-
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
----
-
-### 2. Supported Agent Runtimes
-
-In Rovai, **who a member is** and **which Runtime they act through** are two different layers.
-
-A member's name, appearance, responsibilities, relationships, and collaborative memory define
-who they are.<br>
-The Agent Runtime determines which tools and models they use to participate in the work.
-
-The same Codex Runtime can power a builder focused on delivery or a challenger searching for
-counterexamples.<br>
-The same Claude Code Runtime can serve as a strategist, record keeper, or reviewer,
-depending on the team.
-
-| Agent Runtime | MCP support | Skill support | Identity continuity |
-|---|---|---|---|
-| [Claude Code](https://code.claude.com/docs/en/installation) | Added alongside native | Added alongside native | Native support |
-| [Codex CLI](https://developers.openai.com/codex/cli/) | Added alongside native | Added alongside native | Native support |
-| [Pi Coding Agent](https://github.com/earendil-works/pi) | Rovai projection unsupported; Pi-native extensions remain available | Added alongside Pi-native discovery | Exact-first native resume with replacement fallback |
-| [OpenCode](https://opencode.ai/docs/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | Runtime-native only | Added alongside native | Based on Runtime capabilities |
-| [Kiro CLI](https://kiro.dev/docs/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [Qoder CLI](https://docs.qoder.com/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [CodeBuddy](https://www.codebuddy.ai/docs/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [TRAE CLI CN](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
-| [Kimi Code](https://www.kimi.com/code/docs/) | Added alongside native | Added alongside native | Native resume; re-delivered after compaction |
-| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (macOS arm64/x64, Windows x64, Linux x64) | Added alongside native; assigned same-name server replaces native definition | Added alongside native | Persistent native system prompt through compaction; exact resume |
-
-For exact versions, capabilities, and observed boundaries, see the
-[Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.
-
----
-
-## Core Capabilities
-
-| Core capability | What it means in Rovai |
-| - | - |
-| **Long-lived members** | Preserve each member's enduring identity, appearance, responsibilities, and working style so they can rejoin the team across Camps and Tasks. |
-| **Camp collaboration** | Organize shared conversations, long-lived members, Tasks, attachments, and execution state around one objective, reducing the context users must carry between separate windows. |
-| **Role-based collaboration** | Turn paired questioning, document-informed decision-making, code review, and group discussion into repeatable ways for a team to work together. |
-| **Tasks and ownership** | Give ongoing work a title, owner, and state so unfinished work remains trackable and can be picked up by another member. |
-| **Member handoffs** | Use @mentions, the default Lead, direct replies, and A2A routing to pass questions, conclusions, and next actions to the right member. |
-| **Visible execution** | Inspect tool calls, process state, intermediate results, and final delivery in an independent execution console instead of hiding real work behind a single completion message. |
-| **Approvals, evidence, and recovery** | Require explicit approval for important actions, preserve reviewable execution evidence, and continue from existing state after interruption. |
-| **Collaborative memory** | Preserve important decisions, lessons, and team habits so members gradually understand how this team has solved problems together. |
-| **Native capability compatibility** | Use a generic ACP Adapter to connect Agent Runtimes that support ACP while preserving their native models, permissions, Skills, MCP, and session capabilities whenever possible. |
-
-These capabilities are not isolated features. They are connected by one collaboration
-architecture:
-
-<p align="center">
-  <img
-    src="docs/assets/readme/rovai-architecture.png"
-    alt="Rovai AI architecture showing the Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and Runtime-native capabilities"
-    width="100%"
-  >
-</p>
-
-<p align="center">
-  <sub>
-    Agent Runtimes give members their capabilities. Rovai brings those members together as a team.
-  </sub>
-</p>
-
----
-
-## Design Philosophy
-
-We believe this is how a team grows.
-
-> **Capabilities bring members into the team. Shared experience helps them understand and trust one another.**
-
-### ✦ Worldbuilding adds warmth; the work stays professional
-
-Camp, Principal, members, and journeys are Rovai's language for expressing collaboration, not
-an extra layer of role-playing.
-
-Rovai keeps the design restrained. Worldbuilding never adds irrelevant steps or bloated
-context.
-
-### ✦ Growing together does not mean growing alike
-
-Chemistry does not mean everyone eventually gives the same answer.
-
-Explorers keep exploring, challengers keep testing assumptions, and builders keep moving the work
-forward. Over time, they learn whose judgment to trust, and when.
-
-### ✦ Remember why, not every word
-
-Team memory is not an ever-growing transcript.
-
-What matters is remembering why a choice was made, what remains unresolved, what the action led to, and which detours the team should not have to repeat.
-
----
-
-## Documentation
-
-- [**User Documentation**](https://rovai.dev/docs/): English guides for teammates, collaboration, execution, and settings
-- [**Quick Start**](https://rovai.dev/docs/quickstart.html): prepare one Agent and complete your first task
-- [**Download and Install**](https://rovai.dev/docs/installation.html): downloads, first launch, and upgrade instructions
-- [**Deployment and Remote Access**](https://rovai.dev/docs/remote.html): Desktop Web, independent Server, LAN, Tailscale, and HTTPS
-- [**中文文档**](https://rovai.dev/zh/docs/): the corresponding Chinese user guides
-- [**Product Overview**](https://rovai.dev/): the workspace, teammates, and connected capabilities
-- [**Illustrated System Architecture**](docs/architecture/system-views.md): identity, collaboration, context, memory, and execution
-- [**Architecture Decisions**](docs/decisions/CURRENT.md): current architectural choices and constraints
-- [**Development Environment and Dependencies**](docs/development/environment.md): tools and environment required for local development
-
----
-
 ## Contributing
 
-[Issues](https://github.com/murray17/rovai-ai/issues) and
-[Pull Requests](https://github.com/murray17/rovai-ai/pulls) are welcome.
-
-See the [**Version Roadmap**](docs/versions/README.md) *(Chinese)* for ongoing and planned work.
-
----
+[Issues](https://github.com/murray17/rovai-ai/issues) and [pull requests](https://github.com/murray17/rovai-ai/pulls) are welcome. Include the Rovai version, host platform, and steps to reproduce when reporting a problem.
 
 ## License
 
-The [MIT License](LICENSE) allows use, modification, distribution, and commercial use.
+[MIT](https://github.com/murray17/rovai-ai/blob/main/LICENSE) — free to use, modify, distribute, and use commercially.
+
+## Community
+
+Share your workflows, ask questions, and discuss Rovai in our WeChat group.
+
+<p align="center">
+  <a href="docs/assets/readme/wechat-group.png"><img src="docs/assets/readme/wechat-group.png" alt="QR code for the Rovai WeChat group" width="320"></a><br>
+  <sub>Scan with WeChat · Click the image to view full size</sub>
+</p>
