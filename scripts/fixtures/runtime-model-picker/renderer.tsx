@@ -27,17 +27,20 @@ function Fixture(): React.JSX.Element {
   const [page, setPage] = useState('member')
   const [mode, setMode] = useState('normal')
   const [generation, setGeneration] = useState(1)
+  const [catalogExpired, setCatalogExpired] = useState(false)
   const [disabled, setDisabled] = useState(false)
-  const installation = fixture(kind, mode === 'empty' || mode === 'pending', generation, mode === 'expired-pending')
+  const installation = fixture(kind, mode === 'empty' || mode === 'pending', generation,
+    mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
   Object.assign(window, { runtimeTest: Object.assign(state, {
-    draft, kind, setDisabled,
+    draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled,
+    expireCatalog: () => setCatalogExpired(true),
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
     switchKind: (next: AdapterKind) => { setKind(next); setDraft(draftFromDefaults(fixture(next, false, generation).memberRuntimeDefaults!)) },
     reset: (nextPage = 'member', nextMode = 'normal') => {
       state.changes = 0
-      setPage(nextPage); setMode(nextMode); setGeneration(value => value + 1); setDisabled(false)
+      setPage(nextPage); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false)
       const item = fixture('codex-cli', false, 1); setKind('codex-cli')
       setDraft({ model: onboardingRuntimeSelectionFor('codex-cli', [item]).model!, permissions: item.memberRuntimeDefaults!.permissions })
     },
@@ -46,18 +49,23 @@ function Fixture(): React.JSX.Element {
   const catalog = (): Promise<RuntimeModelCatalogView> => {
     state.calls++
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))
-    const result = mode === 'expired-pending'
+    const modelsWithLowOnlyTarget = installation.snapshot!.models.map(model => model.id === 'vendor/model-1'
+      ? { ...model, options: [{ ...model.options[0], values: [{ value: 'low', label: 'Low' }] }] }
+      : model)
+    const result = mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired)
       ? {
           runtimeKind: kind,
           cache: { ...installation.modelCatalog, status: 'fresh' as const, observedAt: '2026-09-14T00:00:00Z' },
-          models: installation.snapshot!.models.map(model => model.id === 'vendor/model-1'
-            ? { ...model, options: [{ ...model.options[0], values: [{ value: 'low', label: 'Low' }] }] }
-            : model),
+          models: modelsWithLowOnlyTarget,
           refreshStatus: 'completed' as const,
           diagnosticCode: null
         }
-      : { runtimeKind: kind, cache: installation.modelCatalog, models: installation.snapshot!.models, refreshStatus: 'not_required' as const, diagnosticCode: null }
-    if (mode === 'pending' || mode === 'expired-pending') return new Promise(resolve => state.pending.push(() => resolve(result)))
+      : { runtimeKind: kind, cache: { ...installation.modelCatalog, status: mode === 'aging-pending' ? 'stale' as const : installation.modelCatalog.status },
+          models: mode === 'aging-pending' ? modelsWithLowOnlyTarget : installation.snapshot!.models,
+          refreshStatus: 'not_required' as const, diagnosticCode: null }
+    if (mode === 'pending' || mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired)) {
+      return new Promise(resolve => state.pending.push(() => resolve(result)))
+    }
     return Promise.resolve(result)
   }
   return <main style={{ height: '100%', overflow: 'auto', padding: 24 }}>
