@@ -28,20 +28,7 @@
 
 </div>
 
-<p align="center"><a href="docs/assets/readme/workspace-a2a-right.png"><img src="docs/assets/readme/workspace-a2a-right.png" alt="Cheese 在 Rovai 中将独立审查结果交回 Dingding，随后展示最终交付与已完成的英文执行步骤" width="100%"></a></p>
-
-<details>
-<summary>更多执行台布局</summary>
-
-**底部执行台**
-
-<p align="center"><a href="docs/assets/readme/workspace-a2a-bottom.png"><img src="docs/assets/readme/workspace-a2a-bottom.png" alt="底部执行台" width="100%"></a></p>
-
-**浮层执行台**
-
-<p align="center"><a href="docs/assets/readme/workspace-a2a-floating.png"><img src="docs/assets/readme/workspace-a2a-floating.png" alt="浮层执行台" width="100%"></a></p>
-
-</details>
+<p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="同时 @ 四位队员，Gugu 与 Bunny 已回复，Dingding 与 Cheese 仍在运行，右侧展示 Overview" width="100%"></a></p>
 
 ## 从第一条请求，一起做到下一次任务
 

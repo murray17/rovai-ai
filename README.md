@@ -28,20 +28,7 @@ inspect execution and file changes, and keep useful knowledge for the next task.
 
 </div>
 
-<p align="center"><a href="docs/assets/readme/workspace-a2a-right.png"><img src="docs/assets/readme/workspace-a2a-right.png" alt="Cheese hands an independent review back to Dingding through Rovai, followed by the final delivery and completed execution steps" width="100%"></a></p>
-
-<details>
-<summary>Other execution layouts</summary>
-
-**Bottom panel**
-
-<p align="center"><a href="docs/assets/readme/workspace-a2a-bottom.png"><img src="docs/assets/readme/workspace-a2a-bottom.png" alt="Bottom panel" width="100%"></a></p>
-
-**Floating panel**
-
-<p align="center"><a href="docs/assets/readme/workspace-a2a-floating.png"><img src="docs/assets/readme/workspace-a2a-floating.png" alt="Floating panel" width="100%"></a></p>
-
-</details>
+<p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="Four teammates are mentioned; Gugu and Bunny have replied while Dingding and Cheese are still running in the right-hand Overview" width="100%"></a></p>
 
 ## Work together, from the first request to the next task
 

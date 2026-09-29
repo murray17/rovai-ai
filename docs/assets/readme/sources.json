@@ -2,38 +2,23 @@
   "capturedOn": "2026-09-29",
   "appVersion": "0.4.1",
   "build": "Local macOS arm64 acceptance build; not a public release claim.",
-  "collaborationRunSourceCommit": "173ecfea650290a40e19eae276a42f5780097df6",
-  "collaboration": "Actual implementation, independent review, and final delivery in an isolated Orbit example project. The three layout captures reopen the same completed work.",
   "images": [
     {
-      "file": "workspace-a2a-right.png",
+      "file": "workspace-team-ready.png",
       "kind": "app-renderer-screenshot",
-      "sourceCommit": "9897e2b6b8c71bd72ca1f26f93a0340014120535",
-      "layout": "right",
+      "sourceCommit": "16945b9cf1cd8e9dc92b82ca8e0518b10950802a",
+      "layout": "right-overview",
       "width": 1440,
-      "height": 700,
-      "sha256": "76e66e3b42e76ce0c2c233207d22c77589f2e618698d7f3a8b28b4a3bc78b92d",
-      "edited": false
-    },
-    {
-      "file": "workspace-a2a-bottom.png",
-      "kind": "app-renderer-screenshot",
-      "sourceCommit": "9897e2b6b8c71bd72ca1f26f93a0340014120535",
-      "layout": "bottom",
-      "width": 1280,
-      "height": 1040,
-      "sha256": "0af3e8654f809944aa4b65378630d7f5eef4a5876602a75df2911881429bb7e4",
-      "edited": false
-    },
-    {
-      "file": "workspace-a2a-floating.png",
-      "kind": "app-renderer-screenshot",
-      "sourceCommit": "9897e2b6b8c71bd72ca1f26f93a0340014120535",
-      "layout": "floating",
-      "width": 1440,
-      "height": 700,
-      "sha256": "cfd87222578ca240388c834142a03fff5056867d7e4f6b04912f4f4e1e9a9a20",
-      "edited": false
+      "height": 820,
+      "sha256": "ab944dafb411e4d488ed985cb5279d028a391b6457ea12452b045a4610faecd7",
+      "edited": false,
+      "capturedAt": "2026-09-29T12:17:47.411Z",
+      "agents": {
+        "Dingding": "Codex CLI",
+        "Cheese": "Claude Code",
+        "Gugu": "Pi Coding Agent",
+        "Bunny": "Codex CLI"
+      }
     },
     {
       "file": "teammates-agents.png",
@@ -76,5 +61,6 @@
     "file": "architecture-overview.svg",
     "editableSource": "architecture-overview.mmd",
     "purpose": "User-facing overview; engineering authority remains in docs/architecture."
-  }
+  },
+  "heroCapture": "Four teammates were explicitly selected through the mention picker and received one real check-in. The captured moment contains replies from Gugu and Bunny while Dingding and Cheese are still running. Overview is pinned to the right at its supported minimum width of 420px. Messages, runtime labels, and execution states are unedited."
 }
