@@ -18,7 +18,13 @@ team chemistry and collaborative memory along the way.
 </p>
 
 <p>
-  <a href="#quick-start"><strong>Quick Start</strong></a>
+  <a href="https://rovai.dev/"><strong>Website</strong></a>
+  ·
+  <a href="https://rovai.dev/download/"><strong>Download</strong></a>
+  ·
+  <a href="https://rovai.dev/docs/"><strong>Documentation</strong></a>
+  ·
+  <a href="https://rovai.dev/docs/quickstart.html"><strong>Quick Start</strong></a>
   ·
   <a href="#see-a-team-come-together"><strong>How It Works</strong></a>
   ·
@@ -88,33 +94,6 @@ everyone is, what this journey is about, and who should speak first.
   >
 </p>
 
-<details>
-<summary><strong>🗺️ Open the map and see where the party stands</strong></summary>
-
-<br>
-
-<p align="center">
-  <a href="docs/assets/readme/camp-map.png">
-    <img
-      src="docs/assets/readme/camp-map.png"
-      alt="Rovai AI Camp map view showing members around research, review, delivery, and memory locations"
-      width="900"
-    >
-  </a>
-</p>
-
-<p align="center">
-  <sub>
-    The world map began as a spontaneous idea: if this is a shared adventure,
-    perhaps the team should have a real map to travel across.
-    Research Grove, Review Tower, Spark Workshop, and Memory Hall gradually appeared on it.
-    In the future, the map may gain more playful interactions and a few casual games
-    the members can enjoy together between missions.
-  </sub>
-</p>
-
-</details>
-
 ### How they work together
 
 <table align="center" width="900">
@@ -173,7 +152,8 @@ differences fit together.
 #### Desktop installers (recommended)
 
 Download the installer for your device from
-[GitHub Releases](https://github.com/murray17/rovai-ai/releases).
+the [official download page](https://rovai.dev/download/), which lists Desktop and Server packages separately.
+[GitHub Releases](https://github.com/murray17/rovai-ai/releases) contains all release notes and assets.
 
 | Platform | Release asset | Installation |
 |---|---|---|
@@ -184,10 +164,10 @@ Download the installer for your device from
 The Windows x64 installer is currently unsigned. Windows SmartScreen may show an unknown publisher
 warning. Download the installer only from the official Rovai AI GitHub Release.
 
-Rovai AI v0.0.2 adds manual “检查更新” in Settings → About & Updates. A found update downloads
-immediately, shows progress, and installs only after “安装并重启” is selected. The published v0.0.1
-does not contain the updater metadata or install flow, so moving from v0.0.1 to v0.0.2 remains a
-one-time manual installer upgrade; in-app upgrading starts with releases after v0.0.2.
+For first launch and release-specific upgrade instructions, see
+[Download and install](https://rovai.dev/docs/installation.html).
+To connect from a browser or install an independent Server, start with
+[Deployment and remote access](https://rovai.dev/docs/remote.html).
 
 #### Run from source (for developers)
 
@@ -304,11 +284,12 @@ What matters is remembering why a choice was made, what remains unresolved, what
 
 ## Documentation
 
-> Detailed guides are currently available in Chinese.
-
-- [**Installation Guide**](docs/guides/installation.md): downloads, first launch, and common issues
-- [**Operations Guide**](docs/guides/operations.md): configuring members, choosing a Runtime, and setting permissions
-- [**Product Showcase**](docs/product-showcase.md): collaboration workspace, members, automation, and connected capabilities
+- [**User Documentation**](https://rovai.dev/docs/): English guides for teammates, collaboration, execution, and settings
+- [**Quick Start**](https://rovai.dev/docs/quickstart.html): prepare one Agent and complete your first task
+- [**Download and Install**](https://rovai.dev/docs/installation.html): downloads, first launch, and upgrade instructions
+- [**Deployment and Remote Access**](https://rovai.dev/docs/remote.html): Desktop Web, independent Server, LAN, Tailscale, and HTTPS
+- [**中文文档**](https://rovai.dev/zh/docs/): the corresponding Chinese user guides
+- [**Product Overview**](https://rovai.dev/): the workspace, teammates, and connected capabilities
 - [**Illustrated System Architecture**](docs/architecture/system-views.md): identity, collaboration, context, memory, and execution
 - [**Architecture Decisions**](docs/decisions/CURRENT.md): current architectural choices and constraints
 - [**Development Environment and Dependencies**](docs/development/environment.md): tools and environment required for local development

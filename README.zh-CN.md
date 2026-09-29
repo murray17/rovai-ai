@@ -18,7 +18,13 @@ Rovai AI 像一座属于你的 Agent 公会，你可以招募不同性格与分�
 </p>
 
 <p>
-  <a href="#快速开始"><strong>快速开始</strong></a>
+  <a href="https://rovai.dev/zh/"><strong>官网</strong></a>
+  ·
+  <a href="https://rovai.dev/zh/download/"><strong>下载</strong></a>
+  ·
+  <a href="https://rovai.dev/zh/docs/"><strong>使用文档</strong></a>
+  ·
+  <a href="https://rovai.dev/zh/docs/quickstart.html"><strong>快速开始</strong></a>
   ·
   <a href="#看看一支队伍如何开始协作"><strong>使用指南</strong></a>
   ·
@@ -84,32 +90,6 @@ Rovai AI 像一座属于你的 Agent 公会，你可以招募不同性格与分�
   >
 </p>
 
-<details>
-<summary><strong>🗺️ 换到地图视图，看看队伍走到了哪里</strong></summary>
-
-<br>
-
-<p align="center">
-  <a href="docs/assets/readme/camp-map.png">
-    <img
-      src="docs/assets/readme/camp-map.png"
-      alt="Rovai AI Camp 地图视图，展示队员所在的探索、审阅、交付与记忆区域"
-      width="900"
-    >
-  </a>
-</p>
-
-<p align="center">
-  <sub>
-    世界地图最初只是一个偶然的灵感：既然这是一场共同历险，
-    也许队伍也应该拥有一张真正可以行走的地图。
-    于是，探索林地、审阅塔、星火工坊和记忆馆逐渐出现在了地图中。
-    未来，这里也许会出现更多有趣的地图互动，以及一些让队员在任务之外一起放松的小游戏。
-  </sub>
-</p>
-
-</details>
-
 ### 接下来，他们这样一起工作
 
 <table align="center" width="900">
@@ -166,8 +146,8 @@ Rovai AI 像一座属于你的 Agent 公会，你可以招募不同性格与分�
 
 #### 桌面安装包（推荐）
 
-请从 [GitHub Releases](https://github.com/murray17/rovai-ai/releases)
-下载与你的设备匹配的安装包。
+请从[官网下载页](https://rovai.dev/zh/download/)选择与你的设备匹配的安装包；Desktop 与 Server 分别列出。
+[GitHub Releases](https://github.com/murray17/rovai-ai/releases) 保留完整版本说明与发布文件。
 
 | 平台 | 在 Release 中选择 | 安装方式 |
 |---|---|---|
@@ -177,6 +157,9 @@ Rovai AI 像一座属于你的 Agent 公会，你可以招募不同性格与分�
 
 Windows x64 安装包当前未签名，Windows SmartScreen 可能显示“未知发布者”警告。请只从 Rovai AI 官方
 GitHub Release 下载安装包。
+
+首次启动和对应版本的升级说明见[下载与安装](https://rovai.dev/zh/docs/installation.html)。
+通过浏览器连接或安装独立 Server，请从[部署与远程访问](https://rovai.dev/zh/docs/remote.html)开始。
 
 #### 从源码运行（开发者）
 
@@ -280,9 +263,12 @@ Rovai 的设计始终保持克制，不会为了世界观增加无关流程或�
 
 ## 文档
 
-- [**安装指南**](docs/guides/installation.md)：下载安装、首次启动与常见问题
-- [**操作指南**](docs/guides/operations.md)：配置队友、选择 Runtime 与设置权限
-- [**产品展示**](docs/product-showcase.md)：协作工作台、队员管理、定时自动化与能力接入
+- [**使用文档**](https://rovai.dev/zh/docs/)：队员、会话协作、执行与设置的完整教程
+- [**快速开始**](https://rovai.dev/zh/docs/quickstart.html)：准备一种智能体，完成第一次任务
+- [**下载与安装**](https://rovai.dev/zh/docs/installation.html)：下载安装、首次启动与升级说明
+- [**部署与远程访问**](https://rovai.dev/zh/docs/remote.html)：Desktop Web、独立 Server、局域网、Tailscale 与 HTTPS
+- [**English documentation**](https://rovai.dev/docs/)：对应的英文使用文档
+- [**产品概览**](https://rovai.dev/zh/)：协作工作台、长期队员与连接能力
 - [**系统架构图解**](docs/architecture/system-views.md)：身份、协作、上下文、记忆与执行机制
 - [**架构决策**](docs/decisions/CURRENT.md)：当前有效的架构选择与约束
 - [**开发环境与依赖**](docs/development/environment.md)：本地开发所需环境与工具
