@@ -1,4 +1,4 @@
-// Published behavior: Desktop v0.4.1 / Server server-v0.4.0.
+// Published behavior: Desktop v0.4.1 / Server server-v0.4.1.
 // Capture provenance and intentionally untested network paths: website/deployment-notes.md.
 (() => {
   const {topics,groups}=window.RovaiDocs;
@@ -13,8 +13,8 @@
   const link=(id,en,zh)=>({id,label:[en,zh]});
   const ext=(url,en,zh)=>({url,label:[en,zh]});
   const T=(en,zh,e,z,sections)=>({title:[en,zh],lead:[e,z],sections});
-  const release='https://github.com/murray17/rovai-ai/releases/tag/server-v0.4.0';
-  const releaseFiles='https://github.com/murray17/rovai-ai/releases/download/server-v0.4.0/';
+  const release='https://github.com/murray17/rovai-ai/releases/tag/server-v0.4.1';
+  const releaseFiles='https://github.com/murray17/rovai-ai/releases/download/server-v0.4.1/';
   const related=ids=>L('Continue reading','接着阅读',ids.map(id=>({id,label:topics[id].title})));
   for(const group of groups)group.ids=group.ids.filter(id=>id!=='remote');
   groups.splice(groups.findIndex(g=>g.ids.includes('compatibility')),0,{
@@ -32,7 +32,7 @@
       'First choose Desktop Web or a separate Server. Then choose a trusted LAN, a private Tailscale connection or a public HTTPS entrance supported by that release.',
       '先选 Desktop Web 或独立 Server，再选可信局域网、Tailscale 私网或该版本支持的公网 HTTPS 入口。'),
     TB('Two deployment forms','两种部署形态',
-      ['Capability','Desktop Web · 0.4.1','Standalone Server · 0.4.0'],['能力','Desktop Web · 0.4.1','独立 Server · 0.4.0'],[
+      ['Capability','Desktop Web · 0.4.1','Standalone Server · 0.4.1'],['能力','Desktop Web · 0.4.1','独立 Server · 0.4.1'],[
         ['Start / default port','Settings → Remote connection; 8766','Command line; 8767'],
         ['Data and projects','The running Desktop instance and its host files','Its own data directory and host project files'],
         ['Agents','Installed and signed in as the Desktop host user','Installed and signed in as the Server process user'],
@@ -65,8 +65,8 @@
         ['公网 HTTPS','希望普通浏览器通过固定域名访问','可达的 Server 主机、域名、HTTPS 反向代理与 Owner 登录']
       ]),
     P('Match the recipe to your release','按版本选择教程',
-      ['These are network arrangements, not three built-in switches. Tailscale and the reverse proxy are configured outside Rovai. Before choosing Server 0.4.0 for Agent work, read the installation page: the macOS arm64 package tested for this guide is blocked by missing bundled Skill resources.', 'Desktop 0.4.1 offers a Web toggle and port, but no public-origin setting. Use its LAN address or its host’s Tailscale interface address. The complete Serve HTTPS and public HTTPS recipes in this group use Server 0.4.0; do not paste Server flags into Desktop.', 'This is a single-owner workspace. A login Token grants access to that instance; publishing an HTTPS address does not create separate accounts or project-level roles.'],
-      ['这三种方式是网络方案，不是 App 内三个一键开关。Tailscale 和反向代理需要在 Rovai 外配置。选择 Server 0.4.0 执行智能体工作前，先读安装页：本教程实测的 macOS arm64 包因缺少 bundled Skill 资源而阻塞执行。','Desktop 0.4.1 提供 Web 开关和端口，没有公共来源设置。可使用局域网地址或主机的 Tailscale 网卡地址。本组完整的 Serve HTTPS、公网 HTTPS 配方使用 Server 0.4.0，不要把 Server 参数套到 Desktop。','这是单 Owner 工作台。登录 Token 用于访问对应实例；开放 HTTPS 地址不会自动建立多人账号或项目级权限。']),
+      ['These are network arrangements, not three built-in switches. Tailscale and the reverse proxy are configured outside Rovai. Use Server 0.4.1 for the complete Serve HTTPS and public HTTPS recipes in this group.', 'Desktop 0.4.1 offers a Web toggle and port, but no public-origin setting. Use its LAN address or its host’s Tailscale interface address; do not paste Server flags into Desktop.', 'This is a single-owner workspace. A login Token grants access to that instance; publishing an HTTPS address does not create separate accounts or project-level roles.'],
+      ['这三种方式是网络方案，不是 App 内三个一键开关。Tailscale 和反向代理需要在 Rovai 外配置。本组完整的 Serve HTTPS、公网 HTTPS 配方使用 Server 0.4.1。','Desktop 0.4.1 提供 Web 开关和端口，没有公共来源设置。可使用局域网地址或主机的 Tailscale 网卡地址；不要把 Server 参数套到 Desktop。','这是单 Owner 工作台。登录 Token 用于访问对应实例；开放 HTTPS 地址不会自动建立多人账号或项目级权限。']),
     L('Start here','从这里开始',[
       link('desktop-web','Continue an existing Desktop conversation','继续已有桌面会话'),
       link('server-install','Install on a separate host','在独立主机安装 Server'),
@@ -109,26 +109,26 @@
   topics['server-install']=T('Install and run Rovai Server','安装与启动 Rovai Server',
     'Install the published native package, start one independent workspace, and open it in a browser. No source build is required.',
     '安装已发布的原生包，启动独立工作台，再从浏览器进入。普通安装不需要源码构建。',[
-    P('Known issue in the published macOS arm64 0.4.0 package','已发布 macOS arm64 0.4.0 包的已知问题',
-      ['The package tested on 2026-09-29 can start and accept browser login when launched from current/rovai-server, but a real first request fails with “bundled Skill resources are unavailable”. The release archive does not contain the required bundled Skill resources. Installing a different Agent does not fix this package issue.', 'Use this guide to understand installation and connectivity, but do not rely on that package for completed Agent work until a corrected release is available. Desktop Web is the currently demonstrated alternative. Other OS packages were not execution-tested in this documentation pass.'],
-      ['2026-09-29 实测：从 current/rovai-server 启动后可以进入浏览器工作台，但真实首次请求报“bundled Skill resources are unavailable”。发布归档没有包含所需 bundled Skill 资源；更换智能体不能解决这个包问题。','本页仍说明安装与连接操作；修正版发布前，不应依赖这个包完成智能体工作。可采用已演示的 Desktop Web 路径。本轮没有对其他系统包进行真实执行验收。']),
+    P('Server 0.4.1 bridge release','Server 0.4.1 桥接版',
+      ['This release includes the bundled Skill resources missing from 0.4.0 and fixes startup through the installed command link. The earlier macOS arm64 0.4.0 first-request failure remains documented in the historical capture below.', 'The package and operating-system checks do not qualify every coding Agent or model. Check the compatibility guide and verify your chosen Agent with a small request.'],
+      ['此版补齐 0.4.0 缺失的内置 Skill 资源，也修复从已安装命令链接启动的问题。之前 macOS arm64 0.4.0 的首次请求失败仍保留在下方历史截图中。','安装包及系统验收不等于每个编程智能体或模型都已通过资格验收。请参考兼容性说明，并用小请求验证自己的智能体。']),
     P('Use the Server release','选择 Server 发布版',
-      ['This guide uses Server 0.4.0 (tag server-v0.4.0), independently of Desktop 0.4.1. Use the Server assets from that tag, including its installer script and SHA256SUMS.', 'The package contains the host and matching Web UI. Keep them together. Running the host itself does not require Electron, Node, Rust or pnpm. Each coding Agent has its own installation and authentication requirements.'],
-      ['本教程使用 Server 0.4.0（标签 server-v0.4.0），与 Desktop 0.4.1 分别发布。使用这个 Server 标签下的安装包、安装脚本及 SHA256SUMS。','包内包含服务程序和匹配的 Web 界面，必须保持完整。运行 Host 本身不依赖 Electron、Node、Rust 或 pnpm；编程智能体仍有各自的安装和认证要求。']),
+      ['This guide uses Server 0.4.1 (tag server-v0.4.1), independently of Desktop 0.4.1. Use the Server assets from that tag, including its installer script and SHA256SUMS.', 'The package contains the host, matching Web UI and bundled Skills. Keep them together. Running the host itself does not require Electron, Node, Rust or pnpm. Each coding Agent has its own installation and authentication requirements.'],
+      ['本教程使用 Server 0.4.1（标签 server-v0.4.1），与 Desktop 0.4.1 分别发布。使用这个 Server 标签下的安装包、安装脚本及 SHA256SUMS。','包内包含服务程序、匹配的 Web 界面和内置 Skill，必须保持完整。运行 Host 本身不依赖 Electron、Node、Rust 或 pnpm；编程智能体仍有各自的安装和认证要求。']),
     TB('Choose your host package','选择主机安装包',
       ['Host','Asset','Requirements / boundary'],['主机','安装包','条件与边界'],[
-        ['macOS Apple Silicon','rovai-server-0.4.0-macos-arm64.tar.gz','Apple Silicon; use the 0.4.0 launch-path workaround below'],
-        ['macOS Intel','rovai-server-0.4.0-macos-x64.tar.gz','Intel x64; same package layout'],
-        ['Linux x64 GNU','rovai-server-0.4.0-linux-x64.tar.gz','glibc 2.35 baseline; Ubuntu 22.04+ / Debian 12+; no ARM64 or Alpine/musl package'],
-        ['Windows x64','rovai-server-0.4.0-windows-x64.zip','x64 Visual C++ v14 Runtime; installer does not add that system component']
+        ['macOS Apple Silicon','rovai-server-0.4.1-macos-arm64.tar.gz','Apple Silicon'],
+        ['macOS Intel','rovai-server-0.4.1-macos-x64.tar.gz','Intel x64'],
+        ['Linux x64 GNU','rovai-server-0.4.1-linux-x64.tar.gz','glibc 2.35 baseline; Ubuntu 22.04+ / Debian 12+; no ARM64 or Alpine/musl package'],
+        ['Windows x64','rovai-server-0.4.1-windows-x64.zip','x64 Visual C++ v14 Runtime; installer does not add that system component']
       ],[
-        ['macOS Apple 芯片','rovai-server-0.4.0-macos-arm64.tar.gz','Apple Silicon；0.4.0 使用下方启动路径处理办法'],
-        ['macOS Intel','rovai-server-0.4.0-macos-x64.tar.gz','Intel x64；包结构相同'],
-        ['Linux x64 GNU','rovai-server-0.4.0-linux-x64.tar.gz','glibc 2.35 基线；Ubuntu 22.04+ / Debian 12+；无 ARM64 或 Alpine/musl 包'],
-        ['Windows x64','rovai-server-0.4.0-windows-x64.zip','需要 x64 Visual C++ v14 Runtime；安装器不代装该系统组件']
+        ['macOS Apple 芯片','rovai-server-0.4.1-macos-arm64.tar.gz','Apple Silicon'],
+        ['macOS Intel','rovai-server-0.4.1-macos-x64.tar.gz','Intel x64'],
+        ['Linux x64 GNU','rovai-server-0.4.1-linux-x64.tar.gz','glibc 2.35 基线；Ubuntu 22.04+ / Debian 12+；无 ARM64 或 Alpine/musl 包'],
+        ['Windows x64','rovai-server-0.4.1-windows-x64.zip','需要 x64 Visual C++ v14 Runtime；安装器不代装该系统组件']
       ]),
     L('Get the files and prerequisites','获取文件与前置依赖',[
-      ext(release,'Server 0.4.0 release and all assets','Server 0.4.0 发布说明与全部附件'),
+      ext(release,'Server 0.4.1 release and all assets','Server 0.4.1 发布说明与全部附件'),
       ext('https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist','Microsoft Visual C++ Redistributable','Microsoft Visual C++ 可再发行组件'),
       link('compatibility','Agent availability and platform support','智能体可用性与平台支持')]),
     S('Prepare one ordinary host account','准备一个普通主机账号',
@@ -136,21 +136,21 @@
       ['使用一个普通系统账号运行 Server 和智能体。在同一账号下安装并登录智能体，不要为解决 CLI 找不到而改用 root 启动 Rovai。','项目放在这个账号可以读取、按需要写入的主机目录。浏览器设备的文件夹不会自动挂载到主机。','选择长期保留、没有符号链接路径组件的绝对数据目录。默认是进程账号主目录下的 ~/.rovai-server；程序文件和项目文件另存。','确认端口空闲。先用 127.0.0.1:8767 完成本机检查，再按后续连接教程让其他设备可达。']),
     C('macOS / Linux · download the installer','macOS / Linux · 下载安装器',
 `curl -fL '${releaseFiles}install-server.sh' -o install-server.sh
-sh install-server.sh --version 0.4.0`),
+sh install-server.sh --version 0.4.1`),
     P('What the Unix installer changes','Unix 安装器做了什么',
       ['Run these commands in a working folder. curl is needed to download; the shell installer uses standard archive and SHA-256 utilities. Read the downloaded script if your host has an installation review policy.', 'The default program directory is ~/.local/share/rovai-server, with versioned revisions and a current link. The command link is ~/.local/bin/rovai-server. The installer verifies the selected archive against the same release’s SHA256SUMS and adds guarded PATH entries to common shell profiles. Open a new terminal to pick them up.', 'It does not install a system service, install an Agent, or move Desktop data. For an offline host, download the matching archive and SHA256SUMS from the same tag on another device, transfer them together, and use --from-dir /absolute/release-folder. --prefix and --bin-dir customize the program and command directories.'],
       ['在一个工作文件夹中运行命令。下载需要 curl，脚本使用系统常见的解包与 SHA-256 工具；主机有安装审查要求时先阅读下载的脚本。','默认程序目录为 ~/.local/share/rovai-server，内含按版本保留的 revisions 和 current 链接；命令链接位于 ~/.local/bin/rovai-server。安装器用同一 Release 的 SHA256SUMS 校验选中归档，并向常用 shell 配置添加有保护的 PATH 项；新开终端使其生效。','安装器不会建立系统服务、安装智能体或迁移 Desktop 数据。离线安装时，在另一设备下载同一标签的匹配归档与 SHA256SUMS，一起传入，再使用 --from-dir /绝对路径/发布文件夹。--prefix 与 --bin-dir 分别指定程序和命令目录。']),
     C('Windows · install from PowerShell','Windows · 从 PowerShell 安装',
 `Invoke-WebRequest '${releaseFiles}install-server.ps1' -OutFile install-server.ps1
-.\u005cinstall-server.ps1 -Version 0.4.0`),
+.\u005cinstall-server.ps1 -Version 0.4.1`),
     P('Windows program location','Windows 程序位置',
       ['The installer places the package in %LOCALAPPDATA%\\Programs\\RovaiServer\\current and adds it to the user PATH. Open a new PowerShell window, then run rovai-server --version. Use -InstallDirectory to select another program root or -FromDirectory for local release files.', 'If the command reports a missing VCRUNTIME140.dll, install Microsoft’s x64 v14 runtime first. If your organization blocks scripts, follow its approved script policy; changing the machine-wide execution policy is not part of this guide.'],
       ['程序默认放在 %LOCALAPPDATA%\\Programs\\RovaiServer\\current，并加入用户 PATH。新开 PowerShell，运行 rovai-server --version。-InstallDirectory 可指定程序根目录，-FromDirectory 可使用本地发布文件。','若提示缺少 VCRUNTIME140.dll，先安装 Microsoft 的 x64 v14 组件。如果组织策略阻止脚本，按组织批准的方式执行；本教程不要求更改整机脚本策略。']),
-    P('macOS 0.4.0 · launch from the program directory','macOS 0.4.0 · 从程序目录启动',
-      ['In the macOS arm64 package tested for this guide, the installer’s ~/.local/bin shortcut can report “Matching WebUI is missing” at startup. The program locates web-ui next to its executable; the shortcut path can resolve to the wrong parent. Start the executable inside current instead. This is a release-specific workaround, not a reason to rebuild or move web-ui into your bin folder.', 'The examples below use the default installation. If you selected --prefix, substitute that program directory. Keep the complete release package together.'],
-      ['本教程实测的 macOS arm64 0.4.0 包，通过 ~/.local/bin 快捷命令启动时可能出现“Matching WebUI is missing”。程序寻找相邻 web-ui 时，快捷链接路径可能指向错误的父目录。请直接启动 current 内的程序。这是该版本的兼容处理，无需重新构建，也不要把 web-ui 搬到 bin 目录。','下方按默认安装目录书写；若使用 --prefix，替换为自己的程序目录，并保留完整发布包。']),
+    P('Upgrading a macOS 0.4.0 installation','升级 macOS 0.4.0 安装',
+      ['The earlier macOS arm64 package could miss Web UI when launched through ~/.local/bin/rovai-server. Install 0.4.1 over that program directory, keeping the same data directory. The ordinary rovai-server command should then locate its package resources.', 'If you cannot upgrade yet, launch the old current/rovai-server directly for access to existing data. Its missing bundled Skills still prevent Agent work.'],
+      ['早期 macOS arm64 包通过 ~/.local/bin/rovai-server 启动时可能找不到 Web 界面。把 0.4.1 安装到原程序目录，保留原数据目录；之后普通 rovai-server 命令应能找到包内资源。','暂时无法升级时，可直接启动旧版 current/rovai-server 查看原数据，但缺少内置 Skill 仍会阻碍智能体执行。']),
     C('First start · macOS','首次启动 · macOS',
-`"$HOME/.local/share/rovai-server/current/rovai-server" \\
+`rovai-server \\
   --data-dir "$HOME/.rovai-server" \\
   --listen 127.0.0.1:8767`),
     C('First start · Linux','首次启动 · Linux',
@@ -158,21 +158,18 @@ sh install-server.sh --version 0.4.0`),
     C('First start · Windows PowerShell','首次启动 · Windows PowerShell',
 `rovai-server --data-dir "$HOME/.rovai-server" --listen 127.0.0.1:8767`),
     S('Log in and prepare the workspace','登录并准备工作环境',
-      ['Keep the terminal open. Wait for Ready and read the address and data directory in the startup summary. A local browser opens http://127.0.0.1:8767/.', 'Use the login Token displayed in an interactive startup terminal. When output is redirected or a service manager starts the process, use the token command in a separate terminal with the same --data-dir.', 'After login, check the Agent/Runtime settings on the Server host. Server 0.4.0 still uses some Runtime labels; newer Desktop UI calls them Agents. A browser login does not authenticate the Agent.', 'Create or configure a teammate, select a host project directory, create a conversation and send a small read-only request. Open the execution record and compare the answer with actual files.', 'To stop a foreground Server, press Ctrl-C and wait for it to exit. Starting again with the same account and data directory reopens the same workspace.'],
-      ['保持终端打开，等启动摘要出现 Ready，并检查地址与数据目录。本机浏览器打开 http://127.0.0.1:8767/。','使用交互式启动终端显示的登录 Token。输出被重定向或由服务管理器启动时，在另一终端用相同 --data-dir 运行 token 命令。','登录后检查 Server 主机的智能体 / Runtime 设置。Server 0.4.0 的部分界面仍称 Runtime，新版 Desktop 称智能体。浏览器登录不等于完成智能体认证。','创建或配置一位队员，选择主机项目目录，新建会话，发送一个小的只读请求。打开执行记录，对照实际文件核对回答。','前台运行时按 Ctrl-C，等待进程退出。用同一账号、同一数据目录再次启动，会重新打开原工作台。']),
+      ['Keep the terminal open. Wait for Ready and read the address and data directory in the startup summary. A local browser opens http://127.0.0.1:8767/.', 'Use the login Token displayed in an interactive startup terminal. When output is redirected or a service manager starts the process, use the token command in a separate terminal with the same --data-dir.', 'After login, check the Agent/Runtime settings on the Server host. A browser login does not authenticate the Agent.', 'Create or configure a teammate, select a host project directory, create a conversation and send a small read-only request. Open the execution record and compare the answer with actual files.', 'To stop a foreground Server, press Ctrl-C and wait for it to exit. Starting again with the same account and data directory reopens the same workspace.'],
+      ['保持终端打开，等启动摘要出现 Ready，并检查地址与数据目录。本机浏览器打开 http://127.0.0.1:8767/。','使用交互式启动终端显示的登录 Token。输出被重定向或由服务管理器启动时，在另一终端用相同 --data-dir 运行 token 命令。','登录后检查 Server 主机的智能体 / Runtime 设置。浏览器登录不等于完成智能体认证。','创建或配置一位队员，选择主机项目目录，新建会话，发送一个小的只读请求。打开执行记录，对照实际文件核对回答。','前台运行时按 Ctrl-C，等待进程退出。用同一账号、同一数据目录再次启动，会重新打开原工作台。']),
     C('Read the Token · Linux / Windows','获取 Token · Linux / Windows',
 `rovai-server --data-dir "$HOME/.rovai-server" token`),
-    C('Read the Token · macOS 0.4.0','获取 Token · macOS 0.4.0',
-`"$HOME/.local/share/rovai-server/current/rovai-server" --data-dir "$HOME/.rovai-server" token`),
+    C('Read the Token · macOS','获取 Token · macOS',
+`rovai-server --data-dir "$HOME/.rovai-server" token`),
     I('Browser login','浏览器登录','server-login-zh.jpg',
-      'The actual Server 0.4.0 login screen before credentials are entered. This release’s Web UI is Chinese. Use this Server’s Token, not Desktop’s.',
-      '实际 Server 0.4.0 登录页，尚未填写凭据。应使用本 Server 实例的 Token，不能混用 Desktop 凭据。'),
-    I('An actual first request and its blocker','真实首次请求及遇到的阻碍','server-orbit-zh.jpg',
-      'Orbit in the isolated Server 0.4.0 workspace. The submitted request failed before Agent launch because bundled Skill resources were unavailable. This is an actual failure, not a completed review; the release’s Web UI is Chinese.',
-      '隔离 Server 0.4.0 工作台中的 Orbit 项目。真实请求在智能体启动前因缺少 bundled Skill 资源而失败；这不是已完成的审查。'),
-    P('What these examples verify','这组示例验证了什么',
-      ['The package install, local browser login, host-project conversation, failed first execution and normal stop/restart were checked on macOS arm64. Package availability for other platforms is listed above; this capture is not a Windows/Linux acceptance run or a physical phone connectivity test.', 'Agent support is separate from host package availability. In particular, Linux Agent entries retain their own preview/qualification status. Use the compatibility guide before relying on a particular Agent.'],
-      ['本组在 macOS arm64 检查了包安装、本机浏览器登录、主机项目会话、首次执行失败和正常停止后重开。上表列出的其他平台有公开安装包，但本次截图不是 Windows / Linux 验收，也不是实体手机联网测试。','智能体支持与 Host 安装包可用性分别判断，尤其 Linux 智能体仍保留各自的预览 / 验收状态。依赖具体智能体前，先阅读兼容性说明。']),
+      'Historical Server 0.4.0 login screen before credentials are entered. That Web UI is Chinese. Use this Server’s Token, not Desktop’s.',
+      '历史 Server 0.4.0 登录页，尚未填写凭据。应使用本 Server 实例的 Token，不能混用 Desktop 凭据。'),
+    P('What this example verifies','这组示例验证了什么',
+      ['The login screenshot is a historical 0.4.0 browser capture; it illustrates the login flow, not the 0.4.1 interface or a completed Agent request. The 0.4.1 package checks cover its native archive, bundled Skills and browser lifecycle. They do not prove every Agent or a physical phone connection.', 'Agent support is separate from host package availability. In particular, Linux Agent entries retain their own preview/qualification status. Use the compatibility guide before relying on a particular Agent.'],
+      ['登录截图取自历史 0.4.0 浏览器流程，只用于说明登录，不代表 0.4.1 界面或智能体执行结果。0.4.1 包验收覆盖原生归档、内置 Skill 和浏览器生命周期，不代表每个智能体或实体手机连接均通过。','智能体支持与 Host 安装包可用性分别判断，尤其 Linux 智能体仍保留各自的预览 / 验收状态。依赖具体智能体前，先阅读兼容性说明。']),
     L('Source builds are a separate workflow','源码构建另见开发流程',[
       ext('https://github.com/murray17/rovai-ai/blob/main/docs/development/server-preview.md','Build and validate Server from source','从源码构建与验收 Server')])
   ]);
@@ -255,8 +252,8 @@ tailscale serve status`),
     'Give standalone Server one HTTPS domain using Caddy on a Linux host. Keep the backend on loopback and retain owner login.',
     '在 Linux 主机用 Caddy 为独立 Server 提供一个 HTTPS 域名；后端保持回环监听，保留 Owner 登录。',[
     P('The example deployment','本例部署条件',
-      ['This recipe uses Server 0.4.0 and Caddy on Ubuntu/Debian, on the same reachable host. It assumes you control the host, its firewall and a domain. It is a configuration example; the documentation capture did not publish a live public service.', 'Replace agent.example.com and 203.0.113.10 with your own service domain and host IP. They are reserved examples. Do not reuse the Rovai website’s domain or change its DNS to follow this tutorial.', 'Desktop 0.4.1 lacks a public-origin field in its settings. Use the Server installation for this recipe. Use the root of a dedicated hostname; serving Rovai under /rovai/ is not this configuration.'],
-      ['本例在同一台可达 Ubuntu / Debian 主机上运行 Server 0.4.0 与 Caddy，要求你拥有主机、防火墙及一个域名的管理权。这是配置示例；本次文档采集没有对外发布真实公网服务。','把 agent.example.com 和 203.0.113.10 替换为自己的服务域名和主机 IP，它们是保留示例值。不要借用 Rovai 官网域名，也不要修改官网 DNS 来跟随本教程。','Desktop 0.4.1 设置没有公共来源字段，本配方使用独立 Server。使用独立主机名的根路径，不是部署在 /rovai/ 子路径。']),
+      ['This recipe uses Server 0.4.1 and Caddy on Ubuntu/Debian, on the same reachable host. It assumes you control the host, its firewall and a domain. It is a configuration example; the documentation capture did not publish a live public service.', 'Replace agent.example.com and 203.0.113.10 with your own service domain and host IP. They are reserved examples. Do not reuse the Rovai website’s domain or change its DNS to follow this tutorial.', 'Desktop 0.4.1 lacks a public-origin field in its settings. Use the Server installation for this recipe. Use the root of a dedicated hostname; serving Rovai under /rovai/ is not this configuration.'],
+      ['本例在同一台可达 Ubuntu / Debian 主机上运行 Server 0.4.1 与 Caddy，要求你拥有主机、防火墙及一个域名的管理权。这是配置示例；本次文档采集没有对外发布真实公网服务。','把 agent.example.com 和 203.0.113.10 替换为自己的服务域名和主机 IP，它们是保留示例值。不要借用 Rovai 官网域名，也不要修改官网 DNS 来跟随本教程。','Desktop 0.4.1 设置没有公共来源字段，本配方使用独立 Server。使用独立主机名的根路径，不是部署在 /rovai/ 子路径。']),
     D('Public address versus backend address','公网地址与后端地址','deployment-https',
       'The browser reaches agent.example.com over HTTPS 443. Caddy terminates TLS and forwards locally over HTTP to 127.0.0.1:8767. The backend is never an Internet-facing port.',
       '浏览器通过 HTTPS 443 连接 agent.example.com。Caddy 终止 TLS，再通过本机 HTTP 转发到 127.0.0.1:8767；后端端口不向互联网开放。'),
@@ -314,15 +311,15 @@ sudo systemctl status caddy --no-pager`),
     F('Token, browser session and instance','Token、浏览器会话与实例',[
       ['Login Token','登录 Token','The instance’s owner credential. Enter it only in that instance’s login form. A Desktop Token comes from Remote connection; a Server Token comes from its terminal or token command with the same data directory.','实例的 Owner 凭据，只填写在对应实例的登录页。Desktop 从远程连接获取；Server 从启动终端或相同数据目录的 token 命令获取。'],
       ['Browser session','浏览器会话','Login creates a browser session for this origin. Another browser, changed origin or an expired session can require login again. Browser credentials are separate from Agent authentication.','登录后建立对应来源的浏览器会话。换浏览器、换来源或会话过期时可能需要重新登录；它与智能体认证无关。'],
-      ['Server restart','Server 重启','Server 0.4.0 persists authentication state in its data directory. Reuse that root; a different root means a different instance and credential. A session can still expire.','Server 0.4.0 把认证状态保存在数据目录。继续使用原根目录；换目录意味着另一个实例和凭据。浏览器会话仍可能到期。'],
+      ['Server restart','Server 重启','Server 0.4.1 persists authentication state in its data directory. Reuse that root; a different root means a different instance and credential. A session can still expire.','Server 0.4.1 把认证状态保存在数据目录。继续使用原根目录；换目录意味着另一个实例和凭据。浏览器会话仍可能到期。'],
       ['Desktop restart','Desktop 重启','Desktop Web must be enabled again after the App restarts. Get the current Token from the running Desktop rather than assuming an older saved credential remains valid.','App 重启后需要重新开启 Desktop Web。从正在运行的 Desktop 获取当前 Token，不要假定以前保存的凭据仍有效。'],
       ['Scope','权限范围','This release is a single-owner instance. Do not share the Token as if it were a limited project invitation. HTTPS or Tailscale protects the route, not separate user roles.','当前发布版是单 Owner 实例，不要把 Token 当成某个项目的受限邀请。HTTPS 或 Tailscale 保护连接，不提供独立用户角色。']]),
     C('Read paths and Token · same data directory','查看路径与 Token · 使用同一数据目录',
 `rovai-server --data-dir "$HOME/.rovai-server" paths
 rovai-server --data-dir "$HOME/.rovai-server" token`),
     P('Keep credentials private','私下保管凭据',
-      ['On macOS 0.4.0 use the full current/rovai-server path described in Install Server. The paths command reports locations; token prints a secret. Do not paste that output into an issue, a screenshot or a shared terminal recording.', 'There is no documented rotate-token command in Server 0.4.0. If a credential is exposed, close the reachable entrance first and seek recovery guidance for that release. Do not delete the database or invent a token flag.'],
-      ['macOS 0.4.0 使用安装页的 current/rovai-server 完整路径。paths 显示位置，token 输出秘密凭据；不要把输出贴入 Issue、截图或共享终端录屏。','Server 0.4.0 没有公开的 rotate-token 命令。凭据泄露时先关闭可达入口，再按该版本寻求恢复指导；不要删除数据库或尝试虚构参数。']),
+      ['On macOS 0.4.0 use the full current/rovai-server path described in Install Server. The paths command reports locations; token prints a secret. Do not paste that output into an issue, a screenshot or a shared terminal recording.', 'There is no documented rotate-token command in Server 0.4.1. If a credential is exposed, close the reachable entrance first and seek recovery guidance for that release. Do not delete the database or invent a token flag.'],
+      ['macOS 0.4.0 使用安装页的 current/rovai-server 完整路径。paths 显示位置，token 输出秘密凭据；不要把输出贴入 Issue、截图或共享终端录屏。','Server 0.4.1 没有公开的 rotate-token 命令。凭据泄露时先关闭可达入口，再按该版本寻求恢复指导；不要删除数据库或尝试虚构参数。']),
     P('Browser connection is not task state','浏览器连接状态不等于任务状态',
       ['A closed tab, lost Wi-Fi connection or proxy restart can disconnect the view while an accepted request continues on the host. Reconnect to the same instance and conversation, then inspect the Run, pending approvals and Files before repeating a request.', 'Stopping Server, quitting Desktop, host shutdown or sleep is different: it affects the execution host. Previously written files are not rolled back by stopping a process. After restart, read the recorded outcome and current files; send only the remaining work.'],
       ['关闭标签页、Wi-Fi 断开或代理重启可能只中断画面，已接收请求仍在主机上继续。重新连接同一实例、同一会话，查看执行、待审批事项和文件，再决定是否重复请求。','停止 Server、退出 Desktop、关机或休眠会影响执行主机。停止进程不会回滚已经写入的文件。重启后结合记录结果与当前文件，只发尚未完成的工作。']),
@@ -382,7 +379,7 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/dev.rovai.server.
     F('Logs and update procedure','日志与更新步骤',[
       ['Server log','Server 日志','<data-dir>/logs/server.log. --verbose adds diagnostic output to the terminal. Service manager logs explain launch/account/path failures; the Rovai log explains host behavior.','<data-dir>/logs/server.log。--verbose 增加终端诊断输出。服务管理器日志排查启动、账号、路径问题，Rovai 日志排查 Host 行为。'],
       ['Before updating','更新前','Read the Server release notes, finish or stop active work, stop the exact Server process and its startup manager, then back up the data root and project files. Record version and launch flags.','先读 Server 发布说明，完成或停止当前工作，停止对应进程及启动管理器，备份数据根目录与项目文件，记录版本和启动参数。'],
-      ['Install the next version','安装新版本','Run that release’s installer with its explicit version. Preserve the existing data directory. On Windows, the installer does not stop the running executable for you. There is no rovai-server upgrade command in 0.4.0.','用目标 Release 安装器及明确版本重新安装，保留原数据目录。Windows 安装器不会替你停止正在运行的程序。0.4.0 没有 rovai-server upgrade 命令。'],
+      ['Install the next version','安装新版本','Run that release’s installer with its explicit version. Preserve the existing data directory. On Windows, the installer does not stop the running executable for you. There is no rovai-server upgrade command in 0.4.1.','用目标 Release 安装器及明确版本重新安装，保留原数据目录。Windows 安装器不会替你停止正在运行的程序。0.4.1 没有 rovai-server upgrade 命令。'],
       ['After updating','更新后','Restart the same instance and confirm version, login, teammate configuration, project path and an existing conversation. Desktop’s update mechanism does not update a separately installed Server.','重启同一实例，确认版本、登录、队员配置、项目路径及原会话。Desktop 的升级机制不会更新独立安装的 Server。']]),
     P('Save and back up the right files','保存与备份哪些内容',
       ['Program revisions are not a backup of workspace data. Stop the instance and copy its whole data directory, including its database, authentication state, managed skills and configuration. Protect the backup like a credential; it can contain private conversations and usable authentication material.', 'Back up project directories separately, including uncommitted files. Agent sign-in/configuration may live outside Rovai’s root, and source attachments can refer to external paths. A database-only copy does not preserve all of these.', 'For a rollback, retain a stopped pre-update data snapshot and the corresponding package. Restoring files in place at the same absolute data root is the conservative recovery path; do not promise that an older binary accepts a migrated database. Copying a data root to a different path or host is not a documented automatic migration.', 'Check a recovery plan on an isolated copy before relying on it. Do not run two hosts against one live data root or delete instance lock/identity files to bypass a refusal.'],
@@ -393,7 +390,7 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/dev.rovai.server.
       ['Agent unavailable after login','登录后智能体不可用','Check the process account, service PATH, Agent installation, native sign-in and model access on the host. Installing an Agent on the phone will not help the host.','检查主机进程账号、服务 PATH、智能体安装、原生登录与模型权限。把智能体装在手机上不能解决主机问题。'],
       ['Service stops with terminal','关闭终端后服务停止','You ran it in the foreground. Configure one OS startup method above; keep the same data root and inspect its logs.','当前是前台运行。按上文配置一种系统启动方式，使用原数据根目录并检查日志。'],
       ['Browser dropped during a request','请求途中浏览器掉线','Reopen the same conversation and inspect the existing Run before resending. A disconnected view does not tell you whether execution finished.','重新进入原会话查看原执行，再决定是否重发。画面断线不能说明执行是否完成。'],
-      ['Bundled Skill resources unavailable','提示 bundled Skill resources are unavailable','Observed before Agent launch in the published macOS arm64 0.4.0 package. Its required bundled resources are missing. Keep the data, avoid repeated execution, and use Desktop Web or wait for a corrected package; see Install Server.','已在公开 macOS arm64 0.4.0 包的智能体启动前复现，包缺少所需内置资源。保留数据，不要反复重试；使用 Desktop Web 或等待修正版，详见安装页。'],
+      ['Bundled Skill resources unavailable','提示 bundled Skill resources are unavailable','Observed before Agent launch in the published macOS arm64 0.4.0 package. Its required bundled resources are missing. Keep the data and install Server 0.4.1 from its release; see Install Server.','已在公开 macOS arm64 0.4.0 包的智能体启动前复现，包缺少所需内置资源。保留数据，按安装页升级到 Server 0.4.1。'],
       ['Matching WebUI is missing','提示 Matching WebUI is missing','Keep the full package together. On macOS 0.4.0 launch current/rovai-server directly, as shown in Install Server.','保留完整发布包。macOS 0.4.0 按安装页直接启动 current/rovai-server。'],
       ['Symlink or root-lock refusal','符号链接或根目录锁拒绝','Use a real absolute data directory; on macOS /tmp is a symlink, so use its canonical /private/tmp path for a disposable fixture. A root lock means another live process may own the instance.','使用真实绝对数据路径。macOS /tmp 是符号链接，临时夹具应使用其规范 /private/tmp 路径。根目录锁表示可能有另一个运行进程持有实例。']])
   ]);
@@ -413,6 +410,6 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/dev.rovai.server.
   topics.quickstart.sections.push(related(['remote','server-install']));
   topics.installation.sections.push(related(['server-install','remote']));
   topics.compatibility.sections.push(P('Server packages and Agent qualification','Server 包与智能体验收分别判断',
-    ['Server 0.4.0 has public packages for macOS arm64/x64, Windows x64 and Linux x64 GNU. The Server installation guide lists prerequisites. A package being available does not certify every Agent or model on that OS; Linux Agent support retains its per-adapter preview/qualification boundary.'],
-    ['Server 0.4.0 已有 macOS arm64 / x64、Windows x64、Linux x64 GNU 公开包，依赖见 Server 安装页。安装包可用不等于该系统所有智能体或模型均已验收；Linux 智能体仍按具体适配项保留预览 / 资格边界。']),related(['server-install']));
+    ['Server 0.4.1 has public packages for macOS arm64/x64, Windows x64 and Linux x64 GNU. The Server installation guide lists prerequisites. A package being available does not certify every Agent or model on that OS; Linux Agent support retains its per-adapter preview/qualification boundary.'],
+    ['Server 0.4.1 已有 macOS arm64 / x64、Windows x64、Linux x64 GNU 公开包，依赖见 Server 安装页。安装包可用不等于该系统所有智能体或模型均已验收；Linux 智能体仍按具体适配项保留预览 / 资格边界。']),related(['server-install']));
 })();

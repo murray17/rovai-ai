@@ -6,9 +6,9 @@ last_updated: 2026-09-29
 
 # 原生 Server 安装与开发验收
 
-Server 0.4.0（`server-v0.4.0`）已有公开原生包。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
+Server 0.4.1（`server-v0.4.1`）已有公开原生包。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
 
-2026-09-29 的 macOS arm64 **0.4.0** 发布包实测确认安装、登录与会话可用，但有两个发布包阻碍：快捷命令启动可能找不到 WebUI；直接运行 `current/rovai-server` 后，首次 Agent 执行仍因 `bundled Skill resources are unavailable` 失败，归档缺少内置 Skill 资源。0.4.1 桥接构建补齐归档资源与快捷命令路径，仍须以最终发布包完成首次执行验收；不能把 0.4.0 的证据记成端到端执行成功。完整记录见[官网部署素材说明](../../website/deployment-notes.md)。
+2026-09-29 的 macOS arm64 **0.4.0** 发布包实测确认安装、登录与会话可用，但有两个发布包阻碍：快捷命令启动可能找不到 WebUI；直接运行 `current/rovai-server` 后，首次 Agent 执行仍因 `bundled Skill resources are unavailable` 失败，归档缺少内置 Skill 资源。0.4.1 桥接包补齐归档资源与快捷命令路径，包内 Skill 读取和 0.4.0 数据升级已在隔离环境验收；尚不能把旧截图记成端到端执行成功。完整记录见[官网部署素材说明](../../website/deployment-notes.md)。
 
 已接通能力与平台资格分别判断，按[当前版本入口](../versions/README.md)及 [Runtime 兼容性清单](../runtime-compatibility.md)查看当前状态。产品为单 Owner、可信自托管 Host，不承诺同 UID 强隔离。本文历史 Gate 与草稿发布流程描述的是资格流程，不是“当前尚无公开包”的声明。
 
@@ -185,7 +185,7 @@ pnpm smoke:host-web-runtime
 
 新入口更新时重新运行同一安装器，替换匹配程序与 UI，仍用原 `--data-dir` 启动。自定义数据根不会被安装器改写。
 完整原生包提供 WebUI/MobileUI「关于与更新」中的检查、下载、安装并重启；按新通道指向的精确 tag 使用 Server 资产。
-当前官方 Server 通道仍需发布和晋升，未发布会明确显示，不能将模拟发布源验证当成真实 Release 升级。
+官方 Server 通道以实际已发布并完成晋升的 tag 为准，不能将模拟发布源验证当成真实 Release 升级。
 数据必须放在程序目录之外。安装前会受控结束执行并保留 Session，Windows 重启后不另开终端，诊断仍在原数据目录。
 `rovai-server upgrade` 命令未提供；不宣称无损热升级或数据库自动回滚。
 停机备份新布局时保留整个数据根及其权限、目录身份要求；源附件、用户项目与 Agent CLI 原生认证/会话独立保留。
