@@ -497,7 +497,7 @@ function MissionProjectPicker({
   const searchRef = useRef<HTMLInputElement>(null)
   const normalized = query.trim().toLocaleLowerCase()
   const matchingProjects = projects.filter(project => `${project.name}\n${project.projectPath}`.toLocaleLowerCase().includes(normalized))
-  const quickChatMatches = !normalized || `使用快速对话 Rovai AI 管理的快速对话目录`.toLocaleLowerCase().includes(normalized)
+  const quickChatMatches = !normalized || uiAttribute('使用快速对话 Rovai AI 管理的快速对话目录').toLocaleLowerCase().includes(normalized)
   return <Popover.Root open={open} onOpenChange={next => { if (!disabled) onOpenChange(next); if (!next) setQuery('') }}>
     <Popover.Trigger asChild><MissionPropertyChip className="mission-editor-project-property" icon={<ProjectGlyph/>} disabled={disabled} aria-label={uiAttribute("项目：{0}", String(projectLabel))}>{projectLabel}</MissionPropertyChip></Popover.Trigger>
     <Popover.Portal container={portalContainer}><Popover.Content className="compact-menu mission-editor-project-popover" align="start" sideOffset={6} collisionPadding={12}

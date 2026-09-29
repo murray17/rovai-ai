@@ -203,7 +203,7 @@ function requireProvisioningSnapshot(snapshot: OnboardingSnapshot): InProgressOn
 function assertApplied(result: StoredCommandResult, action: string): void {
   if (result.status === 'applied') return
   const message = stringField(result.payload, 'message')
-  throw new Error(message ?? `${action}未完成：${result.code}`)
+  throw new Error(message ?? uiAttribute('{0}未完成：{1}', action, result.code))
 }
 
 function stringField(value: Record<string, unknown>, key: string): string | null {

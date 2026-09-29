@@ -861,7 +861,7 @@ function CommandPalette({
             ))}
             {visible.length === 0 && (
               <p className="command-palette-empty" role="status">
-                {loading ? uiAttribute("正在查找会话…") : error ?? uiAttribute("没有匹配的对话。")}
+                {loading ? uiAttribute("正在查找会话…") : error ? uiAttribute(error) : uiAttribute("没有匹配的对话。")}
               </p>
             )}
           </div>

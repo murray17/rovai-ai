@@ -1,5 +1,6 @@
 import type { AgentRunView, CampMemberView } from '@contracts'
 import { uiAttribute } from './interface-language'
+import { localizedExecutionStepTitle } from './execution-step-language'
 import type { ExecutionProgressItem, LiveExecutionProgress } from './ui-model'
 
 const NON_TERMINAL_RUN_STATUSES = new Set<AgentRunView['status']>([
@@ -357,15 +358,16 @@ export function truncateCampWorldMapSpeech(value: string, maximum = 92): string 
 function executionProgressItemText(item: ExecutionProgressItem): string {
   if (item.kind === 'narration') return item.body
   if (item.kind === 'diagnostic') {
-    return `Claude Code API 暂时不可用，正在自动重试（${item.diagnostic.attempt}/${item.diagnostic.maxAttempts}）`
+    return uiAttribute('Claude Code API 暂时不可用，正在自动重试（{0}/{1}）', item.diagnostic.attempt, item.diagnostic.maxAttempts)
   }
   if (item.kind === 'tool') {
-    if (!item.step.detail) return item.step.title
-    const title = campWorldMapPlainText(item.step.title).toLocaleLowerCase()
+    const publicTitle = localizedExecutionStepTitle(item.step)
+    if (!item.step.detail) return publicTitle
+    const title = campWorldMapPlainText(publicTitle).toLocaleLowerCase()
     const detail = campWorldMapPlainText(item.step.detail).toLocaleLowerCase()
     return title && detail.includes(title)
-      ? item.step.title
-      : `${item.step.title}：${item.step.detail}`
+      ? publicTitle
+      : `${publicTitle}${uiAttribute('：')}${item.step.detail}`
   }
   if (item.kind === 'compaction') return ''
   const currentStep = item.plan.find((step) => step.status === 'inProgress')

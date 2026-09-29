@@ -4,6 +4,7 @@ import type { AgentRunExecutionEvidenceView, AgentRunView, GeneralPreferencesApi
 import {
   CompactionEventRow,
   ExecutionToolGroupStateContext,
+  RuntimeRetryNotice,
   ToolActivityGroup,
   ToolCallRow,
   ToolOutputTruncationNotice,
@@ -75,6 +76,65 @@ describe('localized execution summaries', () => {
       expect(markup).toMatch(/<span>[^<]*等待审批<\/span>/)
       expect(markup).not.toContain('Completed 1 step')
     }
+  })
+
+  it('translates typed Read and Edit activity summaries, rows, and status hints', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    const read = tool('read', 'file-read', 'running')
+    read.step.activityDomain = 'file'
+    read.step.title = '阅读 README.md'
+    read.step.currentInstruction = '阅读 README.md'
+    read.step.fileOperation = { operationKind: 'read', path: 'docs/README.md' }
+    const reading = renderGroup([read], true)
+    expect(reading).toContain('aria-label="Running: Read README.md"')
+    expect(reading).toContain('aria-label="Read docs/README.md, Running"')
+    expect(reading).toContain('title="Running"')
+    expect(reading).not.toContain('阅读')
+
+    const edit = tool('edit', 'file-write', 'waiting')
+    edit.step.activityDomain = 'file'
+    edit.step.title = '编辑 settings.ts'
+    edit.step.currentInstruction = '编辑 settings.ts'
+    edit.step.fileOperation = { operationKind: 'write', changeKind: 'update', path: 'src/settings.ts' }
+    const editing = renderGroup([edit], true, false, 'waiting')
+    expect(editing).toContain('aria-label="Waiting for approval: Edit settings.ts"')
+    expect(editing).toContain('aria-label="Edit src/settings.ts, Waiting for approval"')
+    expect(editing).not.toContain('编辑')
+  })
+
+  it('translates Renderer summaries while preserving Runtime instructions and file names', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    const shellRead = tool('shell-read', 'file-read', 'running')
+    shellRead.step.title = '阅读 a.ts，b.ts'
+    shellRead.step.shellReadSummary = {
+      title: '阅读 a.ts，b.ts', paths: ['src/a.ts', 'src/b.ts'], displayPaths: ['a.ts', 'b.ts']
+    }
+    const reading = renderGroup([shellRead], true)
+    expect(reading).toContain('aria-label="Running: Read a.ts, b.ts"')
+    expect(reading).toContain('Files being read')
+    expect(reading).not.toContain('a.ts，b.ts')
+
+    const generic = tool('generic', 'terminal', 'running')
+    generic.step.title = '终端操作'
+    expect(renderGroup([generic])).toContain('aria-label="Running: Terminal action"')
+    const runtime = tool('runtime', 'tool', 'running')
+    runtime.step.title = '模型原文'
+    runtime.step.currentInstruction = 'Runtime 原文'
+    expect(renderGroup([runtime])).toContain('aria-label="Running: Runtime 原文"')
+    expect(renderGroup([runtime])).not.toContain('Terminal action')
+  })
+
+  it('translates stop and retry notices as complete sentences', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    const stopping = renderGroup([tool('active', 'terminal', 'running')], false, false, 'running', true)
+    expect(stopping).toContain('aria-label="Stopping…: Waiting for execution to end"')
+    expect(stopping).not.toContain('正在停止')
+    const retry = renderToStaticMarkup(<RuntimeRetryNotice diagnostic={{
+      id: 'retry', code: 'runtime_api_retrying', status: 'retrying',
+      attempt: 2, maxAttempts: 4, retryAfterSeconds: 5
+    }} />)
+    expect(retry).toContain('Retrying in 5 seconds (attempt 2/4). This run is still active.')
+    expect(retry).not.toContain('次）')
   })
 
   it('localizes compaction phases and metrics while preserving the runtime summary', async () => {

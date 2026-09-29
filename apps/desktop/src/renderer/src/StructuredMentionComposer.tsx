@@ -105,6 +105,7 @@ export interface StructuredMentionComposerProps {
   skills?: readonly ComposerSkillOption[] | null
   skillCatalogStatus?: 'loading' | 'ready' | 'error'
   skillCatalogErrors?: readonly string[]
+  skillCatalogRefreshFailed?: boolean
   skillCatalogRefreshing?: boolean
   onNeedSkills?(): void
   onRefreshSkills?(): void
@@ -251,6 +252,7 @@ function ComposerBridge({
   skills = [],
   skillCatalogStatus = 'ready',
   skillCatalogErrors = [],
+  skillCatalogRefreshFailed = false,
   skillCatalogRefreshing = false,
   onNeedSkills,
   onRefreshSkills,
@@ -635,6 +637,7 @@ function ComposerBridge({
             skillMenuOptions,
             members,
             skillCatalogErrors ?? [],
+            skillCatalogRefreshFailed,
             skillCatalogRefreshing,
             onRefreshSkills,
             selectedIndex,
@@ -665,7 +668,7 @@ function renderMentionMenu(
           key={option.kind === 'member' ? `member:${option.member.agentId}` : option.kind}
           aria-selected={selectedIndex === index}
           aria-label={option.kind === 'member'
-            ? `${option.member.displayName}，${structuredMentionMemberDescription(option.member)}${option.member.inCamp === false ? `，${pendingInviteIds.includes(option.member.agentId) ? uiAttribute('待邀请') : uiAttribute('邀请加入')}` : ''}`
+            ? `${option.member.displayName}${uiAttribute('，')}${structuredMentionMemberDescription(option.member)}${option.member.inCamp === false ? `${uiAttribute('，')}${pendingInviteIds.includes(option.member.agentId) ? uiAttribute('待邀请') : uiAttribute('邀请加入')}` : ''}`
             : option.kind === 'all_members' ? uiAttribute('所有队员，仅本会话')
               : option.kind === 'invite_other' ? uiAttribute('邀请其他队员') : uiAttribute('返回本会话')}
           className={[selectedIndex === index ? 'active' : '',
@@ -697,12 +700,13 @@ function renderMentionMenu(
   </div>
 }
 
-function renderSkillMenu(
+export function renderSkillMenu(
   menuId: string,
   status: 'loading' | 'ready' | 'error',
   options: readonly ComposerSkillOption[],
   members: readonly StructuredMentionMember[],
   errors: readonly string[],
+  refreshFailed: boolean,
   refreshing: boolean,
   onRefresh: (() => void) | undefined,
   selectedIndex: number,
@@ -727,7 +731,7 @@ function renderSkillMenu(
             {section.entries.map(({ option, index }) => <button type="button" role="option" id={`${menuId}-option-${index}`}
               key={`skill:${option.id}`} data-skill-name={option.name}
               aria-selected={selectedIndex === index}
-              aria-label={`/${option.name}，${option.source === 'toolbox' ? uiAttribute("工具箱") : option.sourceScope === 'project' ? uiAttribute("项目 Skill") : uiAttribute("用户 Skill")}${option.memberIds?.length ? uiAttribute("，关联队员：{0}", String(members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join('、'))) : ''}`}
+              aria-label={`/${option.name}${uiAttribute('，')}${option.source === 'toolbox' ? uiAttribute("工具箱") : option.sourceScope === 'project' ? uiAttribute("项目 Skill") : uiAttribute("用户 Skill")}${option.memberIds?.length ? uiAttribute("，关联队员：{0}", members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join(uiAttribute('、'))) : ''}`}
               className={selectedIndex === index ? 'active' : ''}
               onMouseMove={() => setHighlightedIndex(index)}
               onMouseDown={(event) => event.preventDefault()}
@@ -737,7 +741,7 @@ function renderSkillMenu(
                 <strong>/{option.name}</strong>
                 <small>{option.description}</small>
               </span>
-              {option.memberIds && <span className="skill-picker-member-count" title={`${option.source === 'toolbox' ? uiAttribute("已配置此 Skill 的队员") : uiAttribute("在以下队员的环境中发现")}：${members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join('、')}`}>{option.memberIds.slice(0, 3).map((id) => {
+              {option.memberIds && <span className="skill-picker-member-count" title={`${option.source === 'toolbox' ? uiAttribute("已配置此 Skill 的队员") : uiAttribute("在以下队员的环境中发现")}${uiAttribute('：')}${members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join(uiAttribute('、'))}`}>{option.memberIds.slice(0, 3).map((id) => {
                 const member = members.find((candidate) => candidate.agentId === id)
                 return member ? <MemberAvatar key={id} agentId={id} avatarRef={member.avatarRef ?? null} displayName={member.displayName} size="execution" decorative /> : null
               })}{option.memberIds.length > 3 && <small>+{option.memberIds.length - 3}</small>}</span>}
@@ -745,7 +749,7 @@ function renderSkillMenu(
             </button>)}
           </div>)}
     {refreshing && <p className="structured-mention-empty" role="status"><UiText zh={"正在刷新 Skill 候选…"} /></p>}
-    {errors.includes(uiAttribute('刷新失败'))
+    {refreshFailed
       ? <p className="structured-mention-empty" role="alert"><UiText zh={"刷新失败，当前显示上次读取的候选。请重试。"} /></p>
       : errors.length > 0 && <p className="structured-mention-empty" role="status"><UiText zh={"部分来源暂不可读，仍可选择已发现的 Skill。"} /></p>}
   </div>
@@ -776,7 +780,7 @@ function atomPresentation(
       label:uiAttribute("@所有队员"),
       availability: 'available',
       interactive: Boolean(input.onActivateAllMembersMention),
-      ariaLabel: '所有队员'
+      ariaLabel: uiAttribute('所有队员')
     }
   }
   const skill = (input.skills ?? []).find((candidate) => candidate.id === atom.skillId)

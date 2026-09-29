@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CampChannelSource } from '@contracts'
 import { formatCampTitle } from './camp-title'
+import { changeInterfaceLanguage } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
+import type { GeneralPreferencesApi } from '@contracts'
 
 describe('Camp display titles', () => {
   const sources: [CampChannelSource, string][] = [
@@ -41,5 +44,25 @@ describe('Camp display titles', () => {
       title: 'Murray · 快速对话',
       channelSource: { provider: 'feishu', conversationKind: 'p2p' }
     })).toBe('【飞书私聊】Murray · 快速对话')
+  })
+
+  it('translates only the channel decoration in English', async () => {
+    const languageApi = {
+      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
+    } as GeneralPreferencesApi
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      expect(formatCampTitle({
+        title: '【飞书私聊】我手写的名字',
+        channelSource: { provider: 'feishu', conversationKind: 'p2p' }
+      })).toBe('[Feishu DM] 【飞书私聊】我手写的名字')
+      expect(formatCampTitle({
+        title: 'Plan',
+        channelSource: { provider: 'dingtalk', conversationKind: 'group' }
+      })).toBe('[DingTalk group] Plan')
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
   })
 })

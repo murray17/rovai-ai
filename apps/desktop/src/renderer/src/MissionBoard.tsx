@@ -27,7 +27,7 @@ import {
   type MissionWritingPlaneHandle
 } from './MissionDefinitionEditor'
 import { displayProjectPath } from '../../shared/project-display-name'
-import { UiText, uiAttribute } from './interface-language'
+import { UiText, getInterfaceLanguage, uiAttribute } from './interface-language'
 
 type MissionActions = {
   edit(mission: MissionRecord): void
@@ -54,10 +54,11 @@ export function missionProject(m: MissionRecord, projects: ProjectNavigationGrou
 }
 export function missionDate(value: string): string {
   const date = new Date(value), today = new Date(), yesterday = new Date()
+  const locale = getInterfaceLanguage() === 'en' ? 'en-US' : 'zh-CN'
   yesterday.setDate(today.getDate() - 1)
-  if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
   if (date.toDateString() === yesterday.toDateString()) return uiAttribute("昨天")
-  return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } as const : {}) })
+  return date.toLocaleDateString(locale, { month: 'numeric', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } as const : {}) })
 }
 
 function openMissionCamp(client: Pick<CampClient, 'request'>, campId: string): Promise<CampOpenProjection> {
@@ -501,7 +502,7 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
       {mobile && <button type="button" className="mobile-context-trigger" aria-label={uiAttribute("{0}的操作", String(m.title))} onClick={event => actions.menu(m, event)}><UiText zh={"操作"} /></button>}
       <button className="mission-card-open" onClick={() => onOpen(m)}><h3>{m.title}</h3></button>
       <div className="mission-project-tags"><span className="mission-card-project" title={displayProjectPath(m.projectPath)}><NavigationIcon name="folder-open"/>{missionProject(m, projects)}</span><MissionTags tags={m.tags}/></div>
-      <div className="mission-card-footer"><MissionAvatars m={m} compact onClick={e => actions.roster(m, e)}/>{m.hasUnread && <span className="mission-unread-message" role="img" aria-label={uiAttribute("有未读回复")} title={uiAttribute("有未读回复；与执行状态独立")}><span className="mission-unread-dot" aria-hidden="true"/><span aria-hidden="true"><UiText zh={"未读"} /></span></span>}<time dateTime={m.updatedAt} title={new Date(m.updatedAt).toLocaleString()}>{missionDate(m.updatedAt)}</time></div>
+      <div className="mission-card-footer"><MissionAvatars m={m} compact onClick={e => actions.roster(m, e)}/>{m.hasUnread && <span className="mission-unread-message" role="img" aria-label={uiAttribute("有未读回复")} title={uiAttribute("有未读回复；与执行状态独立")}><span className="mission-unread-dot" aria-hidden="true"/><span aria-hidden="true"><UiText zh={"未读"} /></span></span>}<time dateTime={m.updatedAt} title={new Date(m.updatedAt).toLocaleString(getInterfaceLanguage() === 'en' ? 'en-US' : 'zh-CN')}>{missionDate(m.updatedAt)}</time></div>
       {cleanupFeedback && (
         <MissionCleanupCardStatus mission={m} state={cleanupFeedback} onOpen={() => onOpen(m)}/>
       )}

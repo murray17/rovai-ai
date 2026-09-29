@@ -189,7 +189,9 @@ export function AgentRunFileChangesReviewSurface({
                       <span aria-hidden="true">
                         {selectedFile.additions !== undefined && selectedFile.deletions !== undefined
                           ? <><i className="addition">+{selectedFile.additions}</i><i className="deletion">−{selectedFile.deletions}</i></>
-                          : uiAttribute("{0} 次修改", String(selectedFile.operationCount))}
+                          : selectedFile.operationCount === 1
+                            ? uiAttribute('1 次修改')
+                            : uiAttribute('{0} 次修改', selectedFile.operationCount)}
                       </span>
                     </span>
                     <button

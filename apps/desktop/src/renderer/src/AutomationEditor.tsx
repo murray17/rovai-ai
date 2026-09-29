@@ -99,7 +99,7 @@ function RunHistory({ automation, onOpenCamp }: { automation: AutomationView; on
       {runs.map((run) => {
         const state = runStatus(run)
         const icon: AutomationIcon = run.status === 'completed' ? 'check' : run.status === 'failed' ? 'failed' : run.status === 'skipped' ? 'skip' : 'clock'
-        return <button key={run.runId} className={`automation-history-row ${state.tone}`} type="button" disabled={!run.campId} onClick={() => { if (run.campId) onOpenCamp(run.campId) }} title={state.detail ?? state.label} aria-label={`${state.label}，${dateTimeLabel(run.createdAt)}${run.campId ? uiAttribute("，打开执行对话") : ''}`}>
+        return <button key={run.runId} className={`automation-history-row ${state.tone}`} type="button" disabled={!run.campId} onClick={() => { if (run.campId) onOpenCamp(run.campId) }} title={state.detail ?? state.label} aria-label={`${state.label}${uiAttribute('，')}${dateTimeLabel(run.createdAt)}${run.campId ? uiAttribute("，打开执行对话") : ''}`}>
           <AutomationGlyph name={icon} /><span><time dateTime={run.createdAt}>{dateTimeLabel(run.createdAt)}</time><small>{state.detail ?? state.label}</small></span><span className="automation-history-state">{state.label}</span>{run.campId && <span className="automation-history-open"><AutomationGlyph name="chat" /></span>}
         </button>
       })}

@@ -1,4 +1,7 @@
+import { getInterfaceLanguage } from './interface-language'
+
 export function localizeExecutionEngineTerms(value: string): string {
+  if (getInterfaceLanguage() === 'en') return value
   return value
     .replaceAll('Adapter Installation', '智能体')
     .replaceAll('Agent Runtime', '智能体')

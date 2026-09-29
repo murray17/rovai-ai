@@ -1,5 +1,6 @@
 import { isCampId, type NavigationCampTarget } from '@contracts'
 import { formatCampTitle } from './camp-title'
+import { uiAttribute } from './interface-language'
 
 export function navigationCampSearch(
   query: string,
@@ -15,7 +16,7 @@ export function navigationCampSearch(
     camps: (text ? camps.filter((camp) => {
       const projectName = camp.projectBindingKind === 'directory'
         ? projectNameByPath.get(camp.projectPath) ?? ''
-        : '快速对话'
+        : uiAttribute('快速对话')
       return formatCampTitle(camp).toLowerCase().includes(text)
         || projectName.toLowerCase().includes(text)
     }) : camps).slice(0, 12)

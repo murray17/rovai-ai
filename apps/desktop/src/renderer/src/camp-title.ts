@@ -1,4 +1,5 @@
 import type { CampChannelSource } from '@contracts'
+import { getInterfaceLanguage, uiAttribute } from './interface-language'
 
 const CHANNEL_LABELS = {
   feishu: { p2p: '飞书私聊', group: '飞书群聊', topic: '飞书话题' },
@@ -15,5 +16,8 @@ export function formatCampTitle(camp: {
   if (!source) return camp.title
   const labels: Partial<Record<string, string>> | undefined = CHANNEL_LABELS[source.provider]
   const label = labels?.[source.conversationKind]
-  return label ? `【${label}】${camp.title}` : camp.title
+  if (!label) return camp.title
+  return getInterfaceLanguage() === 'en'
+    ? `[${uiAttribute(label)}] ${camp.title}`
+    : `【${label}】${camp.title}`
 }

@@ -1,4 +1,5 @@
 import type { AgentRunFileChangesView } from '@contracts'
+import { uiAttribute } from './interface-language'
 
 type AgentRunFileChangeSummary = AgentRunFileChangesView['files'][number]
 
@@ -29,19 +30,25 @@ export function agentRunFileChangesPreviewTarget(
 }
 
 export function agentRunFileChangesSummaryLabel(changes: AgentRunFileChangesView): string {
+  const files = changes.fileCount === 1
+    ? uiAttribute('1 个文件')
+    : uiAttribute('{0} 个文件', changes.fileCount)
   if (changes.additions !== undefined && changes.deletions !== undefined) {
-    return `${changes.fileCount} 个文件 · +${changes.additions} −${changes.deletions}`
+    return `${files} · +${changes.additions} −${changes.deletions}`
   }
-  return `${changes.fileCount} 个文件 · ${changes.operationCount} 次修改`
+  const operations = changes.operationCount === 1
+    ? uiAttribute('1 次修改')
+    : uiAttribute('{0} 次修改', changes.operationCount)
+  return `${files} · ${operations}`
 }
 
 export function agentRunFileChangeModeLabel(
   presentationKind: AgentRunFileChangesView['files'][number]['presentationKind']
 ): string {
-  if (presentationKind === 'full_net_diff') return '完整差异'
-  if (presentationKind === 'exact_mutations') return '片段差异'
-  if (presentationKind === 'operation_history') return '操作记录'
-  return '仅文件操作'
+  if (presentationKind === 'full_net_diff') return uiAttribute('完整差异')
+  if (presentationKind === 'exact_mutations') return uiAttribute('片段差异')
+  if (presentationKind === 'operation_history') return uiAttribute('操作记录')
+  return uiAttribute('仅文件操作')
 }
 
 export function agentRunFileChangeKindMark(changeKind: string): string {
@@ -53,7 +60,7 @@ export function agentRunFileChangeKindMark(changeKind: string): string {
 export function agentRunFilePathParts(path: string): { basename: string; directory: string } {
   const normalized = path.replaceAll('\\', '/')
   const separator = normalized.lastIndexOf('/')
-  if (separator < 0) return { basename: normalized, directory: '当前目录' }
+  if (separator < 0) return { basename: normalized, directory: uiAttribute('当前目录') }
   return {
     basename: normalized.slice(separator + 1) || normalized,
     directory: normalized.slice(0, separator) || '/'

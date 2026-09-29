@@ -191,7 +191,7 @@ import {
   toolActivityGroupHasActiveTool,
   type ToolProgressItem
 } from './execution-tool-grouping'
-import { UiText, uiAttribute, useUiText } from './interface-language'
+import { UiText, getInterfaceLanguage, uiAttribute, useUiText } from './interface-language'
 
 function localizedAgentRunPresentation(
   run: Parameters<typeof agentRunPresentation>[0],
@@ -529,7 +529,7 @@ async function mutateComposerDraft(
           author: {
             authorType: message.authorType === 'agent' ? 'agent' : message.authorType === 'user' ? 'user' : 'system',
             authorId: message.authorId,
-            displayName: authorMember?.displayName ?? message.authorDisplayName ?? (message.authorType === 'user' ? '用户' : '系统'),
+            displayName: authorMember?.displayName ?? message.authorDisplayName ?? (message.authorType === 'user' ? uiAttribute('用户') : uiAttribute('系统')),
             recipientAvailability: message.authorType === 'agent'
               ? recipientAvailable ? 'available' : 'unavailable'
               : 'not_applicable'
@@ -1748,7 +1748,8 @@ export function CampWorkspace({
   const [composerSkillCatalog, setComposerSkillCatalog] = useState<{
     candidates: ComposerSkillCandidates
     status: 'loading' | 'ready' | 'error'
-  }>({ candidates: { skills: [], errors: [] }, status: 'loading' })
+    refreshFailed: boolean
+  }>({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
   const [skillCatalogRefreshing, setSkillCatalogRefreshing] = useState(false)
   const refreshSkillCatalogRef = useRef<((refresh?: boolean) => void) | null>(null)
   const composerEditorRef = useRef<HTMLDivElement>(null)
@@ -2146,7 +2147,7 @@ export function CampWorkspace({
     let cancelled = false
     let requestSequence = 0
     let requested = false
-    setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading' })
+    setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
     setSkillCatalogRefreshing(false)
     const loadSkillCatalog = async (refresh = false): Promise<void> => {
       if (requested && !refresh) return
@@ -2155,15 +2156,12 @@ export function CampWorkspace({
       if (refresh) setSkillCatalogRefreshing(true)
       try {
         const candidates = await client.request<ComposerSkillCandidates>('skills.candidates', { campId: snapshot.camp.id, refresh })
-        if (!cancelled && request === requestSequence) setComposerSkillCatalog({ candidates, status: 'ready' })
+        if (!cancelled && request === requestSequence) setComposerSkillCatalog({ candidates, status: 'ready', refreshFailed: false })
       } catch {
         if (!cancelled && request === requestSequence) {
           setComposerSkillCatalog((current) => current.status === 'ready'
-            ? { ...current, candidates: {
-                ...current.candidates,
-                errors: [...current.candidates.errors.filter((error) => error !== '刷新失败'), '刷新失败']
-              } }
-            : { ...current, status: 'error' })
+            ? { ...current, refreshFailed: true }
+            : { ...current, status: 'error', refreshFailed: false })
         }
       } finally {
         if (!cancelled && request === requestSequence) setSkillCatalogRefreshing(false)
@@ -2173,7 +2171,7 @@ export function CampWorkspace({
     const invalidate = (): void => {
       requestSequence += 1
       requested = false
-      setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading' })
+      setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
     }
     const unsubscribeInvalidation = client.onInvalidated?.(invalidate)
     const unsubscribe = client.onEvent?.((event) => {
@@ -3920,10 +3918,10 @@ export function CampWorkspace({
         addedAgentIds = outcome.addedAgentIds
         if (outcome.failures.length > 0) {
           const failed = outcome.failures.map(({ agentId, message }) =>
-            `${profileById.get(agentId)?.displayName ?? agentId}：${message}`).join('；')
+            `${profileById.get(agentId)?.displayName ?? agentId}${uiAttribute('：')}${message}`).join(uiAttribute('；'))
           const added = addedAgentIds.map((agentId) => profileById.get(agentId)?.displayName ?? agentId)
           setComposerInviteMessage(added.length > 0
-            ? uiAttribute('已邀请 {0}；{1}。消息未发送，草稿已保留。', added.join('、'), failed)
+            ? uiAttribute('已邀请 {0}；{1}。消息未发送，草稿已保留。', added.join(uiAttribute('、')), failed)
             : uiAttribute('{0}。消息未发送，草稿已保留。', failed))
           return
         }
@@ -5811,6 +5809,7 @@ export function CampWorkspace({
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
               skillCatalogErrors={composerSkillCatalog.candidates.errors}
+              skillCatalogRefreshFailed={composerSkillCatalog.refreshFailed}
               skillCatalogRefreshing={skillCatalogRefreshing}
               onNeedSkills={() => refreshSkillCatalogRef.current?.()}
               onRefreshSkills={() => refreshSkillCatalogRef.current?.(true)}
@@ -7056,7 +7055,7 @@ function ExecutionDrawer({
         key={run.id}
         tabIndex={-1}
         aria-current={focused ? 'step' : undefined}
-        aria-label={`${runMemberName}，${state.label}，${summary}`}
+        aria-label={[runMemberName, state.label, summary].join(uiAttribute('，'))}
       >
         <span className={`execution-process-node tone-${state.tone} state-${stateShape}`} aria-hidden="true">
           <ExecutionStatusGlyph status={stateShape} />
@@ -7889,7 +7888,7 @@ function MentionAllMembersPopover({
           : uiAttribute("发送接受时会冻结当前实际寻址的队员集合。")}</p>
         <div className="mention-group-members">
           {rows.map(({ agentId, member, profile }) => {
-            const displayName = profile?.displayName ?? member?.displayName ?? '不可用队员'
+            const displayName = profile?.displayName ?? member?.displayName ?? uiAttribute('不可用队员')
             return (
               <div className="mention-group-member" key={agentId}>
                 <MemberAvatar
@@ -8928,7 +8927,7 @@ export function AgentRunFileChangesTimelineCard({
             ? uiAttribute("查看 Files Changed，{0}", String(agentRunFileChangesSummaryLabel(changes)))
             : defaultPreviewTarget
               ? uiAttribute("打开当前文件 {0}，{1}", String(defaultPreviewTarget.file.path), String(agentRunFileChangesSummaryLabel(changes)))
-              : `Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
+              : `Files Changed${uiAttribute('，')}${agentRunFileChangesSummaryLabel(changes)}`}
           onClick={(event) => {
             if (!defaultPreviewTarget) return
             if (defaultPreviewTarget.kind === 'review') {
@@ -9736,51 +9735,51 @@ type TaskTimelineCardPresentation = {
   unassigned: boolean
 }
 
-function taskTimelineCardPresentation(task: TaskView): TaskTimelineCardPresentation {
+function taskTimelineCardPresentation(task: TaskView, t: ReturnType<typeof useUiText>): TaskTimelineCardPresentation {
   if (task.status === 'pending' && !task.assigneeAgentId) {
     return {
-      headline:uiAttribute("任务等待重新分配"),
-      noteLabel:uiAttribute("需要处理"),
-      note: '等待用户或默认负责人重新分配',
+      headline: t('任务等待重新分配'),
+      noteLabel: t('需要处理'),
+      note: t('等待用户或默认负责人重新分配'),
       unassigned: true
     }
   }
   if (task.status === 'pending') {
     return {
-      headline:uiAttribute("任务责任已更新"),
-      noteLabel:uiAttribute("当前"),
-      note: '等待负责人开始；创建不会自动启动执行',
+      headline: t('任务责任已更新'),
+      noteLabel: t('当前'),
+      note: t('等待负责人开始；创建不会自动启动执行'),
       unassigned: false
     }
   }
   if (task.status === 'in_progress') {
     return {
-      headline:uiAttribute("任务正在推进"),
-      noteLabel:uiAttribute("当前"),
-      note: '任务处于进行中；打开详情可查看责任与关联执行',
+      headline: t('任务正在推进'),
+      noteLabel: t('当前'),
+      note: t('任务处于进行中；打开详情可查看责任与关联执行'),
       unassigned: false
     }
   }
   if (task.status === 'blocked') {
     return {
-      headline:uiAttribute("任务暂时受阻"),
-      noteLabel:uiAttribute("阻塞原因"),
-      note: task.blockedReason?.trim() || uiAttribute('阻塞原因尚未提供'),
+      headline: t('任务暂时受阻'),
+      noteLabel: t('阻塞原因'),
+      note: task.blockedReason?.trim() || t('阻塞原因尚未提供'),
       unassigned: false
     }
   }
   if (task.status === 'completed') {
     return {
-      headline:uiAttribute("任务已经完成"),
-      noteLabel:uiAttribute("完成摘要"),
-      note: task.completionSummary?.trim() || uiAttribute('完成摘要尚未提供'),
+      headline: t('任务已经完成'),
+      noteLabel: t('完成摘要'),
+      note: task.completionSummary?.trim() || t('完成摘要尚未提供'),
       unassigned: false
     }
   }
   return {
-    headline:uiAttribute("任务已经取消"),
-    noteLabel:uiAttribute("取消原因"),
-    note: task.cancelReason?.trim() || uiAttribute('取消原因尚未提供'),
+    headline: t('任务已经取消'),
+    noteLabel: t('取消原因'),
+    note: task.cancelReason?.trim() || t('取消原因尚未提供'),
     unassigned: false
   }
 }
@@ -9851,7 +9850,8 @@ export function TaskTimelineCard({
   onOpen(): void
 }): JSX.Element {
   const descriptionId = useId()
-  const presentation = taskTimelineCardPresentation(task)
+  const t = useUiText()
+  const presentation = taskTimelineCardPresentation(task, t)
   const ownerStyle = task.assigneeAgentId
     ? { '--task-owner-accent': identityColorToken(task.assigneeAgentId) } as CSSProperties
     : undefined
@@ -10476,8 +10476,8 @@ function runtimeAdapterLabel(kind: string): string {
 
 export type MemberRuntimeConfigurationPresentation = {
   model: string
-  effort: { label: '推理强度' | '思考强度'; value: string } | null
-  strategy: '固定模型' | '跟随智能体默认'
+  effort: { label: string; value: string } | null
+  strategy: string
   summary: string
 }
 
@@ -10488,9 +10488,9 @@ export function memberRuntimeConfigurationPresentation(
   const modelSelection = configuration.model
   if (modelSelection.mode === 'runtime_default') {
     return {
-      model: '智能体默认',
+      model: uiAttribute('智能体默认'),
       effort: null,
-      strategy: '跟随智能体默认',
+      strategy: uiAttribute('跟随智能体默认'),
       summary:uiAttribute("智能体默认")
     }
   }
@@ -10507,8 +10507,8 @@ export function memberRuntimeConfigurationPresentation(
   const effort = effortDescriptor || typeof rawEffort === 'string'
     ? {
         label: configuration.adapterKind === 'claude-code-cli'
-          ? '思考强度' as const
-          : '推理强度' as const,
+          ? uiAttribute('思考强度')
+          : uiAttribute('推理强度'),
         value: typeof rawEffort === 'string' && rawEffort
           ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [])
           :uiAttribute("跟随模型默认值")
@@ -10518,7 +10518,7 @@ export function memberRuntimeConfigurationPresentation(
   return {
     model,
     effort,
-    strategy: '固定模型',
+    strategy: uiAttribute('固定模型'),
     summary: effort ? `${model} · ${effort.label} ${effort.value}` : model
   }
 }
@@ -11016,7 +11016,7 @@ function taskStatusLabel(status: TaskStatus): string {
 }
 
 function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(getInterfaceLanguage() === 'en' ? 'en-US' : 'zh-CN', {
     dateStyle: 'short',
     timeStyle: 'short'
   }).format(new Date(value))
@@ -11085,9 +11085,9 @@ function taskAssigneeName(task: TaskView, snapshot: CampSnapshot): string {
 
 function taskCommandMessage(result: StoredCommandResult): string {
   const messages: Record<string, string> = {
-    'task.terminal': '已完成或已取消的任务不能再修改。',
-    'task.assignee_unavailable': '所选负责人已不在当前会话，或当前不可用。',
-    'task.invalid_status_transition': '当前任务状态不允许这样变更。'
+    'task.terminal': uiAttribute('已完成或已取消的任务不能再修改。'),
+    'task.assignee_unavailable': uiAttribute('所选负责人已不在当前会话，或当前不可用。'),
+    'task.invalid_status_transition': uiAttribute('当前任务状态不允许这样变更。')
   }
   return messages[result.code] ?? uiAttribute("修改未完成：{0}", String(result.code))
 }

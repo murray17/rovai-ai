@@ -1,9 +1,10 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   StructuredMentionComposer,
   StructuredMentionOptionAvatar,
+  renderSkillMenu,
   shouldHandleStructuredComposerBackspaceAtStart,
   shouldSubmitStructuredComposerOnEnter,
   structuredMentionMemberDescription,
@@ -13,6 +14,9 @@ import {
 import { composerTypeaheadEnterAction } from './ComposerTypeaheadPlugin'
 import { RovaiComposerExtension } from './RovaiComposerExtension'
 import type { ComposerSkillOption } from './composer-skill-picker'
+import type { GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
+import { changeInterfaceLanguage } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
 const members = [{
   agentId: 'agent_1',
@@ -40,6 +44,14 @@ const skills: ComposerSkillOption[] = [{
 }]
 
 describe('StructuredMentionComposer V2', () => {
+  const preferences = {
+    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
+      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
+    })
+  } as GeneralPreferencesApi
+
+  afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
+
   it('renders one native Lexical editing surface with an adjacent placeholder', () => {
     const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
       id: 'empty-composer',
@@ -125,6 +137,23 @@ describe('StructuredMentionComposer V2', () => {
     expect(structuredSkillOptions(skills, 'agent')).toEqual([skills[0]])
     expect(structuredSkillOptions(skills, '并行')).toEqual([skills[1]])
     expect(structuredSkillOptions(skills, '')).toEqual(skills)
+  })
+
+  it('uses a stable refresh failure state and English Skill menu labels', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    const options = [{ ...skills[0], memberIds: ['agent_1'], sourceScope: 'project' as const }]
+    const render = (refreshFailed: boolean) => renderToStaticMarkup(renderSkillMenu(
+      'skill-menu', 'ready', options, members, ['provider unavailable'], refreshFailed,
+      false, undefined, 0, () => undefined, () => undefined
+    ))
+    const failed = render(true)
+    expect(failed).toContain('role="alert">Refresh failed. Current display shows previous candidates. Please retry.')
+    expect(failed).not.toContain('Some sources are temporarily unavailable')
+    expect(failed).toContain('aria-label="/analyze-agent-codebase, Project Skill, linked teammate: 新洛可"')
+    expect(failed).not.toContain('，')
+    const partial = render(false)
+    expect(partial).toContain('Some sources are temporarily unavailable')
+    expect(partial).not.toContain('Refresh failed.')
   })
 
   it('orders keyboard selection to match the Toolbox and Skills groups', () => {

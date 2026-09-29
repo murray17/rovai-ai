@@ -4,6 +4,7 @@ import { DEFAULT_APPEARANCE } from '../../shared/appearance'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 import { changeInterfaceLanguage } from './interface-language'
 import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
+import { agentRunFileChangesSummaryLabel, agentRunFileChangeModeLabel, agentRunFilePathParts } from './file-changes-presentation'
 import { CampDetailEntries } from './CampDetailPopover'
 import { createElement, type ComponentProps } from 'react'
 import { ExecutionToolGroupStateContext } from './ExecutionToolGroup'
@@ -1498,6 +1499,30 @@ describe('task event projections', () => {
     expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images))
       .toMatchObject([{ kind: 'run_artifacts', run: { id: 'run-claude', agentId: 'agent-claude' },
         imageGroups: images, fileChanges: [{ agentRunId: 'run-claude' }] }])
+  })
+
+  it('localizes file change summaries and evidence labels in English', async () => {
+    const languageApi = {
+      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
+    } as GeneralPreferencesApi
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      const changes = {
+        schemaVersion: 2, agentRunId: 'run-localized', executionEpoch: 1,
+        files: [], fileCount: 1, operationCount: 1, completedAt: '2026-08-27T00:00:00Z'
+      } satisfies AgentRunFileChangesView
+      expect(agentRunFileChangesSummaryLabel(changes)).toBe('1 file · 1 change')
+      expect(agentRunFileChangesSummaryLabel({ ...changes, fileCount: 4, operationCount: 5 })).toBe('4 files · 5 changes')
+      expect(agentRunFileChangesSummaryLabel({ ...changes, additions: 1, deletions: 2 })).toBe('1 file · +1 −2')
+      expect((['full_net_diff', 'exact_mutations', 'operation_history', 'operation_only'] as const)
+        .map(agentRunFileChangeModeLabel)).toEqual([
+          'Full diff', 'Edit fragments', 'Operation history', 'File operations only'
+        ])
+      expect(agentRunFilePathParts('README.md').directory).toBe('Current directory')
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
   })
 
   it('renders a three-row Files Changed card with a quiet review entry and mixed totals', () => {
@@ -4700,6 +4725,34 @@ describe('task event projections', () => {
       strategy: '固定模型',
       summary: 'claude-sonnet-4-6 · 思考强度 high'
     })
+  })
+
+  it('shows app-owned model and effort labels in English', async () => {
+    const languageApi = {
+      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
+    } as GeneralPreferencesApi
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      expect(memberRuntimeConfigurationPresentation(configuredRuntime('codex-cli'), null)).toEqual({
+        model: 'Agent default',
+        effort: null,
+        strategy: 'Follow the Agent default',
+        summary: 'Agent default'
+      })
+      expect(memberRuntimeConfigurationPresentation({
+        adapterKind: 'claude-code-cli',
+        model: { mode: 'explicit', modelId: 'claude-sonnet-4-6', options: { effort: 'high' } },
+        permissions: { adapterKind: 'claude-code-cli', schemaVersion: 1, values: {} }
+      }, null)).toEqual({
+        model: 'claude-sonnet-4-6',
+        effort: { label: 'Thinking intensity', value: 'high' },
+        strategy: 'Fixed model',
+        summary: 'claude-sonnet-4-6 · Thinking intensity high'
+      })
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
   })
 
   it.each(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])(

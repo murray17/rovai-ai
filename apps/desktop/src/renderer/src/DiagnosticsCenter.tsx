@@ -13,7 +13,7 @@ import type {
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { revealInFileManagerLabel } from './renderer-platform'
 import { requestProductRuntimeCheck } from './runtime-check'
-import { UiText, uiAttribute } from './interface-language'
+import { UiText, getInterfaceLanguage, uiAttribute } from './interface-language'
 
 export type DiagnosticFilter = 'all' | DiagnosticStatus
 type Notice = {
@@ -584,7 +584,7 @@ function factLabel(key: string): string {
     diagnosticCode: '诊断代码',
     lastSuccessfulProbeAt: '最近成功检查'
   }
-  return labels[key] ?? key
+  return labels[key] ? uiAttribute(labels[key]) : key
 }
 
 function summarySentence(report: DiagnosticsReport): string {
@@ -596,7 +596,7 @@ function formatTimestamp(value: string | null | undefined): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(getInterfaceLanguage() === 'en' ? 'en-US' : 'zh-CN', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

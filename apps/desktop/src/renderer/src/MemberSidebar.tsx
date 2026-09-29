@@ -393,7 +393,7 @@ function MemberSidebarRow({
         className="member-sidebar-select"
         type="button"
         aria-current={selected ? 'true' : undefined}
-        aria-label={`${agent.displayName}，${agent.teamRole ||uiAttribute("团队角色未设置")}${dirty ? uiAttribute("，有未保存更改") : ''}`}
+        aria-label={`${agent.displayName}${uiAttribute('，')}${agent.teamRole ||uiAttribute("团队角色未设置")}${dirty ? uiAttribute("，有未保存更改") : ''}`}
         title={`${agent.displayName} · ${agent.teamRole ||uiAttribute("团队角色未设置")}`}
         onClick={() => onSelect(agent.agentId, 'identity', false)}
       >

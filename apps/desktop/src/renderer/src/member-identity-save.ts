@@ -5,6 +5,7 @@ import {
   type IdentityDraft
 } from './member-identity-draft'
 import { readErrorMessage } from './error-message'
+import { uiAttribute } from './interface-language'
 
 type IdentityMethod = 'members.create' | 'members.update' | 'members.avatar.set'
 
@@ -37,18 +38,18 @@ export async function saveMemberIdentity({
     if (result.status === 'rejected') {
       const message =
         result.code === 'agent_profile.version_conflict'
-          ? '队员已被其他操作更新，请重新载入后重试。'
+          ? uiAttribute('队员已被其他操作更新，请重新载入后重试。')
           : result.code === 'agent_profile.display_name_conflict'
-            ? '该名称已被其他队员使用，请换一个名称。'
+            ? uiAttribute('该名称已被其他队员使用，请换一个名称。')
             : typeof result.payload.message === 'string'
               ? result.payload.message
-              : `保存未完成：${result.code}`
+              : uiAttribute('保存未完成：{0}', result.code)
       throw new Error(message)
     }
     const id = result.resultEntity?.entityId ?? result.payload.agentId
     const version = result.payload.version
     if (typeof id !== 'string' || typeof version !== 'number')
-      throw new Error('已收到保存回执，但无法确认最新版本，请重新载入。')
+      throw new Error(uiAttribute('已收到保存回执，但无法确认最新版本，请重新载入。'))
     return { id, version }
   }
   if (!current) {
@@ -94,7 +95,7 @@ export async function saveMemberIdentity({
     } catch (error) {
       if (textCommitted)
         throw new Error(
-          `队员文字信息已保存，角色图片未保存：${readErrorMessage(error)}`
+          uiAttribute('队员文字信息已保存，角色图片未保存：{0}', readErrorMessage(error))
         )
       throw error
     }

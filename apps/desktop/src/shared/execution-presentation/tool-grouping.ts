@@ -90,8 +90,17 @@ export function toolActivityGroupPresentation(
   items: ToolProgressItem[],
   runStatus: AgentRunView['status'],
   isLiveTail = false,
-  formatCompletedSteps: (count: number) => string = (count) => `已完成 ${count} 个步骤`
+  formatCompletedSteps: (count: number) => string = (count) => `已完成 ${count} 个步骤`,
+  copy: {
+    translateLabel?: (label: string) => string
+    currentTitle?: (step: ToolProgressItem['step']) => string
+    activeAccessibleLabel?: (primary: string, currentTitle: string) => string
+  } = {}
 ): ToolActivityGroupPresentation {
+  const label = copy.translateLabel ?? ((value: string): string => value)
+  const title = copy.currentTitle ?? executionStepCurrentInstructionTitle
+  const activeAccessibleLabel = copy.activeAccessibleLabel
+    ?? ((primary: string, currentTitle: string): string => `${primary}：${currentTitle}`)
   const statuses = items.map((item) => activityStatusForAgentRun(item.step.status, runStatus))
   let activeIndex = -1
   for (let index = statuses.length - 1; index >= 0; index -= 1) {
@@ -107,30 +116,30 @@ export function toolActivityGroupPresentation(
 
   if (activeIndex >= 0) {
     const status = statuses[activeIndex]
-    const primary = status === 'waiting' ? '等待审批' : '执行中'
-    const currentTitle = executionStepCurrentInstructionTitle(items[activeIndex].step)
-    const statusLabel = status === 'waiting' ? '等待审批' : '执行中'
+    const primary = label(status === 'waiting' ? '等待审批' : '执行中')
+    const currentTitle = title(items[activeIndex].step)
     return {
       status,
-      statusLabel,
+      statusLabel: primary,
       primary,
       currentTitle,
       currentIconKind: items[activeIndex].step.iconKind,
       countLabel: null,
-      accessibleLabel: `${primary}：${currentTitle}`
+      accessibleLabel: activeAccessibleLabel(primary, currentTitle)
     }
   }
 
   if (isLiveTail && runStatus === 'running') {
-    const currentTitle = executionStepCurrentInstructionTitle(items[items.length - 1].step)
+    const currentTitle = title(items[items.length - 1].step)
+    const primary = label('执行中')
     return {
       status: 'running',
-      statusLabel: '执行中',
-      primary: '执行中',
+      statusLabel: primary,
+      primary,
       currentTitle,
       currentIconKind: items[items.length - 1].step.iconKind,
       countLabel: null,
-      accessibleLabel: `执行中：${currentTitle}`
+      accessibleLabel: activeAccessibleLabel(primary, currentTitle)
     }
   }
 
@@ -139,16 +148,16 @@ export function toolActivityGroupPresentation(
   let statusLabel: string
   if (completed > 0) {
     status = 'completed'
-    statusLabel = completed === total ? '全部成功' : '含成功操作'
+    statusLabel = label(completed === total ? '全部成功' : '含成功操作')
   } else if (failed === total) {
     status = 'failed'
-    statusLabel = '全部失败'
+    statusLabel = label('全部失败')
   } else if (stopped > 0) {
     status = 'stopped'
-    statusLabel = failed > 0 ? '已停止，含失败操作' : '已停止'
+    statusLabel = label(failed > 0 ? '已停止，含失败操作' : '已停止')
   } else {
     status = 'recorded'
-    statusLabel = failed > 0 ? '已记录，含失败操作' : '已记录'
+    statusLabel = label(failed > 0 ? '已记录，含失败操作' : '已记录')
   }
   const primary = formatCompletedSteps(total)
 

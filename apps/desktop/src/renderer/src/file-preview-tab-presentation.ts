@@ -25,7 +25,7 @@ export function previewTabPresentation(tab: PreviewTabModel, language: Interface
   const file = tab.changes.files.find((entry) => entry.evidenceFileId === tab.selectedEvidenceFileId)
     ?? tab.changes.files[0]
   return {
-    fileName: file ? agentRunFilePathParts(file.path).basename : '文件变更',
+    fileName: file ? agentRunFilePathParts(file.path).basename : translateUi(language, '文件变更'),
     displayPath: file?.path ?? '',
     icon: 'patch'
   }

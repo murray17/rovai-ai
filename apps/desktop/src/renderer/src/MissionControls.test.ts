@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { GeneralPreferencesApi, InterfaceLanguage, MissionRecord, MissionStatus } from '@contracts'
 import { missionCardVisibleAvatarCount, StatusMenu } from './MissionControls'
+import { missionDate } from './MissionBoard'
 import { changeInterfaceLanguage, translateUi } from './interface-language'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
@@ -41,6 +42,20 @@ describe('Mission status language', () => {
     }))
     expect(chinese).toContain('<span>需要你</span>')
     expect(chinese).toContain('aria-label="修改 计划 的状态，当前需要你"')
+  })
+
+  it('formats Mission dates in the selected interface language', async () => {
+    const value = '2000-01-02T03:04:00.000Z'
+    const date = new Date(value)
+    await changeInterfaceLanguage(preferences, 'en')
+    expect(missionDate(value)).toBe(date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }))
+    await changeInterfaceLanguage(preferences, 'zh-CN')
+    expect(missionDate(value)).toBe(date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', year: 'numeric' }))
+    const today = new Date()
+    await changeInterfaceLanguage(preferences, 'en')
+    expect(missionDate(today.toISOString())).toBe(today.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }))
   })
 })
 

@@ -15,6 +15,7 @@ import {
   type CampWorldMapAgent,
   type CampWorldMapNodeId
 } from './camp-world-map-model'
+import { uiAttribute } from './interface-language'
 
 export const CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY = { minimum: 6_000, maximum: 12_000 } as const
 export const CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY = { minimum: 4_000, maximum: 6_000 } as const
@@ -152,7 +153,7 @@ export function campWorldMapCaption(
       kind: 'real',
       interactive: true,
       agentId: realAgent.agentId,
-      label: `真实执行 · ${realAgent.displayName}`,
+      label: uiAttribute('真实执行 · {0}', realAgent.displayName),
       text: realAgent.speech.text
     }
   }
@@ -164,7 +165,7 @@ export function campWorldMapCaption(
       kind: 'waiting',
       interactive: true,
       agentId: waitingAgent.agentId,
-      label: `结果待确认 · ${waitingAgent.displayName}`,
+      label: uiAttribute('结果待确认 · {0}', waitingAgent.displayName),
       text: waitingAgent.speech.text
     }
   }
