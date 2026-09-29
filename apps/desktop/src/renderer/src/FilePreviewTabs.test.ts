@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
 import {
   useFilePreview,
   type FilePreviewContextValue,
@@ -9,6 +10,8 @@ import {
 } from './FilePreviewContext'
 import { FilePreviewPaneContent as FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewTabs } from './FilePreviewTabs'
+import { changeInterfaceLanguage } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
 vi.mock('./FilePreviewContext', () => ({ useFilePreview: vi.fn(), useFilePreviewApi: () => ({}) }))
 
@@ -112,6 +115,45 @@ beforeEach(() => {
     saveReading: vi.fn(), loadChanges: vi.fn(), loadHtmlSource: vi.fn(), saveHtmlSource: vi.fn(), completeHtmlRefresh: vi.fn(), displayed: vi.fn(),
     changePage: vi.fn()
   }
+})
+
+describe('localized preview status tabs', () => {
+  const preferences = {
+    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
+      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
+    })
+  } as GeneralPreferencesApi
+
+  afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
+
+  it('updates the visible labels, tooltips, close controls and panel names', async () => {
+    const activity = { kind: 'mission_activity' as const, id: 'activity', missionId: 'mission-1' }
+    const execution = { kind: 'execution' as const, id: 'execution' }
+    const namedFile = tab('named-file')
+    updateFile(namedFile, { fileName: '活动', displayPath: '活动', pathPresentation: 'file_name_only' })
+    preview.tabs = [activity, execution, namedFile]
+    preview.activeTab = execution
+    preview.activeTabId = execution.id
+
+    await changeInterfaceLanguage(preferences, 'en')
+    const englishTabs = renderTabs()
+    const englishPane = renderPane()
+    expect(englishTabs).toContain('aria-label="Activity"')
+    expect(englishTabs).toContain('aria-label="Run"')
+    expect(englishTabs).toContain('title="Activity"')
+    expect(englishTabs).toContain('title="Run"')
+    expect(englishTabs).toContain('aria-label="Close Activity"')
+    expect(englishTabs).toContain('aria-label="Close Run"')
+    expect(englishPane).toContain('aria-label="Activity"')
+    expect(englishPane).toContain('aria-label="Run"')
+    expect(englishTabs).toContain('aria-label="活动"')
+
+    await changeInterfaceLanguage(preferences, 'zh-CN')
+    const chineseTabs = renderTabs()
+    expect(chineseTabs).toContain('aria-label="活动"')
+    expect(chineseTabs).toContain('aria-label="执行"')
+    expect(chineseTabs).toContain('title="执行"')
+  })
 })
 
 describe('FilePreviewTabs open feedback', () => {
