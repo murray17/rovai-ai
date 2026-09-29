@@ -4806,7 +4806,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
     expect((markup.match(/class="camp-detail-entry(?: [^"]*)?"/g) ?? []).length).toBe(4)
-    expect(markup).toContain('>执行</span><small>0</small></button>')
+    expect(markup).toContain('>执行</span><small>0</small></span></button>')
     expect(markup).toContain('>任务</span><small>0</small>')
     expect(markup).toContain('>队员</span><small>2</small>')
     expect(markup).toContain('>单聊</span><small>0</small>')

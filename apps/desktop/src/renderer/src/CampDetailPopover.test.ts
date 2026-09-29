@@ -61,7 +61,7 @@ describe('Camp execution entry', () => {
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).toContain('aria-haspopup="dialog"')
     expect(markup).toContain('执行，共 2 位队员有执行记录，当前没有队员正在执行')
-    expect(markup).toContain('<span>执行</span><small>2</small>')
+    expect(markup).toContain('<span class="camp-detail-entry-copy"><span>执行</span><small>2</small></span>')
     expect(markup).not.toContain('camp-execution-members')
     expect(markup).not.toContain('camp-execution-orbits')
     expect(markup).not.toContain('disabled')

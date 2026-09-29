@@ -67,8 +67,12 @@ function CampExecutionEntry({ members, executionCount, expanded, panelId, mobile
 
   const face = <>
     {!mobile && <CampDetailIcon tab="execution" />}
-    <span><UiText zh={"执行"} /></span>
-    {!mobile && !running && <small>{executionCount}</small>}
+    {mobile
+      ? <span><UiText zh={"执行"} /></span>
+      : <span className="camp-detail-entry-copy">
+          <span><UiText zh={"执行"} /></span>
+          {!running && <small>{executionCount}</small>}
+        </span>}
     {running && <>
       <span className="camp-execution-members" aria-hidden="true">
         {members.slice(0, avatarLimit).map(member => <MemberAvatar key={member.agentId} {...member} size="execution" decorative />)}
