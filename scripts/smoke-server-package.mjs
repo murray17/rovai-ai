@@ -41,9 +41,8 @@ try {
   const created = await active.request('camps.create', { commandId: randomUUID(), name: 'Package upgrade fixture', workspace: { projectPath: workspace, name: 'workspace' }, memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' })
   assert.equal(created.status, 'applied')
   const campId = created.payload.campId
-  const draft = await active.request('camp.composerDraft.get', { campId })
-  const saved = await active.request('camp.composerDraft.save', { campId, expectedRevision: draft.revision, content: { version: 2, segments: [{ kind: 'text', text: 'PRESERVED_PACKAGE_MESSAGE' }] } })
-  await active.request('camp.messages.send', { commandId: randomUUID(), campId, draftRevision: saved.revision, execution: null })
+  const sent = await active.request('camp.messages.send', { commandId: randomUUID(), campId, content: { version: 2, segments: [{ kind: 'text', text: 'PRESERVED_PACKAGE_MESSAGE' }] }, replyToCampMessageId: null, execution: null })
+  assert.equal(sent.commandResult.status, 'applied')
   const before = await active.request('camps.snapshot', { campId })
   assert.ok(before.messages.some(message=>message.body==='PRESERVED_PACKAGE_MESSAGE'))
   await active.stop(); active = null
@@ -56,7 +55,7 @@ try {
   const administrator = randomBytes(32).toString('hex')
   active = launchHeadless(administrator)
   const origin = await active.origin()
-  const login = await fetch(`${origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: administrator }), redirect: 'error' })
+  const login = await fetch(`${origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: administrator }), redirect: 'error' })
   assert.equal(login.status, 200)
   const token = (await login.json()).token
   const opened = await fetch(`${origin}/api/v1/request`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ operation: 'camps.open', params: { campId, traceId: randomUUID() } }), redirect: 'error' }).then(response=>response.json())

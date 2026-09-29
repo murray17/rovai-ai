@@ -74,7 +74,7 @@ export function AboutUpdatesSettingsView({
     || (snapshot?.status === 'check_failed' && snapshot.failureReason === 'updater_unavailable')
   const officialReleasesUrl = product === 'server'
     ? availableRelease
-      ? `https://github.com/murray17/rovai-ai/releases/tag/server-v${encodeURIComponent(availableRelease.version)}`
+      ? `https://github.com/murray17/rovai-ai/releases/tag/${['0.4.0', '0.4.1'].includes(availableRelease.version) ? 'server-v' : 'v'}${encodeURIComponent(availableRelease.version)}`
       : 'https://github.com/murray17/rovai-ai/releases'
     : 'https://github.com/murray17/rovai-ai/releases/latest'
 

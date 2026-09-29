@@ -70,12 +70,13 @@ pub fn run() -> Result<()> {
     let web_ui = if matches!(cli.command, Some(Command::Token)) {
         None
     } else {
-        let directory = cli.web_ui.unwrap_or(
-            std::env::current_exe()?
+        let directory = match cli.web_ui {
+            Some(directory) => directory,
+            None => std::fs::canonicalize(std::env::current_exe()?)?
                 .parent()
                 .context("Server executable has no directory")?
                 .join("web-ui"),
-        );
+        };
         let directory = std::fs::canonicalize(directory)
             .context("Matching WebUI is missing; reinstall the complete Server package")?;
         ensure!(

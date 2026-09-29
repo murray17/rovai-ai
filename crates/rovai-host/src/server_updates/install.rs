@@ -132,6 +132,7 @@ pub(super) fn prepare(
         program("rovai-host"),
         program("rovai"),
         "web-ui/index.html".into(),
+        "skills/cli-operations/SKILL.md".into(),
     ] {
         ensure!(payload.join(name).is_file(), "Server package is incomplete");
     }

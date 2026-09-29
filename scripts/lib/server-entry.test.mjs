@@ -40,7 +40,8 @@ test('Native Server default and custom roots retain data and token, reject anoth
   if (process.env.ROVAI_SERVER_RELEASE_DIR) {
     const version = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version
     execFileSync('/bin/sh', [join(root, 'scripts/install-server.sh'), '--version', version, '--from-dir', process.env.ROVAI_SERVER_RELEASE_DIR, '--prefix', install, '--bin-dir', join(fixture, 'bin'), '--no-modify-path'], { env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, stdio: 'pipe' })
-    installedBinary = join(install, 'current', executable)
+    // Exercise the user-facing PATH symlink, not just the revision binary.
+    installedBinary = join(fixture, 'bin', executable)
   } else {
     await mkdir(join(install, 'web-ui'), { recursive: true }); await cp(binary, installedBinary)
     await writeFile(join(install, 'web-ui/index.html'), '<!doctype html><title>Matched package UI</title><h1>Shared Host</h1>')
@@ -119,6 +120,11 @@ test('Native Server default and custom roots retain data and token, reject anoth
       const imported = await call(first, token, 'skills.import.commit', { commandId: randomUUID(), command: { stagingToken: inspected.stagingToken, candidateName: inspected.candidates[0].name, expectedDigest: inspected.candidates[0].contentDigest, expectedSkillVersion: null, confirmUpdate: false } })
       assert.equal(imported.status, 'applied', JSON.stringify(imported))
       const skills = await call(first, token, 'skills.list'); assert.ok(skills.some(skill => skill.name === `${name}-skill`))
+      if (process.env.ROVAI_SERVER_RELEASE_DIR) {
+        const toolbox = await call(first, token, 'toolbox.list')
+        assert.equal(toolbox.length, 5)
+        assert.ok(toolbox.every(skill => skill.sourceError === null), JSON.stringify(toolbox))
+      }
       assert.equal(skills.some(skill => skill.name === 'desktop-only-skill'), false)
       assert.equal(desktopHost.child.exitCode, null, 'Desktop Host remains live beside Server')
       assert.equal(await readFile(join(desktop, 'mcp.json'), 'utf8'), desktopBaseline.mcp)

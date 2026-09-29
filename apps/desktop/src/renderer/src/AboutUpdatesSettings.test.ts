@@ -42,6 +42,7 @@ function render(value: AppUpdateSnapshot | null, options: {
   loadError?: boolean
   actionError?: AppUpdateActionError
   readOnly?: boolean
+  product?: 'desktop' | 'server'
 } = {}): string {
   return renderToStaticMarkup(createElement(AboutUpdatesSettingsView, {
     snapshot: value,
@@ -50,6 +51,7 @@ function render(value: AppUpdateSnapshot | null, options: {
     loadError: options.loadError ?? false,
     actionError: options.actionError ?? null,
     readOnly: options.readOnly ?? false,
+    product: options.product ?? 'desktop',
     onCheck: () => undefined,
     onDownload: () => undefined,
     onInstall: () => undefined
@@ -57,6 +59,20 @@ function render(value: AppUpdateSnapshot | null, options: {
 }
 
 describe('AboutUpdatesSettingsView', () => {
+  it('links Server update fallback to the exact bridge or unified release tag', () => {
+    const markup = render(snapshot({
+      status: 'download_failed',
+      availableRelease: release,
+      failureReason: 'network'
+    }), { product: 'server' })
+    expect(markup).toContain('https://github.com/murray17/rovai-ai/releases/tag/v0.0.3')
+    const bridge = render(snapshot({
+      status: 'download_failed',
+      availableRelease: { ...release, version: '0.4.1' },
+      failureReason: 'network'
+    }), { product: 'server' })
+    expect(bridge).toContain('https://github.com/murray17/rovai-ai/releases/tag/server-v0.4.1')
+  })
   it('always shows the installed version and keeps all update mutations user initiated', () => {
     const markup = render(snapshot())
     expect(markup).toContain('class="about-updates-settings" data-update-read-only="false"')

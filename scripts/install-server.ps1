@@ -16,6 +16,7 @@ $staging = Join-Path ([IO.Path]::GetTempPath()) ('rovai-server-install-' + [Guid
 [void][IO.Directory]::CreateDirectory($staging)
 $lease = $null
 $incoming = $null
+$releaseTag = $null
 function Download([string]$Url, [string]$Path) {
     if (-not $Url.StartsWith('https://')) { throw 'HTTPS is required.' }
     Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 600
@@ -23,9 +24,13 @@ function Download([string]$Url, [string]$Path) {
 try {
     if ($Version -eq 'latest') {
         if ($FromDirectory) { throw 'FromDirectory requires Version.' }
-        Download 'https://raw.githubusercontent.com/murray17/rovai-ai/main/scripts/server-channel.txt' (Join-Path $staging 'channel')
-        $Version = (Get-Content -Raw (Join-Path $staging 'channel')).Trim()
-        if ($Version -eq 'unpublished') { throw 'No official native Server release is published yet. Installation was not changed.' }
+        Download 'https://raw.githubusercontent.com/murray17/rovai-ai/main/scripts/server-release-tag.txt' (Join-Path $staging 'channel')
+        $releaseTag = (Get-Content -Raw (Join-Path $staging 'channel')).Trim()
+        if ($releaseTag -eq 'unpublished') { throw 'No official native Server release is published yet. Installation was not changed.' }
+        if ($releaseTag -cmatch '^(?:server-v|v)([0-9]+\.[0-9]+\.[0-9]+)$') { $Version = $Matches[1] }
+        else { throw 'Invalid Server release tag.' }
+    } else {
+        $releaseTag = if ($Version -in @('0.4.0', '0.4.1')) { "server-v$Version" } else { "v$Version" }
     }
     if ($Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$') { throw 'Invalid Server version.' }
     $asset = "rovai-server-$Version-windows-x64.zip"
@@ -35,7 +40,7 @@ try {
         Copy-Item -LiteralPath (Join-Path $FromDirectory $asset) -Destination $archive
         Copy-Item -LiteralPath (Join-Path $FromDirectory 'SHA256SUMS') -Destination $sums
     } else {
-        $release = "https://github.com/murray17/rovai-ai/releases/download/server-v$Version"
+        $release = "https://github.com/murray17/rovai-ai/releases/download/$releaseTag"
         Download "$release/$asset" $archive
         Download "$release/SHA256SUMS" $sums
     }
@@ -61,7 +66,7 @@ try {
     [IO.Compression.ZipFile]::ExtractToDirectory($archive, $staging)
     $payload = Join-Path $staging 'rovai-server'
     $info = @(Get-Content (Join-Path $payload 'package-info'))
-    if ($info -cnotcontains "version=$Version" -or $info -cnotcontains 'target=windows-x64' -or -not (Test-Path -LiteralPath (Join-Path $payload 'web-ui\index.html') -PathType Leaf)) { throw 'Package version, target, or WebUI mismatch.' }
+    if ($info -cnotcontains "version=$Version" -or $info -cnotcontains 'target=windows-x64' -or -not (Test-Path -LiteralPath (Join-Path $payload 'web-ui\index.html') -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $payload 'skills\cli-operations\SKILL.md') -PathType Leaf)) { throw 'Package version, target, WebUI, or bundled Skills mismatch.' }
     $reportedVersion = & (Join-Path $payload 'rovai-server.exe') --version
     if ($LASTEXITCODE -ne 0 -or $reportedVersion -cne "rovai-server $Version") { throw 'Host/package mismatch or missing native dependency.' }
     $marker = Join-Path $InstallDirectory 'INSTALLER-V1'

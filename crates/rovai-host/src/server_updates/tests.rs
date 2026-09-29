@@ -18,6 +18,14 @@ fn release_coordinates_and_checksums_admit_only_exact_stable_server_assets() {
     ] {
         assert_eq!(version_numbers(text), expected);
     }
+    for (tag, expected) in [
+        ("server-v0.4.1", Some(("0.4.1", [0, 4, 1]))),
+        ("v0.4.2", Some(("0.4.2", [0, 4, 2]))),
+        ("v0.4.2-beta", None),
+        ("other-v0.4.2", None),
+    ] {
+        assert_eq!(release_coordinates(tag), expected);
+    }
     let asset = asset_name("0.2.7", "macos-arm64");
     let digest = "a".repeat(64);
     assert_eq!(
@@ -48,6 +56,7 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     fs::create_dir_all(&root).unwrap();
     fs::create_dir_all(&data).unwrap();
     fs::create_dir_all(package.join("web-ui")).unwrap();
+    fs::create_dir_all(package.join("skills/cli-operations")).unwrap();
     let target = target().unwrap();
     let version = "999.0.0";
     let current_version = env!("CARGO_PKG_VERSION");
@@ -82,6 +91,11 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     )
     .unwrap();
     fs::write(package.join("web-ui/index.html"), "new matching UI").unwrap();
+    fs::write(
+        package.join("skills/cli-operations/SKILL.md"),
+        "---\nname: cli-operations\ndescription: Fixture.\n---\n",
+    )
+    .unwrap();
     for program in ["rovai-server", "rovai-host", "rovai"] {
         fs::write(
             package.join(program),
@@ -104,23 +118,23 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     );
     let bytes = fs::read(archive).unwrap();
     let asset = asset_name(version, target);
-    let response = json!({"tag_name":format!("server-v{version}"),"draft":false,"prerelease":false,"name":"Fixture","body":"Changes","published_at":"2026-09-14T00:00:00Z",
+    let response = json!({"tag_name":format!("v{version}"),"draft":false,"prerelease":false,"name":"Fixture","body":"Changes","published_at":"2026-09-14T00:00:00Z",
         "assets":[{"name":asset,"size":bytes.len()},{"name":"SHA256SUMS","size":100}]});
     let current_response = json!({"tag_name":format!("server-v{current_version}"),"draft":false,"prerelease":false,"name":"Installed Fixture","body":"Installed changes","published_at":"2026-09-14T00:00:00Z",
         "assets":[{"name":asset_name(current_version, target),"size":1},{"name":"SHA256SUMS","size":100}]});
     let routes = Arc::new(Mutex::new(HashMap::from([
         ("/channel".to_owned(), b"unpublished".to_vec()),
         (
-            format!("/api/server-v{version}"),
+            format!("/api/v{version}"),
             serde_json::to_vec(&response).unwrap(),
         ),
         (
             format!("/api/server-v{current_version}"),
             serde_json::to_vec(&current_response).unwrap(),
         ),
-        (format!("/assets/server-v{version}/{asset}"), bytes.clone()),
+        (format!("/assets/v{version}/{asset}"), bytes.clone()),
         (
-            format!("/assets/server-v{version}/SHA256SUMS"),
+            format!("/assets/v{version}/SHA256SUMS"),
             format!("{}  {asset}\n", "0".repeat(64)).into_bytes(),
         ),
     ])));
@@ -163,10 +177,10 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     updates.call(UpdateRequest::Check {}).await.unwrap();
     wait_status(&updates, "check_failed").await;
     assert_eq!(updates.snapshot()["failureReason"], "release_unpublished");
-    routes
-        .lock()
-        .unwrap()
-        .insert("/channel".into(), current_version.as_bytes().to_vec());
+    routes.lock().unwrap().insert(
+        "/channel".into(),
+        format!("server-v{current_version}").into_bytes(),
+    );
     updates.call(UpdateRequest::Check {}).await.unwrap();
     wait_status(&updates, "up_to_date").await;
     assert_eq!(
@@ -181,7 +195,7 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     routes
         .lock()
         .unwrap()
-        .insert("/channel".into(), version.as_bytes().to_vec());
+        .insert("/channel".into(), format!("v{version}").into_bytes());
     updates.call(UpdateRequest::Check {}).await.unwrap();
     wait_status(&updates, "available").await;
     assert_eq!(updates.snapshot()["availableRelease"]["version"], version);
@@ -199,7 +213,7 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     routes
         .lock()
         .unwrap()
-        .insert("/channel".into(), version.as_bytes().to_vec());
+        .insert("/channel".into(), format!("v{version}").into_bytes());
     updates.call(UpdateRequest::Check {}).await.unwrap();
     wait_status(&updates, "available").await;
     assert!(
@@ -236,7 +250,7 @@ async fn update_pipeline_keeps_the_running_program_until_verified_and_durably_se
     wait_status(&updates, "download_failed").await;
     assert_eq!(fs::read_to_string(root.join("package-info")).unwrap(), old);
     routes.lock().unwrap().insert(
-        format!("/assets/server-v{version}/SHA256SUMS"),
+        format!("/assets/v{version}/SHA256SUMS"),
         format!("{:x}  {asset}\n", Sha256::digest(&bytes)).into_bytes(),
     );
     updates
