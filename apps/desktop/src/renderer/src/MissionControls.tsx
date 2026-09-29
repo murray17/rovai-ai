@@ -8,8 +8,12 @@ import { useMobileLayout } from './MobileLayout'
 import { missionLabelColorToken } from './theme'
 import { DialogControlIcon } from './AppDialog'
 import type { AgentProfile, MissionRecord as Mission, MissionStatus as Status } from '@contracts'
-import { UiText, uiAttribute } from './interface-language'
-export const statuses: {id: Status; label: string}[] = [{id:'needs_you',label:"需要你"},{id:'not_started',label:"未开始"},{id:'in_progress',label:"进行中"},{id:'completed',label:"已完成"}]
+import { UiText, uiAttribute, useUiText } from './interface-language'
+const statusDefinitions: {id: Status; label: string}[] = [{id:'needs_you',label:"需要你"},{id:'not_started',label:"未开始"},{id:'in_progress',label:"进行中"},{id:'completed',label:"已完成"}]
+export function useMissionStatuses(): { id: Status; label: string }[] {
+  const translate = useUiText()
+  return statusDefinitions.map(status => ({ ...status, label: translate(status.label) }))
+}
 const People = createContext<AgentProfile[]>([])
 export function MissionPeopleProvider({agents,children}:{agents:AgentProfile[];children:ReactNode}) {return <People.Provider value={agents}>{children}</People.Provider>}
 function usePeople() {const agents=useContext(People);return (id:string)=>agents.find(agent=>agent.agentId===id) ?? {avatarRef:null,displayName:id,teamRole:''}}
@@ -30,8 +34,10 @@ export function StatusIcon({ status }: { status: Status }) {
   return <span className={`mission-state-glyph is-${status}`} aria-hidden="true">{status === 'needs_you' ? '!' : status === 'completed' ? <Icon name="check"/> : ''}</span>
 }
 export function StatusMenu({ m, onStatus, compact = false }: { m: Mission; onStatus: (status: Status) => void; compact?: boolean }) {
-  return <Menu.Root><Menu.Trigger asChild><button className={`mission-status ${compact ? 'is-compact' : ''}`} aria-label={uiAttribute("修改 {0} 的状态，当前{1}", String(m.title), String(uiAttribute(statuses.find(s => s.id === m.status)?.label ?? '')))} title={uiAttribute("修改状态")}><StatusIcon status={m.status}/>{!compact && <span>{uiAttribute(statuses.find(s => s.id === m.status)?.label ?? '')}</span>}<Icon name="chevron"/></button></Menu.Trigger>
-    <Menu.Portal><Menu.Content className="compact-menu mission-status-menu" align="end" sideOffset={6} collisionPadding={12} loop><Menu.Label className="mission-menu-label"><UiText zh={"使命状态"} /></Menu.Label><Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem key={s.id} value={s.id} className="compact-option"><StatusIcon status={s.id}/><span>{uiAttribute(s.label)}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup></Menu.Content></Menu.Portal></Menu.Root>
+  const statuses = useMissionStatuses()
+  const currentStatus = statuses.find(status => status.id === m.status)?.label ?? ''
+  return <Menu.Root><Menu.Trigger asChild><button className={`mission-status ${compact ? 'is-compact' : ''}`} aria-label={uiAttribute("修改 {0} 的状态，当前{1}", String(m.title), currentStatus)} title={uiAttribute("修改状态")}><StatusIcon status={m.status}/>{!compact && <span>{currentStatus}</span>}<Icon name="chevron"/></button></Menu.Trigger>
+    <Menu.Portal><Menu.Content className="compact-menu mission-status-menu" align="end" sideOffset={6} collisionPadding={12} loop><Menu.Label className="mission-menu-label"><UiText zh={"使命状态"} /></Menu.Label><Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem key={s.id} value={s.id} className="compact-option"><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup></Menu.Content></Menu.Portal></Menu.Root>
 }
 
 export const orderedMembers = (m: Mission) => [...(m.defaultLeadAgentId ? [m.defaultLeadAgentId] : []), ...m.memberAgentIds.filter(id => id !== m.defaultLeadAgentId)]
@@ -163,10 +169,11 @@ export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onSt
 }) {
   const person=usePeople();
   const mobile=useMobileLayout()
+  const statuses = useMissionStatuses()
   const [panel, setPanel] = useState<string | null>(null)
   const triggers = useRef(new Map<string, HTMLDivElement>())
   const panels = m ? [
-    {id:'status',label:uiAttribute("状态"),className:'',content:<Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem className="compact-option" value={s.id} key={s.id}><StatusIcon status={s.id}/><span>{uiAttribute(s.label)}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
+    {id:'status',label:uiAttribute("状态"),className:'',content:<Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem className="compact-option" value={s.id} key={s.id}><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
     {id:'members',label:uiAttribute("查看队员"),className:'mission-members-popover',content:<MissionRoster m={m}/>},
     {id:'lead',label:uiAttribute("队长"),className:'',content:<Menu.RadioGroup value={m.defaultLeadAgentId ?? ''} onValueChange={onLead}>{orderedMembers(m).map(id => <Menu.RadioItem className="compact-option" key={id} value={id}><Avatar id={id}/><span>{person(id).displayName}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
     {id:'tags',label:uiAttribute("标签"),className:'mission-label-popover',content:<LabelsEditor m={m} catalog={catalog} onSave={onSaveTags}/>}

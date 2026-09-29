@@ -1,9 +1,48 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
-import { missionCardVisibleAvatarCount } from './MissionControls'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { GeneralPreferencesApi, InterfaceLanguage, MissionRecord, MissionStatus } from '@contracts'
+import { missionCardVisibleAvatarCount, StatusMenu } from './MissionControls'
+import { changeInterfaceLanguage, translateUi } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
 const component = readFileSync(new URL('./MissionControls.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('./mission.css', import.meta.url), 'utf8')
+
+describe('Mission status language', () => {
+  const preferences = {
+    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
+      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
+    })
+  } as GeneralPreferencesApi
+
+  afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
+
+  it('updates visible and accessible labels for all four statuses', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    for (const [status, label] of [
+      ['needs_you', 'Needs you'],
+      ['not_started', 'Not started'],
+      ['in_progress', 'In progress'],
+      ['completed', 'Complete']
+    ] as const satisfies ReadonlyArray<readonly [MissionStatus, string]>) {
+      const mission = { title: 'Roadmap', status } as MissionRecord
+      const markup = renderToStaticMarkup(createElement(StatusMenu, { m: mission, onStatus: () => undefined }))
+      expect(markup).toContain(`<span>${label}</span>`)
+      expect(markup).toContain(`aria-label="Change status for Roadmap. Current: ${label}"`)
+    }
+    expect(translateUi('en', '暂无{0}的使命', 'Needs you')).toBe('No missions marked Needs you')
+
+    await changeInterfaceLanguage(preferences, 'zh-CN')
+    const chinese = renderToStaticMarkup(createElement(StatusMenu, {
+      m: { title: '计划', status: 'needs_you' } as MissionRecord,
+      onStatus: () => undefined
+    }))
+    expect(chinese).toContain('<span>需要你</span>')
+    expect(chinese).toContain('aria-label="修改 计划 的状态，当前需要你"')
+  })
+})
 
 describe('Mission card action menu interaction', () => {
   it('keeps submenus click-open while giving every action a visible hover and keyboard-focus state', () => {
