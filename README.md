@@ -28,7 +28,7 @@ inspect execution and file changes, and keep useful knowledge for the next task.
 
 </div>
 
-<p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="Four teammates are mentioned; Gugu and Bunny have replied while Dingding and Cheese are still running in the right-hand Overview" width="100%"></a></p>
+<p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="Four teammates are mentioned; Gugu and Cheese have replied with their execution cards expanded in the right-hand Overview, while Dingding and Bunny are still running" width="100%"></a></p>
 
 ## Work together, from the first request to the next task
 

@@ -28,7 +28,7 @@
 
 </div>
 
-<p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="同时 @ 四位队员，Gugu 与 Bunny 已回复，Dingding 与 Cheese 仍在运行，右侧展示 Overview" width="100%"></a></p>
+<p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="同时 @ 四位队员，Gugu 与 Cheese 已回复，右侧 Overview 展开她们的执行卡片，Dingding 与 Bunny 仍在运行" width="100%"></a></p>
 
 ## 从第一条请求，一起做到下一次任务
 

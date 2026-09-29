@@ -7,12 +7,12 @@
       "file": "workspace-team-ready.png",
       "kind": "app-renderer-screenshot",
       "sourceCommit": "16945b9cf1cd8e9dc92b82ca8e0518b10950802a",
-      "layout": "right-overview",
+      "layout": "right-overview-expanded-cards",
       "width": 1440,
       "height": 820,
-      "sha256": "ab944dafb411e4d488ed985cb5279d028a391b6457ea12452b045a4610faecd7",
+      "sha256": "27ac1b62027698ad0ff16638175962055dc7fd42eb1f456a3266147f91fdee25",
       "edited": false,
-      "capturedAt": "2026-09-29T12:17:47.411Z",
+      "capturedAt": "2026-09-29T12:54:08.019Z",
       "agents": {
         "Dingding": "Codex CLI",
         "Cheese": "Claude Code",
@@ -62,5 +62,5 @@
     "editableSource": "architecture-overview.mmd",
     "purpose": "User-facing overview; engineering authority remains in docs/architecture."
   },
-  "heroCapture": "Four teammates were explicitly selected through the mention picker and received one real check-in. The captured moment contains replies from Gugu and Bunny while Dingding and Cheese are still running. Overview is pinned to the right at its supported minimum width of 420px. Messages, runtime labels, and execution states are unedited."
+  "heroCapture": "Four teammates were explicitly selected through the mention picker and received the real greeting “Ready, team?”. The captured moment contains replies from Gugu and Cheese while Dingding and Bunny are still running. The two completed execution cards are expanded in Overview, pinned to the right at its supported minimum width of 420px. Messages, runtime labels, and execution states are unedited."
 }
