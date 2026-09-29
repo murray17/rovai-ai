@@ -1,0 +1,8 @@
+flowchart LR
+  U["User: goal and decisions"] -->|addressed request| R["Rovai"]
+  R -->|teammate configuration| A["Native Agent"]
+  A -->|model request| M["Configured model service"]
+  M -->|response| A
+  A -->|read edit check| F["Host project files"]
+  A -->|observable output| R
+  R -->|inspect delivery| U

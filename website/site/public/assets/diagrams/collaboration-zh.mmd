@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant U as 用户
+  participant R as Rovai
+  participant I as 实现队员
+  participant V as 审查队员
+  participant F as 项目文件
+    U->>R: 选择实现队员并发送范围
+    R->>I: 投递请求，领取执行
+    I->>F: 修改并检查文件
+    I->>U: 实现摘要与限制
+    U->>V: 选择审查队员并发送审查请求
+    V->>F: 只读检查同一组文件
+    V->>U: 返回真实意见，或说明未发现问题
+  opt 确认问题需要修复
+    U->>I: 可选：按意见请求小范围修复
+  end
+    U->>F: 检查最终页面及变更

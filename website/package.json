@@ -1,0 +1,18 @@
+{
+  "name": "rovai-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/generate.mjs && vitepress build site",
+    "check": "npm run build && node scripts/check-output.mjs",
+    "dev": "node scripts/generate.mjs && vitepress dev site",
+    "preview": "vitepress preview site"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "vitepress": "1.6.4"
+  },
+  "overrides": {
+    "vite": "6.4.3"
+  }
+}

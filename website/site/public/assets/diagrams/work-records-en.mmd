@@ -1,0 +1,7 @@
+flowchart TB
+  M["Mission: goal and board status"] -->|associated team conversation| C["Conversation"]
+  C -->|responsibility records| T["Task"]
+  C -->|addressed message claimed| R["Run"]
+  T -.->|may link, not 1 to 1| R
+  C -->|project context| F["Workspace files"]
+  R -->|operates on| F
