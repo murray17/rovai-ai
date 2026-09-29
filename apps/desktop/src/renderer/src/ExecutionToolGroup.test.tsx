@@ -10,9 +10,9 @@ import {
   selectCompletePresentableExecutionEvidence
 } from './ExecutionToolGroup'
 import type { ToolProgressItem } from './execution-tool-grouping'
-import type { ActivityIconKind } from './ui-model'
+import { runtimeCompactionDetailText, runtimeCompactionTitle, type ActivityIconKind, type RuntimeCompactionDisplayItem } from './ui-model'
 import { openAgentRunActivityFilePreview } from './agent-run-file-preview'
-import { changeInterfaceLanguage } from './interface-language'
+import { changeInterfaceLanguage, translateUi } from './interface-language'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
 const tool = (id: string, iconKind: ActivityIconKind, status: ToolProgressItem['step']['status']): ToolProgressItem => ({
@@ -31,7 +31,7 @@ const renderGroup = (items: ToolProgressItem[], expanded = false, liveTail = fal
   </ExecutionToolGroupStateContext.Provider>
 )
 
-describe('localized completed step summaries', () => {
+describe('localized execution summaries', () => {
   const preferences = {
     setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
       ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
@@ -75,6 +75,43 @@ describe('localized completed step summaries', () => {
       expect(markup).toMatch(/<span>[^<]*等待审批<\/span>/)
       expect(markup).not.toContain('Completed 1 step')
     }
+  })
+
+  it('localizes compaction phases and metrics while preserving the runtime summary', async () => {
+    const compaction: RuntimeCompactionDisplayItem = {
+      id: 'compact', phase: 'started', completionEvidence: null,
+      adapterKind: 'codex-cli',
+      tokens: { before: 128_420, after: 61_208, current: 61_208, contextWindow: 200_000, usagePercent: 30.6 },
+      messages: { compacted: 37 }, elapsedMs: 1_420,
+      summaryText: '用户原文 · keep as written'
+    }
+    const english = (chinese: string): string => translateUi('en', chinese)
+    await changeInterfaceLanguage(preferences, 'en')
+    const markup = renderToStaticMarkup(<CompactionEventRow campId="camp" runId="run" runStatus="running" compaction={compaction} />)
+    expect(markup).toContain('Compacting context · Codex · 128.4K → 61.2K')
+    expect(markup).not.toContain('正在压缩会话上下文')
+    expect(runtimeCompactionTitle({ ...compaction, phase: 'imminent' }, english)).toContain('Preparing to compact context')
+    expect(runtimeCompactionTitle({ ...compaction, phase: 'completed' }, english)).toContain('Context compaction')
+    expect(runtimeCompactionTitle({ ...compaction, phase: 'completed', completionEvidence: 'post_compaction_boundary' }, english))
+      .toContain('Using compacted context')
+    expect(runtimeCompactionDetailText(compaction, english)).toBe([
+      'Before: 128,420 tokens',
+      'After: 61,208 tokens',
+      'Current: 61,208 tokens',
+      'Context window: 200,000 tokens',
+      'Reduced by: 67,212 tokens · 52.3%',
+      'Context used: 30.6%',
+      'Messages compacted: 37',
+      'Duration: 1.42 s',
+      '',
+      'Conversation summary',
+      '',
+      '用户原文 · keep as written'
+    ].join('\n'))
+
+    await changeInterfaceLanguage(preferences, 'zh-CN')
+    expect(renderToStaticMarkup(<CompactionEventRow campId="camp" runId="run" runStatus="running" compaction={compaction} />))
+      .toContain('正在压缩会话上下文')
   })
 })
 

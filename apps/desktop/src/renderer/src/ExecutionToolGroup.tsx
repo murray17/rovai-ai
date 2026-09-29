@@ -632,11 +632,12 @@ export function CompactionEventRow({
   runStatus: AgentRunView['status']
   completeEvidence?: PresentableExecutionEvidence
 }): JSX.Element {
+  const translate = useUiText()
   const [expanded, setExpanded] = useExecutionRetainedState(`compaction-expanded:${runId}:${compaction.id}`, false)
   const [activated, setActivated] = useExecutionRetainedState(`compaction-activated:${runId}:${compaction.id}`, false)
   const summaryRef = useRef<HTMLElement>(null)
-  const title = runtimeCompactionTitle(compaction)
-  const detail = runtimeCompactionDetailText(compaction) ?? ''
+  const title = runtimeCompactionTitle(compaction, translate)
+  const detail = runtimeCompactionDetailText(compaction, translate) ?? ''
   const expandable = runtimeCompactionIsExpandable(compaction)
   const status = runtimeCompactionActivityStatus(compaction, runStatus)
   const summary = (

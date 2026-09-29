@@ -460,7 +460,10 @@ export function runtimeAdapterDisplayLabel(kind: string): string {
   } as Record<string, string>)[kind] ?? kind
 }
 
-export function runtimeCompactionTitle(item: RuntimeCompactionDisplayItem): string {
+export function runtimeCompactionTitle(
+  item: RuntimeCompactionDisplayItem,
+  translate: (chinese: string) => string = (chinese) => chinese
+): string {
   const action = item.phase === 'imminent'
     ? '即将压缩会话上下文'
     : item.phase === 'started'
@@ -471,20 +474,21 @@ export function runtimeCompactionTitle(item: RuntimeCompactionDisplayItem): stri
   const tokenTransition = item.tokens.before !== undefined && item.tokens.after !== undefined
     ? ` · ${compactTokenCount(item.tokens.before)} → ${compactTokenCount(item.tokens.after)}`
     : ''
-  return `${action} · ${runtimeAdapterDisplayLabel(item.adapterKind)}${tokenTransition}`
+  return `${translate(action)} · ${runtimeAdapterDisplayLabel(item.adapterKind)}${tokenTransition}`
 }
 
 export function runtimeCompactionDetailText(
-  item: RuntimeCompactionDisplayItem
+  item: RuntimeCompactionDisplayItem,
+  translate: (chinese: string) => string = (chinese) => chinese
 ): string | null {
   if (!runtimeCompactionIsExpandable(item)) return null
   const metrics: string[] = []
   const formatTokens = (value: number): string => `${new Intl.NumberFormat('zh-CN').format(value)} tokens`
-  if (item.tokens.before !== undefined) metrics.push(`压缩前：${formatTokens(item.tokens.before)}`)
-  if (item.tokens.after !== undefined) metrics.push(`压缩后：${formatTokens(item.tokens.after)}`)
-  if (item.tokens.current !== undefined) metrics.push(`当前：${formatTokens(item.tokens.current)}`)
+  if (item.tokens.before !== undefined) metrics.push(`${translate('压缩前：')}${formatTokens(item.tokens.before)}`)
+  if (item.tokens.after !== undefined) metrics.push(`${translate('压缩后：')}${formatTokens(item.tokens.after)}`)
+  if (item.tokens.current !== undefined) metrics.push(`${translate('当前：')}${formatTokens(item.tokens.current)}`)
   if (item.tokens.contextWindow !== undefined) {
-    metrics.push(`上下文窗口：${formatTokens(item.tokens.contextWindow)}`)
+    metrics.push(`${translate('上下文窗口：')}${formatTokens(item.tokens.contextWindow)}`)
   }
   if (
     item.tokens.before !== undefined
@@ -495,21 +499,21 @@ export function runtimeCompactionDetailText(
     const percent = item.tokens.before > 0
       ? ` · ${((reduction / item.tokens.before) * 100).toFixed(1)}%`
       : ''
-    metrics.push(`减少：${formatTokens(reduction)}${percent}`)
+    metrics.push(`${translate('减少：')}${formatTokens(reduction)}${percent}`)
   }
   if (item.tokens.usagePercent !== undefined) {
-    metrics.push(`上下文使用：${item.tokens.usagePercent.toFixed(1)}%`)
+    metrics.push(`${translate('上下文使用：')}${item.tokens.usagePercent.toFixed(1)}%`)
   }
   if (item.messages.compacted !== undefined) {
-    metrics.push(`整理消息：${new Intl.NumberFormat('zh-CN').format(item.messages.compacted)}`)
+    metrics.push(`${translate('整理消息：')}${new Intl.NumberFormat('zh-CN').format(item.messages.compacted)}`)
   }
   if (item.elapsedMs !== undefined) {
     const seconds = (item.elapsedMs / 1_000).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
-    metrics.push(`耗时：${seconds} 秒`)
+    metrics.push(`${translate('耗时：')}${seconds} ${translate('秒')}`)
   }
   if (!item.summaryText) return metrics.join('\n') || null
   return metrics.length > 0
-    ? `${metrics.join('\n')}\n\n会话摘要\n\n${item.summaryText}`
+    ? `${metrics.join('\n')}\n\n${translate('会话摘要')}\n\n${item.summaryText}`
     : item.summaryText
 }
 
