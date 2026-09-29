@@ -1,0 +1,9 @@
+flowchart TB
+ subgraph LAN["Trusted local network"]
+   browser["Phone / second computer browser"]
+   firewall["Host firewall permits trusted subnet"]
+   host["Host 192.168.1.50: Desktop :8766 OR Server :8767"]
+   browser -->|HTTP| firewall
+   firewall -->|"TCP selected port"| host
+ end
+ note["No public port mapping; localhost means the browser device"]

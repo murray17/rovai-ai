@@ -1,0 +1,19 @@
+# Customize the user, paths, Agent PATH, and connection flags before installing.
+[Unit]
+Description=Rovai Server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=rovai
+WorkingDirectory=/home/rovai
+Environment=HOME=/home/rovai
+Environment=PATH=/home/rovai/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/rovai/.local/share/rovai-server/current/rovai-server --data-dir /home/rovai/.rovai-server --listen 127.0.0.1:8767
+KillMode=control-group
+TimeoutStopSec=90
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,69 @@
+# Deployment documentation delivery notes
+
+## Scope and source versions
+
+- Documentation and website assets only; no App, Server, network implementation, domain, DNS, or release workflow changes.
+- Desktop: public `v0.4.1`, source `ab6f67fb76c41f1758b04cc728eeb95fb6a17227`.
+- Server: public `server-v0.4.0`, source `f4b515e31caebbb37cc643f380173763d11e17d1`.
+- Server channel: `scripts/server-channel.txt` = `0.4.0`, checked against actual release assets on 2026-09-29.
+- GitHub marks the Server release published and non-prerelease; its body still includes old draft wording. This task did not modify release metadata or infer runtime qualification from publication.
+
+## Pages and navigation
+
+The existing `/docs/remote.html` and `/zh/docs/remote.html` now introduce the group. Six new topics use matching English/Chinese paths: `desktop-web`, `server-install`, `lan-access`, `tailscale`, `public-https`, and `server-maintenance`.
+
+Homepage, downloads, installation, quick start and compatibility link to the group. Downloads distinguish Desktop 0.4.1 from Server 0.4.0. The previous repository guides now acknowledge published packages and route ordinary installation to the website.
+
+## Actual capture process
+
+All work used fresh isolated data, Skill Library and MCP configuration directories. No daily Desktop data, credentials or user projects were copied or modified. Orbit was copied from the existing public tutorial fixture into a separate temporary project.
+
+### Server
+
+- Downloaded the release installer, SHA256SUMS and macOS arm64 archive.
+- Ran the released installer with isolated `--prefix`, `--bin-dir`, `--from-dir` and `--no-modify-path`. Its checksum/manifest verification completed.
+- Started the actual released executable, logged in through its browser form, configured Codex CLI 0.157.1 with read-only filesystem access, selected the host Orbit project and created `Orbit · Remote review`.
+- Sent a real read-only inspection request. It failed **before Agent launch**, with `bundled Skill resources are unavailable`. The screenshot preserves that failure.
+- The release has a Chinese Web UI; English documentation reuses the actual Chinese capture and says so. It does not translate or fabricate screenshot text.
+
+### Desktop Web
+
+- Downloaded the public macOS arm64 0.4.1 DMG and launched the App from a separate copied bundle with explicit isolated user data, Skill Library and MCP configuration.
+- Enabled its Web service on **18766**, because the normal **8766** belonged to an existing instance. That existing process was left alone.
+- Captured Chinese and English native Remote connection settings. Only the toggle, port and loopback address are included in the public crops; private interface addresses and credentials are excluded. Screenshot pixels were not rewritten.
+- Logged in through the Desktop-hosted browser form, selected the same separate Orbit project, created `Orbit · Browser follow-up`, and sent a real read-only check.
+- Codex CLI read the page and confirmed the actual Apple Silicon, Intel and Windows x64 fixture files. The request specifically prohibited edits, commits and network tools. The response contains both Chinese and English results; member identities were not rewritten for language variants.
+- A real follow-up asked for a short bilingual summary of that completed inspection. Phone-width captures show the resulting six-line answer; the native Desktop received the same conversation update. No screenshot output or execution state was edited.
+- Phone screenshots are **responsive browser viewport captures on the same Mac**, not evidence of a physical phone or cross-network connection.
+
+## Release limitations found during this work
+
+1. **macOS Server command-link startup:** the installed `.local/bin`-style symlink could report `Matching WebUI is missing`. Running the executable within the installer’s `current` program directory reached Ready and login. The guide gives that release-specific launch path.
+2. **Missing bundled Skill resources:** the macOS arm64 Server 0.4.0 archive lacks the resources required for a real Agent execution. The guide, overview/download context and troubleshooting report the limitation. No resource injection, source build, fake response, or implementation fix was used to make the published package appear successful.
+3. **Desktop external origin:** Desktop 0.4.1 offers port and Web toggle, with no public-origin field in the settings. The Serve HTTPS and Caddy recipes therefore target independent Server; Desktop’s Tailscale route uses the host interface IP. No undocumented Console/IPC workaround is presented as a normal user flow.
+
+## Diagrams and examples
+
+Five bilingual diagram pairs retain SVG and Mermaid sources: deployment choice, deployment forms, trusted LAN, Tailscale Serve, and public HTTPS. They extend the existing neutral diagram style and the existing repository’s network relationships.
+
+Copyable website commands and editable examples include one Caddyfile, one Linux systemd unit and one macOS LaunchAgent. All use placeholder accounts/domains/paths. The examples were **not installed as live system services**. No public service or DNS record was created for these tutorials.
+
+## Validation boundaries
+
+- macOS arm64 published packages were used for local installation/login/real execution observations.
+- Linux and Windows package names and dependencies were checked against release/build contracts; this documentation pass is not execution acceptance on those systems.
+- LAN firewall, Tailscale Serve and Caddy are configuration tutorials checked against implementation and official documentation, not claimed end-to-end network deployments.
+- No cross-host data migration, multi-owner access model, automatic cloud availability or automatic resumption after host shutdown is promised.
+
+### Stop/restart check
+
+Server exited normally on Ctrl-C. It was restarted with the original data directory on another loopback port to verify a fresh-origin login. The original management Token remained valid, and the Orbit project, teammate configuration and failed-run record remained present. This confirms local retention and authentication; it does not fix the blocked Agent execution.
+
+## Website checks
+
+- `npm run check --prefix website`: 78 pages built; local links, assets, anchors, separate release downloads and corresponding deployment-language routes pass.
+- Fixed preformatted line-break preservation in the website generator. Built-page checks now cover the two installer commands and shell continuation; the browser copy action reports success and the rendered command retains its newlines.
+- Checked Chinese and English installation pages and the separate Server download area at desktop and phone widths. The document grid now allows tables and code to scroll within the article without widening the phone page.
+- `pnpm docs:test`, `pnpm docs:check`, and diff-aware `pnpm docs:check:ci` pass against the task base. The LaunchAgent example passes `plutil -lint`.
+- The repository-required `pnpm test:rust:pr` was run: Core reported 392 passed, 1 failed, 1 ignored and stopped the workspace run. The unchanged `database_admission::tests::read_probe_tolerates_only_a_new_empty_wal_not_authority_changes` failed its assumption that a fresh fixture had no macOS provenance attribute (line 1751). A focused rerun passed. Rust sources/manifests/lockfile match the task base; no test was changed or disabled, and the full workspace result is not reported as passing.
+- All isolated capture processes were stopped after their runs completed. The existing Desktop/host instance was left running.

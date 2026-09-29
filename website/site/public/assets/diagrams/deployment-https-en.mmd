@@ -1,0 +1,9 @@
+flowchart TB
+ browser["Browser: https://agent.example.com"]
+ dns["DNS A/AAAA points to reachable host"]
+ caddy["Host: Caddy TLS on 443; HTTP 80 redirect"]
+ backend["Rovai Server 127.0.0.1:8767"]
+ browser -.->|"resolve"| dns
+ browser -->|HTTPS| caddy
+ caddy -->|"HTTP loopback; preserve auth and streaming"| backend
+ backend --- origin["--public-origin https://agent.example.com"]

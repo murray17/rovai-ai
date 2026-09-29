@@ -1,17 +1,16 @@
 ---
 document_type: development-guide
 authority: standalone-server-preview-operation
-last_updated: 2026-09-14
+last_updated: 2026-09-29
 ---
 
 # 原生 Server 安装与开发验收
 
-这是尚未正式发布的原生 Server 链路，提供同一个 Rust Host 和共享生产 Camp 页面。
-以下命令在取得匹配的预编译包并安装后使用；当前不宣称 GitHub 安装地址或正式版本已可下载。
-当前已接通独立草稿、四种 source 上传目标、执行审批、单聊和正式管理页，Automation 由 Rust Host 驱动。
-macOS 上的 Desktop/Headless 真实执行及浏览器管理操作已有证据；第二实体设备与其他平台仍分别验收。每个检查点的实际证据见[当前实施计划](../versions/v1.59/implementation-plan.md)。
-该包不是正式发布资格证明。当前产品为单 Owner、可信自托管 Host，不承诺同 UID 强隔离；
-历史哨兵失败保留，但不再作为本轮交付前置。
+Server 0.4.0（`server-v0.4.0`）已有公开原生包。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
+
+2026-09-29 的 macOS arm64 发布包实测确认安装、登录与会话可用，但有两个发布包阻碍：快捷命令启动可能找不到 WebUI；直接运行 `current/rovai-server` 后，首次 Agent 执行仍因 `bundled Skill resources are unavailable` 失败，归档缺少内置 Skill 资源。本轮只更新文档，未修改包或实现，不能把这组证据记成端到端执行成功。完整记录见[官网部署素材说明](../../website/deployment-notes.md)。
+
+已接通能力与平台资格分别判断，按[当前版本入口](../versions/README.md)及 [Runtime 兼容性清单](../runtime-compatibility.md)查看当前状态。产品为单 Owner、可信自托管 Host，不承诺同 UID 强隔离。本文历史 Gate 与草稿发布流程描述的是资格流程，不是“当前尚无公开包”的声明。
 
 ## 构建与包内容
 

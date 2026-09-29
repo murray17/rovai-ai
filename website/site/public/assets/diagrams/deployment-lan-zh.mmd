@@ -1,0 +1,9 @@
+flowchart TB
+ subgraph LAN["可信局域网"]
+   browser["手机 / 第二台电脑浏览器"]
+   firewall["主机防火墙允许可信子网"]
+   host["主机 192.168.1.50：Desktop :8766 或 Server :8767"]
+   browser -->|HTTP| firewall
+   firewall -->|"所选 TCP 端口"| host
+ end
+ note["不做公网映射；localhost 指浏览器所在设备"]

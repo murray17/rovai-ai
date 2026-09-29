@@ -1,0 +1,12 @@
+flowchart TB
+  desktop["Desktop Web 0.4.1：现有桌面工作台"]
+  server["Server 0.4.0：独立实例"]
+  choice{"选择连接方式"}
+  desktop --> choice
+  server --> choice
+  choice --> lan["可信局域网 HTTP：Desktop 或 Server"]
+  choice --> ts["Tailscale：Desktop IP 直连 / Server Serve HTTPS"]
+  choice --> public["公网 HTTPS：Server + 反向代理"]
+  lan --> login["登录选定实例；文件保留在该主机"]
+  ts --> login
+  public --> login

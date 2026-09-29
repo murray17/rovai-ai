@@ -1,0 +1,8 @@
+flowchart TB
+ browser["Visiting device: Tailscale + browser"]
+ serve["Host: Tailscale Serve at https://host.tailnet.ts.net"]
+ backend["Rovai Server 127.0.0.1:8767"]
+ browser -->|"Encrypted tailnet, HTTPS 443, access policy"| serve
+ serve -->|"HTTP loopback"| backend
+ origin["--public-origin = exact Serve HTTPS origin; Owner login retained"]
+ backend --- origin

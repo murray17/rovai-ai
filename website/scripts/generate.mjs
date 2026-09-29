@@ -8,7 +8,7 @@ const source = join(root, 'scripts', 'source')
 const site = join(root, 'site')
 const origin = 'https://rovai.dev'
 const scripts = Object.fromEntries(await Promise.all(
-  ['docs-content.js', 'docs-details.js', 'docs-tutorials.js', 'site.js'].map(async name =>
+  ['docs-content.js', 'docs-details.js', 'docs-tutorials.js', 'docs-deployment.js', 'site.js'].map(async name =>
     [name, await readFile(join(source, name), 'utf8')]
   )
 ))
@@ -25,7 +25,7 @@ function makeWindow(page, lang, topic = '') {
     configurable: true,
     get: () => ({ src: `${origin}/assets/site.js` })
   })
-  for (const name of ['docs-content.js', 'docs-details.js', 'docs-tutorials.js']) {
+  for (const name of ['docs-content.js', 'docs-details.js', 'docs-tutorials.js', 'docs-deployment.js']) {
     dom.window.eval(scripts[name])
   }
   dom.window.eval(scripts['site.js'])
@@ -87,11 +87,14 @@ async function generate(page, lang, topic = '') {
       : (lang === 'zh' ? 'Rovai AI 文档' : 'Rovai AI documentation')
   const description = topicData ? localized(topicData.lead) : page === 'home'
     ? (lang === 'zh' ? '把编程智能体带到同一个桌面工作台，组织长期队员、会话和任务。' : 'Bring your coding Agents together in a desktop workspace for lasting teammates, conversations and tasks.')
-    : page === 'download' ? (lang === 'zh' ? '下载 Rovai AI macOS 或 Windows 安装包。' : 'Download Rovai AI for macOS or Windows.')
+    : page === 'download' ? (lang === 'zh' ? '下载 Rovai Desktop，或为自己的主机安装独立 Rovai Server。' : 'Download Rovai Desktop or install standalone Rovai Server on your own host.')
       : (lang === 'zh' ? '了解 Rovai AI 的队员、协作、执行、扩展和设置。' : 'Learn how to use teammates, collaboration, execution, extensions and settings in Rovai AI.')
   const app = doc.getElementById('app')
-  for (const pre of app.querySelectorAll('pre')) pre.innerHTML = pre.innerHTML.replaceAll('\n', '&#10;')
-  const content = `<div id="rovai-site">${app.innerHTML.replaceAll('\n', '')}</div>`
+  // Encode preformatted line breaks after serialization: assigning entities to
+  // innerHTML decodes them again before the outer whitespace removal runs.
+  const contentHtml = app.innerHTML.replace(/<pre\b[^>]*>[\s\S]*?<\/pre>|\n/g,
+    part => part === '\n' ? '' : part.replaceAll('\n', '&#10;'))
+  const content = `<div id="rovai-site">${contentHtml}</div>`
   const prefix = lang === 'zh' ? 'zh/' : ''
   const path = page === 'home' ? `${prefix}index.md` : page === 'download' ? `${prefix}download/index.md`
     : topic ? `${prefix}docs/${topic}.md` : `${prefix}docs/index.md`

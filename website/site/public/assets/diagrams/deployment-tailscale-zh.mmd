@@ -1,0 +1,8 @@
+flowchart TB
+ browser["访问设备：Tailscale + 浏览器"]
+ serve["主机：Tailscale Serve，https://host.tailnet.ts.net"]
+ backend["Rovai Server 127.0.0.1:8767"]
+ browser -->|"加密私网、HTTPS 443、访问策略"| serve
+ serve -->|"HTTP loopback"| backend
+ origin["--public-origin = 准确 Serve HTTPS 来源；保留 Owner 登录"]
+ backend --- origin

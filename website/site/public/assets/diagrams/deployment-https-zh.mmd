@@ -1,0 +1,9 @@
+flowchart TB
+ browser["浏览器：https://agent.example.com"]
+ dns["DNS A/AAAA 指向可达主机"]
+ caddy["主机：Caddy 443 TLS；80 HTTP 跳转"]
+ backend["Rovai Server 127.0.0.1:8767"]
+ browser -.->|"解析"| dns
+ browser -->|HTTPS| caddy
+ caddy -->|"本机 HTTP；保留认证与实时响应"| backend
+ backend --- origin["--public-origin https://agent.example.com"]
