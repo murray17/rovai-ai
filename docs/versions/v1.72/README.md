@@ -6,10 +6,18 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-09-30
+last_updated: 2026-10-01
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 待评审提案：Conversation 统一命名
+
+[Camp → Conversation 变更说明 r1](model-context-change-conversation-rename.md)列出 `conversationId`／`campId` 输入兼容、
+私有 AgentSession、旧 Native Session resume 和随包 Skill 更新的具体场景；[文本附录](conversation-rename-comparison.md)提供完整提示词、CLI 与 Skill 前后对照。
+这是尚未取得实施二次确认的文档提案，不表示该更名已实施，也不改变下述已确认的 Lark 范围。
+
+## 版本概览
 
 前置：[v1.71](../v1.71/README.md)。本版把 Lark 从飞书 provider 下未接通的品牌选项，改为与飞书、钉钉并列的独立渠道。
 飞书与 Lark 可以同时连接各自的开发者账号，同一队员可以同时拥有飞书 Bot 与 Lark Bot，两家的账号、Bot、会话和
