@@ -1,8 +1,16 @@
 # Deployment documentation delivery notes
 
+## Desktop and Server 0.4.2 unified publication
+
+The current Desktop and Server downloads share [`v0.4.2`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.2), built from main commit `37877cbd41e47a43c328cbb7021a20c3a5ec8b58`. All 16 release assets were verified against their local SHA-256 values and GitHub digests, and anonymous public downloads were checked before promoting `scripts/server-release-tag.txt` to `v0.4.2`. The legacy `scripts/server-channel.txt` remains `0.4.1` for the bridge path.
+
+The [macOS](https://github.com/murray17/rovai-ai/actions/runs/36716614690), [Windows](https://github.com/murray17/rovai-ai/actions/runs/36716615437), and [four-target Server](https://github.com/murray17/rovai-ai/actions/runs/36716615398) release runs passed on that exact source commit. Ubuntu 22.04, Debian 12, and Ubuntu 24.04 passed the same Linux package checks, bound to manifest SHA-256 `49c4c85d26a647777bd67c34bfae11810b52c521a8f0f13541e1a3d27f61aa00`; their `runtimeQualification` field remains `false`.
+
+On macOS arm64, the native updater installation engine upgraded an isolated copy of the actual published Desktop 0.4.1 App to 0.4.2. The upgraded App's About & Updates acceptance checks passed in light, dark, and compact layouts. This did not modify or restart the daily App and does not claim an end-to-end production network download through the update button. Website version labels, downloads, and installer examples now use 0.4.2; the original captures below retain their actual 0.4.0/0.4.1 provenance.
+
 ## Server 0.4.1 bridge publication
 
-The current Server download is `server-v0.4.1`, built from main commit `446633fcb15303e28fbceaa3bcb76d28be19b2ba`. Desktop `v0.4.1` retains its original source commit and update assets. The two tags share a version number but have different source SHAs; the bridge does not replace the Desktop release.
+The bridge Server download was `server-v0.4.1`, built from main commit `446633fcb15303e28fbceaa3bcb76d28be19b2ba`. Desktop `v0.4.1` retains its original source commit and update assets. The two tags share a version number but have different source SHAs; the bridge does not replace the Desktop release.
 
 This release adds the bundled Skills to each native archive and resolves Web UI resources through the installed command link. An isolated macOS arm64 package test read all five bundled toolbox Skills from an installed archive. An upgrade test used the actual published 0.4.0 macOS arm64 archive, retained an existing camp message in the 0.4.1 Web workspace, and restored the stopped 0.4.0 backup successfully. These checks exercise the package and data boundary; they do not claim a real model request from the final published archive or qualify every Agent.
 
