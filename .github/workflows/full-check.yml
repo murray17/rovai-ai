@@ -22,7 +22,7 @@ on:
           - windows-x64
           - linux-x64
       server_release_draft:
-        description: Assemble a GitHub draft Release after all native targets pass (main only)
+        description: Add Server assets to the unified draft Release after native checks pass (main only)
         type: boolean
         default: false
 
@@ -363,7 +363,7 @@ jobs:
           if-no-files-found: error
 
   server-release-draft:
-    name: Assemble native Server draft Release
+    name: Assemble unified draft Release with native Server assets
     needs: [server-native, server-linux-os, server-linux-debian]
     if: inputs.scope == 'server' && inputs.server_release_draft && inputs.server_target == 'all' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -389,4 +389,4 @@ jobs:
         run: |
           set -euo pipefail
           version=$(node -p 'require("./package.json").version')
-          gh release create "server-v$version" --draft --target "$GITHUB_SHA" --title "Rovai Server $version" --notes-file out/server-release/RELEASE-NOTES.md out/server-release/*.tar.gz out/server-release/*.zip out/server-release/SHA256SUMS scripts/install-server.sh scripts/install-server.ps1
+          gh release create "v$version" --draft --target "$GITHUB_SHA" --title "Rovai AI v$version" --notes-file out/server-release/RELEASE-NOTES.md out/server-release/*.tar.gz out/server-release/*.zip out/server-release/SHA256SUMS scripts/install-server.sh scripts/install-server.ps1

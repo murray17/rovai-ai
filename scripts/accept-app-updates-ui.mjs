@@ -6,6 +6,9 @@ import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const releaseMetadata = JSON.parse(await readFile(join(root, 'build', 'release-metadata.json'), 'utf8'))
+const releaseVersion = releaseMetadata.version
+const releaseNotes = await readFile(join(root, 'build', 'release-notes.md'), 'utf8')
+const releaseSummary = releaseNotes.split('\n').find((line) => line.trim() && !line.startsWith('#'))
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
 const fixtureRoot = process.env.ROVAI_APP_UPDATES_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-app-updates-ui-accept-'))
@@ -57,7 +60,7 @@ try {
     outputDir,
     verified: {
       isolatedPackagedApplication: true,
-      packagedVersion: '0.4.1',
+      packagedVersion: releaseVersion,
       typedIdleUpdaterSnapshot: true,
       bundledCurrentRelease: true,
       bundledCurrentReleaseDate: true,
@@ -97,15 +100,15 @@ async function openAboutUpdates(cdp) {
   assert(selected, 'About & Updates Settings entry was unavailable')
   await waitForSelector(cdp, '.about-updates-settings')
   await waitForExpression(cdp,
-    `document.querySelector('.about-identity p > span:first-child')?.textContent === '版本 v0.4.1'`)
+    `document.querySelector('.about-identity p > span:first-child')?.textContent === ${JSON.stringify(`版本 v${releaseVersion}`)}`)
 }
 
 async function assertAboutUpdates(cdp, context) {
   const updaterSnapshot = await evaluate(cdp, 'window.rovai.appUpdates.get()', true)
-  assert(updaterSnapshot?.currentVersion === '0.4.1'
-    && updaterSnapshot.currentRelease?.version === '0.4.1'
+  assert(updaterSnapshot?.currentVersion === releaseVersion
+    && updaterSnapshot.currentRelease?.version === releaseVersion
     && updaterSnapshot.currentRelease.releaseDate === releaseMetadata.releaseDate
-    && updaterSnapshot.currentRelease.releaseNotes?.startsWith('# Rovai AI v0.4.1\n')
+    && updaterSnapshot.currentRelease.releaseNotes === releaseNotes
     && updaterSnapshot.status === 'idle'
     && updaterSnapshot.availableRelease === null
     && updaterSnapshot.lastCheckSource === null
@@ -135,7 +138,7 @@ async function assertAboutUpdates(cdp, context) {
       releaseNotesText: surface?.querySelector('.about-release-notes')?.textContent ?? '',
       releaseDate: surface?.querySelector('.about-release-header time')?.getAttribute('datetime') ?? '',
       releaseDateText: surface?.querySelector('.about-release-header time')?.textContent ?? '',
-      repeatedReleaseTitle: Boolean(surface?.querySelector('[data-markdown-heading="Rovai AI v0.4.1"]')),
+      repeatedReleaseTitle: Boolean(surface?.querySelector(${JSON.stringify(`[data-markdown-heading="Rovai AI v${releaseVersion}"]`)})),
       fallbackVisible: Boolean(surface?.querySelector('.about-update-fallback')),
       globalPromptVisible: Boolean(document.querySelector('.app-update-prompt')),
       forbiddenCopy: /校验 hash|等待当前任务|自动开始下载/.test(surface?.textContent ?? ''),
@@ -148,14 +151,14 @@ async function assertAboutUpdates(cdp, context) {
   assert(state.heading === '关于与更新', `${context} omitted the page heading`)
   assert(state.description === '自动检查新版本，下载与安装由你决定。',
     `${context} used the wrong description`)
-  assert(state.product === 'Rovai AI' && state.version === '版本 v0.4.1',
+  assert(state.product === 'Rovai AI' && state.version === `版本 v${releaseVersion}`,
     `${context} used the wrong product/version: ${JSON.stringify(state)}`)
   assert(state.action === '检查更新' && state.actionTag === 'BUTTON' && state.actionFocused,
     `${context} did not expose a keyboard-focusable check action`)
   assert(state.statusRole === 'status' && state.source.includes('GitHub Release'),
     `${context} omitted updater status/source evidence`)
-  assert(state.releaseVisible && state.releaseVersion === '0.4.1'
-    && state.releaseNotesText.includes('Mac 版从旧签名升级需要手动安装一次')
+  assert(state.releaseVisible && state.releaseVersion === releaseVersion
+    && typeof releaseSummary === 'string' && state.releaseNotesText.includes(releaseSummary)
     && state.releaseDate === releaseMetadata.releaseDate
     && state.releaseDateText === new Intl.DateTimeFormat('zh-CN', {
       year: 'numeric', month: 'long', day: 'numeric'

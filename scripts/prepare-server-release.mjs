@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { validateReleaseNotesSource } from './lib/release-notes.mjs'
 
 const [artifactsArgument, outputArgument] = process.argv.slice(2)
 if (!artifactsArgument || !outputArgument || !/^[a-f0-9]{40}$/.test(process.env.GITHUB_SHA ?? '')) throw new Error('Expected artifact directory, output directory, and workflow source SHA')
@@ -35,5 +36,7 @@ for (const target of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64']) {
   copyFileSync(archive, join(output, asset))
 }
 writeFileSync(join(output, 'SHA256SUMS'), sums.join('\n') + '\n')
-writeFileSync(join(output, 'RELEASE-NOTES.md'), `Rovai Server ${version} native packages, built from ${process.env.GITHUB_SHA}.\n\nThis is a draft. Native build and bounded lifecycle checks do not certify clean-machine dependencies, Windows console shutdown, or every Agent runtime. Review platform evidence before publication. Publishing the draft does not change the official channel; channel promotion is reviewed separately.\n\nThe complete package includes the shared Rust Host and matching WebUI. Data remains in the selected --data-dir (default ~/.rovai-server); Desktop storage and installations are unchanged. Docker is outside this release.\n`)
-console.log(`Prepared draft assets for server-v${version}`)
+writeFileSync(join(output, 'RELEASE-NOTES.md'), validateReleaseNotesSource(
+  readFileSync(new URL('../build/release-notes.md', import.meta.url), 'utf8'), version
+))
+console.log(`Prepared Server assets for unified draft v${version}; Desktop assets must pass verification before publication`)

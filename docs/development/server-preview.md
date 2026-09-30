@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: standalone-server-preview-operation
-last_updated: 2026-09-29
+last_updated: 2026-09-30
 ---
 
 # 原生 Server 安装与开发验收
@@ -40,6 +40,13 @@ Python smoke 只作为外部驱动，Host 的 PATH 中不含 Node/Electron/Rust�
 原生复核可以用 `server_target` 只选择发生变更的目标；默认 `all` 才运行全部四个目标，单目标通过
 不能写成三平台通过。main 上全部目标通过后可显式开启 `server_release_draft` 组装 GitHub draft Release；
 它校验 source SHA、release profile、版本及平台一致，不自动公开发布或晋升默认安装指针。
+
+从 0.4.2 起，Desktop 与 Server 必须以相同版本、同一个确定的源码 SHA 构建，资产集中在 `v<版本>`。
+Server workflow 在四个原生目标与三套 Linux OS 检查通过后创建该统一草稿，使用
+`build/release-notes.md` 的共用说明。发布者继续加入同一 SHA 的 Desktop 安装包与更新清单，核对
+所有资产版本、来源、校验值及 Desktop 签名验证报告后，一次公开完整 Release。两端构建可并行，
+不得先公开缺少另一端资产的版本。公开资产验证可下载后才晋升 `scripts/server-release-tag.txt`，
+同步官网安装与下载说明；旧 `scripts/server-channel.txt` 固定为 0.4.1，保留到桥接包的入口。
 
 ## Linux 的两个验收 Gate
 

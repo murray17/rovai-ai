@@ -1,25 +1,23 @@
-# Rovai AI v0.4.1
+# Rovai AI v0.4.2
 
-**Mac 版从旧签名升级需要手动安装一次。** v0.4.1 开始使用 Apple Developer ID 签名。已安装 v0.4.0 或更早版本的 Mac 用户，这次请从[官方发布页](https://github.com/murray17/rovai-ai/releases/latest)下载对应芯片的 DMG：Apple 芯片选 arm64，Intel 处理器选 x64。完成手头工作并退出 Rovai AI，打开 DMG，将应用拖入“应用程序”，按 Finder 提示选择“替换”，再从“应用程序”打开新版，检查原有会话和设置。请勿卸载旧版或清理用户数据。旧版“关于与更新”仍可能显示“下载更新”按钮，但这次签名切换不能靠“安装并重启”完成。已经装上 Developer ID 版的 Mac 用户，以及 Windows 用户，无需执行这一步。
+This release adds native Claude Code permission approvals, improves the English interface and onboarding, and brings Desktop and Server into one release.
 
-### 其他更新
+### What's changed
 
-- 【渠道预览】**新增国际版飞书（Lark）独立渠道。** 飞书与 Lark 可以分别配置开发者账号和队员 Bot；Lark 可处理私聊、群聊、多 Bot 协作，以及图片和文件消息，并在重启后恢复连接。
-- 【渠道】**飞书收到的图片和文件可以交给队员读取。** 附件下载完成后再开始处理消息；钉钉入站附件也接入同一条持久流程，并改善钉钉文件发送与暂时性投递失败的重试。
-- 【功能】**界面可切换中文和英文。** 设置和新手引导会跟随所选语言；队员回复和工具输出保留原文。
-- 【功能】**手机端可以使用使命板。** 支持查看、筛选、创建和编辑使命，导航也收进统一抽屉。
-- 【交互】**提醒分类更清楚。** 会话、使命和任务提醒分别展示；单聊回复及状态提醒可以跳转到对应内容。
-- 【功能】**在会话中提及队外队员时可邀请加入。** 发送前先完成邀请；如果邀请失败，草稿仍会保留。
-- 【交互】**渠道网页执行台更接近桌面版。** 飞书、Lark、钉钉的只读页面可以查看执行状态、工具活动、公开文件和历史执行；后续协作回复的执行卡与收件人显示也更完整。
-- 【修复】**改善渠道消息与执行过程。** 附件下载期间减少多余状态卡；钉钉私聊回复、富文本正文，以及渠道执行卡的更新和唤醒更稳定。
-- 【性能】**加快会话切换与 Skills 发现。** 侧栏和会话读取减少无关等待，并复用同一目录的扫描结果；复用运行进程时也更准确地识别配置变化。
-- 【界面】**“关于与更新”可离线查看当前版本的发布日期。**
+- [Feature] **Handle Claude Code permission requests in your conversation.** Approve an operation once, decline it, or remember a rule when Claude Code offers that option.
+- [Interaction] **Keep compatible settings when switching models.** Reasoning effort and other supported options carry over between models within the same agent. Background model-list refreshes no longer clear settings you are editing.
+- [Interface] **Fill gaps in the English interface.** Execution steps, tool statuses, file previews, context compaction, Mission statuses, and approval prompts follow the selected language. Agent replies and tool output retain their original text.
+- [Fix] **Save English starter profiles correctly during onboarding.** Initial members receive their English names and identity descriptions, and the first conversation appears as "First Chat." Edited or configured profiles are preserved.
+- [Improvement] **Simplify agent guidance and bundled Skills.** Collaboration instructions now use concise English, with duplicate and outdated rules removed. Reply language continues to follow the user's request.
+- [Fix] **Restore missing release dates in the Mac update page.** The date of an available update now appears correctly after checking for updates.
+- [Interface] **Correct conversation-header icons and counts.** Restore the team-entry icon and align the execution, task, and team counts.
+- [Documentation] **Add bilingual website and Server guides.** New instructions cover installation, deployment, and remote access.
+- [Release] **Desktop and Server now share one versioned release.** Both are built from the same source commit. Desktop installers and Server packages for all four targets are available together under `v0.4.2`.
 
-### 感谢 PR 贡献
+### Upgrading
 
-- 感谢 [@MadebyNight](https://github.com/MadebyNight) 在 [#519](https://github.com/murray17/rovai-ai/pull/519) 中修复飞书入站图片和文件无法供队员读取的问题，并完成真实飞书附件验收。
-- 感谢 [@arschlochnop](https://github.com/arschlochnop) 在 [#530](https://github.com/murray17/rovai-ai/pull/530) 中接入独立的 Lark 渠道，让国际版飞书与飞书可以分别配置。
+Mac users on v0.4.1 can update in the app. Users on v0.4.0 or earlier still need to download the DMG and replace the installed app once. Keep your existing user data.
 
-### 感谢 Issue 反馈
+Server users on v0.4.1 can update through "About & Updates" in the web interface. For earlier versions, back up your data, stop Server, and run the updated official installer while keeping the same data directory.
 
-- 感谢 [@arschlochnop](https://github.com/arschlochnop) 在 [#523](https://github.com/murray17/rovai-ai/issues/523) 中提出国际版飞书与飞书并存的需求，并梳理独立渠道的边界。
+Windows x64 remains an unsigned preview. SmartScreen may show "Unknown publisher" during installation; download installers only from this official GitHub Release.
