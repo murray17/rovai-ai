@@ -11,10 +11,10 @@ last_updated: 2026-10-01
 
 # Rovai-ai v1.72：Lark 独立渠道
 
-## 待评审提案：Conversation 统一命名
+## 待评审提案：Thread 统一命名
 
-[Camp → Conversation 变更说明 r1](model-context-change-conversation-rename.md)列出 `conversationId`／`campId` 输入兼容、
-私有 AgentSession、旧 Native Session resume 和随包 Skill 更新的具体场景；[文本附录](conversation-rename-comparison.md)提供完整提示词、CLI 与 Skill 前后对照。
+[Camp → Thread 变更说明 r2](model-context-change-thread-rename.md)列出 `threadId`／`campId` 兼容、`--reply-chain` 与旧 `--thread` 兼容、
+内部 Conversation 的暴露边界、旧 Native Session resume 和 Skill 更新场景；[文本附录](thread-rename-comparison.md)提供完整提示词、CLI 与 Skill 前后对照。
 这是尚未取得实施二次确认的文档提案，不表示该更名已实施，也不改变下述已确认的 Lark 范围。
 
 ## 版本概览
