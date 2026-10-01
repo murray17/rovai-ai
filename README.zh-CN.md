@@ -28,7 +28,16 @@
 
 </div>
 
+https://github.com/user-attachments/assets/5922b023-a956-416e-b9c5-4df7e209ec1b
+
+<p align="center"><sub>真实队伍协作演示 · 64 秒 · 无声</sub></p>
+
+<details>
+<summary>工作台截图</summary>
+
 <p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="同时 @ 四位队员，Gugu 与 Cheese 已回复，右侧 Overview 展开她们的执行卡片，Dingding 与 Bunny 仍在运行" width="100%"></a></p>
+
+</details>
 
 ## 从第一条请求，一起做到下一次任务
 

@@ -28,7 +28,16 @@ inspect execution and file changes, and keep useful knowledge for the next task.
 
 </div>
 
+https://github.com/user-attachments/assets/5922b023-a956-416e-b9c5-4df7e209ec1b
+
+<p align="center"><sub>Watch a real team workflow · 64s · No audio</sub></p>
+
+<details>
+<summary>Workspace screenshot</summary>
+
 <p align="center"><a href="docs/assets/readme/workspace-team-ready.png"><img src="docs/assets/readme/workspace-team-ready.png" alt="Four teammates are mentioned; Gugu and Cheese have replied with their execution cards expanded in the right-hand Overview, while Dingding and Bunny are still running" width="100%"></a></p>
+
+</details>
 
 ## Work together, from the first request to the next task
 
