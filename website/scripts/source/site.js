@@ -46,8 +46,8 @@
   function header() { return `<a class="skip" href="#main">${choose('Skip to content','跳到正文')}</a><header class="site-header"><div class="nav-shell"><a href="${route()}" class="brand" aria-label="Rovai AI ${choose('home','首页')}">${mark}<span>Rovai AI</span></a><nav aria-label="${choose('Main navigation','主导航')}"><a class="nav-docs ${page === 'docs' ? 'active' : ''}" href="${route('docs')}">${choose('Docs','文档')}</a><a class="github-link icon-link" href="${github}" target="_blank" rel="noopener" aria-label="GitHub">${icon('github')}</a><span class="nav-rule"></span><a class="language-link" href="${route(page, zh ? 'en' : 'zh', location.hash)}" lang="${zh ? 'en' : 'zh-CN'}" aria-label="${choose('切换为中文','Switch to English')}">${icon('globe')}<span>${choose('中文','EN')}</span></a><a class="button nav-download" href="${route('download')}">${choose('Download','下载')}${icon('download')}</a></nav></div></header>`; }
   function footer(dark = false) { return `<footer class="footer ${dark ? 'footer-dark' : ''}"><div class="footer-inner"><div><a class="brand" href="${route()}">${mark}<span>Rovai AI</span></a><p>${choose('A shared workspace. A lasting team.','同一个工作台，一支长期协作的队伍。')}</p></div><div class="footer-links"><a href="${github}/releases" target="_blank" rel="noopener">${choose('Release notes','更新日志')}</a><a href="${github}/issues" target="_blank" rel="noopener">${choose('Feedback','问题反馈')}</a><a href="${github}" target="_blank" rel="noopener">GitHub${icon('external')}</a></div><span class="license">© 2026 Rovai AI · MIT</span></div></footer>`; }
   function figure(scene, description, hero = false) {
-    const [width,height] = {workspace:[1800,1000],members:[1170,900],remote:[1480,1020]}[scene];
-    const src=asset('screens/'+(scene==='workspace'?'collaboration-delivery-'+lang+'.jpg':scene+'-en.png'));
+    const [width,height] = {workspace:[1440,820],members:[1170,900],remote:[1480,1020]}[scene];
+    const src=asset('screens/'+(scene==='workspace'?'workspace-team-ready.png':scene+'-en.png'));
     return `<figure class="product-figure ${hero?'hero-figure':''}"><button class="image-expand" data-image="${src}" aria-label="${choose('Enlarge image: ','放大图片：')}${description}"><img src="${src}" alt="${description}" width="${width}" height="${height}" loading="${hero?'eager':'lazy'}" fetchpriority="${hero?'high':'auto'}"><span class="expand-cue">${icon('expand')}</span></button></figure>`;
   }
   function home() {return `${header()}<main id="main">
@@ -58,7 +58,7 @@
           <p class="hero-description">${choose('Bring your coding Agents into one desktop workspace. Work together, see every step, and carry the context forward.','把你已有的编程智能体带到同一个桌面工作台。一起讨论、执行任务，留下值得记住的经验。')}</p>
         </div>
       </div>
-      ${figure('workspace',choose('A real Orbit review and repair in conversation and Run','Orbit 真实审查与修复：会话和执行台'),true)}<div class="hero-example">${docLink('collaboration',choose('Follow this implementation and review','查看这次实现与审查过程'))}</div>
+      ${figure('workspace',choose('Four teammates in a shared conversation, with execution cards in the right-hand Overview','四位队员在同一会话中协作，右侧 Overview 展示执行卡片'),true)}<div class="hero-example">${docLink('collaboration',choose('See how team collaboration works','了解队员如何协作'))}</div>
       <div class="hero-download"><div class="hero-actions"><a class="button button-large" href="${route('download')}">${choose('Download Rovai AI','下载 Rovai AI')}${icon('download')}</a><a class="button button-quiet button-large" href="${route('docs')}">${choose('Explore the docs','查看使用文档')}${icon('arrow')}</a></div><p class="platforms">macOS <span>·</span> Windows <span>·</span> ${choose('Open source','开源')}</p></div>
     </section>
     <section id="members" class="showcase section-shell">
