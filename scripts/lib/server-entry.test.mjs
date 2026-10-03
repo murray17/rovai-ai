@@ -20,7 +20,9 @@ test('Server default root is account scoped and independent of working directory
     const paths = JSON.parse(execFileSync(binary, ['paths'], { cwd: fixture, encoding: 'utf8' }))
     assert.equal(paths.dataDir, join(process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME, '.rovai-server'))
     assert.equal(paths.database, join(paths.dataDir, 'rovai.sqlite'))
-    assert.ok(paths.runtimeThreadFilesRoot.startsWith(join(paths.dataDir, 'instances') + sep))
+    // `paths` retains the frozen bootstrap field across the public Thread rename.
+    assert.equal(typeof paths.runtimeCampFilesRoot, 'string')
+    assert.ok(paths.runtimeCampFilesRoot.startsWith(join(paths.dataDir, 'instances') + sep))
     assert.deepEqual(await readdir(fixture), [])
     assert.throws(() => execFileSync(binary, ['--data-dir', 'relative', 'paths'], { stdio: 'pipe' }))
   } finally { await rm(fixture, { recursive: true, force: true }) }
@@ -50,7 +52,7 @@ test('Native Server default and custom roots retain data and token, reject anoth
   const isolatedEnvironment = { ...process.env, HOME: home, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }
   const desktopPaths = JSON.parse(execFileSync(hostBinary, ['prepare', '--data-dir', join(fixture, 'desktop-data')], { env: isolatedEnvironment, encoding: 'utf8' }))
   console.log(JSON.stringify({ channel: 'automatic_acceptance', name: 'parallel-desktop-host', dataDir: desktopPaths.dataDir, skillLibraryRoot: join(desktop, 'skills'), mcpConfigPath: join(desktop, 'mcp.json'), runtime: false }))
-  const desktopHost = launchHost(hostBinary, ['--data-dir', desktopPaths.dataDir, '--skill-library-root', join(desktop, 'skills'), '--mcp-config-path', join(desktop, 'mcp.json'), '--runtime-camp-files-root', desktopPaths.runtimeThreadFilesRoot], { cwd: fixture, env: isolatedEnvironment })
+  const desktopHost = launchHost(hostBinary, ['--data-dir', desktopPaths.dataDir, '--skill-library-root', join(desktop, 'skills'), '--mcp-config-path', join(desktop, 'mcp.json'), '--runtime-camp-files-root', desktopPaths.runtimeCampFilesRoot], { cwd: fixture, env: isolatedEnvironment })
   const processes = []
   const start = args => {
     const child = spawn(installedBinary, [...args, '--listen', '127.0.0.1:0'], { cwd: fixture, env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, stdio: ['ignore', 'pipe', 'pipe'] })

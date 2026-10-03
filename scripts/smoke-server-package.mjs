@@ -40,15 +40,19 @@ try {
   const profiles = await active.request('members.list')
   const created = await active.request('camps.create', { commandId: randomUUID(), name: 'Package upgrade fixture', workspace: { projectPath: workspace, name: 'workspace' }, memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' })
   assert.equal(created.status, 'applied')
-  const threadId = created.payload.threadId
-  const sent = await active.request('camp.messages.send', { commandId: randomUUID(), threadId, content: { version: 2, segments: [{ kind: 'text', text: 'PRESERVED_PACKAGE_MESSAGE' }] }, replyToThreadMessageId: null, execution: null })
+  const threadId = created.payload.threadId ?? created.payload.campId
+  assert.equal(typeof threadId, 'string')
+  // The previous published package may predate the public Thread field rename.
+  const baselineScope = created.payload.threadId ? { threadId } : { campId: threadId }
+  const baselineReply = created.payload.threadId ? { replyToThreadMessageId: null } : { replyToCampMessageId: null }
+  const sent = await active.request('camp.messages.send', { commandId: randomUUID(), ...baselineScope, content: { version: 2, segments: [{ kind: 'text', text: 'PRESERVED_PACKAGE_MESSAGE' }] }, ...baselineReply, execution: null })
   assert.equal(sent.commandResult.status, 'applied')
-  const before = await active.request('camps.snapshot', { threadId })
+  const before = await active.request('camps.snapshot', baselineScope)
   assert.ok(before.messages.some(message=>message.body==='PRESERVED_PACKAGE_MESSAGE'))
   await active.stop(); active = null
   await cp(prepared.dataDir, join(fixture, 'backup-data'), { recursive: true })
-  const hasRuntimeFiles = await lstat(prepared.runtimeThreadFilesRoot).then(()=>true, ()=>false)
-  if (hasRuntimeFiles) await copyStoppedFixtureTree(prepared.runtimeThreadFilesRoot, join(fixture, 'backup-runtime-files'))
+  const hasRuntimeFiles = await lstat(prepared.runtimeCampFilesRoot).then(()=>true, ()=>false)
+  if (hasRuntimeFiles) await copyStoppedFixtureTree(prepared.runtimeCampFilesRoot, join(fixture, 'backup-runtime-files'))
   const beforeDatabase = createHash('sha256').update(await readFile(join(prepared.dataDir, 'rovai.sqlite'))).digest('hex')
   console.log(JSON.stringify({ stage: 'closed-baseline-backed-up', threadId }))
 
@@ -72,12 +76,12 @@ try {
   await cp(prepared.dataDir, join(fixture, 'upgraded-data'), { recursive: true })
   await cp(join(fixture, 'backup-data'), prepared.dataDir, { recursive: true })
   if (hasRuntimeFiles) {
-    await copyStoppedFixtureTree(prepared.runtimeThreadFilesRoot, join(fixture, 'upgraded-runtime-files'))
-    await copyStoppedFixtureTree(join(fixture, 'backup-runtime-files'), prepared.runtimeThreadFilesRoot)
+    await copyStoppedFixtureTree(prepared.runtimeCampFilesRoot, join(fixture, 'upgraded-runtime-files'))
+    await copyStoppedFixtureTree(join(fixture, 'backup-runtime-files'), prepared.runtimeCampFilesRoot)
   }
   assert.equal(createHash('sha256').update(await readFile(join(prepared.dataDir, 'rovai.sqlite'))).digest('hex'), beforeDatabase)
   active = launchPipe(baseline)
-  const restored = await active.request('camps.snapshot', { threadId })
+  const restored = await active.request('camps.snapshot', baselineScope)
   assert.equal(restored.messages.filter(message=>message.body==='PRESERVED_PACKAGE_MESSAGE').length, 1)
   await active.stop(); active = null
   report.checks.stoppedBackupRollback = true
