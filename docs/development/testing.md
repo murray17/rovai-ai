@@ -837,6 +837,10 @@ ROVAI_RUNTIME_ACTIVITY_ACCEPT_METRICS_REAL=1 node scripts/accept-runtime-activit
 可以用 `ROVAI_METRICS_PROMPT_FILE` 覆盖任务，`ROVAI_METRICS_RUNTIME` 选择 Runtime，
 `ROVAI_METRICS_VERIFY_USAGE=1` 核对落盘四项与气泡，`ROVAI_METRICS_VERIFY_CONTEXT=1` 核对
 已证实的 Session 数值与圆环／气泡。两者均隔离 App/Core，CDP 请求有 30 秒超时，不结束日常 App。
+`ROVAI_METRICS_VERIFY_LIVE_CONTEXT=1` 额外要求新 Run 仍在 running 时，当前 Session 的非零 used
+已落盘且与 Renderer 气泡一致；取值 `used-only` 还要求 window/nativeRatio 保持 null、比例显示未知。
+可搭配 `scripts/fixtures/native-live-context-task.txt` 的独立顺序工具调用与停顿；终态成功不能替代
+运行中证据。仅启用该验收选项时增加测试端的范围读取，不改变产品轮询。
 重启验收使用原隔离 fixture，核对 `monitoring.execution` 的四项／Session modelKey／代次，
 不重新调用模型或修改数据库。原生字段历史证据见[原生 Usage 与 Context 核验](../research/runtime-monitoring/native-usage-context-verification-2026-09-30.md)。
 
@@ -854,6 +858,30 @@ ROVAI_RUNTIME_ACTIVITY_ACCEPT_METRICS_REAL=1 node scripts/accept-runtime-activit
 `pnpm test:rust:pr` 和以下原生 owner 的定向命令。历史测速脚本／环境变量仅适用于 `ee444ab1` 及此前记录。
 
 ### 原生 Usage／Context 测试准入（2026-09-30）
+
+2026-10-04 可用性收口继续扩展现有 owner，没有新增/删除/合并/停用 Rust 测试：
+
+- `session_context_rejects_late_observations_after_binding_rotation`：最小 SQLite 拥有未确认输入、绑定/epoch、实际模型及冻结模型配置、窗口省略/撤销/矛盾、下降/新鲜度的持久化边界。
+- `provider_failure_reaches_core_without_poisoning_the_host`：现有 ZCode 双工 RPC owner 暂扣 prompt 最终响应与第一次读取；20 次重复触发只产生一次合并补读，单请求在途、至少两次 Context 在终态前到达 Core，终态旧请求参数不变。
+- Pi `numeric_context_rejects_content_and_stale_run_host_session_or_binding`、Antigravity `native_database_supplements_only_the_current_completed_call` 和 native_usage 既有 owner：独立字段不因缺少分母丢失；显式零窗口交给 latest 层撤下分母，不能继承成旧窗口。
+- `call_normalization_and_request_counts_do_not_depend_on_flush_partition` 保持每调用归一化、未知/零和完整性不受 Context 改动影响。
+
+最低命令为 `pnpm test:rust:pr`，以及 `cargo test -p rovai-core --features extended-tests --lib <owner>`；
+`pnpm test:execution-metrics-ui` 验证隐藏暂停、范围读取、稳定引用和迟到结果，新增时间戳单独变化的引用复用断言。
+打包 App 真实验收使用上述 `METRICS_REAL` 入口；`ROVAI_METRICS_VERIFY_WINDOW_REUSE=1` 在同一 Session 执行两轮，
+`ROVAI_METRICS_MIN_LIVE_UPDATES=2` 强制不同占用至少两次在终态前显示。`ROVAI_METRICS_HELD_FINAL=1` 显式切为
+受控 ACP（不能标成真实 Qwen 样本），验证 prepared 输入、used-only、下降和返回旧数值；
+`ROVAI_METRICS_VERIFY_VISIBILITY=1` 隐藏执行面板 5 秒后重新读取当前值。
+`ROVAI_INTERNAL_CONTEXT_ACCEPTANCE_TRACE=1` 仅与隔离实例标记同时存在时输出固定数字/身份/时间白名单，
+记录事务提交和 ZCode snapshot 次数/耗时；默认关闭，不输出 payload、正文、思考或原始错误。
+脚本报告明确区分原生数值返回、Core 收到、提交后时刻、首次数据库读回和 Renderer 采样时间。
+
+2026-10-03 Claude 运行中 Context 修复扩展既有
+`root_call_usage_is_numeric_and_context_pairs_latest_call_with_its_model`：完整根调用在 result 前即
+发出 used-only，覆盖稀疏字段补齐、显式零、子调用/起始暂定值排除与模型窗口不拼接。
+既有 `session_context_rejects_late_observations_after_binding_rotation` 增加 Claude 数值事件→parser→
+最小 SQLite 的 used-only 读回与原生用量隔离。修复前首个用例缺少运行中 Gauge；持久化用例守住
+下游边界，不另建数据库/进程 owner。没有新增、删除、合并或停用 Rust 测试。
 
 新增 owner 均不调用真实模型；没有删除、合并或停用现有 Rust 测试。
 

@@ -46,7 +46,7 @@ describe('execution metric structural sharing', () => {
     expect(fresh.runs.map(item => item.agentRunId)).toEqual(['r2'])
     expect(fresh.sessions[0]).toMatchObject({ usedTokens: null, windowTokens: 200, nativeRatio: null, sessionGeneration: 2 })
     const renewed = mergeExecutionMetrics(initial, { ...initial, sessions: [{ ...session, observedAt: 'later' }] }, [], [run('r1'), run('r2')])
-    expect(renewed.sessions[0]).not.toBe(initial.sessions[0])
+    expect(renewed).toBe(initial)
   })
 })
 

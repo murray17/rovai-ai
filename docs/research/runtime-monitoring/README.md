@@ -10,9 +10,13 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 # Rovai AI 运行监控指标可采集性审计
 
 > 2026-10-02：按用户要求撤下全部 Runtime 的输出测速。以下速度、v2/v3、思考计数及旧探针记录均为历史证据，
-> 对应代码保留在 Git 提交 `ee444ab1`。当前只保留原生用量与 Session 上下文，见[执行指标合同](../../contracts/runtime-execution-metrics-v5.md)。
+> 对应代码保留在 Git 提交 `ee444ab1`。当前只保留原生用量与 Session 上下文，见[执行指标合同](../../contracts/runtime-execution-metrics-v7.md)。
 
 当前执行台的取数范围、隐藏暂停、引用复用与迟到刷新收口见[执行指标读取验收](execution-metrics-refresh-verification-2026-10-01.md)。
+
+2026-10-04 [上下文运行中可用性收口](live-context-usability-2026-10-04.md)：输入确认解绑、实际模型窗口复用及 ZCode 事件触发读取。
+
+2026-10-03 [运行中 Context 缺失复核](live-context-verification-2026-10-03.md)：Claude 不再等待整轮终态；逐 Runtime 列出采样时机与 ACP 输入确认限制。
 
 2026-10-03 [分批刷盘一致性修复](flush-partition-verification-2026-10-03.md)：逐调用归一化与请求计数、累计基线/重置、部分状态；使用合成固定回放。
 

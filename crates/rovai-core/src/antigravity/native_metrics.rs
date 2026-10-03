@@ -133,11 +133,12 @@ fn read_checked(
             native_session_id: Some(session.into()),
             native_turn_id: None,
             fields: RuntimeUsageFields {
-                context_used_tokens: Some(used),
-                context_size_tokens: Some(window),
+                context_used_tokens: used,
+                context_size_tokens: window,
                 ..Default::default()
             },
             cost: None,
+            context_model_id: Some(format!("antigravity-model:{}", current.model)),
             occurred_at: None,
         });
     Some(NativeMetrics {
@@ -221,7 +222,11 @@ impl ModelUsage {
     }
 }
 
-fn read_context(database: &Connection, step: &StepMetadata, index: u64) -> Option<(i64, i64)> {
+fn read_context(
+    database: &Connection,
+    step: &StepMetadata,
+    index: u64,
+) -> Option<(Option<i64>, Option<i64>)> {
     // metadata_index is a native PK, so no Session-history scan is needed.
     database
         .query_row(
@@ -245,10 +250,15 @@ fn read_context(database: &Connection, step: &StepMetadata, index: u64) -> Optio
                     let start = Fields::parse(chat.bytes(9)?)?;
                     let context = Fields::parse(start.bytes(10)?)?;
                     // Unlike protobuf counters, absence of used is not a measured empty window.
-                    let used = i64::try_from(context.scalar(1)?).ok()?;
-                    let window = i64::try_from(context.scalar(4)?).ok()?;
-                    (used >= 0 && window > 0 && used <= window && window <= i32::MAX as i64)
-                        .then_some((used, window))
+                    let used = context
+                        .scalar(1)
+                        .and_then(|n| i64::try_from(n).ok())
+                        .filter(|n| *n <= 9_007_199_254_740_991);
+                    let window = context
+                        .scalar(4)
+                        .and_then(|n| i64::try_from(n).ok())
+                        .filter(|n| *n <= i32::MAX as i64);
+                    (used.is_some() || window.is_some()).then_some((used, window))
                 })())
             },
         )
@@ -430,7 +440,14 @@ mod tests {
         result
     }
     fn generator(used: u64, window: u64) -> Vec<u8> {
-        let context = [scalar(1, used), scalar(4, window)].concat();
+        partial_generator(Some(used), Some(window))
+    }
+    fn partial_generator(used: Option<u64>, window: Option<u64>) -> Vec<u8> {
+        let context = [used.map(|n| scalar(1, n)), window.map(|n| scalar(4, n))]
+            .into_iter()
+            .flatten()
+            .flatten()
+            .collect::<Vec<_>>();
         let chat = [
             scalar(3, 7),
             bytes(4, &usage()),
@@ -545,19 +562,28 @@ mod tests {
         assert!(receiver.try_recv().is_err());
         // Gauge pairs replace earlier values, including decreases; window-only
         // and malformed/out-of-range data never make a synthetic 0%.
-        for (blob, expected) in [
-            (generator(12, 100), Some(12)),
-            (generator(101, 100), None),
-            (generator(12, 0), None),
-            (vec![0x0a, 0xff], None),
+        for (blob, used, window) in [
+            (generator(12, 100), Some(12), Some(100)),
+            (generator(101, 100), Some(101), Some(100)),
+            (generator(12, 0), Some(12), Some(0)),
+            (partial_generator(Some(12), None), Some(12), None),
+            (partial_generator(None, Some(100)), None, Some(100)),
+            (vec![0x0a, 0xff], None, None),
         ] {
             database
                 .execute("UPDATE gen_metadata SET data=?1 WHERE idx=2", [blob])
                 .unwrap();
             let result = read_checked(&root, 3, 5, &wire).unwrap();
             assert_eq!(
-                result.context.and_then(|c| c.fields.context_used_tokens),
-                expected
+                result
+                    .context
+                    .as_ref()
+                    .and_then(|c| c.fields.context_used_tokens),
+                used
+            );
+            assert_eq!(
+                result.context.and_then(|c| c.fields.context_size_tokens),
+                window
             );
             assert_eq!(result.usage.fields.output_tokens, Some(10));
         }

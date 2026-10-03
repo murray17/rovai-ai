@@ -1,0 +1,2448 @@
+{
+  "schemaVersion": 1,
+  "baseline": "58b838d3",
+  "coreSha256": "d66128f9e8a66b9a54890705988723f9e8c65826264c45e44a38c69ee0787128",
+  "evidenceBoundary": "Selected numeric fields at existing adapter/Core seams, never full raw payloads. Core receipt and commit clocks are instrumented; Renderer is first matching 1s sample, not paint time. Controlled ACP is synthetic; Claude and ZCode use installed Runtime configurations.",
+  "reports": [
+    {
+      "runtime": "qwen-code",
+      "sampleSource": "controlled-acp",
+      "version": "0.24.5",
+      "round": 1,
+      "runId": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+      "campId": "rvcamp_01m41d116ge2hrqm9kjgf5fwnc",
+      "status": "succeeded",
+      "nativeSessionId": "fixture-stream-37237",
+      "sourceReport": "acp-verified/captures/native-metrics-qwen-code.json",
+      "sourceReportSha256": "1253ee5a2e4ed1d6034c17052bc40ce4e3cb8b9ed31c432f7ccaf4c9526a4409",
+      "finalResponseObservedAt": "2026-10-03T17:30:22.980240+00:00",
+      "finalResponseClock": "Core prompt acknowledgement after controlled ACP final",
+      "runEndedAt": "2026-10-03T17:30:22.994840+00:00",
+      "distinctLiveValues": [
+        12800,
+        15000,
+        8000
+      ],
+      "scalarObservations": [
+        {
+          "nativeNumericObservation": {
+            "modelId": "fixture-model",
+            "observedAt": "2026-10-03T17:29:46.969128+00:00",
+            "ratio": null,
+            "runId": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+            "sessionId": "fixture-stream-37237",
+            "used": 12800,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:29:48.681415+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:29:49.240Z",
+            "atMs": 4846,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 05秒",
+              "contextLabel": "当前原生会话上下文：12.8k / 200k，6.4%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:46.969128+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 12800,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:29:46.969128+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:29:49.240Z",
+            "atMs": 4846,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 05秒",
+              "contextLabel": "当前原生会话上下文：12.8k / 200k，6.4%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:46.969128+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 12800,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:29:46.969128+00:00"
+            }
+          },
+          "coreToCommitMs": 1712.287,
+          "commitToRendererMs": 558.585
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "fixture-model",
+            "observedAt": "2026-10-03T17:29:55.971676+00:00",
+            "ratio": null,
+            "runId": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+            "sessionId": "fixture-stream-37237",
+            "used": 15000,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:29:56.681593+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:29:57.428Z",
+            "atMs": 13034,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 14秒",
+              "contextLabel": "当前原生会话上下文：15k / 200k，7.5%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:55.971676+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 15000,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:29:55.971676+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:29:57.428Z",
+            "atMs": 13034,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 14秒",
+              "contextLabel": "当前原生会话上下文：15k / 200k，7.5%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:55.971676+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 15000,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:29:55.971676+00:00"
+            }
+          },
+          "coreToCommitMs": 709.917,
+          "commitToRendererMs": 746.407
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "fixture-model",
+            "observedAt": "2026-10-03T17:30:04.974876+00:00",
+            "ratio": null,
+            "runId": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+            "sessionId": "fixture-stream-37237",
+            "used": 8000,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:30:08.680530+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:30:08.729Z",
+            "atMs": 24335,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 25秒",
+              "contextLabel": "当前原生会话上下文：15k / 200k，7.5%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:04.974876+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 8000,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:30:04.974876+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:30:09.743Z",
+            "atMs": 25349,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 26秒",
+              "contextLabel": "当前原生会话上下文：8k / 200k，4.0%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:04.974876+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 8000,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:30:04.974876+00:00"
+            }
+          },
+          "coreToCommitMs": 3705.654,
+          "commitToRendererMs": 1062.47
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "fixture-model",
+            "observedAt": "2026-10-03T17:30:13.977499+00:00",
+            "ratio": null,
+            "runId": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+            "sessionId": "fixture-stream-37237",
+            "used": 12800,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:30:16.681863+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:30:16.958Z",
+            "atMs": 32564,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 33秒",
+              "contextLabel": "当前原生会话上下文：12.8k / 200k，6.4%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:13.977499+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 12800,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:30:13.977499+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:30:16.958Z",
+            "atMs": 32564,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 33秒",
+              "contextLabel": "当前原生会话上下文：12.8k / 200k，6.4%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "fixture-model",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:13.977499+00:00",
+              "runtimeKind": "qwen-code",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 12800,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "prepared",
+              "acceptedAt": null,
+              "completedAt": null,
+              "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+              "contextObservedAt": "2026-10-03T17:30:13.977499+00:00"
+            }
+          },
+          "coreToCommitMs": 2704.364,
+          "commitToRendererMs": 276.137
+        }
+      ],
+      "nativeContextReads": [],
+      "finalNativeEvents": [],
+      "nativeReadCount": {
+        "live": 0,
+        "terminal": 0,
+        "maxDurationMs": 0
+      },
+      "visibilityCheck": {
+        "hiddenAt": "2026-10-03T17:29:49.315Z",
+        "reopenedAt": "2026-10-03T17:29:54.330Z",
+        "context": {
+          "agentId": "agent_101",
+          "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+          "dialectId": "acp-session-context-gauge-v1",
+          "modelKey": "fixture-model",
+          "nativeRatio": null,
+          "observedAt": "2026-10-03T17:29:46.969128+00:00",
+          "runtimeKind": "qwen-code",
+          "sessionGeneration": 1,
+          "source": "runtime_event",
+          "usedTokens": 12800,
+          "windowTokens": 200000
+        }
+      },
+      "historicalCardCheck": null,
+      "expectedProjectionAndReadback": {
+        "runs": [
+          {
+            "agentRunId": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+            "cacheReadTokens": null,
+            "cacheWriteTokens": null,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-03T17:30:22.994840+00:00",
+            "inputOutputComplete": false,
+            "lastObservedAt": null,
+            "outputTokens": null,
+            "promptInputTotalTokens": null
+          }
+        ],
+        "schemaVersion": 1,
+        "sessions": [
+          {
+            "agentId": "agent_101",
+            "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+            "dialectId": "acp-session-context-gauge-v1",
+            "modelKey": "fixture-model",
+            "nativeRatio": null,
+            "observedAt": "2026-10-03T17:30:13.977499+00:00",
+            "runtimeKind": "qwen-code",
+            "sessionGeneration": 1,
+            "source": "runtime_event",
+            "usedTokens": 12800,
+            "windowTokens": 200000
+          }
+        ]
+      },
+      "expectedUsagePopover": [],
+      "finalContextLabel": "当前原生会话上下文：12.8k / 200k，6.4%",
+      "liveContextWitness": {
+        "at": "2026-10-03T17:29:49.240Z",
+        "atMs": 4846,
+        "status": "running",
+        "ui": {
+          "overview": false,
+          "duration": "0分 05秒",
+          "contextLabel": "当前原生会话上下文：12.8k / 200k，6.4%"
+        },
+        "context": {
+          "agentId": "agent_101",
+          "conversationId": "9a4af7ab-0e1b-49e7-9b21-4cd75496c4d8",
+          "dialectId": "acp-session-context-gauge-v1",
+          "modelKey": "fixture-model",
+          "nativeRatio": null,
+          "observedAt": "2026-10-03T17:29:46.969128+00:00",
+          "runtimeKind": "qwen-code",
+          "sessionGeneration": 1,
+          "source": "runtime_event",
+          "usedTokens": 12800,
+          "windowTokens": 200000
+        },
+        "delivery": {
+          "status": "prepared",
+          "acceptedAt": null,
+          "completedAt": null,
+          "contextSourceRun": "8dd2e501-49bf-47d6-a375-60ac78e1711a",
+          "contextObservedAt": "2026-10-03T17:29:46.969128+00:00"
+        },
+        "rows": [
+          "12.8k / 200k",
+          "6.4%"
+        ]
+      },
+      "syntheticNativeFrames": [
+        {
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-stream-37237",
+            "update": {
+              "sessionUpdate": "usage_update",
+              "used": 12800,
+              "size": 200000
+            }
+          }
+        },
+        {
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-stream-37237",
+            "update": {
+              "sessionUpdate": "usage_update",
+              "used": 15000
+            }
+          }
+        },
+        {
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-stream-37237",
+            "update": {
+              "sessionUpdate": "usage_update",
+              "used": 8000
+            }
+          }
+        },
+        {
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-stream-37237",
+            "update": {
+              "sessionUpdate": "usage_update",
+              "used": 12800
+            }
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "claude-code-cli",
+      "sampleSource": "installed-runtime",
+      "version": "2.1.280 (Claude Code)",
+      "round": 1,
+      "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+      "campId": "rvcamp_01m41d11y6egs8xcqsptn7a5nf",
+      "status": "succeeded",
+      "nativeSessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+      "sourceReport": "claude-verified/captures/native-metrics-claude-code-cli-round-1.json",
+      "sourceReportSha256": "693d953b2af4a221ae835c3a1706413108cd2d756e0bd39d02d95bf897347627",
+      "finalResponseObservedAt": "2026-10-03T17:31:23.619374+00:00",
+      "finalResponseClock": "native result/event handler",
+      "runEndedAt": "2026-10-03T17:31:23.702183+00:00",
+      "distinctLiveValues": [
+        11151,
+        11442,
+        11560,
+        11683,
+        12429
+      ],
+      "scalarObservations": [
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:29:48.695486+00:00",
+            "ratio": null,
+            "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 11151,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:29:52.674030+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:29:53.254Z",
+            "atMs": 8056,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 10秒",
+              "contextLabel": "当前原生会话上下文：11.2k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:48.695486+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11151,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:29:48.695486+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:29:53.254Z",
+            "atMs": 8056,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 10秒",
+              "contextLabel": "当前原生会话上下文：11.2k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:48.695486+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11151,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:29:48.695486+00:00"
+            }
+          },
+          "coreToCommitMs": 3978.544,
+          "commitToRendererMs": 579.97
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:30:07.429704+00:00",
+            "ratio": null,
+            "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 11442,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:30:08.673213+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:30:08.732Z",
+            "atMs": 23534,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 25秒",
+              "contextLabel": "当前原生会话上下文：11.2k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:07.429704+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11442,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:30:07.429704+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:30:09.746Z",
+            "atMs": 24548,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 26秒",
+              "contextLabel": "当前原生会话上下文：11.4k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:07.429704+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11442,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:30:07.429704+00:00"
+            }
+          },
+          "coreToCommitMs": 1243.509,
+          "commitToRendererMs": 1072.787
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:30:32.836282+00:00",
+            "ratio": null,
+            "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 11560,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:30:36.673083+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:30:37.534Z",
+            "atMs": 52336,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 54秒",
+              "contextLabel": "当前原生会话上下文：11.6k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:32.836282+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11560,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:30:32.836282+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:30:37.534Z",
+            "atMs": 52336,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 54秒",
+              "contextLabel": "当前原生会话上下文：11.6k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:32.836282+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11560,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:30:32.836282+00:00"
+            }
+          },
+          "coreToCommitMs": 3836.801,
+          "commitToRendererMs": 860.917
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:31:01.213652+00:00",
+            "ratio": null,
+            "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 11683,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:31:04.675485+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:31:05.371Z",
+            "atMs": 80173,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "1分 22秒",
+              "contextLabel": "当前原生会话上下文：11.7k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:01.213652+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11683,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:31:01.213652+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:31:05.371Z",
+            "atMs": 80173,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "1分 22秒",
+              "contextLabel": "当前原生会话上下文：11.7k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:01.213652+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 11683,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:31:01.213652+00:00"
+            }
+          },
+          "coreToCommitMs": 3461.833,
+          "commitToRendererMs": 695.515
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:31:12.316806+00:00",
+            "ratio": null,
+            "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 12429,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:31:12.674380+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:31:13.637Z",
+            "atMs": 88439,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "1分 30秒",
+              "contextLabel": "当前原生会话上下文：12.4k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:12.316806+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 12429,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:31:12.316806+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:31:13.637Z",
+            "atMs": 88439,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "1分 30秒",
+              "contextLabel": "当前原生会话上下文：12.4k / —，比例未知"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:12.316806+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 12429,
+              "windowTokens": null
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": null,
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:31:12.316806+00:00"
+            }
+          },
+          "coreToCommitMs": 357.574,
+          "commitToRendererMs": 962.62
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:31:23.570283+00:00",
+            "ratio": null,
+            "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 12623,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:31:23.701535+00:00",
+          "firstReadback": null,
+          "firstMatchingRenderer": null,
+          "coreToCommitMs": 131.252,
+          "commitToRendererMs": null
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:31:23.619487+00:00",
+            "ratio": null,
+            "runId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 12623,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:31:23.701535+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:31:23.943Z",
+            "atMs": 98745,
+            "status": "succeeded",
+            "ui": {
+              "overview": false,
+              "duration": null,
+              "contextLabel": "当前原生会话上下文：12.6k / 200k，6.3%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:23.619487+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 12623,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": "2026-10-03T17:31:23.702183+00:00",
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:31:23.619487+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:31:23.943Z",
+            "atMs": 98745,
+            "status": "succeeded",
+            "ui": {
+              "overview": false,
+              "duration": null,
+              "contextLabel": "当前原生会话上下文：12.6k / 200k，6.3%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:23.619487+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 12623,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+              "completedAt": "2026-10-03T17:31:23.702183+00:00",
+              "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+              "contextObservedAt": "2026-10-03T17:31:23.619487+00:00"
+            }
+          },
+          "coreToCommitMs": 82.048,
+          "commitToRendererMs": 241.465
+        }
+      ],
+      "nativeContextReads": [],
+      "finalNativeEvents": [
+        {
+          "kind": "claude_native_final",
+          "receivedAt": "2026-10-03T17:31:23.619374+00:00",
+          "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475"
+        }
+      ],
+      "nativeReadCount": {
+        "live": 0,
+        "terminal": 0,
+        "maxDurationMs": 0
+      },
+      "visibilityCheck": null,
+      "historicalCardCheck": null,
+      "expectedProjectionAndReadback": {
+        "runs": [
+          {
+            "agentRunId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+            "cacheReadTokens": 11776,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-03T17:31:23.702183+00:00",
+            "inputOutputComplete": true,
+            "lastObservedAt": "2026-10-03T17:31:23.700503+00:00",
+            "outputTokens": 1328,
+            "promptInputTotalTokens": 70888
+          }
+        ],
+        "schemaVersion": 1,
+        "sessions": [
+          {
+            "agentId": "agent_101",
+            "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+            "dialectId": "claude-last-call-context-input-v1",
+            "modelKey": "gpt-6.1-sol",
+            "nativeRatio": null,
+            "observedAt": "2026-10-03T17:31:23.619487+00:00",
+            "runtimeKind": "claude-code-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_private_extension",
+            "usedTokens": 12623,
+            "windowTokens": 200000
+          }
+        ]
+      },
+      "expectedUsagePopover": [
+        [
+          "Input Token",
+          "70.9k"
+        ],
+        [
+          "Output Token",
+          "1.3k"
+        ],
+        [
+          "Cache Read",
+          "11.8k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 40秒"
+        ]
+      ],
+      "finalContextLabel": "当前原生会话上下文：12.6k / 200k，6.3%",
+      "liveContextWitness": {
+        "at": "2026-10-03T17:29:53.254Z",
+        "atMs": 8056,
+        "status": "running",
+        "ui": {
+          "overview": false,
+          "duration": "0分 10秒",
+          "contextLabel": "当前原生会话上下文：11.2k / —，比例未知"
+        },
+        "context": {
+          "agentId": "agent_101",
+          "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+          "dialectId": "claude-last-call-context-input-v1",
+          "modelKey": "gpt-6.1-sol",
+          "nativeRatio": null,
+          "observedAt": "2026-10-03T17:29:48.695486+00:00",
+          "runtimeKind": "claude-code-cli",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 11151,
+          "windowTokens": null
+        },
+        "delivery": {
+          "status": "accepted",
+          "acceptedAt": "2026-10-03T17:29:45.880101+00:00",
+          "completedAt": null,
+          "contextSourceRun": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+          "contextObservedAt": "2026-10-03T17:29:48.695486+00:00"
+        },
+        "rows": [
+          "11.2k / —",
+          "—"
+        ]
+      },
+      "nativeJournalEvidence": {
+        "origin": "installed Claude Session journal, numeric fields only; latest row per root message ID",
+        "runStartedAt": "2026-10-03T17:29:43.122273+00:00",
+        "runEndedAt": "2026-10-03T17:31:23.702183+00:00",
+        "calls": [
+          {
+            "timestamp": "2026-10-03T17:29:48.561Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_056a4e2970e51e23016ac13b8991c487d288daea3a8886fd45",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 11151,
+                "output_tokens": 34,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:30:07.334Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_0b3d85ce13ef9355016ac13b8dabc887d1a77d7b24936f9a0e",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 11442,
+                "output_tokens": 346,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:30:32.754Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_0f85dd3d54f26271016ac13bacc80487d287261e9459089b3e",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 11560,
+                "output_tokens": 244,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:31:01.117Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_00df859cf7d9373b016ac13bc5d74487d18f475bc45001f982",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 5795,
+                "output_tokens": 320,
+                "cache_read_input_tokens": 5888,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:31:12.197Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_080aecddc45e29bf016ac13bd652bc87d1a3ad44e340bc2f97",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 12429,
+                "output_tokens": 174,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:31:23.462Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_0fc32a26bd9d87b9016ac13be19f0087d2acb80372160f3cfe",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 6735,
+                "output_tokens": 210,
+                "cache_read_input_tokens": 5888,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          }
+        ],
+        "expectedNormalizedRunUsage": {
+          "promptInputTotalTokens": 70888,
+          "outputTokens": 1328,
+          "cacheReadTokens": 11776,
+          "cacheWriteTokens": 0
+        }
+      }
+    },
+    {
+      "runtime": "claude-code-cli",
+      "sampleSource": "installed-runtime",
+      "version": "2.1.280 (Claude Code)",
+      "round": 2,
+      "runId": "5054515f-b828-4e33-996c-8ed100d4313f",
+      "campId": "rvcamp_01m41d11y6egs8xcqsptn7a5nf",
+      "status": "succeeded",
+      "nativeSessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+      "sourceReport": "claude-verified/captures/native-metrics-claude-code-cli-round-2.json",
+      "sourceReportSha256": "44967716df900582946b397eb04958b7b17eb50a0bfc7261f50a6212696f3001",
+      "finalResponseObservedAt": "2026-10-03T17:32:31.285396+00:00",
+      "finalResponseClock": "native result/event handler",
+      "runEndedAt": "2026-10-03T17:32:31.377740+00:00",
+      "distinctLiveValues": [
+        13561,
+        13826,
+        13944,
+        14065
+      ],
+      "scalarObservations": [
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:31:29.884388+00:00",
+            "ratio": null,
+            "runId": "5054515f-b828-4e33-996c-8ed100d4313f",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 13561,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:31:32.674721+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:31:33.127Z",
+            "atMs": 8305,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 08秒",
+              "contextLabel": "当前原生会话上下文：13.6k / 200k，6.8%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:29.884388+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 13561,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:31:29.884388+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:31:33.127Z",
+            "atMs": 8305,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 08秒",
+              "contextLabel": "当前原生会话上下文：13.6k / 200k，6.8%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:29.884388+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 13561,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:31:29.884388+00:00"
+            }
+          },
+          "coreToCommitMs": 2790.333,
+          "commitToRendererMs": 452.279
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:31:40.327918+00:00",
+            "ratio": null,
+            "runId": "5054515f-b828-4e33-996c-8ed100d4313f",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 13826,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:31:40.674396+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:31:41.477Z",
+            "atMs": 16655,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 16秒",
+              "contextLabel": "当前原生会话上下文：13.8k / 200k，6.9%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:40.327918+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 13826,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:31:40.327918+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:31:41.477Z",
+            "atMs": 16655,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 16秒",
+              "contextLabel": "当前原生会话上下文：13.8k / 200k，6.9%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:31:40.327918+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 13826,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:31:40.327918+00:00"
+            }
+          },
+          "coreToCommitMs": 346.478,
+          "commitToRendererMs": 802.604
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:32:01.350055+00:00",
+            "ratio": null,
+            "runId": "5054515f-b828-4e33-996c-8ed100d4313f",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 13944,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:32:04.676435+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:32:05.300Z",
+            "atMs": 40478,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 40秒",
+              "contextLabel": "当前原生会话上下文：13.9k / 200k，7.0%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:32:01.350055+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 13944,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:32:01.350055+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:32:05.300Z",
+            "atMs": 40478,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 40秒",
+              "contextLabel": "当前原生会话上下文：13.9k / 200k，7.0%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:32:01.350055+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 13944,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:32:01.350055+00:00"
+            }
+          },
+          "coreToCommitMs": 3326.38,
+          "commitToRendererMs": 623.565
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:32:24.665860+00:00",
+            "ratio": null,
+            "runId": "5054515f-b828-4e33-996c-8ed100d4313f",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 14065,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:32:24.676092+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:32:25.000Z",
+            "atMs": 60178,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "1分 00秒",
+              "contextLabel": "当前原生会话上下文：14.1k / 200k，7.0%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:32:24.665860+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 14065,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:32:24.665860+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:32:25.000Z",
+            "atMs": 60178,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "1分 00秒",
+              "contextLabel": "当前原生会话上下文：14.1k / 200k，7.0%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:32:24.665860+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 14065,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": null,
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:32:24.665860+00:00"
+            }
+          },
+          "coreToCommitMs": 10.232,
+          "commitToRendererMs": 323.908
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:32:31.225276+00:00",
+            "ratio": null,
+            "runId": "5054515f-b828-4e33-996c-8ed100d4313f",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 14292,
+            "window": null
+          },
+          "committedAt": "2026-10-03T17:32:31.377021+00:00",
+          "firstReadback": null,
+          "firstMatchingRenderer": null,
+          "coreToCommitMs": 151.745,
+          "commitToRendererMs": null
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "gpt-6.1-sol",
+            "observedAt": "2026-10-03T17:32:31.285470+00:00",
+            "ratio": null,
+            "runId": "5054515f-b828-4e33-996c-8ed100d4313f",
+            "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475",
+            "used": 14292,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:32:31.377021+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:32:32.248Z",
+            "atMs": 67426,
+            "status": "succeeded",
+            "ui": {
+              "overview": false,
+              "duration": null,
+              "contextLabel": "当前原生会话上下文：14.3k / 200k，7.1%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:32:31.285470+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 14292,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": "2026-10-03T17:32:31.377740+00:00",
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:32:31.285470+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:32:32.248Z",
+            "atMs": 67426,
+            "status": "succeeded",
+            "ui": {
+              "overview": false,
+              "duration": null,
+              "contextLabel": "当前原生会话上下文：14.3k / 200k，7.1%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:32:31.285470+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 14292,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+              "completedAt": "2026-10-03T17:32:31.377740+00:00",
+              "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+              "contextObservedAt": "2026-10-03T17:32:31.285470+00:00"
+            }
+          },
+          "coreToCommitMs": 91.551,
+          "commitToRendererMs": 870.979
+        }
+      ],
+      "nativeContextReads": [],
+      "finalNativeEvents": [
+        {
+          "kind": "claude_native_final",
+          "receivedAt": "2026-10-03T17:32:31.285396+00:00",
+          "sessionId": "3a1398ee-ca20-473f-8c62-b63d168dc475"
+        }
+      ],
+      "nativeReadCount": {
+        "live": 0,
+        "terminal": 0,
+        "maxDurationMs": 0
+      },
+      "visibilityCheck": null,
+      "historicalCardCheck": {
+        "openedRunId": "ca35cb50-50cc-45e0-bf50-64d8aaad4f7a",
+        "currentSessionLabel": "当前原生会话上下文：14.3k / 200k，7.1%"
+      },
+      "expectedProjectionAndReadback": {
+        "runs": [
+          {
+            "agentRunId": "5054515f-b828-4e33-996c-8ed100d4313f",
+            "cacheReadTokens": 17664,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-03T17:32:31.377740+00:00",
+            "inputOutputComplete": true,
+            "lastObservedAt": "2026-10-03T17:32:31.375887+00:00",
+            "outputTokens": 625,
+            "promptInputTotalTokens": 69688
+          }
+        ],
+        "schemaVersion": 1,
+        "sessions": [
+          {
+            "agentId": "agent_101",
+            "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+            "dialectId": "claude-last-call-context-input-v1",
+            "modelKey": "gpt-6.1-sol",
+            "nativeRatio": null,
+            "observedAt": "2026-10-03T17:32:31.285470+00:00",
+            "runtimeKind": "claude-code-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_private_extension",
+            "usedTokens": 14292,
+            "windowTokens": 200000
+          }
+        ]
+      },
+      "expectedUsagePopover": [
+        [
+          "Input Token",
+          "69.7k"
+        ],
+        [
+          "Output Token",
+          "0.6k"
+        ],
+        [
+          "Cache Read",
+          "17.7k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 07秒"
+        ]
+      ],
+      "finalContextLabel": "当前原生会话上下文：14.3k / 200k，7.1%",
+      "liveContextWitness": {
+        "at": "2026-10-03T17:31:33.127Z",
+        "atMs": 8305,
+        "status": "running",
+        "ui": {
+          "overview": false,
+          "duration": "0分 08秒",
+          "contextLabel": "当前原生会话上下文：13.6k / 200k，6.8%"
+        },
+        "context": {
+          "agentId": "agent_101",
+          "conversationId": "c764a24b-34e4-46ea-a0f2-7103276d7e93",
+          "dialectId": "claude-last-call-context-input-v1",
+          "modelKey": "gpt-6.1-sol",
+          "nativeRatio": null,
+          "observedAt": "2026-10-03T17:31:29.884388+00:00",
+          "runtimeKind": "claude-code-cli",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 13561,
+          "windowTokens": 200000
+        },
+        "delivery": {
+          "status": "accepted",
+          "acceptedAt": "2026-10-03T17:31:26.293539+00:00",
+          "completedAt": null,
+          "contextSourceRun": "5054515f-b828-4e33-996c-8ed100d4313f",
+          "contextObservedAt": "2026-10-03T17:31:29.884388+00:00"
+        },
+        "rows": [
+          "13.6k / 200k",
+          "6.8%"
+        ]
+      },
+      "nativeJournalEvidence": {
+        "origin": "installed Claude Session journal, numeric fields only; latest row per root message ID",
+        "runStartedAt": "2026-10-03T17:31:24.204911+00:00",
+        "runEndedAt": "2026-10-03T17:32:31.377740+00:00",
+        "calls": [
+          {
+            "timestamp": "2026-10-03T17:31:29.684Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_08ca0ccaaca513fe016ac13bedf4e087d1aa8b0286e9a139de",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 13561,
+                "output_tokens": 34,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:31:40.235Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_01adb83c696c6cf8016ac13bf30e8487d2bc6c8f75317e89ce",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 13826,
+                "output_tokens": 187,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:32:01.252Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_08bdee008ab0058d016ac13c09c83487d1a38aa0e49dc0fe94",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 8056,
+                "output_tokens": 124,
+                "cache_read_input_tokens": 5888,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:32:24.548Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_037fc9caa19107cd016ac13c1edfe087d2871f7ffc98af4d1a",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 8177,
+                "output_tokens": 189,
+                "cache_read_input_tokens": 5888,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-03T17:32:31.082Z",
+            "type": "assistant",
+            "message": {
+              "id": "resp_06f9e6d50bae633a016ac13c2a43f087d1b4630d6691d3b5c8",
+              "model": "gpt-6.1-sol",
+              "usage": {
+                "input_tokens": 8404,
+                "output_tokens": 91,
+                "cache_read_input_tokens": 5888,
+                "cache_creation_input_tokens": 0
+              }
+            }
+          }
+        ],
+        "expectedNormalizedRunUsage": {
+          "promptInputTotalTokens": 69688,
+          "outputTokens": 625,
+          "cacheReadTokens": 17664,
+          "cacheWriteTokens": 0
+        }
+      }
+    },
+    {
+      "runtime": "zcode-app",
+      "sampleSource": "installed-runtime",
+      "version": "0.16.9",
+      "round": 1,
+      "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+      "campId": "rvcamp_01m41d0z7geg081btbdkk543jz",
+      "status": "succeeded",
+      "nativeSessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+      "sourceReport": "zcode-verified/captures/native-metrics-zcode-app.json",
+      "sourceReportSha256": "34d55a6e2abb94a2b955cecde7378460b3ca48e7b5de3a03351b16b8f8532272",
+      "finalResponseObservedAt": "2026-10-03T17:30:39.478110+00:00",
+      "finalResponseClock": "native result/event handler",
+      "runEndedAt": "2026-10-03T17:30:39.799389+00:00",
+      "distinctLiveValues": [
+        15407,
+        15530,
+        15640,
+        16400
+      ],
+      "scalarObservations": [
+        {
+          "nativeNumericObservation": {
+            "modelId": "new-provider/gpt-6-sol",
+            "observedAt": "2026-10-03T17:29:49.283143+00:00",
+            "ratio": null,
+            "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+            "used": 15407,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:29:52.683589+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:29:53.565Z",
+            "atMs": 11113,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 13秒",
+              "contextLabel": "当前原生会话上下文：15.4k / 200k，7.7%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:49.283143+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 15407,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:29:49.283143+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:29:53.565Z",
+            "atMs": 11113,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 13秒",
+              "contextLabel": "当前原生会话上下文：15.4k / 200k，7.7%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:49.283143+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 15407,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:29:49.283143+00:00"
+            }
+          },
+          "coreToCommitMs": 3400.446,
+          "commitToRendererMs": 881.411
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "new-provider/gpt-6-sol",
+            "observedAt": "2026-10-03T17:29:53.773391+00:00",
+            "ratio": null,
+            "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+            "used": 15530,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:29:56.683869+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:29:56.745Z",
+            "atMs": 14293,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 16秒",
+              "contextLabel": "当前原生会话上下文：15.4k / 200k，7.7%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:53.773391+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 15530,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:29:53.773391+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:29:57.776Z",
+            "atMs": 15324,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 17秒",
+              "contextLabel": "当前原生会话上下文：15.5k / 200k，7.8%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:29:53.773391+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 15530,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:29:53.773391+00:00"
+            }
+          },
+          "coreToCommitMs": 2910.478,
+          "commitToRendererMs": 1092.131
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "new-provider/gpt-6-sol",
+            "observedAt": "2026-10-03T17:30:11.047426+00:00",
+            "ratio": null,
+            "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+            "used": 15640,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:30:12.682967+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:30:13.223Z",
+            "atMs": 30771,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 32秒",
+              "contextLabel": "当前原生会话上下文：15.6k / 200k，7.8%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:11.047426+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 15640,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:30:11.047426+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:30:13.223Z",
+            "atMs": 30771,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 32秒",
+              "contextLabel": "当前原生会话上下文：15.6k / 200k，7.8%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:11.047426+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 15640,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:30:11.047426+00:00"
+            }
+          },
+          "coreToCommitMs": 1635.541,
+          "commitToRendererMs": 540.033
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "new-provider/gpt-6-sol",
+            "observedAt": "2026-10-03T17:30:32.892819+00:00",
+            "ratio": null,
+            "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+            "used": 15803,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:30:36.685480+00:00",
+          "firstReadback": null,
+          "firstMatchingRenderer": null,
+          "coreToCommitMs": 3792.661,
+          "commitToRendererMs": null
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "new-provider/gpt-6-sol",
+            "observedAt": "2026-10-03T17:30:36.453857+00:00",
+            "ratio": null,
+            "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+            "used": 16400,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:30:36.685480+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:30:36.954Z",
+            "atMs": 54502,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 56秒",
+              "contextLabel": "当前原生会话上下文：16.4k / 200k，8.2%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:36.453857+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 16400,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:30:36.453857+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:30:36.954Z",
+            "atMs": 54502,
+            "status": "running",
+            "ui": {
+              "overview": false,
+              "duration": "0分 56秒",
+              "contextLabel": "当前原生会话上下文：16.4k / 200k，8.2%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:36.453857+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 16400,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": null,
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:30:36.453857+00:00"
+            }
+          },
+          "coreToCommitMs": 231.623,
+          "commitToRendererMs": 268.52
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "new-provider/gpt-6-sol",
+            "observedAt": "2026-10-03T17:30:39.705055+00:00",
+            "ratio": null,
+            "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+            "used": 16491,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:30:39.792337+00:00",
+          "firstReadback": null,
+          "firstMatchingRenderer": null,
+          "coreToCommitMs": 87.282,
+          "commitToRendererMs": null
+        },
+        {
+          "nativeNumericObservation": {
+            "modelId": "new-provider/gpt-6-sol",
+            "observedAt": "2026-10-03T17:30:39.791859+00:00",
+            "ratio": null,
+            "runId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+            "used": 16491,
+            "window": 200000
+          },
+          "committedAt": "2026-10-03T17:30:39.792337+00:00",
+          "firstReadback": {
+            "at": "2026-10-03T17:30:40.049Z",
+            "atMs": 57597,
+            "status": "succeeded",
+            "ui": {
+              "overview": false,
+              "duration": null,
+              "contextLabel": "当前原生会话上下文：16.5k / 200k，8.2%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:39.791859+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 16491,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": "2026-10-03T17:30:39.799389+00:00",
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:30:39.791859+00:00"
+            }
+          },
+          "firstMatchingRenderer": {
+            "at": "2026-10-03T17:30:40.049Z",
+            "atMs": 57597,
+            "status": "succeeded",
+            "ui": {
+              "overview": false,
+              "duration": null,
+              "contextLabel": "当前原生会话上下文：16.5k / 200k，8.2%"
+            },
+            "context": {
+              "agentId": "agent_101",
+              "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+              "dialectId": "zcode-native-session-context-v1",
+              "modelKey": "new-provider/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-03T17:30:39.791859+00:00",
+              "runtimeKind": "zcode-app",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 16491,
+              "windowTokens": 200000
+            },
+            "delivery": {
+              "status": "accepted",
+              "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+              "completedAt": "2026-10-03T17:30:39.799389+00:00",
+              "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+              "contextObservedAt": "2026-10-03T17:30:39.791859+00:00"
+            }
+          },
+          "coreToCommitMs": 0.478,
+          "commitToRendererMs": 256.663
+        }
+      ],
+      "nativeContextReads": [
+        {
+          "boundedMessages": true,
+          "durationMs": 128,
+          "eventSeq": 16,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:29:49.283082+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 3,
+          "succeeded": true,
+          "used": 15407,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 16,
+              "stateRevision": 3,
+              "contextUsage": {
+                "used": 15407,
+                "size": 200000
+              }
+            }
+          }
+        },
+        {
+          "boundedMessages": true,
+          "durationMs": 103,
+          "eventSeq": 32,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:29:53.773341+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 3,
+          "succeeded": true,
+          "used": 15530,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 32,
+              "stateRevision": 3,
+              "contextUsage": {
+                "used": 15530,
+                "size": 200000
+              }
+            }
+          }
+        },
+        {
+          "boundedMessages": true,
+          "durationMs": 139,
+          "eventSeq": 59,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:30:11.047355+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 3,
+          "succeeded": true,
+          "used": 15640,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 59,
+              "stateRevision": 3,
+              "contextUsage": {
+                "used": 15640,
+                "size": 200000
+              }
+            }
+          }
+        },
+        {
+          "boundedMessages": true,
+          "durationMs": 133,
+          "eventSeq": 85,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:30:32.892773+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 3,
+          "succeeded": true,
+          "used": 15803,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 85,
+              "stateRevision": 3,
+              "contextUsage": {
+                "used": 15803,
+                "size": 200000
+              }
+            }
+          }
+        },
+        {
+          "boundedMessages": true,
+          "durationMs": 134,
+          "eventSeq": 98,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:30:36.453777+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 3,
+          "succeeded": true,
+          "used": 16400,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 98,
+              "stateRevision": 3,
+              "contextUsage": {
+                "used": 16400,
+                "size": 200000
+              }
+            }
+          }
+        },
+        {
+          "boundedMessages": true,
+          "durationMs": 238,
+          "eventSeq": 110,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:30:39.705004+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 4,
+          "succeeded": true,
+          "used": 16491,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 110,
+              "stateRevision": 4,
+              "contextUsage": {
+                "used": 16491,
+                "size": 200000
+              }
+            }
+          }
+        },
+        {
+          "boundedMessages": false,
+          "durationMs": 86,
+          "eventSeq": 110,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:30:39.791761+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 4,
+          "succeeded": true,
+          "used": 16491,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 110,
+              "stateRevision": 4,
+              "contextUsage": {
+                "used": 16491,
+                "size": 200000
+              }
+            }
+          }
+        },
+        {
+          "boundedMessages": false,
+          "durationMs": 94,
+          "eventSeq": 110,
+          "kind": "zcode_context_read",
+          "returnedAt": "2026-10-03T17:30:39.886046+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e",
+          "size": 200000,
+          "stateRevision": 4,
+          "succeeded": true,
+          "used": 16491,
+          "nativeSnapshotNumericFields": {
+            "runtime": {
+              "eventSeq": 110,
+              "stateRevision": 4,
+              "contextUsage": {
+                "used": 16491,
+                "size": 200000
+              }
+            }
+          }
+        }
+      ],
+      "finalNativeEvents": [
+        {
+          "kind": "zcode_native_final",
+          "receivedAt": "2026-10-03T17:30:39.478110+00:00",
+          "sessionId": "sess_0fd4fd40-b6a3-4bcc-971a-2c2abe6cb42e"
+        }
+      ],
+      "nativeReadCount": {
+        "live": 6,
+        "terminal": 2,
+        "maxDurationMs": 238
+      },
+      "visibilityCheck": null,
+      "historicalCardCheck": null,
+      "expectedProjectionAndReadback": {
+        "runs": [
+          {
+            "agentRunId": "cab406b3-585f-449b-8f82-a13e099271b5",
+            "cacheReadTokens": 86784,
+            "cacheWriteTokens": null,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-03T17:30:39.799389+00:00",
+            "inputOutputComplete": true,
+            "lastObservedAt": "2026-10-03T17:30:39.478181+00:00",
+            "outputTokens": 592,
+            "promptInputTotalTokens": 94679
+          }
+        ],
+        "schemaVersion": 1,
+        "sessions": [
+          {
+            "agentId": "agent_101",
+            "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+            "dialectId": "zcode-native-session-context-v1",
+            "modelKey": "new-provider/gpt-6-sol",
+            "nativeRatio": null,
+            "observedAt": "2026-10-03T17:30:39.791859+00:00",
+            "runtimeKind": "zcode-app",
+            "sessionGeneration": 1,
+            "source": "runtime_private_extension",
+            "usedTokens": 16491,
+            "windowTokens": 200000
+          }
+        ]
+      },
+      "expectedUsagePopover": [
+        [
+          "Input Token",
+          "94.7k"
+        ],
+        [
+          "Output Token",
+          "0.6k"
+        ],
+        [
+          "Cache Read",
+          "86.8k"
+        ],
+        [
+          "Cache Write",
+          "—"
+        ],
+        [
+          "执行耗时",
+          "0分 59秒"
+        ]
+      ],
+      "finalContextLabel": "当前原生会话上下文：16.5k / 200k，8.2%",
+      "liveContextWitness": {
+        "at": "2026-10-03T17:29:53.565Z",
+        "atMs": 11113,
+        "status": "running",
+        "ui": {
+          "overview": false,
+          "duration": "0分 13秒",
+          "contextLabel": "当前原生会话上下文：15.4k / 200k，7.7%"
+        },
+        "context": {
+          "agentId": "agent_101",
+          "conversationId": "cd0673ef-4c6a-4e07-b22d-592701446b64",
+          "dialectId": "zcode-native-session-context-v1",
+          "modelKey": "new-provider/gpt-6-sol",
+          "nativeRatio": null,
+          "observedAt": "2026-10-03T17:29:49.283143+00:00",
+          "runtimeKind": "zcode-app",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 15407,
+          "windowTokens": 200000
+        },
+        "delivery": {
+          "status": "accepted",
+          "acceptedAt": "2026-10-03T17:29:41.795858+00:00",
+          "completedAt": null,
+          "contextSourceRun": "cab406b3-585f-449b-8f82-a13e099271b5",
+          "contextObservedAt": "2026-10-03T17:29:49.283143+00:00"
+        },
+        "rows": [
+          "15.4k / 200k",
+          "7.7%"
+        ]
+      }
+    }
+  ]
+}

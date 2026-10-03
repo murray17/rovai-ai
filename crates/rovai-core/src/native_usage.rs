@@ -581,7 +581,7 @@ impl OpenCodeUsageReader {
             "SELECT id,
             CASE WHEN json_type(data,'$.tokens.input')='integer' THEN json_extract(data,'$.tokens.input') END, CASE WHEN json_type(data,'$.tokens.output')='integer' THEN json_extract(data,'$.tokens.output') END,
             CASE WHEN json_type(data,'$.tokens.reasoning')='integer' THEN json_extract(data,'$.tokens.reasoning') END, CASE WHEN json_type(data,'$.tokens.cache.read')='integer' THEN json_extract(data,'$.tokens.cache.read') END,
-            CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, json_extract(data,'$.time.completed')
+            CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, json_extract(data,'$.time.completed'), CASE WHEN json_type(data,'$.providerID')='text' THEN json_extract(data,'$.providerID') END, CASE WHEN json_type(data,'$.modelID')='text' THEN json_extract(data,'$.modelID') END
             FROM message WHERE session_id=?1 AND json_valid(data)
                 AND json_extract(data,'$.role')='assistant'
                 AND json_type(data,'$.time.completed')='integer'
@@ -602,12 +602,14 @@ impl OpenCodeUsageReader {
                         ..Default::default()
                     },
                     row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             },
         )?;
         let mut result = Vec::new();
         for row in rows {
-            let (id, mut fields, time) = row?;
+            let (id, mut fields, time, provider, model) = row?;
             if self.seen.contains(&id) {
                 continue;
             }
@@ -657,6 +659,10 @@ impl OpenCodeUsageReader {
                 gauge.usage.scope = "session".into();
                 gauge.usage.counter_mode = RuntimeUsageCounterMode::Gauge;
                 gauge.usage.identity_suffix = "native_context".into();
+                gauge.usage.context_model_id = provider
+                    .zip(model)
+                    .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
+                    .map(|(provider, model)| format!("{provider}/{model}"));
                 result.push(gauge);
             }
         }
@@ -778,6 +784,7 @@ fn observation(
             native_turn_id: turn,
             fields,
             cost: None,
+            context_model_id: None,
             occurred_at: time
                 .and_then(DateTime::<Utc>::from_timestamp_millis)
                 .map(|t| t.to_rfc3339()),
@@ -851,9 +858,6 @@ fn codebuddy_context(
     }
     let used = call.usage.fields.input_tokens?;
     let window = model.window_tokens.filter(|n| *n > 0);
-    if window.is_some_and(|n| used > n) {
-        return None;
-    }
     let mut gauge = observation(
         call.usage.native_session_id.as_deref()?,
         format!("{}:context", call.source_identity),
@@ -870,6 +874,7 @@ fn codebuddy_context(
     gauge.usage.scope = "session".into();
     gauge.usage.counter_mode = RuntimeUsageCounterMode::Gauge;
     gauge.usage.identity_suffix = "native_context".into();
+    gauge.usage.context_model_id = Some(model.model_id.clone());
     Some(gauge)
 }
 
@@ -971,12 +976,13 @@ fn trae_context(
     // Native /context's calibrated used count is the latest root prompt_tokens,
     // excluding that response and prior calls. Verified against a long response.
     let used = call.usage.fields.input_tokens?;
-    if used <= 0 || model.window_tokens.is_some_and(|window| used > window) {
+    if used <= 0 {
         return None;
     }
     let mut context = call.usage.clone();
     context.identity_suffix = "native_context".into();
     context.dialect_id = "trae-native-calibrated-context-v1".into();
+    context.context_model_id = Some(model.model_id.clone());
     context.scope = "session".into();
     context.counter_mode = RuntimeUsageCounterMode::Gauge;
     context.input_semantics = RuntimeInputSemantics::Unknown;
@@ -1366,7 +1372,7 @@ mod tests {
         assert_eq!(gauge.usage.fields.output_tokens, None);
         for (id, window, expected) in [
             ("other", Some(168000), None),
-            ("GLM-5.3", Some(100), None),
+            ("GLM-5.3", Some(100), Some(18015)),
             ("GLM-5.3", None, Some(18015)),
         ] {
             let model = NativeContextModel {
@@ -1480,7 +1486,14 @@ mod tests {
             None
         );
         model.window_tokens = Some(100);
-        assert!(codebuddy_context(&line, &parsed, &model).is_none());
+        assert_eq!(
+            codebuddy_context(&line, &parsed, &model)
+                .unwrap()
+                .usage
+                .fields
+                .context_used_tokens,
+            parsed.usage.fields.input_tokens
+        );
         model.window_tokens = Some(1000);
         model.model_id = "changed-model".into();
         assert!(codebuddy_context(&line, &parsed, &model).is_none());

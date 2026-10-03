@@ -62,6 +62,7 @@ struct BackgroundTool {
 pub(super) struct Translated {
     pub messages: Vec<Value>,
     pub terminal: Option<Result<Value>>,
+    pub context_refresh: bool,
 }
 
 impl SessionEvents {
@@ -219,6 +220,7 @@ impl SessionEvents {
             && !operation.is_empty()
             && !boundary.is_empty()
         {
+            translated.context_refresh = self.input.is_some();
             translated.messages.push(json!({"method":"_zcode/compaction","params":{
                 "sessionId":session,"operationId":boundary,"nativeOperationId":operation,"status":"completed",
                 "trigger":payload["trigger"],"phase":payload["phase"]}}));
@@ -266,6 +268,15 @@ impl SessionEvents {
         if !self.owns_turn(event["turnId"].as_str()) {
             return Ok(translated);
         }
+        // Official ModelComplete arrives as session.updated with native Usage;
+        // it is a model-call boundary, before tools and the prompt terminal.
+        // A Session snapshot provides occupancy; Usage itself is not reused as it.
+        translated.context_refresh = kind == "session.updated"
+            && payload.get("usage").is_some()
+            && payload
+                .get("querySource")
+                .and_then(Value::as_str)
+                .is_none_or(|source| source == "main_turn");
         match (kind, payload["kind"].as_str()) {
             ("model.streaming", Some("text_delta")) => {
                 let delta = payload["delta"]

@@ -82,7 +82,7 @@ const fixtureExecutionRoot = join(fixtureRoot, 'workspace')
 const codexExpectedCommand = 'rovai camp read --limit 20'
 const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
 const webSearchQueries = ['password=公开验收词 token=保持原样', '第二项公开查询']
-const fixtureContextManifestVersion = 31
+const fixtureContextManifestVersion = 32
 const fixtureContextDeliveryProfile = {
   profileVersion: 10,
   maxSelfActiveTasks: 8
@@ -158,7 +158,7 @@ const runtimes = [
 ]
 
 await mkdir(dataDir, { recursive: true })
-if (executionMetricsStreamOnly) {
+if (executionMetricsStreamOnly && (!metricsRealRuntime || process.env.ROVAI_METRICS_HELD_FINAL === '1')) {
   const runtime = join(root, 'scripts', 'fixtures', 'streaming-acp-runtime.mjs')
   await chmod(runtime, 0o755)
   process.env[process.env.ROVAI_STREAMING_ACP_KIND === 'copilot-cli' ? 'ROVAI_COPILOT_BIN' : 'ROVAI_QWEN_BIN'] = runtime
@@ -1428,8 +1428,14 @@ async function verifyStreamingExecutionMetricsRenderer(app, capturesRoot) {
 
 async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
   const request = (method, params = {}) => evaluate(app.cdp,
-    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`, true)
+    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})
+      .catch(error => { throw new Error(${JSON.stringify(method)} + ': ' + (error?.message ?? error?.code ?? String(error))) })`, true)
   const runtimeKind = process.env.ROVAI_METRICS_RUNTIME ?? 'codex-cli'
+  const liveContextMode = process.env.ROVAI_METRICS_VERIFY_LIVE_CONTEXT
+  assert(liveContextMode == null || ['1', 'used-only'].includes(liveContextMode),
+    'Live Context verification accepts 1 or used-only')
+  const isCount = value => Number.isSafeInteger(value) && value >= 0
+  const metricK = value => value == null ? '—' : `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k`
   const agentId = runtimes.find((entry) => entry.key === 'codex').agentId
   const installation = await configureProductRuntime(request, runtimeKind, [agentId])
   const modelId = process.env.ROVAI_METRICS_MODEL ?? (runtimeKind === 'codex-cli' ? 'gpt-6.1-sol' : null)
@@ -1452,9 +1458,35 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
       ?? join(root, 'scripts', 'fixtures', 'native-execution-metrics-task.txt'), 'utf8'),
     purpose: 'Native Usage and Context through packaged Renderer'
   })
-  assert(setup.status === 'accepted', 'Real Runtime acceptance was not accepted')
+  assert(setup.status === 'accepted' && setup.payload?.threadId && setup.payload?.threadMessageId,
+    'Real Runtime acceptance was not accepted with Thread/message identities')
   const liveCampId = setup.payload.threadId
-  const runId = await waitForControlledMessageRun(request, liveCampId, setup.payload.threadMessageId)
+  const roundCount = process.env.ROVAI_METRICS_VERIFY_WINDOW_REUSE === '1' ? 2 : 1
+  const reports = []
+  await evaluate(app.cdp, `(() => {
+    window.__contextAcceptanceCommits = []
+    window.__contextAcceptanceOff = window.rovai.onEvent(event => {
+      if (event.method === 'monitoring.changed') window.__contextAcceptanceCommits.push({ at: new Date().toISOString(), params: event.params })
+      if (window.__contextAcceptanceCommits.length > 500) window.__contextAcceptanceCommits.shift()
+    })
+  })()`)
+  let messageId = setup.payload.threadMessageId
+  for (let round = 1; round <= roundCount; round++) {
+  if (round > 1) {
+    const sent = await request('thread.messages.send', {
+      commandId: crypto.randomUUID(), threadId: liveCampId,
+      content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] },
+        await readFile(process.env.ROVAI_METRICS_PROMPT_FILE
+          ?? join(root, 'scripts', 'fixtures', 'native-live-context-task.txt'), 'utf8')),
+      sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
+      execution: { taskId: null, purpose: 'Verify confirmed window reuse during the next Run', completionRole: 'required' }
+    })
+    const accepted = sent.commandResult ?? sent
+    assert(accepted.status === 'accepted' && accepted.payload?.threadMessageId, 'Second Context Run not accepted')
+    messageId = accepted.payload.threadMessageId
+  }
+  const captureKey = `${runtimeKind}${roundCount > 1 ? `-round-${round}` : ''}`
+  const runId = await waitForControlledMessageRun(request, liveCampId, messageId)
   await openCamp(app.cdp, liveCampId)
   await selectCampConversationView(app.cdp, 'conversation')
   await evaluate(app.cdp, `(() => {
@@ -1486,19 +1518,66 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
   await waitForExpression(app.cdp, `document.querySelector(${JSON.stringify(stageSelector)})?.closest('.execution-drawer')?.querySelector('.execution-drawer-header')?.classList.contains('is-overview') === false`, 15_000)
   const drawerExpression = `document.querySelector(${JSON.stringify(stageSelector)})?.closest('.execution-drawer')`
   const samples = [], started = Date.now()
-  let status = null, nextProgress = started + 30_000
+  const previousContext = reports.at(-1)?.projection.sessions.find(session => session.agentId === agentId)
+  let visibilityCheck = null
+  let status = null, nextProgress = started + 30_000, liveContextWitness = null
   while (Date.now() - started < 480_000) {
-    const state = await request('camps.snapshot', { campId: liveCampId })
+    const state = await request('threads.snapshot', { threadId: liveCampId })
     status = state.agentRuns.find((candidate) => candidate.id === runId)?.status
+    const liveProjection = liveContextMode
+      ? await request('monitoring.execution', { threadId: liveCampId, agentRunIds: [runId] }) : null
+    const liveContext = liveProjection?.sessions.find(session => session.agentId === agentId) ?? null
     const ui = await evaluate(app.cdp, `(() => {
       const drawer = ${drawerExpression}
       const stage = document.querySelector(${JSON.stringify(stageSelector)})
       return {
         overview: drawer?.querySelector('.execution-drawer-header')?.classList.contains('is-overview') ?? null,
-        duration: stage?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null
+        duration: stage?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null,
+        contextLabel: drawer?.querySelector('.execution-context-trigger')?.getAttribute('aria-label') ?? null
       }
     })()`)
-    samples.push({ atMs: Date.now() - started, status, ui })
+    const delivery = liveContextMode ? JSON.parse(await runSql(databasePath,
+      `SELECT json_object('status',d.status,'acceptedAt',d.accepted_at,'completedAt',ar.ended_at,
+        'contextSourceRun',x.source_agent_run_id,'contextObservedAt',x.observed_at)
+       FROM agent_run ar JOIN runtime_input_delivery d ON d.agent_run_id=ar.id AND d.execution_epoch=ar.execution_epoch
+       LEFT JOIN runtime_session_context_latest x ON x.conversation_id=ar.conversation_id
+       WHERE ar.id=${sqlLiteral(runId)}`) || 'null') : null
+    const sample = { at: new Date().toISOString(), atMs: Date.now() - started, status, ui,
+      ...(liveContextMode ? { context: liveContext, delivery } : {}) }
+    samples.push(sample)
+    if (!liveContextWitness && status === 'running' && delivery?.contextSourceRun === runId && isCount(liveContext?.usedTokens)
+      && liveContext.usedTokens > 0 && ui.contextLabel?.includes(`${metricK(liveContext.usedTokens)} / ${metricK(liveContext.windowTokens)}`)
+      && (!previousContext || (liveContext.windowTokens === previousContext.windowTokens
+        && liveContext.modelKey === previousContext.modelKey && liveContext.sessionGeneration === previousContext.sessionGeneration))
+      && (liveContextMode !== 'used-only' || round > 1 || (liveContext.windowTokens == null
+        && liveContext.nativeRatio == null && ui.contextLabel.includes('比例未知')))) {
+      await evaluate(app.cdp, `document.querySelector('.execution-context-popover') || ${drawerExpression}?.querySelector('.execution-context-trigger').click()`)
+      await waitForExpression(app.cdp, `Boolean(document.querySelector('.execution-context-popover'))`)
+      const rows = await evaluate(app.cdp,
+        `[...document.querySelectorAll('.execution-context-popover > span')].map(node => node.textContent)`)
+      const stillRunning = (await request('threads.snapshot', { threadId: liveCampId }))
+        .agentRuns.find(candidate => candidate.id === runId)?.status === 'running'
+      if (stillRunning && rows[0] === `${metricK(liveContext.usedTokens)} / ${metricK(liveContext.windowTokens)}`
+        && (liveContextMode !== 'used-only' || round > 1 || rows[1] === '—')) {
+        liveContextWitness = { ...sample, rows }
+        await capture(app.cdp, join(capturesRoot, `native-live-context-${captureKey}.png`))
+        console.log(JSON.stringify({ stage: 'native-live-context-verified', runtimeKind, ...liveContextWitness }))
+      }
+      await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+      if (liveContextWitness && process.env.ROVAI_METRICS_VERIFY_VISIBILITY === '1') {
+        await evaluate(app.cdp, `document.querySelector('.camp-detail-entry[data-detail="execution"]')?.click()`)
+        await waitForExpression(app.cdp, `![...document.querySelectorAll('.execution-context-trigger')].some(node => node.getClientRects().length)`)
+        const hiddenAt = new Date().toISOString()
+        // No harness reads during this interval either; Core can keep collecting.
+        await wait(5000)
+        await evaluate(app.cdp, `document.querySelector('.camp-detail-entry[data-detail="execution"]')?.click()`)
+        await waitForExpression(app.cdp, `[...document.querySelectorAll('.execution-context-trigger')].some(node => node.getClientRects().length)`)
+        const latest = await request('monitoring.execution', { threadId: liveCampId, agentRunIds: [runId] })
+        const expected = latest.sessions.find(session => session.agentId === agentId)
+        await waitForExpression(app.cdp, `${drawerExpression}?.querySelector('.execution-context-trigger')?.getAttribute('aria-label')?.includes(${JSON.stringify(`${metricK(expected.usedTokens)} / ${metricK(expected.windowTokens)}`)})`)
+        visibilityCheck = { hiddenAt, reopenedAt: new Date().toISOString(), context: expected }
+      }
+    }
     if (['succeeded', 'failed', 'cancelled'].includes(status)) break
     if (Date.now() >= nextProgress) {
       console.log(JSON.stringify({ stage: 'native-metrics-live', runtimeKind, status }))
@@ -1506,16 +1585,15 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
     }
     await wait(1000)
   }
-  const projection = await request('monitoring.execution', { campId: liveCampId, agentRunIds: [runId] })
+  const projection = await request('monitoring.execution', { threadId: liveCampId, agentRunIds: [runId] })
   const usage = projection.runs.find(run => run.agentRunId === runId)
   const context = projection.sessions[0]
-  const isCount = value => Number.isSafeInteger(value) && value >= 0
   // Matching a null projection proves honest display, not field availability.
   // Keep these facts separate even when optional verification gates are off.
   const availability = {
     usageFields: Object.fromEntries(['promptInputTotalTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens']
       .map(field => [field, isCount(usage?.[field])])),
-    runTotal: status === 'succeeded' && Boolean(usage?.finalizedAt)
+    runTotal: status === 'succeeded' && Boolean(usage?.finalizedAt) && usage?.inputOutputComplete === true
       && isCount(usage?.promptInputTotalTokens) && isCount(usage?.outputTokens),
     contextRatio: Boolean(context && (
       (isCount(context.usedTokens) && isCount(context.windowTokens) && context.windowTokens > 0
@@ -1523,10 +1601,12 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
       || (typeof context.nativeRatio === 'number' && Number.isFinite(context.nativeRatio)
         && context.nativeRatio >= 0 && context.nativeRatio <= 1)))
   }
-  await writeFile(join(capturesRoot, `native-metrics-diagnostic-${runtimeKind}.json`),
-    JSON.stringify({ runtimeKind, status, samples, projection, availability }, null, 2))
+  await writeFile(join(capturesRoot, `native-metrics-diagnostic-${captureKey}.json`),
+    JSON.stringify({ runtimeKind, status, samples, liveContextWitness, projection, availability }, null, 2))
   assert(['succeeded', 'failed', 'cancelled'].includes(status),
     `Real Runtime did not reach a terminal within the 480s acceptance window; partial observations are retained`)
+  assert(!liveContextMode || liveContextWitness,
+    'No matching persisted and rendered Context was observed while this fresh Run was still running')
   if (process.env.ROVAI_METRICS_VERIFY_USAGE === '1') {
     assert(availability.runTotal, 'Real Runtime did not persist a usable native Run total')
     await evaluate(app.cdp, `(() => {
@@ -1547,13 +1627,12 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
   }
   const usageRows = await evaluate(app.cdp, `[...document.querySelectorAll('.execution-metric-popover dl > div')]
     .map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])`)
-  const metricK = value => value == null ? '—' : `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k`
   if (process.env.ROVAI_METRICS_VERIFY_USAGE === '1') {
     assert(JSON.stringify(usageRows.slice(0, 4)) === JSON.stringify([
       ['Input Token', metricK(usage.promptInputTotalTokens)], ['Output Token', metricK(usage.outputTokens)],
       ['Cache Read', metricK(usage.cacheReadTokens)], ['Cache Write', metricK(usage.cacheWriteTokens)]
     ]), 'Renderer Usage differs from native projection')
-    await capture(app.cdp, join(capturesRoot, `native-usage-${runtimeKind}.png`))
+    await capture(app.cdp, join(capturesRoot, `native-usage-${captureKey}.png`))
     await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
   }
   const contextLabel = await evaluate(app.cdp,
@@ -1574,24 +1653,54 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
     assert(JSON.stringify(contextRows) === JSON.stringify([
       `${metricK(context.usedTokens)} / ${metricK(context.windowTokens)}`, percent == null ? '—' : `${percent.toFixed(1)}%`
     ]), 'Native ratio must not infer missing token quantities in the popover')
-    await capture(app.cdp, join(capturesRoot, `native-context-${runtimeKind}.png`))
+    await capture(app.cdp, join(capturesRoot, `native-context-${captureKey}.png`))
+    await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
   }
-  const report = { runtimeKind, version: installation.snapshot?.reportedVersion, campId: liveCampId,
-    runId, status, projection, availability, usageRows, contextLabel, samples }
-  const reportPath = join(capturesRoot, `native-metrics-${runtimeKind}.json`)
+  const liveUpdates = samples.filter(sample => sample.status === 'running' && sample.delivery?.contextSourceRun === runId
+    && sample.context?.usedTokens != null && sample.ui.contextLabel?.includes(`${metricK(sample.context.usedTokens)} / ${metricK(sample.context.windowTokens)}`))
+  const distinctLiveValues = [...new Set(liveUpdates.map(sample => sample.context.usedTokens))]
+  if (process.env.ROVAI_METRICS_MIN_LIVE_UPDATES) assert(distinctLiveValues.length >= Number(process.env.ROVAI_METRICS_MIN_LIVE_UPDATES),
+    `Expected multiple distinct persisted + rendered Context values before terminal; got ${distinctLiveValues.length}`)
+  if (process.env.ROVAI_METRICS_HELD_FINAL === '1') {
+    assert(liveUpdates.some(sample => sample.delivery.status === 'prepared'), 'Context did not render before input acceptance')
+    assert(liveUpdates.some(sample => sample.context.usedTokens === 15000 && sample.context.windowTokens === 200000), 'ACP used-only lost its confirmed window')
+    assert(liveUpdates.some(sample => sample.context.usedTokens === 8000), 'Compaction decrease was not rendered')
+  }
+  const commitNotifications = await evaluate(app.cdp, 'window.__contextAcceptanceCommits')
+  let historicalCardCheck = null
+  if (round > 1) {
+    await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+    const priorRun = reports.at(-1).runId
+    const opened = await evaluate(app.cdp, `(() => {
+      const button = document.querySelector(${JSON.stringify(`.execution-process-stage[data-agent-run-id="${priorRun}"] .execution-run-toggle`)})
+      button?.click()
+      return Boolean(button)
+    })()`)
+    assert(opened, 'Historical Run card was not available for the Session ownership check')
+    const label = await evaluate(app.cdp, `${drawerExpression}?.querySelector('.execution-context-trigger')?.getAttribute('aria-label')`)
+    assert(label === contextLabel, 'Opening a historical Run changed current Session Context')
+    historicalCardCheck = { openedRunId: priorRun, currentSessionLabel: label }
+  }
+  const report = { runtimeKind, sampleSource: process.env.ROVAI_METRICS_HELD_FINAL === '1' ? 'controlled-acp' : 'installed-runtime',
+    round, distinctLiveValues, commitNotifications, scalarTrace: app.contextTrace, visibilityCheck, historicalCardCheck,
+    version: installation.snapshot?.reportedVersion, campId: liveCampId,
+    runId, status, projection, availability, usageRows, contextLabel, liveContextWitness, samples }
+  const reportPath = join(capturesRoot, `native-metrics-${captureKey}.json`)
   await writeFile(reportPath, JSON.stringify(report, null, 2))
   assert(status === 'succeeded'
     && samples.filter(sample => sample.status === 'running').every(sample =>
       sample.ui.overview === false && sample.ui.duration),
   `Real Runtime native metrics acceptance failed; evidence is in ${reportPath}`)
-  return { verified: { status, version: report.version, projection, availability, usageRows, contextLabel },
-    captures: { report: reportPath } }
+  reports.push(report)
+  }
+  await evaluate(app.cdp, 'window.__contextAcceptanceOff?.()')
+  return { verified: { rounds: reports }, captures: { directory: capturesRoot } }
 }
 
 async function waitForControlledMessageRun(request, campId, messageId) {
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
-    const snapshot = await request('camps.snapshot', { campId })
+    const snapshot = await request('threads.snapshot', { threadId: campId })
     const run = snapshot.agentRuns.find((candidate) =>
       candidate.inputMessageIds?.includes(messageId) || candidate.anchorMessageId === messageId)
     if (run) return run.id
@@ -1603,7 +1712,7 @@ async function waitForControlledMessageRun(request, campId, messageId) {
 async function waitForControlledRunStatus(request, campId, runId, status) {
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
-    const snapshot = await request('camps.snapshot', { campId })
+    const snapshot = await request('threads.snapshot', { threadId: campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === runId)
     if (run?.status === status) return
     if (run?.status === 'failed' || run?.status === 'cancelled') {
@@ -1642,7 +1751,7 @@ async function seedFixture() {
   const publishedAttachmentRoot = join(runtimeRoot, attachmentRootRelativePath)
   const fixtureRunFacts = {
     attachmentOutputRoot: publishedAttachmentRoot,
-    historyHint: 'No public-message boundary from a previous run is recorded for you in this Camp.'
+    historyHint: 'No public-message boundary from a previous run is recorded for you in this Thread.'
   }
   const fixtureRunFactRefs = [{ fact: 'attachment_output_root' }, { fact: 'history_hint' }]
   const campAttachmentViewReceipt = {
@@ -2010,7 +2119,7 @@ async function seedFixture() {
       '[]', '[]', '[]', 'fixture-shared-message-evidence', ${sqlLiteral(JSON.stringify(fixtureRunFacts))},
       'agent_v1', '{"schemaVersion":1,"included":false}',
       '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92',
-      ${fixtureContextManifestVersion}, 8, 2,
+      ${fixtureContextManifestVersion}, 9, 2,
       ${sqlLiteral(JSON.stringify(campAttachmentViewReceipt))},
       ${sqlLiteral(campAttachmentViewReceiptDigest)}
     );
@@ -4422,12 +4531,12 @@ function assertRuntimeRows(observed) {
 
 async function openCamp(cdp, id) {
   await waitForExpression(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${id}`)}
+    const target = ${JSON.stringify(`thread:${id}`)}
     return [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === target)
   })()`, 30_000)
   const opened = await evaluate(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${id}`)}
+    const target = ${JSON.stringify(`thread:${id}`)}
     const menu = [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .find((element) => element.dataset.sidebarMenuTarget === target)
     const button = menu?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')
@@ -5427,6 +5536,8 @@ async function verifyExecutionPlacementWriteFailure(cdp) {
 async function launchApp(port, width, height) {
   const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
+  const contextTrace = []
+  let traceLine = ''
   const child = spawn(executable, [
     ...(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DISABLE_SANDBOX === '1'
       ? ['--no-sandbox']
@@ -5438,7 +5549,19 @@ async function launchApp(port, width, height) {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1', TMPDIR: runtimeTempDir }
   })
-  child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+  child.stderr.on('data', (chunk) => {
+    stderr.push(String(chunk))
+    traceLine += String(chunk)
+    const lines = traceLine.split('\n')
+    traceLine = lines.pop().slice(-65536)
+    for (const line of lines) {
+      const marker = 'ROVAI_CONTEXT_ACCEPTANCE '
+      const offset = line.indexOf(marker)
+      if (offset < 0) continue
+      try { contextTrace.push(JSON.parse(line.slice(offset + marker.length))) } catch { /* partial diagnostic */ }
+      if (contextTrace.length > 1000) contextTrace.shift()
+    }
+  })
   let cdp = null
   try {
     const target = await waitForTarget(port, stderr)
@@ -5460,7 +5583,7 @@ async function launchApp(port, width, height) {
     const health = await evaluate(cdp, `window.rovai.request('health.check', {})`, true)
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
-    return { cdp, port, child }
+    return { cdp, port, child, contextTrace }
   } catch (error) {
     let supervisor = null
     if (cdp) {

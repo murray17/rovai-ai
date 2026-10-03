@@ -48,6 +48,21 @@ for await (const line of createInterface({ input: process.stdin })) {
       busy = false
       continue
     }
+    if (process.env.ROVAI_METRICS_HELD_FINAL === '1') {
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Context acceptance running' } })
+      await pause(4_000)
+      update({ sessionUpdate: 'usage_update', used: 12_800, size: 200_000 })
+      await pause(9_000)
+      update({ sessionUpdate: 'usage_update', used: 15_000 })
+      await pause(9_000)
+      update({ sessionUpdate: 'usage_update', used: 8_000 })
+      await pause(9_000)
+      update({ sessionUpdate: 'usage_update', used: 12_800 })
+      await pause(9_000)
+      send({ id: message.id, result: { stopReason: 'end_turn' } })
+      busy = false
+      continue
+    }
     let thoughtOffset = 0
     for (let index = 0; index < 14; index++) {
       update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })

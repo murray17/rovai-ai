@@ -19,9 +19,9 @@ export function executionUsageTotal(run: ExecutionMetricRun, usage: Snapshot['ru
   return usage.promptInputTotalTokens + usage.outputTokens
 }
 
-function sameFields<T extends object>(left: T, right: T): boolean {
+function sameFields<T extends object>(left: T, right: T, ignored?: keyof T): boolean {
   const keys = Object.keys(left) as Array<keyof T>
-  return keys.length === Object.keys(right).length && keys.every(key => Object.is(left[key], right[key]))
+  return keys.length === Object.keys(right).length && keys.every(key => key === ignored || Object.is(left[key], right[key]))
 }
 
 /** Only requested Run rows are replaced/removed. Session rows are an authoritative current view. */
@@ -51,7 +51,8 @@ export function mergeExecutionMetrics(
   const priorSessions = new Map(previous?.sessions.map(session => [session.conversationId, session]) ?? [])
   const sessions = incoming.sessions.map(next => {
     const old = priorSessions.get(next.conversationId)
-    return old && sameFields(old, next) ? old : next
+    // Freshness stays current in Core; it is not rendered by this reader.
+    return old && sameFields(old, next, 'observedAt') ? old : next
   }).sort((a, b) => a.conversationId.localeCompare(b.conversationId))
   const sameRuns = previous && mergedRuns.length === previous.runs.length
     && mergedRuns.every((run, index) => run === previous.runs[index])

@@ -169,6 +169,9 @@ pub struct ParsedRuntimeUsage {
     pub native_turn_id: Option<String>,
     pub fields: RuntimeUsageFields,
     pub cost: Option<RuntimeUsageCost>,
+    /// Actual native model identity, never the configured routing alias.
+    #[serde(default)]
+    pub context_model_id: Option<String>,
     pub occurred_at: Option<String>,
 }
 
@@ -305,6 +308,10 @@ pub struct RuntimeUsageBuffer {
     pending: BTreeMap<BufferedUsageKey, Vec<BufferedUsageRecord>>,
     pending_since: BTreeMap<UsageRunKey, Instant>,
     seen_source_identities: BTreeSet<(BufferedUsageKey, String)>,
+    latest_context_sources: BTreeMap<
+        (UsageRunKey, String, Option<String>),
+        (String, RuntimeUsageFields, Option<String>),
+    >,
 }
 
 impl RuntimeUsageBuffer {
@@ -346,7 +353,32 @@ impl RuntimeUsageBuffer {
             }
             let normalized = normalize_usage(&usage)?;
             let key = BufferedUsageKey::new(&run.key, &usage);
-            if !self
+            if usage.scope == "session" && usage.counter_mode == RuntimeUsageCounterMode::Gauge {
+                let context_key = (
+                    run.key.clone(),
+                    usage.dialect_id.clone(),
+                    usage.native_session_id.clone(),
+                );
+                if self
+                    .latest_context_sources
+                    .get(&context_key)
+                    .is_some_and(|last| {
+                        last.0 == source_identity
+                            && last.1 == usage.fields
+                            && last.2 == usage.context_model_id
+                    })
+                {
+                    continue;
+                }
+                self.latest_context_sources.insert(
+                    context_key,
+                    (
+                        source_identity.to_string(),
+                        usage.fields.clone(),
+                        usage.context_model_id.clone(),
+                    ),
+                );
+            } else if !self
                 .seen_source_identities
                 .insert((key.clone(), source_identity.to_string()))
             {
@@ -392,7 +424,14 @@ impl RuntimeUsageBuffer {
         }
         records
             .into_iter()
-            .filter_map(|(key, records)| {
+            .filter_map(|(key, mut records)| {
+                records.sort_by_key(|record| {
+                    record
+                        .usage
+                        .occurred_at
+                        .as_deref()
+                        .and_then(|at| parse_time(at).ok())
+                });
                 Some(RuntimeUsageFlushBatch {
                     run: self.runs.get(&key)?.clone(),
                     records,
@@ -441,6 +480,8 @@ impl RuntimeUsageBuffer {
         self.runs.retain(|run, _| !idle.contains(run));
         self.seen_source_identities
             .retain(|(key, _)| !idle.contains(&key.run));
+        self.latest_context_sources
+            .retain(|(run, _, _), _| !idle.contains(run));
     }
 }
 
@@ -550,31 +591,27 @@ fn execution_run_usage_rows(
     Ok(rows)
 }
 
-fn execution_usage_has_terminal_rows(
-    connection: &rusqlite::Connection,
-    agent_run_ids: &[&str],
-) -> Result<bool> {
-    Ok(connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM json_each(?1) requested JOIN agent_run ar ON ar.id=requested.value WHERE ar.status NOT IN ('queued','running','waiting'))",
-        [serde_json::to_string(agent_run_ids)?],
-        |row| row.get(0),
-    )?)
-}
-
 pub struct MonitoringService;
 
-impl MonitoringService {
-    pub fn has_terminal_usage_batches(
-        database: &Database,
-        batches: &[RuntimeUsageFlushBatch],
-    ) -> Result<bool> {
-        let ids = batches
-            .iter()
-            .map(|batch| batch.run.key.agent_run_id.as_str())
-            .collect::<Vec<_>>();
-        execution_usage_has_terminal_rows(database.connection(), &ids)
+// Opt-in scalar evidence for isolated App acceptance. Never log native payloads.
+pub(crate) fn context_acceptance_trace(value: impl FnOnce() -> Value) {
+    if context_acceptance_trace_enabled() {
+        // Serialize before writing: Electron prefixes stderr chunks, so a
+        // streaming JSON formatter could fragment one scalar record.
+        let line = format!("ROVAI_CONTEXT_ACCEPTANCE {}", value());
+        eprintln!("{line}");
     }
+}
 
+fn context_acceptance_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("ROVAI_ALLOW_ISOLATED_INSTANCE").as_deref() == Ok("1")
+            && std::env::var("ROVAI_INTERNAL_CONTEXT_ACCEPTANCE_TRACE").as_deref() == Ok("1")
+    })
+}
+
+impl MonitoringService {
     pub fn execution_snapshot(
         database: &Database,
         params: &MonitoringExecutionParams,
@@ -614,10 +651,10 @@ impl MonitoringService {
                   WHERE newer.conversation_id = c.id
                     AND nd.native_binding_id = c.native_binding_id
                     AND nd.native_binding_generation = c.native_binding_generation
-                    AND nd.status = 'accepted'
                     AND (newer.started_at > source_run.started_at
                         OR (newer.started_at = source_run.started_at AND newer.id > source_run.id))
                     AND (newer.runtime_host_config_digest IS NOT x.effective_config_digest
+                        OR newer.runtime_model_selection_json IS NOT source_run.runtime_model_selection_json
                         OR (newer.runtime_observed_model_id IS NOT NULL
                             AND x.model_key IS NOT NULL
                             AND newer.runtime_observed_model_id <> x.model_key))
@@ -830,42 +867,42 @@ impl MonitoringService {
         database: &mut Database,
         batches: &[RuntimeUsageFlushBatch],
     ) -> Result<usize> {
-        Ok(Self::record_usage_batches_with_deferred_context(database, batches)?.0)
-    }
-
-    pub fn record_usage_batches_with_deferred_context(
-        database: &mut Database,
-        batches: &[RuntimeUsageFlushBatch],
-    ) -> Result<(usize, Vec<RuntimeUsageFlushBatch>)> {
         if batches.is_empty() {
-            return Ok((0, Vec::new()));
+            return Ok(0);
         }
         let (collection_epoch, _) = collection_identity(database)?;
         let transaction = database.connection_mut().transaction()?;
         let mut changed = 0;
-        let mut deferred = Vec::new();
+        let mut context_evidence = Vec::new();
+        let trace_enabled = context_acceptance_trace_enabled();
         for batch in batches {
-            let mut latest_context = None;
+            // Context follows the current Session binding, independently of
+            // input acknowledgement and native consumption settlement.
             for record in &batch.records {
-                if context_waits_for_input(&transaction, &batch.run, &record.usage)? {
-                    retain_latest_context(&mut latest_context, record)?;
-                    continue;
-                }
                 if persist_usage_record(&transaction, &collection_epoch, &batch.run, record)? {
                     changed += 1;
+                    if trace_enabled && record.usage.counter_mode == RuntimeUsageCounterMode::Gauge
+                    {
+                        // Borrow only until commit; no second state or history.
+                        context_evidence.push((&batch.run, &record.usage));
+                    }
                 }
-            }
-            if let Some(record) = latest_context {
-                deferred.push(RuntimeUsageFlushBatch {
-                    run: batch.run.clone(),
-                    records: vec![record],
-                    pending_since: batch.pending_since,
-                });
             }
             project_codex_run_cost(&transaction, &collection_epoch, &batch.run)?;
         }
         transaction.commit()?;
-        Ok((changed, deferred))
+        context_acceptance_trace(|| {
+            json!({
+                "kind": "context_commit", "committedAt": Utc::now().to_rfc3339(),
+                "observations": context_evidence.iter().map(|(run, usage)| json!({
+                    "runId": run.key.agent_run_id, "sessionId": usage.native_session_id,
+                    "observedAt": usage.occurred_at, "modelId": usage.context_model_id,
+                    "used": usage.fields.context_used_tokens, "window": usage.fields.context_size_tokens,
+                    "ratio": usage.fields.native_context_ratio
+                })).collect::<Vec<_>>()
+            })
+        });
+        Ok(changed)
     }
 
     pub fn finalize_usage_run(database: &mut Database, agent_run_id: &str) -> Result<bool> {
@@ -1016,6 +1053,14 @@ fn persist_usage_record(
     if !enrolled {
         return Ok(false);
     }
+    if record.usage.scope == "session"
+        && record.usage.counter_mode == RuntimeUsageCounterMode::Gauge
+        && !normalized.any_observed()
+        && record.usage.cost.is_none()
+    {
+        // Context has one latest row, no cumulative baseline or value history.
+        return persist_session_context(transaction, run, &record.usage);
+    }
     let source_key = checkpoint_key(run, &record.usage)?;
     let checkpoint_key = if record.usage.counter_mode == RuntimeUsageCounterMode::Delta {
         // A checkpoint belongs to a native call, not to whichever calls happened
@@ -1133,177 +1178,159 @@ fn persist_usage_record(
     Ok(true)
 }
 
-fn retain_latest_context(
-    latest: &mut Option<BufferedUsageRecord>,
-    incoming: &BufferedUsageRecord,
-) -> Result<()> {
-    let time = parse_time(
-        incoming
-            .usage
-            .occurred_at
-            .as_deref()
-            .context("Context observation has no time")?,
-    )?;
-    if latest.as_ref().is_none_or(|previous| {
-        previous
-            .usage
-            .occurred_at
-            .as_deref()
-            .and_then(|s| parse_time(s).ok())
-            .is_none_or(|old| time >= old)
-    }) {
-        *latest = Some(incoming.clone());
-    }
-    Ok(())
-}
-
-fn context_waits_for_input(
-    transaction: &rusqlite::Transaction<'_>,
-    run: &RuntimeUsageRun,
-    usage: &ParsedRuntimeUsage,
-) -> Result<bool> {
-    let mut other = usage.fields.clone();
-    other.context_used_tokens = None;
-    other.context_size_tokens = None;
-    other.native_context_ratio = None;
-    if usage.scope != "session"
-        || usage.counter_mode != RuntimeUsageCounterMode::Gauge
-        || usage.cost.is_some()
-        || !other.is_empty()
-    {
-        return Ok(false);
-    }
-    let used = usage.fields.context_used_tokens;
-    let window = usage.fields.context_size_tokens.filter(|n| *n > 0);
-    let ratio = usage
-        .fields
-        .native_context_ratio
-        .filter(|n| n.is_finite() && (0.0..=1.0).contains(n));
-    if (used.is_none() && window.is_none() && ratio.is_none())
-        || used.zip(window).is_some_and(|(used, window)| used > window)
-    {
-        return Ok(false);
-    }
-    // Defer only a still-current binding whose input acknowledgement is pending.
-    // Rejected inputs, stale Sessions/epochs and a newer accepted owner cannot
-    // keep an observation alive. The buffer retains one latest numeric record.
-    Ok(transaction.query_row(r#"
-        SELECT EXISTS(
-            SELECT 1 FROM agent_run ar
-            JOIN runtime_input_delivery d ON d.agent_run_id=ar.id AND d.execution_epoch=ar.execution_epoch
-            JOIN conversation c ON c.id=ar.conversation_id
-            WHERE ar.id=?1 AND ar.execution_epoch=?2 AND c.native_session_id=?3
-              AND c.native_binding_id=d.native_binding_id
-              AND c.native_binding_generation=d.native_binding_generation
-              AND d.status IN ('prepared','delivery_unknown')
-              AND NOT EXISTS (
-                  SELECT 1 FROM agent_run newer
-                  JOIN runtime_input_delivery nd ON nd.agent_run_id=newer.id AND nd.execution_epoch=newer.execution_epoch
-                  WHERE newer.conversation_id=ar.conversation_id
-                    AND nd.native_binding_id=d.native_binding_id
-                    AND nd.native_binding_generation=d.native_binding_generation
-                    AND nd.status='accepted'
-                    AND (newer.started_at>ar.started_at OR (newer.started_at=ar.started_at AND newer.id>ar.id))
-              )
-        )"#, params![run.key.agent_run_id,run.key.execution_epoch,usage.native_session_id],|r|r.get(0))?)
-}
-
 fn persist_session_context(
     transaction: &rusqlite::Transaction<'_>,
     run: &RuntimeUsageRun,
     usage: &ParsedRuntimeUsage,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(native_session_id) = usage.native_session_id.as_deref() else {
-        return Ok(());
+        return Ok(false);
     };
     if usage.scope != "session" || usage.counter_mode != RuntimeUsageCounterMode::Gauge {
-        return Ok(());
+        return Ok(false);
     }
     let used = usage.fields.context_used_tokens;
-    let window = usage.fields.context_size_tokens.filter(|value| *value > 0);
-    let native_ratio = usage
+    let mut window = usage.fields.context_size_tokens.filter(|value| *value > 0);
+    let mut native_ratio = usage
         .fields
         .native_context_ratio
         .filter(|n| n.is_finite() && (0.0..=1.0).contains(n));
-    if used.is_none() && window.is_none() && native_ratio.is_none() {
-        return Ok(());
-    }
-    if used.zip(window).is_some_and(|(used, window)| used > window) {
-        return Ok(());
+    if used.is_none() && usage.fields.context_size_tokens.is_none() && native_ratio.is_none() {
+        return Ok(false);
     }
     let observed_at = usage
         .occurred_at
         .as_deref()
         .context("Context observation has no time")?;
-    parse_time(observed_at)?;
-    transaction.execute(
-        r#"
-        INSERT INTO runtime_session_context_latest (
-            conversation_id, native_binding_id, native_binding_generation,
-            native_session_id, runtime_kind, runtime_version, model_key,
-            effective_config_digest, context_used_tokens, context_window_tokens,
-            source, dialect_id, observed_at, source_agent_run_id, source_execution_epoch, native_context_ratio
-        )
+    let observed_time = parse_time(observed_at)?;
+    // The delivery row supplies the immutable dispatch binding, NOT acceptance.
+    // An active, failed or cancelled prompt can all observe its current Session.
+    let owner = transaction.query_row(r#"
         SELECT c.id, d.native_binding_id, d.native_binding_generation,
-               c.native_session_id, ?4, ?5,
-               COALESCE(NULLIF(ar.runtime_observed_model_id, ''), ?6),
-               ar.runtime_host_config_digest, ?7, ?8, ?9, ?10, ?11, ?1, ?2, ?12
+               NULLIF(ar.runtime_observed_model_id, ''), ar.runtime_host_config_digest, ar.runtime_model_selection_json
         FROM agent_run ar
-        JOIN runtime_input_delivery d ON d.agent_run_id = ar.id
-            AND d.execution_epoch = ar.execution_epoch
-        JOIN conversation c ON c.id = ar.conversation_id
-        WHERE ar.id = ?1 AND ar.execution_epoch = ?2
-          AND c.native_session_id = ?3
-          AND c.native_binding_id = d.native_binding_id
-          AND c.native_binding_generation = d.native_binding_generation
-          AND d.status = 'accepted'
+        JOIN runtime_input_delivery d ON d.agent_run_id=ar.id AND d.execution_epoch=ar.execution_epoch
+        JOIN conversation c ON c.id=ar.conversation_id
+        WHERE ar.id=?1 AND ar.execution_epoch=?2 AND c.native_session_id=?3
+          AND c.native_binding_id=d.native_binding_id
+          AND c.native_binding_generation=d.native_binding_generation
           AND NOT EXISTS (
               SELECT 1 FROM agent_run newer
-              JOIN runtime_input_delivery nd ON nd.agent_run_id = newer.id
-                  AND nd.execution_epoch = newer.execution_epoch
-              WHERE newer.conversation_id = ar.conversation_id
-                AND nd.native_binding_id = d.native_binding_id
-                AND nd.native_binding_generation = d.native_binding_generation
-                AND nd.status = 'accepted'
-                AND (newer.started_at > ar.started_at
-                    OR (newer.started_at = ar.started_at AND newer.id > ar.id))
+              JOIN runtime_input_delivery nd ON nd.agent_run_id=newer.id AND nd.execution_epoch=newer.execution_epoch
+              WHERE newer.conversation_id=ar.conversation_id
+                AND nd.native_binding_id=d.native_binding_id
+                AND nd.native_binding_generation=d.native_binding_generation
+                AND (newer.started_at>ar.started_at OR (newer.started_at=ar.started_at AND newer.id>ar.id))
           )
+    "#, params![run.key.agent_run_id, run.key.execution_epoch, native_session_id], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?,
+            r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?))
+    }).optional()?;
+    let Some((conversation, binding, generation, observed_model, config, model_config)) = owner
+    else {
+        return Ok(false);
+    };
+    let previous = transaction
+        .query_row(
+            r#"
+        SELECT x.model_key, x.effective_config_digest, x.context_window_tokens, x.observed_at, previous.runtime_model_selection_json
+        FROM runtime_session_context_latest x JOIN agent_run previous ON previous.id=x.source_agent_run_id
+        WHERE x.conversation_id=?1 AND x.native_binding_id=?2 AND x.native_binding_generation=?3
+          AND x.native_session_id=?4 AND x.runtime_kind=?5
+    "#,
+            params![
+                conversation,
+                binding,
+                generation,
+                native_session_id,
+                run.runtime_kind.as_str()
+            ],
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let mut model = usage
+        .context_model_id
+        .clone()
+        .and_then(non_empty)
+        .or(observed_model);
+    if let Some((old_model, old_config, old_window, old_time, old_model_config)) = previous {
+        if observed_time < parse_time(&old_time)? {
+            return Ok(false);
+        }
+        // Host identity deliberately excludes turn-scoped model options. Check
+        // the frozen selection too (provider/options, including window overrides).
+        // A configured routing alias alone never establishes actual model identity.
+        let same_config =
+            config.is_some() && config == old_config && model_config == old_model_config;
+        if same_config && model.is_none() {
+            model = old_model.clone();
+        }
+        if usage.fields.context_size_tokens.is_none()
+            && same_config
+            && model.is_some()
+            && model == old_model
+        {
+            window = old_window;
+        }
+    }
+    if used.zip(window).is_some_and(|(used, window)| used > window) {
+        // Preserve the measured occupancy; this denominator is no longer valid.
+        window = None;
+        native_ratio = None;
+    }
+    // Occupancy and a native ratio are observations, not reusable capacity.
+    // Neither is inherited from an earlier call when a new observation arrives.
+    let changed = transaction.execute(
+        r#"
+        INSERT INTO runtime_session_context_latest (
+            conversation_id,native_binding_id,native_binding_generation,native_session_id,
+            runtime_kind,runtime_version,model_key,effective_config_digest,
+            context_used_tokens,context_window_tokens,source,dialect_id,observed_at,
+            source_agent_run_id,source_execution_epoch,native_context_ratio
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
         ON CONFLICT(conversation_id) DO UPDATE SET
-            native_binding_id = excluded.native_binding_id,
-            native_binding_generation = excluded.native_binding_generation,
-            native_session_id = excluded.native_session_id,
-            runtime_kind = excluded.runtime_kind,
-            runtime_version = excluded.runtime_version,
-            model_key = excluded.model_key,
-            effective_config_digest = excluded.effective_config_digest,
-            context_used_tokens = excluded.context_used_tokens,
-            context_window_tokens = excluded.context_window_tokens,
-            source = excluded.source,
-            dialect_id = excluded.dialect_id,
-            observed_at = excluded.observed_at,
-            source_agent_run_id = excluded.source_agent_run_id,
-            source_execution_epoch = excluded.source_execution_epoch,
-            native_context_ratio = excluded.native_context_ratio
-        WHERE excluded.native_binding_id <> runtime_session_context_latest.native_binding_id
-           OR excluded.native_binding_generation <> runtime_session_context_latest.native_binding_generation
-           OR excluded.observed_at >= runtime_session_context_latest.observed_at
-        "#,
+            native_binding_id=excluded.native_binding_id,
+            native_binding_generation=excluded.native_binding_generation,
+            native_session_id=excluded.native_session_id,
+            runtime_kind=excluded.runtime_kind,
+            runtime_version=excluded.runtime_version,
+            model_key=excluded.model_key,
+            effective_config_digest=excluded.effective_config_digest,
+            context_used_tokens=excluded.context_used_tokens,
+            context_window_tokens=excluded.context_window_tokens,
+            source=excluded.source, dialect_id=excluded.dialect_id,
+            observed_at=excluded.observed_at, source_agent_run_id=excluded.source_agent_run_id,
+            source_execution_epoch=excluded.source_execution_epoch,
+            native_context_ratio=excluded.native_context_ratio
+    "#,
         params![
-            run.key.agent_run_id,
-            run.key.execution_epoch,
+            conversation,
+            binding,
+            generation,
             native_session_id,
             run.runtime_kind.as_str(),
             run.runtime_version,
-            run.model_key,
+            model,
+            config,
             used,
             window,
             usage.source,
             usage.dialect_id,
             observed_at,
-            native_ratio,
+            run.key.agent_run_id,
+            run.key.execution_epoch,
+            native_ratio
         ],
     )?;
-    Ok(())
+    Ok(changed > 0)
 }
 
 #[derive(Debug, Default)]
@@ -2953,6 +2980,7 @@ pub fn parse_codex_usage_message(method: &str, params: &Value) -> Vec<ParsedRunt
             native_turn_id: string_at_any(params, &["/turnId"]),
             fields,
             cost: None,
+            context_model_id: None,
             occurred_at: None,
         });
     }
@@ -2974,6 +3002,7 @@ pub fn parse_codex_usage_message(method: &str, params: &Value) -> Vec<ParsedRunt
                 ..Default::default()
             },
             cost: None,
+            context_model_id: None,
             occurred_at: None,
         });
     }
@@ -3054,6 +3083,7 @@ pub fn parse_antigravity_step_usage(step: &Value) -> Option<ParsedRuntimeUsage> 
             ..Default::default()
         },
         cost: None,
+        context_model_id: None,
         occurred_at: None,
     })
 }
@@ -3105,6 +3135,7 @@ pub fn parse_acp_usage_message(
                 ..Default::default()
             },
             cost: None,
+            context_model_id: None,
             occurred_at: None,
         }];
     }
@@ -3150,6 +3181,7 @@ pub fn parse_acp_usage_message(
                 native_turn_id: None,
                 fields,
                 cost: None,
+                context_model_id: None,
                 occurred_at: Some(time.into()),
             }];
         }
@@ -3186,6 +3218,7 @@ pub fn parse_acp_usage_message(
             native_turn_id,
             fields,
             cost: None,
+            context_model_id: None,
             occurred_at: None,
         }];
     }
@@ -3252,6 +3285,7 @@ pub fn parse_acp_usage_message(
                     native_turn_id: Some(turn.to_string()),
                     fields,
                     cost: None,
+                    context_model_id: None,
                     occurred_at: None,
                 });
             }
@@ -3274,6 +3308,7 @@ pub fn parse_acp_usage_message(
                     ..Default::default()
                 },
                 cost: None,
+                context_model_id: None,
                 occurred_at: None,
             });
         }
@@ -3282,15 +3317,13 @@ pub fn parse_acp_usage_message(
     if adapter_kind == AdapterKind::ZcodeApp && method == "session/update" {
         let update = &params["update"];
         if update["sessionUpdate"] == "usage_update"
-            && let (Some(seq), Some(revision), Some(used), Some(size)) = (
+            && let (Some(seq), Some(revision)) = (
                 update
                     .pointer("/_meta/zcodeContext/eventSeq")
                     .and_then(Value::as_u64),
                 update
                     .pointer("/_meta/zcodeContext/stateRevision")
                     .and_then(Value::as_u64),
-                integer_at_any(update, &["/used"]),
-                integer_at_any(update, &["/size"]).filter(|n| *n > 0),
             )
         {
             return vec![ParsedRuntimeUsage {
@@ -3303,11 +3336,12 @@ pub fn parse_acp_usage_message(
                 native_session_id: string_at_any(params, &["/sessionId"]),
                 native_turn_id: None,
                 fields: RuntimeUsageFields {
-                    context_used_tokens: Some(used),
-                    context_size_tokens: Some(size),
+                    context_used_tokens: integer_at_any(update, &["/used"]),
+                    context_size_tokens: integer_at_any(update, &["/size"]),
                     ..Default::default()
                 },
                 cost: None,
+                context_model_id: string_at_any(update, &["/_meta/zcodeContext/modelId"]),
                 occurred_at: None,
             }];
         }
@@ -3349,6 +3383,7 @@ pub fn parse_acp_usage_message(
                     native_context_ratio: None,
                 },
                 cost: None,
+                context_model_id: None,
                 occurred_at: None,
             }];
         }
@@ -3380,6 +3415,7 @@ pub fn parse_acp_usage_message(
                     ..Default::default()
                 },
                 cost: None,
+                context_model_id: None,
                 occurred_at: None,
             });
         }
@@ -3418,6 +3454,7 @@ pub fn parse_acp_usage_message(
                     native_turn_id: string_at_any(update, &["/_meta/codebuddy.ai~1requestId"]),
                     fields,
                     cost: None,
+                    context_model_id: None,
                     occurred_at: None,
                 });
             }
@@ -3448,6 +3485,7 @@ pub fn parse_acp_usage_message(
                     native_turn_id: None,
                     fields,
                     cost: None,
+                    context_model_id: None,
                     occurred_at: None,
                 });
             }
@@ -3494,6 +3532,7 @@ pub fn parse_acp_usage_message(
                 native_turn_id: None,
                 fields: context,
                 cost: None,
+                context_model_id: None,
                 occurred_at: None,
             });
         }
@@ -3509,6 +3548,7 @@ pub fn parse_acp_usage_message(
                 native_turn_id: None,
                 fields: RuntimeUsageFields::default(),
                 cost: Some(cost),
+                context_model_id: None,
                 occurred_at: None,
             });
         }
@@ -3591,6 +3631,7 @@ pub fn parse_acp_usage_message(
         native_turn_id: string_at_any(params, &["/turnId", "/promptId"]),
         fields,
         cost,
+        context_model_id: None,
         occurred_at: None,
     }]
 }
@@ -3687,6 +3728,7 @@ pub fn parse_pi_usage_message(
                 ..Default::default()
             },
             cost: None,
+            context_model_id: string_at_any(event, &["/modelId"]),
             occurred_at: None,
         }];
     }
@@ -3727,6 +3769,7 @@ pub fn parse_pi_usage_message(
         // Pi's model catalog calculates monetary cost. It is not provider
         // billing evidence, so it deliberately remains unprojected.
         cost: None,
+        context_model_id: None,
         occurred_at: None,
     }]
 }
@@ -3808,6 +3851,7 @@ pub fn parse_claude_result_usage(result: &Value) -> Vec<ParsedRuntimeUsage> {
         native_turn_id: string_at_any(result, &["/turn_id"]),
         fields,
         cost,
+        context_model_id: None,
         occurred_at: None,
     }]
 }
@@ -3876,6 +3920,7 @@ pub fn parse_claude_observed_usage(event_type: &str, payload: &Value) -> Vec<Par
         native_turn_id: None,
         fields,
         cost: None,
+        context_model_id: string_at_any(payload, &["/modelId"]),
         occurred_at: None,
     }]
 }
@@ -3913,6 +3958,7 @@ mod tests {
                 native_context_ratio: None,
             },
             cost: None,
+            context_model_id: None,
             occurred_at: None,
         }
     }
@@ -4210,10 +4256,6 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(execution_usage_has_terminal_rows(&connection, &["run-a"]).unwrap());
-        assert!(execution_usage_has_terminal_rows(&connection, &["run-b", "foreign"]).unwrap());
-        assert!(!execution_usage_has_terminal_rows(&connection, &["run-b", "missing"]).unwrap());
-        assert!(!execution_usage_has_terminal_rows(&connection, &[]).unwrap());
     }
 
     #[test]
@@ -4245,6 +4287,7 @@ mod tests {
             INSERT INTO runtime_input_delivery VALUES ('run-a', 1, 'binding-a', 1, 'accepted');
             INSERT INTO agent_run VALUES ('run-b', 'conversation', 1, '2026-09-28T00:01:00Z', NULL, NULL);
             INSERT INTO runtime_input_delivery VALUES ('run-b', 1, 'binding-b', 2, 'accepted');
+            ALTER TABLE agent_run ADD COLUMN runtime_model_selection_json TEXT DEFAULT '{}';
         "#).unwrap();
         let run = |id: &str| RuntimeUsageRun {
             key: UsageRunKey {
@@ -4272,9 +4315,32 @@ mod tests {
                 ..Default::default()
             },
             cost: None,
+            context_model_id: None,
             occurred_at: Some(at.to_string()),
         };
         let tx = connection.transaction().unwrap();
+        let mut live = parse_claude_observed_usage(
+            "runtime.context.observed",
+            &json!({"sessionId":"session-a","messageId":"live-call","modelId":"native-model",
+                "usedTokens":115268,"windowTokens":null}),
+        )
+        .remove(0);
+        live.occurred_at = Some("2026-09-28T00:00:10Z".into());
+        assert!(!normalize_usage(&live).unwrap().any_observed());
+        let claude_run = RuntimeUsageRun {
+            runtime_kind: AdapterKind::ClaudeCodeCli,
+            runtime_version: Some("2.1.280".into()),
+            ..run("run-a")
+        };
+        persist_session_context(&tx, &claude_run, &live).unwrap();
+        let saved: (Option<i64>, Option<i64>, Option<f64>) = tx.query_row(
+            "SELECT context_used_tokens,context_window_tokens,native_context_ratio FROM runtime_session_context_latest",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(
+            saved,
+            (Some(115268), None, None),
+            "live used survives without a terminal/window"
+        );
         persist_session_context(
             &tx,
             &run("run-a"),
@@ -4299,59 +4365,42 @@ mod tests {
             "an older observation must not overwrite a newer one"
         );
 
-        // A native Gauge may arrive before the ACP prompt acknowledgement.
-        // Keep only its latest numeric observation, then reapply the same
-        // binding gate after acknowledgement without replaying consumption.
-        tx.execute(
-            "UPDATE runtime_input_delivery SET status='prepared' WHERE agent_run_id='run-a'",
-            [],
-        )
-        .unwrap();
-        let owner = run("run-a");
-        let mut buffer = RuntimeUsageBuffer::default();
-        for (index, used) in [(1, 330), (2, 260)] {
-            let mut gauge = observation("session-a", used, &format!("2026-09-28T00:00:3{index}Z"));
-            gauge.identity_suffix = format!("context:{used}");
-            assert!(context_waits_for_input(&tx, &owner, &gauge).unwrap());
-            buffer
-                .observe_run(
-                    &owner,
-                    &format!("pending-{index}"),
-                    &[gauge],
-                    Instant::now(),
-                )
-                .unwrap();
-        }
-        let mut batch = buffer.drain(RuntimeUsageFlushTarget::Periodic).remove(0);
-        let mut latest = None;
-        for record in &batch.records {
-            retain_latest_context(&mut latest, record).unwrap();
-        }
-        batch.records = vec![latest.unwrap()];
-        assert_eq!(batch.records[0].usage.fields.context_used_tokens, Some(260));
-        buffer.restore(vec![batch]).unwrap();
-        tx.execute(
-            "UPDATE runtime_input_delivery SET status='not_accepted' WHERE agent_run_id='run-a'",
-            [],
-        )
-        .unwrap();
-        let batch = buffer.drain(RuntimeUsageFlushTarget::Periodic).remove(0);
-        assert!(!context_waits_for_input(&tx, &owner, &batch.records[0].usage).unwrap());
-        tx.execute(
-            "UPDATE runtime_input_delivery SET status='accepted' WHERE agent_run_id='run-a'",
-            [],
-        )
-        .unwrap();
-        persist_session_context(&tx, &owner, &batch.records[0].usage).unwrap();
-        assert_eq!(
-            tx.query_row(
-                "SELECT context_used_tokens FROM runtime_session_context_latest",
-                [],
-                |r| r.get::<_, i64>(0)
+        // Pending and uncertain input acknowledgement do not gate Session Context.
+        // Metrics never change delivery/retry state, even when a Run later fails.
+        for (index, status) in ["prepared", "delivery_unknown", "not_accepted"]
+            .iter()
+            .enumerate()
+        {
+            tx.execute(
+                "UPDATE runtime_input_delivery SET status=?1 WHERE agent_run_id='run-a'",
+                [status],
             )
-            .unwrap(),
-            260
-        );
+            .unwrap();
+            let gauge = observation(
+                "session-a",
+                260,
+                &format!("2026-09-28T00:00:3{}Z", index + 1),
+            );
+            assert!(persist_session_context(&tx, &run("run-a"), &gauge).unwrap());
+            assert_eq!(
+                tx.query_row(
+                    "SELECT context_used_tokens FROM runtime_session_context_latest",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                260
+            );
+            assert_eq!(
+                tx.query_row(
+                    "SELECT status FROM runtime_input_delivery WHERE agent_run_id='run-a'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                *status
+            );
+        }
 
         let mut native_only = observation("session-a", 0, "2026-09-28T00:00:35Z");
         native_only.fields = RuntimeUsageFields {
@@ -4419,6 +4468,102 @@ mod tests {
             )
             .unwrap();
         assert_eq!(current, ("session-b".to_string(), 200));
+        // Reuse only confirmed actual model/configuration on the current binding.
+        tx.execute(
+            "UPDATE agent_run SET runtime_host_config_digest='provider-config-a' WHERE id='run-b'",
+            [],
+        )
+        .unwrap();
+        let mut actual = observation("session-b", 128, "2026-09-28T00:04:00Z");
+        actual.context_model_id = Some("actual-model-a".into());
+        persist_session_context(&tx, &run("run-b"), &actual).unwrap();
+        let read_context = || {
+            tx.query_row("SELECT context_used_tokens,context_window_tokens,model_key,native_context_ratio FROM runtime_session_context_latest", [], |r| Ok((r.get::<_,Option<i64>>(0)?,r.get::<_,Option<i64>>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<f64>>(3)?))).unwrap()
+        };
+        actual.fields.context_used_tokens = Some(150);
+        actual.fields.context_size_tokens = None;
+        actual.context_model_id = None; // Omitted model inherits the confirmed binding identity.
+        actual.occurred_at = Some("2026-09-28T00:04:01Z".into());
+        persist_session_context(&tx, &run("run-b"), &actual).unwrap();
+        assert_eq!(
+            read_context(),
+            (Some(150), Some(1000), Some("actual-model-a".into()), None)
+        );
+        actual.context_model_id = Some("actual-model-b".into());
+        actual.occurred_at = Some("2026-09-28T00:04:02Z".into());
+        persist_session_context(&tx, &run("run-b"), &actual).unwrap();
+        assert_eq!(
+            read_context(),
+            (Some(150), None, Some("actual-model-b".into()), None)
+        );
+        actual.fields.context_size_tokens = Some(2000);
+        actual.occurred_at = Some("2026-09-28T00:04:03Z".into());
+        persist_session_context(&tx, &run("run-b"), &actual).unwrap();
+        actual.fields.context_size_tokens = None;
+        tx.execute(
+            "UPDATE agent_run SET runtime_host_config_digest='provider-config-b' WHERE id='run-b'",
+            [],
+        )
+        .unwrap();
+        actual.occurred_at = Some("2026-09-28T00:04:04Z".into());
+        persist_session_context(&tx, &run("run-b"), &actual).unwrap();
+        assert_eq!(
+            read_context().1,
+            None,
+            "configuration change revokes capacity"
+        );
+        actual.fields.context_size_tokens = Some(100);
+        actual.fields.native_context_ratio = Some(0.4);
+        actual.occurred_at = Some("2026-09-28T00:04:05Z".into());
+        persist_session_context(&tx, &run("run-b"), &actual).unwrap();
+        assert_eq!(
+            read_context(),
+            (Some(150), None, Some("actual-model-b".into()), None),
+            "used is not clipped/discarded with a contradictory denominator"
+        );
+        // Same Session, next pending Run inherits actual identity despite an alias.
+        actual.fields.context_size_tokens = Some(2000);
+        actual.fields.native_context_ratio = None;
+        actual.occurred_at = Some("2026-09-28T00:04:06Z".into());
+        persist_session_context(&tx, &run("run-b"), &actual).unwrap();
+        tx.execute_batch("INSERT INTO agent_run VALUES ('run-c','conversation',1,'2026-09-28T00:05:00Z',NULL,'provider-config-b','{}'); INSERT INTO runtime_input_delivery VALUES ('run-c',1,'binding-b',2,'prepared');").unwrap();
+        actual.context_model_id = None;
+        actual.fields.context_used_tokens = Some(200);
+        actual.fields.context_size_tokens = None;
+        actual.occurred_at = Some("2026-09-28T00:05:01Z".into());
+        let mut alias_run = run("run-c");
+        alias_run.model_key = Some("auto".into());
+        persist_session_context(&tx, &alias_run, &actual).unwrap();
+        assert_eq!(
+            read_context(),
+            (Some(200), Some(2000), Some("actual-model-b".into()), None)
+        );
+        assert!(
+            !persist_session_context(&tx, &run("run-b"), &actual).unwrap(),
+            "old owner cannot overwrite a current unaccepted Run"
+        );
+        actual.occurred_at = Some("2026-09-28T00:06:01Z".into());
+        tx.execute_batch(r#"INSERT INTO agent_run VALUES ('run-d','conversation',1,'2026-09-28T00:06:00Z',NULL,'provider-config-b','{"options":{"contextWindow":4000}}'); INSERT INTO runtime_input_delivery VALUES ('run-d',1,'binding-b',2,'prepared');"#).unwrap();
+        persist_session_context(&tx, &run("run-d"), &actual).unwrap();
+        assert_eq!(
+            read_context().1,
+            None,
+            "model options change revokes the old window despite identical Host/model"
+        );
+        actual.fields.context_size_tokens = Some(2000);
+        actual.occurred_at = Some("2026-09-28T00:06:02Z".into());
+        persist_session_context(&tx, &run("run-d"), &actual).unwrap();
+        actual.fields.context_size_tokens = Some(0);
+        actual.occurred_at = Some("2026-09-28T00:06:03Z".into());
+        persist_session_context(&tx, &run("run-d"), &actual).unwrap();
+        assert_eq!(read_context().0, Some(200));
+        assert_eq!(
+            read_context().1,
+            None,
+            "explicit zero capacity is not omission"
+        );
+        alias_run.key.execution_epoch = 2;
+        assert!(!persist_session_context(&tx, &alias_run, &actual).unwrap());
         tx.commit().unwrap();
     }
 

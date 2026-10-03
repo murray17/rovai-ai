@@ -115,8 +115,10 @@ function publishContextUsage(ctx: any): void {
     if (typeof ctx.getContextUsage !== "function") return;
     const current = loadBinding();
     const usage = ctx.getContextUsage();
-    if (!usage || !Number.isSafeInteger(usage.contextWindow) || usage.contextWindow <= 0
-      || !(usage.tokens === null || (Number.isSafeInteger(usage.tokens) && usage.tokens >= 0))) return;
+    if (!usage) return;
+    const used = Number.isSafeInteger(usage.tokens) && usage.tokens >= 0 ? usage.tokens : null;
+    const window = Number.isSafeInteger(usage.contextWindow) && usage.contextWindow >= 0 ? usage.contextWindow : null;
+    if (used === null && window === null) return;
     const sessionId = ctx.sessionManager.getSessionId();
     if (!nonEmpty(sessionId) || !nonEmpty(ctx.model?.provider) || !nonEmpty(ctx.model?.id)) return;
     ctx.ui.setStatus("rovai-managed-context-usage", JSON.stringify({
@@ -125,7 +127,7 @@ function publishContextUsage(ctx: any): void {
       agentRunId: current.agentRunId, executionEpoch: current.executionEpoch,
       nativeBindingId: current.nativeBindingId, nativeBindingGeneration: current.nativeBindingGeneration,
       sessionId, provider: ctx.model.provider, modelId: ctx.model.id,
-      usedTokens: usage.tokens, windowTokens: usage.contextWindow,
+      usedTokens: used, windowTokens: window,
     }));
   } catch {
     // Missing metrics cannot abort a native prompt or expose arbitrary payloads.

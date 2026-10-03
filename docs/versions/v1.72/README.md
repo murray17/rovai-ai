@@ -104,13 +104,17 @@ Migration 177 从 v1.72/schema 126 升到 schema 127，只在 camp 增加摘要�
 
 ## 并行交付：执行指标
 
+Context 当前按 [Execution Metrics v7](../../contracts/runtime-execution-metrics-v7.md) 与输入确认解绑；当前 Session 原生观测经既有低频 Flush 提交并通知可见面板。同一实际模型及有效配置允许复用已确认窗口，ZCode 增加模型调用结束/压缩事件触发的合并读取。没有新增数据库表、指标定时器或测速；同次 App 证据与限制见[上下文运行中可用性收口](../../research/runtime-monitoring/live-context-usability-2026-10-04.md)。
+
+2026-10-03 的 [Execution Metrics v6](../../contracts/runtime-execution-metrics-v6.md) 首先修复 Claude 最新根调用输入桶齐全时发出 used-only；当时其他 Runtime 的确认/采样限制见[运行中 Context 复核](../../research/runtime-monitoring/live-context-verification-2026-10-03.md)。
+
 2026-10-02 按用户要求移除指标专用 CLI 版本门槛，保留产品最低版本资格；补接 CodeBuddy 最新调用占用、Kiro 原生百分比、TRAE 本地 Usage 与 Antigravity 根 step Usage。OpenCode 1.18.32 真实恢复验证通过，失败占位零不再清空 Context。字段支持、未决项与原始到数据库读回证据见[原生格式兼容验收](../../research/runtime-monitoring/native-format-compatibility-2026-10-02.md)。本切片不改变 schema、模型上下文、测速退役结论或界面布局。
 
-执行面板的可见范围读取、隐藏暂停、终态有限尾读与引用复用已收口；周期 Flush 只为终态迟到数据
-增加落盘后失效提示。生产 Renderer 的 500 Run 动态验收、最低层竞争和字段引用证据见
+执行面板的可见范围读取、隐藏暂停、终态有限尾读与引用复用已收口；2026-10-01 时周期 Flush 只为终态迟到数据
+增加落盘后失效提示，v7 扩展到运行中有效提交。生产 Renderer 的 500 Run 动态验收、最低层竞争和字段引用证据见
 [读取生命周期验收](../../research/runtime-monitoring/execution-metrics-refresh-verification-2026-10-01.md)。
 
-执行台分别呈现每 Run 原生四项用量与当前原生 Session 上下文。2026-10-02 按用户要求移除全部 Runtime 的输出测速，包括 Core 字符计数、临时接口、前端轮询与显示；思考内容仍隔离于公开 Evidence 和 Renderer。用量复用 Monitoring Run summary；Migration 178 增加当前 Session 上下文小投影，把 v1.72/schema 127 升至 schema 128；Migration 179 以原子增量升级现有 schema 128 至 129，保留当前上下文数据并独立承接原生比例，不从比例反推数量；Migration 180 在合入 Thread 命名后收口至 schema 130，保留两条已部署路径的业务数据和冻结证据。没有真实回包的 Runtime 字段维持未验证，不回填历史 Run 的结束上下文。字段与 UI 规则由 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md) 和 [Camp 会话工作区](../../ui/components/conversation-workspace.md#camp-执行过程) 拥有；最新用量、上下文和 App 核验见[原生边界验收](../../research/runtime-monitoring/native-boundaries-verification-2026-10-01.md)，早期[第二轮记录](../../research/runtime-monitoring/execution-metrics-verification-2026-09-29.md)和[v3 长回合验收](../../research/runtime-monitoring/observable-output-v3-verification-2026-09-30.md)保留各自范围。
+执行台分别呈现每 Run 原生四项用量与当前原生 Session 上下文。2026-10-02 按用户要求移除全部 Runtime 的输出测速，包括 Core 字符计数、临时接口、前端轮询与显示；思考内容仍隔离于公开 Evidence 和 Renderer。用量复用 Monitoring Run summary；Migration 178 增加当前 Session 上下文小投影，把 v1.72/schema 127 升至 schema 128；Migration 179 以原子增量升级现有 schema 128 至 129，保留当前上下文数据并独立承接原生比例，不从比例反推数量；Migration 180 在合入 Thread 命名后收口至 schema 130，保留两条已部署路径的业务数据和冻结证据。没有真实回包的 Runtime 字段维持未验证，不回填历史 Run 的结束上下文。字段与 UI 规则由 [Runtime Execution Metrics v7](../../contracts/runtime-execution-metrics-v7.md) 和 [Camp 会话工作区](../../ui/components/conversation-workspace.md#camp-执行过程) 拥有；最新用量、上下文和 App 核验见[原生边界验收](../../research/runtime-monitoring/native-boundaries-verification-2026-10-01.md)，早期[第二轮记录](../../research/runtime-monitoring/execution-metrics-verification-2026-09-29.md)和[v3 长回合验收](../../research/runtime-monitoring/observable-output-v3-verification-2026-09-30.md)保留各自范围。
 
 ## 并行交付：公开 Composer 队外 Mention
 
@@ -234,3 +238,7 @@ macOS/Web 不增加入口。托盘及第二次启动恢复原窗口，明确退�
 [Pending Camp Activation v4](../../contracts/pending-camp-activation-v4.md)、[Composer Draft v16](../../contracts/camp-composer-draft-v16.md)
 及对应 Architecture/UI/术语/导航已同步；理由见 [V1.72-D11](decisions.md#v1-72-d11)，证据见
 [实施记录](implementation-plan.md#2026-10-03-普通一键新对话草稿恢复)。无模型上下文、发布 Skill、Runtime 兼容轴或根 README 变化。
+
+2026-10-04 [上下文可用性收口](../../research/runtime-monitoring/live-context-usability-2026-10-04.md)
+按 Execution Metrics v7 解除输入确认等待、复用有效实际模型窗口，并接入 ZCode 运行中事件触发读取。
+旧轮次记录保留当时的限制；当前规则以 v7 为准。

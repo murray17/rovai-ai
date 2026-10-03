@@ -142,7 +142,7 @@ struct PiManagedContextUsage {
     provider: String,
     model_id: String,
     used_tokens: Option<i64>,
-    window_tokens: i64,
+    window_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,11 +176,13 @@ impl PiManagedContextUsage {
             && self.provider.len() <= 512
             && !self.model_id.is_empty()
             && self.model_id.len() <= 512
-            && self.window_tokens > 0
-            && self.window_tokens <= 9_007_199_254_740_991
+            && (self.used_tokens.is_some() || self.window_tokens.is_some())
+            && self
+                .window_tokens
+                .is_none_or(|n| n >= 0 && n <= 9_007_199_254_740_991)
             && self
                 .used_tokens
-                .is_none_or(|n| n >= 0 && n <= self.window_tokens)
+                .is_none_or(|n| n >= 0 && n <= 9_007_199_254_740_991)
     }
 
     fn into_incoming(
@@ -2643,7 +2645,7 @@ mod tests {
             ("nativeBindingGeneration", json!(3)),
             ("sessionId", json!("old-session")),
             ("usedTokens", json!(-1)),
-            ("windowTokens", json!(0)),
+            ("windowTokens", json!(-1)),
         ] {
             let mut altered = value.clone();
             altered[key] = changed;
@@ -2655,6 +2657,19 @@ mod tests {
         let mut unknown = value.clone();
         unknown["usedTokens"] = Value::Null;
         assert!(parse(unknown).matches("host", "session", &binding, &owner));
+        let mut used_only = value.clone();
+        used_only["windowTokens"] = json!(0);
+        assert!(parse(used_only.clone()).matches("host", "session", &binding, &owner));
+        used_only["windowTokens"] = Value::Null;
+        assert!(parse(used_only.clone()).matches("host", "session", &binding, &owner));
+        used_only["usedTokens"] = Value::Null;
+        assert!(!parse(used_only).matches("host", "session", &binding, &owner));
+        let mut overflow = value.clone();
+        overflow["usedTokens"] = json!(101);
+        assert!(
+            parse(overflow).matches("host", "session", &binding, &owner),
+            "projection preserves used and removes the inapplicable window"
+        );
         let mut content = value;
         content["text"] = json!("PRIVATE_CANARY");
         assert!(serde_json::from_value::<PiManagedContextUsage>(content).is_err());

@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-monitoring
 authority: runtime-usage-metering-and-read-boundaries
 status: accepted
-last_updated: 2026-10-03
+last_updated: 2026-10-04
 ---
 
 # Runtime Monitoring 架构
 
-精确字段与方法见 [Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md)；执行台的原生用量与上下文另见 [Runtime Execution Metrics v5](../contracts/runtime-execution-metrics-v5.md)。长期最小化、
+精确字段与方法见 [Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md)；执行台的原生用量与上下文另见 [Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)。长期最小化、
 稀疏语义、clean break 与 Cost grain 由
 [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)拥有。本架构只说明 Usage Transport、内存归一化、
 Projection/Rollup、Read Side 和 Renderer 如何组合。
@@ -67,9 +67,8 @@ Runtime 最低版本和平台门槛保持。OpenCode prompt result 不能证明�
 
 周期 Flush 不发出立即 Snapshot 事件。普通事件受全局最短间隔约束；terminal 事件可在 Debounce 后立即
 刷新。所有请求仍 single-flight，从而不让 Dashboard 反向阻塞单一 SQLite Database Mutex 上的运行结算。
-周期 Flush 若实际提交了终态 Run 的迟到 Usage／Context，则补发 `monitoring.changed`，
-让已经结束有限尾读的执行面板按当前可见范围刷新；活动 Run 的周期提交仍不额外发通知。
-分类读取失败时只保守失效，不恢复已经提交的 batch，也不再次累加用量。
+既有 4 秒周期 Flush 实际提交 Usage／Context 后发出 `monitoring.changed`，活动 Session 与
+迟到结果均可刷新当前可见范围；没有写入不通知。提交失败才恢复 batch，不再次累加已提交用量。
 
 ### 本地原生数值来源与 Context
 
@@ -91,8 +90,10 @@ Qoder 的 custom-provider input 与显式模型窗口须与原生比例相符；
 Kiro 只从精确绑定 Session 文件补原生窗口，缺少独立 used 时仍保留比例和未知数量。
 这些补充均不扫描历史会话、不恢复测速，也不从比例反推数量。
 
-Claude 的 Core 私有路径保留最新根调用的数值 Usage 和原生模型身份，在同一 result 的该模型
-`modelUsage.contextWindow` 到达时发出 Session Gauge；不使用整轮 Usage。Pi managed host v8
+Claude 的 Core 私有路径保留最新根调用的数值 Usage 和原生模型身份；真实 message_delta 的
+三个输入桶齐全即发出 used-only Session Gauge，同一 result 的该模型 `modelUsage.contextWindow`
+到达后确认窗口。Context 保留实际模型身份；同绑定/实际模型/有效配置的后续 used-only
+观测复用已确认窗口。模型/配置变化撤下旧分母，used 始终独立；不使用整轮 Usage。Pi managed host v8
 调用原生 `ctx.getContextUsage()` 并只发送封闭数值 status，Core 验证 Host、Run、Session、绑定代次和
 实际 provider/model 后消费；正文或全会话统计不进入此路径。只有窗口上限时 used 仍未知，压缩后
 原生 tokens 尚未重新有效时清空旧 used。两条私有路径均在公开 Evidence 分发前截断。
@@ -153,3 +154,14 @@ epoch、Database contract `v0.99` 与 projection schema `47`。不存在回填�
 - [Runtime monitoring feasibility audit](../research/runtime-monitoring/README.md)
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
+
+### Context 的运行中可用性
+
+Context 以当前 Session/绑定/Run epoch 归属，和 delivery 是否 accepted 解耦；不存在等待 prompt
+终态的第二个临时 Context 池。原生占用不进入 consumption checkpoint，只更新一个 latest 行。
+消息省略实际模型时允许继承同绑定配置已经确认的身份，配置别名本身不建立确认。
+
+ZCode 当前根模型调用结束/压缩完成通过合并的待读序号唤醒一个 snapshot worker；返回快照已覆盖的触发不再补读，既有原生响应
+reader 不被查询阻塞。live、terminal 和 background snapshot 串行读取；仅 live 返回消息数限制为 1，终态沿用原参数，
+只把数值投递到 Core；旧 input 的回读丢弃。无通用新定时器或正文保存。Pi/Antigravity 的独立
+used/window 不再互为入口条件。支持时机与真实 App 范围见[可用性验收](../research/runtime-monitoring/live-context-usability-2026-10-04.md)。

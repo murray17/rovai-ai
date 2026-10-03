@@ -120,7 +120,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Usage Monitoring v6（历史）](runtime-usage-monitoring-v6.md) | DSH 原生完整调用 total 接通，缓存缺失继续保留未知 |
 | [Runtime Usage Monitoring v5（历史）](runtime-usage-monitoring-v5.md) | 按原生格式准入、去除指标版本门槛；TRAE journal 与 Antigravity step 补采 |
 | [Runtime Usage Monitoring v4（历史）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
-| [Runtime Execution Metrics v5（当前）](runtime-execution-metrics-v5.md) | Run 完整性投影与已有部分用量入口守卫 |
+| [Runtime Execution Metrics v7（当前）](runtime-execution-metrics-v7.md) | 当前 Session 运行中直接更新、有效实际模型窗口复用、ZCode 事件触发读取 |
+| [Runtime Execution Metrics v6（历史）](runtime-execution-metrics-v6.md) | Claude 运行中最新调用占用、窗口未知时独立保存 used |
+| [Runtime Execution Metrics v5（历史）](runtime-execution-metrics-v5.md) | Run 完整性投影与已有部分用量入口守卫 |
 | [Runtime Execution Metrics v4（历史）](runtime-execution-metrics-v4.md) | Antigravity 原生窗口、TRAE 校准占用、Qoder 数量配对及 Kiro 原生窗口 |
 | [Runtime Execution Metrics v3（历史）](runtime-execution-metrics-v3.md) | ZCode 原生 Session 快照的 used/size 接通，数值专用投递 |
 | [Runtime Execution Metrics v2（历史）](runtime-execution-metrics-v2.md) | Kiro 原生比例、CodeBuddy 最新调用占用；无指标版本白名单 |

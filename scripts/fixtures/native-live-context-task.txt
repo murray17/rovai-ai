@@ -1,0 +1,6 @@
+This is an isolated native Session Context acceptance. Use three separate sequential shell tool calls:
+1. Run pwd and list the current workspace; then describe what you found in one sentence.
+2. Run /bin/sleep 12, then printf 'context-observation-one\n'; explain one retry boundary in one sentence.
+3. Run /bin/sleep 12, then printf 'context-observation-two\n'; explain one recovery boundary in one sentence.
+Do not combine these calls, delegate, change files, or inspect other directories. The pauses let the acceptance harness inspect the running Session between model calls. No benchmark or speed measurement is requested.
+Finish normally and send a brief completion with rovai send --public-only, following the Session Charter.

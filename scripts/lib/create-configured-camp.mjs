@@ -1,5 +1,5 @@
 export async function createConfiguredCampAndSend(request, input) {
-  const preflight = await request('camps.creationPreflight')
+  const preflight = await request('threads.creationPreflight')
   if (!preflight.admissible || !preflight.initialLeadAgentId) {
     throw new Error(`Camp creation preflight failed: ${JSON.stringify(preflight)}`)
   }
@@ -8,7 +8,7 @@ export async function createConfiguredCampAndSend(request, input) {
     ?? preflight.presentMembers.map((member) => member.agentId)
   const defaultLeadAgentId = input.defaultLeadAgentId
     ?? preflight.initialLeadAgentId
-  const createResult = await request('camps.create', {
+  const createResult = await request('threads.create', {
     commandId: `${input.commandId}:camp`,
     name: input.name ?? null,
     workspace: input.workspace
@@ -24,13 +24,13 @@ export async function createConfiguredCampAndSend(request, input) {
   }
 
   const content = composerDocumentForAddress(input.address ?? { mode: 'default' }, input.body)
-  const sent = await request('camp.messages.send', {
+  const sent = await request('thread.messages.send', {
     commandId: input.commandId,
-    campId,
+    threadId: campId,
     content,
     sourceAttachments: [],
     quotes: [],
-    replyToCampMessageId: null,
+    replyToThreadMessageId: null,
     execution: {
       taskId: null,
       purpose: input.purpose,
@@ -42,6 +42,7 @@ export async function createConfiguredCampAndSend(request, input) {
     ...sent.commandResult,
     payload: {
       ...sent.commandResult.payload,
+      threadId: campId,
       campId
     }
   }

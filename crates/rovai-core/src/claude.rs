@@ -1471,6 +1471,42 @@ fn merge_claude_numeric_usage(
     }
 }
 
+fn claude_context_observation(
+    state: &ClaudeCodeStreamState,
+    session_id: &str,
+    window: Option<i64>,
+) -> Option<ClaudeCodeRuntimeEvent> {
+    if !state.last_call_usage_observed {
+        return None;
+    }
+    let message_id = state.native_usage_message_id.as_deref()?;
+    let model = state.native_message_model.as_deref()?;
+    if message_id.is_empty() || model.is_empty() {
+        return None;
+    }
+    // Each root call owns its input buckets. The latest Session projection
+    // independently resolves capacity against this actual model identity.
+    let used = [
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ]
+    .into_iter()
+    .try_fold(0i64, |total, key| {
+        total.checked_add(state.call_usage.get(key)?.as_i64()?)
+    })?;
+    if used > 9_007_199_254_740_991 {
+        return None;
+    }
+    Some(ClaudeCodeRuntimeEvent {
+        event_type: "runtime.context.observed",
+        payload: serde_json::json!({
+            "sessionId":session_id, "messageId":message_id, "modelId":model,
+            "usedTokens":used, "windowTokens":window,
+        }),
+    })
+}
+
 fn normalize_claude_runtime_events(
     event: &Value,
     expected_session_id: &str,
@@ -1504,43 +1540,34 @@ fn normalize_claude_runtime_events(
                 normalized.push(ClaudeCodeRuntimeEvent { event_type: "runtime.usage.observed", payload: serde_json::json!({
                     "sessionId":expected_session_id, "messageId":message_id, "usage":state.call_usage,
                 }) });
+                if let Some(context) = claude_context_observation(state, expected_session_id, None)
+                {
+                    normalized.push(context);
+                }
             }
         }
     }
     if event.get("type").and_then(Value::as_str) == Some("result")
         && event.get("parent_tool_use_id").is_none_or(Value::is_null)
-        && let (Some(model), Some(message_id)) =
-            (&state.native_message_model, &state.native_usage_message_id)
+        && let Some(model) = &state.native_message_model
     {
         validate_claude_stream_session(event, expected_session_id)?;
+        crate::monitoring::context_acceptance_trace(|| {
+            serde_json::json!({
+                "kind":"claude_native_final", "sessionId":expected_session_id,
+                "receivedAt":chrono::Utc::now().to_rfc3339()
+            })
+        });
         let window = event
             .get("modelUsage")
             .and_then(|v| v.get(model))
             .and_then(|v| v.get("contextWindow"))
             .and_then(Value::as_i64)
-            .filter(|n| *n > 0);
+            .filter(|n| *n >= 0 && *n <= 9_007_199_254_740_991);
         // Match Claude's native input-only context percentage, never the
         // result's aggregate Usage or output from all tool rounds.
-        let used = [
-            "input_tokens",
-            "cache_read_input_tokens",
-            "cache_creation_input_tokens",
-        ]
-        .into_iter()
-        .try_fold(0i64, |total, key| {
-            total.checked_add(state.call_usage.get(key)?.as_i64()?)
-        });
-        if let (Some(used), Some(window)) = (used, window)
-            && used <= window
-            && state.last_call_usage_observed
-        {
-            normalized.push(ClaudeCodeRuntimeEvent {
-                event_type: "runtime.context.observed",
-                payload: serde_json::json!({
-                    "sessionId":expected_session_id, "messageId":message_id, "modelId":model,
-                    "usedTokens":used, "windowTokens":window,
-                }),
-            });
+        if let Some(context) = claude_context_observation(state, expected_session_id, window) {
+            normalized.push(context);
         }
     }
     if (event.get("type").and_then(Value::as_str) == Some("system")
@@ -3642,10 +3669,17 @@ mod tests {
                 "event":{"type":"message_delta","usage":{"input_tokens":input,"output_tokens":9,
                     "cache_read_input_tokens":20,"cache_creation_input_tokens":2,"private":"PRIVATE_CANARY"}}}),
             );
-            assert_eq!(events.len(), 1);
+            assert_eq!(events.len(), 2);
             assert_eq!(events[0].event_type, "runtime.usage.observed");
             assert_eq!(events[0].payload["messageId"], message);
             assert!(!events[0].payload.to_string().contains("PRIVATE_CANARY"));
+            assert_eq!(events[1].event_type, "runtime.context.observed");
+            assert_eq!(events[1].payload["usedTokens"], input + 22);
+            assert!(
+                events[1].payload["windowTokens"].is_null(),
+                "live occupancy cannot borrow the previous call/model window"
+            );
+            assert!(!events[1].payload.to_string().contains("PRIVATE_CANARY"));
             let context = emit(&mut state, terminal)
                 .into_iter()
                 .find(|v| v.event_type == "runtime.context.observed")
@@ -3724,6 +3758,23 @@ mod tests {
             .all(|v| v.event_type != "runtime.context.observed")
         );
 
+        // A real delta can complete sparse buckets before any terminal result.
+        // Its explicit zero is valid; the provisional all-zero start was not.
+        let completed = emit(
+            &mut state,
+            json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"message_delta","usage":{"cache_creation_input_tokens":0}}}),
+        );
+        assert_eq!(completed[1].payload["usedTokens"], 12);
+        assert!(completed[1].payload["windowTokens"].is_null());
+        let unmatched = emit(
+            &mut state,
+            json!({"type":"result","session_id":session_id,
+            "modelUsage":{"other-model":{"contextWindow":100}}}),
+        );
+        assert_eq!(unmatched[0].payload["usedTokens"], 12);
+        assert!(unmatched[0].payload["windowTokens"].is_null());
+
         let witness: Value = serde_json::from_str(include_str!(
             "../../../docs/research/runtime-monitoring/fixtures/round5-native-usage-context.json"
         ))
@@ -3761,6 +3812,37 @@ mod tests {
                 json!({"usedTokens":context.payload["usedTokens"],"windowTokens":context.payload["windowTokens"]}),
                 frame["expectedParsedContext"]
             );
+        }
+
+        // Replay only native numeric journal fields through a synthetic stream
+        // envelope. The fixture separately records the real running DB/UI witness.
+        let live: Value = serde_json::from_str(include_str!(
+            "../../../docs/research/runtime-monitoring/fixtures/claude-live-context-2026-10-03.json"
+        ))
+        .unwrap();
+        let mut state = ClaudeCodeStreamState::default();
+        for record in live["rawRecords"].as_array().unwrap() {
+            let message = &record["raw"]["message"];
+            if state.native_usage_message_id.as_deref() != message["id"].as_str() {
+                emit(
+                    &mut state,
+                    json!({"type":"stream_event","session_id":session_id,
+                        "event":{"type":"message_start","message":{"id":message["id"],"model":message["model"]}}}),
+                );
+            }
+            let expected = live["expectedCallContexts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|call| call["messageId"] == message["id"])
+                .unwrap();
+            let events = emit(
+                &mut state,
+                json!({"type":"stream_event","session_id":session_id,
+                    "event":{"type":"message_delta","usage":message["usage"]}}),
+            );
+            assert_eq!(events[1].payload["usedTokens"], expected["usedTokens"]);
+            assert_eq!(events[1].payload["windowTokens"], Value::Null);
         }
     }
 

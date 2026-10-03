@@ -20518,43 +20518,45 @@ async fn process_agent_run_acp_message(
             false
         });
     }
-    if !usage.is_empty()
-        && let Err(error) = buffer_runtime_usage(
+    let usage_identity = acp_usage_source_identity(adapter_kind, &method, &params)
+        .ok()
+        .flatten();
+    let observed_model = if usage
+        .iter()
+        .any(|item| item.counter_mode == RuntimeUsageCounterMode::Gauge)
+    {
+        runtime.observed_model_id().await
+    } else {
+        None
+    };
+    for item in &mut usage {
+        let identity = if item.counter_mode == RuntimeUsageCounterMode::Gauge {
+            if item.context_model_id.is_none() {
+                item.context_model_id = observed_model.clone();
+            }
+            // Immutable transport receipt, independent of consumption identity
+            // and numeric value. Repeated values can refresh after compaction.
+            format!("native-context:{host_instance_id}:{native_prompt_id}:{sequence}")
+        } else {
+            usage_identity.clone().unwrap_or_else(|| {
+                canonical_json_digest(&message)
+                    .unwrap_or_else(|_| format!("acp:{method}:{agent_run_id}:{execution_epoch}"))
+            })
+        };
+        if let Err(error) = buffer_runtime_usage(
             core,
             agent_run_id,
             execution_epoch,
-            &if usage.iter().any(|item| {
-                matches!(
-                    item.dialect_id.as_str(),
-                    "grok-acp-meta-context-v1" | "kiro-acp-context-percentage-v1"
-                )
-            }) {
-                // Metadata rides on text/thought notifications. Its stable
-                // receipt identity must not hash their private content.
-                format!("native-context:{host_instance_id}:{native_prompt_id}:{sequence}")
-            } else {
-                acp_usage_source_identity(adapter_kind, &method, &params)
-                .unwrap_or_else(|error| {
-                    eprintln!(
-                        "failed to derive {} Usage identity for AgentRun {agent_run_id}: {error:#}",
-                        adapter_kind.as_str()
-                    );
-                    None
-                })
-                .unwrap_or_else(|| {
-                    canonical_json_digest(&message).unwrap_or_else(|_| {
-                        format!("acp:{method}:{agent_run_id}:{execution_epoch}")
-                    })
-                })
-            },
-            &usage,
+            &identity,
+            std::slice::from_ref(item),
         )
         .await
-    {
-        eprintln!(
-            "failed to persist {} Usage for AgentRun {agent_run_id}: {error:#}",
-            adapter_kind.as_str()
-        );
+        {
+            eprintln!(
+                "failed to persist {} Usage for AgentRun {agent_run_id}: {error:#}",
+                adapter_kind.as_str()
+            );
+        }
     }
     if adapter_kind == AdapterKind::KiroCli && method == "_kiro.dev/metadata" {
         return;
@@ -22414,7 +22416,6 @@ async fn flush_runtime_usage(
     core: &Core,
     target: RuntimeUsageFlushTarget,
     reason: &'static str,
-    notify_monitoring: bool,
 ) -> Result<usize> {
     // A terminal flush must observe the result of any periodic flush that
     // already drained this Run before deciding that its bookkeeping is idle.
@@ -22467,40 +22468,21 @@ async fn flush_runtime_usage(
     }
     let persistence = {
         let mut database = core.database.lock().await;
-        let result =
-            MonitoringService::record_usage_batches_with_deferred_context(&mut database, &batches);
-        // Active UI has a scoped safety poll. A periodic commit after terminal
-        // must invalidate readers even after their bounded terminal tail ends.
-        let notify_late = if !notify_monitoring
-            && matches!(target, RuntimeUsageFlushTarget::Periodic)
-            && result.as_ref().is_ok_and(|(inserted, _)| *inserted > 0)
-        {
-            MonitoringService::has_terminal_usage_batches(&database, &batches).unwrap_or_else(
-                |error| {
-                    eprintln!("failed to classify committed Runtime Usage notification: {error:#}");
-                    true // The data has committed; a conservative invalidation does not duplicate Usage.
-                },
-            )
-        } else {
-            false
-        };
-        result.map(|(inserted, deferred)| (inserted, deferred, notify_late))
+        MonitoringService::record_usage_batches(&mut database, &batches)
     };
     match persistence {
-        Ok((inserted, deferred_context, notify_late)) => {
-            let mut usage = core.runtime_usage.lock().await;
-            if matches!(target, RuntimeUsageFlushTarget::Periodic) {
-                // Native Usage has already been persisted. Only one numeric
-                // Context per Run waits for the existing input acceptance gate.
-                usage.restore(deferred_context)?;
-            }
-            usage.finish_idle_target_after_flush(&target);
-            drop(usage);
-            if inserted > 0 && (notify_monitoring || notify_late) {
+        Ok(inserted) => {
+            core.runtime_usage
+                .lock()
+                .await
+                .finish_idle_target_after_flush(&target);
+            // The existing four-second flush invalidates visible readers after
+            // commit, including Context received before prompt acknowledgement.
+            if inserted > 0 {
                 emit(
                     &core.output,
                     "monitoring.changed",
-                    json!({ "reason": if notify_late { "late_usage_flush" } else { reason }, "observationCount": inserted }),
+                    json!({ "reason": reason, "observationCount": inserted }),
                 );
             }
             Ok(inserted)
@@ -22525,7 +22507,6 @@ async fn flush_runtime_monitoring_run(
             execution_epoch,
         },
         reason,
-        true,
     )
     .await
 }
@@ -22548,7 +22529,6 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     &core,
                     RuntimeUsageFlushTarget::Periodic,
                     "usage_flush",
-                    false,
                 ).await {
                     eprintln!("periodic Runtime Usage flush failed: {error:#}");
                 }
@@ -22567,7 +22547,6 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     &core,
                     RuntimeUsageFlushTarget::All,
                     "shutdown_flush",
-                    false,
                 ).await {
                     eprintln!("terminal Runtime Usage shutdown flush failed: {error:#}");
                 }

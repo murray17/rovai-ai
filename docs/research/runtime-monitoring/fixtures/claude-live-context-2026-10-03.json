@@ -1,0 +1,482 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-03",
+  "branchBase": "79d471de08db65ab7c025f69d15f36227375a3a7",
+  "runtime": "claude-code-cli",
+  "version": "2.1.280 (Claude Code)",
+  "configuredModel": "opus",
+  "nativeModel": "gpt-6.1-sol",
+  "sourceKind": "Native Claude session journal, assistant.message.usage; not a raw stream stdout trace",
+  "privacy": "Numeric fields only; native identifiers aliased; no body, thinking, tool input, paths, endpoints or credentials.",
+  "scenario": "Fresh Session, sequential read-only tools with pauses; packaged App; succeeded",
+  "startedAt": "2026-10-03T14:38:32.134652+00:00",
+  "endedAt": "2026-10-03T14:40:47.585050+00:00",
+  "rawRecords": [
+    {
+      "timestamp": "2026-10-03T14:38:38.723Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-1",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 5260,
+            "cache_read_input_tokens": 5888,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 32
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:38:58.061Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-2",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 5549,
+            "cache_read_input_tokens": 5888,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 423
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:38:59.335Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-2",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 5549,
+            "cache_read_input_tokens": 5888,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 423
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:39:00.838Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-2",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 5549,
+            "cache_read_input_tokens": 5888,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 423
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:39:24.425Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-3",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 11556,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 263
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:39:26.578Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-3",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 11556,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 263
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:39:27.576Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-3",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 11556,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 263
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:06.672Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-4",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 11676,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 275
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:14.699Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-4",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 11676,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 275
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:20.096Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-4",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 11676,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 275
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:24.931Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-5",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 6016,
+            "cache_read_input_tokens": 5888,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 32
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:36.511Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-6",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 1344,
+            "cache_read_input_tokens": 11264,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 259
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:39.137Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-6",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 1344,
+            "cache_read_input_tokens": 11264,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 259
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:45.882Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-7",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 12791,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 137
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-03T14:40:47.398Z",
+      "raw": {
+        "type": "assistant",
+        "isSidechain": false,
+        "sessionId": "session-1",
+        "message": {
+          "id": "call-7",
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 12791,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 137
+          }
+        }
+      }
+    }
+  ],
+  "expectedCallContexts": [
+    {
+      "messageId": "call-1",
+      "model": "gpt-6.1-sol",
+      "usedTokens": 11148,
+      "windowTokens": null
+    },
+    {
+      "messageId": "call-2",
+      "model": "gpt-6.1-sol",
+      "usedTokens": 11437,
+      "windowTokens": null
+    },
+    {
+      "messageId": "call-3",
+      "model": "gpt-6.1-sol",
+      "usedTokens": 11556,
+      "windowTokens": null
+    },
+    {
+      "messageId": "call-4",
+      "model": "gpt-6.1-sol",
+      "usedTokens": 11676,
+      "windowTokens": null
+    },
+    {
+      "messageId": "call-5",
+      "model": "gpt-6.1-sol",
+      "usedTokens": 11904,
+      "windowTokens": null
+    },
+    {
+      "messageId": "call-6",
+      "model": "gpt-6.1-sol",
+      "usedTokens": 12608,
+      "windowTokens": null
+    },
+    {
+      "messageId": "call-7",
+      "model": "gpt-6.1-sol",
+      "usedTokens": 12791,
+      "windowTokens": null
+    }
+  ],
+  "observedRunningContexts": [
+    {
+      "atMs": 6000,
+      "status": "running",
+      "projection": {
+        "runtimeKind": "claude-code-cli",
+        "modelKey": "opus",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "dialectId": "claude-last-call-context-input-v1",
+        "usedTokens": 11148,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T14:38:38.955821+00:00"
+      }
+    },
+    {
+      "atMs": 30322,
+      "status": "running",
+      "projection": {
+        "runtimeKind": "claude-code-cli",
+        "modelKey": "opus",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "dialectId": "claude-last-call-context-input-v1",
+        "usedTokens": 11437,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T14:39:00.924541+00:00"
+      }
+    },
+    {
+      "atMs": 54642,
+      "status": "running",
+      "projection": {
+        "runtimeKind": "claude-code-cli",
+        "modelKey": "opus",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "dialectId": "claude-last-call-context-input-v1",
+        "usedTokens": 11556,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T14:39:27.687240+00:00"
+      }
+    },
+    {
+      "atMs": 110385,
+      "status": "running",
+      "projection": {
+        "runtimeKind": "claude-code-cli",
+        "modelKey": "opus",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "dialectId": "claude-last-call-context-input-v1",
+        "usedTokens": 11676,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T14:40:20.514362+00:00"
+      }
+    },
+    {
+      "atMs": 114451,
+      "status": "running",
+      "projection": {
+        "runtimeKind": "claude-code-cli",
+        "modelKey": "opus",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "dialectId": "claude-last-call-context-input-v1",
+        "usedTokens": 11904,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T14:40:25.061052+00:00"
+      }
+    },
+    {
+      "atMs": 126645,
+      "status": "running",
+      "projection": {
+        "runtimeKind": "claude-code-cli",
+        "modelKey": "opus",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "dialectId": "claude-last-call-context-input-v1",
+        "usedTokens": 12608,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T14:40:39.236610+00:00"
+      }
+    }
+  ],
+  "rendererRunning": {
+    "atMs": 8023,
+    "status": "running",
+    "ui": {
+      "overview": false,
+      "duration": "0分 10秒",
+      "contextLabel": "当前原生会话上下文：11.1k / —，比例未知"
+    },
+    "rows": [
+      "11.1k / —",
+      "—"
+    ]
+  },
+  "finalReadback": {
+    "context": {
+      "runtimeKind": "claude-code-cli",
+      "modelKey": "opus",
+      "sessionGeneration": 1,
+      "source": "runtime_private_extension",
+      "dialectId": "claude-last-call-context-input-v1",
+      "usedTokens": 12791,
+      "windowTokens": 200000,
+      "nativeRatio": null,
+      "observedAt": "2026-10-03T14:40:47.504687+00:00"
+    },
+    "usage": {
+      "promptInputTotalTokens": 83120,
+      "outputTokens": 1421,
+      "cacheReadTokens": 28928,
+      "cacheWriteTokens": 0,
+      "inputOutputComplete": true,
+      "finalizedAt": "2026-10-03T14:40:47.585050+00:00"
+    }
+  },
+  "rendererFinal": {
+    "contextLabel": "当前原生会话上下文：12.8k / 200k，6.4%",
+    "usageRows": [
+      [
+        "Input Token",
+        "83.1k"
+      ],
+      [
+        "Output Token",
+        "1.4k"
+      ],
+      [
+        "Cache Read",
+        "28.9k"
+      ],
+      [
+        "Cache Write",
+        "0k"
+      ],
+      [
+        "执行耗时",
+        "2分 15秒"
+      ]
+    ]
+  },
+  "windowEvidence": "Actual result-path Core projection and Renderer; no raw result stdout frame retained in this fixture. Previous raw result dialect is replayed by the existing round5 fixture."
+}
