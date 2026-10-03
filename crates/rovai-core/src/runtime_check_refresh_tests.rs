@@ -169,6 +169,8 @@ fn configuration(
     process_path: &Path,
 ) -> RuntimeStartupConfiguration {
     RuntimeStartupConfiguration {
+        custom_api: None,
+        custom_api_snapshot: None,
         program_path: path.map(|path| path.to_string_lossy().to_string()),
         environment: vec![
             RuntimeEnvironmentVariable {
@@ -371,6 +373,49 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
         captures,
         "same-write retries remain idempotent"
     );
+    // Write-only API-key input never appears in the RPC's successful readback or errors.
+    let api_kind = AdapterKind::ClaudeCodeCli;
+    let current = fixture
+        .core
+        .handle_runtime_startup("runtime.startup.get", json!({"runtimeKind":api_kind}))
+        .await
+        .unwrap();
+    let saved = fixture.core.handle_runtime_startup("runtime.startup.save", json!({
+        "runtimeKind":api_kind,"edits":[
+            {"path":["mode"],"before":current["configuration"]["customApi"]["mode"],"after":"custom_api","label":"连接方式"},
+            {"path":["baseUrl"],"before":current["configuration"]["customApi"]["baseUrl"],"after":"https://offline.invalid/prefix","label":"地址"},
+            {"path":["credentialVersion"],"before":current["credential"]["version"],"after":"replace","label":"API Key"}
+        ],"apiKey":{"action":"replace","value":"private-rpc-test-key"}
+    })).await.unwrap();
+    assert_eq!(saved["credential"]["status"], "available");
+    assert!(!saved.to_string().contains("private-rpc-test-key"));
+    let read = fixture
+        .core
+        .handle_runtime_startup("runtime.startup.get", json!({"runtimeKind":api_kind}))
+        .await
+        .unwrap();
+    assert_eq!(read["configuration"], saved["configuration"]);
+    assert!(
+        fixture
+            .core
+            .runtime_search_environment
+            .read()
+            .await
+            .startup_configuration(api_kind)
+            .custom_api_snapshot
+            .is_some()
+    );
+    let bad = fixture
+        .core
+        .handle_runtime_startup(
+            "runtime.startup.save",
+            json!({
+                "runtimeKind":api_kind,"edits":[],"apiKey":{"action":"private-rpc-test-key"}
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(!format!("{bad:#}").contains("private-rpc-test-key"));
     fixture.close().await;
 }
 

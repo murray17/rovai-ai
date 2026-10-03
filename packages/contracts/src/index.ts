@@ -127,6 +127,7 @@ export interface RuntimeModelCatalogCache {
 }
 
 export interface RuntimeModelCatalogView {
+  customApiModelIds?: string[] | null
   runtimeKind: AdapterKind
   cache: RuntimeModelCatalogCache
   models: ModelDescriptor[]
@@ -179,6 +180,7 @@ export interface AdapterRelocationAudit {
 }
 
 export interface AdapterInstallation {
+  customApiModelIds?: string[] | null
   id: string
   adapterKind: AdapterKind
   executablePath: string
@@ -359,13 +361,45 @@ export interface RuntimeEnvironmentVariable { name: string; value: string }
 export interface RuntimeStartupConfiguration {
   programPath: string | null
   environment: RuntimeEnvironmentVariable[]
+  customApi?: RuntimeCustomApiConfiguration | null
 }
 
+export type RuntimeConnectionMode = 'official_login' | 'custom_api'
+export type RuntimeCustomApiConfiguration =
+  | { kind: 'claude-code-cli'; mode: RuntimeConnectionMode | null; baseUrl: string; models: { model: string; reasoningModel: string; haikuModel: string; sonnetModel: string; opusModel: string } }
+  | { kind: 'codex-cli'; mode: RuntimeConnectionMode | null; baseUrl: string; models: { rowId: string; id: string; displayName: string }[]; defaultModel: string; defaultRowId: string | null }
+
+/** Write only; omitted means keep. Masked values are never round-tripped as credentials. */
+export type RuntimeApiKeyChange = { action: 'keep' } | { action: 'replace'; value: string } | { action: 'clear' }
+export interface RuntimeNativeCredential {
+  status: 'available' | 'missing' | 'invalid_reference'
+  source: 'native_file' | 'environment_reference' | 'native_managed'
+  sourceLabel: string
+  version: string
+  sourceWritable: boolean
+  canReplace: boolean
+  canClear: boolean
+  restriction: string | null
+  remedy: string | null
+}
+export interface RuntimeConnectionObservation {
+  initialMode: RuntimeConnectionMode | null
+  loginStatus: 'signed_in' | 'signed_out' | 'unknown'
+  conflict: string | null
+}
 export interface RuntimeStartupSettings {
   runtimeKind: AdapterKind
   revision: number
   configuration: RuntimeStartupConfiguration
+  credential: RuntimeNativeCredential | null
+  connectionObservation: RuntimeConnectionObservation | null
+  nativeRevision: string | null
+  connectionReadError: string | null
+  reconnectRequired: boolean
+  nativeWritten: boolean
 }
+export interface RuntimeStartupFieldEdit { path: string[]; before: unknown; after: unknown; label: string }
+export interface RuntimeStartupFieldConflict extends RuntimeStartupFieldEdit { current: unknown }
 
 export interface RuntimeStartupInspection {
   status: 'missing' | 'recognized' | 'version_unverified' | 'authentication_required' | 'ready' | 'check_failed'

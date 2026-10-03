@@ -65,10 +65,12 @@ pub(crate) struct ControlWrite {
 }
 
 pub(crate) struct ClaudeControl {
+    credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     session_id: String,
     permission_mode: String,
     initialize_id: String,
     initialization: Mutex<Option<oneshot::Sender<std::result::Result<(), String>>>>,
+    private_requests: Mutex<HashMap<String, oneshot::Sender<Result<Value>>>>,
     state: Mutex<ControlState>,
     writer: mpsc::UnboundedSender<ControlWrite>,
     changed: Notify,
@@ -88,10 +90,12 @@ impl ClaudeControl {
         let (writer, receiver) = mpsc::unbounded_channel();
         let (initialized, initialization) = oneshot::channel();
         let control = Arc::new(Self {
+            credential_redactor: None,
             session_id,
             permission_mode,
             initialize_id: format!("rovai-initialize-{}", uuid::Uuid::new_v4()),
             initialization: Mutex::new(Some(initialized)),
+            private_requests: Mutex::new(HashMap::new()),
             state: Mutex::new(ControlState::default()),
             writer,
             changed: Notify::new(),
@@ -106,7 +110,31 @@ impl ClaudeControl {
         (control, ready, receiver)
     }
 
-    fn emit(&self, event_type: &'static str, payload: Value) {
+    pub(crate) fn set_credential_redactor(
+        &mut self,
+        redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
+    ) {
+        self.credential_redactor = redactor;
+    }
+
+    pub(crate) fn redact_frame(&self, value: &Value) -> Result<Vec<u8>> {
+        let mut value = value.clone();
+        if let Some(redactor) = &self.credential_redactor {
+            redactor.value(&mut value);
+        }
+        Ok(serde_json::to_vec(&value)?)
+    }
+
+    pub(crate) fn redact_text(&self, value: &str) -> String {
+        self.credential_redactor
+            .as_ref()
+            .map_or_else(|| value.to_owned(), |redactor| redactor.text(value))
+    }
+
+    fn emit(&self, event_type: &'static str, mut payload: Value) {
+        if let Some(redactor) = &self.credential_redactor {
+            redactor.value(&mut payload);
+        }
         if let Some(events) = &self.events {
             let _ = events.send(ClaudeCodeRuntimeEvent {
                 event_type,
@@ -142,6 +170,30 @@ impl ClaudeControl {
             None,
         )
         .await
+    }
+
+    /// Responses may contain credentials. They are consumed here, never emitted as events.
+    pub(crate) async fn private_configuration(&self, subtype: &str) -> Result<Value> {
+        let id = format!("rovai-config-{}", uuid::Uuid::new_v4());
+        let (sent, received) = oneshot::channel();
+        self.private_requests
+            .lock()
+            .unwrap()
+            .insert(id.clone(), sent);
+        let result = async {
+            self.write(
+                json!({"type":"control_request", "request_id":id, "request":{"subtype":subtype}}),
+                None,
+            )
+            .await?;
+            tokio::time::timeout(INITIALIZE_TIMEOUT, received)
+                .await
+                .context("Claude Code 最终配置读取超时。")?
+                .context("Claude Code 配置读取已中断。")?
+        }
+        .await;
+        self.private_requests.lock().unwrap().remove(&id);
+        result
     }
 
     async fn write(&self, frame: Value, permission_request_id: Option<String>) -> Result<()> {
@@ -196,6 +248,21 @@ impl ClaudeControl {
                 let response = frame
                     .get("response")
                     .context("Claude control response has no response")?;
+                if let Some(id) = response.get("request_id").and_then(Value::as_str)
+                    && let Some(sender) = self.private_requests.lock().unwrap().remove(id)
+                {
+                    let value = if response["subtype"] == "success"
+                        && response["response"].is_object()
+                    {
+                        Ok(response["response"].clone())
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "当前 Claude Code 无法读取最终配置；此版本的自定义 API 路径尚不兼容。"
+                        ))
+                    };
+                    let _ = sender.send(value);
+                    return Ok(true);
+                }
                 if response.get("request_id").and_then(Value::as_str) != Some(&self.initialize_id) {
                     bail!("Claude Code returned an unknown control response ID");
                 }
@@ -427,6 +494,7 @@ impl ClaudeControl {
     }
 
     pub(crate) fn disconnect(&self) {
+        self.private_requests.lock().unwrap().clear();
         let ids = {
             let mut state = self.state.lock().unwrap();
             state.closed = true;

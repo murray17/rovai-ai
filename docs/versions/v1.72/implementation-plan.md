@@ -689,3 +689,9 @@ User 于 2026-10-03 明确豁免本次真实任务 Gate；其余本地检查、�
 `pnpm build:desktop`、`pnpm test:member-creation`（2 个隔离 Electron 场景）及三项通用文档门禁。
 全量第二轮曾遇到既有 Lark 附件流用例等待超时；该文件独立 81 项及随后完整套件均通过，未改该用例或渠道代码。
 界面夹具使用内存服务替身，Core 持久化/清理由 SQLite 测试独立验证；未安装或重启日常 App，未运行真实模型。
+
+## Claude Code 与 Codex 原生连接编辑
+
+User 已确认原生配置复用、共享影响范围、两张简单表单及字段级冲突交互，并要求 worktree 实施后推送分支。
+不重复保存 Key，不新增探活。实施与验证统一见[验收记录](runtime-custom-api-verification.md)，
+字段以 [Runtime Launch v47](../../contracts/runtime-launch-and-verification-v47.md) 为准。

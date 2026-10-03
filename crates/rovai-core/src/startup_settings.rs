@@ -18,6 +18,7 @@ use tokio::sync::{Mutex, oneshot};
 pub(crate) struct StartupPreview {
     pub configuration: RuntimeStartupConfiguration,
     pub result: Mutex<Option<Value>>,
+    _credential: Option<runtime_startup::DraftCredential>,
 }
 
 #[derive(Deserialize)]
@@ -31,14 +32,22 @@ struct KindParams {
 struct DraftParams {
     runtime_kind: AdapterKind,
     configuration: RuntimeStartupConfiguration,
+    #[serde(default)]
+    api_key: rovai_core::runtime_custom_api::ApiKeyChange,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SaveParams {
     runtime_kind: AdapterKind,
-    expected_revision: u64,
-    configuration: RuntimeStartupConfiguration,
+    #[serde(default)]
+    edits: Option<Vec<rovai_core::runtime_custom_api::FieldEdit>>,
+    #[serde(default)]
+    configuration: Option<RuntimeStartupConfiguration>,
+    #[serde(default)]
+    expected_revision: Option<u64>,
+    #[serde(default)]
+    api_key: rovai_core::runtime_custom_api::ApiKeyChange,
 }
 
 impl Core {
@@ -73,13 +82,19 @@ impl Core {
                         );
                     }
                 }
-                Ok(serde_json::to_value(settings)?)
+                Ok(serde_json::to_value(runtime_startup::public(settings))?)
             }
             "runtime.startup.inspect" | "runtime.startup.check" => {
-                let params: DraftParams = serde_json::from_value(params)?;
-                let configuration = params.configuration.validated(cfg!(windows))?;
+                let params: DraftParams = serde_json::from_value(params)
+                    .map_err(|_| anyhow::anyhow!("启动设置输入格式无效。"))?;
+                let (configuration, credential) = runtime_startup::resolve_draft(
+                    &*self.database.lock().await,
+                    params.runtime_kind,
+                    params.configuration,
+                    params.api_key,
+                )?;
                 if method == "runtime.startup.check" {
-                    self.check_runtime_startup(params.runtime_kind, configuration)
+                    self.check_runtime_startup(params.runtime_kind, configuration, credential)
                         .await
                 } else {
                     self.inspect_runtime_startup(params.runtime_kind, configuration, false)
@@ -87,21 +102,55 @@ impl Core {
                 }
             }
             "runtime.startup.save" => {
-                let params: SaveParams = serde_json::from_value(params)?;
+                let params: SaveParams = serde_json::from_value(params)
+                    .map_err(|_| anyhow::anyhow!("启动设置输入格式无效。"))?;
                 let kind = params.runtime_kind;
                 ensure!(
                     current_runtime_platform_blocker(kind).is_none(),
                     "当前平台不支持这个运行时。"
                 );
-                let configuration = params.configuration.validated(cfg!(windows))?;
                 let _update = self.runtime_search_update.lock().await;
-                {
-                    let database = self.database.lock().await;
-                    let saved = runtime_startup::load(&database, kind)?;
-                    if saved.revision > 0 && saved.configuration == configuration {
-                        return Ok(serde_json::to_value(saved)?);
+                let initial_legacy_save = params.configuration.is_some();
+                let edits = match (params.edits, params.configuration, params.expected_revision) {
+                    (Some(edits), None, None) => edits,
+                    (None, Some(configuration), Some(revision)) => {
+                        ensure!(
+                            configuration.custom_api.is_none() && params.api_key.is_keep(),
+                            "原生连接保存必须提交修改字段。"
+                        );
+                        let saved = runtime_startup::load(&*self.database.lock().await, kind)?;
+                        let same = saved.configuration.program_path == configuration.program_path
+                            && saved.configuration.environment == configuration.environment;
+                        if same && saved.revision > 0 {
+                            return Ok(serde_json::to_value(runtime_startup::public(saved))?);
+                        }
+                        ensure!(
+                            saved.revision == revision,
+                            "启动设置已被更新，请保留草稿并再次保存。"
+                        );
+                        runtime_startup::ordinary_edits(&saved.configuration, &configuration)
                     }
+                    _ => anyhow::bail!("启动设置保存格式无效。"),
+                };
+                let prepared = runtime_startup::prepare_save(
+                    &*self.database.lock().await,
+                    kind,
+                    edits,
+                    &params.api_key,
+                )?;
+                if !prepared.conflicts.is_empty() {
+                    return Ok(
+                        json!({"status":"conflict", "latest":runtime_startup::public(prepared.current), "conflicts":prepared.conflicts}),
+                    );
                 }
+                if prepared.edits.is_empty()
+                    && !(initial_legacy_save && prepared.current.revision == 0)
+                {
+                    return Ok(serde_json::to_value(runtime_startup::public(
+                        prepared.current,
+                    ))?);
+                }
+                let configuration = prepared.configuration.clone();
                 let search = if configuration.program_path.is_none() {
                     // Restore-auto previews use fresh discovery inputs. Capture them
                     // again under the save lock, then merge the latest saved settings.
@@ -119,34 +168,40 @@ impl Core {
                     )
                 }
                 .with_startup_configuration(kind, configuration.clone());
+                let draft_search = search.clone();
+                let observation =
+                    tokio::task::spawn_blocking(move || discover_runtime_path(kind, &draft_search))
+                        .await?;
                 if configuration.program_path.is_some() {
-                    let draft_search = search.clone();
-                    let observation = tokio::task::spawn_blocking(move || {
-                        discover_runtime_path(kind, &draft_search)
-                    })
-                    .await?;
                     ensure!(
                         observation.discovery_status == RuntimeDiscoveryStatus::Found,
                         "所选程序不存在或无法执行，请重新选择。"
                     );
                 }
+                let executable = observation
+                    .executable_path
+                    .as_deref()
+                    .map(std::path::Path::new);
                 let settings = {
                     let mut database = self.database.lock().await;
-                    runtime_startup::save(
+                    runtime_startup::commit_save(
                         &mut database,
                         kind,
-                        params.expected_revision,
-                        configuration,
+                        prepared,
                         search.generation(),
+                        params.api_key,
+                        executable,
                     )?
                 };
+                let search =
+                    search.with_startup_configuration(kind, settings.configuration.clone());
                 search.activate_for_runtime_commands();
                 *self.runtime_search_environment.write().await = Arc::new(search);
                 self.native_skill_discovery.invalidate_cache();
                 // No fleet invalidation: a live host retains its captured process environment.
                 drop(_update);
                 self.run_runtime_discovery().await;
-                Ok(serde_json::to_value(settings)?)
+                Ok(serde_json::to_value(runtime_startup::public(settings))?)
             }
             _ => anyhow::bail!("Unknown startup settings method"),
         }
@@ -259,10 +314,12 @@ impl Core {
         &self,
         kind: AdapterKind,
         configuration: RuntimeStartupConfiguration,
+        credential: Option<runtime_startup::DraftCredential>,
     ) -> Result<Value> {
         let preview = Arc::new(StartupPreview {
             configuration,
             result: Mutex::new(None),
+            _credential: credential,
         });
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, completion) = oneshot::channel();

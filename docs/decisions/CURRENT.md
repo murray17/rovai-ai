@@ -119,8 +119,8 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Runtime execution 与 Security
 
-- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Planned Shutdown v8](../contracts/planned-shutdown-v8.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)、[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)和[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md)。
-- Claude Code `--print` 的原生双向控制、请求与工具 ID 绑定及审批回填理由：[V1.72-D06](../versions/v1.72/decisions.md#v1-72-d06)；当前边界见[Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md)和[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)。
+- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Planned Shutdown v8](../contracts/planned-shutdown-v8.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)、[Runtime Launch and Verification v47](../contracts/runtime-launch-and-verification-v47.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)和[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md)。
+- Claude Code `--print` 的原生双向控制、请求与工具 ID 绑定及审批回填理由：[V1.72-D06](../versions/v1.72/decisions.md#v1-72-d06)；当前边界见[Runtime Launch v47](../contracts/runtime-launch-and-verification-v47.md)和[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)。
 - 同一 Core generation 内采用固定退避、只有明确未接收的 ACP 输入才由 Rovai 接管，并让 native retry 与 Rovai 保持单一 owner 的理由：[V1.53-D04](../versions/v1.53/decisions.md#v1-53-d04)。
 - Runtime 安装缺失只进入 Availability、optional subsystem 只覆盖 Adapter 自有初始化的当前边界与理由：
   [V1.53-D07](../versions/v1.53/decisions.md#v1-53-d07)。
@@ -176,7 +176,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 - 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)、[Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。生命周期、Blob 与文件投影理由分别见 [V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)、[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)与 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)；普通输出永久有界理由见 [V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。
 - Pi 成功 edit 的 path-bound 原生 patch、activity-v4 cutover、Migration 147 与历史 classifier 冻结理由：[V1.55-D02](../versions/v1.55/decisions.md#v1-55-d02)。
 - 理由来源：[v0.17](../versions/v0.17/decisions.md)、[v0.41](../versions/v0.41/decisions.md)、[v0.96](../versions/v0.96/decisions.md)、[v0.99](../versions/v0.99/decisions.md)、[V1.28-D12](../versions/v1.28/decisions.md#v1-28-d12)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.29-D14](../versions/v1.29/decisions.md#v1-29-d14)。
-- Pi terminal assistant model-call Usage、原生 Action lifecycle 与 `agent_start` admission 的当前字段边界由 [Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md)继承并收敛，接入理由见 [V1.39-D01](../versions/v1.39/decisions.md#v1-39-d01)和[V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)。
+- Pi terminal assistant model-call Usage、原生 Action lifecycle 与 `agent_start` admission 的当前字段边界由 [Runtime Launch v47](../contracts/runtime-launch-and-verification-v47.md)继承并收敛，接入理由见 [V1.39-D01](../versions/v1.39/decisions.md#v1-39-d01)和[V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)。
 
 ## Qualification 与 Benchmark
 
@@ -213,7 +213,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## 官方 ZCode 接入
 
-- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v6](../contracts/runtime-file-change-observation-v6.md)。
+- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v47](../contracts/runtime-launch-and-verification-v47.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v6](../contracts/runtime-file-change-observation-v6.md)。
 - 理由：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)、[V1.57-D02](../versions/v1.57/decisions.md#v1-57-d02)。
 
 ## 双轨执行评测
@@ -243,3 +243,5 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 - 当前规范：[Member Creation Flow v1](../contracts/member-creation-flow-v1.md)、[Pending Camp Activation v4](../contracts/pending-camp-activation-v4.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md#ai-队员创建)、[队员身份与图像](../ui/components/member-identity.md#添加队员与名册排序)。
 - 独立静态回执及窗口内草稿的取舍：[V1.72-D09](../versions/v1.72/decisions.md#v1-72-d09)。
+
+自定义 API 的当前边界见 [Runtime Launch v47](../contracts/runtime-launch-and-verification-v47.md)；原生来源权威与无凭据副本的取舍见 [V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12)。

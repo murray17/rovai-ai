@@ -432,6 +432,8 @@ pub struct ResolvedModelSelection {
 #[serde(rename_all = "camelCase")]
 pub struct FrozenAgentRuntimeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_api: Option<crate::runtime_custom_api::CustomApiSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camp_fast: Option<crate::camp_fast::FrozenThreadMemberFast>,
     pub adapter_kind: AdapterKind,
     pub installation_id: String,
@@ -677,6 +679,8 @@ pub struct AdapterCapabilitySnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdapterInstallationView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_api_model_ids: Option<Vec<String>>,
     pub id: String,
     pub adapter_kind: AdapterKind,
     pub executable_path: String,
@@ -1259,6 +1263,18 @@ impl AgentProfileService {
                 .context("failed to list Adapter installations")?
         };
         for installation in &mut installations {
+            installation.custom_api_model_ids =
+                crate::runtime_startup::load(database, installation.adapter_kind)?
+                    .configuration
+                    .custom_api
+                    .as_ref()
+                    .and_then(|api| api.configured_model_ids());
+            if let (Some(ids), Some(snapshot)) = (
+                &installation.custom_api_model_ids,
+                &mut installation.snapshot,
+            ) {
+                snapshot.models.retain(|model| ids.contains(&model.id));
+            }
             installation.member_runtime_defaults = if installation.enabled
                 && installation.path_state == "valid"
             {
@@ -1626,7 +1642,7 @@ impl AgentProfileService {
             },
             _ => anyhow::bail!("frozen Runtime model source is invalid"),
         };
-        let mut rebound = match resolve_frozen_runtime_binding(
+        let mut rebound = match resolve_frozen_runtime_binding_with_snapshot(
             database.connection(),
             &ResolvedRuntimeBinding {
                 adapter_kind: frozen.adapter_kind,
@@ -1634,6 +1650,7 @@ impl AgentProfileService {
                 model,
                 permissions: frozen.permissions.clone(),
             },
+            Some(frozen.custom_api.clone()),
         )? {
             Ok(runtime) => runtime,
             Err(blocker) => return Ok(Err(blocker)),
@@ -2655,6 +2672,21 @@ impl AgentProfileService {
                     .and_then(|value| serde_json::from_str::<ModelSelection>(value).ok())
                     .as_ref()
                     == Some(&binding.model);
+            if let (Some(api), ModelSelection::Explicit { model_id, .. }) = (
+                crate::runtime_startup::snapshot_from_connection(
+                    transaction,
+                    binding.adapter_kind,
+                )?,
+                &binding.model,
+            ) && !api.model_is_configured(model_id)
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    "runtime_model_unavailable",
+                    json!({
+                        "modelId": model_id, "detail": "当前接口未配置此模型，请重新选择。"
+                    }),
+                ));
+            }
             if ready.preflight_required && !matches!(binding.model, ModelSelection::RuntimeDefault)
             {
                 return Ok(CommandHandlerResult::rejected(
@@ -3686,6 +3718,7 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
         chrono::Utc::now(),
     );
     Ok(AdapterInstallationView {
+        custom_api_model_ids: None,
         id: row.get(0)?,
         adapter_kind,
         executable_path: row.get(2)?,
@@ -4222,6 +4255,43 @@ pub(crate) fn resolve_frozen_runtime_binding(
     transaction: &Connection,
     binding: &ResolvedRuntimeBinding,
 ) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
+    resolve_frozen_runtime_binding_with_snapshot(transaction, binding, None)
+}
+
+fn resolve_frozen_runtime_binding_with_snapshot(
+    transaction: &Connection,
+    binding: &ResolvedRuntimeBinding,
+    frozen_api: Option<Option<crate::runtime_custom_api::CustomApiSnapshot>>,
+) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
+    let is_rebound = frozen_api.is_some();
+    let custom_api = match frozen_api {
+        Some(snapshot) => snapshot,
+        None => {
+            crate::runtime_startup::snapshot_from_connection(transaction, binding.adapter_kind)?
+        }
+    };
+    if is_rebound
+        && custom_api.is_none()
+        && crate::runtime_startup::snapshot_from_connection(transaction, binding.adapter_kind)?
+            .is_some()
+    {
+        return Ok(Err(runtime_blocker(
+            "runtime_connection_changed",
+            json!({
+                "detail":"此执行冻结时没有连接覆盖，当前原生连接已切换；请重新建立执行，未沿用新凭据恢复旧会话。"
+            }),
+        )));
+    }
+    if let (Some(api), ModelSelection::Explicit { model_id, .. }) = (&custom_api, &binding.model)
+        && !api.model_is_configured(model_id)
+    {
+        return Ok(Err(runtime_blocker(
+            "runtime_model_unavailable",
+            json!({
+                "modelId": model_id, "detail": "当前接口未配置此模型，请重新选择。"
+            }),
+        )));
+    }
     let installation_id = binding.installation_id.clone();
     let installation = transaction
         .query_row(
@@ -4355,7 +4425,14 @@ pub(crate) fn resolve_frozen_runtime_binding(
     // existing Dispatch Preflight deep-checks the Runtime and rebinds this frozen configuration.
     // Permissions are still validated against the statically discovered schema before claim.
     let mut validation_binding = binding.clone();
-    if preflight_required {
+    let custom_connection_rebind = is_rebound
+        && (custom_api.is_some()
+            || crate::runtime_startup::snapshot_from_connection(
+                transaction,
+                binding.adapter_kind,
+            )?
+            .is_some());
+    if preflight_required || custom_connection_rebind {
         validation_binding.model = ModelSelection::RuntimeDefault;
     }
     if let Some(issue) = runtime_configuration_issue(
@@ -4369,10 +4446,17 @@ pub(crate) fn resolve_frozen_runtime_binding(
 
     let models: Vec<ModelDescriptor> =
         serde_json::from_str(&effective_models_json).context("invalid Adapter model catalog")?;
-    let model = match resolve_model_selection(adapter_kind, &models, &binding.model)? {
+    let mut model = match resolve_model_selection(adapter_kind, &models, &binding.model)? {
         Ok(model) => model,
         Err(blocker) => return Ok(Err(blocker)),
     };
+    if model.source == "runtime_default"
+        && let Some(id) = custom_api
+            .as_ref()
+            .and_then(|api| api.configuration.default_model())
+    {
+        model.model_id = id.to_owned();
+    }
     let mut capabilities: Vec<String> =
         serde_json::from_str(&capabilities_json).context("invalid Adapter capabilities")?;
     capabilities.sort();
@@ -4427,6 +4511,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
         }
     };
     let mut frozen = FrozenAgentRuntimeConfig {
+        custom_api,
         camp_fast: None,
         adapter_kind,
         installation_id,
@@ -4445,6 +4530,15 @@ pub(crate) fn resolve_frozen_runtime_binding(
         host_config_digest: projection.host_config_digest,
         config_digest: String::new(),
     };
+    if let Some(api) = &frozen.custom_api {
+        let identity = api.identity()?;
+        frozen.host_config_digest = canonical_json_digest(&json!({
+            "native": frozen.host_config_digest, "customApi": identity
+        }))?;
+        frozen.binding_compatibility_digest = canonical_json_digest(&json!({
+            "native": frozen.binding_compatibility_digest, "customApi": identity
+        }))?;
+    }
     frozen.refresh_config_digest()?;
     Ok(Ok(frozen))
 }
@@ -6586,6 +6680,92 @@ mod slow_tests {
             .expect("runtime resolution should be deterministic")
             .expect("message admission should use the last verified Runtime snapshot");
         assert_eq!(frozen.executable_fingerprint, executable_fingerprint);
+        // The admission/rebind seam freezes the connection, including a frozen absence.
+        // Reusing this fixture keeps executable/permission evidence identical across cases.
+        let api = crate::runtime_custom_api::CustomApiSnapshot {
+            configuration: crate::runtime_custom_api::CustomApiConfiguration::Codex {
+                mode: Some(crate::runtime_custom_api::ConnectionMode::CustomApi),
+                base_url: "https://old.example/prefix".into(),
+                models: vec![crate::runtime_custom_api::CustomApiModel {
+                    row_id: "fixture".into(),
+                    id: frozen.model.model_id.clone(),
+                    display_name: String::new(),
+                }],
+                default_model: frozen.model.model_id.clone(),
+                default_row_id: Some("fixture".into()),
+            },
+            native_revision: "fixture".into(),
+            credential_version: uuid::Uuid::new_v4().to_string(),
+            provider_id: "relay".into(),
+            explicit_mode: true,
+            draft_key: None,
+            preview: false,
+            credential_source: crate::runtime_custom_api::native::CredentialSource::Missing,
+            context: crate::runtime_custom_api::native::NativeContext {
+                kind: AdapterKind::CodexCli,
+                directory: executable_path.parent().unwrap().join("native"),
+                artifact_root: executable_path.parent().unwrap().join("artifacts"),
+                environment: Default::default(),
+            },
+        };
+        let custom = resolve_frozen_runtime_binding_with_snapshot(
+            &transaction,
+            &runtime_binding,
+            Some(Some(api.clone())),
+        )
+        .unwrap()
+        .unwrap();
+        assert_ne!(custom.host_config_digest, frozen.host_config_digest);
+        assert_ne!(
+            custom.binding_compatibility_digest,
+            frozen.binding_compatibility_digest
+        );
+        let mut rotated = api.clone();
+        rotated.credential_version = uuid::Uuid::new_v4().to_string();
+        rotated.native_revision = "changed".into();
+        let changed = resolve_frozen_runtime_binding_with_snapshot(
+            &transaction,
+            &runtime_binding,
+            Some(Some(rotated.clone())),
+        )
+        .unwrap()
+        .unwrap();
+        assert_ne!(changed.host_config_digest, custom.host_config_digest);
+        assert_ne!(
+            changed.binding_compatibility_digest,
+            custom.binding_compatibility_digest
+        );
+        let mut stored =
+            serde_json::to_value(crate::runtime_startup::RuntimeStartupConfiguration {
+                custom_api: Some(rotated.configuration.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+        stored.as_object_mut().unwrap().remove("customApi");
+        stored["_connectionMode"] = json!("official_login");
+        transaction.execute("INSERT INTO runtime_startup_setting(runtime_kind,revision,configuration_json,updated_at) VALUES('codex-cli',2,?1,datetime('now'))", [stored.to_string()]).unwrap();
+        assert_eq!(
+            resolve_frozen_runtime_binding_with_snapshot(
+                &transaction,
+                &runtime_binding,
+                Some(custom.custom_api.clone())
+            )
+            .unwrap()
+            .unwrap()
+            .custom_api,
+            Some(api)
+        );
+        assert_eq!(
+            resolve_frozen_runtime_binding_with_snapshot(
+                &transaction,
+                &runtime_binding,
+                Some(frozen.custom_api.clone())
+            )
+            .unwrap()
+            .unwrap_err()
+            .code,
+            "runtime_connection_changed"
+        );
         drop(transaction);
         let verified_identity = service
             .verified_executable_identity(

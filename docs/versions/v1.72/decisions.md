@@ -266,3 +266,22 @@ User 要求恢复一键新对话在消息模型重构前的草稿行为，并明
 跨客户端只能隔离导航，不提供内容同步或冲突合并。拒绝重建旧 Core Draft、revision 和编辑租约体系：它会逆转
 已完成的公开消息边界重构并引入不必要的多客户端协调。仅保留 Renderer map 也无法满足刷新和重启恢复。
 AI 创建队员的专项窗口内生命周期继续由 D09 对应合同约束。
+
+<a id="v1-72-d12"></a>
+## V1.72-D12：连接编辑以原生来源为权威，不另建 Key 副本
+
+- 状态：accepted
+- 日期：2026-10-04
+- 当前权威：[Runtime Launch v47](../../contracts/runtime-launch-and-verification-v47.md)、[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#claude-code-与-codex-原生连接编辑)与[启动设置 UI](../../ui/components/app-shell-navigation.md#原生连接设置)
+
+### 背景与选择
+
+用户要求已经可用的 CLI 配置直接复用，并明确取消自动复制 Key 到 Rovai 私存。采用 Claude Code 与 Codex
+原生配置的字段编辑；连接方式独立记录，官方登录继续归 CLI 管理。配置身份参与既有执行兼容性判断，
+凭据只保留来源和摘要，不建立第二套有效连接或凭据同步体系。
+
+### 后果与替代方案
+
+编辑共享文件可能影响外部 CLI，必须在设置页说明；无法无损切换的原生版本／来源组合须明确报错。
+保留凭据副本可使旧快照更易重放，却会创造迁移、同步和清理责任，故拒绝该方案。复制整个 Home 会影响
+Skills、MCP 和会话，亦不采用。字段级合并及原生文件原子写入是必要边界，不扩成通用供应商平台。

@@ -93,6 +93,7 @@ pub mod runtime;
 pub mod runtime_activity_mapping;
 pub mod runtime_basis;
 pub mod runtime_compaction_display;
+pub mod runtime_custom_api;
 pub mod runtime_diff;
 pub mod runtime_discovery;
 #[cfg(windows)]

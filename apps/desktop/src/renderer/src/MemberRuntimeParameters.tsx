@@ -592,8 +592,10 @@ function RuntimeModelPicker({
     servingCachedModels: models.length > 0,
     refreshStatus: loading ? 'joined' : activeLiveCatalog?.refreshStatus ?? null
   })
-  const missingSelectionLabel = explicit && !selectedModel
-    ? missingModelLabel(explicit.modelId, cache.status)
+  const configuredIds = activeLiveCatalog?.customApiModelIds ?? installation?.customApiModelIds
+  const missingSelectionLabel = explicit && configuredIds && !configuredIds.includes(explicit.modelId)
+    ? uiAttribute('当前接口未配置此模型 · {0}', explicit.modelId)
+    : explicit && !selectedModel ? missingModelLabel(explicit.modelId, cache.status)
     : null
   const triggerLabel = draft.model.mode === 'runtime_default'
     ? uiAttribute('默认')

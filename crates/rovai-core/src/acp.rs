@@ -7535,6 +7535,7 @@ mod tests {
 
     fn frozen_trae_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::TraeCnCli,
             installation_id: "installation-trae".to_string(),
@@ -7565,6 +7566,7 @@ mod tests {
 
     fn frozen_kiro_runtime() -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::KiroCli,
             installation_id: "installation-kiro".to_string(),
@@ -7595,6 +7597,7 @@ mod tests {
 
     fn frozen_cursor_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CursorAgent,
             installation_id: "installation-cursor".to_string(),
@@ -7632,6 +7635,7 @@ mod tests {
 
     fn frozen_kimi_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::KimiCodeCli,
             installation_id: "installation-kimi".to_string(),
@@ -7662,6 +7666,7 @@ mod tests {
 
     fn frozen_grok_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::GrokBuild,
             installation_id: "installation-grok".to_string(),

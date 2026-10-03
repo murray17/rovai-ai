@@ -11,6 +11,12 @@ last_updated: 2026-10-03
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 并行实施：Claude Code 与 Codex 原生连接编辑
+
+按用户确认，仅保留两种 Runtime 的简单表单，直接读取并编辑原生连接，不重复持久化 API Key。
+独立保存官方登录／自定义 API 方式，字段级合并保留外部修改；旧进程、凭据和恢复兼容性接入现有路径。
+代码在任务 worktree 中实现；本地 UI 与原生假服务证据和版本限制见[验收记录](runtime-custom-api-verification.md)。
+
 ## 并行修复：HTML 内部诊断 CSP 归因
 
 保留作品安全策略，预览器只将当前内部诊断请求的明确 CSP 拒绝转为中性诊断不可用，并停止该文档的无效重试。

@@ -3402,6 +3402,8 @@ impl Core {
                     let explicit_search = search.as_ref().clone().with_startup_configuration(
                         kind,
                         rovai_core::runtime_startup::RuntimeStartupConfiguration {
+                            custom_api: None,
+                            custom_api_snapshot: None,
                             program_path: Some(saved_path.to_string_lossy().to_string()),
                             environment: Vec::new(),
                         },
@@ -3877,6 +3879,7 @@ impl Core {
         Ok(json!({
             "runtimeKind": kind,
             "cache": installation.model_catalog,
+            "customApiModelIds": installation.custom_api_model_ids,
             "models": models,
             "refreshStatus": refresh_status,
             "diagnosticCode": installation
@@ -4542,6 +4545,8 @@ impl Core {
                 search.as_ref().clone().with_startup_configuration(
                     kind,
                     rovai_core::runtime_startup::RuntimeStartupConfiguration {
+                        custom_api: None,
+                        custom_api_snapshot: None,
                         program_path: Some(
                             existing_entrypoint_locator
                                 .as_ref()
@@ -14552,7 +14557,11 @@ impl Core {
                 runtime.validate_explicit_model(model).await?;
                 Some(model)
             }
-            "runtime_default" => None,
+            "runtime_default" => execution
+                .runtime
+                .custom_api
+                .as_ref()
+                .and_then(|api| api.configuration.default_model()),
             _ => anyhow::bail!("Codex model source is invalid"),
         };
         let mut session_bootstrap = {
@@ -26223,6 +26232,8 @@ done
             RuntimeSearchEnvironment::for_test_paths(1, Vec::new()).with_startup_configuration(
                 AdapterKind::CodexCli,
                 rovai_core::runtime_startup::RuntimeStartupConfiguration {
+                    custom_api: None,
+                    custom_api_snapshot: None,
                     program_path: Some(executable.to_string_lossy().into_owned()),
                     environment: vec![rovai_core::runtime_startup::RuntimeEnvironmentVariable {
                         name: "ROVAI_CATALOG_FIXTURE".into(),
@@ -27896,6 +27907,7 @@ done
         retry_after: Option<&str>,
     ) -> AdapterInstallationView {
         AdapterInstallationView {
+            custom_api_model_ids: None,
             id: "managed-codex".to_string(),
             adapter_kind: AdapterKind::CodexCli,
             executable_path: "/opt/homebrew/bin/codex".to_string(),
@@ -30216,6 +30228,7 @@ done
             "#!/bin/sh\ntrap '' TERM\nread -r line\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nwhile read -r line; do :; done\n",
         );
         let runtime_config = FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CodexCli,
             installation_id: "cleanup-fixture".into(),
