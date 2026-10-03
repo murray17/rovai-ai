@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-09-04
+last_updated: 2026-10-03
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -136,7 +136,7 @@ pnpm accept:bootstrap-shell-ui
 当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
 Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十三 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏，以及“关于与更新”
-的真实 packaged 版本、内置当前日志与发布日期、确定性禁用网络自动检查、App Update v6 idle 快照，以及 Bootstrap Shell 在未知 authority 下
+的真实 packaged 版本、内置当前日志与发布日期、确定性禁用网络自动检查、[当前 App Update 合同](../contracts/app-update-v7.md)的 idle 快照，以及 Bootstrap Shell 在未知 authority 下
 保留原文件、隔离业务树、显式重试不消耗 crash budget、Day/Night、1040×700、窄窗口、
 200% 等效布局、reduced motion、键盘焦点和无横向溢出回归。available 到失败的完整状态/动作/fallback 矩阵由 Renderer
 测试覆盖；签名 macOS/Windows 跨版本升级仍属于各平台 Release qualification。

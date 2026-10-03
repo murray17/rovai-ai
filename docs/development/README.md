@@ -110,6 +110,7 @@ App，以受控本机 API 和时钟验证页面框架、截止时间与 authorit
 修改审批 Dock 的焦点、原生选项或 Reason 展示时运行 `pnpm test:approval-dock`，使用生产组件的隔离 Electron
 夹具验证键盘操作与动态布局，不启动 Core 或模型。
 修改消息选文引用时运行 `pnpm test:message-quotes`：隔离 Electron 使用生产正文、引用组件与共享投影样例，验证选区排除、原生悬浮、键盘、完整选文和整行定位。验收窗口使用独立 userData，不启动 Core 或模型；其他会争用 OS 焦点的 Electron 验收应顺序运行。
+修改发布说明语言分段或更新页语言选择时运行 `pnpm test:release-notes-ui`：隔离 Electron 挂载正式更新页，验证即时中英文切换、当前/新版本 tab 保留、历史与单语回退、引用链接及安全 Markdown，不启动 Core 或模型；`ROVAI_KEEP_RELEASE_NOTES_FIXTURE=1` 保留截图。
 修改用户消息锚点时运行 `pnpm test:message-anchors`：隔离 Electron 使用生产 CampWorkspace，验证用户数量阈值、日夜主题、原生悬浮、可见范围、首条回复、长轨道与内部滚动、键盘定位、历史加载和草稿保留；不启动 Core 或模型。
 修改队员运行配置批量应用时运行 `pnpm test:member-runtime-apply`：隔离 Electron 挂载正式 MembersView，验证选择、覆盖、逐人版本校验、部分失败重试、未知回执核对、两部分草稿、提交中的离开保护、中英文、手机横竖屏和缩放。使用显式 transport fixture，不启动 Core 或模型；`ROVAI_KEEP_MEMBER_RUNTIME_APPLY_FIXTURE=1` 保留截图及验证记录。原有 `node --test scripts/lib/member-editor.test.mjs` 仍保护队员编辑主流程。
 修改飞书接口扫码时运行 `pnpm test:feishu-login`：隔离 Electron 使用生产 Session HTTP、被动 HTML bootstrap、Cookie

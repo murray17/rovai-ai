@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
+import { selectReleaseNotesLanguage } from '../apps/desktop/src/shared/release-notes-localization.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const releaseMetadata = JSON.parse(await readFile(join(root, 'build', 'release-metadata.json'), 'utf8'))
 const releaseVersion = releaseMetadata.version
 const releaseNotes = await readFile(join(root, 'build', 'release-notes.md'), 'utf8')
-const releaseSummary = releaseNotes.split('\n').find((line) => line.trim() && !line.startsWith('#'))
+const releaseSummary = selectReleaseNotesLanguage(releaseNotes, 'zh-CN').split('\n')
+  .find((line) => line.trim() && !line.startsWith('#'))
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
 const fixtureRoot = process.env.ROVAI_APP_UPDATES_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-app-updates-ui-accept-'))

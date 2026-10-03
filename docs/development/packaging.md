@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-09-29
+last_updated: 2026-10-03
 ---
 
 # macOS 构建、签名与打包
@@ -94,7 +94,7 @@ App 的 `app-update.yml` 读取官方 `murray17/rovai-ai` GitHub Release 通道�
 
 本地隔离 packaged UI 验收可以在同时满足隔离实例 admission 时设置
 `ROVAI_DISABLE_AUTO_UPDATE_CHECKS=1`，避免访问真实 Release 通道。该变量不对日常实例生效，也不构成
-更新功能或签名连续性的发布证据。完整状态合同见 [App Update v6](../contracts/app-update-v6.md)。
+更新功能或签名连续性的发布证据。完整状态及发布说明语言合同见 [App Update v7](../contracts/app-update-v7.md)。
 
 [`build/release-notes.md`](../../build/release-notes.md) 是 macOS 与 Windows 共用的唯一发布说明源；
 `package.json#build.releaseInfo.releaseNotesFile` 必须显式指向它。首个非空行必须是
@@ -102,6 +102,37 @@ App 的 `app-update.yml` 读取官方 `murray17/rovai-ai` GitHub Release 通道�
 Markdown 写入 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`，使 updater 不再把 GitHub Atom HTML
 fallback 当作页面日志内容。发布者不得手工维护另一份 manifest 日志，也不得为日志展示增加 Renderer
 GitHub 请求；版本提升必须在同一个 Release PR 中更新该文件。
+
+新发布的共用文件必须同时包含非空英文和简体中文段。版本首标题保留在公共前言中，语言标记是
+Markdown 语法树的顶层独立单行 HTML 注释，段正文从标记后开始，直到下一个标记或文件结束。
+标记必须与相邻内容分隔，使解析器可识别独立节点；推荐如下格式，精确语法由
+[App Update v7](../contracts/app-update-v7.md#language-boundaries)拥有：
+
+```markdown
+# Rovai AI v<package.json version>
+
+<!-- lang:en -->
+
+## What's new
+
+- English changes and upgrade guidance.
+
+<!-- lang:zh-CN -->
+
+## 更新内容
+
+- 中文更新内容及升级提醒。
+```
+
+公共前言只放两种语言共用的内容；升级提醒等需要翻译的内容必须分别写入对应语言段。
+`check-release-source.mjs` 和 Server draft 组装使用同一个 CommonMark/GFM 解析器，拒绝缺少中英文、
+重复语言标记、格式歧义或空语言段。仅隐藏注释、HTML、定义、禁用图片及递归空容器不算正文，
+不能用它们满足非空门禁。GitHub Release 正文使用完整文件（`--notes-file`），不能只取一种语言；
+Server draft 流程已直接复用此源。manifest 与内嵌日志也保留完整原文。
+应用展示按当前界面语言选择副本，匹配缺失或为空时按 v7 回退；无标记历史、全空或异常分段保留全文。
+文档级链接和完整脚注按原文 first-wins 保留，不能依赖所选语言段覆写同名定义；建议使用不同标识符。
+切换界面语言不发请求、不重置日志版本选择、不修改 updater 快照；具体显示规则见
+[App Update v7](../contracts/app-update-v7.md#document-level-definitions-and-display-cleanup)，不属于发布字节变更。
 
 Desktop Main 也在构建时内嵌此文件，并只在首标题与运行版本完全匹配时把它作为当前版本日志投影给
 Renderer。更新页离线显示当前日志；新版日志继续只来自既有更新检查结果。`releaseInfo.releaseNotesFile`

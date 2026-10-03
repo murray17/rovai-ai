@@ -1,5 +1,5 @@
 ---
-version: 17
+version: 18
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -281,6 +281,13 @@ tabs to switch between new and installed versions; the switch does not start a n
 an explicit empty state. A duplicate first version heading is removed only from the display copy; long notes scroll
 within a bounded region, and all notes use the shared safe Markdown renderer. Renderer receives no remote HTML, local
 installer path or updater credential.
+
+更新日志正文跟随当前界面语言即时切换，中文与英文不并列重复展示。保持当前/新版本 tab 选择，
+不增加语言选择器、额外请求或冗长提示。历史无标记说明保留完整原文；缺少当前语言则显示一个
+可用语言版本，全空或歧义格式保留全文。分段、隐藏空容器准入、回退与文档级链接/完整脚注规则由
+[App Update v7](../../../../docs/contracts/app-update-v7.md)拥有，组件职责见
+[更新架构](../../../../docs/architecture/desktop-app-updates.md#多语言发布与展示)。最终仍通过共享
+`SafeMarkdown`，不改写发布快照；语言变化不重挂载页面或改变更新资格。
 
 Downloading shows determinate percent, transferred/total bytes and speed without blocking navigation or
 ordinary App use. Repeated download requests visibly remain one operation. Download completion changes the

@@ -5,7 +5,7 @@ import { displayReleaseNotes } from './release-notes-display'
 import { SafeMarkdown } from './SafeMarkdown'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import type { AppUpdateActionError, AppUpdatesController } from './useAppUpdates'
-import { UiText, uiAttribute } from './interface-language'
+import { UiText, uiAttribute, useInterfaceLanguage } from './interface-language'
 
 export function AboutUpdatesSettings({
   updates
@@ -275,9 +275,10 @@ function ReleaseNotesBody({ release, installed, showContext }: {
   installed: boolean
   showContext: boolean
 }): React.JSX.Element {
+  const language = useInterfaceLanguage()
   const notes = useMemo(
-    () => displayReleaseNotes(release),
-    [release.version, release.releaseName, release.releaseNotes]
+    () => displayReleaseNotes(release, language),
+    [release.version, release.releaseName, release.releaseNotes, language]
   )
   return <div className="about-release-body" data-notes-version={release.version}>
     <div className="about-release-header">
