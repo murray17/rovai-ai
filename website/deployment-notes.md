@@ -1,8 +1,18 @@
 # Deployment documentation delivery notes
 
+## Desktop and Server 0.4.3 unified publication
+
+The current Desktop and Server downloads share [`v0.4.3`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.3), built from the frozen main commit `085684b5c1f273cfec49f577e0871a3bb32c0a4b`. All 16 release assets were verified against their local SHA-256 values and GitHub digests, and anonymous public downloads were checked before promoting `scripts/server-release-tag.txt` to `v0.4.3`. The legacy `scripts/server-channel.txt` remains `0.4.1` for the bridge path. PR #626 merged after the build source was frozen and is not included in these packages.
+
+The [macOS](https://github.com/murray17/rovai-ai/actions/runs/37110546600), [Windows](https://github.com/murray17/rovai-ai/actions/runs/37110546720), [four-target Server](https://github.com/murray17/rovai-ai/actions/runs/37110546639), and [native Windows Desktop](https://github.com/murray17/rovai-ai/actions/runs/37110546882) release checks passed on that exact source commit. Ubuntu 22.04, Debian 12, and Ubuntu 24.04 passed the same Linux package checks, bound to manifest SHA-256 `2432bc2be18947f4bea40cb32dbd220cff2516b5bbaebc0d25d111b9c0d75f45`; their `runtimeQualification` field remains `false`. The first Debian VM attempt lost its SSH connection before application acceptance; rerunning only failed jobs passed without rebuilding or changing the package.
+
+On macOS arm64, the native updater installation engine upgraded an isolated copy of the actual published Desktop 0.4.2 App to 0.4.3. The upgraded App's About & Updates checks passed in light, dark, compact, and 200% layouts, including the packaged English notes and release date. This did not modify or restart the daily App and does not claim an end-to-end production network download through the update button. An isolated Server 0.4.2 → 0.4.3 upgrade retained its existing conversation message in the authenticated Web workspace; restoring the complete stopped backup returned to 0.4.2 with its data intact. No real Runtime execution was part of these package acceptance checks.
+
+Website version labels, downloads, and installer examples now use 0.4.3. Historical captures and publication records below retain their actual versions and provenance.
+
 ## Desktop and Server 0.4.2 unified publication
 
-The current Desktop and Server downloads share [`v0.4.2`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.2), built from main commit `37877cbd41e47a43c328cbb7021a20c3a5ec8b58`. All 16 release assets were verified against their local SHA-256 values and GitHub digests, and anonymous public downloads were checked before promoting `scripts/server-release-tag.txt` to `v0.4.2`. The legacy `scripts/server-channel.txt` remains `0.4.1` for the bridge path.
+The previous Desktop and Server downloads share [`v0.4.2`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.2), built from main commit `37877cbd41e47a43c328cbb7021a20c3a5ec8b58`. All 16 release assets were verified against their local SHA-256 values and GitHub digests, and anonymous public downloads were checked before promoting `scripts/server-release-tag.txt` to `v0.4.2`. The legacy `scripts/server-channel.txt` remains `0.4.1` for the bridge path.
 
 The [macOS](https://github.com/murray17/rovai-ai/actions/runs/36716614690), [Windows](https://github.com/murray17/rovai-ai/actions/runs/36716615437), and [four-target Server](https://github.com/murray17/rovai-ai/actions/runs/36716615398) release runs passed on that exact source commit. Ubuntu 22.04, Debian 12, and Ubuntu 24.04 passed the same Linux package checks, bound to manifest SHA-256 `49c4c85d26a647777bd67c34bfae11810b52c521a8f0f13541e1a3d27f61aa00`; their `runtimeQualification` field remains `false`.
 
