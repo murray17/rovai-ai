@@ -43,6 +43,7 @@ pub enum AdapterKind {
     OpencodeCli,
     CopilotCli,
     ClaudeCodeCli,
+    ClineCli,
     KiroCli,
     QoderCli,
     CodebuddyCli,
@@ -100,12 +101,13 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::CodexCli,
         Self::Pi,
         Self::OpencodeCli,
         Self::CopilotCli,
         Self::ClaudeCodeCli,
+        Self::ClineCli,
         Self::AntigravityApp,
         Self::KiroCli,
         Self::QoderCli,
@@ -126,6 +128,7 @@ impl AdapterKind {
             Self::OpencodeCli => "opencode-cli",
             Self::CopilotCli => "copilot-cli",
             Self::ClaudeCodeCli => "claude-code-cli",
+            Self::ClineCli => "cline-cli",
             Self::KiroCli => "kiro-cli",
             Self::QoderCli => "qoder-cli",
             Self::CodebuddyCli => "codebuddy-cli",
@@ -147,6 +150,7 @@ impl AdapterKind {
             Self::OpencodeCli => "opencode",
             Self::CopilotCli => "copilot",
             Self::ClaudeCodeCli => "claude",
+            Self::ClineCli => "cline",
             Self::KiroCli => "kiro-cli",
             Self::QoderCli => "qodercli",
             Self::CodebuddyCli => "codebuddy",
@@ -178,6 +182,7 @@ impl AdapterKind {
             Self::OpencodeCli => &["opencode"],
             Self::CopilotCli => &["copilot"],
             Self::ClaudeCodeCli => &["claude"],
+            Self::ClineCli => &["cline"],
             Self::KiroCli => &["kiro-cli"],
             Self::QoderCli => &["qodercli"],
             Self::CodebuddyCli => &["codebuddy"],
@@ -194,6 +199,7 @@ impl AdapterKind {
             Self::OpencodeCli => "OpenCode",
             Self::CopilotCli => "GitHub Copilot",
             Self::ClaudeCodeCli => "Claude Code",
+            Self::ClineCli => "Cline",
             Self::KiroCli => "Kiro",
             Self::QoderCli => "Qoder",
             Self::CodebuddyCli => "CodeBuddy",
@@ -213,6 +219,7 @@ impl AdapterKind {
             self,
             Self::OpencodeCli
                 | Self::CopilotCli
+                | Self::ClineCli
                 | Self::KiroCli
                 | Self::QoderCli
                 | Self::CodebuddyCli
@@ -233,6 +240,7 @@ impl AdapterKind {
             Self::OpencodeCli => "ROVAI_OPENCODE_BIN",
             Self::CopilotCli => "ROVAI_COPILOT_BIN",
             Self::ClaudeCodeCli => "ROVAI_CLAUDE_CODE_BIN",
+            Self::ClineCli => "ROVAI_CLINE_BIN",
             Self::KiroCli => "ROVAI_KIRO_BIN",
             Self::QoderCli => "ROVAI_QODER_BIN",
             Self::CodebuddyCli => "ROVAI_CODEBUDDY_BIN",
@@ -258,6 +266,7 @@ impl AdapterKind {
             | Self::Pi
             | Self::OpencodeCli
             | Self::CopilotCli
+            | Self::ClineCli
             | Self::ClaudeCodeCli
             | Self::KiroCli
             | Self::QoderCli
@@ -282,6 +291,7 @@ impl AdapterKind {
             | Self::Pi
             | Self::OpencodeCli
             | Self::CopilotCli
+            | Self::ClineCli
             | Self::ClaudeCodeCli
             | Self::KiroCli
             | Self::QoderCli
@@ -308,6 +318,7 @@ impl FromStr for AdapterKind {
             "opencode-cli" => Ok(Self::OpencodeCli),
             "copilot-cli" => Ok(Self::CopilotCli),
             "claude-code-cli" => Ok(Self::ClaudeCodeCli),
+            "cline-cli" => Ok(Self::ClineCli),
             "kiro-cli" => Ok(Self::KiroCli),
             "qoder-cli" => Ok(Self::QoderCli),
             "codebuddy-cli" => Ok(Self::CodebuddyCli),
@@ -3918,7 +3929,8 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::CursorAgent
         | AdapterKind::KimiCodeCli
         | AdapterKind::GrokBuild
-        | AdapterKind::DeepseekHarness => "acp-v1",
+        | AdapterKind::DeepseekHarness
+        | AdapterKind::ClineCli => "acp-v1",
         AdapterKind::ZcodeApp => crate::zcode::PROTOCOL,
     }
 }

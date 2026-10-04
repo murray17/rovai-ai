@@ -7,6 +7,7 @@ pub mod application;
 mod builtin_tool_runtime;
 mod claude;
 mod claude_control;
+pub(crate) mod cline;
 mod codex;
 pub(crate) mod command_code;
 mod command_code_activity;

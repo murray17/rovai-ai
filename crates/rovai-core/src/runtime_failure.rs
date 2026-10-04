@@ -334,6 +334,7 @@ fn runtime_display_name(runtime_kind: AdapterKind) -> &'static str {
         AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::DeepseekHarness => "DeepSeek Harness",
+        AdapterKind::ClineCli => "Cline",
         AdapterKind::AntigravityApp => "Antigravity",
         AdapterKind::ZcodeApp => "ZCode",
     }

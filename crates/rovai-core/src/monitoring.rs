@@ -2038,6 +2038,7 @@ fn eligible_mask(runtime: AdapterKind, _runtime_version: Option<&str>) -> i64 {
         AdapterKind::ZcodeApp => {
             ELIGIBLE_PROMPT_INPUT_TOTAL | ELIGIBLE_CACHE_READ | ELIGIBLE_OUTPUT
         }
+        AdapterKind::ClineCli => full_tokens,
         AdapterKind::DeepseekHarness => {
             ELIGIBLE_UNCACHED_INPUT
                 | ELIGIBLE_CACHE_READ
@@ -3221,6 +3222,16 @@ pub fn parse_acp_usage_message(
             context_model_id: None,
             occurred_at: None,
         }];
+    }
+    if adapter_kind == AdapterKind::ClineCli && method == "session/update" {
+        return params
+            .pointer("/update/_meta/clineObservations")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|record| record["sessionId"] == params["sessionId"])
+            .flat_map(crate::cline::parse_observations)
+            .collect();
     }
     if adapter_kind == AdapterKind::DeepseekHarness && method == "session/update" {
         let update = &params["update"];
@@ -5465,6 +5476,34 @@ mod tests {
             );
             assert_eq!(normalized.output_tokens, usage["outputTokens"].as_i64());
         }
+        let cline = parse_acp_usage_message(
+            AdapterKind::ClineCli,
+            Some("3.0.65"),
+            "session/update",
+            &json!({"sessionId":"cline-session","update":{"sessionUpdate":"usage_update","_meta":{"clineObservations":[
+                {"schemaVersion":1,"kind":"model_completed","sessionId":"other-session","runId":"wrong","messageId":"wrong","metrics":{"inputTokens":900}},
+                {"schemaVersion":1,"kind":"model_completed","sessionId":"cline-session","runId":"native-run","messageId":"model-message","metrics":{"inputTokens":110,"cacheReadTokens":100,"cacheWriteTokens":0,"outputTokens":7}}
+            ]}}}),
+        );
+        assert_eq!(cline.len(), 2);
+        assert_eq!(cline[0].identity_suffix, "native-run:model-message");
+        assert_eq!(cline[0].native_session_id.as_deref(), Some("cline-session"));
+        let cline_normalized = normalize_usage(&cline[0]).unwrap();
+        assert_eq!(cline_normalized.prompt_input_total_tokens, Some(110));
+        assert_eq!(cline_normalized.uncached_input_tokens, Some(10));
+        assert_eq!(cline_normalized.cache_read_tokens, Some(100));
+        assert_eq!(cline_normalized.output_tokens, Some(7));
+        assert!(cline[0].cost.is_none());
+        assert_eq!(cline[0].scope, "model_call");
+        assert_eq!(cline_normalized.cache_observable_request_count, Some(1));
+        assert_eq!(cline_normalized.cache_hit_request_count, Some(1));
+        assert_eq!(cline[1].counter_mode, RuntimeUsageCounterMode::Gauge);
+        assert_eq!(cline[1].fields.context_used_tokens, Some(110));
+        assert_eq!(cline[1].fields.context_size_tokens, None);
+        assert_eq!(
+            normalize_usage(&cline[1]).unwrap(),
+            UsageCounters::default()
+        );
 
         // ACP terminal Usage can be a single final call. It must never become
         // a complete Run merely because a version differs from the witness.

@@ -90,6 +90,39 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+<a id="command-code--cline-数值通道2026-10-04"></a>
+## Command Code / Cline 数值通道（2026-10-04）
+
+新增 owner 按数值来源和失败边界划分，不复制公共 Monitoring fixture：
+
+| Owner | 独立失败语义与最低成本 |
+| --- | --- |
+| `command_code::tests::usage_counts_root_calls_once_and_keeps_context_separate` | root start/end 配对、终态重述/子事件去重、稀疏桶和最新 Context；现有 decoder 只拥有帧和权威终态，不能证明计量语义。纯事件进入默认层 |
+| `cline::tests::observer_records_are_private_bounded_and_owned_by_one_prompt` | 新的官方 Plugin 文件边界：精确 lease、跨 Run/重复序号、预算、只读 poll 与终态消费；复用单个最小临时目录，归入 extended-tests。纯 DTO 不能证明文件隔离/消费 |
+| `cline::tests::host_overlay_preserves_native_paths_and_fences_config_changes` | Host 私有配置必须保留原生路径/插件、合并 MCP、限制文件权限并感知 credential 变化；最小文件 fixture，归入 extended-tests，不启动进程/数据库/模型 |
+| `db::tests::cline_catalog_migration_preserves_rows_and_rolls_back_with_its_receipt` | 新的已部署 schema 133 来源，七个 CHECK 表及其触发器/收据/marker 必须在故障后整体回滚；沿用 extended-tests 数据库 owner 层级。旧 DSH migration 不拥有此来源；纯函数无法证明事务回滚与重开 |
+
+真实 `isolated_command_code_reports_live_calls_and_exact_resume_usage` 和
+`isolated_cline_acp_host_observes_warm_and_exact_cold_prompts` 使用显式原因的 ignored Smoke，
+只接受隔离环境与真实凭据。前者核对逐调用四桶和等于原生最终 result，并证明 Context 在结束前到达；
+后者覆盖共享 Host/原生 Plugin seam、live/terminal 去重、精确恢复及工具/取消行为。
+普通 fixture 无法证明当前官方 Runtime 和模型实际返回这些字段。数值记录及环境约束见
+[真实验收](../research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+
+现有 Command transport owner 扩展为大 stdin 与两个输出管道同时阻塞的回归，并验证写入期间可取消，
+不新增等价进程测试。现有 Monitoring parser/flush、ACP event 和数据库 preflight/来源矩阵 owner
+直接加入 Cline case。JS 的 `scripts/lib/cline-observer.test.mjs` 独立拥有官方 Hook 对私有正文、子代理、
+迟到调用与非数值字段的排除；已进入 `pnpm test`。没有退役测试。
+
+合入主干指标后，既有 TRAE LRU owner 将 `models --json` 查询与 `acp serve` Host 启动分别计数，
+仍要求两个 prompt 共用同一 Host/Session。原 `private_host_config_is_created_only_for_kiro` 更名为
+`private_host_config_is_scoped_to_profiles_that_require_it`，保留全部原输入并补 Cline 私有目录 case。
+
+最小命令：`cargo test -p rovai-core --features extended-tests --lib command_code::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib cline::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib cline_catalog_migration_preserves_rows_and_rolls_back_with_its_receipt`；
+其余定向与真实 Smoke 命令见上述验收记录，默认 workspace 门禁仍按下方路由。
+
 ## Thread 执行查询
 
 `thread_runs::tests` 拥有新的输入/游标封闭边界与 Unicode 预览语义；现有 owner 没有执行游标或该截断约定，

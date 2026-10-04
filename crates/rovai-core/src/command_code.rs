@@ -10,13 +10,19 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
     sync::{mpsc, oneshot},
+    task::JoinHandle,
+    time::{Duration, timeout},
 };
 
+use crate::builtin_tool_runtime::BuiltinToolProcessConfig;
 use crate::command_code_activity::{CommandCodeActivityNormalizer, CommandCodeRuntimeEvent};
 use crate::context::{CharterDeliveryMode, PreparedContext};
 use crate::managed_process::{
     ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
     ManagedWindowsArgvDialect,
+};
+use crate::monitoring::{
+    ParsedRuntimeUsage, RuntimeInputSemantics, RuntimeUsageCounterMode, RuntimeUsageFields,
 };
 
 const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -24,8 +30,25 @@ const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
 // Its final `result` is a separate, bounded frame and is the only terminal
 // authority we consume.
 const RUN_END_PREFIX: &[u8] = b"{\"type\":\"event\",\"event\":{\"type\":\"run_end\"";
+const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 
-#[derive(Debug)]
+/// Only native modes with real headless evidence are admitted here. This is
+/// independent of workspace access and never silently changes a saved mode.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CommandCodePermissionMode {
+    DontAsk,
+    Yolo,
+}
+
+impl CommandCodePermissionMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DontAsk => "dont-ask",
+            Self::Yolo => "yolo",
+        }
+    }
+}
+
 pub(crate) struct CommandCodeHeadlessRequest {
     pub executable_path: PathBuf,
     pub execution_root: PathBuf,
@@ -38,10 +61,102 @@ pub(crate) struct CommandCodeHeadlessRequest {
     pub max_turns: Option<u16>,
     pub local_only: bool,
     pub trust_project: bool,
+    pub permission_mode: CommandCodePermissionMode,
+    /// Shared per-Run CLI lease; secrets stay in the native process environment.
+    pub builtin_tools: Option<BuiltinToolProcessConfig>,
     pub ownership: String,
     /// Only normalized public activity crosses this channel. Native
     /// `run_end.nextState` contains the private transcript.
     pub events: Option<mpsc::UnboundedSender<CommandCodeRuntimeEvent>>,
+    /// Private numeric stream; never routed through public Activity/Evidence.
+    pub usage_events: Option<mpsc::UnboundedSender<ParsedRuntimeUsage>>,
+}
+
+#[derive(Default)]
+pub(crate) struct CommandCodeUsageObserver {
+    session_id: Option<String>,
+    next_call: u64,
+    active_call: Option<(u64, String)>,
+}
+
+impl CommandCodeUsageObserver {
+    pub(crate) fn observe(&mut self, event: &Value) -> Vec<ParsedRuntimeUsage> {
+        match event["type"].as_str() {
+            Some("run_start") => {
+                self.session_id = event["sessionId"]
+                    .as_str()
+                    .filter(|id| validate_session_id(id).is_ok())
+                    .map(str::to_owned);
+                self.active_call = None;
+                Vec::new()
+            }
+            Some("model_request_start") if self.session_id.is_some() => {
+                self.next_call = self.next_call.saturating_add(1);
+                self.active_call = event["model"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(|id| (self.next_call, id.to_owned()));
+                Vec::new()
+            }
+            Some("model_request_end") => {
+                let Some((call, model)) = self.active_call.take() else {
+                    return Vec::new();
+                };
+                if event["model"].as_str() != Some(model.as_str()) {
+                    return Vec::new();
+                }
+                let count = |key: &str| event["usage"][key].as_i64().filter(|n| *n >= 0);
+                let fields = RuntimeUsageFields {
+                    input_tokens: count("inputTokens"),
+                    output_tokens: count("outputTokens"),
+                    cache_read_input_tokens: count("cacheReadTokens"),
+                    cache_write_input_tokens: count("cacheWriteTokens"),
+                    ..Default::default()
+                };
+                if fields.input_tokens.is_none()
+                    && fields.output_tokens.is_none()
+                    && fields.cache_read_input_tokens.is_none()
+                    && fields.cache_write_input_tokens.is_none()
+                {
+                    return Vec::new();
+                }
+                let usage = ParsedRuntimeUsage {
+                    identity_suffix: format!("model-call:{call}"),
+                    dialect_id: "command-code-native-model-usage-v1".into(),
+                    source: "runtime_event".into(),
+                    scope: "model_call".into(),
+                    counter_mode: RuntimeUsageCounterMode::Delta,
+                    input_semantics: RuntimeInputSemantics::CacheInclusiveTotal,
+                    native_session_id: self.session_id.clone(),
+                    native_turn_id: None,
+                    fields,
+                    cost: None,
+                    context_model_id: None,
+                    occurred_at: Some(chrono::Utc::now().to_rfc3339()),
+                };
+                let mut observations = vec![usage.clone()];
+                if let Some(used) = usage.fields.input_tokens {
+                    observations.push(ParsedRuntimeUsage {
+                        identity_suffix: format!("model-call:{call}:context"),
+                        dialect_id: "command-code-native-model-context-v1".into(),
+                        scope: "session".into(),
+                        counter_mode: RuntimeUsageCounterMode::Gauge,
+                        input_semantics: RuntimeInputSemantics::Unknown,
+                        fields: RuntimeUsageFields {
+                            context_used_tokens: Some(used),
+                            ..Default::default()
+                        },
+                        context_model_id: Some(model),
+                        ..usage
+                    });
+                }
+                observations
+            }
+            // turn_end and result restate model_request_end. run_end contains
+            // the private transcript; child-agent wrappers are not root calls.
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -248,7 +363,10 @@ fn command_for(request: &CommandCodeHeadlessRequest) -> Result<Command> {
         .arg("--print")
         .args(["--output-format", "json"])
         .arg("--no-auto-update")
-        .args(["--permission-mode", "dont-ask"]);
+        .args(["--permission-mode", request.permission_mode.as_str()]);
+    if let Some(config) = request.builtin_tools.as_ref() {
+        config.configure_command(&mut command)?;
+    }
     if request.trust_project {
         command.arg("--trust");
     }
@@ -281,7 +399,8 @@ fn command_for(request: &CommandCodeHeadlessRequest) -> Result<Command> {
 /// Runs a single headless turn through the shared process owner. This
 /// transport is not a Product Runtime adapter: it consumes the shared frozen
 /// Context input but does not materialize Context or project Skills, MCP,
-/// Tool actions, or permission approvals.
+/// Tool actions, or permission approvals. The caller owns the selected native
+/// permission mode and any Built-in CLI lease.
 pub(crate) async fn run_headless(
     request: CommandCodeHeadlessRequest,
     interrupted: oneshot::Receiver<()>,
@@ -304,75 +423,130 @@ pub(crate) async fn run_headless(
     let stderr = child
         .take_stderr()
         .context("Command Code stderr unavailable")?;
-    stdin
-        .write_all(request.prepared_context.runtime_payload.as_bytes())
-        .await?;
-    stdin.shutdown().await?;
-    drop(stdin);
-
     let expected_session_id = request.resume_session_id;
-    let mut stdout_task = tokio::spawn(async move {
-        capture_stdout(stdout, expected_session_id.as_deref(), request.events).await
+    let stdout_task = tokio::spawn(async move {
+        capture_stdout(
+            stdout,
+            expected_session_id.as_deref(),
+            request.events,
+            request.usage_events,
+        )
+        .await
     });
-    let mut stderr_task = tokio::spawn(capture_stderr(stderr));
+    let stderr_task = tokio::spawn(capture_stderr(stderr));
+    // Some runtimes emit their startup frames before draining stdin. All
+    // pipes must run concurrently, including cancellation during a large write.
+    let stdin_task = tokio::spawn(async move {
+        stdin
+            .write_all(request.prepared_context.runtime_payload.as_bytes())
+            .await
+            .context("failed to write Command Code input")?;
+        stdin
+            .shutdown()
+            .await
+            .context("failed to close Command Code input")
+    });
+    let mut tasks = CommandCodeIoTasks {
+        stdin: stdin_task,
+        stdout: stdout_task,
+        stderr: stderr_task,
+    };
     tokio::pin!(interrupted);
+    let mut stdin_result = None;
     let mut stdout_result = None;
     let mut stderr_result = None;
-    let (status, was_interrupted) = loop {
+    let outcome = loop {
         tokio::select! {
-            status = child.wait() => break (status.context("failed to wait for Command Code")?, false),
-            result = &mut stdout_task, if stdout_result.is_none() => {
-                match result.context("Command Code stdout collector failed")? {
+            status = child.wait() => break status.context("failed to wait for Command Code"),
+            result = &mut tasks.stdin, if stdin_result.is_none() => {
+                match result.context("Command Code stdin writer failed").and_then(|value| value) {
+                    Ok(()) => stdin_result = Some(()),
+                    Err(error) => break Err(error),
+                }
+            }
+            result = &mut tasks.stdout, if stdout_result.is_none() => {
+                match result.context("Command Code stdout collector failed").and_then(|value| value) {
                     Ok(value) => stdout_result = Some(value),
-                    Err(error) => {
-                        let _ = child.force_terminate_tree();
-                        let _ = child.wait().await;
-                        return Err(error);
-                    }
+                    Err(error) => break Err(error),
                 }
             }
-            result = &mut stderr_task, if stderr_result.is_none() => {
-                match result.context("Command Code stderr collector failed")? {
+            result = &mut tasks.stderr, if stderr_result.is_none() => {
+                match result.context("Command Code stderr collector failed").and_then(|value| value) {
                     Ok(value) => stderr_result = Some(value),
-                    Err(error) => {
-                        let _ = child.force_terminate_tree();
-                        let _ = child.wait().await;
-                        return Err(error);
-                    }
+                    Err(error) => break Err(error),
                 }
             }
-            _ = &mut interrupted => {
-                child.force_terminate_tree()?;
-                break (child.wait().await.context("failed to reap Command Code")?, true);
-            }
+            _ = &mut interrupted => break Err(anyhow::anyhow!("Command Code was interrupted")),
         }
     };
-    let _ = child.force_terminate_tree();
+    // Settle the whole owned tree even after a nominally successful root exit.
+    // Collector errors and cancellation share this path; no detached reader or
+    // writer task may retain a pipe after the transport returns.
+    child
+        .force_terminate_tree()
+        .context("failed to stop Command Code process tree")?;
+    timeout(CLEANUP_TIMEOUT, child.wait())
+        .await
+        .context("Command Code process reap timed out")??;
+    #[cfg(windows)]
+    timeout(CLEANUP_TIMEOUT, async {
+        while !child.tree_is_empty()? {
+            child.force_terminate_tree()?;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        Ok::<(), anyhow::Error>(())
+    })
+    .await
+    .context("Command Code process tree cleanup timed out")??;
+    let status = outcome?;
+    if stdin_result.is_none() {
+        timeout(CLEANUP_TIMEOUT, &mut tasks.stdin)
+            .await
+            .context("Command Code stdin did not settle")?
+            .context("Command Code stdin writer failed")??;
+    }
     let decoded = match stdout_result {
         Some(value) => value,
-        None => stdout_task
+        None => timeout(CLEANUP_TIMEOUT, &mut tasks.stdout)
             .await
+            .context("Command Code stdout did not settle")?
             .context("Command Code stdout collector failed")??,
     };
     let stderr_bytes = match stderr_result {
         Some(value) => value,
-        None => stderr_task
+        None => timeout(CLEANUP_TIMEOUT, &mut tasks.stderr)
             .await
+            .context("Command Code stderr did not settle")?
             .context("Command Code stderr collector failed")??,
     };
-    ensure!(!was_interrupted, "Command Code was interrupted");
     decoded
         .finish(status.success())
         .with_context(|| format!("Command Code exited with {status}; stderrBytes={stderr_bytes}"))
+}
+
+struct CommandCodeIoTasks {
+    stdin: JoinHandle<Result<()>>,
+    stdout: JoinHandle<Result<CommandCodeHeadlessDecoder>>,
+    stderr: JoinHandle<Result<usize>>,
+}
+
+impl Drop for CommandCodeIoTasks {
+    fn drop(&mut self) {
+        self.stdin.abort();
+        self.stdout.abort();
+        self.stderr.abort();
+    }
 }
 
 async fn capture_stdout(
     mut stdout: impl AsyncRead + Unpin,
     expected_session_id: Option<&str>,
     events: Option<mpsc::UnboundedSender<CommandCodeRuntimeEvent>>,
+    usage_events: Option<mpsc::UnboundedSender<ParsedRuntimeUsage>>,
 ) -> Result<CommandCodeHeadlessDecoder> {
     let mut decoder = CommandCodeHeadlessDecoder::new(expected_session_id)?;
     let mut activity = CommandCodeActivityNormalizer::default();
+    let mut usage = CommandCodeUsageObserver::default();
     let mut buffer = [0u8; 8192];
     let mut line = Vec::new();
     let mut skip_run_end = false;
@@ -388,6 +562,11 @@ async fn capture_stdout(
                     line.clear();
                 } else if !line.is_empty() {
                     if let Some(event) = decoder.consume_line(&line)? {
+                        for observation in usage.observe(&event) {
+                            if let Some(sender) = &usage_events {
+                                let _ = sender.send(observation);
+                            }
+                        }
                         for normalized in activity.observe(&event)? {
                             if let Some(sender) = events.as_ref() {
                                 let _ = sender.send(normalized);
@@ -414,6 +593,11 @@ async fn capture_stdout(
     if !line.is_empty()
         && let Some(event) = decoder.consume_line(&line)?
     {
+        for observation in usage.observe(&event) {
+            if let Some(sender) = &usage_events {
+                let _ = sender.send(observation);
+            }
+        }
         for normalized in activity.observe(&event)? {
             if let Some(sender) = events.as_ref() {
                 let _ = sender.send(normalized);
@@ -439,6 +623,72 @@ async fn capture_stderr(mut stderr: impl AsyncRead + Unpin) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Root call framing owns deduplication: turn/result restatements and child
+    // wrappers cannot prove a new call. Pure events are the lowest-cost owner.
+    #[test]
+    fn usage_counts_root_calls_once_and_keeps_context_separate() {
+        use serde_json::json;
+        let mut observer = CommandCodeUsageObserver::default();
+        observer.observe(
+            &json!({"type":"run_start","sessionId":"11111111-1111-4111-8111-111111111111"}),
+        );
+        let mut calls = Vec::new();
+        for (input, read, output) in [(12075, 0, 115), (12205, 11904, 185), (12319, 11904, 120)] {
+            observer.observe(&json!({"type":"model_request_start","model":"sub2api/gpt-6-sol"}));
+            let end = json!({"type":"model_request_end","model":"sub2api/gpt-6-sol","usage":{"inputTokens":input,"outputTokens":output,"cacheReadTokens":read,"cacheWriteTokens":0}});
+            let parsed = observer.observe(&end);
+            assert_eq!(parsed.len(), 2);
+            assert_eq!(parsed[0].scope, "model_call");
+            assert_eq!(parsed[1].fields.context_used_tokens, Some(input));
+            assert_eq!(parsed[1].fields.context_size_tokens, None);
+            assert_eq!(parsed[1].fields.input_tokens, None);
+            assert_eq!(parsed[0].fields.reasoning_output_tokens, None);
+            assert_eq!(parsed[0].cost, None);
+            calls.push(parsed[0].clone());
+            assert!(observer.observe(&end).is_empty());
+            for kind in ["turn_end", "result", "child_event"] {
+                let mut replay = end.clone();
+                replay["type"] = json!(kind);
+                assert!(observer.observe(&replay).is_empty());
+            }
+        }
+        assert_eq!(
+            calls
+                .iter()
+                .map(|u| u.fields.input_tokens.unwrap())
+                .sum::<i64>(),
+            36599
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .map(|u| u.fields.output_tokens.unwrap())
+                .sum::<i64>(),
+            420
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .map(|u| u.fields.cache_read_input_tokens.unwrap())
+                .sum::<i64>(),
+            23808
+        );
+        observer.observe(&json!({"type":"model_request_start","model":"sub2api/gpt-6-sol"}));
+        let sparse = observer.observe(&json!({"type":"model_request_end","model":"sub2api/gpt-6-sol","usage":{"outputTokens":0,"inputTokens":-1,"cacheReadTokens":"0"}}));
+        assert_eq!(sparse.len(), 1);
+        assert_eq!(sparse[0].fields.output_tokens, Some(0));
+        assert_eq!(sparse[0].fields.input_tokens, None);
+        assert_eq!(sparse[0].fields.cache_read_input_tokens, None);
+        observer.observe(&json!({"type":"model_request_start","model":"model-a"}));
+        assert!(
+            observer
+                .observe(
+                    &json!({"type":"model_request_end","model":"model-b","usage":{"inputTokens":1}})
+                )
+                .is_empty()
+        );
+    }
 
     #[test]
     fn headless_decoder_fences_session_and_terminal_outcome() {
@@ -487,6 +737,136 @@ mod tests {
         assert!(duplicate.consume_line(br#"{"type":"result","subtype":"error","usage":{},"durationMs":0,"finalText":""}"#).is_err());
     }
 
+    // External opt-in smoke owns the real transport -> numeric stream seam;
+    // deterministic framing and field matrices stay in the pure owner above.
+    #[tokio::test]
+    #[ignore = "requires isolated Command Code Home, BYOK credentials and ROVAI_COMMAND_CODE_SMOKE_ROOT"]
+    async fn isolated_command_code_reports_live_calls_and_exact_resume_usage() {
+        let root = PathBuf::from(std::env::var("ROVAI_COMMAND_CODE_SMOKE_ROOT").unwrap());
+        assert!(root.is_absolute());
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("metric.txt"), "COMMAND_METRICS_VALUE\n").unwrap();
+        let mut resume = None;
+        for (label, prompt) in [
+            (
+                "first",
+                "Reply exactly COMMAND_METRICS_READY without tools.",
+            ),
+            (
+                "resumed-tools",
+                "Read metric.txt, then run the command sleep 6, then reply with the value from the file.",
+            ),
+        ] {
+            let (usage_events, mut observations) = mpsc::unbounded_channel();
+            let (keep_cancel, cancelled) = oneshot::channel();
+            let expected_session = resume.clone();
+            let request = CommandCodeHeadlessRequest {
+                executable_path: PathBuf::from(
+                    std::env::var("ROVAI_COMMAND_CODE_SMOKE_EXECUTABLE").unwrap(),
+                ),
+                execution_root: root.clone(),
+                prepared_context: PreparedContext {
+                    manifest_id: "isolated-numeric-smoke".into(),
+                    bootstrap_evidence_id: "isolated-numeric-smoke".into(),
+                    rendered_payload: prompt.into(),
+                    rendered_payload_digest: "isolated-numeric-smoke".into(),
+                    runtime_payload: prompt.into(),
+                    charter_delivery_mode: CharterDeliveryMode::FirstPayload,
+                    bootstrap_in_runtime_payload: false,
+                    bootstrap_redelivery_revision: None,
+                    expected_binding_generation: 1,
+                    requires_new_native_session: resume.is_none(),
+                    camp_message_boundary_sequence: 0,
+                    collaboration_state_digest: "isolated-numeric-smoke".into(),
+                },
+                resume_session_id: resume,
+                model_id: Some("sub2api/gpt-6-sol".into()),
+                max_turns: Some(8),
+                local_only: true,
+                trust_project: true,
+                permission_mode: CommandCodePermissionMode::Yolo,
+                builtin_tools: None,
+                ownership: format!("command-code-real-metrics-{label}"),
+                events: None,
+                usage_events: Some(usage_events),
+            };
+            let running = tokio::spawn(run_headless(request, cancelled));
+            let mut usage = Vec::new();
+            let mut live_context = false;
+            while let Some(item) = timeout(Duration::from_secs(180), observations.recv())
+                .await
+                .unwrap()
+            {
+                if item.fields.context_used_tokens.is_some_and(|used| used > 0)
+                    && !running.is_finished()
+                {
+                    live_context = true;
+                }
+                eprintln!(
+                    "COMMAND_METRICS {label} {}",
+                    serde_json::to_string(&item).unwrap()
+                );
+                usage.push(item);
+            }
+            let result = running.await.unwrap().unwrap();
+            drop(keep_cancel);
+            assert!(
+                live_context,
+                "context did not arrive before transport completion"
+            );
+            if let Some(expected) = expected_session {
+                assert_eq!(result.session_id, expected);
+            }
+            let calls: Vec<_> = usage.iter().filter(|u| u.scope == "model_call").collect();
+            assert!(!calls.is_empty());
+            if label == "resumed-tools" {
+                assert!(calls.len() >= 2);
+            }
+            for (key, total) in [
+                (
+                    "inputTokens",
+                    calls
+                        .iter()
+                        .map(|u| u.fields.input_tokens.unwrap())
+                        .sum::<i64>(),
+                ),
+                (
+                    "outputTokens",
+                    calls
+                        .iter()
+                        .map(|u| u.fields.output_tokens.unwrap())
+                        .sum::<i64>(),
+                ),
+                (
+                    "cacheReadTokens",
+                    calls
+                        .iter()
+                        .map(|u| u.fields.cache_read_input_tokens.unwrap())
+                        .sum::<i64>(),
+                ),
+                (
+                    "cacheWriteTokens",
+                    calls
+                        .iter()
+                        .map(|u| u.fields.cache_write_input_tokens.unwrap())
+                        .sum::<i64>(),
+                ),
+            ] {
+                assert_eq!(
+                    Some(total),
+                    result.usage[key].as_i64(),
+                    "native result did not reconcile: {key}"
+                );
+            }
+            assert!(
+                usage
+                    .iter()
+                    .all(|u| u.native_session_id.as_deref() == Some(result.session_id.as_str()))
+            );
+            resume = Some(result.session_id);
+        }
+    }
+
     #[cfg(all(unix, feature = "extended-tests"))]
     #[tokio::test]
     async fn managed_headless_process_delivers_stdin_and_exact_resume() {
@@ -519,15 +899,16 @@ printf '%s\n' '{"type":"result","subtype":"success","sessionId":"11111111-1111-4
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-        let mut request = CommandCodeHeadlessRequest {
-            executable_path: executable,
+        let make_request = |payload: String, events| CommandCodeHeadlessRequest {
+            usage_events: None,
+            executable_path: executable.clone(),
             execution_root: root.clone(),
             prepared_context: PreparedContext {
                 manifest_id: "fixture-manifest".into(),
                 bootstrap_evidence_id: "fixture-bootstrap".into(),
                 rendered_payload: "dynamic input".into(),
                 rendered_payload_digest: "fixture-rendered-digest".into(),
-                runtime_payload: "frozen input".into(),
+                runtime_payload: payload,
                 charter_delivery_mode: CharterDeliveryMode::FirstPayload,
                 bootstrap_in_runtime_payload: true,
                 bootstrap_redelivery_revision: Some(1),
@@ -541,9 +922,12 @@ printf '%s\n' '{"type":"result","subtype":"success","sessionId":"11111111-1111-4
             max_turns: Some(2),
             local_only: true,
             trust_project: true,
+            permission_mode: CommandCodePermissionMode::DontAsk,
+            builtin_tools: None,
             ownership: "command-code-transport-test".into(),
-            events: Some(event_tx),
+            events,
         };
+        let mut request = make_request("frozen input".into(), Some(event_tx));
         request.prepared_context.charter_delivery_mode = CharterDeliveryMode::NativeAppend;
         assert!(command_for(&request).is_err());
         request.prepared_context.charter_delivery_mode = CharterDeliveryMode::FirstPayload;
@@ -559,6 +943,64 @@ printf '%s\n' '{"type":"result","subtype":"success","sessionId":"11111111-1111-4
             "agent.text.completed"
         );
         assert!(event_rx.try_recv().is_err());
+
+        // Regression: a native startup can fill both output pipes before it
+        // reads a prompt larger than stdin's buffer. Sequential write/read
+        // deadlocks here; all three pipes must be driven concurrently.
+        std::fs::write(&executable, r##"#!/bin/sh
+head -c 262144 /dev/zero >&2
+i=0
+while [ "$i" -lt 4000 ]; do
+  printf '%s\n' '{"type":"event","event":{"type":"startup_diagnostic"}}'
+  i=$((i + 1))
+done
+count=$(wc -c)
+[ "$count" -eq 1048576 ] || exit 44
+printf '%s\n' '{"type":"event","event":{"type":"run_start","sessionId":"11111111-1111-4111-8111-111111111111"}}'
+printf '%s\n' '{"type":"event","event":{"type":"turn_start","turnNumber":1}}'
+printf '%s\n' '{"type":"result","subtype":"success","sessionId":"11111111-1111-4111-8111-111111111111","stopReason":"end_turn","usage":{},"durationMs":5,"finalText":"drained"}'
+"##).unwrap();
+        let (keep_cancel, cancel) = oneshot::channel();
+        let result = timeout(
+            Duration::from_secs(10),
+            run_headless(make_request("x".repeat(1024 * 1024), None), cancel),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.final_text, "drained");
+        drop(keep_cancel);
+
+        // Cancellation must work while the native process never reads stdin.
+        // A public marker is the handshake, so no timing sleep owns this case.
+        std::fs::write(&executable, r##"#!/bin/sh
+printf '%s\n' '{"type":"event","event":{"type":"run_start","sessionId":"11111111-1111-4111-8111-111111111111"}}'
+printf '%s\n' '{"type":"event","event":{"type":"turn_start","turnNumber":1}}'
+printf '%s\n' '{"type":"event","event":{"type":"message_start"}}'
+printf '%s\n' '{"type":"event","event":{"type":"text_delta","delta":"blocked stdin"}}'
+exec sleep 30
+"##).unwrap();
+        let (cancel, interrupted) = oneshot::channel();
+        let (events, mut received) = mpsc::unbounded_channel();
+        let running = tokio::spawn(run_headless(
+            make_request("x".repeat(1024 * 1024), Some(events)),
+            interrupted,
+        ));
+        assert_eq!(
+            timeout(Duration::from_secs(5), received.recv())
+                .await
+                .unwrap()
+                .unwrap()
+                .event_type,
+            "agent.text.delta"
+        );
+        cancel.send(()).unwrap();
+        let error = timeout(Duration::from_secs(5), running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("interrupted"), "{error:#}");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

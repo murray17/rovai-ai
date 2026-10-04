@@ -1,21 +1,25 @@
 ---
-document_type: model-context-change-proposal
-runtime: command-code
-baseline_version: v1.70
-target_version: unassigned
+document_type: model-context-change
+version: v1.72
+change_id: command-code-first-payload
 revision: 4
 confirmation_status: confirmed
+confirmed_by: Principal (Camp message f70e9798-8f5c-4428-821f-bd51ec0b99f6)
 confirmed_revision: 4
-confirmation_message_id: f70e9798-8f5c-4428-821f-bd51ec0b99f6
-confirmed_at: 2026-09-26T16:13:15.821661Z
-authority: proposal-only
+confirmed_at: 2026-09-26T16:13:15Z
+authority: proposed-model-input-change-statement
 implementation_status: not_started
 last_updated: 2026-09-27
 ---
 
-# Command Code 普通 Prompt 引导：当前基线提案 revision 4
+# Command Code 普通 Prompt 引导：当前版本 revision 4（已确认）
 
-本提案把[已确认的 revision 3](prompt-guidance-proposal.md)移到合并 `main` 后的当前 Context 基线。相对于 revision 3，投递规则仍是共享 `first_payload`，`B`、`P` 的实际字节随 v1.70 Skills 和 `historyHint` 的公共实现更新。2026-09-27 Principal 已明确确认本方案；共用已接受的 Context formatter 本身不构成 Command Code 独有的上下文变更，也不因同步公共基线重复索要确认。Product Adapter 实施前仍须在届时唯一 current 版本保存独立模型上下文变更说明、版本影响表和相应 Decision；研究提案本身不充当准入决定。
+2026-10-04 归档说明：本文件保留 2026-09-27 已确认的 revision 4 输入快照，迁入当前 v1.72 路由。
+下文的 v1.70 Formatter/Manifest 数字描述确认当时的基线；后续 Thread/User 命名与公共 Skills 变化
+由各自已确认的主干合同拥有。Command Code 继续消费公共 `PreparedContext`，不冻结旧模板、不重写其他
+Runtime 的上下文；本次数值适配没有改变 first_payload 选择规则，正式 AgentRun 接线仍未实施。
+
+本说明把[已确认的 revision 3](../../research/command-code-runtime/prompt-guidance-proposal.md)移到合并 `main` 后的当前 Context 基线。相对于 revision 3，投递规则仍是共享 `first_payload`，`B`、`P` 的实际字节随 v1.70 Skills 和 `historyHint` 的公共实现更新。2026-09-27 Principal 已明确确认本方案；共用已接受的 Context formatter 本身不构成 Command Code 独有的上下文变更，也不因同步公共基线重复索要确认。本文件是当前版本独立的模型上下文变更说明；正式准入仍须当前 Version Decision 和逐轴验收。
 
 ## 变更前：当前精确结构与选择
 
@@ -123,4 +127,4 @@ This is Core recovery context for the existing Native Session, not a new task or
 
 ## 二次确认
 
-本 revision 4 已确认。Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6`（2026-09-26T16:13:15.821661Z / 本地 2026-09-27）表示“command那个我确认了，另外cline就用ACP吧”。确认覆盖本文件的共享 `first_payload` 接入方案；按[核心模型上下文变更治理](../../development/model-context-change-governance.md)保存当前版本说明后可实施。若 Command Code 独有的投递内容、位置、时机或选择语义改变，再递增 revision 并对齐；仅同步已经确认的公共 formatter 不重复索要确认。
+本 revision 4 已确认。Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6`（2026-09-26T16:13:15.821661Z / 本地 2026-09-27）表示“command那个我确认了，另外cline就用ACP吧”。确认覆盖本文件的共享 `first_payload` 接入方案；本文件按[核心模型上下文变更治理](../../development/model-context-change-governance.md)保存当前版本说明。若 Command Code 独有的投递内容、位置、时机或选择语义改变，再递增 revision 并对齐；仅同步已经确认的公共 formatter 不重复索要确认。

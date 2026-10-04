@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-30
+last_updated: 2026-10-04
 ---
 
 # Agent Runtime 兼容性清单
@@ -24,13 +24,24 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## Command Code 研究状态
 
-Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。2026-09-25 又用官方 1.65.2、隔离的现有 BYOK 配置和 `sub2api/gpt-6-sol` 真实完成原生生成、同 UUID 续接、read/edit/command 与手动 compact 后恢复；范围及失败语义见[真实 Smoke](research/command-code-runtime/real-byok-smoke-2026-09-25.md)。这些调用没有经过 Rovai AgentRun 或 App Camp。其曾在 v1.68 基线确认的普通 Prompt 引导见[研究提案 revision 3](research/command-code-runtime/prompt-guidance-proposal.md)；合并后 Bootstrap v5／Manifest v31 的[revision 4](research/command-code-runtime/prompt-guidance-v1.70-proposal.md)待二次确认。当前 Command Code 不在 Product Runtime Catalog，所有目标平台均未取得准入或资格证据。
+Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。2026-09-25 又用官方 1.65.2、隔离的现有 BYOK 配置和 `sub2api/gpt-6-sol` 真实完成原生生成、同 UUID 续接、read/edit/command 与手动 compact 后恢复；范围及失败语义见[真实 Smoke](research/command-code-runtime/real-byok-smoke-2026-09-25.md)。这些调用没有经过 Rovai AgentRun 或 App Camp。其曾在 v1.68 基线确认的普通 Prompt 引导见[研究提案 revision 3](research/command-code-runtime/prompt-guidance-proposal.md)；合并后的 [revision 4](versions/v1.72/model-context-change-command-code.md)已在 2026-09-27 确认，复用共享 first_payload。当前 Command Code 不在 Product Runtime Catalog，所有目标平台均未取得准入或资格证据。
+
+2026-10-04 使用官方 1.66.0 经 Core headless transport 完成真实首次、精确恢复与多工具调用：四个 token 桶的逐调用和与原生 result 完全对齐，最新调用输入独立形成运行中的 Context used。窗口/比例/成本未知；仍无 Product AgentRun 和 App 证据。见[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+
+## Cline 接入实施状态
+
+用户已选择官方 `cline --acp` 并允许 sub2api BYOK。Cline 3.0.65 / macOS arm64 经共享 Core ACP Host
+真实验证首次、warm、A→B→A、exact cold load、read/edit/command、取消与逐调用数值采集。
+四个 token 桶与可选 reasoning 来自官方只读 Plugin，运行中及终态 Context used 已观察到；
+未测到可靠窗口、比例或成本。详见[Cline 矩阵](research/cline-runtime/README.md)和[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+内部 closed identity、发现/Host/Skill/数据库接线已存在，Migration 184 升级 schema 134；
+全平台 `NotQualified`，完整 AgentRun/App、Bootstrap、compaction 与准入仍未完成。
 
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十六种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
+当前 closed `AdapterKind` 包含十七种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
-Grok Build、Pi Coding Agent、ZCode 与 DeepSeek Harness。
+Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness 与实施中的 Cline。Cline identity 的存在不代表 First-Class 或平台已准入。
 Cursor 在三个目标平台均为 `not_qualified`；Pi、Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。Pi 三个平台分别绑定自己的 adapter-scoped evidence，不继承通用 macOS/Windows、
 Kimi 或 Grok 的平台结论。

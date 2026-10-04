@@ -2723,6 +2723,7 @@ fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
         SkillDeliveryGroupKey::Grok => "Grok Build",
         SkillDeliveryGroupKey::Zcode => "ZCode",
         SkillDeliveryGroupKey::Dsh => "DeepSeek Harness",
+        SkillDeliveryGroupKey::Cline => "Cline",
     }
 }
 

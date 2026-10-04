@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-03
+last_updated: 2026-10-04
 ---
 
 # v1.72 版本决定
@@ -266,3 +266,31 @@ User 要求恢复一键新对话在消息模型重构前的草稿行为，并明
 跨客户端只能隔离导航，不提供内容同步或冲突合并。拒绝重建旧 Core Draft、revision 和编辑租约体系：它会逆转
 已完成的公开消息边界重构并引入不必要的多客户端协调。仅保留 Renderer map 也无法满足刷新和重启恢复。
 AI 创建队员的专项窗口内生命周期继续由 D09 对应合同约束。
+
+<a id="v1-72-d12"></a>
+## V1.72-D12：Command Code headless 使用冻结的普通 Prompt Bootstrap
+
+- 状态：accepted
+- 日期：2026-09-27
+- 确认：Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 确认 revision 4
+- 当前权威：[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#command-code-研究接入边界)、[当前版本模型上下文说明](model-context-change-command-code.md)、[Context Delivery Profile 10](../../contracts/context-delivery-profile-v10.md)
+
+### 背景
+
+Command Code 的官方 headless NDJSON 提供精确 Session 恢复，但没有已验证的单次高权限 Bootstrap 输入。受管 Mod 的 `appendSystemPrompt` 能追加原生 System Prompt，却是实验性接口；失败或格式异常可能继续模型调用，不能作为唯一的成员身份和 Charter 交付权威。项目／用户 `AGENTS.md` 又是共享原生状态，无法等同于目标 Native Binding 的冻结输入。
+
+### 选择
+
+候选 Product Adapter 使用现有 `first_payload`：Core 对目标 Native Binding 冻结的 Bootstrap `B` 与每 Run 冻结的动态输入 `P` 作精确选择，新 Session 将 `B + "\n\n" + P` 写入 headless stdin，普通完整 UUID 恢复只写 `P`；合格压缩补发沿用共享 envelope。明确接受此 Runtime 的 `B` 位于普通用户消息、低于 System/Developer 的产品差异，且只限 Command Code；身份、授权、CLI、文件和附件仍由 Core 合同独立约束。此决定允许按已确认方案实施，**不表示**压缩连续性、权限、Skills/MCP、Built-in、Usage、App 或平台 First-Class 已通过。
+
+### 后果
+
+- 用户不能把 Command Code 的 Bootstrap 理解为原生 System/Developer 指令。正式产品说明和资格证据必须保留该差异；若真实任务证明普通 Prompt 不足以维持 Charter 语义，禁止准入并重新提出上下文方案。
+- 新／旧 Binding 与输入摘要继续按共享 Context evidence 冻结，未知接受结果不自动重投，`B` 超预算失败而不截断。
+- Cline 的 ACP/Plugin 上下文方案独立决策；本条不替它接受普通 Prompt 层级。
+
+### 未选择方案
+
+- 将受管 Bootstrap 放进 Command Code Mod：其失败放行语义无法保证每个模型请求都有目标 `B`。
+- 改写共享 `AGENTS.md`：会把成员私有的冻结 Bootstrap 投到项目／用户级并造成跨成员串线。
+- 自封 ACP 代理：只改接口形状，不能补出上游缺失的高权限投递和审批保证。

@@ -391,11 +391,12 @@ pub enum SkillDeliveryGroupKey {
     Kimi,
     Grok,
     Dsh,
+    Cline,
     Zcode,
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
@@ -411,6 +412,7 @@ impl SkillDeliveryGroupKey {
         Self::Kimi,
         Self::Grok,
         Self::Dsh,
+        Self::Cline,
         Self::Zcode,
     ];
 
@@ -431,6 +433,7 @@ impl SkillDeliveryGroupKey {
             Self::Kimi => "kimi",
             Self::Grok => "grok",
             Self::Dsh => "dsh",
+            Self::Cline => "cline",
             Self::Zcode => "zcode",
         }
     }
@@ -452,6 +455,7 @@ impl SkillDeliveryGroupKey {
             Self::Kimi => Path::new(".kimi-code/skills"),
             Self::Grok => Path::new(".grok/skills"),
             Self::Dsh => Path::new(".dsh/skills"),
+            Self::Cline => Path::new(".cline/skills"),
             Self::Zcode => Path::new(".zcode/skills"),
         }
     }
@@ -477,6 +481,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "kimi" => Ok(Self::Kimi),
             "grok" => Ok(Self::Grok),
             "dsh" => Ok(Self::Dsh),
+            "cline" => Ok(Self::Cline),
             "zcode" => Ok(Self::Zcode),
             _ => anyhow::bail!("unsupported Skill delivery group: {value}"),
         }
@@ -801,7 +806,7 @@ impl AgentRuntimeAdapterRegistry {
                 ),
             };
         }
-        if kind == AdapterKind::CursorAgent {
+        if matches!(kind, AdapterKind::CursorAgent | AdapterKind::ClineCli) {
             return RuntimePlatformAdmission::not_qualified(
                 kind,
                 platform,
@@ -891,6 +896,7 @@ impl AgentRuntimeAdapterRegistry {
             }),
             AdapterKind::Pi => json!({}),
             AdapterKind::ZcodeApp => json!({"permission_mode": "yolo"}),
+            AdapterKind::ClineCli => json!({"mode":"act", "auto_approve":"true"}),
             AdapterKind::DeepseekHarness => {
                 json!({"sandbox_mode":"danger-full-access", "approval_policy":"never"})
             }
@@ -957,12 +963,17 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::KimiCodeCli
             | AdapterKind::GrokBuild
             | AdapterKind::ZcodeApp
-            | AdapterKind::DeepseekHarness => resolve_acp_runtime(kind, input),
+            | AdapterKind::DeepseekHarness
+            | AdapterKind::ClineCli => resolve_acp_runtime(kind, input),
         }
     }
 
     pub fn skill_discovery(&self, kind: AdapterKind) -> SkillDiscoveryCapability {
         match kind {
+            AdapterKind::ClineCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Cline],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             AdapterKind::DeepseekHarness => native_skill_discovery(
                 [SkillDeliveryGroupKey::Dsh],
                 SkillDiscoveryVerification::Verified,
@@ -1030,9 +1041,8 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::TraeCnCli
             | AdapterKind::KimiCodeCli
             | AdapterKind::ZcodeApp
-            | AdapterKind::DeepseekHarness => {
-                additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
-            }
+            | AdapterKind::DeepseekHarness
+            | AdapterKind::ClineCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
             AdapterKind::GrokBuild => {
                 additive_native_mcp_projection(McpSameNamePolicy::NativeWinsSkip)
             }
@@ -1052,6 +1062,9 @@ impl AgentRuntimeAdapterRegistry {
         observation: AcpProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         match observation.adapter_kind {
+            AdapterKind::ClineCli => {
+                acp_capability_snapshot(observation, cline_permission_options())
+            }
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
             }
@@ -1116,6 +1129,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KimiCodeCli => kimi_permission_options(),
             AdapterKind::GrokBuild => grok_permission_options(),
             AdapterKind::DeepseekHarness => dsh_permission_options(),
+            AdapterKind::ClineCli => cline_permission_options(),
             AdapterKind::ZcodeApp => zcode_permission_options(),
         };
         let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
@@ -1123,6 +1137,8 @@ impl AgentRuntimeAdapterRegistry {
             && !grok_build_minimum_version_satisfied(reported_version.as_deref());
         let dsh_version_unsupported = kind == AdapterKind::DeepseekHarness
             && !crate::dsh::supported_version(reported_version.as_deref());
+        let cline_version_unsupported = kind == AdapterKind::ClineCli
+            && !crate::cline::supported_version(reported_version.as_deref());
         let pi_version_unsupported =
             kind == AdapterKind::Pi && !pi_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
@@ -1132,6 +1148,7 @@ impl AgentRuntimeAdapterRegistry {
             probe_status: if grok_version_unsupported
                 || pi_version_unsupported
                 || dsh_version_unsupported
+                || cline_version_unsupported
             {
                 "light_failed".to_string()
             } else {
@@ -1149,7 +1166,8 @@ impl AgentRuntimeAdapterRegistry {
             stale_at: None,
             last_error: (grok_version_unsupported
                 || pi_version_unsupported
-                || dsh_version_unsupported)
+                || dsh_version_unsupported
+                || cline_version_unsupported)
                 .then(|| "runtime_version_below_minimum".to_string()),
             native_session_compatibility_key: None,
         })
@@ -2621,6 +2639,36 @@ fn acp_model_option(option: &Value) -> Option<ModelOptionDescriptor> {
             .map(str::to_string),
         scope: RuntimeOptionScope::Run,
     })
+}
+
+fn cline_permission_options() -> Vec<PermissionOptionDescriptor> {
+    [
+        (
+            "mode",
+            vec![choice("act", "act"), choice("plan", "plan")],
+            "act",
+        ),
+        (
+            "auto_approve",
+            vec![choice("true", "true"), choice("false", "false")],
+            "true",
+        ),
+    ]
+    .into_iter()
+    .map(|(key, choices, default)| PermissionOptionDescriptor {
+        key: key.into(),
+        label: key.into(),
+        description: format!("Cline native {key}"),
+        value_type: "enum".into(),
+        choices,
+        recommended_value: json!(default),
+        scope: RuntimeOptionScope::Session,
+        risk: "elevated".into(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    })
+    .collect()
 }
 
 fn dsh_permission_options() -> Vec<PermissionOptionDescriptor> {

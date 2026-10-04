@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:d20b2fb07d01b592bdf5da207b44bd6680fdd03df11bc0205d2a7dbf459a1390";
+    "sha256:16739bbb46b8d58c9f4f30b8acb0e30e440b4f694a2edec0b471c802e70678dc";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -331,7 +331,7 @@ mod tests {
                                 Some(DSH_LINUX_X64_EVIDENCE_REVISION)
                             );
                         }
-                        AdapterKind::CursorAgent => {
+                        AdapterKind::CursorAgent | AdapterKind::ClineCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -411,7 +411,10 @@ mod tests {
                 assert_eq!(admission.blocker_code(), None);
             } else if !matches!(
                 runtime_kind,
-                AdapterKind::CursorAgent | AdapterKind::ZcodeApp | AdapterKind::DeepseekHarness
+                AdapterKind::CursorAgent
+                    | AdapterKind::ClineCli
+                    | AdapterKind::ZcodeApp
+                    | AdapterKind::DeepseekHarness
             ) {
                 assert!(admission.is_qualified());
                 assert!(admission.allows_runtime_use());
@@ -470,6 +473,7 @@ mod tests {
             !matches!(
                 kind,
                 AdapterKind::CursorAgent
+                    | AdapterKind::ClineCli
                     | AdapterKind::Pi
                     | AdapterKind::GrokBuild
                     | AdapterKind::ZcodeApp
@@ -488,17 +492,19 @@ mod tests {
             }
         }
         for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
-            let cursor = registry.platform_admission(AdapterKind::CursorAgent, platform);
-            assert_eq!(
-                cursor.status(),
-                RuntimePlatformAdmissionStatus::NotQualified
-            );
-            assert!(!cursor.allows_runtime_use());
-            assert_eq!(
-                cursor.reason_code(),
-                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
-            );
-            assert_eq!(cursor.evidence_revision(), None);
+            for kind in [AdapterKind::CursorAgent, AdapterKind::ClineCli] {
+                let admission = registry.platform_admission(kind, platform);
+                assert_eq!(
+                    admission.status(),
+                    RuntimePlatformAdmissionStatus::NotQualified
+                );
+                assert!(!admission.allows_runtime_use());
+                assert_eq!(
+                    admission.reason_code(),
+                    Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+                );
+                assert_eq!(admission.evidence_revision(), None);
+            }
 
             let pi = registry.platform_admission(AdapterKind::Pi, platform);
             assert_eq!(pi.status(), RuntimePlatformAdmissionStatus::Qualified);

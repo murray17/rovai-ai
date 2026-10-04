@@ -602,6 +602,12 @@ fn user_roots(
             );
         }
         AdapterKind::ZcodeApp => paths.push(home.join(".zcode/skills")),
+        AdapterKind::ClineCli => {
+            paths.push(
+                configured_root("CLINE_DIR", home.join(".cline"), configuration).join("skills"),
+            );
+            paths.push(agents);
+        }
         AdapterKind::AntigravityApp => paths.extend(
             [".gemini/config/skills", ".gemini/antigravity/skills"].map(|part| home.join(part)),
         ),
@@ -651,6 +657,7 @@ fn project_roots(adapter: AdapterKind, project: &Path) -> Vec<(&'static str, Pat
         AdapterKind::KimiCodeCli => &[".kimi-code/skills", ".agents/skills"],
         AdapterKind::GrokBuild => &[".grok/skills"],
         AdapterKind::DeepseekHarness => &[".dsh/skills", ".agents/skills"],
+        AdapterKind::ClineCli => &[".cline/skills", ".agents/skills", ".clinerules/skills"],
         AdapterKind::ZcodeApp => &[".zcode/skills"],
         AdapterKind::AntigravityApp => &[".agents/skills", ".agent/skills"],
     };

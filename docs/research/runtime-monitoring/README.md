@@ -14,6 +14,10 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 
 当前执行台的取数范围、隐藏暂停、引用复用与迟到刷新收口见[执行指标读取验收](execution-metrics-refresh-verification-2026-10-01.md)。
 
+2026-10-04 [Command Code 与 Cline 真实模型核验](command-cline-verification-2026-10-04.md)：
+两条链路均取得四个原生 token 桶，Cline 另有可选 reasoning；最新根调用输入产生 Context used，
+窗口、比例和成本仍未知。证据分别到 Core headless transport / ACP Host，不是完整 App 或平台准入。
+
 2026-10-04 [上下文运行中可用性收口](live-context-usability-2026-10-04.md)：输入确认解绑、实际模型窗口复用及 ZCode 事件触发读取。
 
 2026-10-03 [运行中 Context 缺失复核](live-context-verification-2026-10-03.md)：Claude 不再等待整轮终态；逐 Runtime 列出采样时机与 ACP 输入确认限制。

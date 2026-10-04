@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-09-24
+last_updated: 2026-09-27
 ---
 
 # Runtime Catalog Boundaries
@@ -43,9 +43,18 @@ selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并�
 
 ## Command Code 研究接入边界
 
-Command Code 1.64.0 目前只有内部 one-shot headless NDJSON 传输和隔离 fixture 证据，不属于 closed `AdapterKind`、Product Runtime Catalog 或 Settings Preview。其候选 AgentRun 模型输入复用既有 `CharterDeliveryMode::FirstPayload`：Core 按冻结 Context 证据选择新 Session 的 Bootstrap 与 Dynamic Context 合成，普通精确恢复只交付当次 Dynamic Context；受管 Bootstrap 不通过 `--mod` 或共享 `AGENTS.md` 投递。该 Bootstrap 在 Command Code 中是普通用户消息，不能冒称 System/Developer 级指令。合格压缩补发只有在该 Runtime 的信号与恢复行为获得证据后才能启用或宣称有效。
+Command Code 目前只有内部 one-shot headless NDJSON 传输；1.66.0 已取得真实模型的逐调用 Usage/Context 与精确恢复证据，不属于 closed `AdapterKind`、Product Runtime Catalog 或 Settings Preview。其候选 AgentRun 模型输入复用既有 `CharterDeliveryMode::FirstPayload`：Core 按冻结 Context 证据选择新 Session 的 Bootstrap 与 Dynamic Context 合成，普通精确恢复只交付当次 Dynamic Context；受管 Bootstrap 不通过 `--mod` 或共享 `AGENTS.md` 投递。该 Bootstrap 在 Command Code 中是普通用户消息，不能冒称 System/Developer 级指令。合格压缩补发只有在该 Runtime 的信号与恢复行为获得证据后才能启用或宣称有效。
 
-此输入选择曾在 v1.68 基线上由[研究提案 revision 3](../research/command-code-runtime/prompt-guidance-proposal.md)确认；合并后的当前 Context 基线需要新的版本说明和二次确认。权限、MCP/Skill/Taste 隔离、真实认证、Usage 和逐平台 Golden Flows 仍由[接入清单](../development/runtime-integration-checklist.md)与[研究矩阵](../research/command-code-runtime/parity-matrix.md)逐项验收。正式 Catalog identity 必须满足下述原子准入，不能用已实现的公共 FirstPayload 或 ManagedProcess 代替 Command Code 证据。
+此输入选择曾在 v1.68 基线上由[研究提案 revision 3](../research/command-code-runtime/prompt-guidance-proposal.md)确认；合并后的当前基线由[当前版本 revision 4](../versions/v1.72/model-context-change-command-code.md)二次确认。[V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12)只对 Command Code 接受普通用户消息层级的差异，不把它误称高权限注入。权限、MCP/Skill/Taste 隔离、真实认证、Usage 和逐平台 Golden Flows 仍由[接入清单](../development/runtime-integration-checklist.md)与[研究矩阵](../research/command-code-runtime/parity-matrix.md)逐项验收。正式 Catalog identity 必须满足下述原子准入，不能用已实现的公共 FirstPayload 或 ManagedProcess 代替 Command Code 证据。
+
+## Cline 实施边界
+
+Cline 使用官方 `cline --acp` 与共享 Host/Fleet，原生配置由 Cline 拥有；sub2api BYOK 不转移配置权威。
+当前分支已建立 closed `cline-cli` / Skill group `cline` 及 Migration 184（schema 133 → 134），
+共享 ACP 启动、精确恢复、权限和数值 observer 已接线，但所有平台保持 `NotQualified`。
+这些内部接线不是完整产品准入；[真实证据矩阵](../research/cline-runtime/README.md)仍有
+AgentRun/App、Bootstrap、压缩连续性、Skills/MCP 和 Built-in 缺口。
+数值 observer 只读，不改变模型输入；尚未确认的 Plugin Rule 不能因 Command 的确认自动实施。
 
 ## 可执行准入
 

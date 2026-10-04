@@ -6,10 +6,29 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-03
+last_updated: 2026-10-04
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 并行实施：Command Code 与 Cline
+
+合入主干 `b2c9c976` 后，Command Code 内部 headless transport 与 Cline 官方 ACP Host 适配当前
+Usage v8 / Execution Metrics v7。真实 sub2api/gpt-6-sol 调用取得 input、output、cache read/write，
+Cline 另有可选 reasoning；最新根调用输入独立投影 Context used。窗口、比例和费用保持未知，
+不增加指标定时器或输出测速。[真实数值、测试与层级边界](../../research/runtime-monitoring/command-cline-verification-2026-10-04.md)
+区分 Core 传输/Host 证据与尚未完成的 AgentRun/App 验收，两个 Runtime 都没有由此取得 First-Class。
+
+Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
+所有平台保持 `NotQualified`；完整产品准入仍在实施。Command Code 仍无 Product Adapter。
+其已确认的 [first_payload revision 4](model-context-change-command-code.md)移入当前版本，
+理由由 [V1.72-D12](decisions.md#v1-72-d12)拥有；指标补充没有改变模型输入。
+Cline 的 [Plugin Rule 上下文提案](../../research/cline-runtime/model-context-change-v1.70-proposal.md)
+仍独立待确认，不能借 Command 的确认更换其 Bootstrap 层级。
+
+本切片更新 Runtime Catalog/Monitoring 架构、兼容性清单、研究矩阵、测试说明与当前决定导航。
+活动目录加入 Cline 的保守 run_level 条目，复用既有 ACP typed kind，不改变 activity-v4 或旧 Runtime 解释。
+既有 Usage/Execution Metrics 合同足以表达数值，无新字段合同、Renderer 布局或根 README 支持声明。
 
 ## 并行修复：HTML 内部诊断 CSP 归因
 

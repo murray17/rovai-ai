@@ -106,6 +106,14 @@ DSH 私有 committed Usage 保留原生完整调用 total，校验后以 total �
 缓存桶缺失仍未知。ZCode 从已有终态 session/read 的原生 runtime.contextUsage 提取同 Session
 used/size，在 prompt 终态之前交给现有绑定栅栏；不增加轮询或传播完整 snapshot。
 
+Cline 官方 ACP 的数值补充来自只读 Plugin `afterModel`，按根调用、精确 Prompt lease、原生 Run 和
+单调序号归属。既有周期 Flush 读取有界私有文件，terminal 消费同一批记录并排除已采序号；
+无正文、原生历史扫描或第二个定时器。四个原生 token 桶按 `model_call / delta` 归一化，可选 reasoning
+不与 output 重复相加；最新调用的含缓存 input 独立产生 used-only Gauge，实际模型来自该调用。
+未取得有效窗口、原生比例和费用时保持未知。Cline 仍未取得平台资格；Command Code 的等价数值帧
+目前只接内部 headless transport，尚无 Product AgentRun 消费者。真实字段与验收层级见
+[两条 Runtime 数值核验](../research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+
 ## Read path
 
 Codex Run summary 可记录实际 service tier；费用投影先用原生观察、再用冻结/发送时请求档位。未知不套

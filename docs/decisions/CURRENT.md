@@ -243,3 +243,5 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 - 当前规范：[Member Creation Flow v1](../contracts/member-creation-flow-v1.md)、[Pending Camp Activation v4](../contracts/pending-camp-activation-v4.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md#ai-队员创建)、[队员身份与图像](../ui/components/member-identity.md#添加队员与名册排序)。
 - 独立静态回执及窗口内草稿的取舍：[V1.72-D09](../versions/v1.72/decisions.md#v1-72-d09)。
+
+Command Code 的已确认 `first_payload` 差异由 [V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12) 记录；[完整 revision 4](../versions/v1.72/model-context-change-command-code.md)保留原确认，运行时范围由 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md#command-code-研究接入边界) 拥有。

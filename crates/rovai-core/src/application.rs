@@ -2386,6 +2386,7 @@ struct Core {
     kimi_code_cli: AcpCliRuntimeAdapter,
     grok_build: AcpCliRuntimeAdapter,
     deepseek_harness: AcpCliRuntimeAdapter,
+    cline_cli: AcpCliRuntimeAdapter,
     zcode_app: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
@@ -2739,6 +2740,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::DeepseekHarness => "DeepSeek Harness",
+        AdapterKind::ClineCli => "Cline",
         AdapterKind::AntigravityApp => "Antigravity",
         AdapterKind::ZcodeApp => "ZCode",
     }
@@ -5266,6 +5268,13 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
+        if let Some(runtime) = self
+            .cline_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
         self.grok_build
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -5383,6 +5392,7 @@ impl Core {
             self.kimi_code_cli.shutdown_all(),
             self.grok_build.shutdown_all(),
             self.deepseek_harness.shutdown_all(),
+            self.cline_cli.shutdown_all(),
             self.zcode_app.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
             self.antigravity_app.shutdown_all(),
@@ -5406,6 +5416,7 @@ impl Core {
                 self.kimi_code_cli.shutdown_all(),
                 self.grok_build.shutdown_all(),
                 self.deepseek_harness.shutdown_all(),
+                self.cline_cli.shutdown_all(),
                 self.zcode_app.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
                 self.antigravity_app.shutdown_all(),
@@ -5433,6 +5444,7 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
             rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
             AdapterKind::DeepseekHarness => Some(&self.deepseek_harness),
+            AdapterKind::ClineCli => Some(&self.cline_cli),
             rovai_core::agent_profile::AdapterKind::ZcodeApp => Some(&self.zcode_app),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::Pi
@@ -11278,6 +11290,7 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
+            | rovai_core::agent_profile::AdapterKind::ClineCli
             | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
@@ -16730,6 +16743,7 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
+            | rovai_core::agent_profile::AdapterKind::ClineCli
             | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
@@ -17791,6 +17805,15 @@ async fn run_core(
             runtime_fleet.clone(),
             compaction_detector_policies
                 .policy_for(AdapterKind::DeepseekHarness)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        ),
+        cline_cli: AcpCliRuntimeAdapter::deferred(
+            rovai_core::agent_profile::AdapterKind::ClineCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/cline"),
+            runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::ClineCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         ),
         grok_build: AcpCliRuntimeAdapter::deferred(
@@ -22424,6 +22447,7 @@ async fn flush_runtime_usage(
     // finish this Run between advancing the native cursor and buffering it.
     for kind in [
         AdapterKind::CodebuddyCli,
+        AdapterKind::ClineCli,
         AdapterKind::KimiCodeCli,
         AdapterKind::OpencodeCli,
         AdapterKind::QoderCli,
@@ -25909,6 +25933,15 @@ mod tests {
                 runtime_fleet.clone(),
                 compaction_detector_policies
                     .policy_for(AdapterKind::DeepseekHarness)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            cline_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::ClineCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/cline"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::ClineCli)
                     .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
             grok_build: AcpCliRuntimeAdapter::new(
@@ -30310,6 +30343,29 @@ done
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+
+        let initial = json!({
+            "title":"run_commands: printf CLINE_OUTPUT",
+            "rawInput":{"commands":["printf CLINE_OUTPUT; exit 7"],"credential":"CLINE_PRIVATE_INPUT"}
+        });
+        let mut cline_update = json!({
+            "sessionUpdate":"tool_call_update",
+            "toolCallId":"cline-tool",
+            "status":"completed",
+            "rawOutput":[{"success":false,"result":"CLINE_OUTPUT","private":"CLINE_PRIVATE_RESULT"}]
+        });
+        rovai_core::cline::enrich_tool_update(&mut cline_update, Some(&initial));
+        let (_, cline_payload) = normalize_acp_event(
+            AdapterKind::ClineCli,
+            "session/update",
+            &json!({"update":cline_update}),
+        );
+        assert_eq!(cline_payload["status"], "failed");
+        assert_eq!(cline_payload["input"], "printf CLINE_OUTPUT; exit 7");
+        assert_eq!(cline_payload["output"], "CLINE_OUTPUT");
+        let serialized_cline = serde_json::to_string(&cline_payload).unwrap();
+        assert!(!serialized_cline.contains("CLINE_PRIVATE_INPUT"));
+        assert!(!serialized_cline.contains("CLINE_PRIVATE_RESULT"));
 
         let query = "password=公开测试词 token=也照常展示";
         let (_, web_payload) = normalize_acp_event(

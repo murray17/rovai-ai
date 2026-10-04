@@ -114,6 +114,7 @@ impl DesiredCompactionDetectorPolicies {
 pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDetectorPolicy {
     match adapter_kind {
         AdapterKind::CopilotCli
+        | AdapterKind::ClineCli
         | AdapterKind::OpencodeCli
         | AdapterKind::KiroCli
         | AdapterKind::QoderCli
@@ -135,6 +136,7 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
 pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'static str {
     match adapter_kind {
         AdapterKind::CopilotCli => "ROVAI_INTERNAL_COPILOT_COMPACTION_DETECTOR_POLICY",
+        AdapterKind::ClineCli => "ROVAI_INTERNAL_CLINE_COMPACTION_DETECTOR_POLICY",
         AdapterKind::OpencodeCli => "ROVAI_INTERNAL_OPENCODE_COMPACTION_DETECTOR_POLICY",
         AdapterKind::KiroCli => "ROVAI_INTERNAL_KIRO_COMPACTION_DETECTOR_POLICY",
         AdapterKind::QoderCli => "ROVAI_INTERNAL_QODER_COMPACTION_DETECTOR_POLICY",
@@ -885,6 +887,10 @@ fn qualified_admission(
     admission_point: &str,
 ) -> bool {
     match adapter_kind {
+        AdapterKind::ClineCli => {
+            source_signal == "cline.plugin.compaction.completed.v1"
+                && admission_point == "completed"
+        }
         AdapterKind::CopilotCli => {
             source_signal == "preCompact" && admission_point == "imminent_edge"
         }

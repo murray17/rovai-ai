@@ -4,14 +4,14 @@ runtime: command-code
 authority: research-evidence-only
 status: implementation-in-progress
 admission: research
-observed_version: 1.64.0, 1.65.2
+observed_version: 1.64.0, 1.65.2, 1.66.0
 observed_platform: macos-arm64
-last_updated: 2026-09-24
+last_updated: 2026-10-04
 ---
 
 # Command Code Parity Matrix（1.64.0 fixture；1.65.2 真实 BYOK）
 
-本矩阵按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 建立，先于正式 Adapter 实现。最接近的生产 Adapter 是 `claude-code-cli`；公共控制流可参考它，Command Code 的 wire 与能力证据必须独立取得。`DocumentationOnly` 仅指 [官方 CLI/Headless/Mods/MCP 文档](https://commandcode.ai/docs)或发布包帮助，未替代真实账号、模型、Tool 或 Session Smoke。开发者曾在 v1.68 基线上二次确认[研究提案 revision 3](prompt-guidance-proposal.md)的普通 Prompt 差异；合并后的当前 Context 基线仍须另行确认，不提升其他能力轴或平台资格。
+本矩阵按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 建立，先于正式 Adapter 实现。最接近的生产 Adapter 是 `claude-code-cli`；公共控制流可参考它，Command Code 的 wire 与能力证据必须独立取得。`DocumentationOnly` 仅指 [官方 CLI/Headless/Mods/MCP 文档](https://commandcode.ai/docs)或发布包帮助，未替代真实账号、模型、Tool 或 Session Smoke。开发者已在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 确认当前 [first_payload revision 4](prompt-guidance-v1.70-proposal.md)；此确认不提升其他能力轴或平台资格。
 
 | 能力轴 | Rovai 标准行为 | Command Code 1.64.0 上游能力面 | 候选接入策略 | 当前状态与证据 | 已接受差异 |
 | --- | --- | --- | --- | --- | --- |
@@ -35,6 +35,17 @@ last_updated: 2026-09-24
 [真实 BYOK Smoke](real-byok-smoke-2026-09-25.md)把 Auth/显式 Model、原生同 UUID warm 恢复、`read_file`、`edit_file`、`shell_command` stdout/stderr/空输出/非零退出，以及手动 `/compact` 后的原生 cold CLI 恢复从 `NotObserved` 推进到 **upstream Verified on macOS arm64, 1.65.2, one isolated account/session**。`result.usage` 的四个 token 字段已观察到，但 scope、累计方式和 Rovai 归属未验证。`gpt-6-sol` 未出现在当次 `/v1/models` 响应中，却能通过 Command Code 官方 Provider 配置显式调用；catalog/Ready 不能由该列表单独裁定。
 
 这些增量没有改变对应 Rovai implementation：Product Adapter、AgentRun dispatch、Native Binding/Input Delivery、App Camp Action/Usage、Builtin CLI、Skills/MCP、Approval/cancel、Compaction redelivery 和逐平台 qualification 仍为 `NotImplemented` 或 `Blocked`。1.65.2 的 `dont-ask` 实测读成功、edit/command 被拒；显式 `--yolo` 则能完成隔离 edit/command。当前内部传输固定 `dont-ask`，直接接 Camp 会阻断写和命令，必须先设计并验收唯一权限权威。原生非零 Shell 退出仍产生 `tool_completed`、CLI 顶层 `result.success`，内部 staged normalizer 已补充按终态文本退出码归为失败，并隐藏 read/edit 的结果正文；实际 App Action 尚未验证。旧表中 `1.64.0` 单元格只描述固定版本 fixture，不能读成 1.65.2 的所有轴已过关。
+
+## 1.66.0 真实 Core 数值增量（2026-10-04）
+
+官方 1.66.0 在隔离 Home/workspace、真实 sub2api/gpt-6-sol 下通过 Core headless transport：
+首次及同 UUID 恢复，四个 token 桶的逐调用和与原生 result 相等，Context 使用最新根调用的含缓存输入。
+恢复后 5 调用输入 69,309、输出 399、cache read 39,680、cache write 0；最后 Context used 14,721。
+运行中可观察数值；reasoning、窗口、比例、费用仍未知。实现与数值证据见
+[Usage/Context 验收](../runtime-monitoring/command-cline-verification-2026-10-04.md)。
+这推进了内部 transport 的 Usage parser，不代表尚不存在的 Product AgentRun/App 链路通过；
+上表 1.64.0 的历史测试结论保留各自范围。当前内部传输显式接受原生 `dont-ask` 或 `yolo`，
+不再固定 `dont-ask`；真实工具数值 Smoke 显式使用隔离 workspace 的 `yolo`，产品审批仍未闭合。
 
 ## 实施准入顺序
 
