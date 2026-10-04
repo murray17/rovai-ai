@@ -479,6 +479,7 @@ pub struct MemoryRevisionView {
     pub retrieval_keys: Vec<String>,
     pub actor_kind: Option<MemoryRevisionActorKind>,
     pub actor_id: Option<String>,
+    #[serde(rename = "sourceThreadId", alias = "sourceCampId")]
     pub source_camp_id: Option<String>,
     pub source_agent_run_id: Option<String>,
     pub source_execution_epoch: Option<i64>,
@@ -547,6 +548,7 @@ pub struct HearthReviewItemView {
     pub target_memory_id: Option<String>,
     pub base_revision_id: Option<String>,
     pub source_agent_id: String,
+    #[serde(rename = "sourceThreadId", alias = "sourceCampId")]
     pub source_camp_id: String,
     pub source_agent_run_id: String,
     pub source_execution_epoch: i64,

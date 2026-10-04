@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import type { SkillContentView } from '@contracts'
+import { UiText, uiAttribute } from './interface-language'
 
 interface FileBranch {
   path: string
@@ -171,7 +172,7 @@ export function SkillFileNavigation({
         >
           <FileIcon kind={contentIcon(file)} />
           <span className="skill-file-entry-name">{file.split('/').at(-1)}</span>
-          {file === 'SKILL.md' && <span className="skill-file-entry-meta">说明文档</span>}
+          {file === 'SKILL.md' && <span className="skill-file-entry-meta"><UiText zh={"说明文档"} /></span>}
           {searching && directoryName && (
             <span className="skill-file-search-path">{directoryName}</span>
           )}
@@ -231,8 +232,8 @@ export function SkillFileNavigation({
               type="button"
               ref={trigger}
               className="skill-file-current"
-              aria-label={`切换文件，当前 ${path}`}
-              title={`${path} · 切换文件`}
+              aria-label={uiAttribute("切换文件，当前 {0}", String(path))}
+              title={uiAttribute("{0} · 切换文件", String(path))}
               aria-expanded={expanded}
               aria-controls={expanded ? directoryId : undefined}
               onClick={() => {
@@ -245,7 +246,7 @@ export function SkillFileNavigation({
               <FileIcon kind="chevron" />
             </button>
           ) : <span className="skill-file-current" title={path}>{label}</span>}
-          {multiple && <span className="skill-file-total">{paths.length} 个文件</span>}
+          {multiple && <span className="skill-file-total">{paths.length}<UiText zh={" 个文件"} /></span>}
         </div>
         {children}
       </div>
@@ -254,7 +255,7 @@ export function SkillFileNavigation({
           ref={directory}
           id={directoryId}
           className="skill-file-directory"
-          aria-label="Skill 文件"
+          aria-label={uiAttribute("Skill 文件")}
           onKeyDown={navigate}
         >
           {paths.length > 10 && (
@@ -262,8 +263,8 @@ export function SkillFileNavigation({
               <FileIcon kind="search" />
               <input
                 type="search"
-                aria-label="查找文件"
-                placeholder="查找文件…"
+                aria-label={uiAttribute("查找文件")}
+                placeholder={uiAttribute("查找文件…")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
@@ -272,7 +273,7 @@ export function SkillFileNavigation({
           <div className="skill-file-directory-list">
             {normalizedQuery ? (
               matches.length ? <ul>{matches.map((file) => fileEntry(file, true))}</ul>
-                : <p className="skill-file-empty" role="status">没有匹配的文件。</p>
+                : <p className="skill-file-empty" role="status"><UiText zh={"没有匹配的文件。"} /></p>
             ) : branch(tree)}
           </div>
         </nav>

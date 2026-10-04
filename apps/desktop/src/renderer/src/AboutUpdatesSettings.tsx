@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppUpdateRelease, AppUpdateSnapshot } from '@contracts'
-import { currentReleaseFromBundledNotes } from '../../shared/app-current-release'
+import { currentReleaseFromBundledSources } from '../../shared/app-current-release'
 import { displayReleaseNotes } from './release-notes-display'
 import { SafeMarkdown } from './SafeMarkdown'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import type { AppUpdateActionError, AppUpdatesController } from './useAppUpdates'
+import { UiText, uiAttribute, useInterfaceLanguage } from './interface-language'
 
 export function AboutUpdatesSettings({
   updates
@@ -55,14 +56,14 @@ export function AboutUpdatesSettingsView({
   const availableTabRef = useRef<HTMLButtonElement>(null)
   const currentTabRef = useRef<HTMLButtonElement>(null)
   const presentation = product === 'server' && snapshot?.failureReason === 'restart_unconfirmed'
-    ? { tone: 'error', title: '尚未确认 Server 恢复连接', detail: '可以重试连接；如果持续无法连接，请检查运行 Server 的电脑。' }
+    ? { tone: 'error', title:uiAttribute("尚未确认 Server 恢复连接"), detail:uiAttribute("可以重试连接；如果持续无法连接，请检查运行 Server 的电脑。") }
     : updatePresentation(snapshot, loading, loadError, actionError, canUpdate)
   const primaryAction = updatePrimaryAction(snapshot, loading, canUpdate)
   const availableRelease = snapshot?.availableRelease ?? null
   const currentRelease = snapshot
     ? snapshot.currentRelease?.version === snapshot.currentVersion.replace(/^v/iu, '')
       ? snapshot.currentRelease
-      : currentReleaseFromBundledNotes(snapshot.currentVersion, null)
+      : currentReleaseFromBundledSources(snapshot.currentVersion, null)
     : null
   const showCurrent = !availableRelease || showCurrentForVersion === availableRelease.version
   const release = showCurrent ? currentRelease : availableRelease
@@ -73,7 +74,7 @@ export function AboutUpdatesSettingsView({
     || (snapshot?.status === 'check_failed' && snapshot.failureReason === 'updater_unavailable')
   const officialReleasesUrl = product === 'server'
     ? availableRelease
-      ? `https://github.com/murray17/rovai-ai/releases/tag/server-v${encodeURIComponent(availableRelease.version)}`
+      ? `https://github.com/murray17/rovai-ai/releases/tag/${['0.4.0', '0.4.1'].includes(availableRelease.version) ? 'server-v' : 'v'}${encodeURIComponent(availableRelease.version)}`
       : 'https://github.com/murray17/rovai-ai/releases'
     : 'https://github.com/murray17/rovai-ai/releases/latest'
 
@@ -129,30 +130,30 @@ export function AboutUpdatesSettingsView({
     <div className="about-updates-settings" data-update-read-only={readOnly}>
       <SettingsPageHeader
         eyebrow="Settings / About & Updates"
-        title="关于与更新"
-        description={readOnly ? '版本信息与更新日志。' : '自动检查新版本，下载与安装由你决定。'}
+        title={uiAttribute("关于与更新")}
+        description={readOnly ? uiAttribute("版本信息与更新日志。") : uiAttribute("自动检查新版本，下载与安装由你决定。")}
       />
 
       <div className="about-updates-body">
         <section className="section-block about-updates-section" aria-labelledby="about-version-heading">
           <div className="section-heading">
-            <div><h2 id="about-version-heading">版本</h2><p>当前安装</p></div>
+            <div><h2 id="about-version-heading"><UiText zh={"版本"} /></h2><p><UiText zh={"当前安装"} /></p></div>
           </div>
           <div className="about-identity">
             <svg className="about-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor"/><path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round"/><circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="12" cy="18.46" r="1.05" fill="currentColor"/></svg>
-            <div><strong>Rovai AI</strong><p><span>版本 {snapshot ? displayVersion(snapshot.currentVersion) : loading ? '读取中…' : '暂不可用'}</span><span>{product === 'server' ? 'Server' : '桌面应用'}</span></p></div>
+            <div><strong>Rovai AI</strong><p><span><UiText zh={"版本 "} />{snapshot ? displayVersion(snapshot.currentVersion) : loading ? uiAttribute("读取中…") : uiAttribute("暂不可用")}</span><span>{product === 'server' ? 'Server' : uiAttribute("桌面应用")}</span></p></div>
           </div>
         </section>
 
         {!readOnly && <section className="section-block about-updates-section" aria-labelledby="about-update-heading">
           <div className="section-heading">
-            <div><h2 id="about-update-heading">软件更新</h2><p>检查、下载与安装</p></div>
+            <div><h2 id="about-update-heading"><UiText zh={"软件更新"} /></h2><p><UiText zh={"检查、下载与安装"} /></p></div>
           </div>
           <div className="about-update-body">
             <div className="about-update-control" data-update-status={snapshot?.status ?? 'unavailable'}>
               <div>
                 <strong>{controlTitle(snapshot)}</strong>
-                <p>{product === 'server' && snapshot?.failureReason === 'restart_unconfirmed' ? '连接暂未恢复，尚不能确认更新结果。' : product === 'server' && snapshot?.status === 'installing' ? 'Server 正在重启，页面会自动恢复连接。' : controlDetail(snapshot)}</p>
+                <p>{product === 'server' && snapshot?.failureReason === 'restart_unconfirmed' ? uiAttribute("连接暂未恢复，尚不能确认更新结果。") : product === 'server' && snapshot?.status === 'installing' ? uiAttribute("Server 正在重启，页面会自动恢复连接。") : controlDetail(snapshot)}</p>
               </div>
               <div className="about-update-actions">
                 {showManualCheck && (
@@ -161,7 +162,7 @@ export function AboutUpdatesSettingsView({
                     type="button"
                     disabled={!canUpdate || isOperationBusy(snapshot?.status)}
                     onClick={onCheck}
-                  >重新检查</button>
+                  ><UiText zh={"重新检查"} /></button>
                 )}
                 <button
                   className="primary-button"
@@ -182,12 +183,12 @@ export function AboutUpdatesSettingsView({
             </div>
 
             {downloading && (
-              <div className="about-download-progress" aria-label="更新下载进度">
+              <div className="about-download-progress" aria-label={uiAttribute("更新下载进度")}>
                 <div className="about-download-progress-heading">
-                  <span>下载进度</span>
+                  <span><UiText zh={"下载进度"} /></span>
                   <strong>{formatPercent(progress)}</strong>
                 </div>
-                <progress max="100" value={progress} aria-label={`已下载 ${formatPercent(progress)}`} />
+                <progress max="100" value={progress} aria-label={uiAttribute("已下载 {0}", String(formatPercent(progress)))} />
                 <div className="about-download-progress-meta">
                   <span>{formatTransfer(snapshot.transferredBytes, snapshot.totalBytes)}</span>
                   <span>{formatSpeed(snapshot.bytesPerSecond)}</span>
@@ -207,25 +208,25 @@ export function AboutUpdatesSettingsView({
             </div>
 
             {snapshot && (snapshot.checkedAt || snapshot.lastSuccessfulCheckAt) && (
-              (<details className="settings-disclosure about-history"><summary><span>检查记录</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary><dl className="about-facts" aria-label="更新检查记录"><div><dt>本次检查</dt><dd>{formatCheckAttempt(snapshot)}</dd></div><div><dt>上次成功</dt><dd>{formatTimestamp(snapshot.lastSuccessfulCheckAt)}</dd></div><div><dt>更新来源</dt><dd>Rovai AI 正式 GitHub Releases</dd></div></dl></details>)
+              (<details className="settings-disclosure about-history"><summary><span><UiText zh={"检查记录"} /></span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary><dl className="about-facts" aria-label={uiAttribute("更新检查记录")}><div><dt><UiText zh={"本次检查"} /></dt><dd>{formatCheckAttempt(snapshot)}</dd></div><div><dt><UiText zh={"上次成功"} /></dt><dd>{formatTimestamp(snapshot.lastSuccessfulCheckAt)}</dd></div><div><dt><UiText zh={"更新来源"} /></dt><dd><UiText zh={"Rovai AI 正式 GitHub Releases"} /></dd></div></dl></details>)
             )}
 
             {showFallback && (
               <div className="about-update-fallback">
                 <div>
-                  <strong>{snapshot?.status === 'download_failed' ? '应用内下载未完成' : '此版本无法使用自动更新'}</strong>
+                  <strong>{snapshot?.status === 'download_failed' ? uiAttribute("应用内下载未完成") : uiAttribute("此版本无法使用自动更新")}</strong>
                   <span>{snapshot?.status === 'download_failed'
-                    ? '优先重试下载，也可以改用官方发布页。'
-                    : '可以从官方发布页手动获取版本，或提交问题。'}</span>
+                    ? uiAttribute("优先重试下载，也可以改用官方发布页。")
+                    : uiAttribute("可以从官方发布页手动获取版本，或提交问题。")}</span>
                 </div>
                 <div className="about-update-fallback-actions">
-                  <a href={officialReleasesUrl} target="_blank" rel="noreferrer noopener">官方 Releases</a>
-                  <a href="https://github.com/murray17/rovai-ai/issues" target="_blank" rel="noreferrer noopener">获取支持</a>
+                  <a href={officialReleasesUrl} target="_blank" rel="noreferrer noopener"><UiText zh={"官方 Releases"} /></a>
+                  <a href="https://github.com/murray17/rovai-ai/issues" target="_blank" rel="noreferrer noopener"><UiText zh={"获取支持"} /></a>
                 </div>
               </div>
             )}
 
-            <p className="about-update-source">{product === 'server' ? '更新来自 Rovai AI 的 Server GitHub Release 通道。' : '自动更新来自 Rovai AI 的正式 GitHub Release 通道。'}</p>
+            <p className="about-update-source">{product === 'server' ? uiAttribute("更新来自 Rovai AI 的 Server GitHub Release 通道。") : uiAttribute("自动更新来自 Rovai AI 的正式 GitHub Release 通道。")}</p>
           </div>
         </section>}
 
@@ -237,19 +238,19 @@ export function AboutUpdatesSettingsView({
           >
             <div className="section-heading">
               <div>
-                <h2 id="about-release-notes-heading" tabIndex={-1}>更新日志</h2>
+                <h2 id="about-release-notes-heading" tabIndex={-1}><UiText zh={"更新日志"} /></h2>
               </div>
-              {availableRelease && <div className="about-release-tabs" role="tablist" aria-label="日志版本">
+              {availableRelease && <div className="about-release-tabs" role="tablist" aria-label={uiAttribute("日志版本")}>
                 <button ref={availableTabRef} type="button" role="tab" id="about-release-tab-available"
                   aria-controls="about-release-panel-available" aria-selected={!showCurrent} tabIndex={showCurrent ? -1 : 0}
                   data-app-update-release-tab="available"
                   onClick={() => selectRelease('available')}
-                  onKeyDown={(event) => onReleaseTabKeyDown(event, 'available')}>新版本</button>
+                  onKeyDown={(event) => onReleaseTabKeyDown(event, 'available')}><UiText zh={"新版本"} /></button>
                 <button ref={currentTabRef} type="button" role="tab" id="about-release-tab-current"
                   aria-controls="about-release-panel-current" aria-selected={showCurrent} tabIndex={showCurrent ? 0 : -1}
                   data-app-update-release-tab="current"
                   onClick={() => selectRelease('current')}
-                  onKeyDown={(event) => onReleaseTabKeyDown(event, 'current')}>当前版本</button>
+                  onKeyDown={(event) => onReleaseTabKeyDown(event, 'current')}><UiText zh={"当前版本"} /></button>
               </div>}
             </div>
             {availableRelease && currentRelease ? <>
@@ -274,27 +275,28 @@ function ReleaseNotesBody({ release, installed, showContext }: {
   installed: boolean
   showContext: boolean
 }): React.JSX.Element {
+  const language = useInterfaceLanguage()
   const notes = useMemo(
-    () => displayReleaseNotes(release),
-    [release.version, release.releaseName, release.releaseNotes]
+    () => displayReleaseNotes(release, language),
+    [release.version, release.releaseName, release.releaseNotes, language]
   )
   return <div className="about-release-body" data-notes-version={release.version}>
     <div className="about-release-header">
       <div>
         <div className="about-release-title-line">
           <h3>{release.releaseName ?? `Rovai AI ${displayVersion(release.version)}`}</h3>
-          {showContext && <span className="about-release-context">{installed ? '当前版本' : '新版本'}</span>}
+          {showContext && <span className="about-release-context">{installed ? uiAttribute("当前版本") : uiAttribute("新版本")}</span>}
         </div>
         <p>{release.releaseDate
-          ? <>发布日期：<time dateTime={release.releaseDate}>{formatReleaseDate(release.releaseDate)}</time></>
-          : '发布日期暂未提供'}</p>
+          ? <><UiText zh={"发布日期："} /><time dateTime={release.releaseDate}>{formatReleaseDate(release.releaseDate)}</time></>
+          : uiAttribute("发布日期暂未提供")}</p>
       </div>
     </div>
     {notes
       ? <SafeMarkdown className="about-release-notes">{notes}</SafeMarkdown>
       : <p className="about-release-empty">{installed
-        ? '此版本暂无内置更新日志。'
-        : '此版本没有提供更新日志。版本号与下载操作仍以正式发布信息为准。'}</p>}
+        ? uiAttribute("此版本暂无内置更新日志。")
+        : uiAttribute("此版本没有提供更新日志。版本号与下载操作仍以正式发布信息为准。")}</p>}
   </div>
 }
 
@@ -303,34 +305,34 @@ function updatePrimaryAction(
   loading: boolean,
   canUpdate: boolean
 ): { kind: 'check' | 'download' | 'install'; label: string; disabled: boolean } {
-  if (loading) return { kind: 'check', label: '读取中…', disabled: true }
-  if (!snapshot) return { kind: 'check', label: '重试', disabled: !canUpdate }
-  if (snapshot.failureReason === 'restart_unconfirmed') return { kind: 'check', label: '重试连接', disabled: !canUpdate }
+  if (loading) return { kind: 'check', label:uiAttribute("读取中…"), disabled: true }
+  if (!snapshot) return { kind: 'check', label:uiAttribute("重试"), disabled: !canUpdate }
+  if (snapshot.failureReason === 'restart_unconfirmed') return { kind: 'check', label:uiAttribute("重试连接"), disabled: !canUpdate }
   switch (snapshot.status) {
     case 'checking':
-      return { kind: 'check', label: '正在检查…', disabled: true }
+      return { kind: 'check', label:uiAttribute("正在检查…"), disabled: true }
     case 'available':
-      return { kind: 'download', label: '下载更新', disabled: !canUpdate }
+      return { kind: 'download', label:uiAttribute("下载更新"), disabled: !canUpdate }
     case 'downloading':
       return {
         kind: 'download',
-        label: `正在下载 ${formatPercent(snapshot.downloadPercent ?? 0)}`,
+        label: uiAttribute("正在下载 {0}", String(formatPercent(snapshot.downloadPercent ?? 0))),
         disabled: true
       }
     case 'ready_to_install':
-      return { kind: 'install', label: '安装并重启', disabled: !canUpdate }
+      return { kind: 'install', label:uiAttribute("安装并重启"), disabled: !canUpdate }
     case 'installing':
-      return { kind: 'install', label: '正在安装…', disabled: true }
+      return { kind: 'install', label:uiAttribute("正在安装…"), disabled: true }
     case 'install_failed':
-      return { kind: 'install', label: '重试安装', disabled: !canUpdate }
+      return { kind: 'install', label:uiAttribute("重试安装"), disabled: !canUpdate }
     case 'download_failed':
-      return { kind: 'download', label: '重试下载', disabled: !canUpdate }
+      return { kind: 'download', label:uiAttribute("重试下载"), disabled: !canUpdate }
     case 'up_to_date':
-      return { kind: 'check', label: '重新检查', disabled: !canUpdate }
+      return { kind: 'check', label:uiAttribute("重新检查"), disabled: !canUpdate }
     case 'check_failed':
-      return { kind: 'check', label: '重新检查', disabled: !canUpdate }
+      return { kind: 'check', label:uiAttribute("重新检查"), disabled: !canUpdate }
     case 'idle':
-      return { kind: 'check', label: '检查更新', disabled: !canUpdate }
+      return { kind: 'check', label:uiAttribute("检查更新"), disabled: !canUpdate }
   }
 }
 
@@ -347,73 +349,73 @@ function updatePresentation(
   detail: string
 } {
   if (loading) return {
-    tone: 'neutral', pageLabel: '读取中', title: '正在读取当前版本', detail: '更新检查尚未开始。'
+    tone: 'neutral', pageLabel:uiAttribute("读取中"), title:uiAttribute("正在读取当前版本"), detail:uiAttribute("更新检查尚未开始。")
   }
   if (loadError || !snapshot) return {
     tone: 'error',
-    pageLabel: '读取失败',
-    title: '无法读取更新状态',
-    detail: canUpdate ? '可以直接重试检查。' : '请重新打开此页面后再试。'
+    pageLabel:uiAttribute("读取失败"),
+    title:uiAttribute("无法读取更新状态"),
+    detail: canUpdate ?uiAttribute("可以直接重试检查。") :uiAttribute("请重新打开此页面后再试。")
   }
   if (actionError) return {
     tone: 'error',
-    pageLabel: '操作未完成',
+    pageLabel:uiAttribute("操作未完成"),
     title: actionError === 'download'
-      ? '下载请求未完成'
+      ?uiAttribute("下载请求未完成")
       : actionError === 'install'
-        ? '安装请求未完成'
-        : '更新操作未完成',
-    detail: '已知版本信息和当前 App 状态没有被清除，请重试。'
+        ?uiAttribute("安装请求未完成")
+        :uiAttribute("更新操作未完成"),
+    detail:uiAttribute("已知版本信息和当前 App 状态没有被清除，请重试。")
   }
   switch (snapshot.status) {
     case 'idle':
       return {
-        tone: 'neutral', pageLabel: '尚未检查', title: '尚未检查更新',
-        detail: '打开此页面不会触发下载。点击“检查更新”获取最新正式版本。'
+        tone: 'neutral', pageLabel:uiAttribute("尚未检查"), title:uiAttribute("尚未检查更新"),
+        detail:uiAttribute("打开此页面不会触发下载。点击“检查更新”获取最新正式版本。")
       }
     case 'checking':
       return {
-        tone: 'info', pageLabel: '检查中', title: snapshot.availableRelease ? '正在重新检查' : '正在检查更新',
+        tone: 'info', pageLabel:uiAttribute("检查中"), title: snapshot.availableRelease ?uiAttribute("正在重新检查") :uiAttribute("正在检查更新"),
         detail: snapshot.availableRelease
-          ? '现有更新信息会保留到新的检查结果成功返回。'
-          : '正在连接正式发布通道；不会自动开始下载。'
+          ?uiAttribute("现有更新信息会保留到新的检查结果成功返回。")
+          :uiAttribute("正在连接正式发布通道；不会自动开始下载。")
       }
     case 'available':
       return {
-        tone: 'attention', pageLabel: '更新可用', title: '等待下载确认',
-        detail: '自动检查只发现了新版本。只有你确认后才会开始下载。'
+        tone: 'attention', pageLabel:uiAttribute("更新可用"), title:uiAttribute("等待下载确认"),
+        detail:uiAttribute("自动检查只发现了新版本。只有你确认后才会开始下载。")
       }
     case 'downloading':
       return {
-        tone: 'info', pageLabel: '下载中', title: `正在下载 ${displayRelease(snapshot)}`,
-        detail: "下载期间可以继续使用 Rovai AI。"
+        tone: 'info', pageLabel:uiAttribute("下载中"), title: uiAttribute("正在下载 {0}", String(displayRelease(snapshot))),
+        detail:uiAttribute("下载期间可以继续使用 Rovai AI。")
       }
     case 'ready_to_install':
       return {
-        tone: 'success', pageLabel: '可安装', title: `${displayRelease(snapshot)} 已准备好`,
-        detail: "点击后将安装更新并重新启动。"
+        tone: 'success', pageLabel:uiAttribute("可安装"), title: uiAttribute("{0} 已准备好", String(displayRelease(snapshot))),
+        detail:uiAttribute("点击后将安装更新并重新启动。")
       }
     case 'installing':
       return {
-        tone: 'info', pageLabel: '正在重启', title: '正在准备安装更新',
-        detail: "正在结束当前执行，随后安装并重新启动。"
+        tone: 'info', pageLabel:uiAttribute("正在重启"), title:uiAttribute("正在准备安装更新"),
+        detail:uiAttribute("正在结束当前执行，随后安装并重新启动。")
       }
     case 'up_to_date':
       return {
-        tone: 'success', pageLabel: '已是最新', title: '当前已是最新版本',
-        detail: `${displayVersion(snapshot.currentVersion)} 已安装。需要时可以重新检查。`
+        tone: 'success', pageLabel:uiAttribute("已是最新"), title:uiAttribute("当前已是最新版本"),
+        detail: uiAttribute("{0} 已安装。需要时可以重新检查。", String(displayVersion(snapshot.currentVersion)))
       }
     case 'check_failed':
       return checkFailure(snapshot)
     case 'download_failed':
       return {
-        tone: 'error', pageLabel: '下载失败', title: '更新下载中断',
-        detail: '已知的新版本信息仍然保留；可以直接重试下载。'
+        tone: 'error', pageLabel:uiAttribute("下载失败"), title:uiAttribute("更新下载中断"),
+        detail:uiAttribute("已知的新版本信息仍然保留；可以直接重试下载。")
       }
     case 'install_failed':
       return {
-        tone: 'error', pageLabel: '安装失败', title: '更新未能开始安装',
-        detail: 'Core 与当前 App 仍可继续使用，已下载的更新可以重试安装。'
+        tone: 'error', pageLabel:uiAttribute("安装失败"), title:uiAttribute("更新未能开始安装"),
+        detail:uiAttribute("Core 与当前 App 仍可继续使用，已下载的更新可以重试安装。")
       }
   }
 }
@@ -425,55 +427,55 @@ function checkFailure(snapshot: AppUpdateSnapshot): {
   detail: string
 } {
   if (snapshot.failureReason === 'release_unpublished') return {
-    tone: 'error', pageLabel: '尚未发布', title: '尚无正式 Server 更新',
-    detail: 'Server 发布通道尚未提供安装包，发布后可重新检查。'
+    tone: 'error', pageLabel:uiAttribute("尚未发布"), title:uiAttribute("尚无正式 Server 更新"),
+    detail:uiAttribute("Server 发布通道尚未提供安装包，发布后可重新检查。")
   }
   if (snapshot.failureReason === 'install_failed') return {
-    tone: 'error', pageLabel: '安装未完成', title: '上次更新未完成',
-    detail: `当前仍运行 ${displayVersion(snapshot.currentVersion)}，可以重新检查更新。`
+    tone: 'error', pageLabel:uiAttribute("安装未完成"), title:uiAttribute("上次更新未完成"),
+    detail: uiAttribute("当前仍运行 {0}，可以重新检查更新。", String(displayVersion(snapshot.currentVersion)))
   }
   const retained = snapshot.availableRelease
-    ? ` 已知的 ${displayRelease(snapshot)} 信息仍然保留。`
+    ? uiAttribute(" 已知的 {0} 信息仍然保留。", String(displayRelease(snapshot)))
     : ''
   if (snapshot.failureReason === 'network') {
     return {
-      tone: 'error', pageLabel: '检查失败', title: '无法连接更新服务',
-      detail: `请检查网络连接后重试。${retained}`.trim()
+      tone: 'error', pageLabel:uiAttribute("检查失败"), title:uiAttribute("无法连接更新服务"),
+      detail: uiAttribute("请检查网络连接后重试。{0}", String(retained)).trim()
     }
   }
   if (snapshot.failureReason === 'invalid_release') {
     return {
-      tone: 'error', pageLabel: '信息无效', title: '发布信息暂不可用',
-      detail: `请稍后重新检查；Rovai AI 不会引导安装未经验证的包。${retained}`.trim()
+      tone: 'error', pageLabel:uiAttribute("信息无效"), title:uiAttribute("发布信息暂不可用"),
+      detail: uiAttribute("请稍后重新检查；Rovai AI 不会引导安装未经验证的包。{0}", String(retained)).trim()
     }
   }
   return {
-    tone: 'error', pageLabel: '自动更新不可用', title: '此版本无法使用自动更新',
-    detail: `可以从官方 Releases 手动获取更新。${retained}`.trim()
+    tone: 'error', pageLabel:uiAttribute("自动更新不可用"), title:uiAttribute("此版本无法使用自动更新"),
+    detail: uiAttribute("可以从官方 Releases 手动获取更新。{0}", String(retained)).trim()
   }
 }
 
 function controlTitle(snapshot: AppUpdateSnapshot | null): string {
-  if (!snapshot) return 'Rovai AI 更新'
+  if (!snapshot) return uiAttribute("Rovai AI 更新")
   if (snapshot.status === 'checking') return snapshot.availableRelease
-    ? `正在重新检查 · 已知 ${displayRelease(snapshot)}`
-    : '正在检查更新'
-  if (snapshot.status === 'up_to_date') return 'Rovai AI 已是最新版本'
-  if (snapshot.status === 'check_failed') return '本次检查未完成'
-  return snapshot.availableRelease ? `Rovai AI ${displayRelease(snapshot)}` : 'Rovai AI 更新'
+    ? uiAttribute("正在重新检查 · 已知 {0}", String(displayRelease(snapshot)))
+    :uiAttribute("正在检查更新")
+  if (snapshot.status === 'up_to_date') return uiAttribute("Rovai AI 已是最新版本")
+  if (snapshot.status === 'check_failed') return uiAttribute("本次检查未完成")
+  return snapshot.availableRelease ? `Rovai AI ${displayRelease(snapshot)}` :uiAttribute("Rovai AI 更新")
 }
 
 function controlDetail(snapshot: AppUpdateSnapshot | null): string {
-  if (snapshot?.status === "downloading") return "下载期间可以继续使用 Rovai AI。"
-  if (snapshot?.status === 'available') return "有新版本可供下载。"
+  if (snapshot?.status === "downloading") return uiAttribute("下载期间可以继续使用 Rovai AI。")
+  if (snapshot?.status === 'available') return uiAttribute("有新版本可供下载。")
   if (snapshot?.status === 'ready_to_install' || snapshot?.status === 'install_failed') {
-    return "更新已下载，安装后将重新启动 Rovai AI。"
+    return uiAttribute("更新已下载，安装后将重新启动 Rovai AI。")
   }
-  if (snapshot?.status === 'download_failed') return "下载未完成，可以重试。"
-  if (snapshot?.status === 'up_to_date') return "你正在使用最新版本。"
-  if (snapshot?.status === 'checking') return "正在检查新版本…"
-  if (snapshot?.status === 'installing') return '窗口即将关闭；安装前会完成受控退出。'
-  return "检查新版本，下载与安装由你决定。"
+  if (snapshot?.status === 'download_failed') return uiAttribute("下载未完成，可以重试。")
+  if (snapshot?.status === 'up_to_date') return uiAttribute("你正在使用最新版本。")
+  if (snapshot?.status === 'checking') return uiAttribute("正在检查新版本…")
+  if (snapshot?.status === 'installing') return uiAttribute("窗口即将关闭；安装前会完成受控退出。")
+  return uiAttribute("检查新版本，下载与安装由你决定。")
 }
 
 function displayRelease(snapshot: AppUpdateSnapshot): string {
@@ -482,7 +484,7 @@ function displayRelease(snapshot: AppUpdateSnapshot): string {
 
 function displayVersion(value: string): string {
   const trimmed = value.trim().replace(/^v/i, '')
-  return trimmed ? `v${trimmed}` : '新版本'
+  return trimmed ? `v${trimmed}` : uiAttribute('新版本')
 }
 
 function formatPercent(value: number): string {
@@ -490,13 +492,13 @@ function formatPercent(value: number): string {
 }
 
 function formatTransfer(transferred: number | null, total: number | null): string {
-  if (transferred === null && total === null) return '正在准备下载…'
-  if (total === null) return `已下载 ${formatBytes(transferred ?? 0)}`
+  if (transferred === null && total === null) return uiAttribute("正在准备下载…")
+  if (total === null) return uiAttribute("已下载 {0}", String(formatBytes(transferred ?? 0)))
   return `${formatBytes(transferred ?? 0)} / ${formatBytes(total)}`
 }
 
 function formatSpeed(bytesPerSecond: number | null): string {
-  return bytesPerSecond === null ? '速度计算中' : `${formatBytes(bytesPerSecond)}/s`
+  return bytesPerSecond === null ?uiAttribute("速度计算中") : `${formatBytes(bytesPerSecond)}/s`
 }
 
 function formatBytes(bytes: number): string {
@@ -509,16 +511,16 @@ function formatBytes(bytes: number): string {
 
 function formatReleaseDate(value: string): string {
   const parsed = new Date(value)
-  if (!Number.isFinite(parsed.getTime())) return '日期暂不可用'
+  if (!Number.isFinite(parsed.getTime())) return uiAttribute("日期暂不可用")
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric', month: 'long', day: 'numeric'
   }).format(parsed)
 }
 
 function formatTimestamp(value: string | null): string {
-  if (!value) return '尚无'
+  if (!value) return uiAttribute("尚无")
   const parsed = new Date(value)
-  if (!Number.isFinite(parsed.getTime())) return '时间暂不可用'
+  if (!Number.isFinite(parsed.getTime())) return uiAttribute("时间暂不可用")
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
   }).format(parsed)
@@ -526,12 +528,12 @@ function formatTimestamp(value: string | null): string {
 
 function formatCheckAttempt(snapshot: AppUpdateSnapshot): string {
   const source = snapshot.lastCheckSource === 'startup'
-    ? '启动自动'
+    ?uiAttribute("启动自动")
     : snapshot.lastCheckSource === 'interval'
-      ? '定时自动'
+      ?uiAttribute("定时自动")
       : snapshot.lastCheckSource === 'manual'
-        ? '手动'
-        : '来源未知'
+        ?uiAttribute("手动")
+        :uiAttribute("来源未知")
   return `${formatTimestamp(snapshot.checkedAt)} · ${source}`
 }
 

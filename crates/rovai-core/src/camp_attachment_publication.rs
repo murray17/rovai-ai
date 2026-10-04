@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     camp_attachment_view::{MAX_CAMP_VIEW_BYTES, MAX_INSTANCE_VIEW_BYTES},
-    camp_id::CampId,
+    camp_id::ThreadId,
     db::Database,
 };
 
@@ -51,9 +51,9 @@ impl AttachmentPublicationSource {
 }
 
 #[derive(Debug, Default)]
-pub struct CampAttachmentPublicationCoordinator;
+pub struct ThreadAttachmentPublicationCoordinator;
 
-impl CampAttachmentPublicationCoordinator {
+impl ThreadAttachmentPublicationCoordinator {
     pub fn commit_composer_intent(
         &self,
         transaction: &Transaction<'_>,
@@ -120,7 +120,7 @@ impl CampAttachmentPublicationCoordinator {
         source: AttachmentPublicationSource,
         authority: &[AuthorityAttachment],
     ) -> Result<CommittedAttachmentPublication> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         let requested_bytes = authority.iter().try_fold(0_u64, |total, attachment| {
             total
                 .checked_add(attachment.byte_size)

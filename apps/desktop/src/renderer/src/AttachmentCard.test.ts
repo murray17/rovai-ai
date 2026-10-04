@@ -1,14 +1,14 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { CampMessageAttachmentView, LocalAttachmentOwnerLocator } from '@contracts'
+import type { ThreadMessageAttachmentView, LocalAttachmentOwnerLocator } from '@contracts'
 import { AttachmentCard } from './AttachmentCard'
 
 vi.mock('./FilePreviewContext', () => ({
   useOptionalFilePreview: () => ({ open: vi.fn() })
 }))
 
-const fileAttachment: CampMessageAttachmentView = {
+const fileAttachment: ThreadMessageAttachmentView = {
   id: 'attachment-1',
   displayName: 'report.md',
   kind: 'file',
@@ -20,14 +20,14 @@ const fileAttachment: CampMessageAttachmentView = {
 }
 
 const composerLocators: Array<[string, LocalAttachmentOwnerLocator, boolean]> = [[
-  'Camp composer',
-  { owner: 'composer', campId: 'camp-1', attachmentRefId: fileAttachment.id },
+  'Thread composer',
+  { owner: 'composer', threadId: 'camp-1', attachmentRefId: fileAttachment.id },
   true
 ], [
   'single-chat composer',
   {
     owner: 'single_chat_composer',
-    campId: 'camp-1',
+    threadId: 'camp-1',
     conversationId: 'conversation-1',
     attachmentRefId: fileAttachment.id
   },
@@ -48,7 +48,7 @@ describe('AttachmentCard composer actions', () => {
   })
 
   it('exposes a primary open button for a composer directory', () => {
-    const directoryAttachment: CampMessageAttachmentView = {
+    const directoryAttachment: ThreadMessageAttachmentView = {
       ...fileAttachment,
       id: 'attachment-directory',
       displayName: 'research',
@@ -60,7 +60,7 @@ describe('AttachmentCard composer actions', () => {
       attachment: directoryAttachment,
       locator: {
         owner: 'composer',
-        campId: 'camp-1',
+        threadId: 'camp-1',
         attachmentRefId: directoryAttachment.id
       },
       presentation: 'composer'
@@ -72,7 +72,7 @@ describe('AttachmentCard composer actions', () => {
   })
 
   it('keeps a composer image openable while its thumbnail is loading', () => {
-    const imageAttachment: CampMessageAttachmentView = {
+    const imageAttachment: ThreadMessageAttachmentView = {
       ...fileAttachment,
       id: 'attachment-image',
       displayName: 'diagram.png',
@@ -83,7 +83,7 @@ describe('AttachmentCard composer actions', () => {
       attachment: imageAttachment,
       locator: {
         owner: 'composer',
-        campId: 'camp-1',
+        threadId: 'camp-1',
         attachmentRefId: imageAttachment.id
       },
       presentation: 'composer'

@@ -193,7 +193,7 @@ Rovai-specific interaction contracts are indexed in
 - **Do** keep the two themes on one component tree and one state matrix.
 - **Do** preserve readable evidence, uncertainty and the next user action.
 - **Do** combine state color with text, icon, shape or stable position.
-- **Do** use the established product terms “队员”, “记忆”, “Agent 运行时” and “快速对话”.
+- **Do** use the established product terms “队员”, “记忆”, “智能体” and “快速对话”. “智能体” labels the selectable coding-agent product; “队员” labels its long-lived team identity.
 - **Do** implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery states for
   primary surfaces.
 

@@ -4,7 +4,8 @@ import '../../../apps/desktop/src/renderer/src/member-editor.css'
 import React, { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MembersView } from '../../../apps/desktop/src/renderer/src/MemberManagement'
-import { CampNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
+import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
+import { changeInterfaceLanguage, useInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
 import {
   availability,
   initialMembers,
@@ -102,7 +103,7 @@ window.rovai = {
         removable: true,
         currentCampMembershipCount: 0,
         openAssignedTaskCount: 0,
-        defaultLeadCampCount: 0,
+        defaultLeadThreadCount: 0,
         nonTerminalAgentRunCount: 0
       }
     if (method === 'members.reorder') {
@@ -213,6 +214,7 @@ window.memberFixture = {
   theme: (theme) => {
     document.documentElement.dataset.theme = theme
   },
+  language: language => changeInterfaceLanguage({ setInterfaceLanguage: async interfaceLanguage => ({ interfaceLanguage }) }, language),
   leave: () => openSettings(),
   reset: () => {
     members = initialMembers()
@@ -221,6 +223,7 @@ window.memberFixture = {
   }
 }
 function Fixture() {
+  useInterfaceLanguage()
   const [agents, setAgents] = useState(members)
   const [selected, setSelected] = useState(members[0].agentId)
   const [tab, setTab] = useState('identity')
@@ -246,11 +249,11 @@ function Fixture() {
   }
   return (
     <div className="app-shell">
-      <CampNavigation
+      <ThreadNavigation
         view="members"
         state="ready"
         navigation={navigation}
-        activeCampId={null}
+        activeThreadId={null}
         currentProjectKey="prototype-project"
         pendingMemoryCount={0}
         onNewConversation={noop}
@@ -259,7 +262,7 @@ function Fixture() {
         onMemory={noop}
         onSettings={openSettings}
         onOpenProject={noop}
-        onCamp={noop}
+        onThread={noop}
         onCreateInProject={noop}
         onRemoveProject={async () => {}}
         onRename={() => navigationAction('navigation.rename')}

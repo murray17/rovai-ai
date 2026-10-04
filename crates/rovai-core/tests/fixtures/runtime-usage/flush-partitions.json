@@ -1,0 +1,274 @@
+{
+  "kind": "synthetic-regression",
+  "schemaVersion": 1,
+  "columns": [
+    "promptInputTotalTokens",
+    "uncachedInputTokens",
+    "cacheReadTokens",
+    "cacheWriteTokens",
+    "outputTokens",
+    "cacheObservableRequestCount",
+    "cacheHitRequestCount",
+    "usageQuality"
+  ],
+  "cases": [
+    {
+      "name": "missing-read",
+      "counterMode": "delta",
+      "inputSemantics": "exclusive_buckets",
+      "scope": "model_call",
+      "rawCalls": [
+        {
+          "inputTokens": 100,
+          "cacheReadInputTokens": null,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 10
+        },
+        {
+          "inputTokens": 50,
+          "cacheReadInputTokens": 20,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5
+        }
+      ],
+      "expected": [
+        70,
+        150,
+        20,
+        0,
+        15,
+        1,
+        1,
+        "runtime_reported_partial"
+      ]
+    },
+    {
+      "name": "missing-read-last",
+      "counterMode": "delta",
+      "inputSemantics": "exclusive_buckets",
+      "scope": "model_call",
+      "rawCalls": [
+        {
+          "inputTokens": 50,
+          "cacheReadInputTokens": 20,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5
+        },
+        {
+          "inputTokens": 100,
+          "cacheReadInputTokens": null,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 10
+        }
+      ],
+      "expected": [
+        70,
+        150,
+        20,
+        0,
+        15,
+        1,
+        1,
+        "runtime_reported_partial"
+      ]
+    },
+    {
+      "name": "missing-write",
+      "counterMode": "delta",
+      "inputSemantics": "exclusive_buckets",
+      "scope": "model_call",
+      "rawCalls": [
+        {
+          "inputTokens": 100,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": null,
+          "outputTokens": 10
+        },
+        {
+          "inputTokens": 50,
+          "cacheReadInputTokens": 20,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5
+        }
+      ],
+      "expected": [
+        70,
+        150,
+        20,
+        0,
+        15,
+        2,
+        1,
+        "runtime_reported_partial"
+      ]
+    },
+    {
+      "name": "missing-output",
+      "counterMode": "delta",
+      "inputSemantics": "exclusive_buckets",
+      "scope": "model_call",
+      "rawCalls": [
+        {
+          "inputTokens": 100,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": null
+        },
+        {
+          "inputTokens": 50,
+          "cacheReadInputTokens": 20,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5
+        }
+      ],
+      "expected": [
+        170,
+        150,
+        20,
+        0,
+        5,
+        2,
+        1,
+        "runtime_reported_partial"
+      ]
+    },
+    {
+      "name": "three-calls",
+      "counterMode": "delta",
+      "inputSemantics": "exclusive_buckets",
+      "scope": "model_call",
+      "rawCalls": [
+        {
+          "inputTokens": 100,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 10
+        },
+        {
+          "inputTokens": 50,
+          "cacheReadInputTokens": 20,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5
+        },
+        {
+          "inputTokens": 30,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 3
+        }
+      ],
+      "expected": [
+        200,
+        180,
+        20,
+        0,
+        18,
+        3,
+        1,
+        "runtime_reported"
+      ]
+    },
+    {
+      "name": "explicit-zero",
+      "counterMode": "delta",
+      "inputSemantics": "exclusive_buckets",
+      "scope": "model_call",
+      "rawCalls": [
+        {
+          "inputTokens": 0,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 0
+        },
+        {
+          "inputTokens": 0,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 0
+        }
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        0,
+        "runtime_reported"
+      ]
+    },
+    {
+      "name": "complementary-inclusive",
+      "counterMode": "delta",
+      "inputSemantics": "cache_inclusive_total",
+      "scope": "model_call",
+      "rawCalls": [
+        {
+          "inputTokens": 100,
+          "cacheReadInputTokens": null,
+          "cacheWriteInputTokens": null,
+          "outputTokens": 10
+        },
+        {
+          "inputTokens": null,
+          "cacheReadInputTokens": 20,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5
+        }
+      ],
+      "expected": [
+        100,
+        null,
+        20,
+        0,
+        15,
+        1,
+        1,
+        "runtime_reported_partial"
+      ]
+    },
+    {
+      "name": "cumulative-baseline-reset",
+      "counterMode": "cumulative",
+      "inputSemantics": "cache_inclusive_total",
+      "scope": "session",
+      "rawCalls": [
+        {
+          "inputTokens": 100,
+          "cacheReadInputTokens": 10,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 10
+        },
+        {
+          "inputTokens": 150,
+          "cacheReadInputTokens": 20,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 15
+        },
+        {
+          "inputTokens": 20,
+          "cacheReadInputTokens": 2,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 2
+        },
+        {
+          "inputTokens": 40,
+          "cacheReadInputTokens": 4,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 4
+        }
+      ],
+      "expected": [
+        70,
+        58,
+        12,
+        null,
+        7,
+        null,
+        null,
+        "runtime_reported"
+      ]
+    }
+  ]
+}

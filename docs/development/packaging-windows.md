@@ -3,7 +3,7 @@ document_type: development-guide
 authority: windows-desktop-build-packaging-routing
 status: implemented-pending-release-qualification
 source_version: v1.15
-last_updated: 2026-08-26
+last_updated: 2026-10-03
 ---
 
 # Windows x64 构建、打包与发布
@@ -55,10 +55,15 @@ upgrade，不再次展示安装向导。verifier 还冻结运行中升级协调�
 标准关闭请求，完整等待 20 秒 Planned Shutdown，再进入最多 5 秒的精确安装树强制回收；不得恢复
 electron-builder 默认的 1 秒等待或仅按相同路径前缀批量结束进程。
 
+共享的 `build:desktop` 前置检查同时要求 [`build/release-metadata.json`](../../build/release-metadata.json)
+与包版本一致且发布日期有效；Windows 包内的当前版本日期因此也可离线显示。双语源、独立语言标记与
+GitHub/manifest/内嵌日志保留完整原文的发布流程见[共用发布源](packaging.md#主动检查更新发布集合)，
+不能上传 Renderer 按语言选择后的副本。
+
 正式打包 App 主动检查该发布集合，但不自动下载；用户显式“下载更新”后才进入一轮互斥下载，并在
 `ready_to_install` 再确认“安装并重启”。Updater 必须先同步 stage/启动 silent installer，Main 随后在其
-`before-quit` 中先完成 active Composer Draft fence，再进入同一 Planned Shutdown；同步 stage 或 Draft 保存失败时
-不得预先关闭 Core。检查来源、提示代次、状态与 fallback 由 [App Update v2](../contracts/app-update-v2.md)统一约束。
+`before-quit` 中保留 Desktop-local Composer 快照并进入同一 Planned Shutdown；同步 stage 或本地准备失败时
+不得预先关闭 Core。检查来源、提示代次、状态、发布说明语言与 fallback 由 [App Update v7](../contracts/app-update-v7.md)统一约束。
 
 ## Target-isolated staging
 

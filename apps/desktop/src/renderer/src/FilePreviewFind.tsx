@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { EMPTY_FILE_FIND, type FileFindDocument, type FileFindMatch, type FileFindOptions, type FileFindResult } from './file-find'
 import { searchFileDocuments } from './file-find-client'
+import { UiText, uiAttribute } from './interface-language'
 
 export interface FileFindAdapter {
   scopeLabel: string
@@ -68,7 +69,7 @@ export function FileFindProvider({ activeTabId, visible, children }: { activeTab
     let lastRegion: 'file' | 'conversation' = 'conversation'
     const track = (event: Event): void => {
       if (isFileFindTarget(event.target)) lastRegion = 'file'
-      else if (event.target instanceof Element && event.target.closest('.camp-workspace,.topbar-conversation-context')) lastRegion = 'conversation'
+      else if (event.target instanceof Element && event.target.closest('.thread-workspace,.topbar-conversation-context')) lastRegion = 'conversation'
     }
     const shortcut = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.isComposing || event.altKey || !current.current.visible) return
@@ -108,7 +109,7 @@ export function FileFindButton(): React.JSX.Element | null {
   const registry = useOptionalFileFind()
   if (!registry?.visible) return null
   return <button type="button" className="file-preview-find-trigger"
-    aria-label="查找文件内容" title="查找文件内容（⌘F / Ctrl+F）"
+    aria-label={uiAttribute("查找文件内容")} title={uiAttribute("查找文件内容（⌘F / Ctrl+F）")}
     aria-controls={registry.activeTabId ? `file-find-${registry.activeTabId}` : undefined}
     aria-expanded={registry.controller?.opened ?? false} disabled={!registry.controller?.supported}
     onClick={() => registry.controller?.open()}>
@@ -189,7 +190,7 @@ export function FileFindScope({ id, children }: { id: string; children: ReactNod
           scrollNextSearch.current = false
         }).catch(error => {
           if (abort.signal.aborted) return
-          setResult({ matches: [], limited: false, error: error instanceof Error ? error.message : '暂时无法查找' })
+          setResult({ matches: [], limited: false, error: error instanceof Error ? error.message : uiAttribute('暂时无法查找') })
           setBusy(false)
         })
     }, 160)
@@ -237,28 +238,28 @@ export function FileFindScope({ id, children }: { id: string; children: ReactNod
     <div className={`file-find-scope${active && opened ? ' find-open' : ''}`} ref={root}>
       {children}
       {active && opened && <div className="file-find-surface" id={`file-find-${id}`} ref={surface}>
-        <form role="search" aria-label="文件内查找" className="file-find-form" onSubmit={event => { event.preventDefault(); if (!composing) navigate(1) }}>
+        <form role="search" aria-label={uiAttribute("文件内查找")} className="file-find-form" onSubmit={event => { event.preventDefault(); if (!composing) navigate(1) }}>
           <FindIcon kind="search" />
-          <input ref={input} type="text" aria-label="查找文件内容" placeholder="在文件中查找" value={options.query} maxLength={512}
+          <input ref={input} type="text" aria-label={uiAttribute("查找文件内容")} placeholder={uiAttribute("在文件中查找")} value={options.query} maxLength={512}
             autoComplete="off" spellCheck={false} onChange={event => update({ query: event.target.value })}
             onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
             onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (!event.nativeEvent.isComposing && !composing) navigate(event.shiftKey ? -1 : 1) } }} />
-          <button className="file-find-icon" type="button" aria-label="查找选项" title="查找选项" aria-expanded={expandedOptions} aria-controls={`file-find-options-${id}`} onClick={() => setExpandedOptions(value => !value)}><FindIcon kind="options" /></button>
+          <button className="file-find-icon" type="button" aria-label={uiAttribute("查找选项")} title={uiAttribute("查找选项")} aria-expanded={expandedOptions} aria-controls={`file-find-options-${id}`} onClick={() => setExpandedOptions(value => !value)}><FindIcon kind="options" /></button>
           <span className="file-find-count" aria-hidden="true">{count}</span>
           <span className="file-find-divider" aria-hidden="true" />
-          <button className="file-find-icon" type="button" aria-label="上一个匹配" title="上一个（Shift+Enter）" disabled={busy || !result.matches.length} onClick={() => navigate(-1)}><FindIcon kind="up" /></button>
-          <button className="file-find-icon" type="button" aria-label="下一个匹配" title="下一个（Enter）" disabled={busy || !result.matches.length} onClick={() => navigate(1)}><FindIcon kind="down" /></button>
-          <button className="file-find-icon" type="button" aria-label="关闭文件查找" title="关闭（Esc）" onClick={() => close(true)}><FindIcon kind="close" /></button>
+          <button className="file-find-icon" type="button" aria-label={uiAttribute("上一个匹配")} title={uiAttribute("上一个（Shift+Enter）")} disabled={busy || !result.matches.length} onClick={() => navigate(-1)}><FindIcon kind="up" /></button>
+          <button className="file-find-icon" type="button" aria-label={uiAttribute("下一个匹配")} title={uiAttribute("下一个（Enter）")} disabled={busy || !result.matches.length} onClick={() => navigate(1)}><FindIcon kind="down" /></button>
+          <button className="file-find-icon" type="button" aria-label={uiAttribute("关闭文件查找")} title={uiAttribute("关闭（Esc）")} onClick={() => close(true)}><FindIcon kind="close" /></button>
         </form>
         {expandedOptions && <div className="file-find-options" id={`file-find-options-${id}`}>{([
           ['caseSensitive', 'Aa', '区分大小写'], ['wholeWord', 'ab', '全字匹配'], ['regexp', '.*', '正则']
-        ] as const).map(([key, glyph, label]) => <button key={key} type="button" aria-pressed={options[key]} onClick={() => update({ [key]: !options[key] })}><span>{glyph}</span>{label}</button>)}</div>}
+        ] as const).map(([key, glyph, label]) => <button key={key} type="button" aria-pressed={options[key]} onClick={() => update({ [key]: !options[key] })}><span>{glyph}</span>{uiAttribute(label)}</button>)}</div>}
         {(adapter?.changes || adapter?.scopeLabel) && <div className="file-find-scope-row">{adapter?.changes ? <>
-          <select aria-label="差异查找范围" value={options.allChanges ? 'all' : 'file'} onChange={event => update({ allChanges: event.target.value === 'all' })}><option value="file">当前文件</option><option value="all">本次全部变更</option></select>
-          <label><input type="checkbox" checked={options.changesOnly} onChange={event => update({ changesOnly: event.target.checked })} />仅增删行</label>
+          <select aria-label={uiAttribute("差异查找范围")} value={options.allChanges ? 'all' : 'file'} onChange={event => update({ allChanges: event.target.value === 'all' })}><option value="file"><UiText zh={"当前文件"} /></option><option value="all"><UiText zh={"本次全部变更"} /></option></select>
+          <label><input type="checkbox" checked={options.changesOnly} onChange={event => update({ changesOnly: event.target.checked })} /><UiText zh={"仅增删行"} /></label>
         </> : <span>{adapter?.scopeLabel}</span>}</div>}
         {result.error && <div className="file-find-error" role="alert">{result.error}</div>}
-        <span className="sr-only" role="status" aria-live="polite">{busy ? '正在查找' : result.error ?? (result.limited ? `已显示前 ${result.matches.length} 处匹配，请缩小查找范围` : `当前第 ${result.matches.length ? index + 1 : 0} 处，共 ${result.matches.length} 处匹配`)}</span>
+        <span className="sr-only" role="status" aria-live="polite">{busy ? uiAttribute("正在查找") : result.error ?? (result.limited ? uiAttribute("已显示前 {0} 处匹配，请缩小查找范围", String(result.matches.length)) : uiAttribute("当前第 {0} 处，共 {1} 处匹配", String(result.matches.length ? index + 1 : 0), String(result.matches.length)))}</span>
       </div>}
     </div>
   </AdapterContext.Provider>

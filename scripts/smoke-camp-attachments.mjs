@@ -44,14 +44,14 @@ try {
     defaultLeadAgentId: firstAgents[0],
     collaborationMode: 'peer'
   })
-  const campId = created.payload?.campId
-  if (created.status !== 'applied' || !campId) {
+  const threadId = created.payload?.threadId
+  if (created.status !== 'applied' || !threadId) {
     throw new Error(`Camp creation failed: ${JSON.stringify(created)}`)
   }
 
-  const initialDraft = await core.request('camp.composerDraft.get', { campId })
+  const initialDraft = await core.request('camp.composerDraft.get', { threadId })
   const referencedDraft = await core.request('camp.sourceAttachments.addFromPath', {
-    campId,
+    threadId,
     expectedRevision: initialDraft.revision,
     sourcePath,
     displayName: 'Runtime 公共附件.txt'
@@ -64,7 +64,7 @@ try {
   }
 
   const firstDraft = await core.request('camp.composerDraft.save', {
-    campId,
+    threadId,
     expectedRevision: referencedDraft.revision,
     content: [
       { kind: 'member_mention', agentId: firstAgents[0] },
@@ -79,7 +79,7 @@ try {
   })
   const firstSent = await core.request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId,
+    threadId,
     draftRevision: firstDraft.revision,
     execution: {
       taskId: null,
@@ -93,7 +93,7 @@ try {
   }
 
   const snapshot = await waitFor(async () => {
-    const candidate = await core.request('camps.snapshot', { campId })
+    const candidate = await core.request('camps.snapshot', { threadId })
     const runs = candidate.agentRuns.filter((run) => firstRunIds.includes(run.id))
     failOnTerminalError(runs, candidate)
     return runs.length === 2 && runs.every((run) => run.status === 'succeeded')
@@ -129,7 +129,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     runtime: installation.snapshot.reportedVersion,
-    campId,
+    threadId,
     attachmentId: attachment.id,
     addressedMemberRunIds: firstRunIds,
     tokenVerifiedByRunCount: 2,

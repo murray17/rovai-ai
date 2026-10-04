@@ -52,3 +52,7 @@ Rust owner 复用 `camp_open_tests.rs` 的现有业务 fixture，新增 `camp_op
 Renderer 的最小输入测试证明有无载入消息时使用同一摘要、显式 null 不恢复缓存原文及旧投影兼容。验证命令为 `cargo test -p rovai-core --lib --features slow-tests read_model::camp_open_slow_tests`、`pnpm exec vitest run apps/desktop/src/renderer/src/App.test.ts`、类型检查、Rust PR 门禁与通用文档门禁。
 
 验收结果：三个 Camp Open owner 均通过；`pnpm test:rust:pr`、`pnpm typecheck`、Vitest 全量 2198 项、`pnpm build:desktop`（含 Web）、`cargo fmt --all --check`、`pnpm docs:test` 与 `DOCS_BASE_REF=origin/main pnpm docs:check:ci` 通过。运行期与 UI 测试使用隔离 fixture，未修改日常 Camp 数据。
+
+## 历史勘误：2026-09-25 Bootstrap Evidence 缺失门禁
+
+上文 historyHint 实施切片中“旧 Session 原证据缺失时拒绝补写新版 Charter”是当时的要求。PR #529 据此增加的 `native_session_id` 已存在即拒绝判断，在 TRAE 正常首次绑定后误拒绝首个输入；Principal 随后要求撤回。历史实施与测试记录保留原样，现行证据准备边界以[当前架构](../../architecture/foundational-invariants.md#context-session-bootstrap)和[本版设计勘误](model-context-change-history-hint-additional.md)为准。

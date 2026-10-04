@@ -63,7 +63,7 @@ export class DailyAnalysisService {
           const project = await realpath(automation.projectRef.path)
           if (!inside(project, await realpath(config.output))) throw new Error('Analysis workspace changed; configure the report destination again')
           const result = await runDaily({ output: config.output, timezone: config.timezone, now,
-            scope: { campIds: config.campIds, excludeCampIds: config.excludeCampIds, excludeAutomationIds: [...new Set([...config.excludeAutomationIds, ...configs.map(entry => entry.automationId)])] },
+            scope: { threadIds: config.threadIds, excludeThreadIds: config.excludeThreadIds, excludeAutomationIds: [...new Set([...config.excludeAutomationIds, ...configs.map(entry => entry.automationId)])] },
             exportTrace: params => this.core.request('executionTrace.export', params)
           })
           outcomes.push({ automationId: config.automationId, status: result.report.status, directory: result.directory })
@@ -100,12 +100,17 @@ function inside(parent: string, child: string): boolean {
 function parseConfiguration(value: unknown): Configuration {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected daily configuration')
   const input = { ...value } as Record<string, unknown>
-  const allowed = ['automationId', 'timezone', 'output', 'campIds', 'excludeCampIds', 'excludeAutomationIds']
+  for (const [old, current] of [['campIds', 'threadIds'], ['excludeCampIds', 'excludeThreadIds']]) {
+    if (!(old in input)) continue
+    if (current in input) throw new Error(`${old} and ${current} cannot be supplied together`)
+    input[current] = input[old]; delete input[old]
+  }
+  const allowed = ['automationId', 'timezone', 'output', 'threadIds', 'excludeThreadIds', 'excludeAutomationIds']
   if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Unknown daily configuration field')
   for (const key of ['automationId', 'timezone', 'output']) if (typeof input[key] !== 'string' || !input[key]) throw new Error(`Missing ${key}`)
   if (!isAbsolute(input.output as string)) throw new Error('Daily output must be absolute')
   dailyWindow(input.timezone as string)
-  for (const key of ['campIds', 'excludeCampIds', 'excludeAutomationIds']) {
+  for (const key of ['threadIds', 'excludeThreadIds', 'excludeAutomationIds']) {
     input[key] ??= []
     if (!Array.isArray(input[key]) || input[key].length > 90 || input[key].some((id: unknown) => typeof id !== 'string' || !id || id.length > 128 || /\s/.test(id))) throw new Error(`Invalid ${key}`)
   }

@@ -1,8 +1,8 @@
 import type {
-  CampComposerContinuationIntentView,
-  CampComposerDraftView,
-  CampMessageAttachmentView,
-  CampSnapshot,
+  ThreadComposerContinuationIntentView,
+  ThreadComposerDraftView,
+  ThreadMessageAttachmentView,
+  ThreadSnapshot,
   ComposerDocument,
   MessageQuoteSnapshot
 } from '@contracts'
@@ -63,7 +63,7 @@ function isQuote(value: unknown): value is MessageQuoteSnapshot {
   return value.authorAtCapture.type !== 'agent' || string(value.authorAtCapture.agentId, 512)
 }
 
-function isAttachment(value: unknown): value is CampMessageAttachmentView {
+function isAttachment(value: unknown): value is ThreadMessageAttachmentView {
   return object(value)
     && uuid(value.id)
     && string(value.displayName, 512)
@@ -78,7 +78,7 @@ function isAttachment(value: unknown): value is CampMessageAttachmentView {
 
 function isReplyIntent(value: unknown): boolean {
   if (value === null) return true
-  if (!object(value) || !string(value.replyToCampMessageId, 512)
+  if (!object(value) || !string(value.replyToThreadMessageId, 512)
     || (value.targetState !== 'available' && value.targetState !== 'message_unavailable')
     || !nullableString(value.excerpt)
     || typeof value.recipientSelectionRequired !== 'boolean') return false
@@ -90,10 +90,10 @@ function isReplyIntent(value: unknown): boolean {
     && ['available', 'unavailable', 'not_applicable'].includes(String(value.author.recipientAvailability))
 }
 
-function isContinuationIntent(value: unknown): value is CampComposerContinuationIntentView | null {
+function isContinuationIntent(value: unknown): value is ThreadComposerContinuationIntentView | null {
   if (value === null) return true
   return object(value)
-    && string(value.sourceCampMessageId, 512)
+    && string(value.sourceThreadMessageId, 512)
     && object(value.recipient)
     && string(value.recipient.agentId, 512)
     && string(value.recipient.displayName, 512)
@@ -102,9 +102,9 @@ function isContinuationIntent(value: unknown): value is CampComposerContinuation
     && typeof value.recipientSelectionRequired === 'boolean'
 }
 
-function isStoredDraft(value: unknown, campId: string): value is CampComposerDraftView {
+function isStoredDraft(value: unknown, threadId: string): value is ThreadComposerDraftView {
   return object(value)
-    && value.campId === campId
+    && value.threadId === threadId
     && string(value.body)
     && isComposerDocument(value.content)
     && Number.isInteger(value.revision)
@@ -121,8 +121,8 @@ function isStoredDraft(value: unknown, campId: string): value is CampComposerDra
     && nullableString(value.expiresAt, 128)
 }
 
-function storageKey(campId: string): string {
-  return `${STORAGE_PREFIX}${campId}`
+function storageKey(threadId: string): string {
+  return `${STORAGE_PREFIX}${threadId}`
 }
 
 function browserStorage(): DraftStorage | null {
@@ -134,22 +134,35 @@ function browserStorage(): DraftStorage | null {
   }
 }
 
-export function loadLocalCampComposerDraft(
-  campId: string,
+export function loadLocalThreadComposerDraft(
+  threadId: string,
   storage: DraftStorage | null = browserStorage()
-): CampComposerDraftView | null {
+): ThreadComposerDraftView | null {
   if (!storage) return null
-  const encoded = storage.getItem(storageKey(campId))
+  const encoded = storage.getItem(storageKey(threadId))
   if (!encoded || encoded.length > MAX_STORED_DRAFT_BYTES) return null
   try {
     const parsed: unknown = JSON.parse(encoded)
-    return isStoredDraft(parsed, campId) ? parsed : null
+    // Preserve the established on-disk draft format and key across the public rename.
+    if (object(parsed) && 'campId' in parsed && !('threadId' in parsed)) {
+      parsed.threadId = parsed.campId
+      delete parsed.campId
+      if (object(parsed.replyIntent) && 'replyToCampMessageId' in parsed.replyIntent) {
+        parsed.replyIntent.replyToThreadMessageId = parsed.replyIntent.replyToCampMessageId
+        delete parsed.replyIntent.replyToCampMessageId
+      }
+      if (object(parsed.continuationIntent) && 'sourceCampMessageId' in parsed.continuationIntent) {
+        parsed.continuationIntent.sourceThreadMessageId = parsed.continuationIntent.sourceCampMessageId
+        delete parsed.continuationIntent.sourceCampMessageId
+      }
+    }
+    return isStoredDraft(parsed, threadId) ? parsed : null
   } catch {
     return null
   }
 }
 
-export function localCampComposerDraftIsEmpty(draft: CampComposerDraftView): boolean {
+export function localThreadComposerDraftIsEmpty(draft: ThreadComposerDraftView): boolean {
   return draft.content.segments.every((segment) => segment.kind === 'text' && !segment.text)
     && draft.quotes.length === 0
     && draft.attachments.length === 0
@@ -157,32 +170,44 @@ export function localCampComposerDraftIsEmpty(draft: CampComposerDraftView): boo
     && draft.continuationIntent === null
 }
 
-export function saveLocalCampComposerDraft(
-  draft: CampComposerDraftView,
+export function saveLocalThreadComposerDraft(
+  draft: ThreadComposerDraftView,
   storage: DraftStorage | null = browserStorage()
 ): void {
   if (!storage) return
-  if (localCampComposerDraftIsEmpty(draft)) {
-    storage.removeItem(storageKey(draft.campId))
+  if (localThreadComposerDraftIsEmpty(draft)) {
+    storage.removeItem(storageKey(draft.threadId))
     return
   }
-  const encoded = JSON.stringify(draft)
+  const { threadId, replyIntent, continuationIntent, ...rest } = draft
+  const encoded = JSON.stringify({
+    ...rest,
+    campId: threadId,
+    replyIntent: replyIntent === null ? null : (() => {
+      const { replyToThreadMessageId, ...rest } = replyIntent
+      return { ...rest, replyToCampMessageId: replyToThreadMessageId }
+    })(),
+    continuationIntent: continuationIntent === null ? null : (() => {
+      const { sourceThreadMessageId, ...rest } = continuationIntent
+      return { ...rest, sourceCampMessageId: sourceThreadMessageId }
+    })()
+  })
   if (encoded.length > MAX_STORED_DRAFT_BYTES) {
     throw new Error('当前输入超过本机草稿保存上限。')
   }
-  storage.setItem(storageKey(draft.campId), encoded)
+  storage.setItem(storageKey(draft.threadId), encoded)
 }
 
-export function clearLocalCampComposerDraft(
-  campId: string,
+export function clearLocalThreadComposerDraft(
+  threadId: string,
   storage: DraftStorage | null = browserStorage()
 ): void {
-  storage?.removeItem(storageKey(campId))
+  storage?.removeItem(storageKey(threadId))
 }
 
 export function composerBodyForContent(
   content: ComposerDocument,
-  members: CampSnapshot['members']
+  members: ThreadSnapshot['members']
 ): string {
   return content.segments.map((segment) => {
     if (segment.kind === 'text') return segment.text
@@ -204,9 +229,9 @@ function explicitRecipientIds(content: ComposerDocument): string[] {
 }
 
 export function materializeLocalContinuation(
-  draft: CampComposerDraftView,
-  members: CampSnapshot['members']
-): CampComposerDraftView {
+  draft: ThreadComposerDraftView,
+  members: ThreadSnapshot['members']
+): ThreadComposerDraftView {
   const intent = draft.continuationIntent
   if (!intent || draft.replyIntent
     || explicitRecipientIds(draft.content).length > 0
@@ -227,13 +252,13 @@ export function materializeLocalContinuation(
   return { ...draft, content, body: composerBodyForContent(content, members) }
 }
 
-export function emptyLocalCampComposerDraft(
-  campId: string,
+export function emptyLocalThreadComposerDraft(
+  threadId: string,
   revision = 1,
-  continuationIntent: CampComposerContinuationIntentView | null = null
-): CampComposerDraftView {
+  continuationIntent: ThreadComposerContinuationIntentView | null = null
+): ThreadComposerDraftView {
   return {
-    campId,
+    threadId,
     body: '',
     content: { version: 2, segments: [] },
     quotes: [],
@@ -246,12 +271,12 @@ export function emptyLocalCampComposerDraft(
   }
 }
 
-export function nextLocalCampComposerDraftAfterSend(input: {
-  sent: CampComposerDraftView
-  campMessageId: string | undefined
+export function nextLocalThreadComposerDraftAfterSend(input: {
+  sent: ThreadComposerDraftView
+  threadMessageId: string | undefined
   addressedAgentIds: readonly string[]
-  members: CampSnapshot['members']
-}): CampComposerDraftView {
+  members: ThreadSnapshot['members']
+}): ThreadComposerDraftView {
   const leadId = input.members.find((member) => member.isDefaultLead)?.agentId ?? null
   const ids = explicitRecipientIds(input.sent.content)
   const broadcast = input.sent.content.segments.some((segment) =>
@@ -260,9 +285,9 @@ export function nextLocalCampComposerDraftAfterSend(input: {
     && input.addressedAgentIds.length === 1 && input.addressedAgentIds[0] === ids[0]
     ? input.members.find((member) => member.agentId === ids[0]) ?? null
     : null
-  const continuationIntent = recipient && input.campMessageId
+  const continuationIntent = recipient && input.threadMessageId
     ? {
-        sourceCampMessageId: input.campMessageId,
+        sourceThreadMessageId: input.threadMessageId,
         recipient: {
           agentId: recipient.agentId,
           displayName: recipient.displayName,
@@ -275,8 +300,8 @@ export function nextLocalCampComposerDraftAfterSend(input: {
           || recipient.profilePresence !== 'present'
       }
     : null
-  return emptyLocalCampComposerDraft(
-    input.sent.campId,
+  return emptyLocalThreadComposerDraft(
+    input.sent.threadId,
     input.sent.revision + 1,
     continuationIntent
   )

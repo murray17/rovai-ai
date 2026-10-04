@@ -10,7 +10,7 @@ export type MemoryNavigationTarget = {
 
 export type NavigationTarget = Exclude<RestorableLocation, { kind: 'memory' }>
   | MemoryNavigationTarget
-  | { kind: 'settings'; section: SettingsSection }
+  | { kind: 'settings'; section: SettingsSection; overview?: true }
   | { kind: 'automations' }
   | { kind: 'missions' }
 
@@ -27,8 +27,8 @@ export const MAX_NAVIGATION_ENTRIES = 50
 export function sameNavigationDestination(a: NavigationTarget, b: NavigationTarget): boolean {
   if (a.kind !== b.kind) return false
   switch (a.kind) {
-    case 'camp': return b.kind === 'camp' && a.campId === b.campId
-    case 'settings': return b.kind === 'settings' && a.section === b.section
+    case 'camp': return b.kind === 'camp' && a.threadId === b.threadId
+    case 'settings': return b.kind === 'settings' && a.section === b.section && a.overview === b.overview
     case 'members': return b.kind === 'members' && a.agentId === b.agentId && a.tab === b.tab
     case 'memory': return b.kind === 'memory' && a.memoryId === b.memoryId
     default: return true
@@ -81,7 +81,7 @@ export function createDesktopNavigation<Context = undefined>(
       commit: (resolvedTarget = target) => {
         if (request !== generation || (committed && committedRevision !== entryRevision)) return false
         // Build from the latest committed entries so in-page repairs made during a slow
-        // departure survive. A second commit (Camp preview -> full projection) replaces.
+        // departure survive. A second commit (Thread preview -> full projection) replaces.
         let entries = [...(state.entries.length ? state.entries : operation.kind === 'traverse' ? operation.browserState?.entries ?? [] : [])]
         let index = state.index
         if (!committed && operation.kind === 'push') {
@@ -115,8 +115,8 @@ export function createDesktopNavigation<Context = undefined>(
     connect(): () => void {
       return history?.listen(async next => await navigate({ kind: 'traverse', index: next.index, browserState: next }) ? state : null) ?? (() => undefined)
     },
-    restore(): Promise<boolean> {
-      return history?.initial ? navigate({ kind: 'traverse', index: history.initial.index, browserState: history.initial }) : Promise.resolve(false)
+    restore(context?: Context): Promise<boolean> {
+      return history?.initial ? navigate({ kind: 'traverse', index: history.initial.index, browserState: history.initial }, context) : Promise.resolve(false)
     },
     getSnapshot: (): NavigationState => state,
     subscribe: (listener: () => void): (() => void) => {

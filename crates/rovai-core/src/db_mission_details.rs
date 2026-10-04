@@ -436,7 +436,7 @@ mod tests {
             )
             .unwrap();
         let mission_id = created.result.payload["missionId"].as_str().unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let host: String = database
             .connection()
             .query_row(
@@ -509,7 +509,9 @@ mod tests {
         database.migrate_default_recipient_mention_v166().unwrap();
         assert!(matches!(
             classify_database_contract(database.connection()).unwrap(),
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.61"
+                    && marker.projection_schema_version == 116
         ));
         crate::collaboration::delete_camp_aggregate(database.connection(), camp_id).unwrap();
         assert_eq!(

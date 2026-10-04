@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { AppearanceSettings } from './AppearanceSettings'
 
 describe('appearance settings', () => {
-  it('renders the global three-way preference without Camp-specific controls', () => {
+  it('renders the global three-way preference without Thread-specific controls', () => {
     const markup = renderToStaticMarkup(createElement(AppearanceSettings, {
       appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'night' },
       disabled: false,
@@ -22,7 +22,7 @@ describe('appearance settings', () => {
     expect(markup).not.toContain('Reserved')
     expect(markup).not.toContain('当前视觉语言')
     expect(markup).not.toContain('Steel Strong')
-    expect(markup).not.toContain('Camp 主题')
+    expect(markup).not.toContain('Thread 主题')
   })
 })
 

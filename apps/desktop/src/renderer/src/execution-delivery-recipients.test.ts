@@ -5,7 +5,7 @@ import { executionDeliveryRecipientIds, executionRecipientLayout } from './execu
 type PublicDelivery = Extract<MessageDeliveryView, { deliveryKind: 'public_a2a' }>
 function delivery(overrides: Partial<PublicDelivery> = {}): PublicDelivery {
   return {
-    id: 'delivery-1', messageId: 'message-1', campTurnId: 'turn', taskId: null,
+    id: 'delivery-1', messageId: 'message-1', threadTurnId: 'turn', taskId: null,
     recipientAgentId: 'kyoko', recipientMembershipVersionAtAdmission: 1,
     deliveryKind: 'public_a2a', sourceAgentRunId: 'alice-run', dispatchDisposition: 'dispatch',
     completionRole: 'required', gatherId: null, gatherDispatchDeliveryId: null,

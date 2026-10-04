@@ -110,24 +110,36 @@ pub fn bundled_skill_resources() -> Result<PathBuf> {
         ensure!(path.is_absolute(), "bundled Skills root must be absolute");
         return Ok(path);
     }
-    let executable = std::env::current_exe().context("cannot locate Core executable")?;
-    if let Some(resources) = executable
-        .parent()
-        .and_then(Path::parent)
-        .map(|parent| parent.join("skills"))
-        .filter(|path| path.join("cli-operations").join("SKILL.md").is_file())
-    {
-        return Ok(resources);
+    let executable =
+        fs::canonicalize(std::env::current_exe().context("cannot locate Core executable")?)
+            .context("cannot resolve Core executable")?;
+    if let Some(directory) = executable.parent() {
+        // Native Server keeps skills next to its binaries; Desktop places bin/
+        // and skills/ under the same Resources directory.
+        let mut candidates = vec![directory.join("skills")];
+        if let Some(parent) = directory.parent() {
+            candidates.push(parent.join("skills"));
+        }
+        for resources in candidates {
+            if resources.join("cli-operations").join("SKILL.md").is_file() {
+                return Ok(resources);
+            }
+        }
     }
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("skills");
-    ensure!(
-        source.join("cli-operations").join("SKILL.md").is_file(),
-        "bundled Skill resources are unavailable"
-    );
-    Ok(source)
+    #[cfg(debug_assertions)]
+    {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("skills");
+        ensure!(
+            source.join("cli-operations").join("SKILL.md").is_file(),
+            "bundled Skill resources are unavailable"
+        );
+        Ok(source)
+    }
+    #[cfg(not(debug_assertions))]
+    anyhow::bail!("bundled Skill resources are unavailable")
 }
 
 impl ManagedSkills {
@@ -513,7 +525,7 @@ mod tests {
             )
             .unwrap();
         }
-        let managed = ManagedSkills::new(managed_root.clone(), resources).unwrap();
+        let managed = ManagedSkills::new(managed_root.clone(), resources.clone()).unwrap();
         managed.sync().unwrap();
         fs::write(managed_root.join("campfire").join("SKILL.md"), "modified").unwrap();
         fs::write(managed_root.join("keep.txt"), "user data").unwrap();
@@ -521,6 +533,24 @@ mod tests {
         assert_eq!(
             read_frontmatter(&managed_root.join("campfire").join("SKILL.md"), "campfire").unwrap(),
             "campfire description"
+        );
+        // An app upgrade replaces owned resources at the same managed paths.
+        let upgraded = "---\nname: campfire\ndescription: Updated discussion guidance\n---\nNew instructions.\n";
+        fs::write(resources.join("campfire").join("SKILL.md"), upgraded).unwrap();
+        let references = resources.join("campfire").join("references");
+        fs::create_dir_all(&references).unwrap();
+        fs::write(references.join("lead.md"), "Updated host instructions.\n").unwrap();
+        managed.sync().unwrap();
+        assert_eq!(
+            fs::read_to_string(managed_root.join("campfire").join("SKILL.md")).unwrap(),
+            upgraded
+        );
+        let (entries, omitted) = managed.index(["campfire"]);
+        assert!(omitted.is_empty());
+        assert_eq!(entries[0].desc, "Updated discussion guidance");
+        assert_eq!(
+            fs::read_to_string(managed_root.join("campfire").join("references/lead.md")).unwrap(),
+            "Updated host instructions.\n"
         );
         assert_eq!(
             fs::read_to_string(managed_root.join("keep.txt")).unwrap(),

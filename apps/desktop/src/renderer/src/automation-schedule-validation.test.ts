@@ -32,7 +32,7 @@ describe('scheduled task input validation', () => {
     const html = renderToStaticMarkup(createElement(AutomationEditor, {
       draft: { ...defaultDraft(''), prompt: '检查待办', schedule: { kind: 'cron', expression: '600 9 * * *' } },
       onChange: () => undefined, agents: [], projects: [], automation: null,
-      busy: false, onOpenCamp: () => undefined, onCreate: () => undefined
+      busy: false, onOpenThread: () => undefined, onCreate: () => undefined
     }))
     expect(html).toContain('aria-invalid="true"')
     expect(html).toContain('分钟需在 0–59 之间，当前填写为 600。')

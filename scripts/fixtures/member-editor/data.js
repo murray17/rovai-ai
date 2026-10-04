@@ -182,7 +182,7 @@ export const navigation = {
       lastActivityAt: time,
       lastActivityGlobalSequence: 1,
       totalCount: 3,
-      recentCamps: [
+      recentThreads: [
         camp('demo-member', '队员配置页面'),
         camp('demo-dialog', '弹窗与浮层精简'),
         camp('demo-workspace', '会话工作区')
@@ -191,7 +191,7 @@ export const navigation = {
   ],
   quickChat: {
     totalCount: 2,
-    recentCamps: [
+    recentThreads: [
       camp('demo-ideas', '讨论产品想法', 'quick_chat'),
       camp('demo-code', '一次代码检查', 'quick_chat')
     ]

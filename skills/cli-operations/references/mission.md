@@ -1,23 +1,18 @@
-# Mission：使命读取与当前使命协作
+# Mission
 
-已知使命 ID 时直接 get；需要查找时才 list。读取其他使命不会切换当前使命，
-update/status 仍只修改当前公共 Camp 的使命。标记 needs_you/completed 前先公开说明，
-再用该消息的 sourceMessageId 更新状态；已有说明直接复用。
+Get a known Mission directly; list only to discover one. Reading another Mission does not switch context: update/status still affect the current public Thread's Mission.
 
-Mission 保存共同目标，Task 保存可独立交接的责任；不要为使命自动创建同名 Task。
-编辑描述只整理已明确的目标，不自行扩大授权或删减要求。
+`sourceMessageId` is optional for every status, including `needs_you` and `completed`. Update status directly; link a relevant existing public message only when useful. A Mission owns the shared objective; a Task owns independently transferable responsibility. Do not automatically create a duplicate Task. Edit only the established objective and requirements.
 
-按整体使命选择状态：
+Choose status for the whole Mission:
 
-- `not_started`：尚未开始，或退回等待安排。
-- `in_progress`：正在推进目标，包括无需 Principal 介入的正常等待。
-- `needs_you`：确有需要 Principal 回答、决定或处理的事项。
-- `completed`：整体目标已经交付，不是自己的局部分工或本轮 Run 结束。
+| Status | Meaning |
+| --- | --- |
+| `not_started` | Work has not begun or has returned to scheduling |
+| `in_progress` | Work is advancing, including normal waits without User intervention |
+| `needs_you` | The User must answer, decide or act |
+| `completed` | The entire objective has been delivered |
 
-仅回答既有结果的解释性问题，不重开使命。
+A local assignment or Run ending does not complete the Mission. Explaining an existing result does not reopen it. A public message or `--to-user` does not itself change status; call `mission status` only when the whole Mission's state changes.
 
-不要根据最新 Turn 是否提及 Principal 推断或改写 Mission 状态。公开消息和 `--to-principal` 都不会
-自动改变状态；只有明确需要更新整体 Mission 状态时，才单独调用 `mission status`。
-
-收到 `mission_start` 时，先用 mission get 读取当前完整定义，再开展工作；普通消息沿用本轮真实输入。
-只提交要修改的字段；同字段后提交覆盖，无需读取或提交版本。结果不确定时，按 [Recovery](recovery.md) 处理。
+On a request to start the Mission, read its full current definition with `mission get` first. For other messages, follow the actual current input. Submit only changed fields; later writes to the same field win, with no version parameter. Use [Recovery](recovery.md) for uncertain results.

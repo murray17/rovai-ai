@@ -1,0 +1,341 @@
+{
+  "kind": "synthetic_wire_to_numeric_readback",
+  "algorithmVersion": "observable-output-heuristic-v3",
+  "note": "Synthetic, sanitized frames for deterministic tests and isolated App acceptance. expectedThoughtNormalized lists the relevant parsed fields (contentText denotes content.text), not the full payload. These frames do not prove a real provider emits them.",
+  "scenarios": [
+    {
+      "name": "claude_root_streamed_thinking",
+      "dialect": "claude-code stream_event",
+      "raw": [
+        {
+          "type": "stream_event",
+          "session_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+          "event": {
+            "type": "message_start",
+            "message": {
+              "id": "native-message"
+            }
+          }
+        },
+        {
+          "type": "stream_event",
+          "session_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+          "event": {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+              "type": "thinking",
+              "thinking": ""
+            }
+          }
+        },
+        {
+          "type": "stream_event",
+          "session_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+          "event": {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+              "type": "thinking_delta",
+              "thinking": "🙂"
+            }
+          }
+        },
+        {
+          "type": "stream_event",
+          "session_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+          "event": {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+              "type": "thinking_delta",
+              "thinking": "继续"
+            }
+          }
+        },
+        {
+          "type": "assistant",
+          "session_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+          "uuid": "complete",
+          "message": {
+            "id": "native-message",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "COMPLETED_BLOCK_EXCLUDED"
+              }
+            ]
+          }
+        }
+      ],
+      "expectedThoughtNormalized": [
+        {
+          "eventType": "agent.thought.delta",
+          "itemId": "claude-thinking:native-message:0",
+          "textOffset": 0,
+          "delta": "🙂"
+        },
+        {
+          "eventType": "agent.thought.delta",
+          "itemId": "claude-thinking:native-message:0",
+          "textOffset": 2,
+          "delta": "继续"
+        }
+      ],
+      "expectedReadbackFields": {
+        "publicTextUnits": 0,
+        "reasoningUnits": 220,
+        "reasoningSource": "stream_text",
+        "streamConfirmed": true
+      },
+      "excludedFromReadback": [
+        "COMPLETED_BLOCK_EXCLUDED",
+        "🙂",
+        "继续"
+      ]
+    },
+    {
+      "name": "acp_root_identity_and_replay",
+      "dialect": "ACP session/update",
+      "raw": [
+        {
+          "sequence": 10,
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "messageId": "root-item",
+              "textOffset": 0,
+              "content": {
+                "type": "text",
+                "text": "思🙂"
+              }
+            }
+          }
+        },
+        {
+          "sequence": 14,
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "messageId": "root-item",
+              "textOffset": 0,
+              "content": {
+                "type": "text",
+                "text": "思🙂"
+              }
+            }
+          }
+        },
+        {
+          "sequence": 15,
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "messageId": "root-item",
+              "textOffset": 3,
+              "content": {
+                "type": "text",
+                "text": "思🙂"
+              }
+            }
+          }
+        },
+        {
+          "sequence": 16,
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "textOffset": 6,
+              "content": {
+                "type": "text",
+                "text": "UNKNOWN_ITEM_EXCLUDED"
+              },
+              "snapshot": true
+            }
+          }
+        },
+        {
+          "sequence": 17,
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "messageId": "root-item",
+              "content": {
+                "type": "text",
+                "text": "NO_OFFSET_EXCLUDED"
+              },
+              "replay": true
+            }
+          }
+        },
+        {
+          "sequence": 18,
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "messageId": "child-item",
+              "textOffset": 0,
+              "subagentId": "child",
+              "content": {
+                "type": "text",
+                "text": "CHILD_EXCLUDED"
+              }
+            }
+          }
+        }
+      ],
+      "expectedThoughtNormalized": [
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": "root-item",
+          "textOffset": 0,
+          "contentText": "思🙂"
+        },
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": "root-item",
+          "textOffset": 0,
+          "contentText": "思🙂"
+        },
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": "root-item",
+          "textOffset": 3,
+          "contentText": "思🙂"
+        },
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": null,
+          "textOffset": 6,
+          "contentText": "UNKNOWN_ITEM_EXCLUDED",
+          "snapshot": true
+        },
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": "root-item",
+          "textOffset": null,
+          "contentText": "NO_OFFSET_EXCLUDED",
+          "replay": true
+        },
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": "child-item",
+          "textOffset": 0,
+          "contentText": "CHILD_EXCLUDED",
+          "subagentId": "child"
+        }
+      ],
+      "expectedCountedOffsets": [
+        {
+          "messageId": "root-item",
+          "textOffset": 0
+        },
+        {
+          "messageId": "root-item",
+          "textOffset": 3
+        }
+      ],
+      "expectedReadbackFields": {
+        "publicTextUnits": 0,
+        "reasoningUnits": 320,
+        "reasoningSource": "stream_text",
+        "streamConfirmed": true
+      },
+      "excludedFromReadback": [
+        "UNKNOWN_ITEM_EXCLUDED",
+        "NO_OFFSET_EXCLUDED",
+        "CHILD_EXCLUDED",
+        "思🙂"
+      ],
+      "note": "The two excluded frames carry explicit snapshot/replay markers; missing messageId or textOffset alone no longer excludes a fenced live ACP chunk."
+    },
+    {
+      "name": "acp_standard_live_receipts_without_offsets",
+      "dialect": "ACP session/update",
+      "raw": [
+        {
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "content": {
+                "type": "text",
+                "text": "思🙂"
+              }
+            }
+          }
+        },
+        {
+          "method": "session/update",
+          "params": {
+            "sessionId": "fixture-session",
+            "update": {
+              "sessionUpdate": "agent_thought_chunk",
+              "content": {
+                "type": "text",
+                "text": "思🙂"
+              }
+            }
+          }
+        }
+      ],
+      "delivery": [
+        {
+          "wireIndex": 0,
+          "coreReceipt": 10
+        },
+        {
+          "wireIndex": 0,
+          "coreReceipt": 10
+        },
+        {
+          "wireIndex": 1,
+          "coreReceipt": 11
+        }
+      ],
+      "owner": {
+        "host": "fixture-host",
+        "nativePromptId": "fixture-prompt",
+        "state": "Prompting",
+        "executionEpoch": 1
+      },
+      "expectedThoughtNormalized": [
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": null,
+          "textOffset": null,
+          "contentText": "思🙂"
+        },
+        {
+          "eventType": "agent.thought.delta",
+          "messageId": null,
+          "textOffset": null,
+          "contentText": "思🙂"
+        }
+      ],
+      "expectedReadbackFields": {
+        "publicTextUnits": 0,
+        "reasoningUnits": 320,
+        "reasoningSource": "stream_text",
+        "streamConfirmed": true
+      },
+      "excludedFromReadback": [
+        "思🙂"
+      ],
+      "note": "The repeated receipt is one Core delivery replay, not a second wire receipt. Independent native retransmission without an offset/sequence cannot be content-deduplicated."
+    }
+  ]
+}

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-09-11
+last_updated: 2026-10-02
 ---
 
 # Windows Desktop Platform
@@ -105,6 +105,12 @@ existing Electron application-menu role and opens that native submenu. Submenu c
 Renderer reuses its controlled drag regions and shortens only the Windows sidebar's top spacer from 38px to 8px; it does not
 fork page structure or content. Snap Layout, Alt+Space, double-click maximize/restore, native window buttons and multi-monitor
 DPI remain OS-owned. Preload's platform projection is presentation-only and does not decide Core security.
+
+Windows Main separately owns the main-window close controller and native Tray. Its local preference is independent of Host/Web
+and Core state. Renderer only projects a revisioned snapshot and submits a choice for the current prompt identity; tray creation,
+hide/show and explicit quit remain Main operations. A hide preserves the live BrowserWindow and all background services;
+explicit quit/update invalidates pending hide work and joins in-flight preference writes before the existing Renderer preparation
+and Core drain. The narrow capability is absent outside Windows. See [Windows Window Close v1](../contracts/windows-window-close-v1.md).
 
 Packaging stages `rovai-core.exe` and `rovai.exe` per target without sharing dirty sidecar output with macOS. Formal
 release separately Authenticode-signs Electron EXE, both sidecars and installer with SHA-256/RFC 3161 timestamp; the

@@ -14,7 +14,7 @@ not an execution debugger or reliability dashboard.
 
 The permanent description is one sentence:
 
-> 汇总 Runtime 实际上报的 Token、Cache 与成本；未上报字段显示为未知。
+> 汇总智能体实际报告的 Token、Cache 与成本；未报告字段显示为未知。
 
 Do not add cutover notices, historical-data explanations, unsupported-Runtime warnings or implementation prose to the
 page. Empty state copy describes only the current result.

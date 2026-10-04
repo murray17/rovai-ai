@@ -1,0 +1,7 @@
+flowchart TB
+  browser["Visiting device: browser"]
+  browser -->|"Desktop address + login"| desktop["Desktop Web :8766"]
+  browser -->|"Server address + login"| server["Rovai Server :8767"]
+  desktop -->|"uses"| dd["Desktop data, host Agents and project files"]
+  server -->|"uses"| sd["Server data, host Agents and project files"]
+  note["No automatic synchronization between instances"]

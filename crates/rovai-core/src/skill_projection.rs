@@ -96,6 +96,11 @@ struct LegacyEntryObservation {
     delivered_via_group_key: Option<SkillDeliveryGroupKey>,
 }
 
+struct LegacyEntryGroup {
+    observations: Vec<LegacyEntryObservation>,
+    persisted: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionRootSkillRequirement {
@@ -225,13 +230,21 @@ enum ReconcileRepairPolicy {
 pub struct SkillProjectionReconciler;
 
 impl SkillProjectionReconciler {
-    /// This count reads only dispatch records. It never visits a project or schedules cleanup.
+    /// Windows also counts fixed-name copies in registered project roots when their old
+    /// dispatch records are gone. Counting never mutates a project.
     pub fn legacy_entry_count(&self, database: &Database) -> Result<usize> {
-        Ok(database.connection().query_row(
-            "SELECT COUNT(DISTINCT entry_path) FROM skill_projection_observation",
-            [],
-            |row| row.get::<_, i64>(0),
-        )? as usize)
+        #[cfg(windows)]
+        {
+            Ok(legacy_entry_groups(database)?.len())
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(database.connection().query_row(
+                "SELECT COUNT(DISTINCT entry_path) FROM skill_projection_observation",
+                [],
+                |row| row.get::<_, i64>(0),
+            )? as usize)
+        }
     }
 
     /// Invoked only by the explicit Diagnostics action. In particular, this never changes
@@ -242,15 +255,10 @@ impl SkillProjectionReconciler {
         library: &SkillLibraryService,
     ) -> Result<LegacySkillCleanupReport> {
         let mut report = LegacySkillCleanupReport::default();
-        let mut grouped = BTreeMap::<String, Vec<LegacyEntryObservation>>::new();
-        for observation in legacy_entry_observations(database)? {
-            grouped
-                .entry(observation.entry_path.clone())
-                .or_default()
-                .push(observation);
-        }
+        let grouped = legacy_entry_groups(database)?;
 
-        for observations in grouped.values() {
+        for group in grouped.values() {
+            let observations = &group.observations;
             let classification = classify_legacy_entry(database, library, observations);
             match classification {
                 LegacyEntryClassification::ActiveRun => report.retained_active_run += 1,
@@ -278,7 +286,9 @@ impl SkillProjectionReconciler {
                                 "legacy Skill cleanup is unsupported on this platform"
                             ));
                             if removal.is_ok() {
-                                delete_legacy_observations(database, observations)?;
+                                if group.persisted {
+                                    delete_legacy_observations(database, observations)?;
+                                }
                                 report.removed += 1;
                             } else {
                                 report.retained_inaccessible += 1;
@@ -290,7 +300,9 @@ impl SkillProjectionReconciler {
                         }
                         LegacyEntryClassification::Unverified => report.retained_unverified += 1,
                         LegacyEntryClassification::Missing => {
-                            delete_legacy_observations(database, observations)?;
+                            if group.persisted {
+                                delete_legacy_observations(database, observations)?;
+                            }
                             report.already_missing += 1;
                         }
                     }
@@ -1457,6 +1469,89 @@ enum LegacyEntryClassification {
     ActiveRun,
     Inaccessible,
     Unverified,
+}
+
+fn legacy_entry_groups(database: &Database) -> Result<BTreeMap<String, LegacyEntryGroup>> {
+    let mut grouped = BTreeMap::<String, LegacyEntryGroup>::new();
+    for observation in legacy_entry_observations(database)? {
+        grouped
+            .entry(observation.entry_path.clone())
+            .or_insert_with(|| LegacyEntryGroup {
+                observations: Vec::new(),
+                persisted: true,
+            })
+            .observations
+            .push(observation);
+    }
+    #[cfg(windows)]
+    add_unobserved_windows_named_entries(database, &mut grouped)?;
+    Ok(grouped)
+}
+
+#[cfg(windows)]
+fn add_unobserved_windows_named_entries(
+    database: &Database,
+    grouped: &mut BTreeMap<String, LegacyEntryGroup>,
+) -> Result<()> {
+    let mut known_paths = grouped
+        .keys()
+        .map(|path| path.to_lowercase())
+        .collect::<BTreeSet<_>>();
+    let mut statement = database.connection().prepare(
+        "SELECT execution_root FROM skill_projection_root_state \
+         WHERE access_state = 'active' ORDER BY execution_root",
+    )?;
+    let roots = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for execution_root in roots {
+        if validate_persisted_execution_root(&execution_root).is_err() {
+            continue;
+        }
+        let root = Path::new(&execution_root);
+        if !matches!(fs::symlink_metadata(root), Ok(metadata) if metadata.is_dir())
+            || root.canonicalize().ok().as_deref() != Some(root)
+        {
+            continue;
+        }
+        for group_key in SkillDeliveryGroupKey::ALL {
+            let skills_root = root.join(group_key.relative_path());
+            if !matches!(fs::symlink_metadata(&skills_root), Ok(metadata) if metadata.is_dir())
+                || skills_root.canonicalize().ok().as_deref() != Some(skills_root.as_path())
+            {
+                continue;
+            }
+            for skill_name in WINDOWS_LEGACY_NAMED_CLEANUP_SKILLS {
+                let entry = skills_root.join(skill_name);
+                if fs::symlink_metadata(&entry).is_err() {
+                    continue;
+                }
+                let entry_path = entry
+                    .to_str()
+                    .context("legacy Skill entry path must be Unicode")?
+                    .to_string();
+                if !known_paths.insert(entry_path.to_lowercase()) {
+                    continue;
+                }
+                grouped.insert(
+                    entry_path.clone(),
+                    LegacyEntryGroup {
+                        observations: vec![LegacyEntryObservation {
+                            execution_root: execution_root.clone(),
+                            group_key,
+                            skill_id: String::new(),
+                            revision_id: String::new(),
+                            skill_name: skill_name.to_string(),
+                            entry_path,
+                            delivered_via_group_key: None,
+                        }],
+                        persisted: false,
+                    },
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn legacy_entry_observations(database: &Database) -> Result<Vec<LegacyEntryObservation>> {
@@ -3114,8 +3209,8 @@ mod slow_tests {
     use super::*;
     use crate::{
         collaboration::{
-            AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
-            TestCampMessageAddress, TestCampMessageCommand,
+            AddThreadMemberCommand, CollaborationService, CreateThreadCommand, ExecutionRequest,
+            TestThreadMessageAddress, TestThreadMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
         context::ContextService,
@@ -3498,7 +3593,7 @@ mod slow_tests {
                 &mut database,
                 &user_envelope(
                     "legacy-cleanup-run-camp",
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         roots[0].to_string_lossy().into_owned(),
                         &["agent_2"],
                         "agent_2",
@@ -3506,14 +3601,14 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         collaboration
             .add_camp_member(
                 &mut database,
                 &camp_envelope(
                     "legacy-cleanup-run-member",
                     camp_id,
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.to_string(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -3529,12 +3624,12 @@ mod slow_tests {
                 &camp_envelope(
                     "legacy-cleanup-queue-run",
                     camp_id,
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.to_string(),
                         draft_revision: None,
                         body: "Verify the normal project Run can start".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -4083,7 +4178,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn new_run_reconciles_latest_skill_state_while_an_older_run_continues() {
+    fn new_run_does_not_reconcile_legacy_projection_while_an_older_run_continues() {
         let root = temporary_directory("rovai-projection-new-run-latest");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
@@ -4123,7 +4218,11 @@ mod slow_tests {
             .prepare_skill_exposure(&mut database, &library, "projection-run-new", 1)
             .unwrap();
         assert!(prepared.snapshot.skills.is_empty());
-        assert!(fs::symlink_metadata(root.join(".codex/skills/analyze-agent-codebase")).is_err());
+        assert!(
+            root.join(".codex/skills/analyze-agent-codebase")
+                .canonicalize()
+                .is_ok()
+        );
         let runs: (String, String) = database
             .connection()
             .query_row(
@@ -4140,7 +4239,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn new_run_projects_the_latest_revision_without_waiting_for_an_older_agent() {
+    fn new_run_does_not_project_a_new_revision_into_an_older_execution_root() {
         let root = temporary_directory("rovai-projection-new-revision");
         let source = temporary_directory("rovai-projection-source");
         let data = temporary_directory("rovai-projection-db");
@@ -4192,11 +4291,8 @@ mod slow_tests {
         let updated = library.get(&database, &original.id).unwrap().unwrap();
 
         assert_ne!(updated.current_revision.id, original.current_revision.id);
-        assert_eq!(
-            exposure.snapshot.skills[0].revision_id,
-            updated.current_revision.id
-        );
-        assert_ne!(entry.canonicalize().unwrap(), original_target);
+        assert!(exposure.snapshot.skills.is_empty());
+        assert_eq!(entry.canonicalize().unwrap(), original_target);
         let active_run_count: i64 = database
             .connection()
             .query_row(
@@ -4320,7 +4416,10 @@ mod slow_tests {
             .to_string_lossy()
             .to_string();
         SkillProjectionReconciler
-            .synchronize_removed_execution_roots(&mut database, &[actual_removed.clone()])
+            .synchronize_removed_execution_roots(
+                &mut database,
+                std::slice::from_ref(&actual_removed),
+            )
             .unwrap();
 
         assert!(

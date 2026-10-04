@@ -1,5 +1,5 @@
 import type { AdapterKind, RuntimeModelCatalogView, RovaiApi } from '@contracts'
-import { desktopCampClient } from './desktop-camp-client'
+import { desktopThreadClient } from './desktop-camp-client'
 
 export type ProductRuntimeCheckResult = {
   scheduled: true
@@ -10,12 +10,12 @@ export type ProductRuntimeCheckResult = {
   runtimeKind: AdapterKind
 }
 
-export async function requestProductRuntimeCheck(runtimeKind: AdapterKind, request: RovaiApi['request'] = desktopCampClient.request): Promise<ProductRuntimeCheckResult> {
+export async function requestProductRuntimeCheck(runtimeKind: AdapterKind, request: RovaiApi['request'] = desktopThreadClient.request): Promise<ProductRuntimeCheckResult> {
   // Core refreshes discovery inputs for every explicit check, including guides.
   return request<ProductRuntimeCheckResult>('runtime.product.check', { runtimeKind })
 }
 
-export function openRuntimeModelCatalog(runtimeKind: AdapterKind, request: RovaiApi['request'] = desktopCampClient.request, waitForRefresh = false): Promise<RuntimeModelCatalogView> {
+export function openRuntimeModelCatalog(runtimeKind: AdapterKind, request: RovaiApi['request'] = desktopThreadClient.request, waitForRefresh = false): Promise<RuntimeModelCatalogView> {
   return request<RuntimeModelCatalogView>('runtime.modelCatalog.open', {
     runtimeKind,
     ...(waitForRefresh ? { waitForRefresh: true } : {})

@@ -1,0 +1,38 @@
+{
+  "kind": "sanitized_real_runtime_shape_probe",
+  "observedAt": "2026-09-29",
+  "runtime": "Claude Code",
+  "version": "2.1.274",
+  "model": "gpt-6-sol",
+  "provider": "not disclosed by the CLI response",
+  "launch": "isolated temporary working directory; claude -p with --verbose --output-format stream-json --include-partial-messages --max-turns 1",
+  "result": "success",
+  "rawLineCount": 130,
+  "rawEventShape": {
+    "message_start": 1,
+    "thinking_content_block_start": 1,
+    "thinking_delta": 1,
+    "signature_delta": 1,
+    "text_content_block_start": 1,
+    "text_delta": 112,
+    "message_delta": 1,
+    "message_stop": 1,
+    "assistant": 2,
+    "result": 1
+  },
+  "identityAndBoundary": {
+    "session_id": "present, redacted",
+    "message_id": "present, redacted",
+    "thinking_index": 0,
+    "text_index": 1,
+    "parent_tool_use_id": null,
+    "thinking_delta_unicode_scalars": 28,
+    "text_delta_unicode_scalars": 295
+  },
+  "nativeUsageForComparisonOnly": {
+    "output_tokens": 258,
+    "output_tokens_details_thinking_tokens": 0
+  },
+  "qualification": "raw_present: the installed CLI and effective model produced one root plain-text thinking delta. Parser fixture passed separately; this direct-CLI probe does not prove Core numeric readback or Renderer display for this real provider.",
+  "privacy": "No original prompt, response, thinking text, credentials, native IDs, or raw event bodies are retained in this fixture. Native Output includes protocol/model semantics and was not used to calibrate visible-text speed."
+}

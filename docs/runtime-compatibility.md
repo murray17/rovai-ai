@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-24
+last_updated: 2026-09-30
 ---
 
 # Agent Runtime 兼容性清单
@@ -886,6 +886,27 @@ message/thought、plan、tool、permission request 与 usage/mode/catalog update
 结算为 `not_accepted`。这项共享实现不改写上表各 Runtime 的实测版本；上游若改变
 ACP prompt response shape，须重新执行对应真实 Runtime smoke。
 
+### Claude Code 原生双向审批（2026-09-30）
+
+当前通道为 `--print --input-format stream-json --output-format stream-json --permission-prompt-tool stdio`，
+原生 can_use_tool 提供 request_id 与 tool_use_id。本机 CLI 2.1.280 探针确认初始化成功后结构化输入、
+审批原 input 回填、工具结果与 result/idle 后 stdin 关闭均成立。该 CLI 通过
+`CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` 输出会话状态；官方 SDK 当前源码另有较新的 host-only
+环境参数，本机 2.1.280 尚不识别该参数，不能据最新 SDK 源码猜测本地行为。
+
+此前 2026-09-29 / CLI 2.1.274 的 command Hook Smoke 仅属于已经替换的方案，不能证明当前原生控制协议。
+2026-09-30 在 macOS arm64、Claude Code `2.1.280` 和冻结的 `acceptEdits` 下完成以下独立验收。
+
+| 验收 | 结果与范围 |
+| --- | --- |
+| 真实 Core 审批 Smoke | `ROVAI_CLAUDE_APPROVAL_ONLY=1 node scripts/smoke-claude-runtime.mjs` 通过。允许一次后 Action 根据实际工具结果为 `succeeded`；拒绝和待审批取消均为 `not_executed`，没有发送消息或 Core 发送回执 |
+| 真实发送核对 | 允许 Run `c500309b-efcc-41ee-8609-9dbde89f520a` 的 Core 回执为 `sha256:f762d3263afc1f235bfe71a51ea77252e9185ccffd87bad172a800eb8ec78d9d`，对应消息 `b418615c-74c0-452c-bb09-c1efe90b4af6`；检查 durable Evidence 和消息的 source Run，未使用模型最终文本充当发送证明 |
+| 实际 Desktop 审批点击 | `node scripts/accept-claude-permission.mjs` 在 `pnpm dev` 的独立 userData、Skill Library、MCP 和 Git workspace 中通过。先在既有 Dock 点击“允许一次”，再 resume 同一 Native Session、重复完全相同命令并点击“拒绝”；分别真实发送和未发送，截图与 JSON 记录均已保存 |
+| Desktop 发送核对 | 允许 Run `ead59cff-6707-4e14-b835-38c93ac1011e` 的消息为 `363f5535-cfac-4c35-b96a-13842be97704`，Core 回执 `sha256:b6d9f081db56530d72f8871829417f3816ca356a45fc3946d03d5916bbdb9ed5`；拒绝 Run `dd1b68ee-1e9f-45d9-a8d9-ae049b8e21e2` 没有新增消息或回执 |
+
+这些是本机 Debug Core 与实际开发版 Desktop 的原生协议验收，不替代打包、签名、其他 CLI 版本或平台的验收，
+也不扩大 Provider 资格。
+
 ## Antigravity one-shot 输入确认
 
 2026-08-11 使用本机 `agy 1.1.12` 执行只读 `--print --mode plan --sandbox` smoke：同一份私有日志先后
@@ -1233,3 +1254,27 @@ Read 活动可查询，不产生 Files Changed 或修改 Diff；重启 Core 后�
 当前边界先交付 Preview：个人 Coding Plan 原生凭据透传、Start Plan 验证回调明确拒绝。Z.ai/BigModel 的
 配置回归覆盖签名凭据不改写、显式套餐选择、禁用态与公开目录脱敏；个人 Coding Plan 仍无真实订阅验收，
 Start Plan 仍无成功模型回复，不因允许交付而提升能力证据或平台资格。
+
+### 2026-09-25：官方 App 3.14.3 / 内核 0.16.9 协议迁移
+
+本机 macOS arm64 的官方 ZCode 3.14.3／内核 0.16.9 已移除旧版
+`workspace/updateProviderRegistry`、`workspace/readState` 与 Session `runtimeModel` 字段。
+新版路径读取 App bundle 与 personal Provider Config，使用 `workspace/readPresentation`、
+原生 `ModelSelection` 和独立 `thoughtLevel`；缺少新版 bundled 配置的旧版继续走历史协议。
+Windows 与 Linux 的 bundle 资源路径由确定性布局测试覆盖；本轮没有 Windows 3.14.3 真机安装或执行验收，
+不能把本机通过外推为 Windows 同版通过。
+
+隔离 HOME／ZCode storage／Core data／Skill Library 使用用户授权的本机 Claude API 代理作为临时 BYOK Provider，
+普通 `runtime.product.check` 返回 ready 并列出 `proxy/gpt-6-sol`，没有发送 Prompt。随后真实 Camp
+对随机 nonce 的首轮回复匹配并以 succeeded 结束；停止 Core 后用同一隔离数据重启，观察到原生
+`session/resume`，第二轮 nonce 回复也匹配并以 succeeded 结束。两轮 Core 均以 0 退出，临时数据已清理。
+这证明新版协议下的该 BYOK 配置、正式投递与冷恢复，不代表 Start Plan 账号生成或其他 Provider 已验收。
+
+同一隔离夹具在修复前暴露两处失败：Core 先绑定 Native Session 后冻结 Bootstrap，使首轮投递失败；
+新版 `session/create` 将 `ModelSelection` 转成不含 options 的字符串，导致必需的 reasoning level 丢失。
+修复后分别在绑定前冻结 Bootstrap，并把默认 `reasoningLevel` 独立传给原生 `thoughtLevel`。
+模型创建在 `turn.started` 前失败时的精确 inputId 收口另有定向测试；本轮成功生成不证明所有失败路径均完成真实服务验收。
+
+本机日常 ZCode 目前选择 Start Plan。新版独立 app-server 不自动收到官方桌面 App 的账号 Provider snapshot，
+并且人机验证回调未接入，因此该账号不能因 BYOK 成功而标为已验收。旧版 Windows x64 资格证据仍绑定
+当时的官方版本和协议，不构成新版 Windows 结果。

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
 describe('Quick Chat layout', () => {
-  it('shrinks long recent Camp titles into the available row width', () => {
+  it('shrinks long recent Thread titles into the available row width', () => {
     expect(styles).toMatch(
       /\.truncate\s*\{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;[^}]*\}/
     )

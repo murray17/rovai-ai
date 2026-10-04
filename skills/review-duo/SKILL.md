@@ -1,75 +1,46 @@
 ---
 name: review-duo
-description: 当用户希望由两位 Camp 成员共同审查一份明确的代码改动，并分别检查代码质量与需求符合度时使用。当前评审者发起、完成需求检查和整理报告，固定搭档收到本次规范与质量检查请求时也使用。普通单人评审、没有明确改动范围，以及只要求修改代码而未要求双人评审的任务不使用。
+description: Review a defined code change with two Thread members independently checking standards, quality and requirements. Applies to the initiator and invited reviewer through the final report; excludes solo review, undefined scope and implementation-only requests.
 ---
 
-# 双人代码评审
+# Review Duo
 
-两位成员检查同一份固定代码改动：固定搭档检查仓库规范、正确性与代码质量，当前评审者检查需求与验收条件，最终报告保留两个独立方向。
+Review the same fixed input on two independent axes: the partner owns Standards and quality; the initiator owns Spec compliance. Use the user's language for reports and template headings.
 
-评审默认只读。完成报告不自动修改代码、创建任务、提交、推送或更新 PR；用户同时要求修改时，先完成报告。
+Review is read-only by default. It does not itself authorize fixes, Tasks, commits, pushes or PR updates. If the user also requested fixes, finish the report first.
 
-## 角色与关联
+## Establish the review
 
-- 用户发起双人评审：作为发起者，负责需求检查和最终整理。
-- 当前 AgentRun 由规范与质量检查请求直接触发：作为固定搭档，只处理当前请求。
-- 当前输入是固定搭档对本轮有效请求的直接回复：作为发起者继续。
+Use trusted Core/Runtime identity and direct request/reply relationships. Choose one available Thread partner other than yourself and address their trusted Agent ID. Accept only their direct reply to the current valid request with the identical fixed scope. Titles and scope text do not prove sender identity. One initiator may run one unfinished Review Duo per Thread.
 
-使用 Runtime 或 Core 提供的可信身份和直接回复关系判断角色。固定搭档必须不是自己、仍在当前 Camp、能够接收请求，并使用可信 Agent ID 寻址。
+Read [Snapshot](references/snapshot.md). Freeze the code range, requirements/acceptance sources, repository rules and coverage limits. Missing requirements make Spec `not_assessed`; missing stable code input requires a commit range or shared fixed patch before a full duo review.
 
-发起者只接受当前固定搭档对本轮请求的直接回复，并核对固定评审范围完全一致；标题和范围帮助阅读，不能替代可信发送者与直接回复。同一发起者在一个 Camp 中一次只推进一场未完成的 Review Duo。
+## Independent axes
 
-## 固定评审输入
+- **Standards:** repository rules, correctness, error handling, consistency, concurrency, retry, security, APIs, databases, migrations, lifecycle, material test gaps and maintenance cost. Do not judge product requirement coverage.
+- **Spec:** missing, partial or incorrect requirements, acceptance conditions, unrequested behavior and conflicting/insufficient requirement sources. Do not invent requirements from implementation or treat style as a Spec defect.
 
-开始前读取 [评审范围](references/snapshot.md)。两位成员必须读取同一份固定输入，例如已解析为不可变提交标识的 Git 范围，或用户提供且双方都能读取的固定 patch。
+The request contains no initiator conclusions. Finish and publish Spec before incorporating the partner's findings. Use [Findings](references/findings.md) for bounds and report shape.
 
-同时固定需求与验收来源、仓库规范来源和覆盖限制。没有明确需求时，需求方向标记为 `not_assessed`；没有稳定代码范围时，请用户提供提交范围或固定 patch，不能用两个时间点的实时工作区冒充同一输入。
+## Four messages
 
-## 独立检查
+1. Initiator sends the fixed scope, sources, limits and Standards assignment to the partner with `rovai send --to <partner-agent-id> --body <request>`, then independently reviews Spec in the same Run.
+2. Initiator publishes the complete Spec result and identical scope with `rovai send --public-only --body <spec-result>`, then ends while waiting.
+3. Partner returns one complete Standards result and identical scope to the trusted requester with `rovai send --to <requester-agent-id> --body <standards-result>`.
+4. Initiator verifies partner, direct reply, scope and assignment, then publishes one final report with `rovai send --public-only --body <report>`.
 
-固定搭档只检查仓库规则、明确正确性、错误处理、数据一致性、并发、重试、安全、API、数据库、迁移、生命周期、关键测试缺口和显著维护成本，不判断产品需求是否满足。
+Inspect actual recipients. Escape or fence literal `@` code/quotes. Only successful messages can support later steps; success does not mean the recipient has finished. Process other current batch inputs normally.
 
-当前评审者只检查需求是否缺失、部分实现或实现错误，验收条件是否成立，是否加入未要求的行为，以及需求来源是否冲突或不足，不把一般代码风格写成需求问题，也不从代码反向创造需求。
+Preserve each axis's finding content, IDs, severity and order. The same behavior may appear on both axes. Present Standards before Spec, with no combined score.
 
-发起者必须在吸收搭档结论前完成并公开自己的需求检查；发给搭档的请求不得包含自己的结论。
+## Completion and fallback
 
-## 结果与消息方式
+Keep a successfully invited partner unless unavailable or delivery fails; after replacement, accept only the new partner's direct reply to the new request. Old results are supplementary.
 
-每个方向使用一条有界的完整结果。无法保留必要问题和证据时，
-标记为 `partial` 并建议缩小范围。具体格式见
-[Finding 与报告](references/findings.md)。
+- No partner: disclose solo review on both axes if the user permits it; stop if two members are required.
+- Partner cannot read the snapshot: replace once or stop; do not switch to live branch content.
+- Missing requirements: continue Standards and mark Spec `not_assessed`.
+- Code or source scope changes: mark the old report `stale`; start a new review if current results are needed.
+- User cancels/replaces the objective: close the old review.
 
-- 评审请求只发给固定搭档：`rovai send --to <固定搭档 Agent ID> --body <请求>`；
-  搭档结果只返回请求发送者：`rovai send --to <请求发送者 Agent ID> --body <结果>`；
-  需求检查和最终报告通过 `rovai send --body <正文>` 公开发布。
-- 发送后确认实际收件人符合上述关系。正文中的 `@` 只是代码或引用时，
-  放入代码块或转义。
-- 只有发送成功的消息才能作为后续依据；发送成功不代表对方已经完成。
-
-## 四条消息
-
-1. 发起者向固定搭档发送规范与质量请求，包含固定范围、需求与规范来源、
-   覆盖限制和分工。发送后在同一响应中独立完成需求检查，不等待搭档。
-2. 发起者公开保存一条携带相同固定范围的完整需求检查结果，然后结束当前响应。
-3. 固定搭档只处理当前请求，用一条携带相同固定范围的消息返回完整结果。
-4. 发起者核对搭档身份、直接回复、固定范围和结果职责后，公开发布最终报告。
-
-正常流程只有上述四条消息。
-
-## 结果独立性
-
-两个方向保留各自的 finding 内容、ID、严重度和顺序，不跨方向合并。
-同一行为可以在两个方向分别报告。最终固定先呈现“规范与质量”，
-再呈现“需求符合度”，不生成单一总分。
-
-## 完成与降级
-
-最终报告表示当前会话中的评审完成。同一范围的最终报告发布后，重复、旧搭档或迟到结果只作补充，不再推进或发布报告。
-
-搭档请求发送成功后保持固定。只有明确不可用或投递失败时更换；更换后只接受新搭档对新请求的直接回复，旧结果只作补充。
-
-- 没有合格搭档且用户不强制双人：降级为单人双方向评审，并明确不具备双人独立性；用户强制双人时停止。
-- 搭档无法读取固定范围：更换一次或停止，不改读实时分支。
-- 需求缺失：规范与质量继续，需求方向标记为 `not_assessed`。
-- 范围在最终整理前变化：旧范围报告标记 `stale`；需要最新结果时开始新评审。
-- 用户取消或替换目标：结束旧评审，旧结果不能推进新评审。
+The final report closes this review. Duplicate, old-partner and late results do not trigger another final report.

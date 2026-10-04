@@ -11,9 +11,9 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain('setOptionalOpen(false)')
     expect(component).toContain('aria-expanded={optionalOpen}')
     expect(component).toContain('aria-controls="new-camp-optional-panel"')
-    expect(component).toContain('placeholder="输入名称..."')
+    expect(component).toContain('placeholder={uiAttribute("输入名称...")}')
     expect(component).toContain('nameInputRef.current?.focus()')
-    expect(component).toContain("{busy ? '正在新建…' : '新建'}")
+    expect(component).toContain('{busy ? uiAttribute("正在新建…") : uiAttribute("新建")}')
   })
 
   it('uses an avatar radio menu whose candidates remain the currently selected available members', () => {
@@ -21,7 +21,7 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain('<DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>')
     expect(component).toContain('{selectedAvailableMembers.map((member) => {')
     expect(component).toContain('aria-labelledby="new-camp-lead-label new-camp-lead-value"')
-    expect(component).toContain('aria-label="选择队长"')
+    expect(component).toContain('aria-label={uiAttribute("选择队长")}')
     expect(component).toContain('<DropdownMenu.RadioItem className="compact-option"')
   })
 

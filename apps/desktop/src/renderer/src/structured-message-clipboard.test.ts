@@ -1,4 +1,4 @@
-import type { StructuredCampMessageContent } from '@contracts'
+import type { StructuredThreadMessageContent } from '@contracts'
 import { describe, expect, it } from 'vitest'
 import {
   createStructuredMessageClipboardData,
@@ -30,7 +30,7 @@ describe('structured message clipboard', () => {
     expect(data?.html).not.toContain('agent-alice')
   })
 
-  it('restores valid member and all-members mentions in the target Camp', () => {
+  it('restores valid member and all-members mentions in the target Thread', () => {
     const data = createStructuredMessageClipboardData([
       { kind: 'member_mention', agentId: 'agent-alice' },
       { kind: 'text', text: '、' },
@@ -118,7 +118,7 @@ describe('structured message clipboard', () => {
 
 
 it('copies the current display name while preserving literal body text and paste identity boundaries', () => {
-  const content: StructuredCampMessageContent = [
+  const content: StructuredThreadMessageContent = [
     { kind: 'current_user_mention', userId: 'local_user' },
     { kind: 'text', text: '正文 @你 不变' }
   ]

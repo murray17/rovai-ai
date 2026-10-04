@@ -17,6 +17,11 @@ use crate::{
 
 pub const DEFAULT_WINDOW_LIMIT: i64 = 24;
 
+mod associations;
+mod blocks;
+mod carrier;
+pub use blocks::{read_block_changes, read_block_page, read_group_changes, read_group_page};
+
 fn agent_run_belongs_to_camp(
     connection: &Connection,
     camp_id: &str,
@@ -41,6 +46,7 @@ fn agent_run_belongs_to_camp(
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionWindowPage {
     pub schema_version: i64,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_run_id: String,
     pub requested_before_sequence: Option<i64>,
@@ -248,6 +254,7 @@ fn select_items(
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionWindowChanges {
     pub schema_version: i64,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_run_id: String,
     pub requested_after_change_sequence: i64,
@@ -420,23 +427,40 @@ fn project_items(
 }
 
 // A compact presentation association keeps a digest-bound exact Agent-output proof available
-// when the enclosed Core activity is on the adjacent page. Historical rows retain their exact
-// result comparison. The renderer still checks that the command is a pure CLI carrier.
+// when the Core activity is on another page. A coalesced Shell row may be immediately before or
+// after its Core row, depending on callback order; older multi-row lifetimes still enclose the
+// Core sequence. The renderer also checks that the command is a pure CLI carrier.
 fn supporting_builtin_operation(
     connection: &Connection,
     item: &AgentRunExecutionEvidenceView,
 ) -> Result<Option<String>> {
+    Ok(supporting_builtin_invocation(connection, item)?.map(|(_, operation)| operation))
+}
+
+fn supporting_builtin_invocation(
+    connection: &Connection,
+    item: &AgentRunExecutionEvidenceView,
+) -> Result<Option<(String, String)>> {
     let Some(shell) = item.canonical.as_ref().filter(|canonical| {
         canonical.activity_domain == "shell" && canonical.outcome == "succeeded"
     }) else {
         return Ok(None);
     };
-    let command = item
-        .payload
-        .pointer("/item/command")
-        .or_else(|| item.payload.get("command"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    // Runtime adapters expose the same Shell command in different public input
+    // shapes. TRAE CLI uses the runtime.action input string.
+    let command = [
+        "/item/command",
+        "/command",
+        "/input",
+        "/input/command",
+        "/input/commandLine",
+        "/input/CommandLine",
+        "/input/cmd",
+    ]
+    .into_iter()
+    .filter_map(|path| item.payload.pointer(path).and_then(Value::as_str))
+    .find(|command| !command.trim().is_empty())
+    .unwrap_or_default();
     if !command.contains("rovai") {
         return Ok(None);
     }
@@ -480,7 +504,9 @@ fn supporting_builtin_operation(
          JOIN agent_run_execution_evidence e ON e.id = source.value
          WHERE c.agent_run_id = ?1 AND c.execution_epoch = ?2
            AND c.source_authority = 'core' AND c.credibility = 'core_verified'
-           AND c.first_evidence_sequence > ?3 AND c.last_evidence_sequence < ?4
+           AND ((c.first_evidence_sequence > ?3 AND c.last_evidence_sequence < ?4)
+             OR (?3 = ?4 AND c.first_evidence_sequence = c.last_evidence_sequence
+               AND (c.last_evidence_sequence + 1 = ?3 OR ?3 + 1 = c.first_evidence_sequence)))
            AND e.event_type = 'runtime.action' ORDER BY e.sequence DESC",
     )?;
     let candidates = statement.query_map(
@@ -517,7 +543,7 @@ fn supporting_builtin_operation(
             matched.insert(id, operation.to_string());
         }
     }
-    Ok((matched.len() == 1).then(|| matched.into_values().next().unwrap()))
+    Ok((matched.len() == 1).then(|| matched.into_iter().next().unwrap()))
 }
 
 fn historical_builtin_cli_result(operation: &str, result: &Value) -> Option<Value> {

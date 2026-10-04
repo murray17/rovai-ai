@@ -1,24 +1,25 @@
 import { AttachmentLocationItems, useAttachmentLocation } from './attachment-location'
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import type { CampMessageAttachmentView, LocalAttachmentAvailability, LocalAttachmentOwnerLocator } from '@contracts'
+import type { ThreadMessageAttachmentView, LocalAttachmentAvailability, LocalAttachmentOwnerLocator } from '@contracts'
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { formatByteSize } from './ui-model'
 import {
   AgentArtifactIcon, FileExtensionLabel, UserFileIcon,
   attachmentBaseName, attachmentFormatLabel, classifyAttachmentDisplay
 } from './attachment-presentation'
+import { UiText, uiAttribute } from './interface-language'
 
 type AttachmentKind = 'file' | 'directory'
 
 export function attachmentRevealLabel(platform: NodeJS.Platform): string {
   return platform === 'darwin'
-    ? '在 Finder 中显示'
+    ?uiAttribute("在 Finder 中显示")
     : platform === 'win32'
-      ? '在文件资源管理器中显示'
-      : '显示所在位置'
+      ?uiAttribute("在文件资源管理器中显示")
+      :uiAttribute("显示所在位置")
 }
 
 function AttachmentFolderGlyph(): JSX.Element {
@@ -32,30 +33,30 @@ function AttachmentFolderGlyph(): JSX.Element {
 
 function localAttachmentLocatorKey(locator: LocalAttachmentOwnerLocator): string {
   if (locator.owner === 'composer') {
-    return `composer:${locator.campId}:${locator.attachmentRefId}`
+    return `composer:${locator.threadId}:${locator.attachmentRefId}`
   }
   if (locator.owner === 'message') {
-    return `message:${locator.campId}:${locator.messageId}:${locator.attachmentRefId}`
+    return `message:${locator.threadId}:${locator.messageId}:${locator.attachmentRefId}`
   }
   if (locator.owner === 'mission') {
-    return `mission:${locator.campId}:${locator.missionId}:${locator.attachmentRefId}`
+    return `mission:${locator.threadId}:${locator.missionId}:${locator.attachmentRefId}`
   }
   if (locator.owner === 'pending') {
-    return `pending:${locator.campId}:${locator.pendingInputId}:${locator.attachmentRefId}`
+    return `pending:${locator.threadId}:${locator.pendingInputId}:${locator.attachmentRefId}`
   }
   if (locator.owner === 'pending_edit') {
-    return `pending-edit:${locator.campId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+    return `pending-edit:${locator.threadId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
   }
   if (locator.owner === 'single_chat_composer') {
-    return `single-chat-composer:${locator.campId}:${locator.conversationId}:${locator.attachmentRefId}`
+    return `single-chat-composer:${locator.threadId}:${locator.conversationId}:${locator.attachmentRefId}`
   }
   if (locator.owner === 'single_chat_message') {
-    return `single-chat-message:${locator.campId}:${locator.conversationId}:${locator.conversationMessageId}:${locator.attachmentRefId}`
+    return `single-chat-message:${locator.threadId}:${locator.conversationId}:${locator.conversationMessageId}:${locator.attachmentRefId}`
   }
   if (locator.owner === 'single_chat_pending') {
-    return `single-chat-pending:${locator.campId}:${locator.conversationId}:${locator.pendingInputId}:${locator.attachmentRefId}`
+    return `single-chat-pending:${locator.threadId}:${locator.conversationId}:${locator.pendingInputId}:${locator.attachmentRefId}`
   }
-  return `single-chat-pending-edit:${locator.campId}:${locator.conversationId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+  return `single-chat-pending-edit:${locator.threadId}:${locator.conversationId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
 }
 
 export function AttachmentCard({
@@ -67,7 +68,7 @@ export function AttachmentCard({
   menuItems,
   presentation = 'composer'
 }: {
-  attachment: CampMessageAttachmentView
+  attachment: ThreadMessageAttachmentView
   onRemove?: () => void
   locator: LocalAttachmentOwnerLocator
   onNotify?: (message: string) => void
@@ -75,7 +76,7 @@ export function AttachmentCard({
   menuItems?: ReactNode
   presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
 }): JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const filePreview = useOptionalFilePreview()
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
@@ -137,7 +138,7 @@ export function AttachmentCard({
         if (!forceSystem && attachment.kind === 'file' && filePreview) {
           const outcome = await filePreview.open({
             kind: 'attachment',
-            campId: locator.campId,
+            threadId: locator.threadId,
             locator
           }, undefined, { fileName: attachment.displayName })
           if (outcome.kind === 'error') {
@@ -152,33 +153,33 @@ export function AttachmentCard({
           ? await client.attachments.download(locator)
           : await client.attachments.open(locator)
         setAvailability(result.availability)
-        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
-        else if (result.error) onNotify(client.attachments.kind === 'download' ? '下载附件失败' : '无法使用系统应用打开此附件')
+        if (result.error === 'target_unavailable') onNotify(uiAttribute('此附件当前不可用'))
+        else if (result.error) onNotify(client.attachments.kind === 'download' ?uiAttribute("下载附件失败") :uiAttribute("无法使用系统应用打开此附件"))
       } else if (client.attachments.kind === 'native') {
         const result = await client.attachments.reveal(locator)
         setAvailability(result.availability)
-        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
+        if (result.error === 'target_unavailable') onNotify(uiAttribute('此附件当前不可用'))
         else if (result.error) {
           onNotify(rendererPlatform === 'darwin'
-            ? '无法在 Finder 中显示此附件'
+            ?uiAttribute("无法在 Finder 中显示此附件")
             : rendererPlatform === 'win32'
-              ? '无法在文件资源管理器中显示此附件'
-              : '无法显示此附件所在位置')
+              ?uiAttribute("无法在文件资源管理器中显示此附件")
+              :uiAttribute("无法显示此附件所在位置"))
         }
       }
     } catch {
       onNotify(action === 'open'
-        ? (client.attachments.kind === 'download' ? '下载附件失败' : '无法使用系统应用打开此附件')
-        : '无法显示此附件所在位置')
+        ? (client.attachments.kind === 'download' ?uiAttribute("下载附件失败") :uiAttribute("无法使用系统应用打开此附件"))
+        :uiAttribute("无法显示此附件所在位置"))
     } finally {
       setAttachmentAction(null)
     }
   }
 
   const revealLabel = attachmentRevealLabel(rendererPlatform)
-  const systemOpenLabel = client.attachments.kind === 'download' ? '下载文件' : attachment.kind === 'directory'
-    ? '打开文件夹'
-    : '使用系统应用打开'
+  const systemOpenLabel = client.attachments.kind === 'download' ? uiAttribute('下载文件') : attachment.kind === 'directory'
+    ? uiAttribute('打开文件夹')
+    : uiAttribute('使用系统应用打开')
   const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null
   const showAttachmentContextMenu = (x: number, y: number): void => {
     fileLocation.inspect()
@@ -191,17 +192,17 @@ export function AttachmentCard({
   }
 
   const availabilityLabel = availability === 'missing'
-    ? '文件已不可用'
+    ? uiAttribute('文件已不可用')
     : availability === 'unreadable'
-      ? '文件无法读取'
+      ? uiAttribute('文件无法读取')
       : availability === 'kind_changed'
-        ? '文件类型已变化'
+        ? uiAttribute('文件类型已变化')
         : null
 
   const detailLabel = availabilityLabel ?? (agentPresentation
     ? attachment.kind === 'directory'
-      ? `${attachment.fileCount === null ? '文件数未知' : `${attachment.fileCount} 个文件`} · ${attachment.byteSize === null ? '大小未知' : formatByteSize(attachment.byteSize)}`
-      : `${attachmentTypeLabel(attachment.mediaType)} · ${attachment.byteSize === null ? '大小未知' : formatByteSize(attachment.byteSize)}`
+      ? `${attachment.fileCount === null ? uiAttribute('文件数未知') : uiAttribute("{0} 个文件", String(attachment.fileCount))} · ${attachment.byteSize === null ? uiAttribute('大小未知') : formatByteSize(attachment.byteSize)}`
+      : `${attachmentTypeLabel(attachment.mediaType)} · ${attachment.byteSize === null ? uiAttribute('大小未知') : formatByteSize(attachment.byteSize)}`
     : null)
 
   const content = composerImage
@@ -236,7 +237,7 @@ export function AttachmentCard({
                 <path d="M10.3 3.3h4.4v4.4M14.5 3.5 8.6 9.4" />
                 <path d="M13.5 9.5v4.3H3.8v-9.7h4.3" />
               </svg>
-              <span>打开</span>
+              <span><UiText zh={"打开"} /></span>
             </span>
           )}
         </>
@@ -266,9 +267,9 @@ export function AttachmentCard({
                 type="button"
                 aria-busy={attachmentAction !== null}
                 aria-label={hasImagePreview
-                  ? `预览附件 ${attachment.displayName}`
+                  ? uiAttribute("预览附件 {0}", String(attachment.displayName))
                   : attachment.kind === 'file' && filePreview
-                    ? `打开文件预览 ${attachment.displayName}`
+                    ? uiAttribute("打开文件预览 {0}", String(attachment.displayName))
                     : `${systemOpenLabel} ${attachment.displayName}`}
                 disabled={disabled || attachmentAction !== null}
                 onClick={() => {
@@ -300,7 +301,7 @@ export function AttachmentCard({
                   <DropdownMenu.Portal>
                     <DropdownMenu.Content
                       className="attachment-context-menu"
-                      aria-label={`附件操作：${attachment.displayName}`}
+                      aria-label={uiAttribute("附件操作：{0}", String(attachment.displayName))}
                       align="start"
                       side="right"
                       sideOffset={4}
@@ -312,7 +313,7 @@ export function AttachmentCard({
                     >
                       <DropdownMenu.Label className="attachment-context-menu-label">
                         <strong>{attachment.displayName}</strong>
-                        <small>{attachment.kind === 'directory' ? '文件夹' : attachmentTypeLabel(attachment.mediaType)}</small>
+                        <small>{attachment.kind === 'directory' ? uiAttribute("文件夹") : attachmentTypeLabel(attachment.mediaType)}</small>
                       </DropdownMenu.Label>
                       <AttachmentLocationItems path={fileLocation.location?.path} label={fileLocation.label} onNotify={onNotify} />
                       <DropdownMenu.Item
@@ -349,7 +350,7 @@ export function AttachmentCard({
               <button
                 className="attachment-open is-preview"
                 type="button"
-                aria-label={`预览附件 ${attachment.displayName}`}
+                aria-label={uiAttribute("预览附件 {0}", String(attachment.displayName))}
                 disabled={disabled}
                 onClick={() => setPreviewOpen(true)}
               >
@@ -364,7 +365,7 @@ export function AttachmentCard({
                 <Dialog.Content className="attachment-lightbox" aria-describedby={undefined}>
                   <Dialog.Title>{attachment.displayName}</Dialog.Title>
                   <img src={previewUrl} alt={attachment.displayName} />
-                  <Dialog.Close className="attachment-lightbox-close" aria-label="关闭附件预览">×</Dialog.Close>
+                  <Dialog.Close className="attachment-lightbox-close" aria-label={uiAttribute("关闭附件预览")}>×</Dialog.Close>
                 </Dialog.Content>
               </Dialog.Portal>
             </Dialog.Root>
@@ -373,7 +374,7 @@ export function AttachmentCard({
         <button
           className="attachment-remove"
           type="button"
-          aria-label={`移除附件 ${attachment.displayName}`}
+          aria-label={uiAttribute("移除附件 {0}", String(attachment.displayName))}
           disabled={disabled}
           onClick={onRemove}
         >
@@ -489,23 +490,23 @@ export function AttachmentPlaceholder({
         <strong title={name}>{name}</strong>
         <small title={detail}>
           {state === 'preparing'
-            ? kind === 'directory' ? '正在添加文件夹…' : '正在添加…'
-            : detail ?? '附件处理失败'}
+            ? kind === 'directory' ? uiAttribute("正在添加文件夹…") : uiAttribute("正在添加…")
+            : detail ?? uiAttribute("附件处理失败")}
         </small>
       </span>
       {onRemove && (
-        <button className="attachment-remove" type="button" aria-label={`移除失败附件 ${name}`} onClick={onRemove}>×</button>
+        <button className="attachment-remove" type="button" aria-label={uiAttribute("移除失败附件 {0}", String(name))} onClick={onRemove}>×</button>
       )}
     </div>
   )
 }
 
 function attachmentTypeLabel(mediaType: string | null): string {
-  if (!mediaType) return '文件'
-  if (mediaType === 'inode/directory') return '文件夹'
-  if (mediaType.startsWith('image/')) return '图片'
+  if (!mediaType) return uiAttribute("文件")
+  if (mediaType === 'inode/directory') return uiAttribute("文件夹")
+  if (mediaType.startsWith('image/')) return uiAttribute("图片")
   if (mediaType === 'application/pdf') return 'PDF'
-  if (mediaType.includes('zip')) return '压缩文件'
-  if (mediaType.startsWith('text/')) return '文本'
-  return '文件'
+  if (mediaType.includes('zip')) return uiAttribute("压缩文件")
+  if (mediaType.startsWith('text/')) return uiAttribute("文本")
+  return uiAttribute("文件")
 }

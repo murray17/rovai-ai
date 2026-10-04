@@ -49,7 +49,7 @@ await prepareDshSmokeHome(join(root, 'home'), [
 process.env.DSH_HOME = join(root, 'home')
 process.env.DSH_AGENTS_HOME = join(root, 'agents-home')
 await writeFile(join(root, 'mcp.json'), '{}')
-let core, workspace, events = [], campId
+let core, workspace, events = [], threadId
 const runs = []
 async function start() {
   events = []
@@ -61,23 +61,23 @@ async function start() {
 }
 async function send(body) {
   let response
-  if (!campId) {
+  if (!threadId) {
     response = await createConfiguredCampAndSend(core.request, { commandId: crypto.randomUUID(), workspace, body,
       address: { mode: 'explicit', agentIds: ['agent_2'] }, purpose: 'DSH native usage accounting' })
   } else {
-    const draft = await core.request('camp.composerDraft.get', { campId })
-    const saved = await core.request('camp.composerDraft.save', { campId, expectedRevision: draft.revision,
+    const draft = await core.request('camp.composerDraft.get', { threadId })
+    const saved = await core.request('camp.composerDraft.save', { threadId, expectedRevision: draft.revision,
       content: { version: 2, segments: [{ kind: 'text', text: body }] } })
-    response = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), campId, draftRevision: saved.revision,
+    response = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), threadId, draftRevision: saved.revision,
       execution: { taskId: null, purpose: 'DSH native usage continuation', completionRole: 'required' } })
   }
   const command = response.commandResult ?? response
   assert.equal(command.status, 'accepted')
-  campId ??= command.payload.campId
+  threadId ??= command.payload.threadId
   const runId = command.payload.agentRunIds[0]
   const deadline = Date.now() + 240_000
   while (Date.now() < deadline) {
-    const snapshot = await core.request('camps.snapshot', { campId })
+    const snapshot = await core.request('camps.snapshot', { threadId })
     const run = snapshot.agentRuns.find(item => item.id === runId)
     if (run?.status === 'succeeded') {
       const event = events.find(event => event.params?.agentRunId === runId && event.params?.nativeThreadId && event.params?.hostInstanceId)

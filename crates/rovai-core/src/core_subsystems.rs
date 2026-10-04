@@ -228,7 +228,7 @@ impl super::Core {
                 (|| -> Result<_> {
                     ManagedAttachmentStore::for_database(&database).reconcile(&mut database)?;
                     self.attachment_views
-                        .reconcile(&mut database, &CampAttachmentStore::new(&self.data_dir))?;
+                        .reconcile(&mut database, &ThreadAttachmentStore::new(&self.data_dir))?;
                     unresolved_publication_camp_ids(&database)
                 })()
             };
@@ -310,7 +310,7 @@ impl super::Core {
                     }
                 };
             }
-            let attachments = CampAttachmentStore::new(&self.data_dir);
+            let attachments = ThreadAttachmentStore::new(&self.data_dir);
             maintain!(
                 "attachment_cleanup",
                 attachments.cleanup_expired(&mut database)

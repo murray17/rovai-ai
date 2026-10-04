@@ -1,6 +1,6 @@
 import { filePreviewRetentionLimits } from '../../file-preview-retention'
 import {
-  isCampId,
+  isThreadId,
   type FilePreviewRetentionState,
   type LocalAttachmentOwnerLocator,
   type OpenFilePreviewRequest,
@@ -25,8 +25,8 @@ function string(value: unknown, maximum = 4_096): string {
   return value
 }
 
-function campId(value: unknown): string {
-  if (!isCampId(value)) throw new Error('Unsupported file preview Camp')
+function threadId(value: unknown): string {
+  if (!isThreadId(value)) throw new Error('Unsupported file preview Thread')
   return value
 }
 
@@ -37,20 +37,20 @@ function positiveInteger(value: unknown): number {
   return value as number
 }
 
-function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachmentOwnerLocator {
+function attachmentLocator(value: unknown, expectedThreadId: string): LocalAttachmentOwnerLocator {
   const input = record(value)
-  const ownerCampId = campId(input.campId)
+  const ownerThreadId = threadId(input.threadId)
   const attachmentRefId = string(input.attachmentRefId, 128)
-  if (ownerCampId !== expectedCampId || !isAttachmentId(attachmentRefId)) {
+  if (ownerThreadId !== expectedThreadId || !isAttachmentId(attachmentRefId)) {
     throw new Error('Unsupported Attachment')
   }
   if (input.owner === 'composer') {
-    return { owner: input.owner, campId: ownerCampId, attachmentRefId }
+    return { owner: input.owner, threadId: ownerThreadId, attachmentRefId }
   }
   if (input.owner === 'pending') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       pendingInputId: string(input.pendingInputId, 128),
       attachmentRefId
     }
@@ -58,7 +58,7 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   if (input.owner === 'pending_edit') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       pendingInputId: string(input.pendingInputId, 128),
       editToken: string(input.editToken, 128),
       attachmentRefId
@@ -67,7 +67,7 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   if (input.owner === 'message') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       messageId: string(input.messageId, 128),
       attachmentRefId
     }
@@ -75,7 +75,7 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   if (input.owner === 'mission') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       missionId: string(input.missionId, 128),
       attachmentRefId
     }
@@ -83,7 +83,7 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   if (input.owner === 'single_chat_composer') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       conversationId: string(input.conversationId, 128),
       attachmentRefId
     }
@@ -91,7 +91,7 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   if (input.owner === 'single_chat_pending') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       conversationId: string(input.conversationId, 128),
       pendingInputId: string(input.pendingInputId, 128),
       attachmentRefId
@@ -100,7 +100,7 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   if (input.owner === 'single_chat_pending_edit') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       conversationId: string(input.conversationId, 128),
       pendingInputId: string(input.pendingInputId, 128),
       editToken: string(input.editToken, 128),
@@ -110,7 +110,7 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   if (input.owner === 'single_chat_message') {
     return {
       owner: input.owner,
-      campId: ownerCampId,
+      threadId: ownerThreadId,
       conversationId: string(input.conversationId, 128),
       conversationMessageId: string(input.conversationMessageId, 128),
       attachmentRefId
@@ -119,8 +119,8 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
   throw new Error('Unsupported Attachment')
 }
 
-export function parseFilePreviewCamp(value: unknown): string | null {
-  return value === null ? null : campId(value)
+export function parseFilePreviewThread(value: unknown): string | null {
+  return value === null ? null : threadId(value)
 }
 
 export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequest {
@@ -130,29 +130,29 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
       if (input.rawReference !== 'SKILL.md') throw new Error('Unsupported Skill entry')
       return {
         kind: input.kind,
-        campId: campId(input.campId),
+        threadId: threadId(input.threadId),
         skillId: string(input.skillId, 128),
         rawReference: 'SKILL.md'
       }
     case 'message_reference':
       return {
         kind: input.kind,
-        campId: campId(input.campId),
+        threadId: threadId(input.threadId),
         messageId: string(input.messageId, 128),
         rawReference: string(input.rawReference)
       }
     case 'camp_workspace':
       return {
         kind: input.kind,
-        campId: campId(input.campId),
+        threadId: threadId(input.threadId),
         rawReference: string(input.rawReference)
       }
     case 'attachment': {
-      const attachmentCampId = campId(input.campId)
+      const attachmentThreadId = threadId(input.threadId)
       return {
         kind: input.kind,
-        campId: attachmentCampId,
-        locator: attachmentLocator(input.locator, attachmentCampId)
+        threadId: attachmentThreadId,
+        locator: attachmentLocator(input.locator, attachmentThreadId)
       }
     }
     case 'run_evidence':
@@ -161,7 +161,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
       }
       return {
         kind: input.kind,
-        campId: campId(input.campId),
+        threadId: threadId(input.threadId),
         agentRunId: string(input.agentRunId, 128),
         executionEpoch: positiveInteger(input.executionEpoch),
         evidenceFileId: string(input.evidenceFileId, 256),
@@ -170,7 +170,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
     case 'run_activity_file':
       return {
         kind: input.kind,
-        campId: campId(input.campId),
+        threadId: threadId(input.threadId),
         agentRunId: string(input.agentRunId, 128),
         executionEpoch: positiveInteger(input.executionEpoch),
         evidenceId: string(input.evidenceId, 256),
@@ -189,7 +189,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
     case 'authorized_root':
       return {
         kind: input.kind,
-        campId: campId(input.campId),
+        threadId: threadId(input.threadId),
         rootGrantId: string(input.rootGrantId, 128),
         rawReference: string(input.rawReference)
       }
@@ -260,14 +260,14 @@ export function parseReloadRequest(value: unknown): {
   }
 }
 
-export function parseReopenRequest(value: unknown): { campId: string; reopenToken: string } {
+export function parseReopenRequest(value: unknown): { threadId: string; reopenToken: string } {
   const input = record(value)
-  return { campId: campId(input.campId), reopenToken: string(input.reopenToken, 128) }
+  return { threadId: threadId(input.threadId), reopenToken: string(input.reopenToken, 128) }
 }
 
-export function parseChooseRootRequest(value: unknown): { campId: string; pendingOpenId: string } {
+export function parseChooseRootRequest(value: unknown): { threadId: string; pendingOpenId: string } {
   const input = record(value)
-  return { campId: campId(input.campId), pendingOpenId: string(input.pendingOpenId, 128) }
+  return { threadId: threadId(input.threadId), pendingOpenId: string(input.pendingOpenId, 128) }
 }
 
 export function parseCopyPathRequest(value: unknown): {
@@ -287,7 +287,7 @@ export function parseRetentionState(value: unknown): FilePreviewRetentionState {
     || !Array.isArray(input.handles) || input.handles.length > filePreviewRetentionLimits.handles * 2) throw new Error('Unsupported preview retention')
   return {
     sessions: input.sessions.map(value => { const item = record(value); return {
-      campId: campId(item.campId), previewSessionId: string(item.previewSessionId, 128)
+      threadId: threadId(item.threadId), previewSessionId: string(item.previewSessionId, 128)
     } }),
     handles: input.handles.map(value => {
       const item = record(value)

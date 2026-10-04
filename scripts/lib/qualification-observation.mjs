@@ -8,7 +8,7 @@ export function deriveUnattendedRetryBoundary(snapshot, campTurnId) {
   if (!snapshot || typeof campTurnId !== 'string') return null
   const turn = array(snapshot.turns).find((candidate) => candidate.id === campTurnId)
   if (turn?.status !== 'waiting' || turn.executionBudget?.exhaustedAt) return null
-  const runs = array(snapshot.agentRuns).filter((run) => run.campTurnId === campTurnId)
+  const runs = array(snapshot.agentRuns).filter((run) => (run.threadTurnId ?? run.campTurnId) === campTurnId)
   if (runs.length === 0 || !runs.every((run) => TERMINAL_RUN_STATUSES.has(run.status))) return null
   const failedRequiredRuns = runs.filter((run) => (
     run.completionRole === 'required' && run.status === 'failed'
@@ -17,7 +17,7 @@ export function deriveUnattendedRetryBoundary(snapshot, campTurnId) {
   const runIds = new Set(runs.map((run) => run.id))
   const automaticSettlementPending = runs.some((run) => run.hasUnsettledExternalEffects === true)
     || array(snapshot.messageDeliveries).some((delivery) => (
-      delivery.campTurnId === campTurnId && ACTIVE_DELIVERY_STATUSES.has(delivery.status)
+      (delivery.threadTurnId ?? delivery.campTurnId) === campTurnId && ACTIVE_DELIVERY_STATUSES.has(delivery.status)
     ))
     || array(snapshot.actions).some((action) => (
       runIds.has(action.agentRunId)

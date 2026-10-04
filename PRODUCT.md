@@ -14,7 +14,7 @@ state understandable across long-running projects.
 
 ## Product Purpose
 
-Rovai AI is a desktop workspace for long-lived agent teams. It organizes members, Camps, tasks,
+Rovai AI is a desktop workspace for long-lived agent teams. It organizes members, Threads, tasks,
 execution, approvals, evidence, recovery and collaborative memory while driving coding-agent
 Runtimes already installed on the user's machine. Success means the user can understand and control
 collaborative agent work without surrendering ownership of the workspace, Runtime configuration or
@@ -30,14 +30,14 @@ coordinates them while preserving which facts came from Rovai Core and which cam
 
 - A desktop Electron application operates alongside local Git workspaces and coding-agent CLIs; platform-specific
   support and qualification remain explicit for macOS and Windows rather than being inferred from a shared UI.
-- Users move between Camps, members, memory, settings, approvals, diagnostics and execution detail.
+- Users move between Threads, members, memory, settings, approvals, diagnostics and execution detail.
 - Runtime availability, model capabilities and usage reporting vary by installed product and version.
 - Monitoring is a compact Usage read surface: users compare recent Runtime-reported Token, Cache,
   attributable Cost and Coverage without exposing prompts, completions, tool output or credentials.
 
 ## Capabilities and Constraints
 
-- Supported product language includes “Camp”, “队员”, “记忆”, “Agent 运行时” and “快速对话”.
+- Supported product language includes “Thread”, “队员”, “记忆”, “智能体” and “快速对话”. In the interface, “智能体” names a selectable coding-agent product; “队员” names the long-lived team identity.
 - SQLite-backed Core facts are authoritative; Renderer pages consume typed, read-only projections.
 - Runtime Usage is sparse and source-qualified. Missing fields remain unknown and never become zero.
 - Each Monitoring schema begins at a persistent clean-break collection boundary; older Core runs are

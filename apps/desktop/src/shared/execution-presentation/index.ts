@@ -4,7 +4,7 @@ import type {
   CanonicalRuntimeDiffProjectionView,
   CanonicalRuntimeActivityView,
   CoreEvent,
-  NavigationCampItem,
+  NavigationThreadItem,
   NavigationSnapshot
 } from '@contracts'
 import { safeMarkdownHasRenderableContent } from './safe-markdown-model'
@@ -24,10 +24,10 @@ export function railExpandedFromWidth(width: number): boolean {
   return width >= (RAIL_COLLAPSED_WIDTH + RAIL_EXPANDED_WIDTH) / 2
 }
 
-export function allNavigationCamps(navigation: NavigationSnapshot): NavigationCampItem[] {
+export function allNavigationThreads(navigation: NavigationSnapshot): NavigationThreadItem[] {
   return [
-    ...navigation.quickChat.recentCamps,
-    ...navigation.projects.flatMap((project) => project.recentCamps)
+    ...navigation.quickChat.recentThreads,
+    ...navigation.projects.flatMap((project) => project.recentThreads)
   ].sort((left, right) => {
     if (left.lastActivityGlobalSequence !== right.lastActivityGlobalSequence) {
       return right.lastActivityGlobalSequence - left.lastActivityGlobalSequence
@@ -294,11 +294,11 @@ export function agentRunStateTag(
 
 export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
-    delivery_unknown: 'Agent 运行时是否接收输入尚不可确认；为避免重复执行，Rovai AI 不会盲目重发。',
+    delivery_unknown: '智能体是否接收输入尚不可确认；为避免重复执行，Rovai AI 不会盲目重发。',
     runtime_recovery: '正在从已保存的执行、运行会话与输入回执恢复。',
     network_recovery: '连接中断，等待恢复。确认输入未被接收后，Rovai AI 会自动重试。',
     network_recovery_blocked: '自动恢复的安全条件已经变化，需要处理。请检查执行记录；确认后可停止本次运行并发送后续任务。',
-    recovery_blocked: 'Agent 运行时已接受任务，但 Rovai AI 重启后无法确认原任务的最终结果。原请求不会自动重发。',
+    recovery_blocked: '智能体已接受任务，但 Rovai AI 重启后无法确认原任务的最终结果。原请求不会自动重发。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
   } as Record<string, string>)[waitReason ?? ''] ?? null
@@ -460,7 +460,10 @@ export function runtimeAdapterDisplayLabel(kind: string): string {
   } as Record<string, string>)[kind] ?? kind
 }
 
-export function runtimeCompactionTitle(item: RuntimeCompactionDisplayItem): string {
+export function runtimeCompactionTitle(
+  item: RuntimeCompactionDisplayItem,
+  translate: (chinese: string) => string = (chinese) => chinese
+): string {
   const action = item.phase === 'imminent'
     ? '即将压缩会话上下文'
     : item.phase === 'started'
@@ -471,20 +474,21 @@ export function runtimeCompactionTitle(item: RuntimeCompactionDisplayItem): stri
   const tokenTransition = item.tokens.before !== undefined && item.tokens.after !== undefined
     ? ` · ${compactTokenCount(item.tokens.before)} → ${compactTokenCount(item.tokens.after)}`
     : ''
-  return `${action} · ${runtimeAdapterDisplayLabel(item.adapterKind)}${tokenTransition}`
+  return `${translate(action)} · ${runtimeAdapterDisplayLabel(item.adapterKind)}${tokenTransition}`
 }
 
 export function runtimeCompactionDetailText(
-  item: RuntimeCompactionDisplayItem
+  item: RuntimeCompactionDisplayItem,
+  translate: (chinese: string) => string = (chinese) => chinese
 ): string | null {
   if (!runtimeCompactionIsExpandable(item)) return null
   const metrics: string[] = []
   const formatTokens = (value: number): string => `${new Intl.NumberFormat('zh-CN').format(value)} tokens`
-  if (item.tokens.before !== undefined) metrics.push(`压缩前：${formatTokens(item.tokens.before)}`)
-  if (item.tokens.after !== undefined) metrics.push(`压缩后：${formatTokens(item.tokens.after)}`)
-  if (item.tokens.current !== undefined) metrics.push(`当前：${formatTokens(item.tokens.current)}`)
+  if (item.tokens.before !== undefined) metrics.push(`${translate('压缩前：')}${formatTokens(item.tokens.before)}`)
+  if (item.tokens.after !== undefined) metrics.push(`${translate('压缩后：')}${formatTokens(item.tokens.after)}`)
+  if (item.tokens.current !== undefined) metrics.push(`${translate('当前：')}${formatTokens(item.tokens.current)}`)
   if (item.tokens.contextWindow !== undefined) {
-    metrics.push(`上下文窗口：${formatTokens(item.tokens.contextWindow)}`)
+    metrics.push(`${translate('上下文窗口：')}${formatTokens(item.tokens.contextWindow)}`)
   }
   if (
     item.tokens.before !== undefined
@@ -495,21 +499,21 @@ export function runtimeCompactionDetailText(
     const percent = item.tokens.before > 0
       ? ` · ${((reduction / item.tokens.before) * 100).toFixed(1)}%`
       : ''
-    metrics.push(`减少：${formatTokens(reduction)}${percent}`)
+    metrics.push(`${translate('减少：')}${formatTokens(reduction)}${percent}`)
   }
   if (item.tokens.usagePercent !== undefined) {
-    metrics.push(`上下文使用：${item.tokens.usagePercent.toFixed(1)}%`)
+    metrics.push(`${translate('上下文使用：')}${item.tokens.usagePercent.toFixed(1)}%`)
   }
   if (item.messages.compacted !== undefined) {
-    metrics.push(`整理消息：${new Intl.NumberFormat('zh-CN').format(item.messages.compacted)}`)
+    metrics.push(`${translate('整理消息：')}${new Intl.NumberFormat('zh-CN').format(item.messages.compacted)}`)
   }
   if (item.elapsedMs !== undefined) {
     const seconds = (item.elapsedMs / 1_000).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
-    metrics.push(`耗时：${seconds} 秒`)
+    metrics.push(`${translate('耗时：')}${seconds} ${translate('秒')}`)
   }
   if (!item.summaryText) return metrics.join('\n') || null
   return metrics.length > 0
-    ? `${metrics.join('\n')}\n\n会话摘要\n\n${item.summaryText}`
+    ? `${metrics.join('\n')}\n\n${translate('会话摘要')}\n\n${item.summaryText}`
     : item.summaryText
 }
 
@@ -1567,7 +1571,7 @@ function activeShellSyntax(value: string): boolean {
   return quote !== null
 }
 
-function pureBuiltinShellOperation(command: string): string | null {
+export function pureBuiltinShellOperation(command: string): string | null {
   const source = unwrapShellCommand(stripAnsi(command).trim())
   const stdin = omitBuiltinStdin(source)
   if (!stdin.complete || stdin.hasExpansion) return null

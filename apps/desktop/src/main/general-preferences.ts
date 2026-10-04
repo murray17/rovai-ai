@@ -4,14 +4,15 @@ import { dirname } from 'node:path'
 import type {
   ExecutionConsolePlacement,
   GeneralPreferencesSnapshot,
+  InterfaceLanguage,
   NewConversationDefaults,
   SettingsSection,
   StartupLocationMode,
   StructuredError
 } from '@contracts'
 
-import { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, isExecutionConsolePlacement, isNewConversationDefaults } from '../shared/general-preferences-model'
-export { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, isExecutionConsolePlacement, isNewConversationDefaults, isStartupLocationMode, isSettingsSection } from '../shared/general-preferences-model'
+import { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, isExecutionConsolePlacement, isInterfaceLanguage, isNewConversationDefaults } from '../shared/general-preferences-model'
+export { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, isExecutionConsolePlacement, isInterfaceLanguage, isNewConversationDefaults, isStartupLocationMode, isSettingsSection } from '../shared/general-preferences-model'
 
 export async function readGeneralPreferences(filePath: string): Promise<GeneralPreferencesSnapshot> {
   return (await readGeneralPreferencesResult(filePath)).snapshot
@@ -88,6 +89,16 @@ export class GeneralPreferencesStore {
 
   get(): GeneralPreferencesSnapshot {
     return structuredClone(this.#snapshot)
+  }
+
+  setInterfaceLanguage(language: InterfaceLanguage): Promise<GeneralPreferencesSnapshot> {
+    if (!isInterfaceLanguage(language)) return Promise.reject(new Error('Unsupported interface language'))
+    return this.#enqueue(async () => {
+      const next = { ...this.#snapshot, interfaceLanguage: language }
+      await writePrivateJson(this.#filePath, next)
+      this.#snapshot = next
+      return this.get()
+    })
   }
 
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot> {

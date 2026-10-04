@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { ChannelLoginViewBounds } from '@contracts'
+import { uiAttribute } from './interface-language'
 
 /** Only viewport geometry crosses IPC; the official page never receives the Rovai bridge. */
 export function ChannelLoginViewport({ attemptId }: { attemptId: string }): React.JSX.Element {
@@ -43,10 +44,10 @@ export function ChannelLoginViewport({ attemptId }: { attemptId: string }): Reac
     }
   }, [attemptId])
 
-  return <div ref={element} className="channel-login-viewport" role="region" aria-label="钉钉官方登录验证">
+  return <div ref={element} className="channel-login-viewport" role="region" aria-label={uiAttribute("钉钉官方登录验证")}>
     <span role={failed ? 'alert' : 'status'}>{failed
-      ? '暂时无法显示钉钉登录页，请关闭后重新连接。'
-      : '正在显示钉钉官方登录页…'}</span>
+      ? uiAttribute("暂时无法显示钉钉登录页，请关闭后重新连接。")
+      : uiAttribute("正在显示钉钉官方登录页…")}</span>
   </div>
 }
 

@@ -1,55 +1,37 @@
-# 评审范围
+# Fixed review input
 
-双人评审开始前，先让两位成员能够读取同一份固定代码改动。固定范围是四条评审消息共同携带的自然关联信息，不替代可信发送者或直接回复关系。
+Both members must read the same fixed change. Carry its identifier in all four messages; it does not replace trusted sender and direct-reply checks.
 
-## Git 范围
+## Code identity
 
-PR 或分支优先解析为不可变的 base SHA、head SHA 和 merge-base SHA。评审范围写为：
-
-```text
-git:<完整 merge-base SHA>...<完整 head SHA>
-```
-
-用户明确指定普通提交范围时，可以使用：
+For a PR or branch, resolve full base, head and merge-base SHAs and use:
 
 ```text
-git:<完整 base SHA>..<完整 head SHA>
+git:<full-merge-base-SHA>...<full-head-SHA>
 ```
 
-不要只记录会移动的 `main`、`HEAD` 或分支名。双方应从固定 SHA 读取 diff，而不是在不同时间重新解析移动的 ref。
-
-## 固定 Patch
-
-用户已经提供且双方都能读取的固定 patch，可以按原始内容摘要标识：
+For an explicitly requested ordinary commit range:
 
 ```text
-patch:sha256:<64 位小写摘要>
+git:<full-base-SHA>..<full-head-SHA>
 ```
 
-同时保留稳定读取位置、原始字节大小和覆盖清单。不要重新生成一份“看起来一样”的 patch 后当成同一输入。
+Read diffs from those objects; do not re-resolve moving names such as `main` or `HEAD` independently.
 
-## 实时工作区
+For a user-provided fixed patch readable by both members, retain its stable location, original byte size and coverage list, identified by:
 
-工作区存在尚未提交的改动时，优先让用户提供固定 patch 或提交范围。两位成员在不同时间读取实时工作区，不能保证看到同一份代码，因此不得把这种结果称为完整双人评审。
+```text
+patch:sha256:<64-lowercase-hex-digits>
+```
 
-## 需求来源
+Do not regenerate a similar patch and call it the same input. For uncommitted work, request a fixed patch or commit range. Separate reads of a live workspace cannot support a complete duo review.
 
-按用户提供和仓库事实固定需求来源，例如：
+## Sources and coverage
 
-1. 用户本轮目标；
-2. PR 描述和验收条件；
-3. linked Issue；
-4. 版本范围或设计文档；
-5. Contract 或适用 ADR。
+Freeze requirements from the user's objective, PR acceptance criteria, linked Issue, version/design scope and applicable Contracts/decisions. Commit messages, branch/test names and code help discovery but are not requirements by default. With no requirement source, mark Spec `not_assessed`.
 
-Commit message、分支名、测试名和现有代码可以帮助定位，但默认不是需求真源。没有需求来源时，需求方向标记为 `not_assessed`。
+Read applicable root/path `AGENTS.md`, documentation navigation, current Contracts/decisions, formatter/lint/type/build/test configuration and local rules. Rules newly introduced by the change are review subjects, not automatic exemptions.
 
-## 仓库规范来源
+Record reviewed, limited and unreviewed areas, including generated/vendor/binary/lockfiles, plus checks not run. Mark oversized scope `partial` rather than silently sampling.
 
-至少读取根目录和适用路径的 `AGENTS.md`、仓库文档导航、当前有效 Contract 和 ADR、formatter/lint/type/build/test 配置以及目录局部规则。同一改动中新增加的规则本身也属于被评审内容，不能自动为同一改动提供豁免。
-
-## 覆盖与最终检查
-
-记录已检查范围、未检查或有限检查的内容、generated/vendor/binary/lockfile，以及没有运行的测试、构建或静态检查。代码范围过大时标记 `partial`，不要静默抽样后声称完整。
-
-发布最终报告前重新确认范围。base、head、merge-base 或 patch 改变时，旧结果标记为 `stale`；用户需要最新结果时开始新的评审。需求或规范来源发生实质变化时同样结束旧评审并重新开始。
+Before final publication, recheck base/head/merge-base or patch identity and substantive requirement/rule sources. If changed, mark the old scope `stale` and begin a new review when needed.

@@ -195,7 +195,7 @@ try {
     cdp,
     `!document.querySelector('.activity-pane')
       && document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')
-      && localStorage.getItem('rovai.camp.inspector.visibility') === 'hidden'`,
+      && localStorage.getItem('rovai.thread.inspector.visibility') === 'hidden'`,
     5_000
   )
   const hiddenInspectorInspection = await cdp.send('Runtime.evaluate', {
@@ -228,7 +228,7 @@ try {
   await waitForExpression(
     cdp,
     `Boolean(document.querySelector('.activity-pane'))
-      && localStorage.getItem('rovai.camp.inspector.visibility') === 'visible'`,
+      && localStorage.getItem('rovai.thread.inspector.visibility') === 'visible'`,
     5_000
   )
   if (previewAttachmentId) {
@@ -396,20 +396,20 @@ try {
     if (attachmentCampId) {
       const rejectionProbe = await cdp.send('Runtime.evaluate', {
         expression: `(async () => {
-          const campId = ${JSON.stringify(attachmentCampId)}
-          const before = await window.rovai.request('camp.composerDraft.get', { campId })
+          const threadId = ${JSON.stringify(attachmentCampId)}
+          const before = await window.rovai.request('camp.composerDraft.get', { threadId })
           let rejected = false
           try {
             await window.rovai.request('camp.messages.send', {
               commandId: crypto.randomUUID(),
-              campId,
+              threadId,
               draftRevision: before.revision + 1,
               execution: null
             })
           } catch {
             rejected = true
           }
-          const after = await window.rovai.request('camp.composerDraft.get', { campId })
+          const after = await window.rovai.request('camp.composerDraft.get', { threadId })
           return {
             rejected,
             retained: before.body === after.body

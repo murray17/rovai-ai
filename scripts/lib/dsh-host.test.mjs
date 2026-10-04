@@ -75,10 +75,10 @@ test('DSH official prompt seam binds immutable root identity per session and fai
       assert.equal(Object.hasOwn(fallback, 'after'), false)
     }
     events.get('session/event')({ id: 'session-a', header: {} }, { type: 'assistant/message', seq: 12,
-      data: { turn: 2, usage: { inputTokens: 10, outputTokens: 3, cacheReadTokens: 90 }, message: { content: 'private reply' } } })
+      data: { turn: 2, usage: { inputTokens: 10, outputTokens: 3, totalTokens: 103, cacheReadTokens: 90 }, message: { content: 'private reply' } } })
     const usageFile = readdirSync(root).find(name => name.includes('.usage-'))
     const usage = JSON.parse(readFileSync(join(root, usageFile), 'utf8'))
-    assert.deepEqual(usage.usage, { inputTokens: 10, outputTokens: 3, cacheReadTokens: 90 })
+    assert.deepEqual(usage.usage, { inputTokens: 10, outputTokens: 3, totalTokens: 103, cacheReadTokens: 90 })
     assert.equal(usage.seq, 12)
     assert.equal(JSON.stringify(usage).includes('private reply'), false)
     const observe = event => events.get('session/event')({ id: 'session-a', header: {} }, event)

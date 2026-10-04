@@ -1,3 +1,4 @@
+import { uiAttribute } from './interface-language'
 import type {
   AdapterKind,
   AgentProfile,
@@ -38,17 +39,17 @@ function publicFailureDetail(
 
 function incompatibleRuntimeDetail(availability: ProductRuntimeAvailability): string {
   const fallback = availability.reportedVersion
-    ? `当前版本 ${availability.reportedVersion} 不受支持，请更新后重试。`
-    : '当前版本或必要能力不受支持，请更新后重试。'
+    ? uiAttribute('当前版本 {0} 不受支持，请更新后重试。', availability.reportedVersion)
+    : uiAttribute('当前版本或必要能力不受支持，请更新后重试。')
   const detail = publicFailureDetail(availability, fallback)
   if (availability.runtimeKind !== 'deepseek-harness' || detail.includes('0.1.5-rc.2')) {
     return detail
   }
-  return `${detail}\nDeepSeek Harness 需要 0.1.5-rc.2 或更高版本。`
+  return `${detail}\n${uiAttribute('DeepSeek Harness 需要 0.1.5-rc.2 或更高版本。')}`
 }
 
 const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
-  unconfigured: '未配置 Agent 运行时',
+  unconfigured: '未配置智能体',
   checking: '正在检查…',
   available: '可用',
   authentication_required: '需要登录',
@@ -64,7 +65,7 @@ function presentation(
   status: RuntimeUserStatus,
   detail: string | null = null
 ): RuntimeStatusPresentation {
-  return { status, label: STATUS_LABELS[status], detail }
+  return { status, label: uiAttribute(STATUS_LABELS[status]), detail }
 }
 
 export function runtimeAvailabilityPresentation(
@@ -74,7 +75,7 @@ export function runtimeAvailabilityPresentation(
   if (!availability) {
     return pending
       ? presentation('checking')
-      : presentation('unknown', '尚无最近一次检查结果，系统将在后台继续确认。')
+      : presentation('unknown', uiAttribute('尚无最近一次检查结果，系统将在后台继续确认。'))
   }
 
   switch (availability.status) {
@@ -84,53 +85,53 @@ export function runtimeAvailabilityPresentation(
     case 'found_uninspected':
       return presentation(
         'unknown',
-        '已找到可执行文件，但轻度启动验证尚未形成有效结果。'
+        uiAttribute('已找到可执行文件，但轻度启动验证尚未形成有效结果。')
       )
     case 'light_ready':
       return presentation(
         'available',
-        '已通过轻度启动验证；登录、模型与运行能力将在检查或首次任务时确认。'
+        uiAttribute('已通过轻度启动验证；登录、模型与运行能力将在检查或首次任务时确认。')
       )
     case 'installed_unverified':
       return presentation(
         'unknown',
-        '旧安装尚未形成轻度启动证据；请重新检测或检查状态。'
+        uiAttribute('旧安装尚未形成轻度启动证据；请重新检测或检查状态。')
       )
     case 'ready':
       if (availability.runtimeKind === 'zcode-app') {
         return presentation(
           'available',
-          '已加载本机原生配置并连接成功；本次检查未调用模型，生成能力、余额和高级能力将在实际任务中确认。'
+          uiAttribute('已加载本机原生配置并连接成功；本次检查未调用模型，生成能力、余额和高级能力将在实际任务中确认。')
         )
       }
       return presentation(
         'available',
-        availability.checking ? '正在后台刷新最近一次检查结果。' : null
+        availability.checking ? uiAttribute('正在后台刷新最近一次检查结果。') : null
       )
     case 'refresh_failed_using_last_success':
       return presentation(
         'available',
-        '后台刷新失败，当前继续使用最近一次可用结果。'
+        uiAttribute('后台刷新失败，当前继续使用最近一次可用结果。')
       )
     case 'authentication_required':
       return presentation(
         'authentication_required',
-        publicFailureDetail(availability, '请先完成该 Agent 运行时的登录。')
+        publicFailureDetail(availability, uiAttribute('请先完成该智能体的登录。'))
       )
     case 'needs_attention':
       return {
         status: 'unavailable',
-        label: '需要处理',
+        label: uiAttribute('需要处理'),
         detail: publicFailureDetail(
           availability,
-          '最近一次 Runtime 验证未完成，请重试扫描或检查，并按诊断提示处理。'
+          uiAttribute('最近一次智能体验证未完成，请重试扫描或检查，并按诊断提示处理。')
         )
       }
     case 'missing':
     case 'path_missing':
       return presentation(
         'not_installed',
-        publicFailureDetail(availability, '本机未找到可用的 Agent 运行时入口。')
+        publicFailureDetail(availability, uiAttribute('本机未找到可用的智能体入口。'))
       )
     case 'incompatible':
       return presentation(
@@ -138,7 +139,7 @@ export function runtimeAvailabilityPresentation(
         incompatibleRuntimeDetail(availability)
       )
     case 'disabled':
-      return presentation('unavailable', '该 Agent 运行时已停用。')
+      return presentation('unavailable', uiAttribute('该智能体已停用。'))
   }
 }
 
@@ -167,24 +168,24 @@ export function runtimeProductPresentation(
   if (!admission) {
     return pending
       ? presentation('checking')
-      : presentation('unknown', '尚无当前平台的 Runtime 准入信息。')
+      : presentation('unknown', uiAttribute('尚无当前平台的智能体准入信息。'))
   }
   if (admission.status === 'not_qualified') {
     const windows = admission.platform === 'windows-x64'
     return {
       status: 'not_qualified',
-      label: windows ? 'Windows 尚未验证' : '当前平台尚未验证',
+      label: windows ? uiAttribute('Windows 尚未验证') : uiAttribute('当前平台尚未验证'),
       detail: windows
-        ? '该 Agent 运行时尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。'
-        : '该 Agent 运行时尚未完成当前平台资格验证；这不是本机安装、登录或扫描故障。'
+        ? uiAttribute('该智能体尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。')
+        : uiAttribute('该智能体尚未完成当前平台资格验证；这不是本机安装、登录或扫描故障。')
     }
   }
   if (admission.status === 'unsupported') {
-    return presentation('unsupported', '该 Agent 运行时不支持当前平台。')
+    return presentation('unsupported', uiAttribute('该智能体不支持当前平台。'))
   }
   const availabilityPresentation = runtimeAvailabilityPresentation(availability, pending)
   if (admission.status !== 'preview') return availabilityPresentation
-  const previewDetail = '当前平台已开放使用，完整的平台资格验证记录尚未齐备。'
+  const previewDetail = uiAttribute('当前平台已开放使用，完整的平台资格验证记录尚未齐备。')
   return {
     ...availabilityPresentation,
     detail: availabilityPresentation.detail
@@ -225,7 +226,7 @@ export function memberRuntimePresentation(
     return presentation(
       'available',
       availabilityStatus.status === 'checking'
-        ? '正在后台刷新最近一次检查结果。'
+        ? uiAttribute('正在后台刷新最近一次检查结果。')
         : availabilityStatus.detail
     )
   }
@@ -243,7 +244,7 @@ export function memberRuntimePresentation(
     }
     return presentation(
       'available',
-      '当前配置可用于发起任务；登录、模型与运行能力将在任务的执行前检查中确认。'
+      uiAttribute('当前配置可用于发起任务；登录、模型与运行能力将在任务的执行前检查中确认。')
     )
   }
 
@@ -266,11 +267,11 @@ export function memberRuntimePresentation(
     }
     return presentation(
       'unknown',
-      '旧安装尚未形成轻度启动证据；请重新检测或检查状态。'
+      uiAttribute('旧安装尚未形成轻度启动证据；请重新检测或检查状态。')
     )
   }
   if (blockerCodes.has('runtime_authentication_required')) {
-    return presentation('authentication_required', '请先完成该 Agent 运行时的登录。')
+    return presentation('authentication_required', uiAttribute('请先完成该智能体的登录。'))
   }
 
   if (agent.runtimeReadiness.status === 'needs_attention') {
@@ -283,7 +284,7 @@ export function memberRuntimePresentation(
     if (!environmentBlocker) {
       return presentation(
         'unavailable',
-        '当前配置已失效，请检查模型、参数或权限后重新保存。'
+        uiAttribute('当前配置已失效，请检查模型、参数或权限后重新保存。')
       )
     }
   }
@@ -298,7 +299,7 @@ export function memberRuntimePresentation(
   if (agent.runtimeReadiness.status === 'needs_attention') {
     return presentation(
       'unavailable',
-      '当前配置已失效，请检查模型、参数或权限后重新保存。'
+      uiAttribute('当前配置已失效，请检查模型、参数或权限后重新保存。')
     )
   }
   return presentation('unavailable')
@@ -308,10 +309,10 @@ export function runtimeReadinessLabel(
   status: AgentProfile['runtimeReadiness']['status']
 ): string {
   return ({
-    runtime_not_configured: '未配置 Agent 运行时',
-    needs_attention: '不可用',
-    light_ready: '可用',
-    installed_unverified: '不可用，待检查',
-    ready: '可用'
+    runtime_not_configured: uiAttribute('未配置智能体'),
+    needs_attention: uiAttribute('不可用'),
+    light_ready: uiAttribute('可用'),
+    installed_unverified: uiAttribute('不可用，待检查'),
+    ready: uiAttribute('可用')
   })[status]
 }

@@ -7,52 +7,36 @@ use crate::{
     collaboration::{CollaborationService, ReconcileDefaultLeadCommand},
     command::{ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway},
     db::Database,
-    read_model::{CampOpenProjection, ReadModelService},
+    read_model::{ReadModelService, ThreadOpenProjection},
 };
 
 #[derive(Debug)]
-pub struct CampOpenOutcome {
-    pub projection: CampOpenProjection,
+pub struct ThreadOpenOutcome {
+    pub projection: ThreadOpenProjection,
     pub reconcile_duration: Option<Duration>,
+    pub navigation_changed: bool,
     pub projection_duration: Duration,
 }
 
 #[derive(Debug, Default)]
-pub struct CampOpenService;
+pub struct ThreadOpenService;
 
-impl CampOpenService {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EnterDisposition {
+    ReadOnly,
+    Reconcile,
+}
+
+impl ThreadOpenService {
     pub fn enter(
         &self,
         database: &mut Database,
         envelope: &CommandEnvelope<ReconcileDefaultLeadCommand>,
-    ) -> Result<CampOpenOutcome> {
+    ) -> Result<ThreadOpenOutcome> {
         let camp_id = envelope.payload.camp_id.clone();
-        let activation_state = database
-            .connection()
-            .query_row(
-                "SELECT activation_state FROM camp WHERE id = ?1 AND deletion_operation_id IS NULL",
-                [&camp_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if activation_state.is_none() {
-            anyhow::bail!("Camp does not exist or is being deleted");
-        }
-        let pending = activation_state.as_deref() == Some("pending");
-        // Enter may be a pure read. A real, previously submitted reconciliation still
-        // replays its original receipt (including rejection) even if membership changed.
-        let recorded = if pending {
-            None
-        } else {
-            DomainCommandGateway.replay_if_recorded(database, envelope)?
-        };
-        let lead_valid: bool = database.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM camp JOIN camp_member ON camp_member.camp_id=camp.id AND camp_member.agent_id=camp.default_lead_agent_id JOIN agent_profile ON agent_profile.id=camp_member.agent_id WHERE camp.id=?1 AND camp_member.status='active' AND camp_member.leave_requested_at IS NULL AND agent_profile.profile_status='present')",
-            [&camp_id], |row| row.get(0),
-        )?;
-        let reconcile_duration = if pending
-            || (recorded.is_none() && lead_valid && matches!(envelope.actor, ActorRef::User { .. }))
-        {
+        let disposition = self.enter_disposition(database, envelope)?;
+        let mut navigation_changed = false;
+        let reconcile_duration = if disposition == EnterDisposition::ReadOnly {
             None
         } else {
             let reconcile_started_at = Instant::now();
@@ -65,23 +49,79 @@ impl CampOpenService {
                     execution.result.code
                 );
             }
+            navigation_changed =
+                !execution.replayed && execution.result.code == "camp.default_lead_reconciled";
             Some(reconcile_duration)
         };
         let projection_started_at = Instant::now();
         let projection = ReadModelService.camp_open_projection(database, &camp_id)?;
-        Ok(CampOpenOutcome {
+        Ok(ThreadOpenOutcome {
             projection,
             reconcile_duration,
+            navigation_changed,
             projection_duration: projection_started_at.elapsed(),
         })
     }
 
-    pub fn open(&self, database: &mut Database, camp_id: &str) -> Result<CampOpenOutcome> {
+    // The caller holds the shared Database mutex through classification and projection.
+    // Any uncertain state returns to enter() on the ordered command path, where it is
+    // checked again before a possible reconciliation write.
+    pub fn try_enter_read_only(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ReconcileDefaultLeadCommand>,
+    ) -> Result<Option<ThreadOpenOutcome>> {
+        if !matches!(
+            self.enter_disposition(database, envelope),
+            Ok(EnterDisposition::ReadOnly)
+        ) {
+            return Ok(None);
+        }
+        self.open(database, &envelope.payload.camp_id).map(Some)
+    }
+
+    fn enter_disposition(
+        &self,
+        database: &Database,
+        envelope: &CommandEnvelope<ReconcileDefaultLeadCommand>,
+    ) -> Result<EnterDisposition> {
+        let camp_id = &envelope.payload.camp_id;
+        let activation_state = database
+            .connection()
+            .query_row(
+                "SELECT activation_state FROM camp WHERE id = ?1 AND deletion_operation_id IS NULL",
+                [camp_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if activation_state.is_none() {
+            anyhow::bail!("Camp does not exist or is being deleted");
+        }
+        let pending = activation_state.as_deref() == Some("pending");
+        if pending {
+            return Ok(EnterDisposition::ReadOnly);
+        }
+        // Enter may be a pure read. A real, previously submitted reconciliation still
+        // replays its original receipt (including rejection) even if membership changed.
+        let recorded = DomainCommandGateway.replay_if_recorded(database, envelope)?;
+        let lead_valid: bool = database.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM camp JOIN camp_member ON camp_member.camp_id=camp.id AND camp_member.agent_id=camp.default_lead_agent_id JOIN agent_profile ON agent_profile.id=camp_member.agent_id WHERE camp.id=?1 AND camp_member.status='active' AND camp_member.leave_requested_at IS NULL AND agent_profile.profile_status='present')",
+            [camp_id], |row| row.get(0),
+        )?;
+        if recorded.is_none() && lead_valid && matches!(envelope.actor, ActorRef::User { .. }) {
+            Ok(EnterDisposition::ReadOnly)
+        } else {
+            Ok(EnterDisposition::Reconcile)
+        }
+    }
+
+    pub fn open(&self, database: &mut Database, camp_id: &str) -> Result<ThreadOpenOutcome> {
         let projection_started_at = Instant::now();
         let projection = ReadModelService.camp_open_projection(database, camp_id)?;
-        Ok(CampOpenOutcome {
+        Ok(ThreadOpenOutcome {
             projection,
             reconcile_duration: None,
+            navigation_changed: false,
             projection_duration: projection_started_at.elapsed(),
         })
     }
@@ -91,8 +131,8 @@ impl CampOpenService {
 mod slow_tests {
     use super::*;
     use crate::{
-        camp_attachment::CampAttachmentStore,
-        collaboration::{CampActivationState, CreateCampCommand, ProjectBindingKind},
+        camp_attachment::ThreadAttachmentStore,
+        collaboration::{CreateThreadCommand, ProjectBindingKind, ThreadActivationState},
         command::ActorRef,
         execution_evidence::ExecutionEvidenceService,
         managed_blob::ManagedBlobStore,
@@ -119,7 +159,7 @@ mod slow_tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-camp-open-enter-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        let mut create = CreateCampCommand::for_test_with_members(
+        let mut create = CreateThreadCommand::for_test_with_members(
             directory.join("workspace").to_string_lossy().to_string(),
             &["agent_1", "agent_2"],
             "agent_1",
@@ -131,7 +171,7 @@ mod slow_tests {
                 &user_envelope("camp-open-create", None, create),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -143,7 +183,7 @@ mod slow_tests {
             )
             .unwrap();
 
-        let outcome = CampOpenService
+        let outcome = ThreadOpenService
             .enter(
                 &mut database,
                 &user_envelope(
@@ -169,7 +209,7 @@ mod slow_tests {
         );
         assert!(outcome.reconcile_duration.is_some());
         let stable_sequence = outcome.projection.through_global_sequence;
-        let read_only_enter = CampOpenService
+        let read_only_enter = ThreadOpenService
             .enter(
                 &mut database,
                 &user_envelope(
@@ -195,7 +235,24 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(receipt_count, 0);
-        let replay = CampOpenService
+        let fast_read = ThreadOpenService
+            .try_enter_read_only(
+                &mut database,
+                &user_envelope(
+                    "camp-open-fast-read",
+                    Some(&camp_id),
+                    ReconcileDefaultLeadCommand {
+                        camp_id: camp_id.clone(),
+                    },
+                ),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            fast_read.projection.through_global_sequence,
+            stable_sequence
+        );
+        let replay = ThreadOpenService
             .enter(
                 &mut database,
                 &user_envelope(
@@ -209,9 +266,71 @@ mod slow_tests {
             .unwrap();
         assert!(replay.reconcile_duration.is_some());
         assert_eq!(replay.projection.through_global_sequence, stable_sequence);
+        assert!(
+            ThreadOpenService
+                .try_enter_read_only(
+                    &mut database,
+                    &user_envelope(
+                        "camp-open-enter",
+                        Some(&camp_id),
+                        ReconcileDefaultLeadCommand {
+                            camp_id: camp_id.clone()
+                        },
+                    ),
+                )
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(
             outcome.projection.schema_version,
             crate::read_model::CAMP_OPEN_SCHEMA_VERSION
+        );
+
+        let rejected_envelope = CommandEnvelope {
+            command_id: "camp-open-rejected".to_string(),
+            actor: ActorRef::System {
+                component_id: "test".to_string(),
+            },
+            camp_id: Some(camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: ReconcileDefaultLeadCommand {
+                camp_id: camp_id.clone(),
+            },
+        };
+        assert!(
+            ThreadOpenService
+                .enter(&mut database, &rejected_envelope)
+                .is_err()
+        );
+        assert!(
+            ThreadOpenService
+                .try_enter_read_only(&mut database, &rejected_envelope)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            ThreadOpenService
+                .enter(&mut database, &rejected_envelope)
+                .is_err()
+        );
+        let conflicting_envelope = user_envelope(
+            "camp-open-rejected",
+            Some(&camp_id),
+            ReconcileDefaultLeadCommand {
+                camp_id: camp_id.clone(),
+            },
+        );
+        assert!(
+            ThreadOpenService
+                .try_enter_read_only(&mut database, &conflicting_envelope)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            ThreadOpenService
+                .enter(&mut database, &conflicting_envelope)
+                .is_err()
         );
 
         drop(database);
@@ -221,13 +340,13 @@ mod slow_tests {
     #[test]
     fn open_and_read_only_enter_never_settle_work_or_write_managed_blobs() {
         use crate::collaboration::{
-            ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
+            ExecutionRequest, TestThreadMessageAddress, TestThreadMessageCommand,
         };
         let mut database = crate::test_support::seeded_runtime_database_owned();
         let service = CollaborationService::default();
         let mut camps = Vec::new();
         for index in 0..2 {
-            let mut create = CreateCampCommand::for_test_with_members(
+            let mut create = CreateThreadCommand::for_test_with_members(
                 database
                     .directory()
                     .join(format!("workspace-{index}"))
@@ -243,7 +362,7 @@ mod slow_tests {
                     &user_envelope(&format!("create-repair-{index}"), None, create),
                 )
                 .unwrap();
-            let camp_id = created.result.payload["campId"]
+            let camp_id = created.result.payload["threadId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -253,12 +372,12 @@ mod slow_tests {
                     &user_envelope(
                         &format!("send-repair-{index}"),
                         Some(&camp_id),
-                        TestCampMessageCommand {
+                        TestThreadMessageCommand {
                             camp_id: camp_id.clone(),
                             draft_revision: None,
                             body: "repair scope".into(),
                             prepared_attachment_ids: Vec::new(),
-                            address: TestCampMessageAddress::Broadcast,
+                            address: TestThreadMessageAddress::Broadcast,
                             reply_to_camp_message_id: None,
                             execution: Some(ExecutionRequest {
                                 task_id: None,
@@ -358,9 +477,9 @@ mod slow_tests {
                 _ => Authorization::Allow,
             }))
             .unwrap();
-        let first_open = CampOpenService.open(&mut database, &camps[0].0);
-        let second_open = CampOpenService.open(&mut database, &camps[1].0);
-        let enter = CampOpenService.enter(
+        let first_open = ThreadOpenService.open(&mut database, &camps[0].0);
+        let second_open = ThreadOpenService.open(&mut database, &camps[1].0);
+        let enter = ThreadOpenService.enter(
             &mut database,
             &user_envelope(
                 "read-only-enter",
@@ -419,12 +538,12 @@ mod slow_tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-camp-open-pending-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        let mut create = CreateCampCommand::for_test_with_members(
+        let mut create = CreateThreadCommand::for_test_with_members(
             directory.join("workspace").to_string_lossy().to_string(),
             &["agent_1", "agent_2"],
             "agent_1",
         );
-        create.activation_state = CampActivationState::Pending;
+        create.activation_state = ThreadActivationState::Pending;
         create.project_binding_kind = ProjectBindingKind::Directory;
         let created = CollaborationService::default()
             .create_camp(
@@ -432,16 +551,16 @@ mod slow_tests {
                 &user_envelope("camp-open-pending-create", None, create),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
-        let attachment_store = CampAttachmentStore::new(&directory);
+        let attachment_store = ThreadAttachmentStore::new(&directory);
         let draft_before_enter = attachment_store
             .save_body(&mut database, &camp_id, "unfinished startup draft")
             .unwrap();
 
-        let outcome = CampOpenService
+        let outcome = ThreadOpenService
             .enter(
                 &mut database,
                 &user_envelope(

@@ -45,19 +45,24 @@ pub enum Operation {
     #[serde(rename = "preferences.newConversation.invalidate")]
     NewConversationInvalidate,
 
-    #[serde(rename = "camps.rename")]
+    #[serde(rename = "threads.rename", alias = "camps.rename")]
     CampRename,
-    #[serde(rename = "camps.delete")]
+    #[serde(rename = "threads.delete", alias = "camps.delete")]
     CampDelete,
-    #[serde(rename = "camps.deletionIssues")]
+    #[serde(rename = "threads.deletionIssues", alias = "camps.deletionIssues")]
     CampDeletionIssues,
-    #[serde(rename = "camps.retryDeletion")]
+    #[serde(rename = "threads.retryDeletion", alias = "camps.retryDeletion")]
     CampRetryDeletion,
-    #[serde(rename = "camps.discardPending")]
+    #[serde(rename = "threads.discardPending", alias = "camps.discardPending")]
     CampDiscardPending,
-    #[serde(rename = "camps.members.fast.check")]
+    #[serde(rename = "threads.pendingDraft.setPresence")]
+    PendingDraftPresence,
+    #[serde(
+        rename = "threads.members.fast.check",
+        alias = "camps.members.fast.check"
+    )]
     CampFastCheck,
-    #[serde(rename = "camps.members.fast.set")]
+    #[serde(rename = "threads.members.fast.set", alias = "camps.members.fast.set")]
     CampFastSet,
     #[serde(rename = "members.removalPreview")]
     MemberRemovalPreview,
@@ -142,7 +147,7 @@ pub enum Operation {
     #[serde(rename = "runtime.startup.check")]
     RuntimeStartupCheck,
 
-    #[serde(rename = "navigation.findCamp")]
+    #[serde(rename = "navigation.findThread", alias = "navigation.findCamp")]
     NavigationFindCamp,
     #[serde(rename = "agentRunExecution.page")]
     RunExecutionPage,
@@ -183,9 +188,9 @@ pub enum Operation {
     #[serde(rename = "automations.run")]
     AutomationRun,
 
-    #[serde(rename = "camps.open")]
+    #[serde(rename = "threads.open", alias = "camps.open")]
     CampOpen,
-    #[serde(rename = "camps.enter")]
+    #[serde(rename = "threads.enter", alias = "camps.enter")]
     CampEnter,
     #[serde(rename = "navigation.campViewed")]
     CampViewed,
@@ -207,15 +212,17 @@ pub enum Operation {
     Member,
     #[serde(rename = "navigation.snapshot")]
     Navigation,
-    #[serde(rename = "navigation.groupCamps")]
+    #[serde(rename = "navigation.threads", alias = "navigation.camps")]
+    NavigationCamps,
+    #[serde(rename = "navigation.groupThreads", alias = "navigation.groupCamps")]
     GroupCamps,
-    #[serde(rename = "camps.exists")]
+    #[serde(rename = "threads.exists", alias = "camps.exists")]
     CampExists,
-    #[serde(rename = "camp.messages.page")]
+    #[serde(rename = "thread.messages.page", alias = "camp.messages.page")]
     Messages,
-    #[serde(rename = "camp.messages.around")]
+    #[serde(rename = "thread.messages.around", alias = "camp.messages.around")]
     MessagesAround,
-    #[serde(rename = "camp.messages.find")]
+    #[serde(rename = "thread.messages.find", alias = "camp.messages.find")]
     FindMessages,
     #[serde(rename = "tasks.list")]
     Tasks,
@@ -237,6 +244,8 @@ pub enum Operation {
     Subsystems,
     #[serde(rename = "monitoring.snapshot")]
     Monitoring,
+    #[serde(rename = "monitoring.execution")]
+    ExecutionMetrics,
     #[serde(rename = "skills.list")]
     Skills,
     #[serde(rename = "skills.get")]
@@ -259,9 +268,9 @@ pub enum Operation {
     DraftQuote,
     #[serde(rename = "messageQuotes.capture")]
     CaptureQuote,
-    #[serde(rename = "camp.messages.send")]
+    #[serde(rename = "thread.messages.send", alias = "camp.messages.send")]
     Send,
-    #[serde(rename = "camp.messages.withdraw")]
+    #[serde(rename = "thread.messages.withdraw", alias = "camp.messages.withdraw")]
     WithdrawMessage,
     #[serde(rename = "action.approvals.resolve")]
     Approval,
@@ -269,17 +278,26 @@ pub enum Operation {
     CancelRun,
     #[serde(rename = "commands.reconcile")]
     Reconcile,
-    #[serde(rename = "camps.create")]
+    #[serde(rename = "threads.create", alias = "camps.create")]
     CampCreate,
-    #[serde(rename = "camps.creationPreflight")]
+    #[serde(
+        rename = "threads.creationPreflight",
+        alias = "camps.creationPreflight"
+    )]
     CampCreationDefaults,
-    #[serde(rename = "camps.members.add")]
+    #[serde(rename = "threads.members.add", alias = "camps.members.add")]
     CampAddMember,
-    #[serde(rename = "camps.members.remove")]
+    #[serde(rename = "threads.members.remove", alias = "camps.members.remove")]
     CampRemoveMember,
-    #[serde(rename = "camps.members.removalPreview")]
+    #[serde(
+        rename = "threads.members.removalPreview",
+        alias = "camps.members.removalPreview"
+    )]
     CampRemovalPreview,
-    #[serde(rename = "camps.changeDefaultLead")]
+    #[serde(
+        rename = "threads.changeDefaultLead",
+        alias = "camps.changeDefaultLead"
+    )]
     CampLead,
     #[serde(rename = "members.create")]
     MemberCreate,
@@ -405,6 +423,7 @@ impl Operation {
             Self::CampDeletionIssues => "camps.deletionIssues",
             Self::CampRetryDeletion => "camps.retryDeletion",
             Self::CampDiscardPending => "camps.discardPending",
+            Self::PendingDraftPresence => "camps.pendingDraft.setPresence",
             Self::CampFastCheck => "camps.members.fast.check",
             Self::CampFastSet => "camps.members.fast.set",
             Self::MemberRemovalPreview => "members.removalPreview",
@@ -510,6 +529,7 @@ impl Operation {
             Self::Members => "members.list",
             Self::Member => "members.get",
             Self::Navigation => "navigation.snapshot",
+            Self::NavigationCamps => "navigation.camps",
             Self::GroupCamps => "navigation.groupCamps",
             Self::CampExists => "camps.exists",
             Self::Messages => "camp.messages.page",
@@ -525,6 +545,7 @@ impl Operation {
             Self::Installations => "runtime.installations.list",
             Self::Subsystems => "runtime.subsystems.get",
             Self::Monitoring => "monitoring.snapshot",
+            Self::ExecutionMetrics => "monitoring.execution",
             Self::Skills => "skills.list",
             Self::Skill => "skills.get",
             Self::ToolboxList => "toolbox.list",

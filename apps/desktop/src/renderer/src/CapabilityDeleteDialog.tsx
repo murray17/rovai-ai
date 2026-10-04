@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { CapabilityError } from './CapabilityWorkspace'
+import { UiText, uiAttribute } from './interface-language'
 
 export function CapabilityDeleteDialog({
   open,
@@ -51,12 +52,10 @@ export function CapabilityDeleteDialog({
           <CapabilityError error={error} />
           <AppDialogFooter>
             <Dialog.Close asChild>
-              <button ref={cancel} className="quiet-button" type="button" disabled={busy}>
-                取消
-              </button>
+              <button ref={cancel} className="quiet-button" type="button" disabled={busy}><UiText zh={"取消"} /></button>
             </Dialog.Close>
             <button className="danger-button" type="button" disabled={busy} onClick={onConfirm}>
-              {busy ? '正在删除…' : '确认删除'}
+              {busy ? uiAttribute("正在删除…") : uiAttribute("确认删除")}
             </button>
           </AppDialogFooter>
         </AppDialogContent>

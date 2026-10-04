@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { parseUpdateInfo } from 'electron-updater/out/providers/Provider.js'
 import { mergeMacUpdateInfoDocuments, mergeMacUpdateInfoYaml } from './macos-update-info.mjs'
 
 const SHA_X64 = 'x'.repeat(88)
@@ -40,6 +41,19 @@ test('merges both macOS architectures with deterministic ZIP-first ordering', ()
   assert.equal(merged.releaseDate, '2026-08-24T12:01:00.000Z')
   assert.equal(merged.releaseNotes, '# Rovai AI v0.0.2\n\n- Reliable updates\n')
   assert.match(mergeMacUpdateInfoYaml([updateInfo('arm64'), updateInfo('x64')]), /version: 0\.0\.2/)
+})
+
+test('merged YAML preserves release fields when read by electron-updater', () => {
+  const documents = [updateInfo('arm64'), updateInfo('x64')]
+  const merged = mergeMacUpdateInfoDocuments(documents)
+  const parsed = parseUpdateInfo(
+    mergeMacUpdateInfoYaml(documents),
+    'latest-mac.yml',
+    new URL('https://example.invalid/latest-mac.yml')
+  )
+
+  // Older clients only accept a string date, so the published manifest must retain its type.
+  assert.deepEqual(parsed, merged)
 })
 
 test('rejects version mismatches', () => {

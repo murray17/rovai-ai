@@ -14,9 +14,15 @@ Change Journal。Renderer 只呈现短暂应用内提醒和 Camp 行“有新回
 
 ## 应用内提醒
 
-设置侧栏使用用户语言“提醒”。页面只控制一个总开关和四类默认开启的临时浮层：待审批、提到你、
-本轮完成、执行未完成；普通队员消息没有提醒类别。关闭总开关只暂停浮层，不抹除四类选择，也不改变
-Core 的持久注意力事实。
+设置侧栏使用用户语言“提醒”。总开关下按“会话 / 使命 / 任务”分开：会话包含待审批、提到你、
+本轮完成、单聊回复、执行未完成；使命包含使命需要你、使命状态变更；任务包含任务状态变更。
+任务状态默认关闭，预选已完成、受阻、已取消；使命状态默认开启且只选已完成。各状态筛选内联展开，
+总开关或分类关闭时保留选择，保存失败回读当前值并允许重试。宽屏会话组占左侧两行，使命和任务各占右侧一组；
+窄屏依次堆叠。普通队员消息没有浮层类别。
+
+本轮完成等待该消息引发的全部关联分支与投递成功，单聊回复独立控制。使命需要你只来自实际状态转换；
+只有显式 sourceMessageId 才显示该消息正文，没有关联时只显示使命名和“需要你”。任务受阻不等同用户待办。
+使命需要你与同消息提及、使命完成与同关联轮完成，在两类都开启时优先保留使命卡片；不靠正文猜测重复。
 
 启动或 reload 先建立当前 Journal high-water，不补弹历史。运行中只有新的 exact `headsUpSignal` 可加入
 内存队列；同时最多显示一条，同来源同轮的新高优先级 signal 原地更新，并保留其他精确 Occurrence。浮层标题、摘要、点击和精确确认全部
@@ -35,6 +41,7 @@ resolved Approval 的旧 pending signal 必须删除，即使该 Occurrence 仍�
 
 ## 会话未读点
 
+Camp 与使命行以非撤回 Agent 消息首次发布水位判断新回复；Run 终态本身不生成新回复。
 Camp 行只用小点提示“有新回复”，不显示跨会话总数。小点使用 attention 语义色，并同时通过整行
 `aria-label` 与 title 表达“有新回复”，不能只靠颜色。它位于固定的 12×12px 右侧状态槽内，Desktop / 宽屏 Web
 为 7px，Mobile 为 6px；正在打开或运行时同槽优先显示 loading，未读事实不因此清除，loading 结束后仍按真实状态显示小点。
@@ -66,8 +73,8 @@ Occurrence。
 
 ## References
 
-- [Notification Episode v8](../../contracts/notification-episode-v8.md)
-- [Current User Attention v7](../../contracts/current-user-attention-v7.md)
+- [Notification Episode v9](../../contracts/notification-episode-v9.md)
+- [Current User Attention v8](../../contracts/current-user-attention-v8.md)
 - [App Shell 与统一侧栏](app-shell-navigation.md)
 - [DESIGN.md](../../../DESIGN.md)
 

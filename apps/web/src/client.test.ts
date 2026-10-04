@@ -30,6 +30,24 @@ describe('console transport', () => {
     client.clear()
   })
 
+  it('sends the Lark provider kind unchanged for publish and retry', async () => {
+    const bodies: unknown[] = []
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
+      bodies.push(JSON.parse(String(init?.body)))
+      return Response.json({ result: { schemaVersion: 4 } })
+    })
+    const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)
+    await client.login('b'.repeat(64))
+    await client.channel({ operation: 'publish', kind: 'lark', agentId: 'agent-a' })
+    await client.channel({ operation: 'retry', kind: 'lark', agentId: 'agent-a' })
+    expect(bodies).toEqual([
+      { operation: 'publish', kind: 'lark', agentId: 'agent-a' },
+      { operation: 'retry', kind: 'lark', agentId: 'agent-a' }
+    ])
+    client.clear()
+  })
+
   it('rejects an incompatible Host before installing credentials or admitting business requests', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ protocolVersion: 2, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' }))
     const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)
@@ -105,19 +123,19 @@ describe('console transport', () => {
 
   it('retains an unknown command across reauthentication and only looks up its original receipt', async () => {
     let recorded = false
-    const params = { commandId: newCommandId(), campId: 'test', draftRevision: 4, execution: null }
-    const result = { commandResult: { status: 'applied', payload: { campMessageId: 'once' } } }
+    const params = { commandId: newCommandId(), threadId: 'test', draftRevision: 4, execution: null }
+    const result = { commandResult: { status: 'applied', payload: { threadMessageId: 'once' } } }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
       if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
-      if (body.operation === 'camp.messages.send') throw new TypeError('connection lost after admission')
-      expect(body).toEqual({ operation: 'commands.reconcile', params: { operation: 'camp.messages.send', params } })
+      if (body.operation === 'thread.messages.send') throw new TypeError('connection lost after admission')
+      expect(body).toEqual({ operation: 'commands.reconcile', params: { operation: 'thread.messages.send', params } })
       return Response.json({ result: recorded ? { state: 'recorded', result } : { state: 'unknown' } })
     })
     const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)
     await client.login('b'.repeat(64))
     let settled = false
-    const pending = client.request('camp.messages.send', params).then(value => { settled = true; return value })
+    const pending = client.request('thread.messages.send', params).then(value => { settled = true; return value })
     await vi.waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(3))
     expect(settled).toBe(false)
     expect(client.pendingCommandCount).toBe(1)
@@ -129,18 +147,18 @@ describe('console transport', () => {
     await expect(pending).resolves.toEqual(result)
     expect(client.editingScope).toBe(scope)
     expect(client.pendingCommandCount).toBe(0)
-    expect(fetcher.mock.calls.filter(([, init]) => init?.body && JSON.parse(String(init.body)).operation === 'camp.messages.send')).toHaveLength(1)
+    expect(fetcher.mock.calls.filter(([, init]) => init?.body && JSON.parse(String(init.body)).operation === 'thread.messages.send')).toHaveLength(1)
   })
 
   it('resumes an unknown source binding without uploading another file', async () => {
     let bound = false
     let intent: unknown
-    const draft = { campId: 'test', draftId: 'test/editor', revision: 2, attachments: [{ id: 'bound' }] }
+    const draft = { threadId: 'test', draftId: 'test/editor', revision: 2, attachments: [{ id: 'bound' }] }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
       if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/uploads')) {
         intent = JSON.parse(String((options?.body as FormData).get('intent')))
-        expect(intent).toMatchObject({ campId: 'test', expectedRevision: 1, displayName: 'input.txt', byteSize: 5 })
+        expect(intent).toMatchObject({ threadId: 'test', expectedRevision: 1, displayName: 'input.txt', byteSize: 5 })
         throw new TypeError('response lost after binding')
       }
       expect(String(url)).toMatch(/\/uploads\/reconcile$/)
@@ -188,7 +206,7 @@ describe('console transport', () => {
   })
 
   it('only an explicit retry can resend an unknown command and reuses its original payload', async () => {
-    const params = { commandId: newCommandId(), campId: 'test', draftRevision: 4, execution: null }
+    const params = { commandId: newCommandId(), threadId: 'test', draftRevision: 4, execution: null }
     const original = structuredClone(params)
     let sends = 0
     let allowRetry = false
@@ -197,17 +215,17 @@ describe('console transport', () => {
       if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
       if (body.operation === 'commands.reconcile') return Response.json({ result: { state: 'unknown' } })
-      expect(body).toEqual({ operation: 'camp.messages.send', params: original })
+      expect(body).toEqual({ operation: 'thread.messages.send', params: original })
       sends++
       if (!allowRetry) throw new TypeError('connection lost before dispatch or reply')
       return Response.json({ result })
     })
     const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)
     await client.login('b'.repeat(64))
-    const pending = client.request('camp.messages.send', params)
+    const pending = client.request('thread.messages.send', params)
     await vi.waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(3))
     params.draftRevision = 99
-    params.campId = 'later-ui-state'
+    params.threadId = 'later-ui-state'
     await client.login('b'.repeat(64))
     await client.reconcilePending()
     expect(sends).toBe(1)
@@ -304,14 +322,14 @@ describe('tab session recovery', () => {
     })
     const first = new ConsoleClient('http://localhost:4317', fetcher, storage)
     await first.login('d'.repeat(64))
-    const params = { commandId: newCommandId(), campId: 'original', draftRevision: 7 }
-    void first.request('camp.messages.send', params)
+    const params = { commandId: newCommandId(), threadId: 'original', draftRevision: 7 }
+    void first.request('thread.messages.send', params)
     await vi.waitFor(() => expect(dispatches).toHaveLength(1))
     const next = new ConsoleClient('http://localhost:4317', fetcher, storage)
     await next.restore()
     expect(next.pendingCommandCount).toBe(1)
     expect(dispatches).toHaveLength(1)
-    await expect(next.request('camp.messages.send', { ...params, commandId: newCommandId() })).rejects.toThrow('原提交')
+    await expect(next.request('thread.messages.send', { ...params, commandId: newCommandId() })).rejects.toThrow('原提交')
     await next.retryPending()
     expect(dispatches).toEqual([params, params])
     recorded = true

@@ -1075,7 +1075,7 @@ function postDispatchUserEvents(snapshot, dispatchBoundary) {
         && event.entityId === dispatchBoundary.rootDeliveryId) return false
     if (event.eventType === 'agent_run.queued' && rootRunIds.has(event.entityId)) return false
     if (event.eventType === 'command.result'
-        && (event.entityId === dispatchBoundary.campTurnId
+        && (event.entityId === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId)
           || event.entityId === dispatchBoundary.rootCampMessageId)) return false
     return true
   })
@@ -1129,14 +1129,14 @@ export function deriveConvergenceEvidence({
       failureRecoveryFacts
     }
   }
-  const turn = snapshot.turns.find((candidate) => candidate.id === dispatchBoundary.campTurnId)
-  const runs = snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
+  const turn = snapshot.turns.find((candidate) => candidate.id === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId))
+  const runs = snapshot.agentRuns.filter((run) => (run.threadTurnId ?? run.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId))
   const currentPublicA2a = isCurrentPublicA2aSnapshot(snapshot)
   const inputs = Array.isArray(snapshot.conversationInputs)
-    ? snapshot.conversationInputs.filter((input) => input.campTurnId === dispatchBoundary.campTurnId)
+    ? snapshot.conversationInputs.filter((input) => (input.threadTurnId ?? input.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId))
     : []
   const deliveries = Array.isArray(snapshot.messageDeliveries)
-    ? snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId)
+    ? snapshot.messageDeliveries.filter((delivery) => (delivery.threadTurnId ?? delivery.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId))
     : []
   const conversationInputFact = currentPublicA2a
     ? deriveCurrentMessageDeliverySettlement(snapshot, turn, deliveries)
@@ -1205,12 +1205,12 @@ export function observedDurableMemberCallEffects(snapshot, campTurnId) {
   if (isBatchTrialBoundary(campTurnId)) return trialAgentDeliveries(snapshot, campTurnId)
   if (!snapshot || !campTurnId) return []
   const runIds = new Set(snapshot.agentRuns
-    .filter((run) => run.campTurnId === campTurnId)
+    .filter((run) => (run.threadTurnId ?? run.campTurnId) === campTurnId)
     .map((run) => run.id))
   if (isCurrentPublicA2aSnapshot(snapshot)) {
     const seen = new Set()
     return (Array.isArray(snapshot.messageDeliveries) ? snapshot.messageDeliveries : []).filter((delivery) => {
-      if (delivery.campTurnId !== campTurnId || !isBudgetedPublicA2aDelivery(snapshot, delivery) || seen.has(delivery.id)) return false
+      if ((delivery.threadTurnId ?? delivery.campTurnId) !== campTurnId || !isBudgetedPublicA2aDelivery(snapshot, delivery) || seen.has(delivery.id)) return false
       seen.add(delivery.id)
       return true
     })

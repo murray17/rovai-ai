@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-30",
+  "runtime": "kimi-code-cli",
+  "version": "2.1.1",
+  "scenario": "Last native step.end journal append after immediate ACP terminal flush; second Run in the same native Session",
+  "rawStepUsage": [
+    {
+      "inputOther": 562,
+      "output": 336,
+      "inputCacheRead": 21760,
+      "inputCacheCreation": 0
+    },
+    {
+      "inputOther": 538,
+      "output": 207,
+      "inputCacheRead": 22144,
+      "inputCacheCreation": 0
+    },
+    {
+      "inputOther": 426,
+      "output": 53,
+      "inputCacheRead": 22528,
+      "inputCacheCreation": 0
+    }
+  ],
+  "expectedNativeReadback": {
+    "promptInputTotalTokens": 67958,
+    "outputTokens": 596,
+    "cacheReadTokens": 66432,
+    "cacheWriteTokens": 0
+  },
+  "beforeFixReadback": {
+    "promptInputTotalTokens": 45004,
+    "outputTokens": 543,
+    "cacheReadTokens": 43904,
+    "cacheWriteTokens": 0
+  },
+  "fixedBehavior": "Keep current Run cursor through a serialized 400ms tail read. Deterministic owner appends at 75ms; fresh two-Run native probe matches all 7 steps. Delays beyond 400ms remain unverified."
+}

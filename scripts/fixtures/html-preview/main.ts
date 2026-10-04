@@ -6,16 +6,17 @@ import { FilePreviewService } from '../../../apps/desktop/src/main/file-preview/
 import { navigationAcceptance } from './navigation'
 import { feedbackAcceptance } from './feedback'
 import { lifecycleAcceptance } from './lifecycle'
+import { policyAcceptance } from './policy'
 
 const [renderer, userData, root, preload] = process.argv.slice(2)
 app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 const service = new FilePreviewService({ async resolve(request) {
-  if (request.kind === 'attachment') return { kind: 'file_target', sourceKind: 'attachment', campId: request.campId,
+  if (request.kind === 'attachment') return { kind: 'file_target', sourceKind: 'attachment', threadId: request.threadId,
     sourceIdentity: 'attachment-history', rootPath: root, basePath: root, candidatePath: join(root, 'attachment.html'),
     displayName: '附件交互稿.html', canShowPath: false, allowChildren: true }
   if (request.kind !== 'camp_workspace') return null
-  return { kind: 'file_target', sourceKind: request.kind, campId: request.campId,
+  return { kind: 'file_target', sourceKind: request.kind, threadId: request.threadId,
     sourceIdentity: request.rawReference, rootPath: root, basePath: root,
     rawReference: request.rawReference, allowChildren: true }
 } }, { selectRoot: async () => null, confirmOpen: async () => true, openPath: async () => '', revealPath() {}, copyText() {}, publishExternalUpdate() {} })
@@ -26,7 +27,7 @@ app.whenReady().then(async () => {
   const navigation = new FilePreviewFrameNavigation(url => service.ownsHtmlPreviewOrigin(window.webContents.id, url))
   window.webContents.on('will-frame-navigate', details => { if (!details.isMainFrame && !navigation.allows(details.url, details.frame, window.webContents.mainFrame, window.webContents.mainFrame.framesInSubtree)) details.preventDefault() })
   window.webContents.on('will-redirect', details => { if (!details.isMainFrame && !navigation.allows(details.url, details.frame, window.webContents.mainFrame, window.webContents.mainFrame.framesInSubtree)) details.preventDefault() })
-  const calls = ['updateRetention', 'bindCamp', 'open', 'restore', 'reopen', 'readText', 'readPage', 'resolveLine', 'readBinary', 'prepareHtml', 'prepareHtmlSite', 'releaseHtmlSite', 'reload', 'release']
+  const calls = ['updateRetention', 'bindThread', 'open', 'restore', 'reopen', 'readText', 'readPage', 'resolveLine', 'readBinary', 'prepareHtml', 'prepareHtmlSite', 'releaseHtmlSite', 'reload', 'release']
   ipcMain.handle('preview-fixture', (event, method: string, args: unknown) => {
     if (event.senderFrame !== window.webContents.mainFrame || !calls.includes(method)) throw new Error('Invalid fixture call')
     return (service as unknown as Record<string, (id: number, args: unknown) => unknown>)[method](event.sender.id, args)
@@ -46,12 +47,17 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({ htmlPreviewAcceptance: true, ok: cases.every(result => result.ok), cases, errors }))
     await service.closeAll(); window.destroy(); app.exit(cases.every(result => result.ok) ? 0 : 1); return
   }
+  if (process.env.ROVAI_HTML_PREVIEW_SCENARIO === 'policy') {
+    const cases = await policyAcceptance(window, userData, root)
+    console.log(JSON.stringify({ htmlPreviewAcceptance: true, ok: cases.every(result => result.ok), cases, errors }))
+    await service.closeAll(); window.destroy(); app.exit(cases.every(result => result.ok) ? 0 : 1); return
+  }
   const cases: { name: string; ok: boolean; evidence: unknown }[] = []
   const names = ['history.html', 'canvas.html', 'assets.html', 'errors.html', 'network.html', 'stalled.html', 'many-frames.html']
   for (const name of ['original-history.html','original-canvas.html']) if (await access(join(root,name)).then(()=>true,()=>false)) names.push(name)
   for (const name of names) {
     const started = performance.now()
-    await run(`window.previewAcceptance.open({kind:'camp_workspace',campId:'preview-test',rawReference:${JSON.stringify(name)}})`)
+    await run(`window.previewAcceptance.open({kind:'camp_workspace',threadId:'preview-test',rawReference:${JSON.stringify(name)}})`)
     const frames = () => window.webContents.mainFrame.framesInSubtree.filter(frame => frame !== window.webContents.mainFrame)
     const deadline = performance.now() + 10_000
     for (;;) {

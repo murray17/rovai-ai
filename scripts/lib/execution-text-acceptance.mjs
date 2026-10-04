@@ -26,12 +26,12 @@ export async function acceptExecutionText({ request, workspace, databasePath, wa
       'Then send the short final public answer "Local text-block acceptance finished" to this Camp using the normal Rovai publication route.'
     ].join(' '), purpose: 'Verify every narration block, tool ordering and fresh-run SQLite write volume.'
   })
-  const campId = sent.payload?.campId
+  const threadId = sent.payload?.threadId
   const runId = sent.payload?.agentRunIds?.[0]
-  if (!campId || !runId) throw new Error('Text acceptance Run not admitted')
+  if (!threadId || !runId) throw new Error('Text acceptance Run not admitted')
   let observedStreamingCharacters = 0
   const final = await waitFor(async () => {
-    const snapshot = await request('camps.snapshot', { campId })
+    const snapshot = await request('camps.snapshot', { threadId })
     for (const item of snapshot.executionEvidence) {
       if (item.agentRunId === runId && item.eventType === 'agent.text.block'
         && item.payload.status === 'streaming') {
@@ -46,7 +46,7 @@ export async function acceptExecutionText({ request, workspace, databasePath, wa
   const evidence = []
   let afterSequence = 0
   for (;;) {
-    const page = await request('agentRunEvidence.list', { campId, agentRunId: runId, afterSequence, limit: 200 })
+    const page = await request('agentRunEvidence.list', { threadId, agentRunId: runId, afterSequence, limit: 200 })
     evidence.push(...page.evidence)
     if (!page.hasMore) break
     afterSequence = page.nextAfterSequence
@@ -54,7 +54,7 @@ export async function acceptExecutionText({ request, workspace, databasePath, wa
   const bodies = []
   for (const item of evidence.filter((item) => item.eventType === 'agent.text.block')) {
     const payload = item.isTruncated
-      ? (await request('agentRunEvidence.getContent', { campId, evidenceId: item.id })).payload
+      ? (await request('agentRunEvidence.getContent', { threadId, evidenceId: item.id })).payload
       : item.payload
     bodies.push({ ...item, payload })
   }
@@ -78,7 +78,7 @@ export async function acceptExecutionText({ request, workspace, databasePath, wa
     SELECT operation,event_type,count(*) AS count FROM execution_text_accept_writes
     WHERE run_id='${runId.replaceAll("'", "''")}' GROUP BY operation,event_type
   `)
-  return { runId, campId, status: run.status, evidenceRows: evidence.length,
+  return { runId, threadId, status: run.status, evidenceRows: evidence.length,
     narrationBlocks: bodies.length, markerSequences: markers.map((item) => item.sequence),
     observedStreamingCharacters, liveFrames: await frames(runId), writeCounts }
 }

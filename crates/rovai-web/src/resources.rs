@@ -17,7 +17,7 @@ impl Handles {
         self.0
             .lock()
             .expect("file registry poisoned")
-            .retain(|_, handle| handle.source["campId"] != camp_id);
+            .retain(|_, handle| handle.source["threadId"] != camp_id);
     }
 }
 #[derive(Clone)]
@@ -164,7 +164,7 @@ fn reference_path(raw: &str, base: &std::path::Path) -> Result<PathBuf> {
 async fn resolve(state: &WebState, client: &DraftClient, source: &Value) -> Result<ResolvedSource> {
     if source["kind"] == "attachment" {
         ensure!(
-            source["campId"] == source["locator"]["campId"],
+            source["threadId"] == source["locator"]["threadId"],
             "source_not_authorized"
         );
         let target = core_value(
@@ -386,6 +386,16 @@ pub async fn files(
     }))
 }
 
+fn normalize_thread_scope(value: &mut Value) -> Result<()> {
+    if let Some(object) = value.as_object_mut() {
+        if let Some(id) = object.remove("campId") {
+            ensure!(!object.contains_key("threadId"), "source_not_authorized");
+            object.insert("threadId".to_string(), id);
+        }
+    }
+    Ok(())
+}
+
 async fn file_operation(
     state: &WebState,
     client: &DraftClient,
@@ -393,7 +403,13 @@ async fn file_operation(
     body: FileRequest,
     permit: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<Value> {
-    let request = body.request;
+    let mut request = body.request;
+    normalize_thread_scope(&mut request)?;
+    if request["kind"] == "attachment" {
+        if let Some(locator) = request.get_mut("locator") {
+            normalize_thread_scope(locator)?;
+        }
+    }
     if body.action == "attachmentLocation" {
         return core_value(state, client, "camp.attachments.location", request).await;
     }
@@ -423,13 +439,13 @@ async fn file_operation(
             };
             if changed {
                 let key = preview_key(&handle);
-                if let Some(camp_id) = handle.source["campId"].as_str() {
+                if let Some(camp_id) = handle.source["threadId"].as_str() {
                     updates.entry(camp_id.to_owned()).or_default().push(key);
                 }
             }
         }
         return Ok(
-            json!({"ok":true,"value":updates.into_iter().map(|(camp_id,preview_keys)|json!({"campId":camp_id,"previewKeys":preview_keys})).collect::<Vec<_>>()}),
+            json!({"ok":true,"value":updates.into_iter().map(|(camp_id,preview_keys)|json!({"threadId":camp_id,"previewKeys":preview_keys})).collect::<Vec<_>>()}),
         );
     }
     if matches!(body.action.as_str(), "open" | "restore") {
@@ -453,8 +469,8 @@ async fn file_operation(
                 .filter(|h| {
                     h.client == client.id()
                         && request
-                            .get("campId")
-                            .is_none_or(|camp| *camp == h.source["campId"])
+                            .get("threadId")
+                            .is_none_or(|camp| *camp == h.source["threadId"])
                         && h.allow_children
                 })
                 .cloned()
@@ -477,10 +493,10 @@ async fn file_operation(
                 .to_owned();
             // Match Desktop: only project children get a durable independent
             // restore request. External children retain their exact parent source.
-            let workspace = json!({"kind":"camp_workspace","campId":parent.source["campId"],"rawReference":"."});
+            let workspace = json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":"."});
             let restore = if let Ok(root) = resolve(state, client, &workspace).await {
                 path.strip_prefix(&root.root).ok().and_then(|relative| relative.to_str()).map(|relative|
-                    json!({"kind":"camp_workspace","campId":parent.source["campId"],"rawReference":relative}))
+                    json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":relative}))
             } else {
                 None
             };
@@ -498,7 +514,7 @@ async fn file_operation(
         } else {
             let resolved = resolve(state, client, &request).await?;
             let workspace =
-                json!({"kind":"camp_workspace","campId":request["campId"],"rawReference":"."});
+                json!({"kind":"camp_workspace","threadId":request["threadId"],"rawReference":"."});
             let project_root = if request["kind"] == "attachment" {
                 None
             } else {
@@ -548,7 +564,7 @@ async fn file_operation(
                 .find(|(_, handle)| {
                     handle.client == client.id()
                         && Some(handle.token.as_str()) == request["reopenToken"].as_str()
-                        && handle.source["campId"] == request["campId"]
+                        && handle.source["threadId"] == request["threadId"]
                 })
                 .map(|(id, handle)| (id.clone(), handle.clone()))
         } else {
@@ -702,7 +718,13 @@ pub async fn binary(
             "source_not_authorized"
         );
         let client = DraftClient::verified_web(&session.client_id).expect("Host editor identity");
-        let request = body.request;
+        let mut request = body.request;
+        normalize_thread_scope(&mut request)?;
+        if request["kind"] == "attachment" {
+            if let Some(locator) = request.get_mut("locator") {
+                normalize_thread_scope(locator)?;
+            }
+        }
         let handle = state
             .files
             .0
@@ -792,11 +814,12 @@ fn disposition(name: &str) -> String {
 pub async fn attachment(
     State(state): State<WebState>,
     Extension(session): Extension<Arc<Session>>,
-    Json(locator): Json<Value>,
+    Json(mut locator): Json<Value>,
 ) -> Response {
     let client = DraftClient::verified_web(&session.client_id).expect("Host editor identity");
     let result = async {
-        let source = json!({"kind":"attachment","campId":locator["campId"],"locator":locator});
+        normalize_thread_scope(&mut locator)?;
+        let source = json!({"kind":"attachment","threadId":locator["threadId"],"locator":locator});
         let resolved = resolve(&state, &client, &source).await?;
         let (bytes, _, _) = content(&resolved.path, None).await?;
         let name = resolved.name;

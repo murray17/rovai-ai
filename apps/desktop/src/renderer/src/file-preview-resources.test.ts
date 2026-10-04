@@ -16,7 +16,7 @@ function fixture(limits: Partial<Record<keyof typeof filePreviewRetentionLimits,
     const name = 'rawReference' in request ? request.rawReference : 'file.txt'
     const id = `handle-${++sequence}`
     const file: ResolvedFilePreview = {
-      handleId: id, reopenToken: id, previewKey: `${'campId' in request ? request.campId : ''}:${name}`,
+      handleId: id, reopenToken: id, previewKey: `${'threadId' in request ? request.threadId : ''}:${name}`,
       fileName: name, displayPath: name, pathPresentation: 'project_relative', size: 12, mime: name.endsWith('.html') ? 'text/html' : 'text/plain',
       extension: name.endsWith('.html') ? '.html' : '.txt', kind: name.endsWith('.html') ? 'html' : 'text', hasExternalUpdate: false,
       contentGeneration: id, contentVersion: { size: 12, mtimeMs: sequence }, capabilities: ['read']
@@ -27,7 +27,7 @@ function fixture(limits: Partial<Record<keyof typeof filePreviewRetentionLimits,
   const failure = async () => ({ ok: false as const, error: { code: 'read_failed' as const, message: 'failed', retryable: true } })
   let update: Parameters<FilePreviewApi['onExternalUpdate']>[0] = () => undefined
   const api: FilePreviewApi = {
-    bindCamp: vi.fn(async () => undefined), updateRetention: vi.fn(async () => undefined),
+    bindThread: vi.fn(async () => undefined), updateRetention: vi.fn(async () => undefined),
     open: vi.fn(async request => ({ ok: true as const, value: { kind: 'file_preview' as const, file: resolve(request) } })),
     restore: vi.fn(async request => ({ ok: true as const, value: { kind: 'file_preview' as const, file: resolve(request) } })),
     reopen: failure, readText: vi.fn(async ({ handleId }) => ({
@@ -45,21 +45,21 @@ function fixture(limits: Partial<Record<keyof typeof filePreviewRetentionLimits,
       }
     })),
     prepareHtml: failure, releaseHtmlSite: vi.fn(async () => ({ released: true as const })),
-    reload: vi.fn(async ({ handleId }) => ({ ok: true as const, value: resolve({ kind: 'camp_workspace', campId: 'a', rawReference: handles.get(handleId)!.fileName }) })),
+    reload: vi.fn(async ({ handleId }) => ({ ok: true as const, value: resolve({ kind: 'camp_workspace', threadId: 'a', rawReference: handles.get(handleId)!.fileName }) })),
     release: vi.fn(async () => ({ released: true as const })), openInSystem: failure, revealInFolder: failure, copyPath: failure,
     chooseAuthorizedRoot: failure, onExternalUpdate: listener => { update = listener; return () => undefined }
   }
   const owner = new FilePreviewResources(api, { ...filePreviewRetentionLimits, ...limits })
   resources.push(owner)
-  return { owner, api, update: (campId: string, previewKeys: string[]) => update({ campId, previewKeys }) }
+  return { owner, api, update: (threadId: string, previewKeys: string[]) => update({ threadId, previewKeys }) }
 }
 function active(session: FilePreviewSession): FilePreviewTabModel {
   return session.getSnapshot().tabs.find(tab => tab.id === session.getSnapshot().activeTabId) as FilePreviewTabModel
 }
-async function open(owner: FilePreviewResources, campId: string, name = 'file.txt') {
-  owner.activate(campId)
-  const session = owner.session(campId)
-  await session.actions.open({ kind: 'camp_workspace', campId, rawReference: name })
+async function open(owner: FilePreviewResources, threadId: string, name = 'file.txt') {
+  owner.activate(threadId)
+  const session = owner.session(threadId)
+  await session.actions.open({ kind: 'camp_workspace', threadId, rawReference: name })
   await vi.waitFor(() => expect(active(session)?.loadState).toBe('ready'))
   return session
 }
@@ -121,7 +121,7 @@ describe('window-owned preview resources', () => {
     expect(session.getSnapshot()).toMatchObject({ activeTabId: activityId, paneVisible: true })
   })
 
-  it('retains activity selection and reading position per Camp across cooling and restoration', async () => {
+  it('retains activity selection and reading position per Thread across cooling and restoration', async () => {
     const { owner, api } = fixture()
     owner.activate('mission-a')
     const a = owner.session('mission-a')
@@ -139,7 +139,7 @@ describe('window-owned preview resources', () => {
     expect(restored.session('mission-a').getSnapshot()).toMatchObject({ activeTabId: id, paneVisible: true, tabs: [{ kind: 'mission_activity', reading: { scrollTop: 320 } }] })
   })
 
-  it('switches a hot Camp without opening, reading or replacing its content and reading position', async () => {
+  it('switches a hot Thread without opening, reading or replacing its content and reading position', async () => {
     const { owner, api, update } = fixture()
     const a = await open(owner, 'a')
     const first = active(a)
@@ -157,7 +157,7 @@ describe('window-owned preview resources', () => {
     await owner.sync()
     expect(api.readText).toHaveBeenCalledTimes(count)
     expect(api.restore).not.toHaveBeenCalled()
-    await a.actions.open({ kind: 'camp_workspace', campId: 'a', rawReference: 'file.txt' })
+    await a.actions.open({ kind: 'camp_workspace', threadId: 'a', rawReference: 'file.txt' })
     expect(api.open).toHaveBeenCalledTimes(2)
     expect(api.readText).toHaveBeenCalledTimes(count)
   })
@@ -168,7 +168,7 @@ describe('window-owned preview resources', () => {
     vi.mocked(api.readText).mockImplementationOnce(() => delayed.promise)
     owner.activate('a')
     const a = owner.session('a')
-    await a.actions.open({ kind: 'camp_workspace', campId: 'a', rawReference: 'slow.txt' })
+    await a.actions.open({ kind: 'camp_workspace', threadId: 'a', rawReference: 'slow.txt' })
     await vi.waitFor(() => expect(api.readText).toHaveBeenCalledTimes(1))
     owner.activate('b'); owner.activate('a'); owner.activate('b')
     const b = await open(owner, 'b')
@@ -176,7 +176,7 @@ describe('window-owned preview resources', () => {
     delayed.resolve({ ok: true as const, value: { text: 'late A', contentGeneration: active(a).file!.contentGeneration, contentVersion: { size: 6, mtimeMs: 1 } } })
     await vi.waitFor(() => expect(active(a).content).toMatchObject({ text: 'late A' }))
     expect(active(b)).toBe(bTab)
-    expect(owner.currentCampId).toBe('b')
+    expect(owner.currentThreadId).toBe('b')
     expect(api.readText).toHaveBeenCalledTimes(2)
   })
 
@@ -185,7 +185,7 @@ describe('window-owned preview resources', () => {
     const delayed = deferred<{ ok: true; value: FilePreviewTextContent }>()
     vi.mocked(api.readText).mockImplementationOnce(() => delayed.promise)
     owner.activate('a'); const a = owner.session('a')
-    await a.actions.open({ kind: 'camp_workspace', campId: 'a', rawReference: 'slow.txt' })
+    await a.actions.open({ kind: 'camp_workspace', threadId: 'a', rawReference: 'slow.txt' })
     const file = active(a).file!
     a.actions.close(active(a).id)
     delayed.resolve({ ok: true as const, value: { text: 'late', contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } })
@@ -194,8 +194,8 @@ describe('window-owned preview resources', () => {
     expect(api.release).toHaveBeenCalledWith({ handleId: file.handleId })
   })
 
-  it('cools the least recently used Camp and restores only its selected tab', async () => {
-    const { owner, api } = fixture({ hotCamps: 2 })
+  it('cools the least recently used Thread and restores only its selected tab', async () => {
+    const { owner, api } = fixture({ hotThreads: 2 })
     const a = await open(owner, 'a', 'one.txt')
     await open(owner, 'a', 'two.txt')
     const selected = active(a).id
@@ -211,7 +211,7 @@ describe('window-owned preview resources', () => {
     expect(a.getSnapshot().tabs.filter(tab => tab.kind === 'file' && tab.content)).toHaveLength(1)
   })
 
-  it('reclaims a nonactive tab in the current Camp when the background byte budget is exceeded', async () => {
+  it('reclaims a nonactive tab in the current Thread when the background byte budget is exceeded', async () => {
     const { owner } = fixture({ backgroundBytes: 10 })
     const a = await open(owner, 'a', 'one.txt'); const first = active(a).id
     await open(owner, 'a', 'two.txt')
@@ -292,7 +292,7 @@ it('preserves independent cached content after handle eviction and can refresh i
 it('coalesces concurrent committed opens of the same source', async () => {
   const { owner, api } = fixture()
   owner.activate('a'); const a = owner.session('a')
-  const source = { kind: 'camp_workspace' as const, campId: 'a', rawReference: 'same.txt' }
+  const source = { kind: 'camp_workspace' as const, threadId: 'a', rawReference: 'same.txt' }
   const results = await Promise.all([a.actions.open(source, undefined, undefined, { commitOnSuccess: true }),
   a.actions.open(source, undefined, undefined, { commitOnSuccess: true })])
   expect(results[0]).toEqual(results[1])
@@ -301,8 +301,8 @@ it('coalesces concurrent committed opens of the same source', async () => {
   expect(a.getSnapshot().tabs).toHaveLength(1)
 })
 
-it('reclaims immutable change detail with the hot Camp while preserving its selection and reading snapshot', async () => {
-  const { owner } = fixture({ hotCamps: 1 })
+it('reclaims immutable change detail with the hot Thread while preserving its selection and reading snapshot', async () => {
+  const { owner } = fixture({ hotThreads: 1 })
   owner.activate('a'); const a = owner.session('a')
   const changes = { agentRunId: 'run', executionEpoch: 1, files: [{ evidenceFileId: 'evidence', presentationKind: 'operation_only', path: 'file.txt' }] } as unknown as import('@contracts').AgentRunFileChangesView
   const id = a.actions.openFileChanges('a', changes)!
@@ -379,8 +379,8 @@ it('keeps stale file-change detail readable and rejects an older same-version re
   })
 })
 
-it('bounds cold snapshots without letting snapshot writes promote their Camp', async () => {
-  const { owner } = fixture({ hotCamps: 1, snapshots: 3 })
+it('bounds cold snapshots without letting snapshot writes promote their Thread', async () => {
+  const { owner } = fixture({ hotThreads: 1, snapshots: 3 })
   const a = await open(owner, 'a')
   await open(owner, 'b'); await open(owner, 'c')
   a.actions.saveReading(active(a).id, { scrollTop: 777 })

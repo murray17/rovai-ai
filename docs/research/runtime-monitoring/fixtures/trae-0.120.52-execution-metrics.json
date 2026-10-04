@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "runtime": "trae-cn-cli",
+  "runtimeVersion": "0.120.52",
+  "configuredModel": "trae-cn-cli://runtime-default",
+  "source": "isolated successful one-Run smoke, monitoring.execution read after terminal",
+  "visibleTextDeltaCount": 1,
+  "run": { "status": "succeeded", "promptInputTotalTokens": null, "outputTokens": null, "cacheReadTokens": null, "cacheWriteTokens": null, "finalized": true },
+  "currentSession": null,
+  "limits": ["No native Usage or Context observation reached the Core projection in this call", "A single text delta does not demonstrate current tok/s", "Provider and effective model behind runtime-default were not exposed"]
+}

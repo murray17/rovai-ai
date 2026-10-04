@@ -24,7 +24,7 @@ describe('Local Composer attachment authority', () => {
     await writeFile(imagePath, bytes)
     const first = new LocalComposerAttachmentRegistry(registryPath)
     const attachment = await first.prepare({
-      campId: 'camp-a', sourcePath: imagePath, displayName: 'screenshot.png', mediaType: 'image/png'
+      threadId: 'camp-a', sourcePath: imagePath, displayName: 'screenshot.png', mediaType: 'image/png'
     })
     expect(attachment).toMatchObject({ previewKind: 'image', availability: 'available', sourcePath: imagePath })
 
@@ -32,12 +32,12 @@ describe('Local Composer attachment authority', () => {
     const [restored] = await restoredOwner.restore('camp-a', [attachment])
     expect(restored).toMatchObject({ id: attachment.id, previewKind: 'image', sourcePath: imagePath })
     const preview = await restoredOwner.preview({
-      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
     })
     expect(preview?.availability).toBe('available')
     expect(preview?.preview?.bytes).toEqual(new Uint8Array(bytes))
     expect((await restoredOwner.resolveTarget({
-      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
     }))?.target).toMatchObject({ path: imagePath, canShowPath: true })
   })
 
@@ -50,7 +50,7 @@ describe('Local Composer attachment authority', () => {
 
     const registry = new LocalComposerAttachmentRegistry(registryPath)
     const attachment = await registry.prepare({
-      campId: 'camp-a', sourcePath, displayName: 'large.png', mediaType: 'image/png'
+      threadId: 'camp-a', sourcePath, displayName: 'large.png', mediaType: 'image/png'
     })
     expect(attachment).toMatchObject({ availability: 'available', byteSize, previewKind: 'image' })
 
@@ -58,10 +58,10 @@ describe('Local Composer attachment authority', () => {
     const [restored] = await restoredOwner.restore('camp-a', [attachment])
     expect(restored).toMatchObject({ availability: 'available', byteSize })
     expect(await restoredOwner.preview({
-      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
     })).toEqual({ preview: null, availability: 'available' })
     expect((await restoredOwner.resolveTarget({
-      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
     }))?.target?.path).toBe(sourcePath)
   })
 
@@ -73,7 +73,7 @@ describe('Local Composer attachment authority', () => {
     await writeFile(replacementPath, 'replacement')
     const registry = new LocalComposerAttachmentRegistry(registryPath)
     const attachment = await registry.prepare({
-      campId: 'camp-a', sourcePath: selectedPath, displayName: 'selected.txt', mediaType: 'text/plain'
+      threadId: 'camp-a', sourcePath: selectedPath, displayName: 'selected.txt', mediaType: 'text/plain'
     })
     const [restored] = await registry.restore('camp-a', [{ ...attachment, sourcePath: replacementPath }])
     expect(restored.sourcePath).toBe(selectedPath)
@@ -85,11 +85,11 @@ describe('Local Composer attachment authority', () => {
     await writeFile(sourcePath, '# notes')
     const registry = new LocalComposerAttachmentRegistry(registryPath)
     const attachment = await registry.prepare({
-      campId: 'camp-a', sourcePath, displayName: 'notes.md', mediaType: 'text/markdown'
+      threadId: 'camp-a', sourcePath, displayName: 'notes.md', mediaType: 'text/markdown'
     })
     await registry.discard('camp-a', [attachment.id])
     expect(await registry.resolveTarget({
-      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
     })).toEqual({ target: null, availability: 'missing' })
   })
 
@@ -99,14 +99,14 @@ describe('Local Composer attachment authority', () => {
     await writeFile(sourcePath, '# notes')
     const registry = new LocalComposerAttachmentRegistry(registryPath)
     const attachment = await registry.prepare({
-      campId: 'camp-a', sourcePath, displayName: 'notes.md', mediaType: 'text/markdown'
+      threadId: 'camp-a', sourcePath, displayName: 'notes.md', mediaType: 'text/markdown'
     })
     await rm(registryPath)
     await mkdir(registryPath)
 
     await expect(registry.discard('camp-a', [attachment.id])).rejects.toThrow()
     expect((await registry.resolveTarget({
-      owner: 'composer', campId: 'camp-a', attachmentRefId: attachment.id
+      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
     }))?.target?.path).toBe(sourcePath)
   })
 })

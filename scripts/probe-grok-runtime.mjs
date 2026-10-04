@@ -519,8 +519,20 @@ function sanitizeMessageShape(message) {
   return {
     method: message.method,
     sessionUpdate: typeof update?.sessionUpdate === 'string' ? update.sessionUpdate : null,
-    keys: Object.keys(update ?? message.params ?? {}).sort()
+    keys: Object.keys(update ?? message.params ?? {}).sort(),
+    ...(update?.usage && typeof update.usage === 'object'
+      ? { usage: numericUsageFields(update.usage) } : {})
   }
+}
+
+function numericUsageFields(value) {
+  return Object.fromEntries(Object.entries(value).flatMap(([key, field]) => {
+    if (Number.isSafeInteger(field) && field >= 0) return [[key, field]]
+    if (field && typeof field === 'object' && !Array.isArray(field)) {
+      return [[key, numericUsageFields(field)]]
+    }
+    return []
+  }))
 }
 
 function sanitizeCompactionEvent(message, update) {

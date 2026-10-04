@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState, type ReactNode } f
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { filePreviewSplitMinWidth } from './file-preview-layout'
+import { UiText, uiAttribute } from './interface-language'
 
 const WIDTH_KEY = 'rovai.mission-drawer-width'
 const minimum = 640
@@ -125,20 +126,20 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
   if (!enabled) return <div className="ordinary-workspace-host">{children}</div>
   return <section ref={root} className={`${full ? 'mission-full' : 'mission-drawer'} mission-workspace-host${dragging ? ' is-resizing' : ''}`}
     style={{ '--mission-drawer-width': `${width}px` } as React.CSSProperties}
-    role={full ? undefined : 'dialog'} aria-modal={full ? undefined : false} aria-label={full ? undefined : '使命会话'}
+    role={full ? undefined : 'dialog'} aria-modal={full ? undefined : false} aria-label={full ? undefined : uiAttribute("使命会话")}
     onKeyDown={event => {
       if (full || event.key !== 'Escape' || event.defaultPrevented) return
       // Let the focused conversation tool consume Escape before closing its owner.
-      if (root.current?.querySelector('.camp-detail-entry[aria-expanded="true"]')) return
+      if (root.current?.querySelector('.thread-detail-entry[aria-expanded="true"]')) return
       event.preventDefault()
       onClose()
     }}>
     {!full && <>
       <div ref={handle} className="mission-drawer-resize-handle" role="separator" tabIndex={0}
-        aria-label="调整使命抽屉宽度" aria-orientation="vertical"
+        aria-label={uiAttribute("调整使命抽屉宽度")} aria-orientation="vertical"
         aria-valuemin={Math.min(minimum, available)} aria-valuemax={available} aria-valuenow={Math.round(width)}
-        aria-valuetext={`${Math.round(width)} 像素，向左拖到边缘立即展开`}
-        aria-describedby="mission-drawer-resize-help" title="向左拖动，到边缘立即展开；双击或 Enter 展开"
+        aria-valuetext={uiAttribute("{0} 像素，向左拖到边缘立即展开", String(Math.round(width)))}
+        aria-describedby="mission-drawer-resize-help" title={uiAttribute("向左拖动，到边缘立即展开；双击或 Enter 展开")}
         onPointerDown={event => {
           if (event.button !== 0 || !event.isPrimary || gesture.current) return
           event.preventDefault()
@@ -186,7 +187,7 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
           if (next >= available - 24) onExpand()
           else chooseWidth(next)
         }} />
-      <span className="sr-only" id="mission-drawer-resize-help">左右方向键调整宽度，Shift 加速；Enter 或 End 展开；Home 使用最小宽度；拖动时 Escape 取消。</span>
+      <span className="sr-only" id="mission-drawer-resize-help"><UiText zh={"左右方向键调整宽度，Shift 加速；Enter 或 End 展开；Home 使用最小宽度；拖动时 Escape 取消。"} /></span>
     </>}
     {children}
   </section>

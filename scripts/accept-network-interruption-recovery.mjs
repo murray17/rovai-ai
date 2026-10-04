@@ -93,12 +93,12 @@ try {
   assertReadyInstallation(claudeInstallation, 'claude-code-cli')
   assertReadyInstallation(openCodeInstallation, 'opencode-cli')
 
-  const claudeCampId = await createCamp(core.request, {
+  const claudeCampId = await createThread(core.request, {
     name: 'Native network retry acceptance',
     workspace,
     agentId: claudeAgentId
   })
-  const openCodeCampId = await createCamp(core.request, {
+  const openCodeCampId = await createThread(core.request, {
     name: 'Rovai network recovery acceptance',
     workspace,
     agentId: openCodeAgentId
@@ -106,14 +106,14 @@ try {
 
   activeStep = 'online_baselines'
   const claudeBaseline = await sendAndWaitForSuccess(core, {
-    campId: claudeCampId,
+    threadId: claudeCampId,
     agentId: claudeAgentId,
     body: 'Do not call tools or inspect files. Reply with exactly ROVAI_CLAUDE_NETWORK_BASELINE_OK and nothing else.',
     purpose: 'Establish the Claude Code session before native network retry acceptance.',
     marker: 'ROVAI_CLAUDE_NETWORK_BASELINE_OK'
   })
   const openCodeBaseline = await sendAndWaitForSuccess(core, {
-    campId: openCodeCampId,
+    threadId: openCodeCampId,
     agentId: openCodeAgentId,
     body: 'Do not call tools or inspect files. Reply with exactly ROVAI_OPENCODE_NETWORK_BASELINE_OK and nothing else.',
     purpose: 'Establish the OpenCode ACP session before Rovai network recovery acceptance.',
@@ -133,8 +133,8 @@ try {
   ])
 
   const claudeMarker = 'ROVAI_CLAUDE_NATIVE_NETWORK_RECOVERY_OK'
-  const claudeRequest = await sendCampMessage(core.request, {
-    campId: claudeCampId,
+  const claudeRequest = await sendThreadMessage(core.request, {
+    threadId: claudeCampId,
     body: `Do not call tools or inspect files. Reply with exactly ${claudeMarker} and nothing else.`,
     purpose: 'Prove Claude Code retains ownership across a native API retry.'
   })
@@ -154,7 +154,7 @@ try {
       && event.params?.payload?.code === 'runtime_api_retrying'
       && event.params?.payload?.status === 'retrying',
     'Claude Code runtime_api_retrying evidence',
-    { campId: claudeCampId, agentRunId: claudeRunId, timeoutMs: 180_000 }
+    { threadId: claudeCampId, agentRunId: claudeRunId, timeoutMs: 180_000 }
   )
 
   activeStep = 'claude_reconnect'
@@ -165,7 +165,7 @@ try {
   ])
 
   const claudeRecovered = await waitForRunSuccess(core, {
-    campId: claudeCampId,
+    threadId: claudeCampId,
     agentRunId: claudeRunId,
     marker: claudeMarker,
     label: 'Claude Code native network recovery',
@@ -197,8 +197,8 @@ try {
   ])
 
   const openCodeMarker = 'ROVAI_OPENCODE_NEW_EPOCH_NETWORK_RECOVERY_OK'
-  const openCodeRequest = await sendCampMessage(core.request, {
-    campId: openCodeCampId,
+  const openCodeRequest = await sendThreadMessage(core.request, {
+    threadId: openCodeCampId,
     body: `Do not call tools or inspect files. Reply with exactly ${openCodeMarker} and nothing else.`,
     purpose: 'Prove Rovai recovers an ACP not-accepted network terminal in a new epoch.'
   })
@@ -217,7 +217,7 @@ try {
       && event.params?.agentRunId === openCodeRunId
       && event.params?.source === 'acp_prompt_terminal',
     'OpenCode ACP network terminal and Rovai waiting state',
-    { campId: openCodeCampId, agentRunId: openCodeRunId, timeoutMs: 180_000 }
+    { threadId: openCodeCampId, agentRunId: openCodeRunId, timeoutMs: 180_000 }
   )
 
   activeStep = 'opencode_reconnect'
@@ -229,7 +229,7 @@ try {
   await core.request('runtime.networkRecovery.wake')
 
   const openCodeRecovered = await waitForRunSuccess(core, {
-    campId: openCodeCampId,
+    threadId: openCodeCampId,
     agentRunId: openCodeRunId,
     marker: openCodeMarker,
     label: 'Rovai ACP network recovery',
@@ -425,7 +425,7 @@ function startCore(dataDirectory) {
   return { request, stop, events, stderr, pid: child.pid }
 }
 
-async function createCamp(request, { name, workspace, agentId }) {
+async function createThread(request, { name, workspace, agentId }) {
   const created = await request('camps.create', {
     commandId: crypto.randomUUID(),
     name,
@@ -434,25 +434,25 @@ async function createCamp(request, { name, workspace, agentId }) {
     defaultLeadAgentId: agentId,
     collaborationMode: 'peer'
   })
-  const campId = created.payload?.campId
-  assert(created.status === 'applied' && campId,
+  const threadId = created.payload?.threadId
+  assert(created.status === 'applied' && threadId,
     `Acceptance Camp creation failed: ${JSON.stringify(created)}`)
-  return campId
+  return threadId
 }
 
-async function sendCampMessage(request, { campId, agentId = null, body, purpose }) {
-  const draft = await request('camp.composerDraft.get', { campId })
+async function sendThreadMessage(request, { threadId, agentId = null, body, purpose }) {
+  const draft = await request('camp.composerDraft.get', { threadId })
   const address = agentId
     ? { mode: 'explicit', agentIds: [agentId] }
     : { mode: 'default' }
   const saved = await request('camp.composerDraft.save', {
-    campId,
+    threadId,
     expectedRevision: draft.revision,
     content: composerDocumentForAddress(address, body)
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId,
+    threadId,
     draftRevision: saved.revision,
     execution: {
       taskId: null,
@@ -463,10 +463,10 @@ async function sendCampMessage(request, { campId, agentId = null, body, purpose 
 }
 
 async function sendAndWaitForSuccess(coreHandle, input) {
-  const sent = await sendCampMessage(coreHandle.request, input)
+  const sent = await sendThreadMessage(coreHandle.request, input)
   const agentRunId = requiredAgentRunId(sent, input.marker)
   return waitForRunSuccess(coreHandle, {
-    campId: input.campId,
+    threadId: input.threadId,
     agentRunId,
     marker: input.marker,
     label: `${input.marker} online baseline`,
@@ -483,14 +483,14 @@ function requiredAgentRunId(result, label) {
 }
 
 async function waitForRunSuccess(coreHandle, {
-  campId,
+  threadId,
   agentRunId,
   marker,
   label,
   timeoutMs
 }) {
   return waitFor(async () => {
-    const snapshot = await coreHandle.request('camps.snapshot', { campId })
+    const snapshot = await coreHandle.request('camps.snapshot', { threadId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (run && ['failed', 'cancelled'].includes(run.status)) {
       throw new Error(`${label} entered ${run.status}: ${JSON.stringify({
@@ -511,8 +511,8 @@ async function waitForEvent(coreHandle, predicate, label, options = {}) {
   return waitFor(async () => {
     const event = coreHandle.events.find(predicate)
     if (event) return event
-    if (options.campId && options.agentRunId) {
-      const snapshot = await coreHandle.request('camps.snapshot', { campId: options.campId })
+    if (options.threadId && options.agentRunId) {
+      const snapshot = await coreHandle.request('camps.snapshot', { threadId: options.threadId })
       const run = snapshot.agentRuns.find((candidate) => candidate.id === options.agentRunId)
       if (run && ['failed', 'cancelled', 'succeeded'].includes(run.status)) {
         throw new Error(`${label} was not observed before the AgentRun entered ${run.status}: ${JSON.stringify(run)}`)

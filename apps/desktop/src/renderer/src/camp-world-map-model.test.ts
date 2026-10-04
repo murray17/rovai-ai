@@ -1,20 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentRunView, CampMemberView } from '@contracts'
+import type { AgentRunView, ThreadMemberView, GeneralPreferencesApi } from '@contracts'
 import type { LiveExecutionProgress } from './ui-model'
+import { changeInterfaceLanguage } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 import {
   campWorldMapInitialNodes,
+  campWorldMapExecutionSummary,
   campWorldMapPlainText,
   campWorldMapRendezvousNode,
   campWorldMapShortestPath,
-  projectCampWorldMap,
-  truncateCampWorldMapSpeech
+  projectThreadWorldMap,
+  truncateThreadWorldMapSpeech
 } from './camp-world-map-model'
 
 function member(
   agentId: string,
   memberOrder: number,
-  overrides: Partial<CampMemberView> = {}
-): CampMemberView {
+  overrides: Partial<ThreadMemberView> = {}
+): ThreadMemberView {
   return {
     agentId,
     displayName: `队员 ${agentId}`,
@@ -39,7 +42,7 @@ function run(
 ): AgentRunView {
   return {
     id,
-    campTurnId: 'turn_1',
+    threadTurnId: 'turn_1',
     conversationId: 'conversation_1',
     agentId,
     taskId: null,
@@ -78,8 +81,8 @@ function run(
   }
 }
 
-describe('Camp world map model', () => {
-  it('places a Camp member set deterministically without collisions', () => {
+describe('Thread world map model', () => {
+  it('places a Thread member set deterministically without collisions', () => {
     const first = campWorldMapInitialNodes('camp_1', ['agent_4', 'agent_2', 'agent_1', 'agent_3'])
     const second = campWorldMapInitialNodes('camp_1', ['agent_3', 'agent_1', 'agent_4', 'agent_2'])
 
@@ -99,8 +102,36 @@ describe('Camp world map model', () => {
 
   it('normalizes Markdown and truncates by grapheme without leaking formatting syntax', () => {
     expect(campWorldMapPlainText('### 检查\n- **路线**与[地图](https://example.com)')).toBe('检查 路线与地图')
-    expect(truncateCampWorldMapSpeech('甲乙丙丁', 3)).toBe('甲乙丙…')
-    expect(truncateCampWorldMapSpeech('👩‍💻正在检查', 2)).toBe('👩‍💻正…')
+    expect(truncateThreadWorldMapSpeech('甲乙丙丁', 3)).toBe('甲乙丙…')
+    expect(truncateThreadWorldMapSpeech('👩‍💻正在检查', 2)).toBe('👩‍💻正…')
+  })
+
+  it('localizes structured file activity in the world map without translating Runtime detail', async () => {
+    const languageApi = {
+      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
+    } as GeneralPreferencesApi
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      const read = {
+        key: 'tool:read', kind: 'tool' as const,
+        step: {
+          id: 'read', title: '阅读 README.md', publicCommand: null, publicResult: null,
+          detail: '', status: 'running' as const, activityDomain: 'file', iconKind: 'file-read' as const,
+          toolName: null, credibility: 'runtime_structured',
+          fileOperation: { operationKind: 'read' as const, path: 'docs/README.md' }
+        }
+      }
+      expect(campWorldMapExecutionSummary({ items: [read] })).toMatchObject({ text: 'Read README.md' })
+      expect(campWorldMapExecutionSummary({ items: [{
+        ...read, key: 'tool:edit', step: {
+          ...read.step, id: 'edit', title: '编辑 settings.ts', detail: 'Runtime 原文',
+          fileOperation: { operationKind: 'write', changeKind: 'update', path: 'src/settings.ts' }
+        }
+      }] })).toMatchObject({ text: 'Edit settings.ts: Runtime 原文' })
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
   })
 
   it('projects only active present members and keeps real and waiting output distinct', () => {
@@ -117,7 +148,7 @@ describe('Camp world map model', () => {
             title: '读取文件',
             publicCommand: null,
             publicResult: null,
-            detail: 'CampWorkspace.tsx',
+            detail: 'ThreadWorkspace.tsx',
             status: 'running',
             activityDomain: 'filesystem',
             iconKind: 'file',
@@ -127,7 +158,7 @@ describe('Camp world map model', () => {
         }]
       }]
     ])
-    const projection = projectCampWorldMap(
+    const projection = projectThreadWorldMap(
       [
         member('alice', 1, { displayName: '爱丽丝' }),
         member('kyoko', 2, { displayName: '雾切响子' }),
@@ -152,13 +183,13 @@ describe('Camp world map model', () => {
       speech: {
         kind: 'waiting',
         label: '执行 · 结果待确认',
-        text: '读取文件：CampWorkspace.tsx'
+        text: '读取文件：ThreadWorkspace.tsx'
       }
     })
   })
 
   it('shows an honest no-output state instead of synthesizing task progress', () => {
-    const projection = projectCampWorldMap(
+    const projection = projectThreadWorldMap(
       [member('alice', 1)],
       [run('run_alice', 'alice', 'running')],
       new Map()
@@ -182,12 +213,12 @@ describe('Camp world map model', () => {
       a2aDepth: 1,
       createdAt: '2026-08-13T12:00:03.000Z'
     })
-    const running = projectCampWorldMap(
+    const running = projectThreadWorldMap(
       [member('alice', 1), member('kyoko', 2)],
       [source, target],
       new Map()
     )
-    const waiting = projectCampWorldMap(
+    const waiting = projectThreadWorldMap(
       [member('alice', 1), member('kyoko', 2)],
       [source, { ...target, status: 'waiting' }],
       new Map()

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-29",
+  "method": "isolated native Runtime probe plus isolated Core smoke; all identities and text removed",
+  "observations": [
+    {
+      "runtime": "codex-cli",
+      "version": "0.157.1",
+      "providerModel": "sub2api / gpt-6-sol",
+      "startup": "Codex App Server, two Runs in one native Session",
+      "rawNativeRollout": [
+        {
+          "type": "token_count",
+          "last_token_usage": { "input_tokens": 19118, "cached_input_tokens": 18816, "cache_write_input_tokens": 0, "output_tokens": 13, "reasoning_output_tokens": 0, "total_tokens": 19131 },
+          "total_token_usage": { "input_tokens": 56143, "cached_input_tokens": 49280, "cache_write_input_tokens": 0, "output_tokens": 354, "total_tokens": 56497 },
+          "model_context_window": 258400
+        },
+        {
+          "type": "token_count",
+          "last_token_usage": { "input_tokens": 22234, "cached_input_tokens": 21888, "cache_write_input_tokens": 0, "output_tokens": 15, "reasoning_output_tokens": 0, "total_tokens": 22249 },
+          "total_token_usage": { "input_tokens": 100473, "cached_input_tokens": 83712, "cache_write_input_tokens": 0, "output_tokens": 442, "total_tokens": 100915 },
+          "model_context_window": 258400
+        }
+      ],
+      "parserFixture": "crates/rovai-core/tests/fixtures/runtime-usage/codex.json",
+      "expectedProjection": {
+        "run1": { "input": 56143, "output": 354, "read": 49280, "write": 0, "contextUsed": 19131, "contextWindow": 258400 },
+        "run2": { "input": 44330, "output": 88, "read": 34432, "write": 0, "contextUsed": 22249, "contextWindow": 258400 }
+      },
+      "databaseReadback": {
+        "sameNativeSession": true,
+        "currentSession": { "used": 22249, "window": 258400, "dialect": "codex-thread-context-v2" },
+        "runs": [
+          { "input": 56143, "output": 354, "read": 49280, "write": 0 },
+          { "input": 44330, "output": 88, "read": 34432, "write": 0 }
+        ]
+      }
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "version": "2.1.1",
+      "providerModel": "sub2api Anthropic compatible / gpt-6-sol",
+      "startup": "kimi ACP with ROVAI_KIMI_CONFIG; direct native probe and separate Core smoke",
+      "rawDirectAcp": { "method": "session/update", "params": { "sessionId": "redacted", "update": { "sessionUpdate": "usage_update", "used": 18913, "size": 262144 } } },
+      "parserFixture": "crates/rovai-core/tests/fixtures/runtime-usage/kimi-context.json",
+      "expectedParse": { "scope": "session", "used": 18913, "window": 262144 },
+      "databaseReadbackSeparateCall": { "used": 20765, "window": 262144, "dialect": "acp-session-context-gauge-v1", "input": null, "output": null, "read": null, "write": null },
+      "limitation": "The direct raw frame and Core readback are separate calls; the exact Core call wire frame was not retained. No native four-bucket Usage fields appeared in the direct ACP probe."
+    },
+    {
+      "runtime": "grok-build",
+      "version": "1.0.41",
+      "providerModel": "sub2api Responses / gpt-6-sol",
+      "startup": "grok ACP with isolated GROK_HOME and Responses backend",
+      "rawNativeUpdate": { "method": "_x.ai/session/update", "sessionUpdate": "turn_completed", "usage": { "inputTokens": 17755, "outputTokens": 69, "totalTokens": 17824, "cachedReadTokens": 0, "cacheCreationTokens": 0, "reasoningTokens": 54, "modelCalls": 1 } },
+      "parserFixture": "crates/rovai-core/tests/fixtures/runtime-usage/grok.json",
+      "expectedProjection": { "input": 17755, "output": 69, "read": 0, "write": 0 },
+      "databaseReadback": { "input": 17755, "output": 69, "read": 0, "write": 0, "contextUsed": null, "contextWindow": null },
+      "limitation": "The native session log uses _x.ai/session/update; the ACP notification carries the same turn_completed usage under _x.ai/session_notification. Positive cache and multi-call consolidation remain untested."
+    },
+    {
+      "runtime": "deepseek-harness",
+      "version": "0.1.5-rc.3",
+      "providerModel": "sub2api / gpt-6-sol",
+      "startup": "DSH ACP, isolated DSH_HOME",
+      "rawNativeSessionEvent": { "type": "assistant/message", "usage": { "inputTokens": 11386, "outputTokens": 24, "totalTokens": 11410 } },
+      "parserFixture": "crates/rovai-core/tests/fixtures/runtime-usage/dsh-sub2api.json",
+      "expectedProjection": { "uncachedInput": 11386, "inputTotal": null, "output": 24, "read": null, "write": null },
+      "databaseReadback": { "input": null, "output": 24, "read": null, "write": null, "contextUsed": 11410, "contextWindow": 262144 },
+      "limitation": "The native event omitted cache categories; this dialect treats inputTokens as an exclusive bucket, so Input total cannot be synthesized. The reported Context window comes from DSH configuration and is not independently confirmed by the Provider."
+    },
+    {
+      "runtime": "codebuddy-cli",
+      "version": "2.133.1",
+      "providerModel": "sub2api / custom-local:gpt-6-sol",
+      "startup": "codebuddy --acp --model custom-local:gpt-6-sol",
+      "rawDirectAcp": { "promptStopReason": "end_turn", "usageObservationCount": 0 },
+      "databaseReadback": { "input": null, "output": null, "read": null, "write": null, "contextUsed": null, "contextWindow": null },
+      "limitation": "A separate non-ACP JSON command reports native Usage, but the current ACP route did not emit it. The full sanitized ACP notification list was not retained."
+    }
+  ]
+}

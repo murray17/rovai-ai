@@ -12,13 +12,13 @@ use crate::{
     team_tool_catalog::builtin_tool_definitions,
 };
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 32;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 35;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 2;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 32;
-pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 5;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v32";
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 35;
+pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 8;
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v35";
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
@@ -179,9 +179,9 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 26] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 27] = [
     BuiltinToolCliIdentity {
-        operation: "camp.message.send",
+        operation: "thread.message.send",
         group: "send",
         action: "",
     },
@@ -211,19 +211,24 @@ pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 26] = [
         action: "update",
     },
     BuiltinToolCliIdentity {
-        operation: "camp.list",
-        group: "camp",
+        operation: "thread.list",
+        group: "thread",
         action: "list",
     },
     BuiltinToolCliIdentity {
-        operation: "camp.search",
-        group: "camp",
+        operation: "thread.search",
+        group: "thread",
         action: "search",
     },
     BuiltinToolCliIdentity {
-        operation: "camp.read",
-        group: "camp",
+        operation: "thread.read",
+        group: "thread",
         action: "read",
+    },
+    BuiltinToolCliIdentity {
+        operation: "thread.runs",
+        group: "thread",
+        action: "runs",
     },
     BuiltinToolCliIdentity {
         operation: "single_chat.history",
@@ -559,6 +564,7 @@ struct CatalogDigestOperation {
 }
 
 pub fn builtin_tool_identity_by_operation(operation: &str) -> Option<BuiltinToolCliIdentity> {
+    let operation = crate::thread_compat::canonical_operation(operation);
     BUILTIN_TOOL_CLI_IDENTITIES
         .iter()
         .copied()
@@ -569,6 +575,7 @@ pub fn builtin_tool_identity_by_command(
     group: &str,
     action: &str,
 ) -> Option<BuiltinToolCliIdentity> {
+    let group = if group == "camp" { "thread" } else { group };
     BUILTIN_TOOL_CLI_IDENTITIES
         .iter()
         .copied()
@@ -593,6 +600,7 @@ pub fn builtin_tool_list() -> Result<BuiltinToolList> {
 }
 
 pub fn builtin_tool_description(operation: &str) -> Result<BuiltinToolDescription> {
+    let operation = crate::thread_compat::canonical_operation(operation);
     let definitions = catalog_digest_operations()?;
     let catalog_digest = builtin_tool_catalog_digest_from(&definitions)?;
     let definition = definitions
@@ -718,11 +726,8 @@ fn direct_arguments(input_schema: &Value) -> Vec<BuiltinToolArgument> {
 
 fn direct_argument_flag(field: &str) -> String {
     match field {
-        // Principal attention is the canonical Agent-facing vocabulary. The
-        // legacy --to-user spelling is accepted only by the CLI parser and is
-        // deliberately absent from this discoverable operation catalog.
-        // name while keeping the Core input free of a user-selectable identity.
-        "mentionUser" => "--to-principal".to_string(),
+        // Keep the legacy --to-principal alias in the parser only.
+        "mentionUser" => "--to-user".to_string(),
         "files" => "--file".to_string(),
         _ => format!("--{}", camel_to_kebab(field)),
     }
@@ -831,7 +836,7 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
     ];
     if matches!(
         operation,
-        "camp.list" | "camp.search" | "camp.read" | "history.search"
+        "thread.list" | "thread.search" | "thread.read" | "history.search"
     ) {
         errors.push(BuiltinToolErrorContract {
             code: "camp.invalid_argument".to_string(),
@@ -839,7 +844,7 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
         });
     }
     match operation {
-        "camp.message.send" => {
+        "thread.message.send" => {
             for code in [
                 "message.addressing_invalid",
                 "message.public_only_conflict",
@@ -886,12 +891,22 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
             code: "memory.view_unavailable".to_string(),
             recovery: BuiltinToolRecovery::Stop,
         }),
-        "camp.search" => errors.push(BuiltinToolErrorContract {
-            code: "camp.search_unavailable".to_string(),
+        "thread.search" => errors.push(BuiltinToolErrorContract {
+            code: "thread.search_unavailable".to_string(),
             recovery: BuiltinToolRecovery::Stop,
         }),
-        "camp.read" => errors.push(BuiltinToolErrorContract {
-            code: "camp.read_unavailable".to_string(),
+        "thread.runs" => errors.extend([
+            BuiltinToolErrorContract {
+                code: "thread.runs_unavailable".into(),
+                recovery: BuiltinToolRecovery::Stop,
+            },
+            BuiltinToolErrorContract {
+                code: "single_chat.operation_denied".into(),
+                recovery: BuiltinToolRecovery::Stop,
+            },
+        ]),
+        "thread.read" => errors.push(BuiltinToolErrorContract {
+            code: "thread.read_unavailable".to_string(),
             recovery: BuiltinToolRecovery::Stop,
         }),
         "single_chat.history" => errors.push(BuiltinToolErrorContract {
@@ -939,16 +954,17 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
 
 pub fn projection_identity(operation: &str) -> Result<&'static str> {
     match operation {
-        "camp.message.send" => Ok("camp-message-send-v2"),
+        "thread.message.send" => Ok("camp-message-send-v2"),
         "memory.write" => Ok("memory-write-v2"),
         "member.create"
         | "team.create_task"
         | "team.get_task"
         | "team.list_tasks"
         | "team.update_task"
-        | "camp.list"
-        | "camp.search"
-        | "camp.read"
+        | "thread.list"
+        | "thread.search"
+        | "thread.read"
+        | "thread.runs"
         | "history.search"
         | "memory.search"
         | "memory.read"
@@ -1109,9 +1125,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 32);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 32);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v32");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 35);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 35);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v35");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -1121,8 +1137,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 26);
-        assert_eq!(commands.len(), 26);
+        assert_eq!(operations.len(), 27);
+        assert_eq!(commands.len(), 27);
     }
 
     #[test]
@@ -1181,15 +1197,16 @@ mod tests {
 
     #[test]
     fn receipt_is_stable_and_covers_the_outcome() {
-        let first =
-            builtin_tool_receipt("camp.list", "request-1", true, &json!({"camps": []})).unwrap();
+        let first = builtin_tool_receipt("thread.list", "request-1", true, &json!({"threads": []}))
+            .unwrap();
         let replay =
-            builtin_tool_receipt("camp.list", "request-1", true, &json!({"camps": []})).unwrap();
+            builtin_tool_receipt("thread.list", "request-1", true, &json!({"threads": []}))
+                .unwrap();
         let changed = builtin_tool_receipt(
-            "camp.list",
+            "thread.list",
             "request-1",
             true,
-            &json!({"camps": [{"campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}]}),
+            &json!({"threads": [{"threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}]}),
         )
         .unwrap();
         assert_eq!(first, replay);
@@ -1232,18 +1249,18 @@ mod tests {
     #[test]
     fn malformed_envelope_fails_receipt_and_operation_validation() {
         let mut envelope = BuiltinToolInvocationEnvelope::success(
-            "camp.list",
+            "thread.list",
             "7b5db24c-4a43-4cab-9217-d982b08f7691",
-            json!({"camps": [], "truncated": false}),
+            json!({"threads": [], "truncated": false}),
         )
         .unwrap();
         envelope.receipt = format!("sha256:{}", "0".repeat(64));
         assert!(envelope.validate().is_err());
 
         let mut envelope = BuiltinToolInvocationEnvelope::success(
-            "camp.list",
+            "thread.list",
             "7b5db24c-4a43-4cab-9217-d982b08f7691",
-            json!({"camps": [], "truncated": false}),
+            json!({"threads": [], "truncated": false}),
         )
         .unwrap();
         envelope.operation = "unknown.operation".to_string();
@@ -1268,12 +1285,12 @@ mod tests {
                     && error.recovery == BuiltinToolRecovery::Stop
             }));
         }
-        let camp_search = builtin_tool_description("camp.search").unwrap();
+        let camp_search = builtin_tool_description("thread.search").unwrap();
         assert!(camp_search.errors.iter().any(|error| {
             error.code == "camp.invalid_argument" && error.recovery == BuiltinToolRecovery::FixInput
         }));
         assert!(camp_search.errors.iter().any(|error| {
-            error.code == "camp.search_unavailable" && error.recovery == BuiltinToolRecovery::Stop
+            error.code == "thread.search_unavailable" && error.recovery == BuiltinToolRecovery::Stop
         }));
         assert_eq!(
             recovery_for_operation_error("mission.get", "mission.current_unavailable"),
@@ -1298,18 +1315,18 @@ mod tests {
                 .iter()
                 .all(|error| error.code != "mission.source_message_required")
         );
-        let send = builtin_tool_description("camp.message.send").unwrap();
+        let send = builtin_tool_description("thread.message.send").unwrap();
         assert_eq!(
             send.arguments
                 .iter()
                 .find(|argument| argument.field == "mentionUser")
                 .map(|argument| argument.flag.as_str()),
-            Some("--to-principal")
+            Some("--to-user")
         );
-        assert!(send.input_schema["properties"].get("campId").is_none());
+        assert!(send.input_schema["properties"].get("threadId").is_none());
         assert!(
             send.input_schema["properties"]
-                .get("replyToCampMessageId")
+                .get("replyToThreadMessageId")
                 .is_none()
         );
         assert!(
@@ -1331,9 +1348,8 @@ mod tests {
             send.input_schema["properties"]["mentionUser"]["description"]
                 .as_str()
                 .is_some_and(|description| {
-                    description
-                        .contains("new unresolved decision, answer, or action for the Principal")
-                        && description.contains("Principal attention is message-local")
+                    description.contains("new unresolved decision, answer, or action for the User")
+                        && description.contains("User attention is message-local")
                 })
         );
     }
@@ -1345,7 +1361,7 @@ mod tests {
         let mut legacy_teaching = current.clone();
         let send = legacy_teaching
             .iter_mut()
-            .find(|operation| operation.name == "camp.message.send")
+            .find(|operation| operation.name == "thread.message.send")
             .unwrap();
         send.input_schema["properties"]["mentionUser"]["description"] =
             json!("Mention the current user and create an Inbox notification.");

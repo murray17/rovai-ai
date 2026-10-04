@@ -1,7 +1,8 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { ExecutionContentContext, ExecutionVirtualList, useExecutionRetainedState } from './ExecutionVirtualList'
 import { createContext, useContext, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
-import type { AgentRunExecutionEvidenceView, AgentRunView, CanonicalRuntimeActivityView } from '@contracts'
+import type { AgentRunExecutionBlock, AgentRunExecutionEvidenceView, AgentRunView, CanonicalRuntimeActivityView } from '@contracts'
+import { useExecutionGroupWindow } from './useExecutionGroupWindow'
 import { RunningText } from './RunningText'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
 import { useOptionalFilePreview } from './FilePreviewContext'
@@ -11,11 +12,12 @@ import { readErrorMessage } from './error-message'
 import {
   activityStatusForAgentRun,
   executionEvidenceResultText,
-  executionStepPublicTitle,
   runtimeCompactionDetailText,
   runtimeCompactionIsExpandable,
   runtimeCompactionTitle,
   selectCompleteExecutionEvidence,
+  buildLiveExecutionProgress,
+  liveRuntimeEventFromExecutionEvidence,
   type ActivityIconKind,
   type LiveExecutionProgress,
   type RuntimeCompactionDisplayItem,
@@ -26,6 +28,8 @@ import {
   toolActivityGroupPresentation,
   type ToolProgressItem
 } from './execution-tool-grouping'
+import { UiText, uiAttribute, useUiText } from './interface-language'
+import { fileOperationVerb, localizedExecutionStepTitle } from './execution-step-language'
 
 /** Keep group disclosure choices when paging changes the first item of a group. */
 export const ExecutionToolGroupStateContext = createContext<{
@@ -69,18 +73,12 @@ interface ToolResultViewState {
   evidenceId: string | null
   status: ToolResultLoadStatus
   text: string
-  error: string | null
-}
-
-function toolResultErrorMessage(error: unknown, outputWasTruncated: boolean): string {
-  const resultLabel = outputWasTruncated ? '结果' : '完整结果'
-  const detail = readErrorMessage(error, '').trim()
-  return detail ? `读取${resultLabel}失败：${detail}` : `读取${resultLabel}失败：未知错误`
+  errorDetail: string | null
 }
 
 export function ToolOutputTruncationNotice({ visible }: { visible: boolean }): JSX.Element | null {
   return visible
-    ? <p className="tool-result-truncation-note" role="note">结果过长，部分内容已省略。</p>
+    ? <p className="tool-result-truncation-note" role="note"><UiText zh={"结果过长，部分内容已省略。"} /></p>
     : null
 }
 
@@ -130,7 +128,7 @@ function handleToolResultKeyDown(
 }
 
 function ToolCallDetail({
-  campId,
+  threadId,
   detail,
   completeEvidence,
   expanded,
@@ -139,7 +137,7 @@ function ToolCallDetail({
   summaryRef,
   inputOnly = false
 }: {
-  campId: string
+  threadId: string
   detail: string
   completeEvidence?: PresentableExecutionEvidence
   expanded: boolean
@@ -148,15 +146,16 @@ function ToolCallDetail({
   summaryRef: RefObject<HTMLElement | null>
   inputOnly?: boolean
 }): JSX.Element {
-  const client = useCampClient()
+  const t = useUiText()
+  const client = useThreadClient()
   const evidenceId = completeEvidence?.id ?? null
   const outputWasTruncated = !inputOnly && completeEvidence?.outputTruncated === true
-  const resultLabel = outputWasTruncated ? '结果' : '完整结果'
+  const resultLabel = outputWasTruncated ? t('结果') : t('完整结果')
   const [result, setResult] = useExecutionRetainedState<ToolResultViewState>(`result:${resultKey}:${evidenceId}`, () => ({
     evidenceId,
     status: evidenceId ? 'idle' : 'ready',
     text: evidenceId ? '' : detail,
-    error: null
+    errorDetail: null
   }))
   const requestSequence = useRef(0)
   const previousEvidenceId = useRef(evidenceId)
@@ -174,7 +173,7 @@ function ToolCallDetail({
       evidenceId,
       status: evidenceId ? 'idle' : 'ready',
       text: evidenceId ? '' : detail,
-      error: null
+      errorDetail: null
     })
   }, [detail, evidenceId])
 
@@ -182,7 +181,7 @@ function ToolCallDetail({
     if (evidenceId !== null) return
     setResult((current) => current.text === detail && current.status === 'ready'
       ? current
-      : { evidenceId: null, status: 'ready', text: detail, error: null })
+      : { evidenceId: null, status: 'ready', text: detail, errorDetail: null })
   }, [detail, evidenceId])
 
   useEffect(() => () => {
@@ -197,12 +196,12 @@ function ToolCallDetail({
       evidenceId: completeEvidence.id,
       status: 'loading',
       text: '',
-      error: null
+      errorDetail: null
     })
     try {
       const response = await client.request<{ payload: unknown }>(
         'agentRunEvidence.getContent',
-        { campId, evidenceId: completeEvidence.id }
+        { threadId, evidenceId: completeEvidence.id }
       )
       const fullText = executionEvidenceResultText(
         completeEvidence.eventType,
@@ -214,7 +213,7 @@ function ToolCallDetail({
         evidenceId: completeEvidence.id,
         status: fullText === null ? 'empty' : 'ready',
         text: fullText ?? '',
-        error: null
+        errorDetail: null
       })
     } catch (error) {
       if (requestSequence.current !== sequence) return
@@ -222,10 +221,10 @@ function ToolCallDetail({
         evidenceId: completeEvidence.id,
         status: 'failed',
         text: '',
-        error: toolResultErrorMessage(error, outputWasTruncated)
+        errorDetail: readErrorMessage(error, '').trim()
       })
     }
-  }, [client, campId, completeEvidence, outputWasTruncated])
+  }, [client, threadId, completeEvidence])
 
   useEffect(() => {
     if (
@@ -253,20 +252,32 @@ function ToolCallDetail({
     return () => window.cancelAnimationFrame(frame)
   }, [result.status])
 
+  const idleMessage = outputWasTruncated ? t('展开后读取结果。') : t('展开后读取完整结果。')
+  const loadingMessage = outputWasTruncated ? t('正在读取结果…') : t('正在读取完整结果…')
+  const failedHeading = outputWasTruncated ? t('未能读取结果') : t('未能读取完整结果')
+  const failedDetail = result.errorDetail
+    ? outputWasTruncated
+      ? t('读取结果失败：{0}', result.errorDetail)
+      : t('读取完整结果失败：{0}', result.errorDetail)
+    : outputWasTruncated
+      ? t('读取结果失败：未知错误')
+      : t('读取完整结果失败：未知错误')
+  const scrollHelp = inputOnly
+    ? t('入参区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。')
+    : t('结果区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。')
+
   return (
     <div className="tool-call-detail" aria-busy={result.status === 'loading'}>
       {result.status === 'ready' && (
         <>
-          <span className="sr-only" id={scrollHelpId}>
-            {inputOnly ? '入参' : '结果'}区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。
-          </span>
+          <span className="sr-only" id={scrollHelpId}>{scrollHelp}</span>
           <pre
             ref={resultRef}
             className="tool-call-result-scroll"
             data-tool-result-key={resultKey}
             tabIndex={0}
             role="region"
-            aria-label={`${title}的${inputOnly ? '入参' : resultLabel}，可滚动`}
+            aria-label={t("{0}的{1}，可滚动", title, inputOnly ? t('入参') : resultLabel)}
             aria-describedby={scrollHelpId}
             onKeyDown={(event) => handleToolResultKeyDown(event, summaryRef.current)}
           >
@@ -277,32 +288,30 @@ function ToolCallDetail({
       )}
       {result.status === 'idle' && (
         <div className="tool-result-state" role="status">
-          <span>展开后读取{resultLabel}。</span>
+          <span>{idleMessage}</span>
         </div>
       )}
       {result.status === 'loading' && (
         <div className="tool-result-state" role="status" aria-live="polite">
           <span className="tool-result-spinner" aria-hidden="true" />
-          <span>正在读取{resultLabel}…</span>
+          <span>{loadingMessage}</span>
         </div>
       )}
       {result.status === 'empty' && (
-        <div className="tool-result-state" role="status">没有可展示的公开结果。</div>
+        <div className="tool-result-state" role="status"><UiText zh={"没有可展示的公开结果。"} /></div>
       )}
       {result.status === 'failed' && (
         <div className="tool-result-state is-error" role="alert">
           <span className="tool-result-state-copy">
-            <strong>未能读取{resultLabel}</strong>
-            <span>{result.error}</span>
+            <strong>{failedHeading}</strong>
+            <span>{failedDetail}</span>
           </span>
           <button
             ref={retryRef}
             className="quiet-button compact tool-result-retry"
             type="button"
             onClick={() => void loadCompleteResult(true)}
-          >
-            重试
-          </button>
+          ><UiText zh={"重试"} /></button>
         </div>
       )}
     </div>
@@ -311,16 +320,16 @@ function ToolCallDetail({
 
 export type ToolCallStep = Extract<LiveExecutionProgress['items'][number], { kind: 'tool' }>['step']
 
-
-export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence, itemKey, onFileOpenError }: {
-  campId: string
+export function ModifiedFileRow({ threadId, change, semanticKind, completeEvidence, itemKey, onFileOpenError }: {
+  threadId: string
   change: NonNullable<ToolCallStep['fileChanges']>[number]
   semanticKind: ToolCallStep['fileChangeSemantics']
   completeEvidence?: PresentableExecutionEvidence
   itemKey?: string
   onFileOpenError(message: string): void
 }): JSX.Element {
-  const client = useCampClient()
+  const t = useUiText()
+  const client = useThreadClient()
   const filePreview = useOptionalFilePreview()
   const [expanded, setExpanded] = useExecutionRetainedState(`file-expanded:${itemKey ?? change.path}`, false)
   const diffId = useId()
@@ -336,16 +345,16 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
     let disposed = false
     setDiffError(false)
     void client.request<{ canonical?: CanonicalRuntimeActivityView | null }>(
-      'agentRunEvidence.getContent', { campId, evidenceId: completeEvidence.id }
+      'agentRunEvidence.getContent', { threadId, evidenceId: completeEvidence.id }
     ).then(response => {
       const entry = response.canonical?.diffProjection?.entries?.find(item => item.path === change.path)
-      if (!entry) throw new Error('文件差异不可用')
+      if (!entry) throw new Error(uiAttribute('文件差异不可用'))
       if (!disposed) setLoadedDiff({ evidenceId: completeEvidence.id, diff: entry.diff })
     }).catch(() => { if (!disposed) setDiffError(true) })
     return () => { disposed = true }
-  }, [client, expanded, deferred, campId, completeEvidence?.id, change.path, diff, retry])
+  }, [client, expanded, deferred, threadId, completeEvidence?.id, change.path, diff, retry])
   const fileName = change.path.split('/').filter(Boolean).at(-1) ?? change.path
-  const verb = change.changeKind === 'add' ? '新增' : '编辑'
+  const verb = change.changeKind === 'add' ? t('新增') : t('编辑')
   const exactMutation = semanticKind === 'exact_mutation'
   const lines = useMemo(
     () => !expanded || diff === null ? [] : exactMutation ? exactMutationDiffLines(diff) : inlineDiffLines(diff),
@@ -354,7 +363,7 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
   const openFile = async (): Promise<void> => {
     await openAgentRunActivityFilePreview({
       filePreview,
-      campId,
+      threadId,
       evidence: completeEvidence,
       path: change.path,
       allowLegacyWorkspaceFallback: true,
@@ -373,7 +382,7 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
         className="modified-file-summary"
         aria-controls={diffId}
         aria-expanded={expanded}
-        aria-label={`${verb} ${change.path}，新增 ${change.additions} 行，删除 ${change.deletions} 行`}
+        aria-label={uiAttribute("{0} {1}，新增 {2} 行，删除 {3} 行", String(verb), String(change.path), String(change.additions), String(change.deletions))}
       >
         <ToolCallIcon iconKind="file-write" />
         <span className="modified-file-title">
@@ -381,8 +390,8 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
           <button
             className="tool-file-link"
             type="button"
-            aria-label={`打开文件预览：${change.path}`}
-            title={`${change.path} · 打开文件预览`}
+            aria-label={uiAttribute("打开文件预览：{0}", String(change.path))}
+            title={uiAttribute("{0} · 打开文件预览", String(change.path))}
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
@@ -399,7 +408,7 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
         <span
           className="tool-call-disclosure-slot"
           aria-hidden="true"
-          title={`${expanded ? '收起' : '展开'}文件差异`}
+          title={uiAttribute("{0}文件差异", String(expanded ? uiAttribute("收起") : uiAttribute("展开")))}
         >
           <svg viewBox="0 0 16 16" focusable="false">
             <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
@@ -411,11 +420,11 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
         className={`modified-file-diff${exactMutation ? ' is-exact-mutation' : ''}`}
         tabIndex={expanded ? 0 : -1}
         hidden={!expanded}
-        aria-label={`${change.path} 的${exactMutation ? '修改片段' : '文件差异'}`}
+        aria-label={uiAttribute("{0} 的{1}", String(change.path), String(exactMutation ? uiAttribute("修改片段") : uiAttribute("文件差异")))}
       >
           {expanded && diff === null && (diffError
-            ? <div role="status">文件差异读取失败。<button className="quiet-button compact" type="button" onClick={() => setRetry(value => value + 1)}>重试</button></div>
-            : <div role="status">正在读取文件差异…</div>)}
+            ? <div role="status"><UiText zh={"文件差异读取失败。"} /><button className="quiet-button compact" type="button" onClick={() => setRetry(value => value + 1)}><UiText zh={"重试"} /></button></div>
+            : <div role="status"><UiText zh={"正在读取文件差异…"} /></div>)}
           {lines.map((line, index) => exactMutation
             ? (
                 <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
@@ -442,21 +451,22 @@ export function ModifiedFileRow({ campId, change, semanticKind, completeEvidence
   )
 }
 
-export function FileOperationRow({ campId, step, runStatus, completeEvidence, onFileOpenError }: {
-  campId: string
+export function FileOperationRow({ threadId, step, runStatus, completeEvidence, onFileOpenError }: {
+  threadId: string
   step: ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }
   runStatus: AgentRunView['status']
   completeEvidence?: PresentableExecutionEvidence
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const t = useUiText()
   const filePreview = useOptionalFilePreview()
-  const { operationKind, path, changeKind } = step.fileOperation
-  const fileName = path.split('/').filter(Boolean).at(-1) ?? path
-  const verb = operationKind === 'read' ? '阅读' : changeKind === 'add' ? '新增' : '编辑'
+  const { operationKind, path } = step.fileOperation
+  const fileName = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path
+  const verb = fileOperationVerb(step.fileOperation, t)
   const status = activityStatusForAgentRun(step.status, runStatus)
   const openFile = async (): Promise<void> => {
     await openAgentRunActivityFilePreview({
-      filePreview, campId, evidence: completeEvidence, path, onError: onFileOpenError
+      filePreview, threadId, evidence: completeEvidence, path, onError: onFileOpenError
     })
   }
   return (
@@ -465,7 +475,7 @@ export function FileOperationRow({ campId, step, runStatus, completeEvidence, on
       data-execution-item-key={`tool:${step.id}`}
       data-activity-domain="file"
       role="group"
-      aria-label={`${verb} ${path}，${toolCallStatusLabel(status)}`}
+      aria-label={t('{0} {1}，{2}', verb, path, toolCallStatusLabel(status, t))}
     >
       <ToolCallIcon iconKind={operationKind === 'read' ? 'file-read' : 'file-write'} />
       <span className="tool-call-title file-operation-title">
@@ -473,8 +483,8 @@ export function FileOperationRow({ campId, step, runStatus, completeEvidence, on
         <button
           className="tool-file-link"
           type="button"
-          aria-label={`打开文件预览：${path}`}
-          title={`${path} · 打开文件预览`}
+          aria-label={uiAttribute("打开文件预览：{0}", String(path))}
+          title={uiAttribute("{0} · 打开文件预览", String(path))}
           onClick={() => void openFile()}
         >
           {fileName}
@@ -486,48 +496,49 @@ export function FileOperationRow({ campId, step, runStatus, completeEvidence, on
 }
 
 export function ToolCallRow({
-  campId,
+  threadId,
   step,
   runId,
   runStatus,
   completeEvidence,
   onFileOpenError
 }: {
-  campId: string
+  threadId: string
   step: ToolCallStep
   runId: string
   runStatus: AgentRunView['status']
   completeEvidence?: PresentableExecutionEvidence
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const t = useUiText()
   const filePreview = useOptionalFilePreview()
   const [expanded, setExpanded] = useExecutionRetainedState(`tool-expanded:${runId}:${step.id}`, false)
   const [activated, setActivated] = useExecutionRetainedState(`tool-activated:${runId}:${step.id}`, false)
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
-  const publicTitle = executionStepPublicTitle(step)
+  const publicTitle = localizedExecutionStepTitle(step, false, t)
   const inputOnly = step.builtinOperation !== undefined && step.detailOperationId === undefined
   const hasDetail = Boolean(step.detail) || (!inputOnly && completeEvidence !== undefined)
   const openReadFile = async (path: string): Promise<void> => {
     if (!filePreview) {
-      onFileOpenError('无法打开该文件')
+      onFileOpenError(uiAttribute('无法打开该文件'))
       return
     }
     const outcome = await filePreview.open(
-      { kind: 'camp_workspace', campId, rawReference: path },
+      { kind: 'camp_workspace', threadId, rawReference: path },
       undefined,
       undefined,
       { commitOnSuccess: true, previewOnly: true }
     )
-    if (outcome.kind !== 'preview') onFileOpenError('无法打开该文件')
+    if (outcome.kind !== 'preview') onFileOpenError(uiAttribute('无法打开该文件'))
   }
   const readSummary = step.shellReadSummary
   const readFileLink = (path: string, label: string): JSX.Element => (
     <button
       className="tool-file-link shell-read-file-link"
       type="button"
-      aria-label={`打开文件预览：${path}`}
-      title={`${path} · 打开文件预览`}
+      aria-label={uiAttribute("打开文件预览：{0}", String(path))}
+      title={uiAttribute("{0} · 打开文件预览", String(path))}
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -543,11 +554,11 @@ export function ToolCallRow({
       <span className="command-copy">
       {readSummary ? (
         <span className="tool-call-title shell-read-summary-copy">
-          <span className="shell-read-summary-title">阅读</span>
-          <span className="shell-read-file-list" role="list" aria-label="阅读的文件">
+          <span className="shell-read-summary-title"><UiText zh={"阅读"} /></span>
+          <span className="shell-read-file-list" role="list" aria-label={uiAttribute("阅读的文件")}>
             {readSummary.paths.map((path, index) => (
               <span role="listitem" key={path}>
-                {index > 0 && <span className="shell-read-file-separator" aria-hidden="true">，</span>}
+                {index > 0 && <span className="shell-read-file-separator" aria-hidden="true">{t('，')}</span>}
                 {readFileLink(path, readSummary.displayPaths[index])}
               </span>
             ))}
@@ -589,7 +600,7 @@ export function ToolCallRow({
       <summary ref={summaryRef} aria-expanded={expanded} className={`tool-call-summary${readSummary ? ' has-shell-read-summary' : ''}`}>{summary}</summary>
       {activated && (
         <ToolCallDetail
-          campId={campId}
+          threadId={threadId}
           detail={step.detail}
           completeEvidence={inputOnly ? undefined : completeEvidence}
           inputOnly={inputOnly}
@@ -622,23 +633,24 @@ function CompactionEventIcon(): JSX.Element {
 }
 
 export function CompactionEventRow({
-  campId,
+  threadId,
   compaction,
   runId,
   runStatus,
   completeEvidence
 }: {
-  campId: string
+  threadId: string
   compaction: RuntimeCompactionDisplayItem
   runId: string
   runStatus: AgentRunView['status']
   completeEvidence?: PresentableExecutionEvidence
 }): JSX.Element {
+  const translate = useUiText()
   const [expanded, setExpanded] = useExecutionRetainedState(`compaction-expanded:${runId}:${compaction.id}`, false)
   const [activated, setActivated] = useExecutionRetainedState(`compaction-activated:${runId}:${compaction.id}`, false)
   const summaryRef = useRef<HTMLElement>(null)
-  const title = runtimeCompactionTitle(compaction)
-  const detail = runtimeCompactionDetailText(compaction) ?? ''
+  const title = runtimeCompactionTitle(compaction, translate)
+  const detail = runtimeCompactionDetailText(compaction, translate) ?? ''
   const expandable = runtimeCompactionIsExpandable(compaction)
   const status = runtimeCompactionActivityStatus(compaction, runStatus)
   const summary = (
@@ -674,7 +686,7 @@ export function CompactionEventRow({
       <summary ref={summaryRef} aria-expanded={expanded} className="tool-call-summary">{summary}</summary>
       {activated && (
         <ToolCallDetail
-          campId={campId}
+          threadId={threadId}
           detail={detail}
           completeEvidence={completeEvidence}
           expanded={expanded}
@@ -714,16 +726,17 @@ function ToolActivityGroupState({ status, label }: { status: string; label: stri
 }
 
 export function ToolActivityGroup({
-  campId,
+  threadId,
   items,
   liveTail,
   cancelling,
   runId,
   runStatus,
   completeEvidence,
+  block,
   onFileOpenError
 }: {
-  campId: string
+  threadId: string
   items: ToolProgressItem[]
   liveTail: boolean
   cancelling: boolean
@@ -733,36 +746,58 @@ export function ToolActivityGroup({
     byToolId: Map<string, PresentableExecutionEvidence>
     byFileOperationToolId?: Map<string, PresentableExecutionEvidence>
   }
+  block?: AgentRunExecutionBlock
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const t = useUiText()
   const [localExpanded, setLocalExpanded] = useState(false)
   const groupState = useContext(ExecutionToolGroupStateContext)
   const retained = useContext(ExecutionContentContext)
-  const groupKeys = items.map(item => `${runId}:${item.key}`)
+  const root = useRef<HTMLDetailsElement>(null)
+  const groupKeys = block ? [`${runId}:block:${block.key}`] : items.map(item => `${runId}:${item.key}`)
   const expanded = groupKeys.some(key => retained?.get<boolean>(`group:${key}`)) || (groupState ? groupKeys.some(key => groupState.expanded.has(key)) : localExpanded)
   const setExpanded = (value: boolean): void => {
     for (const key of groupKeys) retained?.set(`group:${key}`, value)
     if (groupState) groupState.change(groupKeys, value)
     else setLocalExpanded(value)
   }
-  const settledPresentation = toolActivityGroupPresentation(items, runStatus, liveTail)
+  const childWindow = useExecutionGroupWindow(block, threadId, runId, expanded, liveTail, root)
+  const childEvidence = childWindow.window?.state.evidence
+  const childItems = useMemo(() => childEvidence
+    ? buildLiveExecutionProgress(childEvidence.map(liveRuntimeEventFromExecutionEvidence), runId, { includePublicResults: false })
+        .items.filter((item): item is ToolProgressItem => item.kind === 'tool')
+    : items, [childEvidence, items, runId])
+  const childCompleteEvidence = useMemo(() => childEvidence
+    ? selectCompletePresentableExecutionEvidence(childEvidence) : completeEvidence, [childEvidence, completeEvidence])
+  const settledPresentation = toolActivityGroupPresentation(
+    items, runStatus, liveTail,
+    count => count === 1 ? t('已完成 1 个步骤') : t('已完成 {0} 个步骤', count),
+    {
+      translateLabel: t,
+      currentTitle: step => localizedExecutionStepTitle(step, true, t),
+      activeAccessibleLabel: (primary, title) => t('{0}：{1}', primary, title)
+    },
+    block
+  )
   // Cancellation intent is retained in history; an authoritative terminal Run wins.
   const nonTerminal = runStatus === 'queued' || runStatus === 'running' || runStatus === 'waiting'
   const presentation = cancelling && nonTerminal
     ? {
         ...settledPresentation,
         status: 'stopped' as const,
-        statusLabel: '正在停止',
-        primary: '正在停止',
-        currentTitle: '等待执行结束',
+        statusLabel: t('正在停止'),
+        primary: t('正在停止'),
+        currentTitle: t('等待执行结束'),
         countLabel: null,
-        accessibleLabel: '正在停止：等待执行结束'
+        accessibleLabel: t('{0}：{1}', t('正在停止'), t('等待执行结束'))
       }
     : settledPresentation
   const active = presentation.status === 'running' || presentation.status === 'waiting'
   return (
-    <details className={`tool-activity-group status-${presentation.status}`} open={expanded}
-      data-execution-item-key={items[0]?.key}
+    <details ref={root} className={`tool-activity-group status-${presentation.status}`} open={expanded}
+      data-execution-item-key={block?.key ?? items[0]?.key}
+      data-execution-group-sequence={block?.sequence}
+      data-execution-group-loaded={childEvidence?.length}
       data-execution-item-keys={items.map(item => item.key).join(' ')}
       onToggle={event => { if (event.target === event.currentTarget) setExpanded(event.currentTarget.open) }}
     >
@@ -806,14 +841,22 @@ export function ToolActivityGroup({
         </span>}
       </summary>
       {expanded && <div className="tool-group-items">
-        <ExecutionVirtualList items={items} enabled={Boolean(retained)} gap={1}>{(item) => {
+        {block && (childWindow.window?.state.hasEarlier || !childWindow.window?.state.initialized
+          || (childWindow.window.direction !== 'newer' && (childWindow.window.loading || childWindow.window.error))) &&
+          <ExecutionGroupBoundary root={childWindow.before} loading={Boolean(childWindow.window?.loading)} error={childWindow.window?.error}
+            onLoad={() => void childWindow.move(childWindow.window?.error ? 'retry' : childWindow.window?.state.initialized ? 'earlier' : 'initial')} />}
+        <ExecutionVirtualList items={childItems} enabled={Boolean(retained)} gap={1} onVisible={visible => {
+          const ids = new Set(visible.map(item => item.step.id))
+          const sequences = (childEvidence ?? []).filter(item => ids.has(item.canonical?.operationId ?? item.id)).map(item => item.sequence)
+          if (sequences.length) childWindow.window?.setViewport(Math.min(...sequences), Math.max(...sequences))
+        }}>{(item) => {
           const step = item.step
           if (step.fileChanges?.length) {
             return step.fileChanges.map((change, index) => (
               <ModifiedFileRow
-                campId={campId}
+                threadId={threadId}
                 change={change}
-                completeEvidence={completeEvidence.byToolId.get(step.id)}
+                completeEvidence={childCompleteEvidence.byToolId.get(step.id)}
                 itemKey={`${item.key}:file:${index}`}
                 key={`${item.key}:file:${index}:${change.path}`}
                 onFileOpenError={onFileOpenError}
@@ -825,10 +868,10 @@ export function ToolActivityGroup({
             return (
               <FileOperationRow
                 key={item.key}
-                campId={campId}
+                threadId={threadId}
                 step={step as ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }}
                 runStatus={runStatus}
-                completeEvidence={completeEvidence.byFileOperationToolId?.get(step.id)}
+                completeEvidence={childCompleteEvidence.byFileOperationToolId?.get(step.id)}
                 onFileOpenError={onFileOpenError}
               />
             )
@@ -836,39 +879,55 @@ export function ToolActivityGroup({
           return (
             <ToolCallRow
               key={item.key}
-              campId={campId}
+              threadId={threadId}
               step={step}
               runId={runId}
               runStatus={runStatus}
-              completeEvidence={completeEvidence.byToolId.get(step.detailOperationId ?? step.id)}
+              completeEvidence={childCompleteEvidence.byToolId.get(step.detailOperationId ?? step.id)}
               onFileOpenError={onFileOpenError}
             />
           )
         }}</ExecutionVirtualList>
+        {block && (childWindow.window?.state.hasNewer || (childWindow.window?.direction === 'newer' && (childWindow.window.loading || childWindow.window.error))) &&
+          <ExecutionGroupBoundary root={childWindow.after} newer loading={Boolean(childWindow.window?.loading)} error={childWindow.window?.error}
+            onLoad={() => void childWindow.move(childWindow.window?.error ? 'retry' : 'newer')} />}
       </div>}
     </details>
   )
 }
 
+function ExecutionGroupBoundary({ root, newer = false, loading, error, onLoad }: {
+  root: RefObject<HTMLDivElement | null>; newer?: boolean; loading: boolean; error?: string | null; onLoad(): void
+}): JSX.Element {
+  return <div ref={root} className={`camp-history-loader execution-history-loader execution-group-loader${error ? ' is-error' : ''}`}
+    role={error ? 'alert' : 'status'} aria-atomic="true">
+    {error && <span><UiText zh={"执行记录暂时没有加载"} /></span>}
+    <button className="camp-history-text-button" type="button" disabled={loading} onClick={onLoad}>
+      {loading ? <><span className="camp-history-spinner" aria-hidden="true" /><UiText zh={"正在加载…"} /></>
+        : error ? <UiText zh={"重试"} />
+          : <><span aria-hidden="true">{newer ? '↓' : '↑'}</span><UiText zh={newer ? "加载更多" : "加载更早记录"} /></>}
+    </button>
+  </div>
+}
+
 export function RuntimeRetryNotice({ diagnostic }: {
   diagnostic: RuntimeDiagnostic
 }): JSX.Element {
+  const t = useUiText()
   const retryTiming = diagnostic.retryAfterSeconds === 0
-    ? '正在立即重试'
-    : `将在 ${diagnostic.retryAfterSeconds} 秒后重试`
+    ? t('正在立即重试')
+    : t('将在 {0} 秒后重试', diagnostic.retryAfterSeconds)
   return (
     <section
       className="runtime-retry-notice"
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      aria-label="Claude Code API 暂时不可用"
+      aria-label={t('Claude Code API 暂时不可用')}
     >
-      <strong>Claude Code API 暂时不可用</strong>
+      <strong><UiText zh={"Claude Code API 暂时不可用"} /></strong>
       <p>
-        {retryTiming}（第 {diagnostic.attempt}/{diagnostic.maxAttempts} 次）。
-        本次执行尚未结束，可继续等待或停止执行。
-      </p>
+        {retryTiming}{t('（第 {0}/{1} 次）。本次执行尚未结束，可继续等待或停止执行。', diagnostic.attempt, diagnostic.maxAttempts)}</p>
     </section>
   )
 }
@@ -943,7 +1002,8 @@ function ToolCallIcon({ iconKind }: { iconKind: ActivityIconKind }): JSX.Element
 }
 
 function ToolCallState({ status }: { status: string }): JSX.Element {
-  const label = toolCallStatusLabel(status)
+  const t = useUiText()
+  const label = toolCallStatusLabel(status, t)
   return (
     <span
       className={`tool-call-state status-${status}`}
@@ -956,8 +1016,8 @@ function ToolCallState({ status }: { status: string }): JSX.Element {
   )
 }
 
-function toolCallStatusLabel(status: string): string {
-  return ({
+function toolCallStatusLabel(status: string, t: ReturnType<typeof useUiText>): string {
+  const label = ({
     running: '执行中',
     completed: '成功',
     failed: '失败',
@@ -966,4 +1026,5 @@ function toolCallStatusLabel(status: string): string {
     skipped: '未执行',
     recorded: '结果未知'
   } as Record<string, string>)[status] ?? status
+  return t(label)
 }

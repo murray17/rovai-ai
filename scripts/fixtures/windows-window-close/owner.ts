@@ -1,0 +1,5 @@
+export { WindowsWindowClose, restoreMainWindow } from '../../../apps/desktop/src/main/windows-window-close'
+export { WindowClosePreferences } from '../../../apps/desktop/src/main/window-close-preferences'
+export { createWindowCloseRequestHandler } from '../../../apps/desktop/src/main/window-close-ipc'
+export { createWindowsTray } from '../../../apps/desktop/src/main/windows-tray'
+export { AppQuitCoordinator } from '../../../apps/desktop/src/main/app-quit-coordinator'

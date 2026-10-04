@@ -1,6 +1,8 @@
+import visibilityCases from '../../../../../packages/contracts/fixtures/execution-shell-visibility.json'
+import carrierCases from '../../../../../packages/contracts/fixtures/execution-carrier-cases.json'
 import { describe, expect, it } from 'vitest'
 import type { CanonicalRuntimeActivityView } from '@contracts'
-import { executionActivityTitle, executionEvidenceResultText } from './index'
+import { executionActivityTitle, executionEvidenceResultText, pureBuiltinShellOperation, buildLiveExecutionProgress } from './index'
 
 const shell: CanonicalRuntimeActivityView = {
   operationId: 'powershell-command', classifierVersion: 'test', activityDomain: 'shell',
@@ -42,4 +44,19 @@ describe('PowerShell command presentation', () => {
   ])('preserves commands outside the bounded wrapper shape: %s', (wrapped) => {
     expect(executionActivityTitle(shell, { item: { command: wrapped } })).toBe(wrapped)
   })
+})
+
+it('agrees with Core block counting on the shared carrier proof cases', () => {
+  for (const { command, operation } of carrierCases) expect(pureBuiltinShellOperation(command), command).toBe(operation)
+})
+
+it('agrees with Core on unresolved Shell visibility', () => {
+  for (const { title, toolName, visible } of visibilityCases) {
+    const progress = buildLiveExecutionProgress([{
+      id: 'shell', agentRunId: 'run', eventType: 'activity.started', createdAt: '2026-10-03T00:00:00Z',
+      payload: { item: { id: 'shell', type: 'commandExecution' } },
+      canonical: { ...shell, operationId: 'shell', phase: 'started', outcome: 'unknown', presentationHint: title, toolName }
+    }], 'run')
+    expect(progress.items.some(item => item.kind === 'tool'), title).toBe(visible)
+  }
 })

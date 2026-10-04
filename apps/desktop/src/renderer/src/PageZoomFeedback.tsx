@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { UiText } from './interface-language'
 
 export const PAGE_ZOOM_FEEDBACK_DURATION_MS = 1_600
 
@@ -14,7 +15,7 @@ export function PageZoomIndicator({
       aria-live="polite"
       aria-atomic="true"
     >
-      <span>页面缩放</span>
+      <span><UiText zh={"页面缩放"} /></span>
       <strong>{percentage}%</strong>
     </div>
   )

@@ -235,6 +235,29 @@ pub async fn run(args: &[String]) -> Result<u8> {
 }
 
 async fn execute(args: &[String]) -> Result<u8> {
+    // Keep the existing parser and input-source rules; only normalize named aliases.
+    let mut args = args.to_vec();
+    if args.first().is_some_and(|value| value == "thread") {
+        args[0] = "camp".into();
+    }
+    for (new, old) in [
+        ("--thread-id", "--camp-id"),
+        ("--exclude-thread-id", "--exclude-camp-id"),
+    ] {
+        if args.iter().any(|value| value == new) && args.iter().any(|value| value == old) {
+            return Err(CliError::new(
+                "automation_invalid_input",
+                format!("{new} and {old} cannot be supplied together"),
+            )
+            .into());
+        }
+        for value in &mut args {
+            if value == new {
+                *value = old.into();
+            }
+        }
+    }
+    let args = args.as_slice();
     if args.is_empty() || args == ["--help"] {
         print_help();
         return Ok(0);
@@ -339,8 +362,8 @@ async fn execute(args: &[String]) -> Result<u8> {
                     "automationId": flags.required("automation-id")?,
                     "timezone": flags.required("timezone")?,
                     "output": flags.required("output")?,
-                    "campIds": flags.repeated("camp-id"),
-                    "excludeCampIds": flags.repeated("exclude-camp-id"),
+                    "threadIds": flags.repeated("camp-id"),
+                    "excludeThreadIds": flags.repeated("exclude-camp-id"),
                     "excludeAutomationIds": flags.repeated("exclude-automation-id")
                 }),
             )
@@ -433,7 +456,7 @@ async fn evaluation_actions_reach_their_public_help_without_owner_ipc() {
 
 fn print_help() {
     println!(
-        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app camp create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n  rovai app trace export|schedule|schedules\n  rovai app eval configure|gate|weekly|schedule|status|cancel\n\nThe Desktop App must already be running. V1 never launches it automatically."
+        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app thread create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n  rovai app trace export|schedule|schedules\n  rovai app eval configure|gate|weekly|schedule|status|cancel\n\nThe Desktop App must already be running. V1 never launches it automatically."
     );
 }
 
@@ -455,12 +478,12 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
             "rovai app member runtime clear --agent-id <id> --expected-version <version> [--command-id <id>] [--json]"
         }
         ("camp", Some("create")) => {
-            "rovai app camp create [--name <name>] (--workspace <path> | --quick-chat) --member <id> [--member <id> ...] [--lead <id>] [--json]"
+            "rovai app thread create [--name <name>] (--workspace <path> | --quick-chat) --member <id> [--member <id> ...] [--lead <id>] [--json]"
         }
         ("camp", Some("send")) => {
-            "rovai app camp send --camp-id <id> --agent-id <id> (--body <text> | --body-file <path>) [--timeout <duration> | explicit budget] [--json]"
+            "rovai app thread send --thread-id <id> --agent-id <id> (--body <text> | --body-file <path>) [--timeout <duration> | explicit budget] [--json]"
         }
-        ("camp", Some("open")) => "rovai app camp open --camp-id <id> [--json]",
+        ("camp", Some("open")) => "rovai app thread open --thread-id <id> [--json]",
         ("agent-run", Some("show")) => "rovai app agent-run show --agent-run-id <id> [--json]",
         ("agent-run", Some("watch")) => "rovai app agent-run watch --agent-run-id <id> [--jsonl]",
         ("agent-run", Some("export")) => {
@@ -471,10 +494,10 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
             "rovai app trial run --agent-id <id> --workspace <directory> --task-file <file> [--name <name>] [--timeout 30m] [--wait | --no-wait] [--export <directory>] [--open] [--json]"
         }
         ("trace", Some("export")) => {
-            "rovai app trace export --since <RFC3339> --until <RFC3339> --output <new-directory> [--camp-id <id> ...] [--exclude-camp-id <id> ...] [--exclude-automation-id <id> ...] [--json]"
+            "rovai app trace export --since <RFC3339> --until <RFC3339> --output <new-directory> [--thread-id <id> ...] [--exclude-thread-id <id> ...] [--exclude-automation-id <id> ...] [--json]"
         }
         ("trace", Some("schedule")) => {
-            "rovai app trace schedule --automation-id <existing-id> --timezone <IANA-zone> --output <directory-in-automation-workspace> [--camp-id <id> ...] [--exclude-camp-id <id> ...] [--exclude-automation-id <id> ...] [--json]"
+            "rovai app trace schedule --automation-id <existing-id> --timezone <IANA-zone> --output <directory-in-automation-workspace> [--thread-id <id> ...] [--exclude-thread-id <id> ...] [--exclude-automation-id <id> ...] [--json]"
         }
         ("trace", Some("schedules")) => "rovai app trace schedules [--json]",
         ("eval", Some("configure")) => {
@@ -838,7 +861,7 @@ async fn camp_create(flags: &Flags) -> Result<u8> {
         members,
         lead,
     );
-    let result = invoke("camp.create", params).await?;
+    let result = invoke("thread.create", params).await?;
     print_json(&result)?;
     Ok(command_result_exit_code(&result))
 }
@@ -865,11 +888,11 @@ async fn camp_send(flags: &Flags) -> Result<u8> {
     let body = read_body(flags, "body", &["body-file"])?;
     let execution_budget = execution_budget_from_flags(flags, false)?;
     let result = invoke(
-        "camp.send",
+        "thread.send",
         json!({
             "commandId": flags.one("command-id").map_err(anyhow::Error::new)?
                 .map(str::to_string).unwrap_or_else(command_id),
-            "campId": camp_id,
+            "threadId": camp_id,
             "agentId": flags.required("agent-id").map_err(anyhow::Error::new)?,
             "body": body,
             "executionBudget": execution_budget
@@ -886,8 +909,8 @@ async fn camp_open(flags: &Flags) -> Result<()> {
         .map_err(anyhow::Error::new)?;
     print_json(
         &invoke(
-            "camp.open",
-            json!({ "campId": alias_required(flags, "camp-id", "camp")? }),
+            "thread.open",
+            json!({ "threadId": alias_required(flags, "camp-id", "camp")? }),
         )
         .await?,
     )
@@ -1043,7 +1066,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
         .map(str::to_string)
         .unwrap_or_else(|| format!("Runtime Diagnostic {trial_id}"));
     let created = invoke(
-        "camp.create",
+        "thread.create",
         camp_create_params(
             create_command_id,
             Some(camp_name),
@@ -1057,15 +1080,15 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
     set_journal_phase(
         &mut journal,
         "camp_created",
-        Some(("campId", json!(camp_id))),
+        Some(("threadId", json!(camp_id))),
     );
     atomic_write_private_json(&journal_path, &journal)?;
 
     let launch = invoke(
-        "camp.send",
+        "thread.send",
         json!({
             "commandId": send_command_id,
-            "campId": camp_id,
+            "threadId": camp_id,
             "agentId": agent_id,
             "body": task,
             "executionBudget": {
@@ -1090,7 +1113,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
             "trialId": trial_id,
             "trialClass": "diagnostic_trial",
             "formalQualification": false,
-            "campId": camp_id,
+            "threadId": camp_id,
             "launch": launch,
             "agentRunId": Value::Null,
             "journalPath": journal_path
@@ -1108,7 +1131,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
             )?;
         }
         if flags.has("open") {
-            let _ = invoke("camp.open", json!({ "campId": camp_id })).await?;
+            let _ = invoke("thread.open", json!({ "threadId": camp_id })).await?;
         }
         print_json(&result)?;
         return Ok(1);
@@ -1130,7 +1153,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
             "A diagnostic Trial requires exactly one root AgentRun.",
         )
         .with_details(json!({
-            "campId": camp_id,
+            "threadId": camp_id,
             "launch": launch,
             "journalPath": journal_path
         }))
@@ -1165,7 +1188,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
                 "trialId": trial_id,
                 "trialClass": "diagnostic_trial",
                 "formalQualification": false,
-                "campId": camp_id,
+                "threadId": camp_id,
                 "launch": launch,
                 "agentRunId": agent_run_id,
                 "terminal": {
@@ -1187,15 +1210,15 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
                 )?;
             }
             if flags.has("open") {
-                let _ = invoke("camp.open", json!({ "campId": camp_id })).await?;
+                let _ = invoke("thread.open", json!({ "threadId": camp_id })).await?;
             }
             return Err(CliError::new(
                 "trial_settlement_incomplete",
-                format!("Trial did not settle; campId={camp_id} agentRunId={agent_run_id}"),
+                format!("Trial did not settle; threadId={camp_id} agentRunId={agent_run_id}"),
             )
             .with_details(json!({
-                "campId": camp_id,
-                "campTurnId": launch.get("campTurnId").cloned().unwrap_or(Value::Null),
+                "threadId": camp_id,
+                "threadTurnId": launch.get("threadTurnId").cloned().unwrap_or(Value::Null),
                 "agentRunId": agent_run_id,
                 "journalPath": journal_path,
                 "resultDirectory": export_path.as_ref().map(|path| absolute_path(path)).transpose()?
@@ -1214,7 +1237,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
         "trialId": trial_id,
         "trialClass": "diagnostic_trial",
         "formalQualification": false,
-        "campId": camp_id,
+        "threadId": camp_id,
         "launch": launch,
         "agentRunId": agent_run_id,
         "journalPath": journal_path
@@ -1240,7 +1263,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
     set_journal_phase(&mut journal, "completed", None);
     atomic_write_private_json(&journal_path, &journal)?;
     if flags.has("open") {
-        let _ = invoke("camp.open", json!({ "campId": camp_id })).await?;
+        let _ = invoke("thread.open", json!({ "threadId": camp_id })).await?;
     }
     let exit_code = if wait {
         terminal_exit_code(&diagnostic_view)
@@ -1310,14 +1333,14 @@ async fn capture_cycle(
     print_items: bool,
 ) -> Result<()> {
     let camp_id = diagnostic_view
-        .get("campId")
+        .get("threadId")
         .and_then(Value::as_str)
-        .context("AgentRun diagnostic has no Camp identity")?;
+        .context("AgentRun diagnostic has no Thread identity")?;
     loop {
         let batch = invoke(
             "domain.events",
             json!({
-                "campId": camp_id,
+                "threadId": camp_id,
                 "afterGlobalSequence": captured.domain_cursor,
                 "limit": 500
             }),
@@ -1354,7 +1377,7 @@ async fn capture_cycle(
         let page = invoke(
             "evidence.list",
             json!({
-                "campId": camp_id,
+                "threadId": camp_id,
                 "agentRunId": agent_run_id,
                 "afterSequence": captured.evidence_cursor,
                 "limit": 500
@@ -1710,18 +1733,18 @@ fn applied_camp_id(result: &Value) -> Result<String> {
             .get("code")
             .and_then(Value::as_str)
             .unwrap_or("camp_create_rejected");
-        return Err(CliError::new(code, "Camp creation was rejected.")
+        return Err(CliError::new(code, "Thread creation was rejected.")
             .with_exit_code(1)
             .into());
     }
     result
-        .pointer("/payload/campId")
+        .pointer("/payload/threadId")
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| {
             CliError::new(
                 "automation_contract_upgrade_required",
-                "Camp creation returned no Camp ID",
+                "Thread creation returned no Thread ID",
             )
             .into()
         })

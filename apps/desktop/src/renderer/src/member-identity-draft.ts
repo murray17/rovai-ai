@@ -1,3 +1,4 @@
+import { uiAttribute } from './interface-language'
 import type {
   AgentProfile,
   CreateAgentProfileCommand,
@@ -48,14 +49,14 @@ export function identityDraftIssue(
 ): { field: IdentityDraftField; message: string } | null {
   const displayNameLength = unicodeScalarLength(draft.displayName.trim())
   if (displayNameLength < 1 || displayNameLength > 80) {
-    return { field: 'displayName', message: '名称必须为 1–80 个字符。' }
+    return { field: 'displayName', message: uiAttribute('名称必须为 1–80 个字符。') }
   }
   if (
     hasDuplicateMemberDisplayName(draft.displayName, currentAgentId, agents)
   ) {
     return {
       field: 'displayName',
-      message: '该名称已被其他队员使用，请换一个名称。'
+      message: uiAttribute('该名称已被其他队员使用，请换一个名称。')
     }
   }
   const teamRole = normalizeIdentityTag(draft.teamRole)
@@ -65,13 +66,13 @@ export function identityDraftIssue(
   ) {
     return {
       field: 'teamRole',
-      message: '团队角色最多 120 个字符，且不能包含换行或控制字符。'
+      message: uiAttribute('团队角色最多 120 个字符，且不能包含换行或控制字符。')
     }
   }
   if (unicodeScalarLength(draft.professionalResponsibilities.trim()) > 300) {
     return {
       field: 'professionalResponsibilities',
-      message: '专业职责最多 300 个字符。'
+      message: uiAttribute('专业职责最多 300 个字符。')
     }
   }
   if (
@@ -83,14 +84,14 @@ export function identityDraftIssue(
   ) {
     return {
       field: 'personalityTraits',
-      message: '性格底色最多 6 项，每项必须为 1–16 个字符。'
+      message: uiAttribute('性格底色最多 6 项，每项必须为 1–16 个字符。')
     }
   }
   if (unicodeScalarLength(draft.workingPrinciples.trim()) > 300) {
-    return { field: 'workingPrinciples', message: '工作准则最多 300 个字符。' }
+    return { field: 'workingPrinciples', message: uiAttribute('工作准则最多 300 个字符。') }
   }
   if (unicodeScalarLength(draft.growthTopic.trim()) > 300) {
-    return { field: 'growthTopic', message: '成长课题最多 300 个字符。' }
+    return { field: 'growthTopic', message: uiAttribute('成长课题最多 300 个字符。') }
   }
   return null
 }

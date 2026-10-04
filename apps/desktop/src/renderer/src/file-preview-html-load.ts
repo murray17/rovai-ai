@@ -4,6 +4,7 @@ export interface HtmlPreviewLoadSnapshot {
   document: HtmlDocumentState
   channel: 'waiting' | 'connected' | 'unavailable'
   serverDiagnostics: 'waiting' | 'connected' | 'unavailable' | 'not-applicable'
+  serverDiagnosticsReason: 'policy' | null
   failure: string | null
   notice: string | null
 }
@@ -19,6 +20,7 @@ export class HtmlPreviewLoadState {
   #failure: string | null = null
   #channel: HtmlPreviewLoadSnapshot['channel'] = 'waiting'
   #serverDiagnostics: HtmlPreviewLoadSnapshot['serverDiagnostics']
+  #serverDiagnosticsReason: HtmlPreviewLoadSnapshot['serverDiagnosticsReason'] = null
   #awaitingLoadConfirmation = false
   #documentTimer: ReturnType<typeof setTimeout> | null = null
   #channelTimer: ReturnType<typeof setTimeout> | null = null
@@ -33,7 +35,7 @@ export class HtmlPreviewLoadState {
     const notice = document === 'unconfirmed' ? unknownPage
       : document === 'unresponsive' ? '页面尚未完成加载。已显示的内容会保留，你可以重试。'
         : this.#channel === 'unavailable' ? '页面通信未响应，无法确认后续页面状态。已显示的内容会保留。' : null
-    this.publish({ documentId: this.#awaitingLoadConfirmation ? null : this.#documentId, document, channel: this.#channel, serverDiagnostics: this.#serverDiagnostics, failure: document === 'failed' ? this.#failure : null, notice })
+    this.publish({ documentId: this.#awaitingLoadConfirmation ? null : this.#documentId, document, channel: this.#channel, serverDiagnostics: this.#serverDiagnostics, serverDiagnosticsReason: this.#serverDiagnosticsReason, failure: document === 'failed' ? this.#failure : null, notice })
   }
   connecting(): void {
     this.#channel = 'waiting'
@@ -55,6 +57,7 @@ export class HtmlPreviewLoadState {
       this.#clearDocumentTimer()
       this.#documentId = documentId; this.#document = 'loading'; this.#failure = null
       this.#serverDiagnostics = this.hasServerDiagnostics ? 'waiting' : 'not-applicable'
+      this.#serverDiagnosticsReason = null
       this.#documentTimer = setTimeout(() => {
         this.#documentTimer = null
         if (this.#document === 'loading') { this.#document = 'unresponsive'; this.#emit() }
@@ -77,9 +80,10 @@ export class HtmlPreviewLoadState {
     if (!this.#documentId) this.#document = 'unconfirmed'
     this.#emit()
   }
-  serverDiagnostics(documentId: string, state: 'waiting' | 'connected' | 'unavailable'): void {
+  serverDiagnostics(documentId: string, state: 'waiting' | 'connected' | 'unavailable', reason?: unknown): void {
     if (documentId !== this.#documentId || !this.hasServerDiagnostics) return
     this.#serverDiagnostics = state
+    this.#serverDiagnosticsReason = state === 'unavailable' && reason === 'policy' ? 'policy' : null
     this.#emit()
   }
   failed(message: string): void {

@@ -64,7 +64,8 @@ describe('General settings', () => {
     const agents = [profile('agent-a', '洛可'), profile('agent-b', '沐瓦')]
     agents[1].runtimeReadiness.status = 'needs_attention'
     const preferences: GeneralPreferencesSnapshot = {
-      schemaVersion: 4,
+      schemaVersion: 5,
+      interfaceLanguage: 'zh-CN',
       startupLocationMode: 'last_location',
       lastSettingsSection: 'general',
       executionConsolePlacement: 'bottom',
@@ -78,10 +79,9 @@ describe('General settings', () => {
     }
     const markup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls,
       agents,
-      initialPreferences: preferences,
-      currentProjectLabel: 'rovai-ai'
+      initialPreferences: preferences
     }))
-    expect(markup).toContain('当前生效：rovai-ai · 2 位默认队员 · 队长 洛可')
+    expect(markup).toContain('2 位默认队员 · 队长 洛可')
     expect(markup).toContain('aria-label="一键创建新对话" checked=""')
     expect(markup).toMatch(/aria-label="启用世界地图"[^>]*checked=""/)
     expect(markup).not.toContain('默认队员配置需要重新确认')

@@ -1,3 +1,5 @@
+import type { InboundResource } from './channel-inbound-attachments'
+
 export type DingTalkInboundMessage = {
   provider: 'dingtalk'
   appId: string
@@ -12,6 +14,7 @@ export type DingTalkInboundMessage = {
   senderDisplayName: string
   body: string
   attachmentSummaries: Array<{ name: string; mediaType: string | null }>
+  resources: InboundResource[]
   explicitlyAtBot: boolean
   chatbotUserId: string | null
   atUsers: Array<{ staffId: string | null; dingtalkId: string | null }>
@@ -80,6 +83,7 @@ export function normalizeDingTalkRobotMessage(
     senderDisplayName: first(value, 'senderNick') ?? '钉钉用户',
     body: body.trim(),
     attachmentSummaries: messageAttachmentSummaries(value),
+    resources: messageResources(value),
     explicitlyAtBot: !group || value.isInAtList === true || value.isInAtList === 'true',
     chatbotUserId,
     atUsers,
@@ -116,6 +120,8 @@ function normalizeQuote(value: Record<string, unknown>): DingTalkInboundMessage[
   const attachmentSummaries = messageAttachmentSummaries(quote)
   const body = quoteBodyReadable(rawBody)
     ? rawBody
+    : attachmentSummaries.length > 0
+      ? attachmentSummaries.map((item) => `[附件：${item.name}]`).join('\n')
     : '[引用的钉钉消息不可读取]'
   return {
     senderDisplayName: first(quote, 'senderNick', 'senderName') ?? '引用消息',
@@ -136,16 +142,56 @@ function quoteBodyReadable(value: string): boolean {
 function messageText(value: Record<string, unknown>): string | null {
   const text = objectOrEmpty(value.text)
   const content = objectOrEmpty(value.content)
+  // Rich-text picture nodes are delivered as resources. Read the text nodes
+  // directly so a provider-supplied summary cannot duplicate those images.
+  if (Array.isArray(content.richText)) {
+    const body = richTextBody(content.richText)
+    return body || (messageResources(value).length > 0 ? '' : null)
+  }
   return first(text, 'content', 'text')
     ?? first(content, 'text', 'content')
     ?? first(value, 'content')
 }
 
+function richTextBody(segments: unknown[]): string {
+  const parts = segments.map(item => {
+    const segment = objectOrEmpty(item)
+    if (resourceKind(segment.type)) return ''
+    return first(segment, 'text') ?? ''
+  }).filter(Boolean)
+  return parts.join('\n')
+}
+
+function resourceKind(value: unknown): string | null {
+  const type = typeof value === 'string' ? value.toLowerCase() : ''
+  if (['image', 'picture', 'photo'].includes(type)) return 'image'
+  return ['file', 'audio', 'video', 'folder', 'sticker'].includes(type) ? type : null
+}
+
+function messageResources(value: Record<string, unknown>): InboundResource[] {
+  const content = objectOrEmpty(value.content)
+  const type = first(value, 'msgtype', 'msgType', 'messageType')?.toLowerCase()
+  const candidates = type === 'richtext' && Array.isArray(content.richText)
+    ? content.richText.map(item => objectOrEmpty(item))
+    : [{ ...content, type }]
+  return candidates.flatMap((item, index) => {
+    const kind = resourceKind(item.type)
+    if (!kind) return []
+    const name = first(item, 'fileName', 'filename', 'name')
+      ?? (type !== 'richtext' ? first(value, 'fileName', 'filename', 'name') : null)
+      ?? (kind === 'image' ? '图片' : kind === 'audio' ? '音频' : kind === 'video' ? '视频' : '附件')
+    const downloadCode = first(item, 'downloadCode', 'pictureDownloadCode')
+    // Stable source positions allow multi-Bot callbacks to agree even when their
+    // download grants differ. A missing grant still gates Agent admission and
+    // ends through the normal visible download-failure path.
+    return [{ fileKey: `resource:${index}`, name, kind, ...(downloadCode ? { downloadCode } : {}) }]
+  })
+}
+
 function summarizeMessage(value: Record<string, unknown>): string {
   const msgType = first(value, 'msgtype', 'msgType', 'messageType')?.toLowerCase()
   if (!msgType || msgType === 'text') return ''
-  const summaries = messageAttachmentSummaries(value)
-  if (summaries.length > 0) return summaries.map((item) => `[附件：${item.name}]`).join('\n')
+  if (messageResources(value).length > 0) return ''
   return `[钉钉消息：${msgType}]`
 }
 
@@ -154,6 +200,9 @@ function messageAttachmentSummaries(
 ): Array<{ name: string; mediaType: string | null }> {
   const content = objectOrEmpty(value.content)
   const msgType = first(value, 'msgtype', 'msgType', 'messageType')?.toLowerCase() ?? ''
+  if (msgType === 'richtext') {
+    return messageResources(value).map(resource => ({ name: resource.name, mediaType: null }))
+  }
   const name = first(value, 'fileName', 'filename', 'name')
     ?? first(content, 'fileName', 'filename', 'name')
   if (!name && !['file', 'image', 'audio', 'video', 'picture', 'photo'].includes(msgType)) return []

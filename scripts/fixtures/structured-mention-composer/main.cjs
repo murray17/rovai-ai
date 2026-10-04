@@ -152,6 +152,46 @@ app.whenReady().then(async () => {
       assert.deepEqual(current.atomTypes, ['member'])
     })
 
+    await run('invite layer inserts an outsider Atom without changing the draft until selection', async () => {
+      await reset('')
+      await evaluate('window.composerTest.includeOutsideMember()')
+      await frames()
+      await insert('@')
+      const root = await state(false)
+      assert.equal(root.menuKind, 'mention')
+      assert.ok(root.options.some((option) => option.includes('邀请其他队员')), JSON.stringify(root))
+      await key('ArrowDown', 40)
+      await key('ArrowDown', 40)
+      await key('Enter', 13)
+      const layer = await state(false)
+      assert.ok(layer.options.some((option) => option.includes('返回本会话')), JSON.stringify(layer))
+      assert.deepEqual(layer.atomTypes, [])
+      assert.deepEqual(layer.localStatus.memberAgentIds, [])
+      await key('ArrowDown', 40)
+      await key('Enter', 13)
+      const selected = await expectSegments([
+        { kind: 'atom', atom: { type: 'member', agentId: 'agent-outside', labelFallback: '爱丽丝' } },
+        { kind: 'text', text: ' ' }
+      ])
+      assert.deepEqual(selected.localStatus.memberAgentIds, ['agent-outside'])
+      assert.equal(selected.submitCount, 0)
+    })
+
+    await run('repeated outsider mentions remain in text while the last deletion clears pending identity', async () => {
+      const atom = { kind: 'atom', atom: { type: 'member', agentId: 'agent-outside', labelFallback: '爱丽丝' } }
+      await reset({ version: 2, segments: [atom, atom] })
+      await evaluate('window.composerTest.includeOutsideMember()')
+      await frames()
+      assert.deepEqual((await state(false)).localStatus.memberAgentIds, ['agent-outside'])
+      await key('Backspace', 8)
+      const one = await state(true)
+      assert.deepEqual(one.atomTypes, ['member'])
+      assert.deepEqual(one.localStatus.memberAgentIds, ['agent-outside'])
+      await key('Backspace', 8)
+      const none = await expectSegments([])
+      assert.deepEqual(none.localStatus.memberAgentIds, [])
+    })
+
     await run('All Members Typeahead creates the broadcast Atom', async () => {
       await reset('')
       await insert('@所有')
@@ -304,7 +344,7 @@ app.whenReady().then(async () => {
       assert.match(copied.html, /white-space: pre-wrap/)
     })
 
-    await run('structured paste restores valid references and visibly degrades missing ones', async () => {
+    await run('structured paste degrades missing members and preserves missing Skill source identity', async () => {
       const pasted = {
         version: 2,
         segments: [
@@ -320,7 +360,8 @@ app.whenReady().then(async () => {
       await frames()
       await expectSegments([
         { kind: 'atom', atom: { type: 'member', agentId: 'agent-a' } },
-        { kind: 'text', text: ' @离队成员 /old-skill' }
+        { kind: 'text', text: ' @离队成员 ' },
+        { kind: 'atom', atom: { type: 'skill', skillId: 'missing-skill', nameAtSend: 'old-skill' } }
       ])
     })
 
@@ -351,7 +392,7 @@ app.whenReady().then(async () => {
       assert.equal(current.pastedFileCount, 1)
     })
 
-    await run('catalog presentation refresh does not dirty or save the Draft', async () => {
+    await run('catalog presentation refresh preserves outside focus and does not save the Draft', async () => {
       await reset({
         version: 2,
         segments: [{
@@ -360,8 +401,11 @@ app.whenReady().then(async () => {
         }]
       })
       const before = await state(true)
+      await evaluate(`(() => { const button = document.createElement('button'); button.id = 'outside-composer'; button.textContent = '主菜单'; document.body.append(button); button.focus() })()`)
       await evaluate('window.composerTest.renameMember("新名字")')
       await frames()
+      assert.equal(await evaluate('document.activeElement.id'), 'outside-composer')
+      await evaluate('document.getElementById("outside-composer").remove()')
       const after = await state(false)
       assert.deepEqual(after.atomLabels, ['@新名字'])
       assert.equal(after.localVersion, before.localVersion)

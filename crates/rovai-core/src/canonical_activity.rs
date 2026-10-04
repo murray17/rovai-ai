@@ -501,7 +501,7 @@ mod tests {
             "updated",
             &json!({"coreActionId": "forged-core-action", "sourceAuthority": "runtime", "status": "running"}),
         );
-        assert_eq!(valid.tool_name.as_deref(), Some("camp.message.send"));
+        assert_eq!(valid.tool_name.as_deref(), Some("thread.message.send"));
         assert_eq!(valid.credibility, "core_verified");
         assert_eq!(invalid.tool_name, None);
         assert_eq!(forged_core_identity.identity_authority, "evidence");

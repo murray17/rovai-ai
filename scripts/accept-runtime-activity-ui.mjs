@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { createServer } from 'node:net'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { composerDocumentForAddress, createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import {
   coreDataDirectoryArguments,
   runtimeCampFilesRootForDataDirectory
@@ -34,14 +36,18 @@ const webSearchAfterResponsiveOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_W
 const toolDetailsOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_TOOL_DETAILS_ONLY === '1'
 const completeToolOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_COMPLETE_TOOL_ONLY === '1'
 const executionAutoFollowOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_AUTO_FOLLOW_ONLY === '1'
+const executionMetricsOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_METRICS_ONLY === '1'
+const metricsRealRuntime = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_METRICS_REAL === '1'
+const executionMetricsStreamOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_METRICS_STREAM_ONLY === '1'
+  || metricsRealRuntime
 const placementRestartOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_PLACEMENT_RESTART_ONLY === '1'
 const withdrawalOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WITHDRAWAL_ONLY === '1'
 const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT
   ? Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT)
   : await availableLoopbackPort()
-const campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
-const campTitle = previewOnly ? '执行背景分层验收 · 模拟数据' : 'v0.55 Agent 执行过程验收'
+const threadId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
+const threadTitle = previewOnly ? '执行背景分层验收 · 模拟数据' : 'v0.55 Agent 执行过程验收'
 const composerLayoutCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec1'
 const composerLayoutCampTitle = 'v0.56 Composer 布局验收'
 const ambientEncounterCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec2'
@@ -76,9 +82,9 @@ const fixtureExecutionRoot = join(fixtureRoot, 'workspace')
 const codexExpectedCommand = 'rovai camp read --limit 20'
 const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
 const webSearchQueries = ['password=公开验收词 token=保持原样', '第二项公开查询']
-const fixtureContextManifestVersion = 29
+const fixtureContextManifestVersion = 32
 const fixtureContextDeliveryProfile = {
-  profileVersion: 9,
+  profileVersion: 10,
   maxSelfActiveTasks: 8
 }
 
@@ -145,13 +151,18 @@ const runtimes = [
     evidenceKind: 'runtime.action', eventType: 'runtime.action', sourceAuthority: 'core',
     credibility: 'core_verified', payload: {
       toolCallId: 'op-antigravity', status: 'completed', kind: 'mcp_tool_call',
-      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'camp.message.send', output: 'delivered',
-      operationProjection: { operation: 'camp.message.send', canonicalInput: { recipientAgentIds: ['agent_101'] } }
+      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'thread.message.send', output: 'delivered',
+      operationProjection: { operation: 'thread.message.send', canonicalInput: { recipientAgentIds: ['agent_101'] } }
     }
   })
 ]
 
 await mkdir(dataDir, { recursive: true })
+if (executionMetricsStreamOnly && (!metricsRealRuntime || process.env.ROVAI_METRICS_HELD_FINAL === '1')) {
+  const runtime = join(root, 'scripts', 'fixtures', 'streaming-acp-runtime.mjs')
+  await chmod(runtime, 0o755)
+  process.env[process.env.ROVAI_STREAMING_ACP_KIND === 'copilot-cli' ? 'ROVAI_COPILOT_BIN' : 'ROVAI_QWEN_BIN'] = runtime
+}
 seedCompletedOnboardingForAcceptance(dataDir)
 await writeFile(join(dataDir, 'general-preferences.json'), `${JSON.stringify({
   schemaVersion: 4,
@@ -182,7 +193,7 @@ try {
   app = await launchApp(debugPort, 1440, 920)
   await setTheme(app.cdp, 'day')
   await activateControlledRun()
-  await openCamp(app.cdp, campId)
+  await openCamp(app.cdp, threadId)
   await waitForExpression(app.cdp,
     `document.querySelectorAll(${JSON.stringify(runArticleSelector)}).length > 0`, 30_000)
   const renderedMessageCount = await evaluate(app.cdp,
@@ -216,7 +227,28 @@ try {
     await waitForExpression(app.cdp,
       `document.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId === ${JSON.stringify(activeAgentId)}`)
   }
-  if (placementRestartOnly) {
+  if (executionMetricsStreamOnly) {
+    const report = await verifyStreamingExecutionMetricsRenderer(app, outputDir)
+    console.log(JSON.stringify({
+      ok: true,
+      mode: 'controlled-execution-metrics-live-renderer',
+      fixtureRoot,
+      outputDir,
+      verified: report.verified,
+      captures: report.captures
+    }, null, 2))
+  } else if (executionMetricsOnly) {
+    const report = await verifyExecutionMetricsRenderer(app, outputDir, (restarted) => { app = restarted })
+    app = report.app
+    console.log(JSON.stringify({
+      ok: true,
+      mode: 'controlled-execution-metrics-renderer-fixture',
+      fixtureRoot,
+      outputDir,
+      verified: report.verified,
+      captures: report.captures
+    }, null, 2))
+  } else if (placementRestartOnly) {
     const restart = await verifyExecutionPlacementAcrossRestart(app)
     app = restart.app
     console.log(JSON.stringify({
@@ -239,7 +271,7 @@ try {
     }, null, 2))
   } else if (previewOnly) {
     console.log(JSON.stringify({ ready: true, mode: 'controlled-manual-preview', app: appPath,
-      fixtureRoot, userData: dataDir, skillLibrary: join(dataDir, 'managed-skill-library'), campId, campTitle }, null, 2))
+      fixtureRoot, userData: dataDir, skillLibrary: join(dataDir, 'managed-skill-library'), threadId, threadTitle }, null, 2))
     await new Promise(resolveExit => app.child.once('exit', resolveExit))
   } else {
   // The remaining matrix exercises all three placements, then continues from bottom.
@@ -819,9 +851,9 @@ try {
   })
   await waitForExpression(app.cdp, `innerWidth === 2560 && innerHeight === 1440`)
 
-  await openCamp(app.cdp, campId)
+  await openCamp(app.cdp, threadId)
   await waitForExpression(app.cdp,
-    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`, 30_000)
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${threadTitle}`)}`, 30_000)
   await wait(200)
   const wideConversationLayout = await collectWideConversationLayout(app.cdp)
   assert(wideConversationLayout.viewportWidth === 2560
@@ -974,7 +1006,7 @@ try {
       completeToolOutput,
       webSearchPresentation,
       claudeCommandDisclosure,
-      antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
+      antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'thread.message.send',
       conversationPresentation,
       timelineFollowLatest,
       messageAuthorProfileTriggers,
@@ -1135,11 +1167,14 @@ async function initializeDatabase() {
 }
 
 async function activateControlledRun() {
+  const startedAt = executionMetricsOnly
+    ? new Date(Date.now() - 84_000).toISOString()
+    : '2026-08-05T12:00:01Z'
   const status = await runSql(databasePath, `
     PRAGMA busy_timeout = 5000;
     UPDATE agent_run
     SET status = 'running',
-        started_at = '2026-08-05T12:00:01Z',
+        started_at = ${sqlLiteral(startedAt)},
         ended_at = NULL,
         updated_at = '2026-08-05T12:00:01Z',
         version = version + 1
@@ -1148,6 +1183,544 @@ async function activateControlledRun() {
   `)
   assert(status.trim().split(/\s+/).at(-1) === 'running',
     `Controlled AgentRun did not enter running state: ${status}`)
+}
+
+async function verifyExecutionMetricsRenderer(app, capturesRoot, onRestart) {
+  await waitForExpression(app.cdp, `Boolean(document.querySelector(
+    '.execution-process-stage.is-focused .execution-run-metric'
+  ))`)
+  const running = await evaluate(app.cdp, `(() => {
+    const stage = document.querySelector('.execution-process-stage.is-focused')
+    const duration = stage?.querySelector('.execution-run-metric')
+    const slot = stage?.querySelector('.execution-run-trailing')
+    return {
+      runId: stage?.dataset.agentRunId ?? null,
+      duration: duration?.textContent?.trim() ?? null,
+      fitsSlot: duration.getBoundingClientRect().right <= slot.getBoundingClientRect().right + 1,
+      slotWidth: slot?.getBoundingClientRect().width ?? null
+    }
+  })()`)
+  assert(running.runId === activeRunId
+    && /^1分 \d{2}秒$/.test(running.duration)
+    && running.fitsSlot && running.slotWidth >= 76,
+  `Running card did not keep duration: ${JSON.stringify(running)}`)
+  const runningCapture = join(capturesRoot, 'execution-metrics-running.png')
+  await capture(app.cdp, runningCapture)
+
+  await closeApp(app)
+  const endedAt = new Date().toISOString()
+  await runSql(databasePath, `
+    UPDATE agent_run SET status = 'succeeded', ended_at = ${sqlLiteral(endedAt)},
+      updated_at = ${sqlLiteral(endedAt)}, version = version + 1,
+      terminal_reason_code = NULL, terminal_resolution_source = NULL,
+      cancel_requested_at = NULL, cancel_reason_code = NULL
+    WHERE id = ${sqlLiteral(activeRunId)} AND status IN ('running', 'cancelled');
+    INSERT INTO runtime_usage_run_summary(
+      collection_epoch, agent_run_id, runtime_kind, parser_version,
+      eligible_mask, input_semantics, enrolled_at, finalized_at, last_observed_at,
+      prompt_input_total_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+    ) SELECT collection_epoch, ${sqlLiteral(activeRunId)}, 'codex-cli', 4,
+      127, 'cache_inclusive_total', ${sqlLiteral(endedAt)}, ${sqlLiteral(endedAt)},
+      ${sqlLiteral(endedAt)}, 1500, 500, 250, 0
+    FROM runtime_usage_collection_state WHERE singleton_id = 1;
+  `)
+
+  const restarted = await launchApp(app.port, 1440, 920)
+  onRestart(restarted)
+  await setTheme(restarted.cdp, 'day')
+  await openCamp(restarted.cdp, campId)
+  await evaluate(restarted.cdp, `document.querySelector(
+    ${JSON.stringify(`.run-pulse-chip[data-agent-id="${activeAgentId}"]`)}
+  )?.click()`)
+  await waitForExpression(restarted.cdp, `document.querySelector(
+    '.execution-process-stage.is-focused .execution-usage-trigger'
+  )?.textContent?.trim() === '2k'`, 20_000)
+  const terminal = await evaluate(restarted.cdp, `(() => {
+    const stage = document.querySelector('.execution-process-stage.is-focused')
+    const group = stage?.querySelector('.execution-run-metric-group')
+    return {
+      runId: stage?.dataset.agentRunId ?? null,
+      durationInCard: stage?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null,
+      usage: group?.querySelector('.execution-usage-trigger')?.textContent?.trim() ?? null,
+    }
+  })()`)
+  assert(terminal.runId === activeRunId && terminal.usage === '2k'
+    && terminal.durationInCard === null,
+  `Terminal card did not show only the Usage entry: ${JSON.stringify(terminal)}`)
+  await evaluate(restarted.cdp, `document.querySelector(
+    '.execution-process-stage.is-focused .execution-usage-trigger'
+  )?.click()`)
+  await waitForExpression(restarted.cdp, `document.querySelectorAll('.execution-metric-popover dl > div').length === 5`)
+  const usageRows = await evaluate(restarted.cdp, `[...document.querySelectorAll(
+    '.execution-metric-popover dl > div'
+  )].map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])`)
+  assert(JSON.stringify(usageRows.slice(0, 4)) === JSON.stringify([
+    ['Input Token', '1.5k'], ['Output Token', '0.5k'],
+    ['Cache Read', '0.3k'], ['Cache Write', '0k']
+  ]) && usageRows[4]?.[0] === '执行耗时' && /^1分 \d{2}秒$/.test(usageRows[4]?.[1]),
+  `Terminal Usage popover did not show four buckets and duration: ${JSON.stringify(usageRows)}`)
+  const terminalCapture = join(capturesRoot, 'execution-metrics-terminal.png')
+  await capture(restarted.cdp, terminalCapture)
+  return {
+    app: restarted,
+    verified: { running, terminal, usageRows },
+    captures: { running: runningCapture, terminal: terminalCapture }
+  }
+}
+
+async function verifyStreamingExecutionMetricsRenderer(app, capturesRoot) {
+  if (metricsRealRuntime) return verifyRealRuntimeExecutionMetrics(app, capturesRoot)
+  const request = (method, params = {}) => evaluate(app.cdp,
+    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`, true)
+  const controlledCopilot = process.env.ROVAI_STREAMING_ACP_KIND === 'copilot-cli'
+  const agentId = runtimes.find((entry) => entry.key === (controlledCopilot ? 'copilot' : 'qwen'))?.agentId
+  assert(agentId, 'The streaming fixture has no selected member')
+  await configureProductRuntime(request, controlledCopilot ? 'copilot-cli' : 'qwen-code', [agentId])
+  const workspace = await request('workspaces.inspect', { path: fixtureExecutionRoot })
+  const setup = await createConfiguredCampAndSend(request, {
+    commandId: crypto.randomUUID(),
+    name: '执行指标固定流验收',
+    workspace,
+    memberAgentIds: [agentId],
+    defaultLeadAgentId: agentId,
+    address: { mode: 'explicit', agentIds: [agentId] },
+    body: 'ROVAI_STREAM_FAST_SETUP',
+    purpose: 'Seed one completed Run for switching cards'
+  })
+  assert(setup.status === 'accepted' && setup.payload?.threadId && setup.payload?.threadMessageId,
+    `Could not create the controlled streaming Camp: ${JSON.stringify(setup)}`)
+  const streamCampId = setup.payload.threadId
+  const setupRunId = await waitForControlledMessageRun(request, streamCampId, setup.payload.threadMessageId)
+  await waitForControlledRunStatus(request, streamCampId, setupRunId, 'succeeded')
+  await openCamp(app.cdp, campId)
+  await openCamp(app.cdp, streamCampId)
+  await selectCampConversationView(app.cdp, 'conversation')
+  await waitForExpression(app.cdp,
+    `document.body.innerText.includes('ROVAI_STREAM_FAST_READY')`, 20_000)
+  await evaluate(app.cdp, `(() => {
+    window.__privateThoughtIpcLeaks = 0
+    window.__privateThoughtIpcUnsubscribe = window.rovai.onEvent(event => {
+      if (JSON.stringify(event).includes('V3_PRIVATE_REASONING_FIXTURE')) window.__privateThoughtIpcLeaks++
+    })
+  })()`)
+
+  const sent = await request('camp.messages.send', {
+    commandId: crypto.randomUUID(),
+    campId: streamCampId,
+    content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] },
+      'Emit the controlled streaming fixture.'),
+    sourceAttachments: [], quotes: [], replyToCampMessageId: null,
+    execution: { taskId: null, purpose: 'Verify live Renderer metrics', completionRole: 'required' }
+  })
+  const accepted = sent.commandResult ?? sent
+  assert(accepted.status === 'accepted' && accepted.payload?.threadMessageId,
+    `The controlled streaming Run was not accepted: ${JSON.stringify(sent)}`)
+  const runId = await waitForControlledMessageRun(request, streamCampId, accepted.payload.threadMessageId)
+  const stageSelector = `.execution-process-stage[data-agent-run-id="${runId}"]`
+  await evaluate(app.cdp,
+    `document.querySelector('.camp-detail-entry[data-detail="execution"]')?.click()`)
+  await waitForExpression(app.cdp,
+    `Boolean(document.querySelector(${JSON.stringify(`.run-pulse-chip[data-agent-id="${agentId}"]`)}))`, 10_000)
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(`.run-pulse-chip[data-agent-id="${agentId}"]`)})?.click()`)
+  await waitForExpression(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.classList.contains('status-running')`, 20_000)
+  const leakedEvidence = await runSql(databasePath, `SELECT COUNT(*) FROM agent_run_execution_evidence
+    WHERE agent_run_id = ${sqlLiteral(runId)}
+      AND payload_preview_json LIKE '%V3_PRIVATE_REASONING_FIXTURE%';`)
+  const leakedRenderer = await evaluate(app.cdp,
+    `document.body.textContent.includes('V3_PRIVATE_REASONING_FIXTURE')`)
+  assert(leakedEvidence.trim() === '0' && !leakedRenderer,
+    'The controlled private thought marker escaped into Evidence or Renderer')
+  const steadyCapture = join(capturesRoot, 'execution-metrics-stream-steady.png')
+  await capture(app.cdp, steadyCapture)
+
+  // Leave and re-enter during the same stream; the running duration stays available.
+  await openCamp(app.cdp, campId)
+  await openCamp(app.cdp, streamCampId)
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(`.run-pulse-chip[data-agent-id="${agentId}"]`)})?.click()`)
+  await waitForExpression(app.cdp,
+    `Boolean(document.querySelector('.execution-drawer-header:not(.is-overview)')
+      && document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-run-metric'))`, 10_000)
+  const reopened = await evaluate(app.cdp, `(() => {
+    const stage = document.querySelector(${JSON.stringify(stageSelector)})
+    return { duration: stage?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null }
+  })()`)
+  assert(reopened.duration,
+    `Midstream entry lost the running duration: ${JSON.stringify(reopened)}`)
+  await evaluate(app.cdp, `document.querySelector('.execution-history-toggle')?.click()`)
+  const historySelector = `.execution-process-stage[data-agent-run-id="${setupRunId}"]`
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(historySelector)})?.querySelector('.execution-run-toggle')?.click()`)
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-run-toggle')?.click()`)
+  const switched = await evaluate(app.cdp, `(() => {
+    const active = document.querySelector(${JSON.stringify(stageSelector)})
+    const history = document.querySelector(${JSON.stringify(historySelector)})
+    return { activeDuration: active?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null,
+      activeExpanded: active?.querySelector('.execution-run-toggle')?.getAttribute('aria-expanded') === 'true',
+      historyExpanded: history?.querySelector('.execution-run-toggle')?.getAttribute('aria-expanded') === 'true',
+      historyVisible: Boolean(history?.getClientRects().length) }
+  })()`)
+  assert(switched.historyVisible && switched.historyExpanded && !switched.activeExpanded
+    && switched.activeDuration,
+  `Switching current and historical Run cards mixed metrics: ${JSON.stringify(switched)}`)
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-run-toggle')?.click()`)
+
+  await waitForExpression(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.classList.contains('status-succeeded')`, 30_000)
+  const terminalBeforeUsage = await evaluate(app.cdp,
+    `({ usage: document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-trigger')?.textContent?.trim() ?? null,
+      clock: Boolean(document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-duration-trigger')),
+      durationInCard: document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null })`)
+  assert(terminalBeforeUsage.usage === null && terminalBeforeUsage.clock
+    && terminalBeforeUsage.durationInCard === null,
+    `The terminal card did not fall back to a duration clock before Usage: ${JSON.stringify(terminalBeforeUsage)}`)
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-duration-trigger')?.click()`)
+  await waitForExpression(app.cdp,
+    `/分 \\d{2}秒$/.test(document.querySelector('.execution-duration-reading')?.textContent?.trim() ?? '')`)
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-duration-trigger')?.click()`)
+  const observedAt = new Date().toISOString()
+  await runSql(databasePath, `
+    PRAGMA busy_timeout = 5000;
+    UPDATE runtime_usage_run_summary SET
+      parser_version = 4, eligible_mask = 127,
+      input_semantics = 'cache_inclusive_total',
+      finalized_at = ${sqlLiteral(observedAt)}, last_observed_at = ${sqlLiteral(observedAt)},
+      prompt_input_total_tokens = 1500, output_tokens = 500,
+      cache_read_tokens = 250, cache_write_tokens = 0
+    WHERE agent_run_id = ${sqlLiteral(runId)};
+  `)
+  await waitForExpression(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-trigger')?.textContent?.trim() === '2k'`, 16_000)
+  await evaluate(app.cdp,
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-trigger')?.click()`)
+  await waitForExpression(app.cdp, `document.querySelectorAll('.execution-metric-popover dl > div').length === 5`)
+  const usageRows = await evaluate(app.cdp, `[...document.querySelectorAll(
+    '.execution-metric-popover dl > div'
+  )].map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])`)
+  assert(JSON.stringify(usageRows.slice(0, 4)) === JSON.stringify([
+    ['Input Token', '1.5k'], ['Output Token', '0.5k'],
+    ['Cache Read', '0.3k'], ['Cache Write', '0k']
+  ]) && usageRows[4]?.[0] === '执行耗时' && /分 \d{2}秒$/.test(usageRows[4]?.[1]),
+  `Late terminal Usage did not reach the four buckets and duration: ${JSON.stringify(usageRows)}`)
+  const terminalCapture = join(capturesRoot, 'execution-metrics-stream-late-usage.png')
+  await capture(app.cdp, terminalCapture)
+  const leakedFiles = await filesContainingMarker(dataDir, 'V3_PRIVATE_REASONING_FIXTURE')
+  const leakedIpc = await evaluate(app.cdp, `(() => {
+    window.__privateThoughtIpcUnsubscribe?.()
+    return window.__privateThoughtIpcLeaks
+  })()`)
+  assert(leakedFiles.length === 0,
+    `The controlled private thought marker escaped into isolated Core files: ${JSON.stringify(leakedFiles)}`)
+  assert(leakedIpc === 0, 'The controlled private thought marker escaped through public IPC')
+  return {
+    verified: { streamCampId, runId, setupRunId,
+      leakedEvidence: Number(leakedEvidence.trim()), leakedRenderer, leakedFiles, leakedIpc,
+      reopened, switched, usageRows },
+    captures: { steady: steadyCapture, terminal: terminalCapture }
+  }
+}
+
+async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
+  const request = (method, params = {}) => evaluate(app.cdp,
+    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})
+      .catch(error => { throw new Error(${JSON.stringify(method)} + ': ' + (error?.message ?? error?.code ?? String(error))) })`, true)
+  const runtimeKind = process.env.ROVAI_METRICS_RUNTIME ?? 'codex-cli'
+  const liveContextMode = process.env.ROVAI_METRICS_VERIFY_LIVE_CONTEXT
+  assert(liveContextMode == null || ['1', 'used-only'].includes(liveContextMode),
+    'Live Context verification accepts 1 or used-only')
+  const isCount = value => Number.isSafeInteger(value) && value >= 0
+  const metricK = value => value == null ? '—' : `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k`
+  const agentId = runtimes.find((entry) => entry.key === 'codex').agentId
+  const installation = await configureProductRuntime(request, runtimeKind, [agentId])
+  const modelId = process.env.ROVAI_METRICS_MODEL ?? (runtimeKind === 'codex-cli' ? 'gpt-6.1-sol' : null)
+  if (modelId) {
+    const profile = await request('members.get', { agentId })
+    const selection = await request('members.runtime.set', { commandId: crypto.randomUUID(), command: {
+      agentId, expectedVersion: profile.version, adapterKind: runtimeKind,
+      permissions: profile.runtimeConfiguration.permissions,
+      model: { mode: 'explicit', modelId,
+        options: process.env.ROVAI_METRICS_MODEL_OPTIONS ? JSON.parse(process.env.ROVAI_METRICS_MODEL_OPTIONS)
+          : runtimeKind === 'codex-cli' ? { reasoning_effort: 'high' } : {} }
+    } })
+    assert(selection.status === 'applied', 'Real Runtime acceptance model was not applied')
+  }
+  const workspace = await request('workspaces.inspect', { path: fixtureExecutionRoot })
+  const setup = await createConfiguredCampAndSend(request, {
+    commandId: crypto.randomUUID(), name: `原生执行指标 ${runtimeKind} 验收`, workspace,
+    memberAgentIds: [agentId], defaultLeadAgentId: agentId,
+    body: await readFile(process.env.ROVAI_METRICS_PROMPT_FILE
+      ?? join(root, 'scripts', 'fixtures', 'native-execution-metrics-task.txt'), 'utf8'),
+    purpose: 'Native Usage and Context through packaged Renderer'
+  })
+  assert(setup.status === 'accepted' && setup.payload?.threadId && setup.payload?.threadMessageId,
+    'Real Runtime acceptance was not accepted with Thread/message identities')
+  const liveCampId = setup.payload.threadId
+  const roundCount = process.env.ROVAI_METRICS_VERIFY_WINDOW_REUSE === '1' ? 2 : 1
+  const reports = []
+  await evaluate(app.cdp, `(() => {
+    window.__contextAcceptanceCommits = []
+    window.__contextAcceptanceOff = window.rovai.onEvent(event => {
+      if (event.method === 'monitoring.changed') window.__contextAcceptanceCommits.push({ at: new Date().toISOString(), params: event.params })
+      if (window.__contextAcceptanceCommits.length > 500) window.__contextAcceptanceCommits.shift()
+    })
+  })()`)
+  let messageId = setup.payload.threadMessageId
+  for (let round = 1; round <= roundCount; round++) {
+  if (round > 1) {
+    const sent = await request('thread.messages.send', {
+      commandId: crypto.randomUUID(), threadId: liveCampId,
+      content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] },
+        await readFile(process.env.ROVAI_METRICS_PROMPT_FILE
+          ?? join(root, 'scripts', 'fixtures', 'native-live-context-task.txt'), 'utf8')),
+      sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
+      execution: { taskId: null, purpose: 'Verify confirmed window reuse during the next Run', completionRole: 'required' }
+    })
+    const accepted = sent.commandResult ?? sent
+    assert(accepted.status === 'accepted' && accepted.payload?.threadMessageId, 'Second Context Run not accepted')
+    messageId = accepted.payload.threadMessageId
+  }
+  const captureKey = `${runtimeKind}${roundCount > 1 ? `-round-${round}` : ''}`
+  const runId = await waitForControlledMessageRun(request, liveCampId, messageId)
+  await openCamp(app.cdp, liveCampId)
+  await selectCampConversationView(app.cdp, 'conversation')
+  await evaluate(app.cdp, `(() => {
+    const entry = document.querySelector('.camp-detail-entry[data-detail="execution"]')
+    if (entry?.getAttribute('aria-expanded') !== 'true') entry?.click()
+  })()`)
+  await waitForExpression(app.cdp,
+    `Boolean([...document.querySelectorAll(${JSON.stringify(`.run-pulse-chip[data-agent-id="${agentId}"]`)})]
+      .find(chip => chip.getClientRects().length))`, 15_000)
+  await evaluate(app.cdp, `(() => {
+    const chip = [...document.querySelectorAll(${JSON.stringify(`.run-pulse-chip[data-agent-id="${agentId}"]`)})]
+      .find(candidate => candidate.getClientRects().length)
+    if (chip?.getAttribute('aria-pressed') !== 'true') chip?.click()
+  })()`)
+  await waitForExpression(app.cdp, `Boolean(
+    [...document.querySelectorAll(${JSON.stringify(`.run-pulse-chip.is-selected[data-agent-id="${agentId}"]`)})]
+      .some(chip => chip.getClientRects().length)
+    && [...document.querySelectorAll('.execution-drawer-header:not(.is-overview)')]
+      .some(header => header.getClientRects().length))`, 15_000)
+  const stageSelector = `.execution-process-stage[data-agent-run-id="${runId}"]`
+  await waitForExpression(app.cdp, `Boolean(document.querySelector(${JSON.stringify(stageSelector)}))`, 15_000)
+  await evaluate(app.cdp, `(() => {
+    const stage = document.querySelector(${JSON.stringify(stageSelector)})
+    const dock = stage?.closest('.execution-sidecar-panel') ?? stage?.closest('.camp-workspace')
+    const chip = dock?.querySelector(${JSON.stringify(`.run-pulse-chip[data-agent-id="${agentId}"]`)})
+    if (!chip) throw new Error('Native Run panel has no member selector')
+    if (chip.getAttribute('aria-pressed') !== 'true') chip.click()
+  })()`)
+  await waitForExpression(app.cdp, `document.querySelector(${JSON.stringify(stageSelector)})?.closest('.execution-drawer')?.querySelector('.execution-drawer-header')?.classList.contains('is-overview') === false`, 15_000)
+  const drawerExpression = `document.querySelector(${JSON.stringify(stageSelector)})?.closest('.execution-drawer')`
+  const samples = [], started = Date.now()
+  const previousContext = reports.at(-1)?.projection.sessions.find(session => session.agentId === agentId)
+  let visibilityCheck = null
+  let status = null, nextProgress = started + 30_000, liveContextWitness = null
+  while (Date.now() - started < 480_000) {
+    const state = await request('threads.snapshot', { threadId: liveCampId })
+    status = state.agentRuns.find((candidate) => candidate.id === runId)?.status
+    const liveProjection = liveContextMode
+      ? await request('monitoring.execution', { threadId: liveCampId, agentRunIds: [runId] }) : null
+    const liveContext = liveProjection?.sessions.find(session => session.agentId === agentId) ?? null
+    const ui = await evaluate(app.cdp, `(() => {
+      const drawer = ${drawerExpression}
+      const stage = document.querySelector(${JSON.stringify(stageSelector)})
+      return {
+        overview: drawer?.querySelector('.execution-drawer-header')?.classList.contains('is-overview') ?? null,
+        duration: stage?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null,
+        contextLabel: drawer?.querySelector('.execution-context-trigger')?.getAttribute('aria-label') ?? null
+      }
+    })()`)
+    const delivery = liveContextMode ? JSON.parse(await runSql(databasePath,
+      `SELECT json_object('status',d.status,'acceptedAt',d.accepted_at,'completedAt',ar.ended_at,
+        'contextSourceRun',x.source_agent_run_id,'contextObservedAt',x.observed_at)
+       FROM agent_run ar JOIN runtime_input_delivery d ON d.agent_run_id=ar.id AND d.execution_epoch=ar.execution_epoch
+       LEFT JOIN runtime_session_context_latest x ON x.conversation_id=ar.conversation_id
+       WHERE ar.id=${sqlLiteral(runId)}`) || 'null') : null
+    const sample = { at: new Date().toISOString(), atMs: Date.now() - started, status, ui,
+      ...(liveContextMode ? { context: liveContext, delivery } : {}) }
+    samples.push(sample)
+    if (!liveContextWitness && status === 'running' && delivery?.contextSourceRun === runId && isCount(liveContext?.usedTokens)
+      && liveContext.usedTokens > 0 && ui.contextLabel?.includes(`${metricK(liveContext.usedTokens)} / ${metricK(liveContext.windowTokens)}`)
+      && (!previousContext || (liveContext.windowTokens === previousContext.windowTokens
+        && liveContext.modelKey === previousContext.modelKey && liveContext.sessionGeneration === previousContext.sessionGeneration))
+      && (liveContextMode !== 'used-only' || round > 1 || (liveContext.windowTokens == null
+        && liveContext.nativeRatio == null && ui.contextLabel.includes('比例未知')))) {
+      await evaluate(app.cdp, `document.querySelector('.execution-context-popover') || ${drawerExpression}?.querySelector('.execution-context-trigger').click()`)
+      await waitForExpression(app.cdp, `Boolean(document.querySelector('.execution-context-popover'))`)
+      const rows = await evaluate(app.cdp,
+        `[...document.querySelectorAll('.execution-context-popover > span')].map(node => node.textContent)`)
+      const stillRunning = (await request('threads.snapshot', { threadId: liveCampId }))
+        .agentRuns.find(candidate => candidate.id === runId)?.status === 'running'
+      if (stillRunning && rows[0] === `${metricK(liveContext.usedTokens)} / ${metricK(liveContext.windowTokens)}`
+        && (liveContextMode !== 'used-only' || round > 1 || rows[1] === '—')) {
+        liveContextWitness = { ...sample, rows }
+        await capture(app.cdp, join(capturesRoot, `native-live-context-${captureKey}.png`))
+        console.log(JSON.stringify({ stage: 'native-live-context-verified', runtimeKind, ...liveContextWitness }))
+      }
+      await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+      if (liveContextWitness && process.env.ROVAI_METRICS_VERIFY_VISIBILITY === '1') {
+        await evaluate(app.cdp, `document.querySelector('.camp-detail-entry[data-detail="execution"]')?.click()`)
+        await waitForExpression(app.cdp, `![...document.querySelectorAll('.execution-context-trigger')].some(node => node.getClientRects().length)`)
+        const hiddenAt = new Date().toISOString()
+        // No harness reads during this interval either; Core can keep collecting.
+        await wait(5000)
+        await evaluate(app.cdp, `document.querySelector('.camp-detail-entry[data-detail="execution"]')?.click()`)
+        await waitForExpression(app.cdp, `[...document.querySelectorAll('.execution-context-trigger')].some(node => node.getClientRects().length)`)
+        const latest = await request('monitoring.execution', { threadId: liveCampId, agentRunIds: [runId] })
+        const expected = latest.sessions.find(session => session.agentId === agentId)
+        await waitForExpression(app.cdp, `${drawerExpression}?.querySelector('.execution-context-trigger')?.getAttribute('aria-label')?.includes(${JSON.stringify(`${metricK(expected.usedTokens)} / ${metricK(expected.windowTokens)}`)})`)
+        visibilityCheck = { hiddenAt, reopenedAt: new Date().toISOString(), context: expected }
+      }
+    }
+    if (['succeeded', 'failed', 'cancelled'].includes(status)) break
+    if (Date.now() >= nextProgress) {
+      console.log(JSON.stringify({ stage: 'native-metrics-live', runtimeKind, status }))
+      nextProgress = Date.now() + 30_000
+    }
+    await wait(1000)
+  }
+  const projection = await request('monitoring.execution', { threadId: liveCampId, agentRunIds: [runId] })
+  const usage = projection.runs.find(run => run.agentRunId === runId)
+  const context = projection.sessions[0]
+  // Matching a null projection proves honest display, not field availability.
+  // Keep these facts separate even when optional verification gates are off.
+  const availability = {
+    usageFields: Object.fromEntries(['promptInputTotalTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens']
+      .map(field => [field, isCount(usage?.[field])])),
+    runTotal: status === 'succeeded' && Boolean(usage?.finalizedAt) && usage?.inputOutputComplete === true
+      && isCount(usage?.promptInputTotalTokens) && isCount(usage?.outputTokens),
+    contextRatio: Boolean(context && (
+      (isCount(context.usedTokens) && isCount(context.windowTokens) && context.windowTokens > 0
+        && context.usedTokens <= context.windowTokens)
+      || (typeof context.nativeRatio === 'number' && Number.isFinite(context.nativeRatio)
+        && context.nativeRatio >= 0 && context.nativeRatio <= 1)))
+  }
+  await writeFile(join(capturesRoot, `native-metrics-diagnostic-${captureKey}.json`),
+    JSON.stringify({ runtimeKind, status, samples, liveContextWitness, projection, availability }, null, 2))
+  assert(['succeeded', 'failed', 'cancelled'].includes(status),
+    `Real Runtime did not reach a terminal within the 480s acceptance window; partial observations are retained`)
+  assert(!liveContextMode || liveContextWitness,
+    'No matching persisted and rendered Context was observed while this fresh Run was still running')
+  if (process.env.ROVAI_METRICS_VERIFY_USAGE === '1') {
+    assert(availability.runTotal, 'Real Runtime did not persist a usable native Run total')
+    await evaluate(app.cdp, `(() => {
+      const history = ${drawerExpression}?.querySelector('.execution-history-toggle')
+      if (history?.getAttribute('aria-expanded') === 'false') history.click()
+    })()`)
+    await waitForExpression(app.cdp, `Boolean(document.querySelector(
+      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-trigger`)}
+    )?.getClientRects().length)`, 15_000)
+    await evaluate(app.cdp, `document.querySelector(
+      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-trigger`)}).click()`)
+    await waitForExpression(app.cdp, `document.querySelectorAll('.execution-metric-popover dl > div').length === 5`)
+    await waitForExpression(app.cdp, `(() => {
+      const popover = document.querySelector('.execution-metric-popover')?.getBoundingClientRect()
+      const anchor = document.querySelector(${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-trigger`)})?.getBoundingClientRect()
+      return popover && anchor && anchor.width > 0 && Math.abs(popover.right - anchor.right) < 300
+    })()`)
+  }
+  const usageRows = await evaluate(app.cdp, `[...document.querySelectorAll('.execution-metric-popover dl > div')]
+    .map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])`)
+  if (process.env.ROVAI_METRICS_VERIFY_USAGE === '1') {
+    assert(JSON.stringify(usageRows.slice(0, 4)) === JSON.stringify([
+      ['Input Token', metricK(usage.promptInputTotalTokens)], ['Output Token', metricK(usage.outputTokens)],
+      ['Cache Read', metricK(usage.cacheReadTokens)], ['Cache Write', metricK(usage.cacheWriteTokens)]
+    ]), 'Renderer Usage differs from native projection')
+    await capture(app.cdp, join(capturesRoot, `native-usage-${captureKey}.png`))
+    await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+  }
+  const contextLabel = await evaluate(app.cdp,
+    `${drawerExpression}?.querySelector('.execution-drawer-header .execution-context-trigger')?.getAttribute('aria-label') ?? null`)
+  if (process.env.ROVAI_METRICS_VERIFY_CONTEXT === '1') {
+    assert(availability.contextRatio, 'Real Runtime did not provide a usable Context ratio; used alone is incomplete')
+    assert(context
+      && contextLabel?.includes(metricK(context.usedTokens)) && contextLabel?.includes(metricK(context.windowTokens)),
+    'Renderer Context differs from native projection')
+    const percent = context.usedTokens != null && context.windowTokens > 0
+      ? context.usedTokens / context.windowTokens * 100
+      : context.nativeRatio != null ? context.nativeRatio * 100 : null
+    assert(percent == null ? contextLabel.includes('比例未知') : contextLabel.includes(`${percent.toFixed(1)}%`),
+      'Renderer Context ratio differs from the same native observation')
+    await evaluate(app.cdp, `${drawerExpression}?.querySelector('.execution-drawer-header .execution-context-trigger').click()`)
+    await waitForExpression(app.cdp, `Boolean(document.querySelector('.execution-context-popover'))`)
+    const contextRows = await evaluate(app.cdp, `[...document.querySelectorAll('.execution-context-popover > span')].map(node => node.textContent)`)
+    assert(JSON.stringify(contextRows) === JSON.stringify([
+      `${metricK(context.usedTokens)} / ${metricK(context.windowTokens)}`, percent == null ? '—' : `${percent.toFixed(1)}%`
+    ]), 'Native ratio must not infer missing token quantities in the popover')
+    await capture(app.cdp, join(capturesRoot, `native-context-${captureKey}.png`))
+    await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+  }
+  const liveUpdates = samples.filter(sample => sample.status === 'running' && sample.delivery?.contextSourceRun === runId
+    && sample.context?.usedTokens != null && sample.ui.contextLabel?.includes(`${metricK(sample.context.usedTokens)} / ${metricK(sample.context.windowTokens)}`))
+  const distinctLiveValues = [...new Set(liveUpdates.map(sample => sample.context.usedTokens))]
+  if (process.env.ROVAI_METRICS_MIN_LIVE_UPDATES) assert(distinctLiveValues.length >= Number(process.env.ROVAI_METRICS_MIN_LIVE_UPDATES),
+    `Expected multiple distinct persisted + rendered Context values before terminal; got ${distinctLiveValues.length}`)
+  if (process.env.ROVAI_METRICS_HELD_FINAL === '1') {
+    assert(liveUpdates.some(sample => sample.delivery.status === 'prepared'), 'Context did not render before input acceptance')
+    assert(liveUpdates.some(sample => sample.context.usedTokens === 15000 && sample.context.windowTokens === 200000), 'ACP used-only lost its confirmed window')
+    assert(liveUpdates.some(sample => sample.context.usedTokens === 8000), 'Compaction decrease was not rendered')
+  }
+  const commitNotifications = await evaluate(app.cdp, 'window.__contextAcceptanceCommits')
+  let historicalCardCheck = null
+  if (round > 1) {
+    await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+    const priorRun = reports.at(-1).runId
+    const opened = await evaluate(app.cdp, `(() => {
+      const button = document.querySelector(${JSON.stringify(`.execution-process-stage[data-agent-run-id="${priorRun}"] .execution-run-toggle`)})
+      button?.click()
+      return Boolean(button)
+    })()`)
+    assert(opened, 'Historical Run card was not available for the Session ownership check')
+    const label = await evaluate(app.cdp, `${drawerExpression}?.querySelector('.execution-context-trigger')?.getAttribute('aria-label')`)
+    assert(label === contextLabel, 'Opening a historical Run changed current Session Context')
+    historicalCardCheck = { openedRunId: priorRun, currentSessionLabel: label }
+  }
+  const report = { runtimeKind, sampleSource: process.env.ROVAI_METRICS_HELD_FINAL === '1' ? 'controlled-acp' : 'installed-runtime',
+    round, distinctLiveValues, commitNotifications, scalarTrace: app.contextTrace, visibilityCheck, historicalCardCheck,
+    version: installation.snapshot?.reportedVersion, campId: liveCampId,
+    runId, status, projection, availability, usageRows, contextLabel, liveContextWitness, samples }
+  const reportPath = join(capturesRoot, `native-metrics-${captureKey}.json`)
+  await writeFile(reportPath, JSON.stringify(report, null, 2))
+  assert(status === 'succeeded'
+    && samples.filter(sample => sample.status === 'running').every(sample =>
+      sample.ui.overview === false && sample.ui.duration),
+  `Real Runtime native metrics acceptance failed; evidence is in ${reportPath}`)
+  reports.push(report)
+  }
+  await evaluate(app.cdp, 'window.__contextAcceptanceOff?.()')
+  return { verified: { rounds: reports }, captures: { directory: capturesRoot } }
+}
+
+async function waitForControlledMessageRun(request, campId, messageId) {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const snapshot = await request('threads.snapshot', { threadId: campId })
+    const run = snapshot.agentRuns.find((candidate) =>
+      candidate.inputMessageIds?.includes(messageId) || candidate.anchorMessageId === messageId)
+    if (run) return run.id
+    await wait(250)
+  }
+  throw new Error(`Controlled Camp message ${messageId} did not dispatch an AgentRun`)
+}
+
+async function waitForControlledRunStatus(request, campId, runId, status) {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const snapshot = await request('threads.snapshot', { threadId: campId })
+    const run = snapshot.agentRuns.find((candidate) => candidate.id === runId)
+    if (run?.status === status) return
+    if (run?.status === 'failed' || run?.status === 'cancelled') {
+      throw new Error(`Controlled Run ${runId} entered ${run.status}`)
+    }
+    await wait(250)
+  }
+  throw new Error(`Controlled Run ${runId} did not enter ${status}`)
 }
 
 async function seedFixture() {
@@ -1174,16 +1747,16 @@ async function seedFixture() {
   assert(typeof runtimeRootMarker.rootIdentityDigest === 'string',
     `Runtime Files Root marker did not expose its identity: ${JSON.stringify(runtimeRootMarker)}`)
   const emptyCatalogDigest = '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
-  const attachmentRootRelativePath = `camps/${campId}/attachments`
+  const attachmentRootRelativePath = `camps/${threadId}/attachments`
   const publishedAttachmentRoot = join(runtimeRoot, attachmentRootRelativePath)
   const fixtureRunFacts = {
     attachmentOutputRoot: publishedAttachmentRoot,
-    historyHint: 'No public-message boundary from a previous run is recorded for you in this Camp.'
+    historyHint: 'No public-message boundary from a previous run is recorded for you in this Thread.'
   }
   const fixtureRunFactRefs = [{ fact: 'attachment_output_root' }, { fact: 'history_hint' }]
   const campAttachmentViewReceipt = {
     schemaVersion: 2,
-    campId,
+    threadId,
     attachmentRootRelativePath,
     catalogRevision: 0,
     catalogEntryCount: 0,
@@ -1194,7 +1767,7 @@ async function seedFixture() {
   const campAttachmentViewReceiptDigest = canonicalJsonDigest(campAttachmentViewReceipt)
   const runtimeAttachmentAuthReceipt = {
     schemaVersion: 1,
-    campId,
+    threadId,
     publishedAttachmentRoot,
     rootIdentityDigest: runtimeRootMarker.rootIdentityDigest,
     dispatchGeneration: 1,
@@ -1236,13 +1809,13 @@ async function seedFixture() {
     'member', '', '[]', '', ''
   )`).join(',\n')
   const memberRows = runtimes.map((entry) => `(
-    ${sqlLiteral(campId)}, ${sqlLiteral(entry.agentId)}, 'active', '{}', 1, ${sqlLiteral(now)}
+    ${sqlLiteral(threadId)}, ${sqlLiteral(entry.agentId)}, 'active', '{}', 1, ${sqlLiteral(now)}
   )`).join(',\n')
   const ambientMemberRows = ambientEncounterAgentIds.map((agentId) => `(
     ${sqlLiteral(ambientEncounterCampId)}, ${sqlLiteral(agentId)}, 'active', '{}', 1, ${sqlLiteral(now)}
   )`).join(',\n')
   const conversationRows = runtimes.map((entry) => `(
-    ${sqlLiteral(`conversation-${entry.key}`)}, ${sqlLiteral(campId)}, ${sqlLiteral(entry.agentId)},
+    ${sqlLiteral(`conversation-${entry.key}`)}, ${sqlLiteral(threadId)}, ${sqlLiteral(entry.agentId)},
     1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
   )`).join(',\n')
   const ambientConversationRows = ambientEncounterAgentIds.map((agentId, index) => `(
@@ -1255,7 +1828,7 @@ async function seedFixture() {
       const nonTerminal = active
       const updatedAt = `2026-08-05T12:${String(index).padStart(2, '0')}:${active ? '01' : '02'}Z`
       return `(
-        ${sqlLiteral(`turn-${entry.key}`)}, ${sqlLiteral(campId)}, 'system_event',
+        ${sqlLiteral(`turn-${entry.key}`)}, ${sqlLiteral(threadId)}, 'system_event',
         ${sqlLiteral(`runtime-activity-${entry.key}`)}, ${sqlLiteral(nonTerminal ? 'running' : 'completed')},
         1, ${sqlLiteral(now)}, ${sqlLiteral(nonTerminal ? '2036-08-06T12:00:00Z' : '2026-08-06T12:00:00Z')}, ${nonTerminal ? 0 : 86400}, 32, 16, 1,
         1,
@@ -1265,7 +1838,7 @@ async function seedFixture() {
       )`
     }),
     `(
-      'turn-codex-history', ${sqlLiteral(campId)}, 'system_event',
+      'turn-codex-history', ${sqlLiteral(threadId)}, 'system_event',
       'runtime-activity-codex-history', 'completed',
       1, ${sqlLiteral(now)}, '2026-08-06T12:00:00Z', 86400, 32, 16, 1,
       1, '2026-08-05T11:58:00Z', '2026-08-05T11:58:02Z', '2026-08-05T11:58:02Z'
@@ -1282,7 +1855,7 @@ async function seedFixture() {
         ${sqlLiteral(`run-${entry.key}`)}, ${sqlNullable(recoveryBlocked ? null : `turn-${entry.key}`)},
         ${sqlLiteral(`conversation-${entry.key}`)},
         ${sqlLiteral(recoveryBlocked ? 'batch' : 'direct')},
-        ${sqlNullable(recoveryBlocked ? campId : null)},
+        ${sqlNullable(recoveryBlocked ? threadId : null)},
         ${sqlNullable(recoveryBlocked ? recoveryInputMessageId : null)},
         ${recoveryBlocked ? fixtureLastMessageSequence : 'NULL'},
         0, 0,
@@ -1322,7 +1895,7 @@ async function seedFixture() {
       ? [runtimes[0].agentId, runtimes[1].agentId]
       : []
     return `(
-      ${sqlLiteral(`message-${entry.key}`)}, ${sqlLiteral(campId)}, ${sequence},
+      ${sqlLiteral(`message-${entry.key}`)}, ${sqlLiteral(threadId)}, ${sequence},
       'agent', ${sqlLiteral(entry.agentId)}, ${sqlLiteral(`run-${entry.key}`)},
       ${sqlLiteral(body)}, ${sqlLiteral(JSON.stringify([{ kind: 'text', text: body }]))},
       ${sqlLiteral(addressedAgentIds.length > 0 ? 'explicit' : 'default')},
@@ -1333,7 +1906,7 @@ async function seedFixture() {
     )`
   }).join(',\n')
   const recoveryInputMessageRow = `(
-    ${sqlLiteral(recoveryInputMessageId)}, ${sqlLiteral(campId)}, ${recoveryInputSequence},
+    ${sqlLiteral(recoveryInputMessageId)}, ${sqlLiteral(threadId)}, ${recoveryInputSequence},
     'user', 'local_user', NULL,
     ${sqlLiteral(recoveryInputBody)}, ${sqlLiteral(JSON.stringify(recoveryInputContent))},
     'explicit', ${sqlLiteral(JSON.stringify([recoveryInputEntry.agentId]))}, NULL,
@@ -1346,7 +1919,7 @@ async function seedFixture() {
     id: 'delivery-antigravity-opencode', recipientAgentId: runtimes[1].agentId,
     recipientCanonicalPosition: 1, status: 'failed', failureCode: 'runtime_unavailable'
   }].map((delivery) => `(
-    ${sqlLiteral(delivery.id)}, ${sqlLiteral(campId)}, 'turn-antigravity',
+    ${sqlLiteral(delivery.id)}, ${sqlLiteral(threadId)}, 'turn-antigravity',
     'message-antigravity', ${sqlLiteral(delivery.recipientAgentId)},
     ${delivery.recipientCanonicalPosition}, ${sqlLiteral(`digest-${delivery.id}`)},
     ${sqlLiteral('digest-message-antigravity')}, 'run-antigravity', 'forward', 'run-antigravity', 1,
@@ -1386,7 +1959,7 @@ async function seedFixture() {
       project_path, default_lead_agent_id, last_message_sequence,
       version, created_at, updated_at, activation_state
     ) VALUES (
-      ${sqlLiteral(campId)}, ${sqlLiteral(campTitle)}, 'user', 'peer', 'quick_chat',
+      ${sqlLiteral(threadId)}, ${sqlLiteral(threadTitle)}, 'user', 'peer', 'quick_chat',
       '', ${sqlLiteral(runtimes[0].agentId)}, ${fixtureLastMessageSequence}, 1,
       ${sqlLiteral(now)}, ${sqlLiteral(now)}, 'active'
     ), (
@@ -1411,7 +1984,7 @@ async function seedFixture() {
            NULL, NULL, ${sqlLiteral(now)}, ${sqlLiteral(now)}
     FROM camp
     WHERE id IN (
-      ${sqlLiteral(campId)},
+      ${sqlLiteral(threadId)},
       ${sqlLiteral(composerLayoutCampId)},
       ${sqlLiteral(ambientEncounterCampId)}
     );
@@ -1455,7 +2028,9 @@ async function seedFixture() {
     ) VALUES ${runRows};
     UPDATE agent_run
     SET status = 'waiting', wait_reason = 'recovery_blocked', runtime_recovery_required = 0,
-        last_error_code = 'accepted_input_outcome_unknown'
+        last_error_code = 'accepted_input_outcome_unknown',
+        claim_previous_public_boundary_sequence = 0,
+        claim_has_additional_public_messages = 1
     WHERE id = ${sqlLiteral(recoveryBlockedRunId)};
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, source_agent_run_id,
@@ -1468,7 +2043,7 @@ async function seedFixture() {
       status, claimed_agent_run_id, failure_code, version,
       created_at, claimed_at, ended_at, updated_at
     ) VALUES (
-      'fixture-copilot-delivery', ${sqlLiteral(campId)}, ${sqlLiteral(recoveryInputMessageId)},
+      'fixture-copilot-delivery', ${sqlLiteral(threadId)}, ${sqlLiteral(recoveryInputMessageId)},
       ${sqlLiteral(recoveryInputEntry.agentId)}, 1, ${recoveryInputSequence},
       'claimed', ${sqlLiteral(recoveryBlockedRunId)}, NULL, 2,
       ${sqlLiteral(now)}, ${sqlLiteral(now)}, NULL, ${sqlLiteral(now)}
@@ -1491,7 +2066,7 @@ async function seedFixture() {
       delivery_mode, created_at
     ) VALUES (
       'fixture-copilot-bootstrap', 'conversation-copilot', 'fixture-copilot-binding', 1,
-      'native_session_bootstrap_v4', 4,
+      'native_session_bootstrap_v5', 5,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)},
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)},
       '[]', 'fixture-authorization-basis', 'native_append', ${sqlLiteral(now)}
@@ -1544,7 +2119,7 @@ async function seedFixture() {
       '[]', '[]', '[]', 'fixture-shared-message-evidence', ${sqlLiteral(JSON.stringify(fixtureRunFacts))},
       'agent_v1', '{"schemaVersion":1,"included":false}',
       '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92',
-      ${fixtureContextManifestVersion}, 7, 2,
+      ${fixtureContextManifestVersion}, 9, 2,
       ${sqlLiteral(JSON.stringify(campAttachmentViewReceipt))},
       ${sqlLiteral(campAttachmentViewReceiptDigest)}
     );
@@ -1610,7 +2185,7 @@ async function seedFixture() {
     `)
   }
   await seedEmptyAttachmentViewRoots(runtimeRoot, [
-    campId,
+    threadId,
     composerLayoutCampId,
     ambientEncounterCampId
   ])
@@ -1622,11 +2197,11 @@ async function seedFixture() {
   if (toolDetailsOnly) await seedClaudeToolDetailFixtures()
 }
 
-async function seedEmptyAttachmentViewRoots(runtimeRoot, campIds) {
+async function seedEmptyAttachmentViewRoots(runtimeRoot, threadIds) {
   const campsRoot = join(runtimeRoot, 'camps')
   await chmod(campsRoot, 0o300)
   try {
-    for (const exactCampId of campIds) {
+    for (const exactCampId of threadIds) {
       const campRoot = join(campsRoot, exactCampId)
       const attachmentRoot = join(campRoot, 'attachments')
       await mkdir(campRoot, { mode: 0o700 })
@@ -2261,7 +2836,7 @@ async function seedActivity(entry, index) {
   `] : []).join('\n')
   const evidenceIds = evidence.map((item) => item.id)
   const toolName = entry.payload.toolName
-    ?? (entry.sourceAuthority === 'core' ? 'camp.message.send' : null)
+    ?? (entry.sourceAuthority === 'core' ? 'thread.message.send' : null)
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
     BEGIN IMMEDIATE;
@@ -2756,7 +3331,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
       && !card?.textContent?.includes('只读快照')
   })()`, 30_000)
   const draft = await evaluate(cdp,
-    `window.rovai.request('camp.composerDraft.get', { campId: ${JSON.stringify(campId)} })`,
+    `window.rovai.request('camp.composerDraft.get', { threadId: ${JSON.stringify(threadId)} })`,
     true)
   const directoryAttachment = draft?.attachments?.find((attachment) =>
     attachment.displayName === '项目资料')
@@ -3956,12 +4531,12 @@ function assertRuntimeRows(observed) {
 
 async function openCamp(cdp, id) {
   await waitForExpression(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${id}`)}
+    const target = ${JSON.stringify(`thread:${id}`)}
     return [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === target)
   })()`, 30_000)
   const opened = await evaluate(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${id}`)}
+    const target = ${JSON.stringify(`thread:${id}`)}
     const menu = [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .find((element) => element.dataset.sidebarMenuTarget === target)
     const button = menu?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')
@@ -4683,9 +5258,9 @@ async function verifyGlobalExecutionPlacement(cdp) {
     `document.querySelector('.camp-detail-entry[aria-expanded="true"]')?.click()`)
   await waitForExpression(cdp,
     `document.querySelector('.camp-detail-popover')?.hidden`)
-  await openCamp(cdp, campId)
+  await openCamp(cdp, threadId)
   await waitForExpression(cdp,
-    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`, 30_000)
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${threadTitle}`)}`, 30_000)
   await waitForExpression(cdp, `(() => {
     const activeTab = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
       ?.querySelector(':scope > span:not([aria-hidden="true"])')?.textContent?.trim()
@@ -4714,7 +5289,7 @@ async function verifyGlobalExecutionPlacement(cdp) {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`)
   await evaluate(cdp, `document.querySelector('.settings-sidebar-back')?.click()`)
   await waitForExpression(cdp,
-    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`, 30_000)
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${threadTitle}`)}`, 30_000)
   await waitForExpression(cdp, `(() => {
     const activeTab = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
       ?.querySelector(':scope > span:not([aria-hidden="true"])')?.textContent?.trim()
@@ -4761,7 +5336,7 @@ async function verifyRightExecutionPlacement(cdp) {
   } catch (error) {
     const state = await evaluate(cdp, `(() => ({
       visibleHosts: [...document.querySelectorAll('.file-preview-retained-host:not([hidden])')].map((host) => ({
-        campId: host.dataset.previewCamp ?? null,
+        threadId: host.dataset.previewCamp ?? null,
         tabs: [...host.querySelectorAll('.file-preview-tab-activate')].map((tab) => ({
           label: tab.textContent?.trim() ?? null,
           selected: tab.getAttribute('aria-selected')
@@ -4822,7 +5397,7 @@ async function verifyExecutionPlacementAcrossRestart(currentApp) {
     `innerWidth === 1440 && innerHeight === 920 && Math.abs(devicePixelRatio - 1) < 0.01`)
   await evaluate(currentApp.cdp,
     'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))', true)
-  await openCamp(currentApp.cdp, campId)
+  await openCamp(currentApp.cdp, threadId)
   await chooseExecutionPlacement(currentApp.cdp, 'inspector')
   await waitForExpression(currentApp.cdp, `Boolean(document.querySelector('.run-pulse-inspector'))`)
   const beforeRestart = await evaluate(
@@ -4836,11 +5411,11 @@ async function verifyExecutionPlacementAcrossRestart(currentApp) {
   await closeApp(currentApp)
   const relaunchedApp = await launchApp(debugPort, 1440, 920)
   try {
-    await openCamp(relaunchedApp.cdp, campId)
+    await openCamp(relaunchedApp.cdp, threadId)
     await waitForExpression(relaunchedApp.cdp,
       `(() => {
         return document.querySelector('.camp-workspace')?.getAttribute('aria-label')
-          === ${JSON.stringify(`会话：${campTitle}`)}
+          === ${JSON.stringify(`会话：${threadTitle}`)}
           && !document.querySelector('.timeline-pane > .run-pulse-bottom')
       })()`, 30_000)
     const afterRestart = await evaluate(
@@ -4961,6 +5536,8 @@ async function verifyExecutionPlacementWriteFailure(cdp) {
 async function launchApp(port, width, height) {
   const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
+  const contextTrace = []
+  let traceLine = ''
   const child = spawn(executable, [
     ...(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DISABLE_SANDBOX === '1'
       ? ['--no-sandbox']
@@ -4972,7 +5549,19 @@ async function launchApp(port, width, height) {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1', TMPDIR: runtimeTempDir }
   })
-  child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+  child.stderr.on('data', (chunk) => {
+    stderr.push(String(chunk))
+    traceLine += String(chunk)
+    const lines = traceLine.split('\n')
+    traceLine = lines.pop().slice(-65536)
+    for (const line of lines) {
+      const marker = 'ROVAI_CONTEXT_ACCEPTANCE '
+      const offset = line.indexOf(marker)
+      if (offset < 0) continue
+      try { contextTrace.push(JSON.parse(line.slice(offset + marker.length))) } catch { /* partial diagnostic */ }
+      if (contextTrace.length > 1000) contextTrace.shift()
+    }
+  })
   let cdp = null
   try {
     const target = await waitForTarget(port, stderr)
@@ -4994,7 +5583,7 @@ async function launchApp(port, width, height) {
     const health = await evaluate(cdp, `window.rovai.request('health.check', {})`, true)
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
-    return { cdp, port, child }
+    return { cdp, port, child, contextTrace }
   } catch (error) {
     let supervisor = null
     if (cdp) {
@@ -5187,11 +5776,13 @@ async function connectCdp(url) {
     const pendingRequest = pending.get(message.id)
     if (!pendingRequest) return
     pending.delete(message.id)
+    clearTimeout(pendingRequest.timer)
     if (message.error) pendingRequest.reject(new Error(message.error.message))
     else pendingRequest.resolve(message)
   })
   socket.addEventListener('close', () => {
     for (const pendingRequest of pending.values()) {
+      clearTimeout(pendingRequest.timer)
       pendingRequest.reject(new Error('CDP connection closed'))
     }
     pending.clear()
@@ -5200,7 +5791,11 @@ async function connectCdp(url) {
     send(method, params = {}) {
       return new Promise((resolveSend, rejectSend) => {
         const id = nextId++
-        pending.set(id, { resolve: resolveSend, reject: rejectSend })
+        const timer = setTimeout(() => {
+          pending.delete(id)
+          rejectSend(new Error(`CDP ${method} timed out`))
+        }, 30_000)
+        pending.set(id, { resolve: resolveSend, reject: rejectSend, timer })
         socket.send(JSON.stringify({ id, method, params }))
       })
     },
@@ -5352,6 +5947,19 @@ function normalizeClipboardArchive(archive) {
 
 function runSql(path, sql) {
   return runProcess('/usr/bin/sqlite3', [path, sql])
+}
+
+async function filesContainingMarker(rootPath, marker) {
+  const matches = []
+  const visit = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await visit(path)
+      else if (entry.isFile() && (await readFile(path)).includes(marker)) matches.push(path)
+    }
+  }
+  await visit(rootPath)
+  return matches
 }
 
 function runProcess(command, args, { input } = {}) {

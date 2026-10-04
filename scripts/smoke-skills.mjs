@@ -579,7 +579,7 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   let lastState = null
   const resolvedApprovals = new Set()
   const snapshot = await waitFor(async () => {
-    const candidate = await request('camps.snapshot', { campId: created.payload.campId })
+    const candidate = await request('camps.snapshot', { threadId: created.payload.threadId })
     for (const approval of candidate.approvals.filter((value) =>
       value.status === 'pending'
         && !resolvedApprovals.has(value.id)
@@ -592,7 +592,7 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
       }
       const resolution = await request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
-        campId: created.payload.campId,
+        threadId: created.payload.threadId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId: option.optionId,
@@ -696,11 +696,11 @@ async function runSkillAbsenceProbe(request, workspace, forbiddenMarkers) {
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
     throw new Error(`Pi Skill absence Camp was not accepted: ${JSON.stringify(created)}`)
   }
-  const campId = created.payload.campId
+  const threadId = created.payload.threadId
   const agentRunId = created.payload.agentRunIds[0]
   const resolvedApprovals = new Set()
   const snapshot = await waitFor(async () => {
-    const candidate = await request('camps.snapshot', { campId })
+    const candidate = await request('camps.snapshot', { threadId })
     for (const approval of candidate.approvals.filter((value) =>
       value.status === 'pending'
         && !resolvedApprovals.has(value.id)
@@ -710,7 +710,7 @@ async function runSkillAbsenceProbe(request, workspace, forbiddenMarkers) {
       if (!option) throw new Error(`Pi Skill absence probe Approval has no deny option: ${JSON.stringify(approval)}`)
       const resolution = await request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
-        campId,
+        threadId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId: option.optionId,

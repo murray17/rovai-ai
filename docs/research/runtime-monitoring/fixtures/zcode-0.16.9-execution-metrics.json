@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "runtime": "zcode-app",
+  "runtimeVersion": "0.16.9",
+  "configuredModel": "zcode-app://runtime-default",
+  "source": "isolated successful one-Run smoke, runtime_private_extension Usage, monitoring.execution read after terminal",
+  "visibleTextDeltaCount": 2,
+  "run": { "status": "succeeded", "promptInputTotalTokens": 15560, "outputTokens": 59, "cacheReadTokens": 0, "cacheWriteTokens": null, "finalized": true },
+  "currentSession": null,
+  "limits": ["Cache Write and Context were not reported", "Provider and effective model behind runtime-default were not exposed", "No Renderer speed sampling was captured"]
+}

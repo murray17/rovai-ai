@@ -1,5 +1,6 @@
 import type { SingleChatRunView } from '@contracts'
 import type { ExecutionProgressItem } from './ui-model'
+import { uiAttribute } from './interface-language'
 
 export function executionInitialFeedback(
   status: SingleChatRunView['status'],
@@ -8,8 +9,8 @@ export function executionInitialFeedback(
   runtimePhase?: 'thinking' | 'executing'
 ): string | null {
   if (hasFinal || items.some((item) => item.kind === 'narration' || item.kind === 'plan' || item.kind === 'tool')) return null
-  if (status === 'queued') return '连接中'
-  if (status === 'running') return runtimePhase === 'thinking' ? '思考中' : '执行中'
+  if (status === 'queued') return uiAttribute('连接中')
+  if (status === 'running') return runtimePhase === 'thinking' ? uiAttribute('思考中') : uiAttribute('执行中')
   return null
 }
 
@@ -23,9 +24,9 @@ export function formatExecutionDuration(startedAt: string, endedAt: string): str
   const minutes = Math.floor((totalSeconds % 3_600) / 60)
   const seconds = totalSeconds % 60
   return [
-    ...(hours > 0 ? [`${hours} 小时`] : []),
-    ...(minutes > 0 ? [`${minutes} 分`] : []),
-    `${seconds} 秒`
+    ...(hours > 0 ? [uiAttribute('{0} 小时', hours)] : []),
+    ...(minutes > 0 ? [uiAttribute('{0} 分', minutes)] : []),
+    uiAttribute('{0} 秒', seconds)
   ].join(' ')
 }
 
@@ -33,9 +34,9 @@ export function executionRunSummary(run: Pick<SingleChatRunView, 'status' | 'sta
   const start = run.startedAt ?? run.createdAt
   const end = run.endedAt ?? now
   const duration = formatExecutionDuration(start, end)
-  if (run.status === 'succeeded') return `工作了 ${duration}`
-  if (run.status === 'cancelled') return `你在 ${duration}后停止了运行`
-  if (run.status === 'failed') return `运行 ${duration}后失败`
-  if (run.status === 'waiting') return '等待继续'
-  return executionInitialFeedback(run.status, []) ?? '等待继续'
+  if (run.status === 'succeeded') return uiAttribute('工作了 {0}', duration)
+  if (run.status === 'cancelled') return uiAttribute('你在 {0}后停止了运行', duration)
+  if (run.status === 'failed') return uiAttribute('运行 {0}后失败', duration)
+  if (run.status === 'waiting') return uiAttribute('等待继续')
+  return executionInitialFeedback(run.status, []) ?? uiAttribute('等待继续')
 }

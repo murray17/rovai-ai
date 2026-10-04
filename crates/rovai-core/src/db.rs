@@ -1,9 +1,31 @@
 #[path = "db_attachment_paths.rs"]
 mod attachment_paths;
+#[path = "db_member_creation.rs"]
+mod member_creation;
 #[path = "db_mission_context.rs"]
 mod mission_context;
 #[path = "db_mission_details.rs"]
 mod mission_details;
+#[path = "db_notification_model.rs"]
+pub(crate) mod notification_model;
+#[path = "db_pending_draft.rs"]
+mod pending_draft;
+#[path = "db_thread_names.rs"]
+mod thread_names;
+#[path = "db_user_projection.rs"]
+mod user_projection;
+
+// Exercise upgrade against the context owner's populated, isolated legacy fixture.
+#[cfg(all(test, feature = "slow-tests"))]
+pub(crate) fn upgrade_user_projection_fixture(database: &mut Database) {
+    user_projection::downgrade_for_test(database.connection());
+    let before = public_history_claim_preserved_evidence_digest(database.connection()).unwrap();
+    user_projection::migrate(database).unwrap();
+    assert_eq!(
+        before,
+        public_history_claim_preserved_evidence_digest(database.connection()).unwrap()
+    );
+}
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -28,7 +50,7 @@ use crate::agent_identity::{
 };
 #[cfg(all(test, feature = "extended-tests"))]
 use crate::agent_runtime_adapter::SkillDeliveryGroupKey;
-use crate::camp_id::CampId;
+use crate::camp_id::ThreadId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::database_admission::{
@@ -46,6 +68,7 @@ use crate::member_avatar::{
 #[cfg(all(test, feature = "extended-tests"))]
 thread_local! {
     static STOP_BEFORE_TASK_VERSIONLESS_MIGRATION_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static STOP_BEFORE_PUBLIC_CONTEXT_MIGRATION_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -269,13 +292,13 @@ const CAMP_FAST_LIFETIME_SCHEMA_OBJECTS: &[(&str, &str)] = &[
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MainCampMigrationSource {
+pub(crate) enum MainThreadMigrationSource {
     Pending,
     Fast,
     FastLifetime,
 }
 
-impl MainCampMigrationSource {
+impl MainThreadMigrationSource {
     fn has_fast(self) -> bool {
         self != Self::Pending
     }
@@ -289,8 +312,8 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.70";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 124;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 133;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -739,6 +762,15 @@ struct CurrentMigrationState {
     v172: bool,
     v173: bool,
     v174: bool,
+    v175: bool,
+    v176: bool,
+    v177: bool,
+    v178: bool,
+    v179: bool,
+    v180: bool,
+    v181: bool,
+    v182: bool,
+    v183: bool,
 }
 
 impl CurrentMigrationState {
@@ -760,11 +792,83 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v183 {
+            let mut previous = *self;
+            previous.v183 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && self.v182
+                && previous.admits("v1.72", 132, classifier);
+        }
+        if self.v182 {
+            let mut previous = *self;
+            previous.v182 = false;
+            return contract == "v1.72"
+                && schema == 132
+                && self.v181
+                && previous.admits("v1.72", 131, classifier);
+        }
+        if self.v181 {
+            let mut previous = *self;
+            previous.v181 = false;
+            return contract == "v1.72"
+                && schema == 131
+                && self.v180
+                && previous.admits("v1.72", 130, classifier);
+        }
+        if self.v180 {
+            let mut previous = *self;
+            previous.v180 = false;
+            return contract == "v1.72"
+                && schema == 130
+                && self.v179
+                && previous.admits("v1.72", 129, classifier);
+        }
+        if self.v179 {
+            let mut previous = *self;
+            previous.v179 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 129
+                && self.v178
+                && previous.admits("v1.72", 128, classifier);
+        }
+        if self.v178 {
+            let mut previous = *self;
+            previous.v178 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 128
+                && self.v177
+                && previous.admits("v1.72", 127, classifier);
+        }
+        if self.v177 {
+            let mut previous = *self;
+            previous.v177 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 127
+                && self.v176
+                && previous.admits("v1.72", 126, classifier);
+        }
+        if self.v176 {
+            let mut previous = *self;
+            previous.v176 = false;
+            return contract == "v1.72"
+                && schema == 126
+                && self.v175
+                && previous.admits("v1.71", 125, classifier);
+        }
+        if self.v175 {
+            let mut previous = *self;
+            previous.v175 = false;
+            return contract == "v1.71"
+                && schema == 125
+                && self.v174
+                && previous.admits("v1.70", 124, classifier);
+        }
         if self.v174 {
             let mut previous = *self;
             previous.v174 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            return contract == "v1.70"
+                && schema == 124
                 && self.v173
                 && previous.admits("v1.69", 123, classifier);
         }
@@ -2723,7 +2827,7 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
 /// already used those numbers. Only the exact shipped main schemas may remap.
 fn main_camp_migration_collision(
     connection: &Connection,
-) -> rusqlite::Result<Option<MainCampMigrationSource>> {
+) -> rusqlite::Result<Option<MainThreadMigrationSource>> {
     let marker = connection
         .query_row(
             "SELECT contract_version, projection_schema_version, classifier_version
@@ -2742,15 +2846,15 @@ fn main_camp_migration_collision(
         return Ok(None);
     };
     let source = match (contract.as_str(), schema, classifier.as_str()) {
-        ("v1.33", 71, V116_CLASSIFIER_VERSION) => MainCampMigrationSource::Pending,
-        ("v1.34", 72, V116_CLASSIFIER_VERSION) => MainCampMigrationSource::Fast,
-        ("v1.34", 73, V116_CLASSIFIER_VERSION) => MainCampMigrationSource::FastLifetime,
+        ("v1.33", 71, V116_CLASSIFIER_VERSION) => MainThreadMigrationSource::Pending,
+        ("v1.34", 72, V116_CLASSIFIER_VERSION) => MainThreadMigrationSource::Fast,
+        ("v1.34", 73, V116_CLASSIFIER_VERSION) => MainThreadMigrationSource::FastLifetime,
         _ => return Ok(None),
     };
     let mut state = load_current_migration_state(connection)?;
     if !state.v117
         || state.v118 != source.has_fast()
-        || state.v119 != (source == MainCampMigrationSource::FastLifetime)
+        || state.v119 != (source == MainThreadMigrationSource::FastLifetime)
     {
         return Ok(None);
     }
@@ -2786,10 +2890,10 @@ fn main_camp_migration_collision(
 
 fn pending_fast_schema_matches(
     connection: &Connection,
-    source: MainCampMigrationSource,
+    source: MainThreadMigrationSource,
 ) -> rusqlite::Result<bool> {
     let has_fast = source.has_fast();
-    let has_lifetime = source == MainCampMigrationSource::FastLifetime;
+    let has_lifetime = source == MainThreadMigrationSource::FastLifetime;
     let state = load_current_migration_state(connection)?;
     let has_source_attachments = state.v137;
     let normalized = |sql: &str| {
@@ -2905,9 +3009,9 @@ fn pending_fast_schema_matches(
 /// rows or turn ordinary upgrades into whole-database integrity diagnostics.
 fn validate_joined_channel_schema(connection: &Connection) -> Result<()> {
     let source = if load_current_migration_state(connection)?.v130 {
-        MainCampMigrationSource::FastLifetime
+        MainThreadMigrationSource::FastLifetime
     } else {
-        MainCampMigrationSource::Fast
+        MainThreadMigrationSource::Fast
     };
     if !pending_fast_schema_matches(connection, source)? {
         anyhow::bail!("joined schema is missing the exact Pending/Fast objects or columns");
@@ -3086,6 +3190,7 @@ pub(crate) fn classify_database_contract(
         return Ok(DatabaseContractClassification::Unknown(None));
     };
     let migrations = load_current_migration_state(connection)?;
+    let legacy_main_source = legacy_main_context_source(connection, &marker, migrations)?;
     let legacy_client_source = legacy_web_client_source(connection, &marker, migrations)?;
     let deployed_tool_source = marker.contract_version == "v1.52"
         && marker.projection_schema_version == 92
@@ -3192,6 +3297,18 @@ pub(crate) fn classify_database_contract(
         || (migrations.v172 && !public_context_schema_matches)
         || (migrations.v173 && !skills_rebuild_schema_matches)
         || (migrations.v174 && !public_history_claim_schema_matches)
+        || (migrations.v175 && !notification_model::schema_matches(connection)?)
+        || (migrations.v176 && !lark_channel_v176_schema_matches(connection)?)
+        || (migrations.v177 && !navigation_summary_schema_matches(connection)?)
+        || (migrations.v178
+            && !legacy_main_source
+            && !runtime_session_context_schema_matches(connection)?)
+        || (migrations.v179
+            && !legacy_main_source
+            && !runtime_session_context_ratio_schema_matches(connection)?)
+        || (migrations.v181 && !user_projection::schema_matches(connection)?)
+        || (migrations.v182 && !member_creation::schema_matches(connection)?)
+        || (migrations.v183 && !pending_draft::schema_matches(connection)?)
         || (migrations.v156
             && !migrations.v157
             && !attachment_paths::schema_matches(connection)?
@@ -3464,7 +3581,7 @@ fn camp_message_agent_run_v163_schema_matches(connection: &Connection) -> rusqli
             'context_manifest_v28_only_insert',
             'context_manifest_v29_only_insert',
             'context_manifest_v30_only_insert',
-            'context_manifest_v31_only_insert',
+            'context_manifest_v31_only_insert','context_manifest_v32_only_insert',
             'context_manifest_quote_profile_insert',
             'runtime_input_delivery_attachment_auth_insert'
         )
@@ -3488,8 +3605,8 @@ fn camp_message_agent_run_v163_schema_matches(connection: &Connection) -> rusqli
                 .contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29)")
             || context_manifest_schema
                 .contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)")
-            || context_manifest_schema
-                .contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)"))
+            || (context_manifest_schema
+                .contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)") || context_manifest_schema.contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)")))
         && (context_manifest_schema
             .contains("context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26)")
             || context_manifest_schema
@@ -3502,15 +3619,15 @@ fn camp_message_agent_run_v163_schema_matches(connection: &Connection) -> rusqli
             || context_manifest_schema.contains(
                 "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)",
             )
-            || context_manifest_schema.contains(
+            || (context_manifest_schema.contains(
                 "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)",
-            ))
+            ) || context_manifest_schema.contains("context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)")))
         && (context_manifest_schema.contains("run_facts_schema_version IN (1, 2, 3, 4, 5)")
             || context_manifest_schema.contains("run_facts_schema_version IN (1, 2, 3, 4, 5, 6)")
             || context_manifest_schema
                 .contains("run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7)")
-            || context_manifest_schema
-                .contains("run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8)"))
+            || (context_manifest_schema
+                .contains("run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8)") || context_manifest_schema.contains("run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9)")))
         && automation_run_schema.contains("trigger_message_id TEXT UNIQUE")
         && automation_run_schema.contains("trigger_delivery_id TEXT UNIQUE")
         && mission_start_schema
@@ -3541,7 +3658,7 @@ fn default_recipient_mention_v166_schema_matches(
             'agent_run_input_v28_only_insert',
             'agent_run_input_v29_only_insert',
             'agent_run_input_v30_only_insert',
-            'agent_run_input_v31_only_insert',
+            'agent_run_input_v31_only_insert','agent_run_input_v32_only_insert',
             'agent_run_input_context_projection_immutable'
         )
         "#,
@@ -3561,7 +3678,7 @@ fn default_recipient_mention_v166_schema_matches(
             'context_manifest_v28_only_insert',
             'context_manifest_v29_only_insert',
             'context_manifest_v30_only_insert',
-            'context_manifest_v31_only_insert',
+            'context_manifest_v31_only_insert','context_manifest_v32_only_insert',
             'context_manifest_quote_profile_insert',
             'runtime_input_delivery_attachment_auth_insert'
         )
@@ -3571,7 +3688,7 @@ fn default_recipient_mention_v166_schema_matches(
     )?;
     let new_write_trigger: String = connection
         .query_row(
-            "SELECT COALESCE(sql, '') FROM sqlite_master WHERE type = 'trigger' AND name IN ('context_manifest_v27_only_insert', 'context_manifest_v28_only_insert', 'context_manifest_v29_only_insert', 'context_manifest_v30_only_insert', 'context_manifest_v31_only_insert')",
+            "SELECT COALESCE(sql, '') FROM sqlite_master WHERE type = 'trigger' AND name IN ('context_manifest_v27_only_insert', 'context_manifest_v28_only_insert', 'context_manifest_v29_only_insert', 'context_manifest_v30_only_insert', 'context_manifest_v31_only_insert','context_manifest_v32_only_insert')",
             [],
             |row| row.get(0),
         )
@@ -3587,6 +3704,27 @@ fn default_recipient_mention_v166_schema_matches(
         [],
         |row| row.get(0),
     )?;
+    if manifest_schema.contains(
+        "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)",
+    ) {
+        return Ok(input_columns == 2
+            && input_guards == 2
+            && triggers == 3
+            && manifest_schema.contains(
+                "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)",
+            )
+            && manifest_schema
+                .contains("context_delivery_profile_version IN (4, 5, 6, 7, 8, 9, 10)")
+            && new_write_trigger.contains("NEW.context_manifest_version = 32")
+            && new_write_trigger.contains("NEW.context_manifest_version = 28")
+            && new_write_trigger.contains("NEW.context_manifest_version = 30")
+            && new_write_trigger.contains("NEW.context_manifest_version = 27")
+            && new_write_trigger.contains("invocation_kind = 'batch'")
+            && profile_trigger.contains("NEW.context_manifest_version = 31")
+            && profile_trigger.contains("NEW.context_delivery_profile_version = 10")
+            && attachment_trigger
+                .contains("context_manifest_version IN (26, 27, 28, 29, 30, 31, 32)"));
+    }
     if manifest_schema.contains(
         "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)",
     ) {
@@ -3723,6 +3861,23 @@ fn camp_deletion_v169_schema_matches(connection: &Connection) -> rusqlite::Resul
         |row| row.get(0),
     )?;
     Ok(camp_columns == 7 && journal_columns == 4 && indexes == 4)
+}
+
+fn lark_channel_v176_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    connection.query_row(r#"
+        SELECT
+            (SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN (
+                'lark_account', 'lark_owner_identity', 'lark_owner_app_identity',
+                'lark_member_bot', 'lark_member_bot_publication_intent')) = 5
+            AND EXISTS(SELECT 1 FROM pragma_table_info('lark_account')
+                WHERE name='brand' AND type='TEXT' AND "notnull"=1)
+            AND (SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN (
+                'channel_credentials', 'channel_developer_sessions', 'automation_notification_delivery')
+                AND instr(sql, "'lark'") > 0) = 3
+            AND (SELECT count(*) FROM sqlite_schema WHERE type='view' AND name IN (
+                'channel_member_bot_directory', 'channel_owner_app_identity_directory')
+                AND instr(sql, "'lark'") > 0) = 2
+    "#, [], |row| row.get(0))
 }
 
 fn tool_output_v170_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
@@ -3906,6 +4061,106 @@ fn public_history_claim_preserved_evidence_digest(connection: &Connection) -> Re
     }))
 }
 
+fn navigation_summary_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    connection.query_row(
+        "SELECT
+          (SELECT COUNT(*) FROM pragma_table_info('camp') WHERE
+              (name IN ('navigation_activity_sequence', 'navigation_completion_sequence') AND type='INTEGER' AND [notnull]=1 AND dflt_value='0')
+              OR (name='navigation_activity_at' AND type='TEXT' AND [notnull]=0)) = 3
+          AND (SELECT COUNT(*) FROM sqlite_master WHERE
+              (type='index' AND name IN ('camp_navigation_window_idx', 'agent_run_navigation_active_idx', 'agent_run_navigation_legacy_active_idx'))
+              OR (type='trigger' AND name IN ('camp_navigation_event_insert', 'camp_navigation_event_sequence', 'camp_navigation_reply_tombstone'))) = 6",
+        [], |row| row.get(0))
+}
+
+// Main and the installed metrics preview used overlapping receipts 178..180.
+// Recognize main only by its complete shape, receipts and exact source marker.
+fn legacy_main_context_source(
+    connection: &Connection,
+    marker: &DatabaseContractMarker,
+    migrations: CurrentMigrationState,
+) -> rusqlite::Result<bool> {
+    if marker.contract_version != "v1.72"
+        || !(128..=130).contains(&marker.projection_schema_version)
+        || migrations.v181
+        || migrations.v182
+        || migrations.v183
+        || !migrations.admits(
+            "v1.72",
+            marker.projection_schema_version,
+            &marker.classifier_version,
+        )
+    {
+        return Ok(false);
+    }
+    let main_layout: bool = connection.query_row(
+        "SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_session_context_latest')
+          AND EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='context_manifest_v32_only_insert')
+          AND EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='agent_run_input_v32_only_insert')",
+        [], |row| row.get(0))?;
+    if !main_layout
+        || user_projection::schema_matches(connection)? != (marker.projection_schema_version >= 129)
+    {
+        return Ok(false);
+    }
+    if marker.projection_schema_version == 130 {
+        return member_creation::schema_matches(connection);
+    }
+    connection.query_row(
+        "SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('member_creation', 'member_creation_camp_idx', 'member_creation_preference'))",
+        [], |row| row.get(0))
+}
+
+fn create_runtime_session_context_table(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(r#"
+            CREATE TABLE runtime_session_context_latest (
+                conversation_id TEXT NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+                native_binding_id TEXT NOT NULL,
+                native_binding_generation INTEGER NOT NULL CHECK(native_binding_generation >= 1),
+                native_session_id TEXT NOT NULL,
+                runtime_kind TEXT NOT NULL,
+                runtime_version TEXT,
+                model_key TEXT,
+                effective_config_digest TEXT,
+                context_used_tokens INTEGER CHECK(context_used_tokens IS NULL OR context_used_tokens >= 0),
+                context_window_tokens INTEGER CHECK(context_window_tokens IS NULL OR context_window_tokens > 0),
+                source TEXT NOT NULL,
+                dialect_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                source_agent_run_id TEXT NOT NULL,
+                source_execution_epoch INTEGER NOT NULL CHECK(source_execution_epoch >= 1),
+                PRIMARY KEY(conversation_id),
+                CHECK(context_used_tokens IS NULL OR context_window_tokens IS NULL
+                    OR context_used_tokens <= context_window_tokens)
+            );
+    "#)
+}
+
+fn runtime_session_context_ratio_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let column: bool = connection.query_row(
+        "SELECT COUNT(*)=1 FROM pragma_table_info('runtime_session_context_latest') WHERE name='native_context_ratio' AND type='REAL' AND [notnull]=0 AND dflt_value IS NULL",
+        [], |row| row.get(0))?;
+    let schema: String = connection.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name='runtime_session_context_latest'", [], |row| row.get(0))?;
+    Ok(column
+        && schema.contains("native_context_ratio >= 0")
+        && schema.contains("native_context_ratio <= 1"))
+}
+
+fn runtime_session_context_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let schema: Option<String> = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='runtime_session_context_latest'",
+        [],
+        |row| row.get(0),
+    ).optional()?;
+    Ok(schema.is_some_and(|sql| {
+        sql.contains("PRIMARY KEY(conversation_id)")
+            && sql.contains("native_binding_generation INTEGER NOT NULL")
+            && sql.contains("context_used_tokens INTEGER")
+            && sql.contains("context_window_tokens INTEGER")
+            && sql.contains("observed_at TEXT NOT NULL")
+    }))
+}
+
 fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
     let columns: i64 = connection.query_row(
         r#"
@@ -3930,8 +4185,27 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
     let run = schema("table", "agent_run")?;
     let manifest = schema("table", "context_manifest")?;
     let input = schema("table", "agent_run_input")?;
-    let manifest_guard = schema("trigger", "context_manifest_v31_only_insert")?;
-    let input_guard = schema("trigger", "agent_run_input_v31_only_insert")?;
+    let thread_names: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=180) OR EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='context_manifest_v32_only_insert')",
+        [],
+        |row| row.get(0),
+    )?;
+    let manifest_guard = schema(
+        "trigger",
+        if thread_names {
+            "context_manifest_v32_only_insert"
+        } else {
+            "context_manifest_v31_only_insert"
+        },
+    )?;
+    let input_guard = schema(
+        "trigger",
+        if thread_names {
+            "agent_run_input_v32_only_insert"
+        } else {
+            "agent_run_input_v31_only_insert"
+        },
+    )?;
     let profile_guard = schema("trigger", "context_manifest_quote_profile_insert")?;
     let attachment_guard = schema("trigger", "runtime_input_delivery_attachment_auth_insert")?;
     let skills_tables: i64 = connection.query_row(
@@ -3944,7 +4218,11 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
         "trigger",
         "native_session_bootstrap_evidence_v5_only_insert",
     )?;
-    Ok(columns == 2
+    Ok((!thread_names || (manifest_guard.contains("NEW.context_manifest_version = 32 AND NEW.formatter_version = 32")
+        && manifest_guard.contains("NEW.context_manifest_version = 28 AND NEW.formatter_version = 28")
+        && manifest_guard.contains("NEW.run_facts_schema_version = 9 AND NEW.context_delivery_profile_version = 10")
+        && profile_guard.contains("NEW.context_manifest_version = 32 AND NEW.context_delivery_profile_version = 10")))
+        && columns == 2
         && skills_tables == 4
         && bootstrap_guard.contains("bootstrap_formatter_version IS NOT 5")
         && bootstrap.contains("native_session_bootstrap_v5")
@@ -3955,12 +4233,12 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
         && run.contains(
             "claim_has_additional_public_messages INTEGER CHECK(claim_has_additional_public_messages IN (0, 1))",
         )
-        && manifest.contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)")
-        && manifest.contains("context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)")
-        && manifest.contains("run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8)")
+        && manifest.contains(if thread_names { "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)" } else { "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)" })
+        && manifest.contains(if thread_names { "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)" })
+        && manifest.contains(if thread_names { "run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9)" } else { "run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8)" })
         && manifest.contains("context_manifest_version = 31 AND formatter_version = 31 AND run_facts_schema_version = 8")
         && manifest.contains("context_manifest_version = 30 AND formatter_version = 30 AND run_facts_schema_version = 7")
-        && input.contains("context_manifest_version IN (26, 27, 28, 29, 30, 31)")
+        && input.contains(if thread_names { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (26, 27, 28, 29, 30, 31)" })
         && manifest_guard.contains("NEW.context_manifest_version = 31 AND NEW.formatter_version = 31")
         && manifest_guard.contains("NEW.run_facts_schema_version = 8 AND NEW.context_delivery_profile_version = 10")
         && manifest_guard.contains("run.claim_previous_public_boundary_sequence IS NOT NULL")
@@ -3970,10 +4248,10 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
         && manifest_guard.contains("NEW.context_manifest_version = 29")
         && manifest_guard.contains("NEW.context_manifest_version = 27")
         && manifest_guard.contains("NEW.context_manifest_version = 26")
-        && input_guard.contains("NEW.context_manifest_version IS NOT 31")
+        && input_guard.contains(if thread_names { "NEW.context_manifest_version IS NOT 32" } else { "NEW.context_manifest_version IS NOT 31" })
         && profile_guard.contains("NEW.context_manifest_version = 31 AND NEW.context_delivery_profile_version = 10")
         && profile_guard.contains("NEW.context_manifest_version = 30 AND NEW.context_delivery_profile_version = 10")
-        && attachment_guard.contains("context_manifest_version IN (26, 27, 29, 30, 31)"))
+        && attachment_guard.contains(if thread_names { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (26, 27, 29, 30, 31)" }))
 }
 
 fn skills_rebuild_v173_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
@@ -4395,7 +4673,7 @@ fn message_quote_v148_schema_matches(connection: &Connection) -> rusqlite::Resul
             return Ok(false);
         }
     }
-    let guards: i64 = connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE type='trigger' AND name IN ('context_manifest_v23_only_insert','context_manifest_v24_only_insert','context_manifest_v25_only_insert','context_manifest_v26_only_insert','context_manifest_v27_only_insert','context_manifest_v28_only_insert','context_manifest_v29_only_insert','context_manifest_v30_only_insert','context_manifest_v31_only_insert','context_manifest_quote_profile_insert')", [], |row| row.get(0))?;
+    let guards: i64 = connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE type='trigger' AND name IN ('context_manifest_v23_only_insert','context_manifest_v24_only_insert','context_manifest_v25_only_insert','context_manifest_v26_only_insert','context_manifest_v27_only_insert','context_manifest_v28_only_insert','context_manifest_v29_only_insert','context_manifest_v30_only_insert','context_manifest_v31_only_insert','context_manifest_v32_only_insert','context_manifest_quote_profile_insert')", [], |row| row.get(0))?;
     Ok(guards == 2)
 }
 
@@ -4901,7 +5179,16 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 171),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 172),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 173),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 174)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 174),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 175),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 176),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 177),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 178),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 179),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 180),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 181),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 182),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 183)
         "#,
         [],
         |row| {
@@ -5011,6 +5298,15 @@ fn load_current_migration_state(
                 v172: row.get(102)?,
                 v173: row.get(103)?,
                 v174: row.get(104)?,
+                v175: row.get(105)?,
+                v176: row.get(106)?,
+                v177: row.get(107)?,
+                v178: row.get(108)?,
+                v179: row.get(109)?,
+                v180: row.get(110)?,
+                v181: row.get(111)?,
+                v182: row.get(112)?,
+                v183: row.get(113)?,
             })
         },
     )
@@ -7324,6 +7620,10 @@ impl Database {
                 "migration_reconciliation",
                 self.reconcile_legacy_feishu_migration_collision()
             );
+            migration_step!(
+                "migration_main_metrics_convergence",
+                self.reconcile_main_metrics_lineage()
+            );
         }
         if fresh_database {
             let transaction = self
@@ -8082,6 +8382,40 @@ impl Database {
             if !self.schema_migration_applied(174)? {
                 migration_step!("migration_174", self.migrate_public_history_claim_v174());
             }
+            #[cfg(all(test, feature = "extended-tests"))]
+            if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
+                return Ok(());
+            }
+            if !self.schema_migration_applied(175)? {
+                migration_step!("migration_175", notification_model::migrate(self));
+            }
+            if !self.schema_migration_applied(176)? {
+                migration_step!("migration_176", self.migrate_lark_channel_v176());
+            }
+            if !self.schema_migration_applied(177)? {
+                migration_step!("migration_177", self.migrate_navigation_summary_v177());
+            }
+            if !self.schema_migration_applied(178)? {
+                migration_step!("migration_178", self.migrate_runtime_session_context_v178());
+            }
+            if !self.schema_migration_applied(179)? {
+                migration_step!(
+                    "migration_179",
+                    self.migrate_runtime_session_context_ratio_v179()
+                );
+            }
+            if !self.schema_migration_applied(180)? {
+                migration_step!("migration_180", thread_names::migrate(self));
+            }
+            if !self.schema_migration_applied(181)? {
+                migration_step!("migration_181", user_projection::migrate(self));
+            }
+            if !self.schema_migration_applied(182)? {
+                migration_step!("migration_182", member_creation::migrate(self));
+            }
+            if !self.schema_migration_applied(183)? {
+                migration_step!("migration_183", pending_draft::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -8815,6 +9149,40 @@ impl Database {
         }
         if !self.schema_migration_applied(174)? {
             migration_step!("migration_174", self.migrate_public_history_claim_v174());
+        }
+        #[cfg(all(test, feature = "extended-tests"))]
+        if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
+            return Ok(());
+        }
+        if !self.schema_migration_applied(175)? {
+            migration_step!("migration_175", notification_model::migrate(self));
+        }
+        if !self.schema_migration_applied(176)? {
+            migration_step!("migration_176", self.migrate_lark_channel_v176());
+        }
+        if !self.schema_migration_applied(177)? {
+            migration_step!("migration_177", self.migrate_navigation_summary_v177());
+        }
+        if !self.schema_migration_applied(178)? {
+            migration_step!("migration_178", self.migrate_runtime_session_context_v178());
+        }
+        if !self.schema_migration_applied(179)? {
+            migration_step!(
+                "migration_179",
+                self.migrate_runtime_session_context_ratio_v179()
+            );
+        }
+        if !self.schema_migration_applied(180)? {
+            migration_step!("migration_180", thread_names::migrate(self));
+        }
+        if !self.schema_migration_applied(181)? {
+            migration_step!("migration_181", user_projection::migrate(self));
+        }
+        if !self.schema_migration_applied(182)? {
+            migration_step!("migration_182", member_creation::migrate(self));
+        }
+        if !self.schema_migration_applied(183)? {
+            migration_step!("migration_183", pending_draft::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -18707,11 +19075,11 @@ impl Database {
             .path
             .parent()
             .context("v99 database path has no data directory")?;
-        let attachment_store = crate::camp_attachment::CampAttachmentStore::new(data_dir);
+        let attachment_store = crate::camp_attachment::ThreadAttachmentStore::new(data_dir);
         for (camp_id, attachment_id, media_type, byte_size, content_digest, storage_path) in
             &published_attachments
         {
-            CampId::parse(camp_id)
+            ThreadId::parse(camp_id)
                 .with_context(|| format!("v99 Published Attachment has invalid Camp {camp_id}"))?;
             Uuid::parse_str(attachment_id).with_context(|| {
                 format!("v99 Published Attachment has invalid ID {attachment_id}")
@@ -23459,7 +23827,7 @@ impl Database {
                 [],
             )?;
         }
-        if source == MainCampMigrationSource::FastLifetime {
+        if source == MainThreadMigrationSource::FastLifetime {
             transaction.execute(
                 "UPDATE schema_migration SET version = 130 WHERE version = 119",
                 [],
@@ -23578,7 +23946,7 @@ impl Database {
                 V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 V116_CLASSIFIER_VERSION,
             )
-            || !pending_fast_schema_matches(&transaction, MainCampMigrationSource::Fast)?
+            || !pending_fast_schema_matches(&transaction, MainThreadMigrationSource::Fast)?
         {
             anyhow::bail!("Fast lifetime migration requires the exact legacy Fast schema");
         }
@@ -28180,6 +28548,151 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_navigation_summary_v177(&mut self) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&tx)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.72" && marker.projection_schema_version == 126),
+            "Navigation summary migration requires v1.72/schema 126"
+        );
+        tx.execute_batch(include_str!("db_navigation_summary.sql"))?;
+        tx.execute_batch("INSERT INTO schema_migration VALUES (177, datetime('now'));
+            UPDATE rovai_data_contract SET projection_schema_version=127, updated_at=datetime('now') WHERE singleton=1;")?;
+        anyhow::ensure!(
+            navigation_summary_schema_matches(&tx)?,
+            "Navigation summary schema is incomplete"
+        );
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&tx)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.contract_version == "v1.72" && marker.projection_schema_version == 127
+            ),
+            "Navigation summary migration failed v1.72/schema 127 admission"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn reconcile_main_metrics_lineage(&mut self) -> Result<()> {
+        let DatabaseContractClassification::SupportedMigrationSource(marker) =
+            classify_database_contract(&self.connection)?
+        else {
+            return Ok(());
+        };
+        if !legacy_main_context_source(
+            &self.connection,
+            &marker,
+            load_current_migration_state(&self.connection)?,
+        )? {
+            return Ok(());
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let before = public_history_claim_preserved_evidence_digest(&tx)?;
+        create_runtime_session_context_table(&tx)?;
+        tx.execute_batch("ALTER TABLE runtime_session_context_latest ADD COLUMN native_context_ratio REAL
+            CHECK(native_context_ratio IS NULL OR (native_context_ratio >= 0 AND native_context_ratio <= 1));")?;
+        // Existing receipts retain their timestamps. Add only the missing receipts
+        // after proving each already-installed main schema above.
+        let (last_receipt, target_schema) = match marker.projection_schema_version {
+            128 => (180, 130),
+            129 => (181, 131),
+            130 => (182, 132),
+            _ => unreachable!("source was admitted above"),
+        };
+        for version in 179..=last_receipt {
+            tx.execute(
+                "INSERT OR IGNORE INTO schema_migration VALUES (?1, datetime('now'))",
+                [version],
+            )?;
+        }
+        tx.execute("UPDATE rovai_data_contract SET projection_schema_version=?1,updated_at=datetime('now') WHERE singleton=1", [target_schema])?;
+        anyhow::ensure!(
+            before == public_history_claim_preserved_evidence_digest(&tx)?,
+            "Main metrics convergence changed frozen evidence"
+        );
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&tx)?,
+                DatabaseContractClassification::Current(_)
+                    | DatabaseContractClassification::SupportedMigrationSource(_)
+            ),
+            "Main metrics convergence failed schema admission"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn migrate_runtime_session_context_v178(&mut self) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&tx)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.contract_version == "v1.72" && marker.projection_schema_version == 127),
+            "Runtime session context migration requires v1.72/schema 127"
+        );
+        create_runtime_session_context_table(&tx)?;
+        tx.execute_batch("INSERT INTO schema_migration VALUES (178, datetime('now'));
+            UPDATE rovai_data_contract SET projection_schema_version=128, updated_at=datetime('now') WHERE singleton=1;")?;
+        anyhow::ensure!(
+            runtime_session_context_schema_matches(&tx)?,
+            "Runtime session context schema is incomplete"
+        );
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&tx)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.contract_version == "v1.72" && marker.projection_schema_version == 128
+            ),
+            "Runtime session context migration failed schema 128 source admission"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn migrate_runtime_session_context_ratio_v179(&mut self) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&tx)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.72" && marker.projection_schema_version == 128),
+            "Runtime context ratio migration requires v1.72/schema 128"
+        );
+        if !runtime_session_context_schema_matches(&tx)? {
+            // Classification above accepts absence only for the complete main v32 layout.
+            create_runtime_session_context_table(&tx)?;
+        }
+        tx.execute_batch(r#"
+            ALTER TABLE runtime_session_context_latest ADD COLUMN native_context_ratio REAL
+                CHECK(native_context_ratio IS NULL OR (native_context_ratio >= 0 AND native_context_ratio <= 1));
+            INSERT INTO schema_migration VALUES (179, datetime('now'));
+            UPDATE rovai_data_contract SET projection_schema_version=129, updated_at=datetime('now') WHERE singleton=1;
+        "#)?;
+        anyhow::ensure!(
+            runtime_session_context_ratio_schema_matches(&tx)?,
+            "Runtime context ratio schema is incomplete"
+        );
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&tx)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.contract_version == "v1.72" && marker.projection_schema_version == 129
+            ),
+            "Runtime context ratio migration failed current schema admission"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
     fn migrate_public_history_claim_v174(&mut self) -> Result<()> {
         self.connection.execute_batch("PRAGMA foreign_keys=OFF;")?;
         let result = (|| -> Result<()> {
@@ -28394,9 +28907,10 @@ impl Database {
             anyhow::ensure!(
                 matches!(
                     classify_database_contract(&tx)?,
-                    DatabaseContractClassification::Current(_)
+                    DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                        if marker.contract_version == "v1.70" && marker.projection_schema_version == 124
                 ),
-                "Public history claim migration failed current schema admission"
+                "Public history claim migration failed v1.70/schema 124 admission"
             );
             tx.commit()?;
             Ok(())
@@ -28404,6 +28918,47 @@ impl Database {
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys=ON;");
         result?;
         foreign_keys_result?;
+        Ok(())
+    }
+
+    fn migrate_lark_channel_v176(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.71" && marker.projection_schema_version == 125),
+            "Lark migration requires the exact v1.71/schema 125 source"
+        );
+        transaction.execute_batch(include_str!("lark_channel_v176.sql"))?;
+        transaction.execute_batch(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (176, datetime('now'));
+            UPDATE rovai_data_contract SET contract_version='v1.72', projection_schema_version=126,
+                reset_reason=NULL, updated_at=datetime('now') WHERE singleton=1;",
+        )?;
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&transaction)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.contract_version == "v1.72" && marker.projection_schema_version == 126
+            ),
+            "Lark migration failed v1.72/schema 126 admission"
+        );
+        validate_migration_foreign_keys(
+            &transaction,
+            &[
+                "lark_account",
+                "lark_owner_identity",
+                "lark_owner_app_identity",
+                "lark_member_bot",
+                "lark_member_bot_publication_intent",
+                "channel_credentials",
+                "channel_developer_sessions",
+                "automation_notification_delivery",
+            ],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -33199,7 +33754,7 @@ impl Database {
             } else {
                 None
             };
-            let camp_id = CampId::new();
+            let camp_id = ThreadId::new();
             let internal_ref = is_repository.then(|| format!("refs/rovai/camps/{camp_id}"));
             let lead = active_profiles
                 .first()
@@ -33442,7 +33997,7 @@ impl Database {
 #[cfg(all(test, feature = "extended-tests"))]
 pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
     database: &mut Database,
-    source: MainCampMigrationSource,
+    source: MainThreadMigrationSource,
 ) {
     downgrade_current_schema_to_v115_source_for_test(database.connection());
     database.migrate_runtime_activity_classifier_v116().unwrap();
@@ -33451,7 +34006,7 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
         database.migrate_camp_member_fast_v127().unwrap();
     }
     let connection = database.connection();
-    if source == MainCampMigrationSource::FastLifetime {
+    if source == MainThreadMigrationSource::FastLifetime {
         connection
             .execute_batch("DROP TRIGGER agent_profile_fast_revision_update;")
             .unwrap();
@@ -33621,8 +34176,73 @@ fn downgrade_current_schema_to_v151_source_for_test(connection: &Connection) {
     }
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
+pub(crate) fn open_v170_source_for_test(directory: &Path) -> Result<Database> {
+    STOP_BEFORE_TASK_VERSIONLESS_MIGRATION_FOR_TEST.with(|flag| {
+        flag.set(true);
+        let result = Database::open(directory);
+        flag.set(false);
+        result
+    })
+}
+
+#[cfg(test)]
+fn downgrade_runtime_session_context_for_test(connection: &Connection) {
+    thread_names::downgrade_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=178)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            "DROP TABLE runtime_session_context_latest;
+             DELETE FROM schema_migration WHERE version IN (178,179);
+             UPDATE rovai_data_contract SET projection_schema_version=127 WHERE singleton=1;",
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_navigation_summary_for_test(connection: &Connection) {
+    downgrade_runtime_session_context_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=177)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            "DROP TRIGGER camp_navigation_event_insert;
+        DROP TRIGGER camp_navigation_event_sequence;
+        DROP TRIGGER camp_navigation_reply_tombstone;
+        DROP INDEX camp_navigation_window_idx;
+        DROP INDEX agent_run_navigation_active_idx;
+        DROP INDEX agent_run_navigation_legacy_active_idx;
+        ALTER TABLE camp DROP COLUMN navigation_activity_sequence;
+        ALTER TABLE camp DROP COLUMN navigation_activity_at;
+        ALTER TABLE camp DROP COLUMN navigation_completion_sequence;
+        DELETE FROM schema_migration WHERE version=177;
+        UPDATE rovai_data_contract SET projection_schema_version=126 WHERE singleton=1;",
+        )
+        .unwrap();
+}
+
 #[cfg(test)]
 fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
+    downgrade_current_schema_to_v175_source_for_test(connection);
+    #[cfg(feature = "extended-tests")]
+    notification_model::downgrade_for_test(connection);
     // Only the old-migration fixtures reverse the three latest migrations.
     // Keep the production classifier and migration source checks exact.
     let has_v173: bool = connection
@@ -33888,6 +34508,40 @@ fn downgrade_recent_context_for_legacy_fixture(connection: &Connection) {
     .unwrap();
     tx.commit().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v175_source_for_test(connection: &Connection) {
+    downgrade_navigation_summary_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=176)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    let transaction = connection.unchecked_transaction().unwrap();
+    for table in [
+        "lark_account",
+        "lark_member_bot",
+        "lark_owner_identity",
+        "lark_owner_app_identity",
+        "lark_member_bot_publication_intent",
+    ] {
+        let count: i64 = transaction
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "downgrade fixture must not discard Lark rows");
+    }
+    transaction
+        .execute_batch(include_str!("lark_channel_v176_downgrade.sql"))
+        .unwrap();
+    transaction.commit().unwrap();
 }
 
 #[cfg(test)]
@@ -37974,6 +38628,224 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_context_migration_upgrades_schema_127_and_rolls_back_atomically() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-context-migration-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                "INSERT INTO camp(id,title,project_binding_kind,project_path,created_at,updated_at)
+             VALUES ('context-camp','kept','quick_chat','','2026-01-01','2026-01-01');",
+            )
+            .unwrap();
+        downgrade_runtime_session_context_for_test(database.connection());
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 127
+        ));
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_context_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version=178 BEGIN SELECT RAISE(ABORT,'context receipt failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            database
+                .migrate_runtime_session_context_v178()
+                .unwrap_err()
+                .to_string()
+                .contains("context receipt failure")
+        );
+        assert!(!runtime_session_context_schema_matches(database.connection()).unwrap());
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 127
+        ));
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_context_receipt")
+            .unwrap();
+        database.migrate_runtime_session_context_v178().unwrap();
+        assert!(runtime_session_context_schema_matches(database.connection()).unwrap());
+        database.seed_agents().unwrap();
+        database.connection().execute_batch("INSERT INTO conversation(id,camp_id,agent_id,created_at,updated_at)
+            VALUES('context-conversation','context-camp','agent_1','2026-01-01','2026-01-01');
+            INSERT INTO runtime_session_context_latest VALUES('context-conversation','binding',1,'session','codex-cli',
+            '0.157.1','model','config',125,1000,'runtime_event','fixture','2026-01-01','run',1);
+            CREATE TEMP TRIGGER reject_ratio_receipt BEFORE INSERT ON schema_migration
+            WHEN NEW.version=179 BEGIN SELECT RAISE(ABORT,'ratio receipt failure'); END;").unwrap();
+        assert!(
+            database
+                .migrate_runtime_session_context_ratio_v179()
+                .unwrap_err()
+                .to_string()
+                .contains("ratio receipt failure")
+        );
+        assert!(!runtime_session_context_ratio_schema_matches(database.connection()).unwrap());
+        assert!(
+            matches!(classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 128)
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_ratio_receipt")
+            .unwrap();
+        drop(database);
+        let reopened = Database::open(&directory).unwrap();
+        assert!(matches!(
+            classify_database_contract(reopened.connection()).unwrap(),
+            DatabaseContractClassification::Current(_)
+        ));
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT title FROM camp WHERE id='context-camp'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "kept"
+        );
+        let saved: (Option<i64>,Option<i64>,Option<f64>) = reopened.connection().query_row(
+            "SELECT context_used_tokens,context_window_tokens,native_context_ratio FROM runtime_session_context_latest",
+            [],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(
+            saved,
+            (Some(125), Some(1000), None),
+            "schema 128 installed data survives the additive ratio migration"
+        );
+        assert!(
+            reopened
+                .connection()
+                .execute(
+                    "UPDATE runtime_session_context_latest SET native_context_ratio=1.01",
+                    []
+                )
+                .is_err()
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn navigation_summary_migration_preserves_tables_backfills_and_rolls_back_with_events() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-navigation-migration-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        database.connection().execute_batch(r#"
+            INSERT INTO camp(id,title,project_binding_kind,project_path,created_at,updated_at)
+            VALUES ('nav-a','A','quick_chat','','2026-01-01','2026-01-01'),
+                   ('nav-b','B','directory','/repo','2026-01-02','2026-01-02');
+            INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,structured_content_json,content_digest,address_mode,addressed_agent_ids_json,version,created_at,updated_at)
+            VALUES('nav-message','nav-a',1,'user','local_user','hello','[]','digest','default','[]',1,'2026-02-01','2026-02-01'),
+                  ('nav-reply','nav-b',1,'agent','agent_1','reply','[]','reply','default','[]',1,'2026-03-01','2026-03-01');
+            INSERT INTO event_log(event_type,camp_id,entity_type,entity_id,payload_json,created_at)
+            VALUES('camp_message.sent','nav-a','camp_message','nav-message','{}','2026-02-01'),
+                  ('camp_message.sent','nav-b','camp_message','nav-reply','{}','2026-03-01');
+        "#).unwrap();
+        let expected = serde_json::to_value(
+            crate::read_model::ReadModelService
+                .navigation_snapshot(&mut database)
+                .unwrap(),
+        )
+        .unwrap();
+        downgrade_navigation_summary_for_test(database.connection());
+        let tables = |database: &Database| {
+            database
+                .connection()
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let before = tables(&database);
+        assert!(
+            matches!(classify_database_contract(database.connection()).unwrap(), DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 126)
+        );
+        database.connection().execute_batch("CREATE TEMP TRIGGER reject_navigation_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=177 BEGIN SELECT RAISE(ABORT,'navigation receipt failure'); END;").unwrap();
+        assert!(
+            database
+                .migrate_navigation_summary_v177()
+                .unwrap_err()
+                .to_string()
+                .contains("navigation receipt failure")
+        );
+        assert!(!navigation_summary_schema_matches(database.connection()).unwrap());
+        assert_eq!(tables(&database), before);
+        assert!(
+            matches!(classify_database_contract(database.connection()).unwrap(), DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 126)
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_navigation_receipt")
+            .unwrap();
+        database.migrate_navigation_summary_v177().unwrap();
+        assert_eq!(
+            tables(&database),
+            before,
+            "navigation must add no persistent table"
+        );
+        assert_eq!(
+            serde_json::to_value(
+                crate::read_model::ReadModelService
+                    .navigation_snapshot(&mut database)
+                    .unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+        {
+            let tx = database.connection_mut().transaction().unwrap();
+            tx.execute_batch("INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,structured_content_json,content_digest,address_mode,addressed_agent_ids_json,version,created_at,updated_at)
+                VALUES('nav-new-reply','nav-a',2,'agent','agent_1','reply','[]','new-reply','default','[]',1,'2026-04-01','2026-04-01');
+                INSERT INTO event_log(event_type,camp_id,entity_type,entity_id,payload_json,created_at)
+                VALUES ('camp_message.sent','nav-a','camp_message','nav-new-reply','{}','2026-04-01');").unwrap();
+            assert!(
+                tx.query_row(
+                    "SELECT navigation_completion_sequence > 0 FROM camp WHERE id='nav-a'",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap()
+            );
+            tx.rollback().unwrap();
+        }
+        assert_eq!(
+            serde_json::to_value(
+                crate::read_model::ReadModelService
+                    .navigation_snapshot(&mut database)
+                    .unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+        drop(database);
+        let mut reopened = Database::open(&directory).unwrap();
+        assert!(matches!(
+            classify_database_contract(reopened.connection()).unwrap(),
+            DatabaseContractClassification::Current(_)
+        ));
+        assert_eq!(
+            serde_json::to_value(
+                crate::read_model::ReadModelService
+                    .navigation_snapshot(&mut reopened)
+                    .unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn v173_preserves_imported_revisions_and_member_studio_disablement() {
         let directory =
             std::env::temp_dir().join(format!("rovai-v173-skills-rebuild-{}", Uuid::new_v4()));
@@ -38232,7 +39104,8 @@ mod tests {
         assert!(source.schema_migration_applied(174).unwrap());
         assert!(matches!(
             classify_database_contract(source.connection()).unwrap(),
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.70" && marker.projection_schema_version == 124
         ));
         drop(source);
         let reopened = Database::open(&directory).unwrap();
@@ -38271,7 +39144,7 @@ mod tests {
         assert!(
             old_insert
                 .to_string()
-                .contains("must use ContextManifest v31")
+                .contains("must use ContextManifest v32")
         );
         for (column, invalid) in [
             ("claim_previous_public_boundary_sequence", -1),
@@ -38414,6 +39287,235 @@ mod tests {
         assert_eq!(business_state(&reopened), before);
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn lark_migration_preserves_rows_rolls_back_and_clones_the_provider_schema() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v175_source_for_test(database.connection());
+        database.connection().execute_batch(r#"
+            INSERT INTO channel_credentials VALUES('feishu-kept','feishu','member_bot','app-kept','{"appSecret":"fixture"}',1,7,11,12);
+            INSERT INTO channel_developer_sessions VALUES('dingtalk','account-kept','{}','{}',1,8,21,22);
+            INSERT INTO automation_run(id,automation_id,automation_version,trigger_kind,scheduled_for,status,reason,prompt,member_id,project_ref_json,notify_channels_json,timeout_at,created_at,started_at,ended_at,updated_at)
+            VALUES('kept-run','kept-automation',6,'manual','kept-scheduled','failed','timeout','Original instruction','agent_1','{"kind":"quick_chat"}','[]','original-deadline','kept-created','kept-started','kept-ended','kept-updated');
+            INSERT INTO automation_notification_delivery(id,automation_run_id,provider,member_id,payload_json,status,available_at,created_at,updated_at)
+            VALUES('kept-notification','kept-run','feishu','agent_1','{}','pending','a','b','c');
+            INSERT INTO feishu_account(id,identity_digest,display_name,tenant_name,status,created_at,updated_at,brand)
+            VALUES('old-feishu','fixture','Owner','Tenant','connected','a','b','lark');
+            INSERT INTO feishu_member_bot(agent_id,account_id,app_id,bot_display_name,credential_ref,status,created_at,updated_at,published_at)
+            VALUES('agent_1','old-feishu','old-feishu-app','Bot','feishu-kept','published','a','b','c');
+            INSERT INTO feishu_owner_identity VALUES('old-feishu','tenant','principal-feishu','digest',NULL,'a',1,'b','c');
+            INSERT INTO feishu_owner_app_identity VALUES('old-feishu','old-feishu-app','open-digest',NULL,NULL,'a',1,'b','c');
+            INSERT INTO dingtalk_account(id,user_id_digest,corp_id,user_name,corp_name,oauth_profile_ref,status,created_at,updated_at,connected_at,last_verified_at)
+            VALUES('old-dingtalk','digest','corp','Owner','Corp','profile','connected','a','b','c','d');
+            INSERT INTO dingtalk_member_bot VALUES('agent_1','old-dingtalk','unified','old-dingtalk-app','robot','Bot','dingtalk-kept','digest','published',NULL,1,'a','b','c');
+            INSERT INTO dingtalk_owner_app_identity VALUES('old-dingtalk-app','old-dingtalk','corp','digest',1,'a','b');
+            CREATE TEMP TRIGGER reject_lark_receipt BEFORE INSERT ON schema_migration
+            WHEN NEW.version=176 BEGIN SELECT RAISE(ABORT,'fixture Lark receipt failure'); END;
+        "#).unwrap();
+        let snapshot = |connection: &Connection, table: &str| {
+            let mut statement = connection
+                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    (0..row.as_ref().column_count())
+                        .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let tables = [
+            "channel_credentials",
+            "channel_developer_sessions",
+            "automation_notification_delivery",
+            "channel_member_bot_directory",
+            "channel_owner_app_identity_directory",
+        ];
+        let before = tables.map(|table| snapshot(database.connection(), table));
+        assert!(
+            database
+                .migrate_lark_channel_v176()
+                .unwrap_err()
+                .to_string()
+                .contains("fixture Lark receipt failure")
+        );
+        assert!(!database.schema_migration_applied(176).unwrap());
+        assert!(
+            !database
+                .connection()
+                .table_exists(None::<&str>, "lark_account")
+                .unwrap()
+        );
+        assert_eq!(
+            tables.map(|table| snapshot(database.connection(), table)),
+            before
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_lark_receipt")
+            .unwrap();
+        database.migrate_lark_channel_v176().unwrap();
+        assert_eq!(
+            tables.map(|table| snapshot(database.connection(), table)),
+            before
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT count(*) FROM lark_account", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT brand FROM feishu_account WHERE id='old-feishu'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "lark"
+        );
+        for suffix in [
+            "account",
+            "owner_identity",
+            "owner_app_identity",
+            "member_bot",
+            "member_bot_publication_intent",
+        ] {
+            let feishu = format!("feishu_{suffix}");
+            let lark = format!("lark_{suffix}");
+            let canonical_sql = |name: &str| {
+                let sql: String = database
+                    .connection()
+                    .query_row(
+                        "SELECT sql FROM sqlite_schema WHERE name=?1",
+                        [name],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                sql.chars()
+                    .filter(|c| !c.is_whitespace() && *c != '"')
+                    .collect::<String>()
+            };
+            let expected_sql = canonical_sql(&feishu).replace("feishu_", "lark_").replace(
+                "brandTEXTCHECK(brandISNULLORbrandIN('feishu','lark'))",
+                "brandTEXTNOTNULLCHECK(brand='lark')",
+            );
+            assert_eq!(
+                canonical_sql(&lark),
+                expected_sql,
+                "{suffix} CHECK/default/constraint definitions"
+            );
+            let pragma = |kind: &str, name: &str| {
+                let mut statement = database
+                    .connection()
+                    .prepare(&format!("PRAGMA {kind}('{name}')"))
+                    .unwrap();
+                let mut rows = statement
+                    .query_map([], |row| {
+                        (0..row.as_ref().column_count())
+                            .map(|i| {
+                                let value = row.get::<_, rusqlite::types::Value>(i)?;
+                                Ok(match value {
+                                    rusqlite::types::Value::Text(value) => {
+                                        rusqlite::types::Value::Text(
+                                            value.replace("lark_", "feishu_"),
+                                        )
+                                    }
+                                    value => value,
+                                })
+                            })
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                // brand is the sole allowed column-definition difference.
+                if kind == "table_xinfo" && suffix == "account" {
+                    for row in &mut rows {
+                        if row[1] == rusqlite::types::Value::Text("brand".into()) {
+                            row[3] = rusqlite::types::Value::Integer(1);
+                        }
+                    }
+                }
+                rows
+            };
+            assert_eq!(
+                pragma("table_xinfo", &feishu),
+                pragma("table_xinfo", &lark),
+                "{suffix} columns"
+            );
+            assert_eq!(
+                pragma("foreign_key_list", &feishu),
+                pragma("foreign_key_list", &lark),
+                "{suffix} foreign keys"
+            );
+            let indexes = pragma("index_list", &feishu);
+            assert_eq!(indexes, pragma("index_list", &lark), "{suffix} indexes");
+            for index in indexes {
+                let rusqlite::types::Value::Text(name) = &index[1] else {
+                    panic!("index name")
+                };
+                assert_eq!(
+                    pragma("index_info", name),
+                    pragma("index_info", &name.replace("feishu_", "lark_"))
+                );
+            }
+        }
+        database.connection().execute_batch(r#"
+            INSERT INTO channel_credentials VALUES('lark-new','lark','member_bot','app-new','{"appSecret":"fixture"}',1,1,1,1);
+            INSERT INTO channel_developer_sessions VALUES('lark','new-account','{}','{}',1,1,1,1);
+            INSERT INTO automation_notification_delivery(id,automation_run_id,provider,member_id,payload_json,status,available_at,created_at,updated_at)
+            VALUES('lark-notification','kept-run','lark','agent_1','{}','pending','a','b','c');
+        "#).unwrap();
+        database
+            .connection()
+            .execute_batch(
+                "
+            INSERT INTO lark_account SELECT * FROM feishu_account;
+            INSERT INTO lark_member_bot SELECT * FROM feishu_member_bot;
+            INSERT INTO lark_owner_identity SELECT * FROM feishu_owner_identity;
+            INSERT INTO lark_owner_app_identity SELECT * FROM feishu_owner_app_identity;
+        ",
+            )
+            .unwrap();
+        assert!(
+            database
+                .connection()
+                .execute("UPDATE lark_account SET brand='feishu'", [])
+                .is_err()
+        );
+        assert!(
+            database
+                .connection()
+                .execute("UPDATE lark_account SET brand=NULL", [])
+                .is_err()
+        );
+        for view in [
+            "channel_member_bot_directory",
+            "channel_owner_app_identity_directory",
+        ] {
+            let count: i64 = database
+                .connection()
+                .query_row(
+                    &format!("SELECT count(*) FROM {view} WHERE provider='lark'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.72" && marker.projection_schema_version == 126
+        ));
     }
 
     #[test]
@@ -38852,7 +39954,7 @@ mod tests {
     #[test]
     fn v163_requeues_unfrozen_public_work_and_retires_the_legacy_run_placeholder() {
         use crate::{
-            collaboration::{CollaborationService, CreateCampCommand},
+            collaboration::{CollaborationService, CreateThreadCommand},
             command::{ActorRef, CommandEnvelope},
             delivery_queue::{claim_waiting_delivery_batches, enqueue_message_deliveries},
         };
@@ -38871,7 +39973,7 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test_with_members(
+                    payload: CreateThreadCommand::for_test_with_members(
                         workspace.to_string_lossy().into_owned(),
                         &["agent_1"],
                         "agent_1",
@@ -38879,7 +39981,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -39002,6 +40104,16 @@ mod tests {
         database.migrate_public_context_v172().unwrap();
         database.migrate_skills_rebuild_v173().unwrap();
         database.migrate_public_history_claim_v174().unwrap();
+        notification_model::migrate(&mut database).unwrap();
+        database.migrate_lark_channel_v176().unwrap();
+        database.migrate_navigation_summary_v177().unwrap();
+        database.migrate_runtime_session_context_v178().unwrap();
+        database
+            .migrate_runtime_session_context_ratio_v179()
+            .unwrap();
+        thread_names::migrate(&mut database).unwrap();
+        user_projection::migrate(&mut database).unwrap();
+        member_creation::migrate(&mut database).unwrap();
         let successor_run_id = claim_waiting_delivery_batches(&mut database, 1)
             .unwrap()
             .pop()
@@ -39353,6 +40465,15 @@ mod tests {
             v172: version >= 172,
             v173: version >= 173,
             v174: version >= 174,
+            v175: version >= 175,
+            v176: version >= 176,
+            v177: version >= 177,
+            v178: version >= 178,
+            v179: version >= 179,
+            v180: version >= 180,
+            v181: version >= 181,
+            v182: version >= 182,
+            v183: version >= 183,
         }
     }
 
@@ -39361,9 +40482,9 @@ mod tests {
     #[test]
     fn main_camp_collision_rejects_lookalike_markers_and_partial_schemas() {
         for source in [
-            MainCampMigrationSource::Pending,
-            MainCampMigrationSource::Fast,
-            MainCampMigrationSource::FastLifetime,
+            MainThreadMigrationSource::Pending,
+            MainThreadMigrationSource::Fast,
+            MainThreadMigrationSource::FastLifetime,
         ] {
             let connection = Connection::open_in_memory().unwrap();
             connection.execute_batch(
@@ -39408,7 +40529,7 @@ mod tests {
                     connection.execute_batch(schema).unwrap();
                 }
             }
-            if source == MainCampMigrationSource::FastLifetime {
+            if source == MainThreadMigrationSource::FastLifetime {
                 connection
                     .execute_batch("DROP TRIGGER agent_profile_fast_revision_update;")
                     .unwrap();
@@ -39547,8 +40668,32 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                174,
+                183,
             ),
+            (
+                "v1.72/schema 132 before pending draft retention",
+                "v1.72",
+                132,
+                182,
+            ),
+            ("v1.72/schema 131 before member receipts", "v1.72", 131, 181),
+            ("v1.72/schema 130 before User projection", "v1.72", 130, 180),
+            (
+                "v1.72/schema 129 before Thread convergence",
+                "v1.72",
+                129,
+                179,
+            ),
+            ("v1.72/schema 128 before native ratio", "v1.72", 128, 178),
+            ("v1.72/schema 127 before metrics", "v1.72", 127, 177),
+            (
+                "v1.72/schema 126 before navigation summaries",
+                "v1.72",
+                126,
+                176,
+            ),
+            ("v1.71/schema 125 before Lark", "v1.71", 125, 175),
+            ("v1.70/schema 124 before notifications", "v1.70", 124, 174),
             (
                 "v1.69/schema 123 before public history claim",
                 "v1.69",
@@ -40032,7 +41177,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(174);
+        let current = migration_state_through(183);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -40074,7 +41219,70 @@ mod tests {
         missing_task_description.v167 = false;
         let mut missing_execution_lifecycle = current;
         missing_execution_lifecycle.v168 = false;
+        let mut missing_navigation_summary = current;
+        missing_navigation_summary.v177 = false;
+        let mut missing_session_context = current;
+        missing_session_context.v178 = false;
+        let mut missing_native_ratio = current;
+        missing_native_ratio.v179 = false;
+        let mut missing_thread_convergence = current;
+        missing_thread_convergence.v180 = false;
+        let mut missing_user_projection = current;
+        missing_user_projection.v181 = false;
+        let mut missing_member_creation = current;
+        missing_member_creation.v182 = false;
+        let mut missing_pending_draft = current;
+        missing_pending_draft.v183 = false;
         let rejected = [
+            (
+                "current marker without pending draft retention",
+                missing_pending_draft,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without User projection",
+                missing_user_projection,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without member receipts",
+                missing_member_creation,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without session context migration",
+                missing_session_context,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without native ratio migration",
+                missing_native_ratio,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without Thread convergence migration",
+                missing_thread_convergence,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without navigation summary migration",
+                missing_navigation_summary,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without execution lifecycle migration",
                 missing_execution_lifecycle,
@@ -40504,7 +41712,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(174));
+        assert_eq!(state, migration_state_through(182));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -40961,7 +42169,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let camp = result.result.payload["campId"].as_str().unwrap();
+        let camp = result.result.payload["threadId"].as_str().unwrap();
         let mission = result.result.payload["missionId"].as_str().unwrap();
         database.connection().execute("INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,diagnostic,created_at,updated_at) VALUES('cleanup',?1,?2,?3,'/fixture/repo','/fixture/repo','/fixture/repo/.git','/fixture/worktree','/fixture/worktree','main','rovai/mission/fixture','base','ownership','ready',NULL,'created','updated')",rusqlite::params![mission,camp,host]).unwrap();
         crate::collaboration::delete_camp_aggregate(database.connection(), camp).unwrap();
@@ -41056,7 +42264,7 @@ mod tests {
             .to_string();
         preview.migrate_dsh_runtime_v157().unwrap();
         preview.migrate_mission_context_v158().unwrap();
-        assert!(connection_has_current_data_contract(preview.connection()).unwrap());
+        assert!(connection_has_v166_data_contract(preview.connection()).unwrap());
         assert_eq!(
             preview
                 .connection()
@@ -41564,7 +42772,7 @@ mod tests {
         let mut database = fresh_schema_database_v170_at(&directory);
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         crate::camp_attachment::insert_test_camp(&database, camp_id);
-        let store = crate::camp_attachment::CampAttachmentStore::new(&directory);
+        let store = crate::camp_attachment::ThreadAttachmentStore::new(&directory);
         let draft = store
             .save_body(&mut database, camp_id, "Desktop edit survives upgrade")
             .unwrap();
@@ -41962,13 +43170,16 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::CreateCampCommand::for_test(
+                    payload: crate::collaboration::CreateThreadCommand::for_test(
                         workspace.display().to_string(),
                     ),
                 },
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let sent = collaboration
             .send_test_camp_message(
                 &mut database.0,
@@ -41980,12 +43191,12 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::TestCampMessageCommand {
+                    payload: crate::collaboration::TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "Invalidate the old Camp identity context".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: crate::collaboration::TestCampMessageAddress::Default,
+                        address: crate::collaboration::TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(crate::collaboration::ExecutionRequest {
                             task_id: None,
@@ -42128,11 +43339,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(
-            manifest_schema.contains(
-                "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30))"
-            )
-        );
+        assert!(manifest_schema.contains(
+            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32))"
+        ));
         let conversation: (Option<String>, Option<String>, i64, i64) = reopened
             .connection()
             .query_row(
@@ -42194,13 +43403,16 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::CreateCampCommand::for_test(
+                    payload: crate::collaboration::CreateThreadCommand::for_test(
                         workspace.display().to_string(),
                     ),
                 },
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -42212,12 +43424,12 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::TestCampMessageCommand {
+                    payload: crate::collaboration::TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "Migration 98 must preserve this public message".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: crate::collaboration::TestCampMessageAddress::Default,
+                        address: crate::collaboration::TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(crate::collaboration::ExecutionRequest {
                             task_id: None,
@@ -42233,7 +43445,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        let message_id = sent.result.payload["campMessageId"]
+        let message_id = sent.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -42461,11 +43673,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(
-            manifest_schema.contains(
-                "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30))"
-            )
-        );
+        assert!(manifest_schema.contains(
+            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32))"
+        ));
         assert!(
             manifest_schema
                 .contains("CHECK(context_delivery_profile_version IN (4, 5, 6, 7, 8, 9, 10))")
@@ -42630,11 +43840,11 @@ mod tests {
     #[test]
     fn v100_backfills_stable_catalog_and_terminalizes_old_nonterminal_runs() {
         use crate::{
-            camp_attachment::CampAttachmentStore,
-            camp_attachment_view::CampAttachmentViewStore,
+            camp_attachment::ThreadAttachmentStore,
+            camp_attachment_view::ThreadAttachmentViewStore,
             collaboration::{
-                CollaborationService, CreateCampCommand, ExecutionRequest,
-                SendUserCampDraftCommand, TestCampMessageAddress, TestCampMessageCommand,
+                CollaborationService, CreateThreadCommand, ExecutionRequest,
+                SendUserThreadDraftCommand, TestThreadMessageAddress, TestThreadMessageCommand,
             },
             command::{ActorRef, CommandEnvelope},
         };
@@ -42655,15 +43865,15 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test(workspace.display().to_string()),
+                    payload: CreateThreadCommand::for_test(workspace.display().to_string()),
                 },
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("migration-100.txt");
         fs::write(&source, b"stable semantic attachment").unwrap();
         let saved = attachment_store
@@ -42678,7 +43888,7 @@ mod tests {
                 "migration-100.txt",
             )
             .unwrap();
-        let view = CampAttachmentViewStore::for_test(&database).unwrap();
+        let view = ThreadAttachmentViewStore::for_test(&database).unwrap();
         let command_id = Uuid::new_v4().to_string();
         let publication = view
             .stage_publication(
@@ -42704,7 +43914,7 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendUserCampDraftCommand {
+                    payload: SendUserThreadDraftCommand {
                         draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -42735,12 +43945,12 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: TestCampMessageCommand {
+                    payload: TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "Old V1 receipt run".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -44054,7 +45264,7 @@ mod tests {
         assert!(database.migrate_fast_preference_lifetime_v130().is_err());
         assert!(!database.schema_migration_applied(130).unwrap());
         assert!(
-            pending_fast_schema_matches(database.connection(), MainCampMigrationSource::Fast)
+            pending_fast_schema_matches(database.connection(), MainThreadMigrationSource::Fast)
                 .unwrap()
         );
         assert_eq!(database.connection().query_row(
@@ -46968,13 +48178,16 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::CreateCampCommand::for_test(
+                    payload: crate::collaboration::CreateThreadCommand::for_test(
                         workspace.display().to_string(),
                     ),
                 },
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -46986,12 +48199,12 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::TestCampMessageCommand {
+                    payload: crate::collaboration::TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "Migration 111 must preserve terminal cancellation".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: crate::collaboration::TestCampMessageAddress::Default,
+                        address: crate::collaboration::TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(crate::collaboration::ExecutionRequest {
                             task_id: None,
@@ -47007,7 +48220,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        let message_id = sent.result.payload["campMessageId"]
+        let message_id = sent.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -47446,11 +48659,11 @@ mod tests {
     fn v99_preserves_legacy_evidence_classifies_unfinished_work_and_backfills_only_published_attachments()
      {
         use crate::{
-            camp_attachment::CampAttachmentStore,
-            camp_attachment_view::CampAttachmentViewStore,
+            camp_attachment::ThreadAttachmentStore,
+            camp_attachment_view::ThreadAttachmentViewStore,
             collaboration::{
-                CollaborationService, CreateCampCommand, ExecutionRequest, TestCampMessageAddress,
-                TestCampMessageCommand,
+                CollaborationService, CreateThreadCommand, ExecutionRequest,
+                TestThreadMessageAddress, TestThreadMessageCommand,
             },
             command::{ActorRef, CommandEnvelope},
             context::{
@@ -47479,12 +48692,12 @@ mod tests {
                         camp_id: Some(camp_id.to_string()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: TestCampMessageCommand {
+                        payload: TestThreadMessageCommand {
                             camp_id: camp_id.to_string(),
                             draft_revision: None,
                             body: body.to_string(),
                             prepared_attachment_ids: Vec::new(),
-                            address: TestCampMessageAddress::Explicit {
+                            address: TestThreadMessageAddress::Explicit {
                                 agent_ids: vec![agent_id.to_string()],
                             },
                             reply_to_camp_message_id: None,
@@ -47503,7 +48716,7 @@ mod tests {
                     .as_str()
                     .unwrap()
                     .to_string(),
-                sent.result.payload["campMessageId"]
+                sent.result.payload["threadMessageId"]
                     .as_str()
                     .unwrap()
                     .to_string(),
@@ -47525,7 +48738,7 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test_with_members(
+                    payload: CreateThreadCommand::for_test_with_members(
                         workspace.display().to_string(),
                         &["agent_1", "agent_2", "agent_3"],
                         "agent_1",
@@ -47533,11 +48746,11 @@ mod tests {
                 },
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
-        let view = CampAttachmentViewStore::for_test(&database).unwrap();
+        let view = ThreadAttachmentViewStore::for_test(&database).unwrap();
         view.ensure_empty_camp_ready(&mut database, &camp_id)
             .unwrap();
 
@@ -47618,7 +48831,7 @@ mod tests {
             )
             .unwrap();
 
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let published_source = data_dir.join("migration-99-published.txt");
         fs::write(&published_source, b"published authority bytes").unwrap();
         let saved = attachment_store
@@ -47682,6 +48895,16 @@ mod tests {
                 "SELECT id FROM context_manifest WHERE agent_run_id = ?1",
                 [&accepted_run_id],
                 |row| row.get(0),
+            )
+            .unwrap();
+        // This v99 fixture verifies preservation of the legacy manifest and
+        // attachment receipts. Materialization now creates v5 Bootstrap
+        // evidence, which cannot exist in the v98 source schema.
+        database
+            .connection()
+            .execute(
+                "UPDATE native_session_bootstrap_evidence SET contract_version='native_session_bootstrap_v3', bootstrap_formatter_version=3 WHERE id=(SELECT bootstrap_evidence_id FROM context_manifest WHERE id=?1)",
+                [&manifest_id],
             )
             .unwrap();
         view.remove_camp_view(&mut database, &camp_id).unwrap();
@@ -48018,8 +49241,9 @@ mod tests {
         database
             .migrate_unified_attachment_publication_v102()
             .unwrap();
-        let view = CampAttachmentViewStore::for_test(&database).unwrap();
-        view.reconcile(&mut database, &attachment_store).unwrap();
+        let view = ThreadAttachmentViewStore::for_test(&database).unwrap();
+        view.reconcile_camp(&mut database, &attachment_store, &camp_id)
+            .unwrap();
         assert_eq!(
             database
                 .connection()
@@ -48059,10 +49283,10 @@ mod tests {
     #[test]
     fn v99_authority_preflight_failure_leaves_schema_and_evidence_untouched() {
         use crate::{
-            camp_attachment::CampAttachmentStore,
+            camp_attachment::ThreadAttachmentStore,
             collaboration::{
-                CollaborationService, CreateCampCommand, TestCampMessageAddress,
-                TestCampMessageCommand,
+                CollaborationService, CreateThreadCommand, TestThreadMessageAddress,
+                TestThreadMessageCommand,
             },
             command::{ActorRef, CommandEnvelope},
         };
@@ -48082,11 +49306,11 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test(workspace.display().to_string()),
+                    payload: CreateThreadCommand::for_test(workspace.display().to_string()),
                 },
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -48101,23 +49325,23 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: TestCampMessageCommand {
+                    payload: TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "published attachment authority".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
                 },
             )
             .unwrap();
-        let message_id = sent.result.payload["campMessageId"]
+        let message_id = sent.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("migration-99-preflight.txt");
         fs::write(&source, b"original authority bytes").unwrap();
         let saved = attachment_store
@@ -49512,7 +50736,7 @@ mod tests {
     #[test]
     fn v17_resets_collaboration_and_preserves_member_and_adapter_configuration() {
         use crate::{
-            collaboration::{CollaborationService, CreateCampCommand, CreateTaskCommand},
+            collaboration::{CollaborationService, CreateTaskCommand, CreateThreadCommand},
             command::{ActorRef, CommandEnvelope},
         };
 
@@ -49559,13 +50783,16 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test(
+                    payload: CreateThreadCommand::for_test(
                         directory.join("workspace").to_string_lossy().to_string(),
                     ),
                 },
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         service
             .create_task(
                 &mut database,
@@ -49582,7 +50809,6 @@ mod tests {
                         title: "will be reset".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_1".to_string(),
-                        ..Default::default()
                     },
                 },
             )
@@ -49874,8 +51100,8 @@ mod tests {
     fn v35_installs_directory_workspace_and_agent_run_git_observation_columns() {
         use crate::{
             collaboration::{
-                CollaborationService, CreateCampCommand, TestCampMessageAddress,
-                TestCampMessageCommand,
+                CollaborationService, CreateThreadCommand, TestThreadMessageAddress,
+                TestThreadMessageCommand,
             },
             command::{ActorRef, CommandEnvelope},
         };
@@ -49920,11 +51146,11 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test(workspace.to_string_lossy().to_string()),
+                    payload: CreateThreadCommand::for_test(workspace.to_string_lossy().to_string()),
                 },
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let binding: (String, String) = database
             .connection()
             .query_row(
@@ -49947,12 +51173,12 @@ mod tests {
                     camp_id: Some(camp_id.to_string()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: TestCampMessageCommand {
+                    payload: TestThreadMessageCommand {
                         camp_id: camp_id.to_string(),
                         draft_revision: None,
                         body: "migration fixture".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -50221,7 +51447,8 @@ mod tests {
     #[test]
     fn v39_resets_camps_and_accepts_only_quick_chat_or_directory_bindings() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v39-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let mut database = Database::open(&directory).expect("database should open");
+        downgrade_navigation_summary_for_test(database.connection());
         database
             .connection()
             .execute_batch(
@@ -50258,9 +51485,13 @@ mod tests {
                 "#,
             )
             .expect("test should restore the pre-v39 Camp schema");
-        drop(database);
-
-        let reopened = Database::open(&directory).expect("v39 database should reopen");
+        // This fixture replaces only Camp, leaving later receipts on other tables.
+        // Exercise its owned migration boundary, not current-store admission of
+        // that deliberately mixed schema. Supported full upgrades have separate owners.
+        database
+            .migrate_quick_chat_binding_v39()
+            .expect("v39 Camp migration should succeed");
+        let reopened = database;
         let camp_count: i64 = reopened
             .connection()
             .query_row("SELECT COUNT(*) FROM camp", [], |row| row.get(0))
@@ -50596,16 +51827,21 @@ mod tests {
                 r#"
                 PRAGMA foreign_keys = OFF;
                 DROP TABLE skill_projection_observation;
-                DROP TABLE skill_group_assignment;
                 DROP TABLE skill_revision;
                 DROP TABLE skill;
                 ALTER TABLE context_manifest DROP COLUMN skill_exposure_json;
                 ALTER TABLE context_manifest DROP COLUMN skill_exposure_digest;
-                DELETE FROM schema_migration WHERE version IN (19, 49);
+                DELETE FROM schema_migration WHERE version = 19;
                 PRAGMA foreign_keys = ON;
                 "#,
             )
             .expect("test should restore the pre-v19 schema");
+        // A source with only the v19 receipt removed is not an admitted upgrade
+        // source for today's full migration runner. Exercise the historical step
+        // directly, then require the repaired current database to reopen.
+        database
+            .migrate_skill_library_v19()
+            .expect("v19 should restore its owned schema and receipt");
         drop(database);
 
         let reopened = Database::open(&directory).expect("v19 database should reopen");
@@ -51999,7 +53235,8 @@ mod tests {
             .execute_batch(
                 r#"
                 PRAGMA foreign_keys = OFF;
-                ALTER TABLE agent_run DROP COLUMN task_version_at_admission;
+                -- v171 already removed this column from the current fixture;
+                -- the v65 migration below must recreate it from the older shape.
                 ALTER TABLE agent_run DROP COLUMN assignee_agent_id_at_admission;
                 DROP INDEX task_camp_status_created_idx;
                 DROP INDEX task_camp_assignee_status_idx;
@@ -52962,6 +54199,9 @@ mod tests {
                 "automation_run_history_idx",
                 "automation_notification_claim_idx",
                 "camp_turn_automation_run_unique",
+                "camp_navigation_window_idx",
+                "agent_run_navigation_active_idx",
+                "agent_run_navigation_legacy_active_idx",
             ],
             true,
         );
@@ -53108,9 +54348,9 @@ mod tests {
             connection,
             "trigger",
             &[
-                "context_manifest_v30_only_insert",
+                "context_manifest_v32_only_insert",
                 "context_manifest_version_immutable",
-                "agent_run_input_v30_only_insert",
+                "agent_run_input_v32_only_insert",
                 "agent_run_input_context_projection_immutable",
                 "runtime_input_delivery_attachment_auth_insert",
                 "camp_attachment_view_camp_insert",
@@ -53119,6 +54359,8 @@ mod tests {
                 "camp_turn_automation_run_insert_valid",
                 "camp_turn_automation_run_immutable",
                 "automation_run_dispatch_link_valid",
+                "camp_navigation_event_insert",
+                "camp_navigation_event_sequence",
             ],
             true,
         );

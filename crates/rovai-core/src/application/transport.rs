@@ -138,7 +138,7 @@ impl CoreService {
             .send(Request {
                 client,
                 id: Value::String(id),
-                method: method.to_string(),
+                method: rovai_core::thread_compat::stored_host_method(method),
                 params,
             })
             .await

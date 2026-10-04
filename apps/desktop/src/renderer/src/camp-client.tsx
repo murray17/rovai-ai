@@ -1,14 +1,15 @@
+import { uiAttribute } from './interface-language'
 import { createContext, useContext, type ReactNode } from 'react'
 import type { RovaiApi } from '@contracts'
-import { desktopCampClient } from './desktop-camp-client'
+import { desktopThreadClient } from './desktop-camp-client'
 
-/** Dependencies of the existing Camp UI, not a public HTTP operation allowlist.
+/** Dependencies of the existing Thread UI, not a public HTTP operation allowlist.
  * Remote adapters must authorize each operation and resource at the Host boundary.
  * Native startup, credentials, window controls and supervisor are intentionally absent.
  */
 export interface EditingRecovery { get(identity: string): unknown; set(identity: string, value: unknown): void }
 
-export type CampClient = Pick<RovaiApi,
+export type ThreadClient = Pick<RovaiApi,
   'request' | 'singleChatAttachments' | 'platform'
 > & {
   missionAttachments: RovaiApi['missionAttachments'] | null
@@ -42,24 +43,24 @@ export type CampClient = Pick<RovaiApi,
   }
 }
 
-const CampClientContext = createContext<CampClient | null>(null)
+const ThreadClientContext = createContext<ThreadClient | null>(null)
 
-export function CampClientProvider({ client, children }: {
+export function ThreadClientProvider({ client, children }: {
   // Stable for one Host/Owner/editor scope. Authentication renewal changes the
   // transport generation, not this object or the mounted Composer.
-  client: CampClient
+  client: ThreadClient
   children: ReactNode
 }): React.JSX.Element {
-  return <CampClientContext.Provider value={client}>{children}</CampClientContext.Provider>
+  return <ThreadClientContext.Provider value={client}>{children}</ThreadClientContext.Provider>
 }
 
-export function useCampClient(): CampClient {
+export function useThreadClient(): ThreadClient {
   // Existing Desktop mounts retain their real bridge. Browser/review mounts must
   // inject a client; no global window.rovai shim or empty-result fallback is created.
-  const client = useContext(CampClientContext)
+  const client = useContext(ThreadClientContext)
   if (client) return client
-  if (typeof window === 'undefined' || window.rovai) return desktopCampClient
-  throw new Error('共享页面缺少 CampClientProvider；浏览器不能使用 Desktop 默认适配。')
+  if (typeof window === 'undefined' || window.rovai) return desktopThreadClient
+  throw new Error(uiAttribute('共享页面缺少 ThreadClientProvider；浏览器不能使用 Desktop 默认适配。'))
 }
 
-export function useEditingRecovery(): EditingRecovery | undefined { return useContext(CampClientContext)?.editingRecovery }
+export function useEditingRecovery(): EditingRecovery | undefined { return useContext(ThreadClientContext)?.editingRecovery }

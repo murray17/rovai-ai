@@ -173,7 +173,7 @@ try {
         assert(mutation.status === 'ok', `${method} failed: ${JSON.stringify(mutation)}`)
       }
       const probe = (body, agentId = 'agent_1', options = {}) => runProjectedTool(core.request, workspace, adapterKind,
-        adapterMarker, core.events, { campId: result.campId, agentId,
+        adapterMarker, core.events, { threadId: result.threadId, agentId,
           body: body.replace('text lifecycle.', `text lifecycle_${crypto.randomUUID()}.`), ...options })
       const call = `Call the MCP server named ${serverName} echo tool exactly once with text lifecycle. This is a fresh request: actually call the tool with the current text, never reuse a previous result. Return its actual result. If denied, report denial without retrying. Do not use other tools.`
       const assertSource = (run, expected, forbidden, label) => {
@@ -460,14 +460,14 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
   const agentId = options.agentId ?? 'agent_1'
   const body = options.body ?? toolInstructions.join('\n')
   let created
-  if (options.campId) {
-    const draft = await request('camp.composerDraft.get', { campId: options.campId })
-    const saved = await request('camp.composerDraft.save', { campId: options.campId, expectedRevision: draft.revision,
+  if (options.threadId) {
+    const draft = await request('camp.composerDraft.get', { threadId: options.threadId })
+    const saved = await request('camp.composerDraft.save', { threadId: options.threadId, expectedRevision: draft.revision,
       content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] }, body) })
-    created = await request('camp.messages.send', { commandId: crypto.randomUUID(), campId: options.campId,
+    created = await request('camp.messages.send', { commandId: crypto.randomUUID(), threadId: options.threadId,
       draftRevision: saved.revision, execution: { taskId: null, purpose: 'Verify MCP lifecycle and Session isolation.', completionRole: 'required' } })
     created = created.commandResult ?? created
-    created.payload.campId = options.campId
+    created.payload.threadId = options.threadId
   } else created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
@@ -482,7 +482,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
   const resolvedApprovals = new Set()
   let lastState = null
   const snapshot = await waitFor(async () => {
-    const candidate = await request('camps.snapshot', { campId: created.payload.campId })
+    const candidate = await request('camps.snapshot', { threadId: created.payload.threadId })
     for (const approval of candidate.approvals.filter((value) =>
       value.status === 'pending'
         && !resolvedApprovals.has(value.id)
@@ -490,12 +490,12 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
     )) {
       if (options.approval === 'cancel') {
         const run = candidate.agentRuns.find(value => value.id === agentRunId)
-        let turn = candidate.turns.find(value => value.id === run.campTurnId)
+        let turn = candidate.turns.find(value => value.id === run.threadTurnId)
         for(let attempt = 0; attempt < 5; attempt++) {
-          const cancelled = await request('campTurns.cancel', { commandId: crypto.randomUUID(), command: { campId: created.payload.campId, campTurnId: turn.id, expectedVersion: turn.version } })
+          const cancelled = await request('campTurns.cancel', { commandId: crypto.randomUUID(), command: { threadId: created.payload.threadId, threadTurnId: turn.id, expectedVersion: turn.version } })
           if(cancelled.status !== 'rejected') break
           assert(cancelled.code === 'command.version_conflict' && attempt < 4, 'DSH MCP cancellation was rejected')
-          turn = (await request('camps.snapshot', { campId: created.payload.campId })).turns.find(value => value.id === turn.id)
+          turn = (await request('camps.snapshot', { threadId: created.payload.threadId })).turns.find(value => value.id === turn.id)
         }
         resolvedApprovals.add(approval.id)
         continue
@@ -507,7 +507,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
       if (!option) throw new Error(`${adapterKind} MCP request has no exact allow option: ${JSON.stringify(approval)}`)
       const resolution = await request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
-        campId: created.payload.campId,
+        threadId: created.payload.threadId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId: option.optionId,
@@ -547,7 +547,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
     event.method === 'agent_run.started' && event.params?.agentRunId === agentRunId
   )
   return {
-    campId: created.payload.campId,
+    threadId: created.payload.threadId,
     agentRunId,
     conversationId: run?.conversationId,
     output,

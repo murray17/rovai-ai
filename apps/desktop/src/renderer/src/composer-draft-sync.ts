@@ -62,6 +62,7 @@ interface NodeContribution {
   content: number
   explicitRecipient: number
   unavailableAtom: number
+  memberAgentId: string | null
 }
 
 type AtomAvailabilityBinding = Pick<ComposerDraftSyncBindings<never>, 'atomIsAvailable'>
@@ -69,7 +70,8 @@ type AtomAvailabilityBinding = Pick<ComposerDraftSyncBindings<never>, 'atomIsAva
 const EMPTY_CONTRIBUTION: NodeContribution = {
   content: 0,
   explicitRecipient: 0,
-  unavailableAtom: 0
+  unavailableAtom: 0,
+  memberAgentId: null
 }
 
 export class ComposerDraftSync<Draft = unknown> {
@@ -132,7 +134,7 @@ export class ComposerDraftSync<Draft = unknown> {
     ) return
     if (payload.dirtyLeaves.size === 0 && payload.dirtyElements.size === 0) return
 
-    this.applyDirtyLeaves(payload.editorState, payload.dirtyLeaves)
+    this.applyDirtyLeaves(payload.editorState, payload.dirtyLeaves, payload.dirtyElements.size > 0)
     this.localVersion += 1
     try { this.bindings.onLocalDocumentChange?.(editorStateToComposerDocument(payload.editorState)) }
     catch (error) { this.setPersistenceError(error instanceof Error ? error : new Error(String(error))) }
@@ -350,7 +352,11 @@ export class ComposerDraftSync<Draft = unknown> {
     this.emitStatusIfChanged()
   }
 
-  private applyDirtyLeaves(editorState: EditorState, dirtyLeaves: ReadonlySet<NodeKey>): void {
+  private applyDirtyLeaves(
+    editorState: EditorState,
+    dirtyLeaves: ReadonlySet<NodeKey>,
+    structureChanged: boolean
+  ): void {
     editorState.read(() => {
       for (const key of dirtyLeaves) {
         const node = $getNodeByKey(key)
@@ -360,6 +366,13 @@ export class ComposerDraftSync<Draft = unknown> {
             ? contributionForNode(node, this.bindings)
             : null
         )
+      }
+      // Lexical marks the parent element dirty when a leaf is removed; the
+      // removed leaf does not have to appear in dirtyLeaves.
+      if (structureChanged) {
+        for (const key of this.contributions.keys()) {
+          if (!$getNodeByKey(key)) this.replaceContribution(key, null)
+        }
       }
     })
     this.emitStatusIfChanged()
@@ -398,7 +411,9 @@ export class ComposerDraftSync<Draft = unknown> {
     return {
       hasContent: this.totals.content > 0,
       hasExplicitRecipient: this.totals.explicitRecipient > 0,
-      hasUnavailableAtom: this.totals.unavailableAtom > 0
+      hasUnavailableAtom: this.totals.unavailableAtom > 0,
+      memberAgentIds: [...new Set([...this.contributions.values()]
+        .flatMap((contribution) => contribution.memberAgentId ? [contribution.memberAgentId] : []))].sort()
     }
   }
 
@@ -408,6 +423,8 @@ export class ComposerDraftSync<Draft = unknown> {
       this.lastStatus?.hasContent === status.hasContent
       && this.lastStatus.hasExplicitRecipient === status.hasExplicitRecipient
       && this.lastStatus.hasUnavailableAtom === status.hasUnavailableAtom
+      && this.lastStatus.memberAgentIds.length === status.memberAgentIds.length
+      && this.lastStatus.memberAgentIds.every((id, index) => id === status.memberAgentIds[index])
     ) return
     this.lastStatus = status
     this.bindings.onStatusChange?.(status)
@@ -423,13 +440,15 @@ function contributionForNode(
     return {
       content: 1,
       explicitRecipient: type === 'member' || type === 'all_members' ? 1 : 0,
-      unavailableAtom: bindings.atomIsAvailable(node) ? 0 : 1
+      unavailableAtom: bindings.atomIsAvailable(node) ? 0 : 1,
+      memberAgentId: type === 'member' ? node.getReferenceId() : null
     }
   }
   if (!$isTextNode(node)) return EMPTY_CONTRIBUTION
   return {
     content: node.getTextContent().trim().length > 0 ? 1 : 0,
     explicitRecipient: 0,
-    unavailableAtom: 0
+    unavailableAtom: 0,
+    memberAgentId: null
   }
 }

@@ -116,6 +116,11 @@ describe('ExecutionViewService', () => {
 
   it('serves a no-store page and an immutable scoped public snapshot with a bearer token', async () => {
     const root = await tempRoot()
+    const assetsDirectory = join(root, 'assets')
+    await mkdir(assetsDirectory)
+    await writeFile(join(assetsDirectory, 'execution.js'), 'document.documentElement.dataset.loaded = "true"')
+    await writeFile(join(assetsDirectory, 'execution.css'), 'body { color: black }')
+    await writeFile(join(assetsDirectory, 'file-find.worker-test_1.js'), 'self.onmessage = () => undefined')
     const port = await availablePort()
     const settingsFilePath = join(root, 'execution-web.json')
     await writeFile(settingsFilePath, JSON.stringify({ schemaVersion: 1, enabled: false, port }), 'utf8')
@@ -134,6 +139,7 @@ describe('ExecutionViewService', () => {
     ]
     const service = new ExecutionViewService({
       settingsFilePath,
+      assetsDirectory,
       resolveAddress: () => address,
       randomToken: () => tokens.shift()!,
       core: {
@@ -153,7 +159,7 @@ describe('ExecutionViewService', () => {
     const scope: ExecutionViewScope = {
       channelConversationId: 'channel-original',
       targetAppId: 'app-a',
-      campId: 'camp-a',
+      threadId: 'camp-a',
       agentId: 'agent-a',
       focusRunId: 'run-a',
       maxRunCreatedAt: '2026-09-01T00:00:00Z'
@@ -166,22 +172,28 @@ describe('ExecutionViewService', () => {
     expect(page.status).toBe(200)
     expect(page.headers.get('cache-control')).toBe('no-store')
     expect(page.headers.get('connection')).toBe('close')
+    expect(page.headers.get('content-security-policy')).toContain("script-src 'self' 'unsafe-inline'")
     const pageHtml = await page.text()
     expect(pageHtml).toContain('<meta name="viewport"')
-    expect(pageHtml).toContain('data-brand-mark="horizon"')
-    expect(pageHtml).toContain('run-disclosure')
-    expect(pageHtml).toContain('tool-group')
-    expect(pageHtml).toContain('command-disclosure')
-    expect(pageHtml).toContain("if (nonTerminal(run)) return '处理过程'")
-    expect(pageHtml).not.toContain('nonTerminal(run) ? Date.now()')
+    expect(pageHtml).toContain('href="/assets/execution.css"')
+    expect(pageHtml).toContain('src="/assets/execution.js"')
+    expect(pageHtml).toContain("matchMedia('(prefers-color-scheme: dark)')")
     expect(pageHtml).not.toContain('局域网视图')
     expect(pageHtml).not.toContain('飞书成员')
-    expect(pageHtml).toContain("trigger.authorKind === 'agent'")
-    expect(pageHtml).toContain("triggerAvatar.id = 'source-avatar'")
-    expect(pageHtml).not.toContain("text('span', '你', 'you-avatar')")
-    const pageScript = pageHtml.match(/<script>([\s\S]*)<\/script>/)?.[1]
+    const pageScript = pageHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1]
     expect(pageScript).toBeTruthy()
     expect(() => new Script(pageScript!)).not.toThrow()
+    const script = await fetch(`http://127.0.0.1:${port}/assets/execution.js`)
+    expect(script.status).toBe(200)
+    expect(script.headers.get('content-type')).toBe('text/javascript; charset=utf-8')
+    expect(script.headers.get('cache-control')).toBe('no-store')
+    expect(await script.text()).toContain('dataset.loaded')
+    const style = await fetch(`http://127.0.0.1:${port}/assets/execution.css`)
+    expect(style.status).toBe(200)
+    expect(style.headers.get('content-type')).toBe('text/css; charset=utf-8')
+    expect((await fetch(`http://127.0.0.1:${port}/assets/file-find.worker-test_1.js`)).status).toBe(200)
+    expect((await fetch(`http://127.0.0.1:${port}/assets/unlisted.js`)).status).toBe(404)
+    expect((await fetch(`http://127.0.0.1:${port}/assets/../execution.js`)).status).toBe(404)
 
     const unauthorized = await fetch(`http://127.0.0.1:${port}/api/execution/run-a/snapshot`)
     expect(unauthorized.status).toBe(401)
@@ -291,7 +303,7 @@ describe('ExecutionViewService', () => {
       const href = await service.createExecutionViewUrl({
         channelConversationId: 'channel-a',
         targetAppId: 'app-a',
-        campId: 'camp-a',
+        threadId: 'camp-a',
         agentId: 'agent-a',
         focusRunId: 'run-a',
         maxRunCreatedAt: '2026-09-01T00:00:00Z'
@@ -354,7 +366,7 @@ describe('ExecutionViewService', () => {
       const href = await service.createExecutionViewUrl({
         channelConversationId: 'channel-a',
         targetAppId: 'app-a',
-        campId: 'camp-a',
+        threadId: 'camp-a',
         agentId: 'agent-a',
         focusRunId: 'run-a',
         maxRunCreatedAt: '2026-09-01T00:00:00Z'
@@ -375,7 +387,7 @@ describe('ExecutionViewService', () => {
       expect(await service.createExecutionViewUrl({
         channelConversationId: 'channel-a',
         targetAppId: 'app-a',
-        campId: 'camp-a',
+        threadId: 'camp-a',
         agentId: 'agent-a',
         focusRunId: 'run-a',
         maxRunCreatedAt: '2026-09-01T00:00:00Z'
@@ -425,11 +437,11 @@ function coreSnapshot(): unknown {
   return {
     schemaVersion: 1,
     focusRunId: 'run-a',
-    camp: { id: 'camp-a', title: '产品讨论' },
+    thread: { id: 'camp-a', title: '产品讨论' },
     agent: { id: 'agent-a', displayName: '叮叮' },
     runs: [{
       id: 'run-a',
-      campTurnId: 'turn-a',
+      threadTurnId: 'turn-a',
       purpose: '公开触发消息',
       invocationKind: 'direct',
       status: 'running',

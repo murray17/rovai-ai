@@ -1,8 +1,8 @@
 import { newCommandId } from '../../shared/command-id'
 import type {
-  CampComposerDraftView,
-  CampComposerReplyRecipient,
-  CampMessageView,
+  ThreadComposerDraftView,
+  ThreadComposerReplyRecipient,
+  ThreadMessageView,
   ComposerDocument,
   MessageQuoteAction
 } from '@contracts'
@@ -14,10 +14,10 @@ export type DraftMutation =
   | { kind: 'save_content'; content: ComposerDocument }
   | { kind: 'add_source_attachment'; file: File }
   | { kind: 'remove_source_attachment'; attachmentId: string }
-  | { kind: 'start_reply'; message: CampMessageView }
+  | { kind: 'start_reply'; message: ThreadMessageView }
   | { kind: 'cancel_reply' }
-  | { kind: 'resolve_reply_recipient'; recipient: CampComposerReplyRecipient }
-  | { kind: 'dismiss_continuation'; sourceCampMessageId: string }
+  | { kind: 'resolve_reply_recipient'; recipient: ThreadComposerReplyRecipient }
+  | { kind: 'dismiss_continuation'; sourceThreadMessageId: string }
   | { kind: 'resolve_continuation_recipient'; agentId: string }
 
 export type DraftCoordinatorChangeKind = DraftMutation['kind']
@@ -32,13 +32,13 @@ export function draftCoordinatorChangeRefreshesProjection(
 }
 
 export interface DraftMutationCoordinatorBindings {
-  load(campId: string): Promise<CampComposerDraftView>
+  load(threadId: string): Promise<ThreadComposerDraftView>
   mutate(
-    currentDraft: CampComposerDraftView,
+    currentDraft: ThreadComposerDraftView,
     mutation: DraftMutation
-  ): Promise<CampComposerDraftView>
+  ): Promise<ThreadComposerDraftView>
   onChange?(
-    draft: CampComposerDraftView | null,
+    draft: ThreadComposerDraftView | null,
     epoch: number,
     kind: DraftCoordinatorChangeKind
   ): void
@@ -52,14 +52,14 @@ export class StaleDraftEpochError extends Error {
 }
 
 /**
- * The only Renderer owner of the complete authoritative Camp Draft view.
+ * The only Renderer owner of the complete authoritative Thread Draft view.
  * Callers may observe the current value, but every mutation and revision
  * transition is serialized here.
  */
 export class DraftMutationCoordinator {
   private readonly bindings: DraftMutationCoordinatorBindings
-  private campId: string | null = null
-  private currentDraft: CampComposerDraftView | null = null
+  private threadId: string | null = null
+  private currentDraft: ThreadComposerDraftView | null = null
   private epoch = 0
   private queue: Promise<void> = Promise.resolve()
 
@@ -67,12 +67,12 @@ export class DraftMutationCoordinator {
     this.bindings = bindings
   }
 
-  beginEpoch(campId: string, draft: CampComposerDraftView | null = null): number {
-    if (draft && draft.campId !== campId) {
-      throw new Error('Composer Draft does not belong to the active Camp.')
+  beginEpoch(threadId: string, draft: ThreadComposerDraftView | null = null): number {
+    if (draft && draft.threadId !== threadId) {
+      throw new Error('Composer Draft does not belong to the active Thread.')
     }
     this.epoch += 1
-    this.campId = campId
+    this.threadId = threadId
     this.currentDraft = draft
     this.queue = Promise.resolve()
     this.bindings.onChange?.(draft, this.epoch, 'begin_epoch')
@@ -83,102 +83,102 @@ export class DraftMutationCoordinator {
     return this.epoch
   }
 
-  getCurrentDraft(): CampComposerDraftView | null {
+  getCurrentDraft(): ThreadComposerDraftView | null {
     return this.currentDraft
   }
 
-  load(shouldAccept?: () => boolean): Promise<CampComposerDraftView> {
+  load(shouldAccept?: () => boolean): Promise<ThreadComposerDraftView> {
     const epoch = this.epoch
-    const campId = this.requireCampId()
+    const threadId = this.requireThreadId()
     const result = this.queue.then(async () => {
-      this.assertActive(epoch, campId)
-      const loaded = await this.bindings.load(campId)
-      this.assertActive(epoch, campId)
+      this.assertActive(epoch, threadId)
+      const loaded = await this.bindings.load(threadId)
+      this.assertActive(epoch, threadId)
       // A background route read must not publish after local editing started.
       if (shouldAccept && !shouldAccept()) return this.requireCurrentDraft()
-      return this.acceptDraft(loaded, epoch, campId, 'load')
+      return this.acceptDraft(loaded, epoch, threadId, 'load')
     })
     this.queue = result.then(() => undefined, () => undefined)
     return result
   }
 
-  acceptAuthoritativeDraft(draft: CampComposerDraftView, advanceEpoch = false): number {
-    if (advanceEpoch || this.campId !== draft.campId) {
-      return this.beginEpoch(draft.campId, draft)
+  acceptAuthoritativeDraft(draft: ThreadComposerDraftView, advanceEpoch = false): number {
+    if (advanceEpoch || this.threadId !== draft.threadId) {
+      return this.beginEpoch(draft.threadId, draft)
     }
     this.currentDraft = draft
     this.bindings.onChange?.(draft, this.epoch, 'authoritative_replacement')
     return this.epoch
   }
 
-  saveContent(content: ComposerDocument): Promise<CampComposerDraftView> {
+  saveContent(content: ComposerDocument): Promise<ThreadComposerDraftView> {
     return this.enqueue('save_content', async (current) => {
       if (composerDocumentsEqualDirect(current.content, content)) return current
       return this.bindings.mutate(current, { kind: 'save_content', content })
     })
   }
 
-  addSourceAttachment(file: File): Promise<CampComposerDraftView> {
+  addSourceAttachment(file: File): Promise<ThreadComposerDraftView> {
     return this.enqueue('add_source_attachment', (current) => this.bindings.mutate(
       current,
       { kind: 'add_source_attachment', file }
     ))
   }
 
-  removeSourceAttachment(attachmentId: string): Promise<CampComposerDraftView> {
+  removeSourceAttachment(attachmentId: string): Promise<ThreadComposerDraftView> {
     return this.enqueue('remove_source_attachment', (current) => this.bindings.mutate(
       current,
       { kind: 'remove_source_attachment', attachmentId }
     ))
   }
 
-  startReply(message: CampMessageView): Promise<CampComposerDraftView> {
+  startReply(message: ThreadMessageView): Promise<ThreadComposerDraftView> {
     return this.enqueue('start_reply', (current) => this.bindings.mutate(
       current,
       { kind: 'start_reply', message }
     ))
   }
 
-  cancelReply(): Promise<CampComposerDraftView> {
+  cancelReply(): Promise<ThreadComposerDraftView> {
     return this.enqueue('cancel_reply', (current) =>
       this.bindings.mutate(current, { kind: 'cancel_reply' }))
   }
 
-  resolveReplyRecipient(recipient: CampComposerReplyRecipient): Promise<CampComposerDraftView> {
+  resolveReplyRecipient(recipient: ThreadComposerReplyRecipient): Promise<ThreadComposerDraftView> {
     return this.enqueue('resolve_reply_recipient', (current) => this.bindings.mutate(
       current,
       { kind: 'resolve_reply_recipient', recipient }
     ))
   }
 
-  dismissContinuation(sourceCampMessageId: string): Promise<CampComposerDraftView> {
+  dismissContinuation(sourceThreadMessageId: string): Promise<ThreadComposerDraftView> {
     return this.enqueue('dismiss_continuation', (current) => this.bindings.mutate(
       current,
-      { kind: 'dismiss_continuation', sourceCampMessageId }
+      { kind: 'dismiss_continuation', sourceThreadMessageId }
     ))
   }
 
-  resolveContinuationRecipient(agentId: string): Promise<CampComposerDraftView> {
+  resolveContinuationRecipient(agentId: string): Promise<ThreadComposerDraftView> {
     return this.enqueue('resolve_continuation_recipient', (current) => this.bindings.mutate(
       current,
       { kind: 'resolve_continuation_recipient', agentId }
     ))
   }
 
-  mutateQuote(action: MessageQuoteAction): Promise<CampComposerDraftView> {
+  mutateQuote(action: MessageQuoteAction): Promise<ThreadComposerDraftView> {
     const commandId = newCommandId()
     return this.enqueue('quote', (current) => this.bindings.mutate(current, { kind: 'quote', action, commandId }))
   }
 
-  async waitForIdle(): Promise<CampComposerDraftView> {
+  async waitForIdle(): Promise<ThreadComposerDraftView> {
     const epoch = this.epoch
-    const campId = this.requireCampId()
+    const threadId = this.requireThreadId()
     await this.queue
-    this.assertActive(epoch, campId)
+    this.assertActive(epoch, threadId)
     return this.requireCurrentDraft()
   }
 
-  returnPendingInput(pendingInputId: string, expectedRevision: number, editToken: string | null): Promise<CampComposerDraftView> {
+  returnPendingInput(pendingInputId: string, expectedRevision: number, editToken: string | null): Promise<ThreadComposerDraftView> {
     const commandId = newCommandId()
     return this.enqueue('return_pending_input', (current) => this.bindings.mutate(current, {
       kind: 'return_pending_input', pendingInputId, expectedRevision, editToken, commandId
@@ -187,22 +187,22 @@ export class DraftMutationCoordinator {
 
   private enqueue(
     kind: DraftMutation['kind'],
-    operation: (current: CampComposerDraftView) => Promise<CampComposerDraftView>
-  ): Promise<CampComposerDraftView> {
+    operation: (current: ThreadComposerDraftView) => Promise<ThreadComposerDraftView>
+  ): Promise<ThreadComposerDraftView> {
     const epoch = this.epoch
-    const campId = this.requireCampId()
+    const threadId = this.requireThreadId()
     const result = this.queue.then(async () => {
-      this.assertActive(epoch, campId)
-      const current = this.currentDraft ?? await this.loadForOperation(epoch, campId)
+      this.assertActive(epoch, threadId)
+      const current = this.currentDraft ?? await this.loadForOperation(epoch, threadId)
       const next = await operation(current)
-      this.assertActive(epoch, campId)
-      return next === current ? current : this.acceptDraft(next, epoch, campId, kind)
+      this.assertActive(epoch, threadId)
+      return next === current ? current : this.acceptDraft(next, epoch, threadId, kind)
     }).catch(async (error: unknown) => {
       if (error instanceof StaleDraftEpochError) throw error
-      if (this.isActive(epoch, campId)) {
+      if (this.isActive(epoch, threadId)) {
         try {
-          const refreshed = await this.bindings.load(campId)
-          if (this.isActive(epoch, campId)) this.acceptDraft(refreshed, epoch, campId, 'load')
+          const refreshed = await this.bindings.load(threadId)
+          if (this.isActive(epoch, threadId)) this.acceptDraft(refreshed, epoch, threadId, 'load')
         } catch {
           // Preserve the mutation error; an explicit later operation can reload.
         }
@@ -213,42 +213,42 @@ export class DraftMutationCoordinator {
     return result
   }
 
-  private async loadForOperation(epoch: number, campId: string): Promise<CampComposerDraftView> {
-    const loaded = await this.bindings.load(campId)
-    this.assertActive(epoch, campId)
-    return this.acceptDraft(loaded, epoch, campId, 'load')
+  private async loadForOperation(epoch: number, threadId: string): Promise<ThreadComposerDraftView> {
+    const loaded = await this.bindings.load(threadId)
+    this.assertActive(epoch, threadId)
+    return this.acceptDraft(loaded, epoch, threadId, 'load')
   }
 
   private acceptDraft(
-    draft: CampComposerDraftView,
+    draft: ThreadComposerDraftView,
     epoch: number,
-    campId: string,
+    threadId: string,
     kind: DraftCoordinatorChangeKind
-  ): CampComposerDraftView {
-    this.assertActive(epoch, campId)
-    if (draft.campId !== campId) {
-      throw new Error('Core returned a Composer Draft for a different Camp.')
+  ): ThreadComposerDraftView {
+    this.assertActive(epoch, threadId)
+    if (draft.threadId !== threadId) {
+      throw new Error('Core returned a Composer Draft for a different Thread.')
     }
     this.currentDraft = draft
     this.bindings.onChange?.(draft, epoch, kind)
     return draft
   }
 
-  private requireCampId(): string {
-    if (!this.campId) throw new Error('Composer Draft context is not initialized.')
-    return this.campId
+  private requireThreadId(): string {
+    if (!this.threadId) throw new Error('Composer Draft context is not initialized.')
+    return this.threadId
   }
 
-  private requireCurrentDraft(): CampComposerDraftView {
+  private requireCurrentDraft(): ThreadComposerDraftView {
     if (!this.currentDraft) throw new Error('Composer Draft is not loaded.')
     return this.currentDraft
   }
 
-  private isActive(epoch: number, campId: string): boolean {
-    return this.epoch === epoch && this.campId === campId
+  private isActive(epoch: number, threadId: string): boolean {
+    return this.epoch === epoch && this.threadId === threadId
   }
 
-  private assertActive(epoch: number, campId: string): void {
-    if (!this.isActive(epoch, campId)) throw new StaleDraftEpochError()
+  private assertActive(epoch: number, threadId: string): void {
+    if (!this.isActive(epoch, threadId)) throw new StaleDraftEpochError()
   }
 }

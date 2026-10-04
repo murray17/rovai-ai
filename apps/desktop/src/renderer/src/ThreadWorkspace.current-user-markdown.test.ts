@@ -1,0 +1,578 @@
+import { CurrentUserProfileContext } from './CurrentUserProfile'
+import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile } from '@contracts'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import type {
+  ThreadMessageView,
+  ThreadSnapshot,
+  StructuredThreadMessageContent
+} from '@contracts'
+import {
+  ThreadWorkspace,
+  defaultRecipientMentionAgentId,
+  projectLeadingCurrentUserMentionMarkdownBody,
+  structuredThreadContentPlainText
+} from './ThreadWorkspace'
+
+const members: ThreadSnapshot['members'] = [{
+  agentId: 'agent_author',
+  displayName: '洛可',
+  teamRole: 'Lead',
+  avatarRef: null,
+  accent: '#526f88',
+  membershipStatus: 'active',
+  leaveRequestedAt: null,
+  profilePresence: 'present',
+  memberOrder: 0,
+  isDefaultLead: true,
+  version: 1
+}, {
+  agentId: 'agent_reviewer',
+  displayName: '沐瓦',
+  teamRole: '评审',
+  avatarRef: null,
+  accent: '#7897ae',
+  membershipStatus: 'active',
+  leaveRequestedAt: null,
+  profilePresence: 'present',
+  memberOrder: 1,
+  isDefaultLead: false,
+  version: 1
+}]
+
+function renderMessage(
+  content: StructuredThreadMessageContent,
+  body = 'NON_AUTHORITATIVE_BODY_CACHE',
+  authorType: 'agent' | 'user' | 'external_principal' = 'agent',
+  campMembers = members,
+  profile: CurrentUserProfile = DEFAULT_CURRENT_USER_PROFILE,
+  messageOverrides: Partial<ThreadMessageView> = {}
+): string {
+  const message: ThreadMessageView = {
+    quotes: [],
+    withdrawn: false,
+    canWithdraw: false,
+    version: 1,
+    id: 'message-current-user-markdown',
+    sequence: 1,
+    timelineGlobalSequence: 1,
+    authorType,
+    authorId: 'agent_author',
+    sourceAgentRunId: null,
+    body,
+    content,
+    attachments: [],
+    addressMode: 'default',
+    addressedAgentIds: [],
+    replyToThreadMessageId: null,
+    threadTurnId: null,
+    presentation: null,
+    createdAt: '2026-08-13T00:00:00Z',
+    ...messageOverrides
+  }
+  const snapshot: ThreadSnapshot = {
+    schemaVersion: 35,
+    throughGlobalSequence: 1,
+    thread: {
+      id: 'camp-current-user-markdown',
+      title: 'Current User Markdown',
+      activationState: 'active',
+      projectBindingKind: 'quick_chat',
+      projectPath: '/quick-chat',
+      defaultLeadAgentId: 'agent_author',
+      membershipGeneration: 1,
+      version: 1,
+      createdAt: '2026-08-13T00:00:00Z',
+      updatedAt: '2026-08-13T00:00:00Z'
+    },
+    members: campMembers,
+    membershipReconciliations: [],
+    tasks: [],
+    messages: [message],
+    messageDeliveries: [],
+    turns: [],
+    agentRuns: [],
+    executionEvidence: [],
+    agentRunFileChanges: [],
+    contextManifests: [],
+    approvals: [],
+    actions: [],
+    timeline: []
+  }
+
+  return renderToStaticMarkup(createElement(CurrentUserProfileContext.Provider, {
+    value: { profile, ready: true, error: null, reload: () => undefined, save: async () => profile }
+  }, createElement(ThreadWorkspace, {
+    snapshot,
+    projectName: null,
+    agents: [],
+    busy: false,
+    onSend: async () => undefined,
+    onChangeLead: async () => undefined,
+    onTasksChanged: async () => undefined,
+    onResolveApproval: () => undefined,
+    stopping: false,
+    onStop: () => undefined,
+    inspectorVisible: false
+  })))
+}
+
+describe('Default recipient timeline Mention rendering', () => {
+  it('shows the frozen default recipient before authored user text without changing the source', () => {
+    const content: StructuredThreadMessageContent = [{ kind: 'text', text: '请检查这条消息' }]
+    const source = JSON.stringify(content)
+    const message = {
+      authorType: 'user' as const,
+      addressMode: 'default' as const,
+      addressedAgentIds: ['agent_author']
+    }
+    const markup = renderMessage(
+      content,
+      '请检查这条消息',
+      'user',
+      members,
+      DEFAULT_CURRENT_USER_PROFILE,
+      message
+    )
+
+    expect(defaultRecipientMentionAgentId(message)).toBe('agent_author')
+    expect(markup).toContain('class="default-recipient-mention-prefix" data-quote-exclude=""')
+    expect(markup).toContain('class="message-mention-token is-interactive" data-agent-id="agent_author"')
+    expect(markup).toContain('aria-label="查看洛可的基础信息"')
+    expect(markup.replace(/<[^>]*>/gu, '')).toContain('@洛可 请检查这条消息')
+    expect(JSON.stringify(content)).toBe(source)
+  })
+
+  it.each([
+    ['explicit', ['agent_author']],
+    ['broadcast', ['agent_author']],
+    ['default', []],
+    ['default', ['agent_author', 'agent_reviewer']]
+  ] as const)('fails closed for %s addressing with %s recipients', (addressMode, addressedAgentIds) => {
+    const message = { authorType: 'user' as const, addressMode, addressedAgentIds: [...addressedAgentIds] }
+    const markup = renderMessage(
+      [{ kind: 'text', text: '保持用户原文' }],
+      '保持用户原文',
+      'user',
+      members,
+      DEFAULT_CURRENT_USER_PROFILE,
+      message
+    )
+
+    expect(defaultRecipientMentionAgentId(message)).toBeNull()
+    expect(markup).not.toContain('default-recipient-mention-prefix')
+  })
+
+  it('does not add a default-recipient prefix to Agent-authored messages', () => {
+    const message = {
+      authorType: 'agent' as const,
+      addressMode: 'default' as const,
+      addressedAgentIds: ['agent_reviewer']
+    }
+    const markup = renderMessage(
+      [{ kind: 'text', text: 'Agent 原文' }],
+      'Agent 原文',
+      'agent',
+      members,
+      DEFAULT_CURRENT_USER_PROFILE,
+      message
+    )
+
+    expect(defaultRecipientMentionAgentId(message)).toBeNull()
+    expect(markup).not.toContain('default-recipient-mention-prefix')
+  })
+})
+
+describe('Agent Current User Mention Markdown rendering', () => {
+  it('projects the authoritative remainder while preserving Member and all-members text', () => {
+    expect(projectLeadingCurrentUserMentionMarkdownBody([{
+      kind: 'current_user_mention',
+      userId: 'local_user'
+    }, {
+      kind: 'text',
+      text: '请 '
+    }, {
+      kind: 'member_mention',
+      agentId: 'agent_reviewer'
+    }, {
+      kind: 'text',
+      text: ' 与 '
+    }, {
+      kind: 'all_members_mention'
+    }], members)).toBe('请 @沐瓦 与 @所有队员')
+
+    expect(projectLeadingCurrentUserMentionMarkdownBody([{
+      kind: 'current_user_mention',
+      userId: 'local_user'
+    }], members)).toBe('')
+  })
+
+  it('escapes structured mention labels before Markdown parsing', () => {
+    const hostileMembers = [{
+      ...members[1],
+      displayName: '[评审](https://example.com/phish)\n## 标题'
+    }]
+    expect(projectLeadingCurrentUserMentionMarkdownBody([{
+      kind: 'current_user_mention',
+      userId: 'local_user'
+    }, {
+      kind: 'text',
+      text: '请 '
+    }, {
+      kind: 'member_mention',
+      agentId: 'agent_reviewer'
+    }], hostileMembers)).toBe(
+      '请 @\\[评审\\]\\(https://example\\.com/phish\\) \\#\\# 标题'
+    )
+  })
+
+  it('renders a profile-card trigger plus sanitized GFM from Structured Content', () => {
+    const content: StructuredThreadMessageContent = [{
+      kind: 'current_user_mention',
+      userId: 'local_user'
+    }, {
+      kind: 'text',
+      text: [
+        '## 请确认',
+        '',
+        '- 方案 A：保留兼容层',
+        '- `方案 B`：查看 [迁移说明](https://example.com/migration)',
+        '',
+        '```sh',
+        'pnpm test',
+        '```',
+        '',
+        '| 项目 | 结果 |',
+        '| --- | --- |',
+        '| Renderer | PASS |',
+        '',
+        '<script>alert("unsafe")</script>',
+        '',
+        '请 '
+      ].join('\n')
+    }, {
+      kind: 'member_mention',
+      agentId: 'agent_reviewer'
+    }, {
+      kind: 'text',
+      text: ' 与 '
+    }, {
+      kind: 'all_members_mention'
+    }, {
+      kind: 'text',
+      text: ' 审阅。'
+    }]
+
+    const markup = renderMessage(content)
+    const token = markup.match(
+      /<span class="message-mention-token current-user is-interactive"[^>]*>@你<\/span>/
+    )?.[0]
+
+    expect(token).toBeDefined()
+    expect(token).toContain('aria-label="查看你的个人资料"')
+    expect(token).toContain('role="button"')
+    expect(token).toContain('tabindex="0"')
+    expect(token).toContain('aria-haspopup="dialog"')
+    expect(markup.indexOf(token!)).toBeLessThan(markup.indexOf('data-markdown-heading="请确认"'))
+    expect(markup).toContain('current-user-mention-prefix')
+    expect(markup).toContain('current-user-markdown-content')
+    expect(markup).toContain('<h3 data-markdown-heading="请确认">请确认</h3>')
+    expect(markup).toContain('<ul>')
+    expect(markup).toContain('<code>方案 B</code>')
+    expect(markup).toContain('<a class="markdown-web-reference" href="https://example.com/migration"')
+    expect(markup).toContain('<span class="resource-reference-label">迁移说明</span>')
+    expect(markup).toContain('<pre><code class="language-sh">pnpm test')
+    expect(markup).toContain('<table>')
+    expect(markup).toContain('请 @沐瓦 与 @所有队员 审阅。')
+    expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
+    expect(markup).not.toContain('<script')
+    expect(markup).not.toContain('alert(&quot;unsafe&quot;)')
+    expect(markup).not.toContain('alert("unsafe")')
+  })
+
+  it('preserves Markdown and live nicknames for non-leading and repeated Current User segments', () => {
+    const nonLeading: StructuredThreadMessageContent = [{
+      kind: 'text',
+      text: '## 检查结果 <script>alert("unsafe")</script> '
+    }, {
+      kind: 'current_user_mention',
+      userId: 'local_user'
+    }]
+    const repeated: StructuredThreadMessageContent = [{
+      kind: 'current_user_mention',
+      userId: 'local_user'
+    }, {
+      kind: 'text',
+      text: '正文'
+    }, {
+      kind: 'current_user_mention',
+      userId: 'local_user'
+    }]
+
+    expect(projectLeadingCurrentUserMentionMarkdownBody(nonLeading, members)).toBeNull()
+    expect(projectLeadingCurrentUserMentionMarkdownBody(repeated, members)).toBeNull()
+
+    const markup = renderMessage(nonLeading, '<script>cache()</script>')
+    expect(markup).toContain('<h3 data-markdown-heading=')
+    expect(markup).toContain('检查结果')
+    expect(markup).not.toContain('<script>')
+    expect(markup).not.toContain('cache()')
+    for (const displayName of ['Murray✨', '小雪_[团队]', '新的昵称']) {
+      for (const content of [nonLeading, repeated, [
+        { kind: 'text', text: '**完成**\n\nROVAICURRENTUSER1END\n' },
+        { kind: 'current_user_mention', userId: 'local_user' },
+        { kind: 'text', text: ' 请确认 `@Principal`' }
+      ] as StructuredThreadMessageContent]) {
+        const rendered = renderMessage(content, undefined, 'agent', members, { displayName, avatarDataUrl: null })
+        expect(rendered).toContain(`>@${displayName}</span>`)
+        expect(rendered).not.toContain('>@@')
+        const expectedCount = content.filter((segment) => segment.kind === 'current_user_mention').length
+        expect(rendered.match(/class="message-mention-token current-user/g)).toHaveLength(expectedCount)
+        expect(structuredThreadContentPlainText(content, members, displayName)).toContain(`@${displayName}`)
+      }
+    }
+    const collision = renderMessage([
+      { kind: 'text', text: '**完成**\n\nROVAICURRENTUSER1END\n' },
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: ' 请确认 `@Principal`' }
+    ])
+    expect(collision).toContain('<strong>完成</strong>')
+    expect(collision).toContain('ROVAICURRENTUSER1END')
+    expect(collision).toContain('<code>@Principal</code>')
+
+    const encodedDefinition = renderMessage([
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: '[x]: ROVAI&#67;URRENTUSER2END\n' },
+      { kind: 'current_user_mention', userId: 'local_user' }
+    ])
+    expect(encodedDefinition.match(/class="message-mention-token current-user/g)).toHaveLength(2)
+    expect(encodedDefinition).toContain('[x]: ROVAICURRENTUSER2END')
+
+    for (const text of ['ROVAI&#67;URRENTUSER1END\n', '&#82;OVAICURRENTUSER1END\n', '\t', '    ']) {
+      const rendered = renderMessage([
+        { kind: 'text', text },
+        { kind: 'current_user_mention', userId: 'local_user' },
+        { kind: 'text', text: ' 请确认' }
+      ], undefined, 'agent', members, { displayName: '小雪_[团队]', avatarDataUrl: null })
+      expect(rendered.match(/class="message-mention-token current-user/g)).toHaveLength(1)
+      expect(rendered).toContain('>@小雪_[团队]</span>')
+      if (text.includes('&#')) expect(rendered).toContain('ROVAICURRENTUSER1END')
+      else {
+        expect(rendered).toContain('<pre><code>')
+        expect(rendered).not.toContain('ROVAICURRENTUSER')
+      }
+    }
+  })
+
+  it('projects file labels in user messages without flattening Member and Skill identities', () => {
+    const content: StructuredThreadMessageContent = [{
+      kind: 'member_mention',
+      agentId: 'agent_reviewer'
+    }, {
+      kind: 'text',
+      text: ' 请查看 [v1.30 方案](docs/versions/v1.30/README.md) 和 `src/app.ts:20`，再用 '
+    }, {
+      kind: 'skill_mention',
+      skillId: 'skill-review',
+      nameAtSend: 'review'
+    }]
+    const markup = renderMessage(content, 'NON_AUTHORITATIVE_BODY_CACHE', 'user')
+    expect(markup).toContain('data-agent-id="agent_reviewer"')
+    expect(markup).toContain('aria-label="查看沐瓦的基础信息"')
+    expect(markup).toContain('<button type="button" class="message-mention-token skill-mention is-interactive"')
+    expect(markup).toContain('aria-label="预览 Skill /review 文件"')
+    expect(markup).toContain('title="docs/versions/v1.30/README.md"')
+    expect(markup).toContain('<span class="file-reference-label">v1.30 方案</span>')
+    expect(markup).toContain('<code>src/app.ts:20</code>')
+    expect(markup).not.toContain('<span class="file-reference-label is-code">src/app.ts:20</span>')
+    expect(markup.replace(/<[^>]*>/gu, '')).not.toContain('docs/versions/v1.30/README.md')
+    expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
+    expect(content[1]).toEqual({ kind: 'text', text: ' 请查看 [v1.30 方案](docs/versions/v1.30/README.md) 和 `src/app.ts:20`，再用 ' })
+  })
+
+  it('uses the same label projection for plain user bodies and leading Current User Markdown', () => {
+    const source = '[方案](docs/plan.md)'
+    const user = renderMessage([{ kind: 'text', text: source }], source, 'user')
+    const currentUser = renderMessage([
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: source }
+    ])
+    for (const markup of [user, currentUser]) {
+      expect(markup).toContain('title="docs/plan.md"')
+      expect(markup).toContain('<span class="file-reference-label">方案</span>')
+      expect(markup.replace(/<[^>]*>/gu, '')).not.toContain('docs/plan.md')
+    }
+    expect(currentUser).toContain('message-mention-token current-user')
+  })
+})
+
+describe('Agent leading Member Mention Markdown rendering', () => {
+  it('renders the structured recipient as an interactive prefix without losing GFM', () => {
+    const markup = renderMessage([
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: [
+        ' review 结论：**通过**。',
+        '',
+        '## 事实复核',
+        '',
+        '- 保留列表和 `行内代码`',
+        '- [验收说明](docs/plan.md)',
+        '',
+        '```sh',
+        'pnpm test',
+        '```',
+        '',
+        '| 项目 | 结果 |',
+        '| --- | --- |',
+        '| Mention | PASS |',
+        '',
+        '<script>alert("unsafe")</script>'
+      ].join('\n') }
+    ])
+    const token = markup.match(/<span class="message-mention-token[^\"]*" data-agent-id="agent_reviewer"[^>]*>/)?.[0]
+    expect(token).toBeDefined()
+    expect(token).toContain('is-interactive')
+    expect(token).toContain('role="button"')
+    expect(token).toContain('tabindex="0"')
+    expect(token).toContain('aria-label="查看沐瓦的基础信息"')
+    expect(token).toContain('aria-haspopup="dialog"')
+    expect(markup).toContain('member-mention-markdown-body')
+    expect(markup).toContain('data-inline-body="true"')
+    expect(markup).toContain('<strong>通过</strong>')
+    expect(markup).toContain('<h3 data-markdown-heading="事实复核">事实复核</h3>')
+    expect(markup).toContain('<ul>')
+    expect(markup).toContain('<code>行内代码</code>')
+    expect(markup).toContain('title="docs/plan.md"')
+    expect(markup).toContain('<span class="file-reference-label">验收说明</span>')
+    expect(markup).toContain('<pre><code class="language-sh">pnpm test')
+    expect(markup).toContain('<table>')
+    expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
+    expect(markup).not.toContain('<script')
+    expect(markup).not.toContain('alert(&quot;unsafe&quot;)')
+  })
+
+  it('preserves multiple leading recipients and does not mutate authoritative content', () => {
+    const content: StructuredThreadMessageContent = [
+      { kind: 'text', text: ' ' },
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: ' ' },
+      { kind: 'member_mention', agentId: 'agent_author' },
+      { kind: 'text', text: ' 请一起 **复核**。' }
+    ]
+    const before = JSON.stringify(content)
+    const markup = renderMessage(content)
+    expect(markup).toContain('class="message-mention-token is-interactive" data-agent-id="agent_reviewer"')
+    expect(markup).toContain('class="message-mention-token is-interactive" data-agent-id="agent_author"')
+    expect(markup).toContain('<strong>复核</strong>')
+    expect(JSON.stringify(content)).toBe(before)
+  })
+
+  it('does not turn a literal at-name in an Agent body into an identity', () => {
+    const body = '@沐瓦 review 结论：**通过**。'
+    const markup = renderMessage([{ kind: 'text', text: body }], body)
+    expect(markup).toContain('@沐瓦 review 结论：<strong>通过</strong>。')
+    expect(markup).not.toContain('member-mention-markdown-body')
+    expect(markup).not.toContain('class="message-mention-token')
+  })
+
+  it.each(['left', 'removed', 'missing'] as const)('keeps an unavailable %s recipient static', (state) => {
+    const campMembers = state === 'missing' ? [members[0]] : [members[0], {
+      ...members[1],
+      ...(state === 'left' ? { membershipStatus: 'left' as const } : { profilePresence: 'removed' as const })
+    }]
+    const markup = renderMessage([
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: ' **历史消息**' }
+    ], 'NON_AUTHORITATIVE_BODY_CACHE', 'agent', campMembers)
+    const token = markup.match(/<span class="message-mention-token[^\"]*" data-agent-id="agent_reviewer"[^>]*>/)?.[0]
+    expect(token).toBeDefined()
+    expect(token).toContain('is-unavailable')
+    expect(token).not.toContain('is-interactive')
+    expect(token).not.toContain('role=')
+    expect(token).not.toContain('tabindex=')
+    expect(markup).toContain(state === 'missing' ? '@不可用队员' : '@沐瓦')
+    expect(markup).toContain('<strong>历史消息</strong>')
+  })
+
+  it('does not interpret a recipient name as Markdown or HTML', () => {
+    const campMembers = [members[0], {
+      ...members[1],
+      displayName: '[评审](https://example.com/phish)<script>unsafe()</script>'
+    }]
+    const markup = renderMessage([
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: ' **通过**' }
+    ], 'NON_AUTHORITATIVE_BODY_CACHE', 'agent', campMembers)
+    expect(markup).toContain('@[评审](https://example.com/phish)&lt;script&gt;unsafe()&lt;/script&gt;')
+    expect(markup).not.toContain('href="https://example.com/phish"')
+    expect(markup).not.toContain('<script>')
+    expect(markup).toContain('<strong>通过</strong>')
+  })
+
+  it('keeps a mention-only message visible and preserves the following paragraph boundary', () => {
+    const mention: StructuredThreadMessageContent[number] = { kind: 'member_mention', agentId: 'agent_reviewer' }
+    const mentionOnly = renderMessage([mention])
+    expect(mentionOnly).toContain('@沐瓦</span>')
+    expect(mentionOnly).not.toContain('member-mention-markdown-content')
+    const separated = renderMessage([mention, { kind: 'text', text: '\n\n另一段 **正文**。' }])
+    expect(separated).toContain('data-inline-body="false"')
+    expect(separated).toContain('<p>另一段 <strong>正文</strong>。</p>')
+  })
+
+  it('renders a user message over 20 explicit lines as 19 lines plus an expand control', () => {
+    const body = Array.from(
+      { length: 21 },
+      (_, index) => `COLLAPSE-LINE-${String(index + 1).padStart(2, '0')}`
+    ).join('\n')
+    const markup = renderMessage([{ kind: 'text', text: body }], body, 'user')
+
+    expect(markup).toContain('COLLAPSE-LINE-19')
+    expect(markup).not.toContain('COLLAPSE-LINE-20')
+    expect(markup).not.toContain('COLLAPSE-LINE-21')
+    expect(markup).toContain('class="message-long-toggle"')
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).toContain('aria-controls=')
+    expect(markup).toContain('<span>展开</span>')
+    expect(markup).toContain('aria-live="polite">其余内容已收起，共 21 行</span>')
+    expect(markup).not.toContain('message-long-ellipsis')
+    expect(markup).not.toContain('>…</span>')
+  })
+
+  it('keeps exactly 20 explicit user-message lines intact', () => {
+    const body = Array.from(
+      { length: 20 },
+      (_, index) => `BOUNDARY-LINE-${String(index + 1).padStart(2, '0')}`
+    ).join('\n')
+    const markup = renderMessage([{ kind: 'text', text: body }], body, 'user')
+
+    expect(markup).toContain('BOUNDARY-LINE-20')
+    expect(markup).not.toContain('message-long-toggle')
+  })
+})
+
+
+describe('historical current user presentation', () => {
+  it('changes author identity presentation and only structured mentions, keeping canonical content and body intact', () => {
+    const content: StructuredThreadMessageContent = [
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: '正文 @你 与 `@你` 保持原样。' }
+    ]
+    const canonical = JSON.stringify(content)
+    const profile = { displayName: 'Murray 🐻', avatarDataUrl: 'data:image/png;base64,cHJvZmlsZQ==' }
+    const markup = renderMessage(content, '@你 旧缓存', 'agent', members, profile)
+    expect(markup).toContain('aria-label="查看Murray 🐻的个人资料"')
+    expect(markup).toContain('>@Murray 🐻</span>')
+    expect(markup).toContain('正文 @你 与 <code>@你</code> 保持原样。')
+    expect(structuredThreadContentPlainText(content, members, profile.displayName)).toBe('@Murray 🐻 正文 @你 与 `@你` 保持原样。')
+    expect(JSON.stringify(content)).toBe(canonical)
+    expect(renderMessage([{ kind: 'text', text: '普通正文 @你 保持原样' }], '普通正文 @你 保持原样', 'agent', members, profile)).toContain('普通正文 @你 保持原样')
+    for (const authorType of ['user', 'external_principal'] as const) {
+      const human = renderMessage([{ kind: 'text', text: '旧消息正文' }], '旧消息正文', authorType, members, profile)
+      expect(human).toContain('Murray 🐻')
+      expect(human).toContain('aria-label="查看Murray 🐻的个人资料"')
+      expect(human).toContain(`src="${profile.avatarDataUrl}"`)
+      expect(human).toContain('旧消息正文')
+    }
+  })
+})

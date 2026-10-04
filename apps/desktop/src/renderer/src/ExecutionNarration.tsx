@@ -1,14 +1,15 @@
-import { useCampClient } from './camp-client'
+import { UiText, uiAttribute } from './interface-language'
+import { useThreadClient } from './camp-client'
 import { useContext, useEffect, useState } from 'react'
 import type { AgentRunExecutionEvidenceView } from '@contracts'
 import { ExecutionContentContext } from './ExecutionVirtualList'
 import { SafeMarkdown } from './SafeMarkdown'
 
 /** Full narration is read only while its measured row is mounted near the viewport. */
-export function ExecutionNarration({ campId, evidence, preview }: {
-  campId: string; evidence?: AgentRunExecutionEvidenceView; preview: string
+export function ExecutionNarration({ threadId, evidence, preview }: {
+  threadId: string; evidence?: AgentRunExecutionEvidenceView; preview: string
 }) {
-  const client = useCampClient()
+  const client = useThreadClient()
   const cache = useContext(ExecutionContentContext)
   const stamp = `${evidence?.id}:${evidence?.contentBlobId}:${evidence?.contentByteCount}`
   const [body, setBody] = useState<{ stamp: string; text: string } | null>(() => {
@@ -24,8 +25,8 @@ export function ExecutionNarration({ campId, evidence, preview }: {
     let disposed = false
     setFailed(false)
     const read = async () => {
-      const result = await client.request<{ payload: { text?: string } }>('agentRunEvidence.getContent', { campId, evidenceId: evidence.id })
-      if (typeof result.payload.text !== 'string') throw new Error('执行正文格式不兼容')
+      const result = await client.request<{ payload: { text?: string } }>('agentRunEvidence.getContent', { threadId, evidenceId: evidence.id })
+      if (typeof result.payload.text !== 'string') throw new Error(uiAttribute('执行正文格式不兼容'))
       return result.payload.text
     }
     void (cache ? cache.load(`body:${stamp}`, read) : read()).then(text => {
@@ -33,8 +34,8 @@ export function ExecutionNarration({ campId, evidence, preview }: {
     }).catch(() => { if (!disposed) setFailed(true) })
 
     return () => { disposed = true }
-  }, [client, campId, stamp, cache, retry])
+  }, [client, threadId, stamp, cache, retry])
   return <><SafeMarkdown>{body?.stamp === stamp ? body.text : preview}</SafeMarkdown>
-    {failed && <button className="camp-history-text-button" type="button" onClick={() => setRetry(value => value + 1)}>正文读取失败，重试</button>}
+    {failed && <button className="camp-history-text-button" type="button" onClick={() => setRetry(value => value + 1)}><UiText zh={"正文读取失败，重试"} /></button>}
   </>
 }

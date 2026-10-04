@@ -141,7 +141,7 @@ export function buildCollaborationMessageEvidence({
     policyId: SEMANTIC_JUDGE_CONTENT_POLICY_ID,
     ...(evaluationAttemptId ? { evaluationRevision: { evaluationAttemptId, evidenceIndexArtifactId: evidenceIndex.artifactId, producerDigest } } : {}),
     trialId,
-    campTurnId: dispatchBoundary?.campTurnId ?? null,
+    campTurnId: (dispatchBoundary?.threadTurnId ?? dispatchBoundary?.campTurnId) ?? null,
     sourceSurface: collaborationEvidence?.sourceSurface ?? null,
     coverage: sourceCoverageComplete && allCallsProjected
       ? { state: 'complete', reason: null }
@@ -538,7 +538,7 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
       || !leadId || deliveries.some(message => message.authorType !== 'agent' || message.authorId !== leadId
         || !runs.has(message.sourceAgentRunId)
         || (!isBatchTrialBoundary(result.dispatchBoundary)
-          && message.campTurnId !== result.dispatchBoundary.campTurnId)
+          && (message.threadTurnId ?? message.campTurnId) !== (result.dispatchBoundary.threadTurnId ?? result.dispatchBoundary.campTurnId))
         || message.addressedAgentIds?.length || (!Number.isSafeInteger(message.sequence) || message.sequence < 1))
       || new Set(deliveries.map(message => message.sequence)).size !== deliveries.length)) throw new Error('delivery_history.inventory_incomplete')
   const deliveryOrder = new Map(deliveries.map((message, index) => [message.id, index + 1]))
@@ -548,7 +548,7 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
   for (const message of snapshot.messages) {
     if (message.authorType !== 'agent' || !runs.has(message.sourceAgentRunId)
         || (!isBatchTrialBoundary(result.dispatchBoundary)
-          && message.campTurnId !== result.dispatchBoundary.campTurnId)) continue
+          && (message.threadTurnId ?? message.campTurnId) !== (result.dispatchBoundary.threadTurnId ?? result.dispatchBoundary.campTurnId))) continue
     const body = typeof message.body === 'string' ? message.body : (message.content ?? []).filter(part => part.kind === 'text').map(part => part.text).join('')
     const evidenceReference = { artifactId: evidenceIndex.artifactId, evidenceId: stableEvidenceId('core.message-content', message.id) }
     const record = indexRecords.get(evidenceReference.evidenceId)

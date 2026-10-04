@@ -64,14 +64,14 @@ describe('renderer theme model', () => {
 
 it('applies independent reading preferences while retaining unrelated document state', () => {
   const root = rootWithTheme('day')
-  root.dataset.activeCamp = 'camp-fixture'
+  root.dataset.activeThread = 'camp-fixture'
   applyAppearanceSnapshot(root, { ...DEFAULT_APPEARANCE, resolvedTheme: 'day', chatFontSize: 20, documentFontSize: 18, codeFontSize: 24, readingDensity: 'relaxed', motionPreference: 'reduce' })
   expect(root.style.getPropertyValue('--chat-font-size')).toBe('20px')
   expect(root.style.getPropertyValue('--document-preview-font-size')).toBe('18px')
   expect(root.style.getPropertyValue('--code-preview-font-size')).toBe('24px')
   expect(root.dataset.readingDensity).toBe('relaxed')
   expect(root.dataset.motionPreference).toBe('reduce')
-  expect(root.dataset.activeCamp).toBe('camp-fixture')
+  expect(root.dataset.activeThread).toBe('camp-fixture')
   applyAppearanceSnapshot(root, { ...DEFAULT_APPEARANCE, resolvedTheme: 'day' })
   expect(root.dataset.motionPreference).toBe('system')
   expect(root.style.getPropertyValue('--chat-font-size')).toBe('13px')

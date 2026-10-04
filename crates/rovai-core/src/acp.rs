@@ -24,7 +24,7 @@ use rovai_core::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_run_image::{AcpImageAccumulator, RuntimeImageObservation},
     agent_runtime_adapter::{
-        AcpClientTerminalMode, AgentRuntimeAdapterRegistry, acp_model_catalog_from_session,
+        AcpClientTerminalMode, AgentRuntimeAdapterRegistry, acp_model_catalog_for_adapter,
         acp_runtime_model_id_from_session, write_kiro_additive_agent_config,
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
@@ -44,7 +44,7 @@ use rovai_core::{
     runtime_discovery::{RuntimeLaunchPurpose, runtime_launch_allowed},
     runtime_failure::sanitize_public_runtime_error,
     runtime_search_operation,
-    storage_layout::CampOutputDirectory,
+    storage_layout::ThreadOutputDirectory,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -57,6 +57,7 @@ use tokio::{
 use crate::{
     builtin_tool_runtime::BuiltinToolProcessConfig,
     health,
+    native_usage::{NativeContextModel, NativeUsageObservation, NativeUsageReader},
     runtime_fleet::{
         AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
         RuntimeCompatibilityKey, RuntimeProcessHost,
@@ -104,6 +105,13 @@ pub enum AcpIncoming {
         native_prompt_id: String,
         delivery_id: String,
         sequence: u64,
+        message: Value,
+    },
+    LateSessionContext {
+        adapter_kind: AdapterKind,
+        agent_run_id: String,
+        execution_epoch: i64,
+        native_session_id: String,
         message: Value,
     },
     HostDiagnostic {
@@ -211,6 +219,21 @@ impl AcpRuntimeOwner {
             execution_epoch: self.execution_epoch,
         }
     }
+
+    fn late_session_context(
+        &self,
+        adapter_kind: AdapterKind,
+        native_session_id: &str,
+        message: Value,
+    ) -> AcpIncoming {
+        AcpIncoming::LateSessionContext {
+            adapter_kind,
+            agent_run_id: self.agent_run_id.clone(),
+            execution_epoch: self.execution_epoch,
+            native_session_id: native_session_id.to_string(),
+            message,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +316,9 @@ enum AcpSessionMessageRoute {
         active_prompt: AcpActivePrompt,
         sequence: u64,
     },
+    LateSessionContext {
+        owner: AcpRuntimeOwner,
+    },
     SessionMetadata,
     ReplayQuarantined,
     Quarantined(String),
@@ -322,7 +348,7 @@ fn is_acp_client_terminal_method(method: &str) -> bool {
     )
 }
 
-fn is_session_catalog_update(message: &Value) -> bool {
+pub(crate) fn is_session_catalog_update(message: &Value) -> bool {
     message.get("id").is_none()
         && message.get("method").and_then(Value::as_str) == Some("session/update")
         && matches!(
@@ -338,13 +364,31 @@ fn is_session_catalog_update(message: &Value) -> bool {
         )
 }
 
+fn is_prompt_metadata_only(adapter_kind: AdapterKind, message: &Value) -> bool {
+    let carries_context = adapter_kind == AdapterKind::GrokBuild
+        && crate::runtime::is_root_output(&message["params"])
+        && crate::runtime::is_root_output(&message["params"]["update"])
+        && message
+            .pointer("/params/_meta/totalTokens")
+            .and_then(Value::as_i64)
+            .is_some_and(|n| n >= 0);
+    // Grok also attaches its latest context to catalog notifications. Let the
+    // active prompt's numeric collector observe it before dropping the catalog.
+    (is_session_catalog_update(message) && !carries_context)
+        || is_known_session_lifecycle_extension(adapter_kind, message)
+}
+
 fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Value) -> bool {
     if message.get("id").is_some() {
         return false;
     }
+    if adapter_kind == AdapterKind::KiroCli && is_kiro_context_gauge(message) {
+        return false;
+    }
     let method = message.get("method").and_then(Value::as_str);
     (adapter_kind == AdapterKind::GrokBuild
-        && method.is_some_and(|method| method.starts_with("_x.ai/")))
+        && method.is_some_and(|method| method.starts_with("_x.ai/"))
+        && !is_grok_turn_usage_frame(message))
         || matches!(
             (adapter_kind, message.get("method").and_then(Value::as_str)),
             (AdapterKind::KiroCli, Some("_kiro.dev/compaction/status"))
@@ -360,6 +404,19 @@ fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Val
                     Some("_zcode/compaction" | "_zcode/inputAccepted")
                 )
         )
+}
+
+fn is_grok_turn_usage_frame(message: &Value) -> bool {
+    message.get("id").is_none()
+        && message.get("method").and_then(Value::as_str) == Some("_x.ai/session_notification")
+        && message
+            .pointer("/params/update/sessionUpdate")
+            .and_then(Value::as_str)
+            == Some("turn_completed")
+        && message
+            .pointer("/params/update/prompt_id")
+            .and_then(Value::as_str)
+            .is_some()
 }
 
 fn is_kimi_compaction_completed_frame(message: &Value) -> bool {
@@ -514,6 +571,8 @@ fn is_en_us_unsigned_integer(value: &str) -> bool {
 fn is_idle_session_metadata(adapter_kind: AdapterKind, message: &Value) -> bool {
     is_session_catalog_update(message)
         || is_known_session_lifecycle_extension(adapter_kind, message)
+        || (adapter_kind == AdapterKind::GrokBuild && is_grok_turn_usage_frame(message))
+        || (adapter_kind == AdapterKind::KiroCli && is_kiro_context_gauge(message))
         || (adapter_kind == AdapterKind::KimiCodeCli && is_kimi_compaction_completed_frame(message))
         || (message.get("id").is_none()
             && message.get("method").and_then(Value::as_str) == Some("session/update")
@@ -521,6 +580,29 @@ fn is_idle_session_metadata(adapter_kind: AdapterKind, message: &Value) -> bool 
                 .pointer("/params/update/sessionUpdate")
                 .and_then(Value::as_str)
                 == Some("usage_update"))
+}
+
+fn is_late_session_context_gauge(message: &Value) -> bool {
+    is_kiro_context_gauge(message)
+        || (message.get("id").is_none()
+            && message.get("method").and_then(Value::as_str) == Some("session/update")
+            && message
+                .pointer("/params/update/sessionUpdate")
+                .and_then(Value::as_str)
+                == Some("usage_update")
+            && ["/params/update/used", "/params/update/size"]
+                .iter()
+                .any(|path| message.pointer(path).and_then(Value::as_u64).is_some()))
+}
+
+fn is_kiro_context_gauge(message: &Value) -> bool {
+    message.get("id").is_none()
+        && message["method"] == "_kiro.dev/metadata"
+        && crate::runtime::is_root_output(&message["params"])
+        && message
+            .pointer("/params/contextUsagePercentage")
+            .and_then(Value::as_f64)
+            .is_some_and(|n| n.is_finite() && (0.0..=100.0).contains(&n))
 }
 
 const ACP_HISTORY_RESTORE_MAX_EVENTS: u64 = 4_096;
@@ -1223,6 +1305,7 @@ pub(crate) struct AcpHost {
     next_compaction_observation_sequence: AtomicU64,
     grok_acceptance_auto_compact_armed: AtomicBool,
     routes: RwLock<HashMap<String, AcpSessionRoute>>,
+    late_context_owners: RwLock<HashMap<String, (AcpRuntimeOwner, Instant)>>,
     ingress_fence: Mutex<()>,
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
@@ -1237,11 +1320,11 @@ pub(crate) struct AcpHost {
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
     remove_private_config_root_on_shutdown: bool,
-    session_permission_mode: Option<String>,
     detector_config_root: Option<PathBuf>,
     ephemeral_config: Mutex<Option<EphemeralMcpConfigFile>>,
     executable_path: PathBuf,
     builtin_tools: Option<BuiltinToolProcessConfig>,
+    grok_context_windows: BTreeMap<String, i64>,
 }
 
 impl AcpHost {
@@ -1268,22 +1351,19 @@ impl AcpHost {
         let private_config =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
         let private_config_root = private_config.as_ref().map(|config| config.root.as_path());
-        let session_permission_mode = if frozen_runtime.adapter_kind == AdapterKind::KimiCodeCli {
-            Some(
-                frozen_runtime
-                    .permissions
-                    .values
-                    .get("permission_mode")
-                    .and_then(Value::as_str)
-                    .context("Kimi Code Runtime requires permission_mode")?
-                    .to_string(),
-            )
+        let host_instance_id = uuid::Uuid::new_v4().to_string();
+        let grok_configuration = if frozen_runtime.adapter_kind == AdapterKind::GrokBuild {
+            Some(load_grok_native_configuration()?)
         } else {
             None
         };
-        let host_instance_id = uuid::Uuid::new_v4().to_string();
-        let grok_byok_configured =
-            frozen_runtime.adapter_kind == AdapterKind::GrokBuild && grok_native_byok_configured()?;
+        let grok_byok_configured = grok_configuration
+            .as_ref()
+            .is_some_and(|c| c.byok_configured);
+        let grok_context_windows = grok_configuration
+            .as_ref()
+            .map(|c| c.context_windows.clone())
+            .unwrap_or_default();
         let mut command = if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
             crate::zcode::command(Path::new(&frozen_runtime.executable_path))?
         } else {
@@ -1389,7 +1469,10 @@ impl AcpHost {
             let bridge = crate::zcode::transport::start(
                 stdin,
                 stdout,
-                crate::zcode::NativeConfig::load(cwd)?,
+                crate::zcode::NativeConfig::load_for_executable(
+                    cwd,
+                    Path::new(&frozen_runtime.executable_path),
+                )?,
                 // Session RPCs use the protocol spelling, not Rust's Win32
                 // verbatim spelling. The bridge must compare that same key.
                 PathBuf::from(acp_protocol_path(cwd)),
@@ -1413,6 +1496,7 @@ impl AcpHost {
             next_compaction_observation_sequence: AtomicU64::new(1),
             grok_acceptance_auto_compact_armed: AtomicBool::new(false),
             routes: RwLock::new(HashMap::new()),
+            late_context_owners: RwLock::new(HashMap::new()),
             ingress_fence: Mutex::new(()),
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
@@ -1429,34 +1513,37 @@ impl AcpHost {
             remove_private_config_root_on_shutdown: private_config
                 .as_ref()
                 .is_some_and(|config| config.remove_on_shutdown),
-            session_permission_mode,
             detector_config_root,
             ephemeral_config: Mutex::new(ephemeral_config),
             executable_path: PathBuf::from(&frozen_runtime.executable_path),
             builtin_tools,
+            grok_context_windows,
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
-        let initialized = host
-            .rpc(
-                "initialize",
-                json!({
-                    "protocolVersion": 1,
-                    "clientCapabilities": {
-                        "fs": {
-                            "readTextFile": allow_client_fs,
-                            "writeTextFile": allow_client_fs
-                        },
-                        "terminal": host.client_terminal_mode.is_available()
-                    },
-                    "clientInfo": {
-                        "name": "rovai",
-                        "title": "Rovai-ai",
-                        "version": env!("CARGO_PKG_VERSION")
-                    }
-                }),
-            )
-            .await;
+        let mut initialize_params = json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": {
+                    "readTextFile": allow_client_fs,
+                    "writeTextFile": allow_client_fs
+                },
+                "terminal": host.client_terminal_mode.is_available()
+            },
+            "clientInfo": {
+                "name": "rovai",
+                "title": "Rovai-ai",
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        });
+        if host.adapter_kind == AdapterKind::CopilotCli {
+            // Subscribe only to per-call Usage, separate from ACP's
+            // process/session cumulative result.
+            initialize_params["clientCapabilities"]["_meta"] = json!({
+                "github.com/copilot": {"events": ["assistant.usage"]}
+            });
+        }
+        let initialized = host.rpc("initialize", initialize_params).await;
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
                 *host.initialize_result.write().await = Some(result.clone());
@@ -1726,6 +1813,16 @@ impl AcpHost {
                                     display_owner,
                                 )
                                 .await;
+                            }
+                            AcpSessionMessageRoute::LateSessionContext { owner } => {
+                                let session_id = session_id
+                                    .as_deref()
+                                    .expect("late ACP Context route has Session ID");
+                                let _ = host.incoming.send(owner.late_session_context(
+                                    host.adapter_kind,
+                                    session_id,
+                                    message,
+                                ));
                             }
                             AcpSessionMessageRoute::ReplayQuarantined => {
                                 if message.get("id").is_some() {
@@ -2092,6 +2189,7 @@ impl AcpHost {
         {
             bail!("ACP Native Session is already bound to another logical runtime");
         }
+        self.late_context_owners.write().await.remove(session_id);
         routes.insert(
             session_id.to_string(),
             AcpSessionRoute {
@@ -2254,6 +2352,17 @@ impl AcpHost {
         let mut routes = self.routes.write().await;
         let Some(route) = routes.get_mut(session_id) else {
             drop(routes);
+            if is_late_session_context_gauge(message)
+                && let Some((owner, detached_at)) = self
+                    .late_context_owners
+                    .read()
+                    .await
+                    .get(session_id)
+                    .cloned()
+                && detached_at.elapsed() < Duration::from_secs(60)
+            {
+                return AcpSessionMessageRoute::LateSessionContext { owner };
+            }
             if ((self.adapter_kind == AdapterKind::KimiCodeCli
                 && is_kimi_compaction_completed_frame(message))
                 || (self.adapter_kind == AdapterKind::GrokBuild
@@ -2303,12 +2412,15 @@ impl AcpHost {
                 {
                     return AcpSessionMessageRoute::SessionMetadata;
                 }
-                if is_session_catalog_update(message)
-                    || is_known_session_lifecycle_extension(self.adapter_kind, message)
-                {
+                if is_prompt_metadata_only(self.adapter_kind, message) {
                     return AcpSessionMessageRoute::SessionMetadata;
                 }
-                active_prompt.prompt_activity_observed = true;
+                // Catalog metadata may report the previous context before a
+                // prompt is accepted. Collect its numbers without treating it
+                // as proof that a rejected input was consumed.
+                if !is_session_catalog_update(message) {
+                    active_prompt.prompt_activity_observed = true;
+                }
                 route.sequence = route.sequence.saturating_add(1);
                 AcpSessionMessageRoute::Forward {
                     owner: route.owner.clone(),
@@ -2370,6 +2482,11 @@ impl AcpHost {
                     )
                 {
                     return AcpSessionMessageRoute::SessionMetadata;
+                }
+                if is_late_session_context_gauge(message) {
+                    return AcpSessionMessageRoute::LateSessionContext {
+                        owner: route.owner.clone(),
+                    };
                 }
                 if is_idle_session_metadata(self.adapter_kind, message) {
                     return AcpSessionMessageRoute::SessionMetadata;
@@ -2578,13 +2695,23 @@ impl AcpHost {
         let mut routes = self.routes.write().await;
         if routes.get(session_id).map(|route| &route.owner) == Some(owner)
             && let Some(route) = routes.remove(session_id)
-            && self.adapter_kind == AdapterKind::ZcodeApp
-            && matches!(route.phase, AcpSessionPhase::PromptActive(_))
         {
-            self.zcode_detached_prompts
-                .write()
-                .await
-                .insert(session_id.to_string(), route);
+            if matches!(route.phase, AcpSessionPhase::PromptCompleted(_)) {
+                let mut late = self.late_context_owners.write().await;
+                late.retain(|_, (_, detached_at)| detached_at.elapsed() < Duration::from_secs(60));
+                late.insert(
+                    session_id.to_string(),
+                    (route.owner.clone(), Instant::now()),
+                );
+            }
+            if self.adapter_kind == AdapterKind::ZcodeApp
+                && matches!(route.phase, AcpSessionPhase::PromptActive(_))
+            {
+                self.zcode_detached_prompts
+                    .write()
+                    .await
+                    .insert(session_id.to_string(), route);
+            }
         }
         drop(routes);
         // Session terminal cleanup is idempotent and must still run when a
@@ -2605,13 +2732,25 @@ impl AcpHost {
                 let mut routes = self.routes.write().await;
                 if routes.get(session_id).map(|route| &route.owner) == Some(owner)
                     && let Some(route) = routes.remove(session_id)
-                    && self.adapter_kind == AdapterKind::ZcodeApp
-                    && matches!(route.phase, AcpSessionPhase::PromptActive(_))
                 {
-                    self.zcode_detached_prompts
-                        .write()
-                        .await
-                        .insert(session_id.to_string(), route);
+                    if matches!(route.phase, AcpSessionPhase::PromptCompleted(_)) {
+                        let mut late = self.late_context_owners.write().await;
+                        late.retain(|_, (_, detached_at)| {
+                            detached_at.elapsed() < Duration::from_secs(60)
+                        });
+                        late.insert(
+                            session_id.to_string(),
+                            (route.owner.clone(), Instant::now()),
+                        );
+                    }
+                    if self.adapter_kind == AdapterKind::ZcodeApp
+                        && matches!(route.phase, AcpSessionPhase::PromptActive(_))
+                    {
+                        self.zcode_detached_prompts
+                            .write()
+                            .await
+                            .insert(session_id.to_string(), route);
+                    }
                 }
             }
             let (completion, flushed) = oneshot::channel();
@@ -3297,7 +3436,9 @@ pub struct AcpRuntime {
     execution_root: PathBuf,
     attachment_access_root: Option<PathBuf>,
     workspace_access: String,
+    session_permission_mode: Option<String>,
     active_observation: Mutex<Option<AcpPromptObservation>>,
+    native_usage: Mutex<Option<Arc<std::sync::Mutex<NativeUsageReader>>>>,
 }
 
 #[derive(Debug)]
@@ -3439,6 +3580,7 @@ impl AcpRuntime {
         execution_root: PathBuf,
         attachment_access_root: Option<PathBuf>,
         workspace_access: String,
+        session_permission_mode: Option<String>,
     ) -> Arc<Self> {
         Arc::new(Self {
             owner,
@@ -3450,7 +3592,9 @@ impl AcpRuntime {
             execution_root,
             attachment_access_root,
             workspace_access,
+            session_permission_mode,
             active_observation: Mutex::new(None),
+            native_usage: Mutex::new(None),
         })
     }
 
@@ -3659,13 +3803,14 @@ impl AcpRuntime {
                     detail: "the real ACP Session did not expose its catalog".to_string(),
                 })
             })?;
-            let models = acp_model_catalog_from_session(session_result).map_err(|error| {
-                anyhow::Error::new(AcpLiveModelValidationError {
-                    code: "runtime_model_catalog_unavailable",
-                    model_id: model.to_string(),
-                    detail: error.to_string(),
-                })
-            })?;
+            let models = acp_model_catalog_for_adapter(self.host.adapter_kind, session_result)
+                .map_err(|error| {
+                    anyhow::Error::new(AcpLiveModelValidationError {
+                        code: "runtime_model_catalog_unavailable",
+                        model_id: model.to_string(),
+                        detail: error.to_string(),
+                    })
+                })?;
             if !models.iter().any(|candidate| {
                 candidate.id == model && !candidate.hidden && !candidate.deprecated
             }) {
@@ -3675,13 +3820,33 @@ impl AcpRuntime {
                     detail: "the real ACP Session did not advertise the saved model".to_string(),
                 }));
             }
-            if matches!(
+            if self.host.adapter_kind == AdapterKind::CodebuddyCli
+                && model.starts_with("custom-local:")
+                && acp_runtime_model_id_from_session(session_result).as_deref() == Some(model)
+            {
+                // This custom model was selected by the host's --model argument.
+                // CodeBuddy omits it from set_config_option's built-in choices.
+            } else if matches!(
                 self.host.adapter_kind,
                 AdapterKind::KiroCli | AdapterKind::GrokBuild
             ) {
                 self.set_model(&session_id, model).await?;
             } else {
                 self.set_config_option(&session_id, "model", model).await?;
+            }
+            if self.host.adapter_kind == AdapterKind::CodebuddyCli {
+                // Freeze the acknowledged selection, not session/new's old
+                // default. The catalog window is matched by this exact ID.
+                if let Some(session) = self.session_result.write().await.as_mut() {
+                    session["models"]["currentModelId"] = json!(model);
+                    if let Some(options) = session["configOptions"].as_array_mut() {
+                        for option in options {
+                            if option["id"] == "model" {
+                                option["currentValue"] = json!(model);
+                            }
+                        }
+                    }
+                }
             }
         } else if model_source != "runtime_default" {
             bail!("ACP model source is invalid");
@@ -3715,7 +3880,6 @@ impl AcpRuntime {
         }
         if self.host.adapter_kind == AdapterKind::KimiCodeCli {
             let configured = self
-                .host
                 .session_permission_mode
                 .as_deref()
                 .context("Kimi Code Runtime has no frozen Session mode")?;
@@ -3748,6 +3912,12 @@ impl AcpRuntime {
     }
 
     pub async fn observed_model_id(&self) -> Option<String> {
+        if self.adapter_kind() == AdapterKind::CopilotCli {
+            // The advertised Session default may not
+            // be the root call's model. Its validated assistant.usage owns the
+            // first actual model observation in Core.
+            return None;
+        }
         self.session_result
             .read()
             .await
@@ -3804,6 +3974,39 @@ impl AcpRuntime {
             .host
             .prepare_prompt(&session_id, &self.owner, delivery_id)
             .await?;
+        let kind = self.adapter_kind();
+        let workspace = self.execution_root.clone();
+        let native_session = session_id.clone();
+        let context_model = match kind {
+            AdapterKind::CodebuddyCli => self
+                .session_result
+                .read()
+                .await
+                .as_ref()
+                .and_then(codebuddy_context_model),
+            AdapterKind::QoderCli => {
+                if let Some(model_id) = self.observed_model_id().await {
+                    crate::native_usage::qoder_context_model(model_id)
+                } else {
+                    None
+                }
+            }
+            AdapterKind::TraeCnCli => {
+                if let Some(model_id) = self.observed_model_id().await {
+                    Some(trae_context_model(&self.host.executable_path, &workspace, model_id).await)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        *self.native_usage.lock().await = tokio::task::spawn_blocking(move || {
+            NativeUsageReader::for_prompt(kind, &workspace, &native_session, context_model)
+                .map(|reader| Arc::new(std::sync::Mutex::new(reader)))
+        })
+        .await
+        .ok()
+        .flatten();
         *self.active_observation.lock().await = Some(AcpPromptObservation::new(
             prepared.prompt_id.clone(),
             delivery_id.to_string(),
@@ -4160,6 +4363,49 @@ impl AcpRuntime {
         self.owner.execution_epoch
     }
 
+    pub(crate) async fn native_usage_selected(&self) -> bool {
+        self.native_usage.lock().await.is_some()
+    }
+
+    pub(crate) async fn observed_context_window(&self) -> Option<i64> {
+        let model = self.observed_model_id().await?;
+        match self.adapter_kind() {
+            AdapterKind::GrokBuild => self.host.grok_context_windows.get(&model).copied(),
+            AdapterKind::KiroCli => {
+                let session = self.session_id().await?;
+                let workspace = self.execution_root.clone();
+                let root = crate::native_usage::kiro_session_root()?;
+                tokio::task::spawn_blocking(move || {
+                    crate::native_usage::kiro_context_window(&root, &workspace, &session, &model)
+                })
+                .await
+                .ok()
+                .flatten()
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) async fn poll_native_usage(&self, prompt_end: bool) -> Vec<NativeUsageObservation> {
+        let Some(reader) = self.native_usage.lock().await.clone() else {
+            return Vec::new();
+        };
+        tokio::task::spawn_blocking(move || {
+            reader
+                .lock()
+                .map(|mut reader| {
+                    if prompt_end {
+                        reader.poll_prompt_end()
+                    } else {
+                        reader.poll()
+                    }
+                })
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
     pub async fn read_text_file(&self, params: &Value) -> Result<Value> {
         let path = params
             .get("path")
@@ -4203,6 +4449,66 @@ impl AcpRuntime {
             .unbind_session_and_flush_ingress(session_id.as_deref(), &self.owner)
             .await
     }
+}
+
+fn codebuddy_context_model(session: &Value) -> Option<NativeContextModel> {
+    let model_id = acp_runtime_model_id_from_session(session)?;
+    let window_tokens = session
+        .pointer("/models/availableModels")
+        .and_then(Value::as_array)
+        .and_then(|models| models.iter().find(|model| model["modelId"] == model_id))
+        .and_then(|model| model.pointer("/_meta/maxInputTokens"))
+        .and_then(Value::as_i64)
+        .filter(|n| *n > 0 && *n <= 9_007_199_254_740_991);
+    Some(NativeContextModel {
+        model_id,
+        window_tokens,
+    })
+}
+
+/// Query the effective native catalog once for this prompt. No model request,
+/// guessed alias/window, persistent catalog or recurring polling is involved.
+async fn trae_context_model(
+    executable: &Path,
+    workspace: &Path,
+    model_id: String,
+) -> NativeContextModel {
+    use crate::runtime_probe_process::{ProbeCommandLimits, run_bounded_command};
+    let mut command = Command::new(executable);
+    rovai_core::runtime_discovery::configure_runtime_command(AdapterKind::TraeCnCli, &mut command);
+    command.current_dir(workspace).args([
+        "--config",
+        "disable_auto_upgrade=true",
+        "models",
+        "--json",
+    ]);
+    let window_tokens = match run_bounded_command(
+        &mut command,
+        ProbeCommandLimits::new(Duration::from_secs(2)),
+    )
+    .await
+    {
+        Ok(output) if output.status.success() && !output.stdout.truncated => {
+            trae_catalog_window(&output.stdout.bytes, &model_id)
+        }
+        _ => None,
+    };
+    NativeContextModel {
+        model_id,
+        window_tokens,
+    }
+}
+
+fn trae_catalog_window(bytes: &[u8], selected: &str) -> Option<i64> {
+    #[derive(serde::Deserialize)]
+    struct ModelWindow {
+        name: String,
+        context_window: Option<i64>,
+    }
+    let models: Vec<ModelWindow> = serde_json::from_slice(bytes).ok()?;
+    let mut matches = models.iter().filter(|model| model.name == selected);
+    let window = matches.next()?.context_window?;
+    (matches.next().is_none() && window > 0 && window <= 9_007_199_254_740_991).then_some(window)
 }
 
 pub struct AcpCliRuntimeAdapter {
@@ -4288,6 +4594,20 @@ impl AcpCliRuntimeAdapter {
         if frozen_runtime.adapter_kind != self.kind {
             bail!("ACP Runtime received an AgentRun for another Adapter");
         }
+        let session_permission_mode = if self.kind == AdapterKind::KimiCodeCli {
+            let mode = frozen_runtime
+                .permissions
+                .values
+                .get("permission_mode")
+                .and_then(Value::as_str)
+                .context("Kimi Code Runtime requires permission_mode")?;
+            if !matches!(mode, "default" | "plan" | "auto" | "yolo") {
+                bail!("Kimi Code permission_mode is invalid");
+            }
+            Some(mode.to_string())
+        } else {
+            None
+        };
         let existing = { self.runtimes.lock().await.get(agent_run_id).cloned() };
         if let Some(existing) = existing {
             if existing.execution_epoch() == execution_epoch
@@ -4375,6 +4695,7 @@ impl AcpCliRuntimeAdapter {
             } else {
                 "runtime_managed".to_string()
             },
+            session_permission_mode,
         );
         self.runtimes
             .lock()
@@ -4394,6 +4715,25 @@ impl AcpCliRuntimeAdapter {
             .get(agent_run_id)
             .filter(|runtime| runtime.execution_epoch() == execution_epoch)
             .cloned()
+    }
+
+    pub(crate) async fn native_usage_runs(&self) -> Vec<(String, i64, Arc<AcpRuntime>)> {
+        if !matches!(
+            self.kind,
+            AdapterKind::CodebuddyCli
+                | AdapterKind::KimiCodeCli
+                | AdapterKind::OpencodeCli
+                | AdapterKind::QoderCli
+                | AdapterKind::TraeCnCli
+        ) {
+            return Vec::new();
+        }
+        self.runtimes
+            .lock()
+            .await
+            .iter()
+            .map(|(id, runtime)| (id.clone(), runtime.execution_epoch(), runtime.clone()))
+            .collect()
     }
 
     pub async fn get_agent_run_on_host(
@@ -4503,8 +4843,29 @@ pub(crate) fn runtime_compatibility_digest(
     workspace: &AgentRunWorkspace,
     permission_semantics: PermissionSemantics,
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
-    mcp_projection_digest: &str,
-    attachment_authorization: &CampOutputDirectory,
+    attachment_authorization: &ThreadOutputDirectory,
+) -> Result<String> {
+    let kimi_provider_environment_digest = (frozen_runtime.adapter_kind
+        == AdapterKind::KimiCodeCli)
+        .then(kimi_model_environment_compatibility_digest)
+        .transpose()?;
+    runtime_compatibility_digest_with_provider_environment(
+        frozen_runtime,
+        workspace,
+        permission_semantics,
+        external_mcp_servers,
+        attachment_authorization,
+        kimi_provider_environment_digest.as_deref(),
+    )
+}
+
+fn runtime_compatibility_digest_with_provider_environment(
+    frozen_runtime: &FrozenAgentRuntimeConfig,
+    workspace: &AgentRunWorkspace,
+    permission_semantics: PermissionSemantics,
+    external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+    attachment_authorization: &ThreadOutputDirectory,
+    kimi_provider_environment_digest: Option<&str>,
 ) -> Result<String> {
     let execution_root = PathBuf::from(&workspace.execution_root)
         .canonicalize()
@@ -4514,42 +4875,24 @@ pub(crate) fn runtime_compatibility_digest(
                 workspace.execution_root
             )
         })?;
-    // TRAE's first real AgentRun upgrades an installed-unverified snapshot to
-    // Ready and therefore changes the full frozen config digest. Kimi and Grok MCP
-    // projection digests are also Run-local because their evidence includes the
-    // AgentRun identity. Those values are not Host launch inputs. The concrete
-    // resolved MCP server set below remains compatibility-authoritative. ZCode
-    // sets models on each exact Session; only its host projection (including mode) and
-    // official configuration, not member Session preferences, fence the process.
-    let excludes_runtime_config_digest = matches!(
-        frozen_runtime.adapter_kind,
-        AdapterKind::TraeCnCli | AdapterKind::ZcodeApp | AdapterKind::DeepseekHarness
-    );
-    let excludes_mcp_projection_digest = matches!(
-        frozen_runtime.adapter_kind,
-        AdapterKind::TraeCnCli
-            | AdapterKind::KimiCodeCli
-            | AdapterKind::GrokBuild
-            | AdapterKind::ZcodeApp
-            | AdapterKind::DeepseekHarness
-    );
-    let runtime_config_digest =
-        (!excludes_runtime_config_digest).then_some(frozen_runtime.config_digest.as_str());
-    let mcp_projection_compatibility_digest =
-        (!excludes_mcp_projection_digest).then_some(mcp_projection_digest);
+    // Full frozen config and MCP projection digests carry Run-local audit
+    // fields. Resolved servers and Host-scoped settings below are the process
+    // inputs. CodeBuddy's explicit model is the one model launch flag.
+    let codebuddy_launch_model = (frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli
+        && frozen_runtime.model.source != "runtime_default")
+        .then_some(frozen_runtime.model.model_id.as_str());
     let is_grok = frozen_runtime.adapter_kind == AdapterKind::GrokBuild;
     let mut compatibility = json!({
-        "schemaVersion": if is_grok { 5 } else { 3 },
+        "schemaVersion": if is_grok { 6 } else { 4 },
         "adapterKind": frozen_runtime.adapter_kind,
-        "runtimeConfigDigest": runtime_config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
+        "codebuddyLaunchModel": codebuddy_launch_model,
         "executionRoot": execution_root,
         "workspace": workspace,
         "permissionSemantics": permission_semantics,
         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         "externalMcpServers": external_mcp_servers,
-        "mcpProjectionDigest": mcp_projection_compatibility_digest,
         "attachmentOutputRoot": attachment_authorization.output_root,
     });
     if is_grok {
@@ -4565,13 +4908,23 @@ pub(crate) fn runtime_compatibility_digest(
             json!(GROK_NATIVE_RULES_REVISION),
         );
     }
+    if frozen_runtime.adapter_kind == AdapterKind::KimiCodeCli {
+        compatibility["kimiProviderEnvironmentDigest"] = json!(
+            kimi_provider_environment_digest.context("Kimi provider environment digest missing")?
+        );
+    }
     if frozen_runtime.adapter_kind == AdapterKind::DeepseekHarness {
         compatibility["dshNativeConfigurationDigest"] =
             json!(crate::dsh::native_configuration_digest(&execution_root)?);
     }
     if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
-        compatibility["zcodeNativeConfigurationDigest"] =
-            json!(crate::zcode::NativeConfig::load(&execution_root)?.digest);
+        compatibility["zcodeNativeConfigurationDigest"] = json!(
+            crate::zcode::NativeConfig::load_for_executable(
+                &execution_root,
+                Path::new(&frozen_runtime.executable_path),
+            )?
+            .digest
+        );
     }
     canonical_json_digest(&compatibility)
 }
@@ -4633,8 +4986,13 @@ pub(crate) fn freeze_native_session_compatibility(
         );
     }
     if adapter_kind == AdapterKind::ZcodeApp {
-        compatibility["zcodeNativeConfigurationDigest"] =
-            json!(crate::zcode::NativeConfig::load(&execution_root)?.digest);
+        compatibility["zcodeNativeConfigurationDigest"] = json!(
+            crate::zcode::NativeConfig::load_for_executable(
+                &execution_root,
+                Path::new(&frozen_runtime.executable_path),
+            )?
+            .digest
+        );
     }
     let compatibility_digest = canonical_json_digest(&compatibility)?;
     let compatibility_flow = if is_grok
@@ -5014,6 +5372,28 @@ pub(crate) fn configure_kimi_model_environment(command: &mut Command) -> Result<
 }
 
 fn configure_kimi_model_environment_from_path(command: &mut Command, path: &Path) -> Result<()> {
+    for (key, value) in load_kimi_model_environment_from_path(path)? {
+        command.env(key, value);
+    }
+    Ok(())
+}
+
+fn kimi_model_environment_compatibility_digest() -> Result<String> {
+    kimi_model_environment_compatibility_digest_from_path(&kimi_model_environment_path()?)
+}
+
+fn kimi_model_environment_compatibility_digest_from_path(path: &Path) -> Result<String> {
+    let values = path
+        .exists()
+        .then(|| load_kimi_model_environment_from_path(path))
+        .transpose()?;
+    canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "effectiveProviderEnvironment": values,
+    }))
+}
+
+fn load_kimi_model_environment_from_path(path: &Path) -> Result<BTreeMap<String, String>> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -5081,10 +5461,7 @@ fn configure_kimi_model_environment_from_path(command: &mut Command, path: &Path
             );
         }
     }
-    for (key, value) in values {
-        command.env(key, value);
-    }
-    Ok(())
+    Ok(values)
 }
 
 const GROK_ENVIRONMENT_FILE_NAME: &str = ".env";
@@ -5095,6 +5472,7 @@ struct GrokNativeConfiguration {
     byok_configured: bool,
     environment: BTreeMap<String, String>,
     compatibility_digest: String,
+    context_windows: BTreeMap<String, i64>,
 }
 
 fn grok_home_path() -> Result<PathBuf> {
@@ -5340,6 +5718,18 @@ fn load_grok_native_configuration_from_paths(
         None => toml::Value::Table(toml::map::Map::new()),
     };
     let literal_api_key = grok_config_has_literal_api_key(&config);
+    // Use only an explicit native model configuration. Unknown built-in
+    // catalog entries and the CLI's default window do not become guessed limits.
+    let context_windows = config
+        .get("model")
+        .and_then(toml::Value::as_table)
+        .into_iter()
+        .flat_map(|entries| entries.iter())
+        .filter_map(|(id, model)| {
+            let window = model.get("context_window")?.as_integer()?;
+            (window > 0 && window as u64 <= 9_007_199_254_740_991).then_some((id.clone(), window))
+        })
+        .collect();
     let (credential_keys, injected_keys) = collect_grok_model_environment_keys(&config)?;
     let (file_environment, environment_contents) =
         read_grok_environment_file(environment_path, &injected_keys)?;
@@ -5367,6 +5757,7 @@ fn load_grok_native_configuration_from_paths(
         byok_configured,
         environment,
         compatibility_digest,
+        context_windows,
     })
 }
 
@@ -6934,6 +7325,89 @@ mod route_policy_tests {
     }
 
     #[test]
+    fn grok_turn_usage_reaches_active_prompt_without_poisoning_late_idle_route() {
+        let usage = json!({
+            "method": "_x.ai/session_notification",
+            "params": {
+                "sessionId": "session-grok",
+                "update": {
+                    "sessionUpdate": "turn_completed",
+                    "prompt_id": "prompt-grok",
+                    "usage": {"inputTokens": 25, "outputTokens": 2}
+                }
+            }
+        });
+        assert!(is_grok_turn_usage_frame(&usage));
+        assert!(!is_known_session_lifecycle_extension(
+            AdapterKind::GrokBuild,
+            &usage
+        ));
+        assert!(is_idle_session_metadata(AdapterKind::GrokBuild, &usage));
+        // Actual Grok 1.0.44 terminal sequence: the final context is carried on
+        // available_commands_update after the last body chunk (19636 -> 19724).
+        let mut catalog = json!({"method":"session/update", "params":{
+            "sessionId":"session-grok", "_meta":{"totalTokens":19724},
+            "update":{"sessionUpdate":"available_commands_update",
+                "availableCommands":[{"name":"private-catalog-entry"}]}}});
+        assert!(is_session_catalog_update(&catalog));
+        assert!(!is_prompt_metadata_only(AdapterKind::GrokBuild, &catalog));
+        assert!(is_idle_session_metadata(AdapterKind::GrokBuild, &catalog));
+        assert!(is_prompt_metadata_only(AdapterKind::TraeCnCli, &catalog));
+        for invalid in [json!(-1), json!("19724"), Value::Null] {
+            catalog["params"]["_meta"]["totalTokens"] = invalid;
+            assert!(is_prompt_metadata_only(AdapterKind::GrokBuild, &catalog));
+        }
+        catalog["params"]["_meta"]["totalTokens"] = json!(0);
+        assert!(!is_prompt_metadata_only(AdapterKind::GrokBuild, &catalog));
+        catalog["params"]["agentId"] = json!("child");
+        assert!(is_prompt_metadata_only(AdapterKind::GrokBuild, &catalog));
+        let mut unbound = usage;
+        unbound["params"]["update"]
+            .as_object_mut()
+            .unwrap()
+            .remove("prompt_id");
+        assert!(!is_grok_turn_usage_frame(&unbound));
+        assert!(is_known_session_lifecycle_extension(
+            AdapterKind::GrokBuild,
+            &unbound
+        ));
+    }
+
+    #[test]
+    fn only_native_session_usage_gauge_qualifies_for_late_context() {
+        let gauge = json!({
+            "method": "session/update",
+            "params": {
+                "sessionId": "session-kimi",
+                "update": {"sessionUpdate": "usage_update", "used": 18913, "size": 262144}
+            }
+        });
+        assert!(is_late_session_context_gauge(&gauge));
+        let mut cumulative = gauge.clone();
+        cumulative["params"]["update"]["sessionUpdate"] = json!("agent_message_chunk");
+        assert!(!is_late_session_context_gauge(&cumulative));
+        let mut request = gauge;
+        request["id"] = json!(1);
+        assert!(!is_late_session_context_gauge(&request));
+        let mut kiro = json!({"method":"_kiro.dev/metadata",
+            "params":{"sessionId":"session-kiro","contextUsagePercentage":2.179}});
+        assert!(is_late_session_context_gauge(&kiro));
+        assert!(!is_known_session_lifecycle_extension(
+            AdapterKind::KiroCli,
+            &kiro
+        ));
+        assert!(is_idle_session_metadata(AdapterKind::KiroCli, &kiro));
+        for invalid in [json!(-1), json!(101), json!("2.179"), Value::Null] {
+            kiro["params"]["contextUsagePercentage"] = invalid;
+            assert!(!is_late_session_context_gauge(&kiro));
+        }
+        kiro["params"]["contextUsagePercentage"] = json!(0);
+        assert!(is_late_session_context_gauge(&kiro));
+        kiro["params"]["agentId"] = json!("child");
+        assert!(!is_late_session_context_gauge(&kiro));
+    }
+
+    #[test]
     fn kiro_private_command_catalog_notification_is_narrow_idle_metadata() {
         let notification = json!({
             "jsonrpc": "2.0",
@@ -7244,10 +7718,11 @@ mod tests {
             || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
 
-    async fn assert_runtime_terminal_capability(
+    async fn assert_runtime_client_capabilities(
         root: &Path,
         frozen: &FrozenAgentRuntimeConfig,
-        expected: bool,
+        expected_terminal: bool,
+        expected_meta: Option<Value>,
     ) {
         let protocol_log = root.join("initialize.json");
         make_executable(
@@ -7286,14 +7761,18 @@ while IFS= read -r ignored; do :; done
             initialize
                 .pointer("/params/clientCapabilities/terminal")
                 .and_then(Value::as_bool),
-            Some(expected)
+            Some(expected_terminal)
         );
-        assert_eq!(host.client_terminal_bridge.is_some(), expected);
+        assert_eq!(host.client_terminal_bridge.is_some(), expected_terminal);
+        assert_eq!(
+            initialize.pointer("/params/clientCapabilities/_meta"),
+            expected_meta.as_ref()
+        );
         host.shutdown().await;
     }
 
     #[tokio::test]
-    async fn runtime_policy_negotiates_client_terminal_only_for_kimi() {
+    async fn runtime_policy_negotiates_only_required_client_capabilities() {
         let kimi_root = std::env::temp_dir().join(format!(
             "rovai-acp-terminal-capability-kimi-{}",
             uuid::Uuid::new_v4()
@@ -7311,11 +7790,43 @@ while IFS= read -r ignored; do :; done
         kimi.reported_version = Some("0.38.0".to_string());
         let trae = frozen_trae_runtime(&trae_root.join("traecli"));
 
-        assert_runtime_terminal_capability(&kimi_root, &kimi, true).await;
-        assert_runtime_terminal_capability(&trae_root, &trae, false).await;
+        assert_runtime_client_capabilities(&kimi_root, &kimi, true, None).await;
+        assert_runtime_client_capabilities(&trae_root, &trae, false, None).await;
 
         std::fs::remove_dir_all(kimi_root).unwrap();
         std::fs::remove_dir_all(trae_root).unwrap();
+
+        let copilot_root = std::env::temp_dir().join(format!(
+            "rovai-acp-capabilities-copilot-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&copilot_root).unwrap();
+        let mut copilot = frozen_trae_runtime(&copilot_root.join("copilot"));
+        copilot.adapter_kind = AdapterKind::CopilotCli;
+        copilot.permissions = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::CopilotCli,
+            schema_version: 1,
+            values: json!({"allow_all": "off"}),
+        };
+        // Assert the initialize frame emitted by the real Host path. The
+        // verified dialect needs native Usage, never a reasoning subscription.
+        for version in [
+            Some("1.0.83"),
+            Some("1.0.82"),
+            Some("1.0.84"),
+            Some("99.0.0"),
+            None,
+        ] {
+            copilot.reported_version = version.map(str::to_string);
+            assert_runtime_client_capabilities(
+                &copilot_root,
+                &copilot,
+                false,
+                Some(json!({"github.com/copilot": {"events": ["assistant.usage"]}})),
+            )
+            .await;
+        }
+        std::fs::remove_dir_all(copilot_root).unwrap();
     }
 
     #[tokio::test]
@@ -7366,6 +7877,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "read_only".to_string(),
+            None,
         );
         let target = outside.join("runtime-owned.txt");
         let first_write = runtime
@@ -7506,6 +8018,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            Some("yolo".to_string()),
         );
         runtime
             .start_or_resume_session(
@@ -7528,6 +8041,14 @@ while IFS= read -r ignored; do :; done
         receive_through_prompt_completion(&mut receiver).await;
 
         let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert!(protocol.lines().any(|line| {
+            let Ok(message) = serde_json::from_str::<Value>(line) else {
+                return false;
+            };
+            message.get("method") == Some(&json!("session/set_config_option"))
+                && message.pointer("/params/configId") == Some(&json!("mode"))
+                && message.pointer("/params/value") == Some(&json!("yolo"))
+        }));
         let response = |id| {
             protocol
                 .lines()
@@ -8068,6 +8589,7 @@ done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            Some("default".to_string()),
         );
         runtime
             .start_or_resume_session(
@@ -8194,6 +8716,29 @@ done
         );
         assert_eq!(environment["KIMI_MODEL_API_KEY"], "test-plan-key");
 
+        let original_digest = kimi_model_environment_compatibility_digest_from_path(&path).unwrap();
+        let original = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("# display-only comment\n{original}")).unwrap();
+        assert_eq!(
+            kimi_model_environment_compatibility_digest_from_path(&path).unwrap(),
+            original_digest,
+            "comments do not change the child process environment"
+        );
+        std::fs::write(
+            &path,
+            original.replace("test-plan-key", "replacement-plan-key"),
+        )
+        .unwrap();
+        assert_ne!(
+            kimi_model_environment_compatibility_digest_from_path(&path).unwrap(),
+            original_digest,
+            "provider credentials injected at Host startup must fence reuse"
+        );
+        assert_ne!(
+            kimi_model_environment_compatibility_digest_from_path(&root.join("missing")).unwrap(),
+            original_digest
+        );
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -8269,6 +8814,7 @@ done
                 "\n",
                 "[model.minimax-m3]\n",
                 "model = \"MiniMax-M3\"\n",
+                "context_window = 204800\n",
                 "base_url = \"https://api.minimaxi.com/v1\"\n",
                 "env_key = \"MINIMAX_API_KEY\"\n",
                 "env_http_headers = { \"X-Tenant\" = \"MINIMAX_TENANT_TOKEN\" }\n",
@@ -8298,6 +8844,11 @@ done
             &BTreeMap::new(),
         )
         .unwrap();
+        assert_eq!(
+            configuration.context_windows.get("minimax-m3"),
+            Some(&204800)
+        );
+        assert!(!configuration.context_windows.contains_key("unknown"));
         assert!(configuration.byok_configured);
         assert_eq!(configuration.environment.len(), 2);
         assert_eq!(
@@ -8402,6 +8953,33 @@ done
 
     #[test]
     fn codebuddy_launch_preserves_native_default_and_explicit_model_selection() {
+        let mut session = json!({"models":{"currentModelId":"selected", "availableModels":[
+            {"modelId":"other","_meta":{"maxInputTokens":999}},
+            {"modelId":"selected","_meta":{"maxInputTokens":1000}}
+        ]}});
+        let context = codebuddy_context_model(&session).unwrap();
+        assert_eq!(context.model_id, "selected");
+        assert_eq!(context.window_tokens, Some(1000));
+        for invalid in [
+            Value::Null,
+            json!(0),
+            json!(-1),
+            json!("1000"),
+            json!(9_007_199_254_740_992_i64),
+        ] {
+            session["models"]["availableModels"][1]["_meta"]["maxInputTokens"] = invalid;
+            assert_eq!(
+                codebuddy_context_model(&session).unwrap().window_tokens,
+                None
+            );
+        }
+        session["models"]["currentModelId"] = json!("unlisted");
+        assert_eq!(
+            codebuddy_context_model(&session).unwrap().window_tokens,
+            None
+        );
+        session["models"]["currentModelId"] = Value::Null;
+        assert!(codebuddy_context_model(&session).is_none());
         let root = std::env::temp_dir();
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         for (source, model_id, expected) in [
@@ -8577,6 +9155,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            None,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -8770,6 +9349,7 @@ while IFS= read -r ignored; do :; done
                 root.clone(),
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
+                None,
             );
             runtime
                 .start_or_resume_session(
@@ -8831,7 +9411,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn trae_agent_execution_starts_one_session_process_without_a_diagnostic_child() {
+    async fn trae_execution_uses_one_session_host_and_a_bounded_numeric_catalog() {
         let root =
             std::env::temp_dir().join(format!("rovai-trae-agent-process-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
@@ -8842,6 +9422,10 @@ while IFS= read -r ignored; do :; done
             &format!(
                 r#"#!/bin/sh
 printf '%s\n' "$*" >> '{}'
+if [ "$*" = "--config disable_auto_upgrade=true models --json" ]; then
+  printf '%s\n' '[{{"name":"trae-default","context_window":168000}}]'
+  exit 0
+fi
 IFS= read -r initialize || exit 1
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
 IFS= read -r session || exit 1
@@ -8882,6 +9466,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            None,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -8904,6 +9489,52 @@ while IFS= read -r ignored; do :; done
         assert_eq!(invocations.lines().count(), 1);
         assert_eq!(invocations.trim(), "acp serve --permission-mode default");
         assert!(!invocations.contains("--version"));
+        // Session creation above still has one Host. Only the explicit numeric
+        // supplement adds one bounded catalog read; it never starts a prompt.
+        let model = trae_context_model(&executable, &root, "trae-default".into()).await;
+        assert_eq!(model.window_tokens, Some(168000));
+        let invocations = std::fs::read_to_string(&invocation_log).unwrap();
+        assert_eq!(
+            invocations.lines().collect::<Vec<_>>(),
+            vec![
+                "acp serve --permission-mode default",
+                "--config disable_auto_upgrade=true models --json"
+            ]
+        );
+        for (catalog, model, expected) in [
+            (
+                json!([{ "name":"selected","context_window":168000 },{"name":"other","context_window":256000}]),
+                "selected",
+                Some(168000),
+            ),
+            (
+                json!([{ "name":"selected","context_window":168000 }]),
+                "other",
+                None,
+            ),
+            (json!([{ "name":"selected" }]), "selected", None),
+            (
+                json!([{ "name":"selected","context_window":0 }]),
+                "selected",
+                None,
+            ),
+            (
+                json!([{ "name":"selected","context_window":"168000" }]),
+                "selected",
+                None,
+            ),
+            (
+                json!([{ "name":"selected","context_window":168000 },{"name":"selected","context_window":256000}]),
+                "selected",
+                None,
+            ),
+        ] {
+            assert_eq!(
+                trae_catalog_window(catalog.to_string().as_bytes(), model),
+                expected
+            );
+        }
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -8970,6 +9601,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            None,
         );
 
         let session_id = runtime
@@ -9064,6 +9696,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            None,
         );
 
         let error = runtime
@@ -9153,6 +9786,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            None,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -9279,6 +9913,7 @@ while IFS= read -r ignored; do :; done
                 root.clone(),
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
+                None,
             );
             let error = runtime
                 .start_or_resume_session(
@@ -9893,6 +10528,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            Some("default".to_string()),
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -10060,6 +10696,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
+            None,
         );
         let prompt_id = "prompt-final-assistant-suffix";
         *runtime.active_observation.lock().await = Some(AcpPromptObservation::new(
@@ -10770,12 +11407,12 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn warm_compatibility_ignores_run_local_projection_but_not_host_inputs() {
+    fn warm_compatibility_matches_process_inputs_across_acp_adapters() {
         let root =
             std::env::temp_dir().join(format!("rovai-trae-compatibility-{}", uuid::Uuid::new_v4()));
         let attachments = root.join("attachments");
         std::fs::create_dir_all(&attachments).unwrap();
-        let attachment_authorization = CampOutputDirectory {
+        let attachment_authorization = ThreadOutputDirectory {
             camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             output_root: attachments,
         };
@@ -10783,58 +11420,46 @@ while IFS= read -r ignored; do :; done
         make_executable(&executable, "#!/bin/sh\nexit 0\n");
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let frozen = frozen_trae_runtime(&executable);
-        let first = runtime_compatibility_digest(
+        let first = runtime_compatibility_digest_with_provider_environment(
             &frozen,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
-            "sha256:mcp",
             &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
-        let legacy_digest = canonical_json_digest(&json!({
-            "schemaVersion": 3,
+        let process_input_digest = canonical_json_digest(&json!({
+            "schemaVersion": 4,
             "adapterKind": frozen.adapter_kind,
-            "runtimeConfigDigest": None::<&str>,
             "hostConfigDigest": frozen.host_config_digest,
+            "codebuddyLaunchModel": None::<&str>,
             "executionRoot": root.canonicalize().unwrap(),
             "workspace": workspace,
             "permissionSemantics": PermissionSemantics::RuntimeManagedV2,
             "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
             "builtinToolCatalogDigest": builtin_tool_catalog_digest().unwrap(),
             "externalMcpServers": BTreeMap::<String, McpServerDefinition>::new(),
-            "mcpProjectionDigest": None::<&str>,
             "attachmentOutputRoot": attachment_authorization.output_root,
         }))
         .unwrap();
-        assert_eq!(first, legacy_digest);
+        assert_eq!(first, process_input_digest);
 
         let mut upgraded = frozen.clone();
         upgraded.reported_version = Some("0.120.52".to_string());
         upgraded.capabilities = vec!["session.load".to_string(), "session.new".to_string()];
         upgraded.model.model_id = "GLM-5.2".to_string();
         upgraded.config_digest = "sha256:ready-snapshot".to_string();
-        let ready = runtime_compatibility_digest(
+        let ready = runtime_compatibility_digest_with_provider_environment(
             &upgraded,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
-            "sha256:mcp",
             &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_eq!(ready, first);
-
-        let run_local_mcp_projection = runtime_compatibility_digest(
-            &upgraded,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &BTreeMap::new(),
-            "sha256:another-run-local-mcp-projection",
-            &attachment_authorization,
-        )
-        .unwrap();
-        assert_eq!(run_local_mcp_projection, first);
 
         let mut changed_servers = BTreeMap::new();
         changed_servers.insert(
@@ -10846,69 +11471,107 @@ while IFS= read -r ignored; do :; done
         );
 
         let kimi = frozen_kimi_runtime(&executable);
-        let kimi_first = runtime_compatibility_digest(
+        let kimi_first = runtime_compatibility_digest_with_provider_environment(
             &kimi,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
-            "sha256:kimi-run-one-projection",
             &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
-        let kimi_next_run_projection = runtime_compatibility_digest(
-            &kimi,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &BTreeMap::new(),
-            "sha256:kimi-run-two-projection",
-            &attachment_authorization,
-        )
-        .unwrap();
-        assert_eq!(kimi_next_run_projection, kimi_first);
-
-        let kimi_changed_mcp = runtime_compatibility_digest(
+        let kimi_changed_mcp = runtime_compatibility_digest_with_provider_environment(
             &kimi,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &changed_servers,
-            "sha256:kimi-run-three-projection",
             &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_ne!(kimi_changed_mcp, kimi_first);
 
         let mut kimi_changed_config = kimi.clone();
         kimi_changed_config.config_digest = "sha256:kimi-changed-config".to_string();
-        let kimi_changed_config = runtime_compatibility_digest(
+        let kimi_changed_config = runtime_compatibility_digest_with_provider_environment(
             &kimi_changed_config,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
-            "sha256:kimi-run-four-projection",
             &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
-        assert_ne!(kimi_changed_config, kimi_first);
+        assert_eq!(kimi_changed_config, kimi_first);
 
-        let changed_mcp = runtime_compatibility_digest(
+        let mut kimi_changed_session_mode = kimi.clone();
+        kimi_changed_session_mode.permissions.values = json!({"permission_mode": "plan"});
+        let kimi_changed_session_mode = runtime_compatibility_digest_with_provider_environment(
+            &kimi_changed_session_mode,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
+        )
+        .unwrap();
+        assert_eq!(kimi_changed_session_mode, kimi_first);
+
+        let mut codebuddy = frozen_kiro_runtime();
+        codebuddy.adapter_kind = AdapterKind::CodebuddyCli;
+        codebuddy.model.source = "runtime_default".to_string();
+        let codebuddy_default = runtime_compatibility_digest_with_provider_environment(
+            &codebuddy,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
+        )
+        .unwrap();
+        codebuddy.model.source = "explicit".to_string();
+        codebuddy.model.model_id = "provider:explicit-model".to_string();
+        let codebuddy_explicit = runtime_compatibility_digest_with_provider_environment(
+            &codebuddy,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
+        )
+        .unwrap();
+        assert_ne!(codebuddy_explicit, codebuddy_default);
+        codebuddy.model.options = json!({"temperature": "0.5"});
+        let codebuddy_turn_option = runtime_compatibility_digest_with_provider_environment(
+            &codebuddy,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
+        )
+        .unwrap();
+        assert_eq!(codebuddy_turn_option, codebuddy_explicit);
+
+        let changed_mcp = runtime_compatibility_digest_with_provider_environment(
             &upgraded,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &changed_servers,
-            "sha256:another-run-local-mcp-projection",
             &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_ne!(changed_mcp, first);
 
         upgraded.host_config_digest = "sha256:changed-host-input".to_string();
-        let changed_host = runtime_compatibility_digest(
+        let changed_host = runtime_compatibility_digest_with_provider_environment(
             &upgraded,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
-            "sha256:mcp",
             &attachment_authorization,
+            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_ne!(changed_host, first);

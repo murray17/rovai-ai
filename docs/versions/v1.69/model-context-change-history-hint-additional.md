@@ -112,3 +112,7 @@ P = 0: No public-message boundary from a previous run is recorded for you in thi
 ## 二次确认
 
 **历史确认仅适用于 revision 2：**Principal 在完整 revision 2 写出后，于 Camp 消息 `71a91b2d-df04-4e0f-8bb7-213d1110b82d` 表示“没问题，你执行吧”。Principal 随后于消息 `40d1152a-a00b-4d71-9851-1c2147bb3711` 明确不能换 Session，于消息 `f2de4763-69e2-40a0-bbd5-9b6f688f3a04` 进一步纠正：Charter 要改，但老会话不改系统提示词、不要切 Session。revision 3 对这些话的理解有误且未获确认；上述纠正发生在本文 revision 4 **完整写出之前**，不构成 revision 4 的二次确认。Principal 在完整 revision 4 提交后的 Camp 消息 `0be09c9c-9fe3-4b55-9804-3ae65b15c532` 明确表示“那你实现吧，不要做复杂，完成后推到远端分支”；据此确认按 **revision 4** 实施。该确认不撤销先前“别测了、别开子 agent 验收了、容量不处理了”的边界。
+
+## 历史勘误：2026-09-25 Bootstrap Evidence 缺失门禁
+
+本文“旧 Session 缺失证据必须拒绝补写”的要求曾在 PR #529 中实现为 `native_session_id` 已存在即拒绝首次冻结。目标 Camp `rvcamp_01m3bq7gt2ebgb8qs55m4fa179` 的 TRAE 首轮运行证明这一判断会误挡先绑定 ACP Session、再准备首次证据的正常路径；该 Binding 尚无已接受输入，也不是在重写已有证据。Principal 已要求撤回这条判断。当前语义见[Session continuity 与 Bootstrap](../../architecture/foundational-invariants.md#context-session-bootstrap)：已有证据继续按原字节复用和校验，缺失时沿原首次准备路径冻结，损坏时拒绝；Runtime Input Delivery 仍独立决定实际投递。保留上文原确认记录作为当时快照，不再将其中的“缺失即拒绝”作为当前门禁。

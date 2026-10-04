@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { StructuredCampMessageContent } from '@contracts'
+import type { StructuredThreadMessageContent } from '@contracts'
 import {
   collapsedMessageProjection,
   explicitMessageLineCount
@@ -20,7 +20,7 @@ describe('conversation message collapse', () => {
   it('keeps the first 19 lines and preserves structured tokens before the cutoff', () => {
     const firstTenLines = Array.from({ length: 10 }, (_, index) => `第 ${index + 1} 行`).join('\n')
     const remainingLines = Array.from({ length: 12 }, (_, index) => `第 ${index + 11} 行`).join('\r\n')
-    const content: StructuredCampMessageContent = [
+    const content: StructuredThreadMessageContent = [
       { kind: 'text', text: `${firstTenLines}\n` },
       { kind: 'member_mention', agentId: 'agent_1' },
       { kind: 'text', text: ` ${remainingLines}` }

@@ -5,6 +5,7 @@ const { app, BrowserWindow, nativeImage } = require('electron')
 const [renderer, userData] = process.argv.slice(2)
 assert.ok(isAbsolute(renderer) && isAbsolute(userData))
 mkdirSync(userData, { recursive: true })
+mkdirSync(join(userData, 'managed-skill-library'), { recursive: true })
 app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 const active = '.member-editor-page:not([hidden]) '
@@ -109,7 +110,7 @@ app
       await openParameter(index)
       const label = await run(`window.memberFixture.installations.flatMap(item => [...(item.snapshot?.permissionOptions ?? []).flatMap(option => option.choices ?? []), ...(item.snapshot?.models ?? []).flatMap(model => model.options.flatMap(option => option.values))]).find(choice => choice.value === ${JSON.stringify(value)})?.label ?? ${JSON.stringify(value)}`)
       assert.ok(label, `Missing parameter choice: ${value}`)
-      await click('[role=menuitemradio]', label)
+      await click('[role=menuitemradio] .runtime-model-picker-copy strong', label)
     }
     const roleValue = () =>
       run(`document.querySelectorAll(${JSON.stringify(textInput)})[1].value`)
@@ -166,7 +167,7 @@ app
       const options = []
       for (const index of [0, 1]) {
         await openParameter(index)
-        options.push(await run(`[...document.querySelectorAll('[role=menuitemradio]')].map(node => node.textContent.trim())`))
+        options.push(await run(`[...document.querySelectorAll('[role=menuitemradio] .runtime-model-picker-copy strong')].map(node => node.textContent.trim())`))
         await key('Escape')
       }
       assert.deepEqual(options, [
@@ -223,7 +224,7 @@ app
       await key('Home')
       assert.deepEqual(await dragRoster([170]), [76])
       assert.equal(await run('!!document.querySelector(".member-sidebar.is-collapsed")'), true)
-      await click('.member-sidebar-actions button[aria-label="展开队员名册"]')
+      await click('.member-roster-resizer'); await key('Right')
       assert.equal(await rosterWidth(), 256)
       assert.deepEqual(await dragRoster([330]), [330])
       await reloadPage()
@@ -239,8 +240,7 @@ app
       await key('Left')
       assert.equal(await rosterWidth(), 240)
       await key('Home')
-      await click('.member-sidebar-actions button[aria-label="名册选项"]')
-      await click('.member-roster-width-option', '较窄192 px')
+      await key('Home'); for (let n=0; n<4; n++) await key('Left')
       assert.equal(await rosterWidth(), 192)
       await click('.member-roster-resizer')
       await key('Left')
@@ -248,12 +248,8 @@ app
       await key('Right')
       assert.equal(await rosterWidth(), 192)
       await key('Home')
-      await click('.member-sidebar-actions button[aria-label="名册选项"]')
-      await click('.member-roster-options .member-editor-menu-item', '调整队员顺序')
-      assert.equal(await run('document.querySelector(".member-roster-resizer").getAttribute("aria-disabled")'), 'true')
-      assert.equal(await run(`document.querySelector('.member-sidebar-actions button[aria-label="折叠队员名册"]').disabled`), true)
-      await click('.member-sidebar-actions button[aria-label="完成调整队员顺序"]')
-      assert.equal(await run('document.querySelector(".member-roster-resizer").hasAttribute("aria-disabled")'), false)
+      assert.equal(await run('document.querySelectorAll(".member-order-handle, .member-roster-options").length'), 0)
+      assert.equal(await run('document.querySelectorAll(".member-sidebar-actions > button").length'), 2)
       window.setContentSize(1040, 700)
       await settle()
       await click('.member-roster-resizer')
@@ -265,11 +261,36 @@ app
       window.setContentSize(1440, 920)
       await settle()
     })
+    await check('roster rows reorder directly and rejected writes restore the saved order', async () => {
+      const order=()=>run('[...document.querySelectorAll("[data-member-id]")].map(row=>row.dataset.memberId)')
+      const before=await order()
+      const dragMember=async()=>{
+        const points=await run(`[...document.querySelectorAll('.member-sidebar-select')].slice(0,2).map(node=>{const r=node.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})`)
+        window.webContents.sendInputEvent({type:'mouseMove',...points[0]})
+        window.webContents.sendInputEvent({type:'mouseDown',...points[0],button:'left',clickCount:1})
+        window.webContents.sendInputEvent({type:'mouseMove',...points[1],button:'left',modifiers:['leftButtonDown']})
+        await settle()
+        assert.equal(await run('document.querySelector(".member-roster-resizer").getAttribute("aria-disabled")'),'true')
+        window.webContents.sendInputEvent({type:'mouseUp',...points[1],button:'left',clickCount:1})
+        await new Promise(resolve=>setTimeout(resolve,200));await settle()
+      }
+      await dragMember()
+      assert.deepEqual(await order(),[before[1],before[0],...before.slice(2)])
+      await run("window.memberFixture.fail('members.reorder')")
+      await dragMember()
+      assert.deepEqual(await order(),[before[1],before[0],...before.slice(2)])
+      assert.ok(await run('!!document.querySelector(".member-sidebar-error")'))
+      await run('document.querySelector(".member-sidebar-select").focus()')
+      await key('Down',['alt'])
+      await new Promise(resolve=>setTimeout(resolve,200))
+      assert.deepEqual(await order(),before)
+      assert.equal(await run('document.querySelector(".member-roster-resizer").hasAttribute("aria-disabled")'),false)
+    })
     await check('roster preferences preserve old collapse and tolerate corrupt storage', async () => {
       await run(`localStorage.removeItem('rovai-member-roster-width-v2'); localStorage.setItem('rovai-member-roster-width-v1', 'collapsed')`)
       await reloadPage()
       assert.equal(await rosterWidth(), 76)
-      await click('.member-sidebar-actions button[aria-label="展开队员名册"]')
+      await click('.member-roster-resizer'); await key('Right')
       assert.equal(await rosterWidth(), 256)
       await run(`localStorage.setItem('rovai-member-roster-width-v2', '{broken')`)
       await reloadPage()
@@ -293,7 +314,7 @@ app
       assert.equal(await run('document.querySelectorAll(".member-sidebar-row").length'), 1)
       assert.equal(await run('document.querySelector(".member-sidebar-title").textContent'), '队员1 / 16')
       await click('.member-sidebar-select', '队员 5产品设计与用户研究')
-      assert.equal(await run(`document.querySelector('${active}.member-header-runtime').textContent.trim()`), '未配置运行时')
+      assert.equal(await run(`document.querySelector('${active}.member-header-runtime').textContent.trim()`), '未配置智能体')
       await click('.member-sidebar-filter button[aria-label="清除队员筛选"]')
       await click('.member-sidebar-select', '芝士鉴定士')
       assert.equal(await run(`document.querySelector('${active}.member-header-runtime').textContent.trim()`), 'Claude Code')
@@ -301,17 +322,18 @@ app
       await settle()
       assert.deepEqual(await run('[...document.querySelectorAll(".member-sidebar-group-heading")].map(node => node.textContent)'), ['在队14', '暂离2'])
       await run("window.memberFixture.theme('night')")
-      await click('.member-sidebar-actions button[aria-label="折叠队员名册"]')
+      await click('.member-roster-resizer'); await key('Enter')
       await capture('member-roster-night-collapsed')
-      await click('.member-sidebar-actions button[aria-label="展开队员名册"]')
+      await click('.member-roster-resizer'); await key('Right')
       await reloadPage()
     })
     await check(
       'runtime menu has every admitted product icon and keyboard focus return',
       async () => {
         await click(`${active}[data-member-runtime-select]`)
+        const menuCount = await run('window.memberFixture.installations.length + 1')
         await wait(
-          'document.querySelectorAll(".member-runtime-menu-item").length === 15'
+          `document.querySelectorAll(".member-runtime-menu-item").length === ${menuCount}`
         )
         const labels = await run(
           '[...document.querySelectorAll(".member-runtime-menu-item")].map(node => node.textContent.trim())'
@@ -323,7 +345,7 @@ app
           await run(
             'document.querySelectorAll(".member-runtime-menu-item .member-runtime-glyph").length'
           ),
-          15
+          menuCount
         )
         await capture('runtime-menu')
         await key('Escape')
@@ -549,7 +571,7 @@ app
     await check(
       'new teammate is inline and counted only after creation, including its selected portrait',
       async () => {
-        await click('.member-sidebar-actions button[aria-label="新增队员"]')
+        await click('.member-sidebar-actions button[aria-label="添加队员"]')
         assert.equal(
           await run('document.querySelectorAll(".member-sidebar-row").length'),
           4
@@ -709,7 +731,7 @@ app
       await click('.member-leave-dialog button', '继续编辑')
       assert.equal(await run('document.querySelector("#profile-name").value'), '未保存的个人资料')
       await click('.profile-save-row button', '放弃更改')
-      await click('.member-sidebar-actions button[aria-label="新增队员"]')
+      await click('.member-sidebar-actions button[aria-label="添加队员"]')
       await click(personal)
       assert.equal(await run('document.querySelectorAll(".member-editor-page:not([hidden])").length'), 1)
       await run('void window.memberFixture.leave()')
@@ -732,6 +754,57 @@ app
       await wait('document.querySelector(".member-leave-dialog")')
       await click('.member-leave-dialog button', '放弃更改')
       await wait('!document.querySelector(".members-view")')
+    })
+    await check('permission guidance preserves selection and language drafts with 36px switches', async () => {
+      for (const kind of ['copilot-cli', 'kiro-cli', 'antigravity-app']) {
+        await reloadPage()
+        await run(`(() => {
+          const member = window.memberFixture.profiles()[0]
+          const configuration = structuredClone(window.memberFixture.installations.find(item => item.adapterKind === '${kind}').memberRuntimeDefaults)
+          const key = '${kind}' === 'copilot-cli' ? 'allow_all' : '${kind}' === 'kiro-cli' ? 'trust_all_tools' : 'dangerously_skip_permissions'
+          configuration.permissions.values[key] = 'off'
+          window.memberFixture.change(member.agentId, { runtimeConfiguration: configuration })
+        })()`)
+        await wait(`document.querySelector('${active}.runtime-parameter-switch input')`)
+        const baseline = await run('JSON.stringify(window.memberFixture.profiles())')
+        for (const language of ['zh-CN', 'en']) {
+          await run(`window.memberFixture.language('${language}')`)
+          await settle()
+          const heights = await run(`[...document.querySelectorAll('${active}.member-editor-runtime-fields .runtime-model-picker-trigger, ${active}.runtime-parameter-switch')].map(node => node.getBoundingClientRect().height)`)
+          assert.ok(heights.every(height => height === 36), `${kind}: ${heights}`)
+          assert.equal(await run(`document.querySelector('${active}.permission-switch-guidance').textContent`), language === 'en' ? 'Enable for a smoother experience.' : '建议开启，体验更顺畅。')
+          assert.equal(await run(`document.querySelector('${active}.runtime-parameter-switch-state').textContent`), language === 'en' ? 'Off' : '关闭')
+          assert.equal(await run('JSON.stringify(window.memberFixture.profiles())'), baseline)
+        }
+        await click(`${active}.runtime-parameter-switch input`)
+        await run(`window.permissionDraftNode = document.querySelector('${active}.runtime-parameter-switch input')`)
+        await run("window.memberFixture.language('zh-CN')")
+        await settle()
+        assert.equal(await run(`window.permissionDraftNode === document.querySelector('${active}.runtime-parameter-switch input') && window.permissionDraftNode.checked`), true)
+        assert.equal(await run('JSON.stringify(window.memberFixture.profiles())'), baseline)
+        assert.equal(await run('window.memberFixture.calls.length'), 0)
+      }
+      await reloadPage()
+      await run(`(() => {
+        const member = window.memberFixture.profiles()[0]
+        window.memberFixture.change(member.agentId, { runtimeConfiguration: { ...member.runtimeConfiguration, permissions: { ...member.runtimeConfiguration.permissions, values: { sandbox_mode: 'workspace-write', approval_policy: 'on-request' } } } })
+      })()`)
+      await settle()
+      const baseline = await run('JSON.stringify(window.memberFixture.profiles())')
+      await openParameter(0)
+      assert.deepEqual(await run(`(() => {
+        const note = document.querySelector('.permission-option-note')
+        return { text: note.textContent, value: note.closest('[role=menuitemradio]').querySelector('strong').textContent, selected: note.closest('[role=menuitemradio]').getAttribute('aria-checked'), background: getComputedStyle(note).backgroundColor, border: getComputedStyle(note).borderWidth, footer: document.querySelector('.permission-menu-guidance').textContent }
+      })()`), { text: '推荐', value: 'danger-full-access (no sandbox)', selected: 'false', background: 'rgba(0, 0, 0, 0)', border: '0px', footer: '建议使用最高权限，体验更顺畅。' })
+      await key('Escape')
+      await run("window.memberFixture.language('en')")
+      await settle()
+      await openParameter(0)
+      assert.equal(await run("document.querySelector('.permission-option-note').textContent"), 'Recommended')
+      assert.equal(await run("document.querySelector('.permission-menu-guidance').textContent"), 'For a smoother experience, use full permissions.')
+      await key('Escape')
+      assert.equal(await run('JSON.stringify(window.memberFixture.profiles())'), baseline)
+      assert.equal(await run('window.memberFixture.calls.length'), 0)
     })
     assert.deepEqual(errors, [])
     console.log(JSON.stringify({ ok: true, cases }))

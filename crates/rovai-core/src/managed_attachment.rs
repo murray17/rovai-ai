@@ -12,21 +12,21 @@ use uuid::Uuid;
 
 use crate::{
     camp_attachment::{
-        CampAttachmentStore, MAX_DRAFT_ATTACHMENT_BYTES, MAX_PREPARED_ATTACHMENTS,
-        RuntimeAttachmentCopyReceipt, cleanup_consumed_prepared_attachment_paths,
+        MAX_DRAFT_ATTACHMENT_BYTES, MAX_PREPARED_ATTACHMENTS, RuntimeAttachmentCopyReceipt,
+        ThreadAttachmentStore, cleanup_consumed_prepared_attachment_paths,
         copy_agent_sources_to_managed_staging, harden_managed_attachment_tree,
         inspect_runtime_attachment_copy, remove_managed_attachment_tree,
     },
     camp_attachment_publication::AuthorityAttachment,
     camp_attachment_view::{MAX_CAMP_VIEW_BYTES, MAX_INSTANCE_VIEW_BYTES},
-    camp_id::CampId,
+    camp_id::ThreadId,
     db::Database,
 };
 
 const INGEST_PLAN_SCHEMA_VERSION: i64 = 1;
 const MANAGED_DIRECTORY: &str = ".managed-v2";
 const STAGING_DIRECTORY: &str = ".managed-v2-staging";
-type ManagedCampRootGate = Arc<Mutex<()>>;
+type ManagedThreadRootGate = Arc<Mutex<()>>;
 static MANAGED_CAMP_ROOT_GATES: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> =
     OnceLock::new();
 
@@ -202,7 +202,7 @@ impl ManagedAttachmentStore {
         draft_revision: i64,
         requested_attachment_ids: &[String],
     ) -> Result<Option<ManagedAttachmentIngestPlan>> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         if requested_attachment_ids.is_empty() {
             return Ok(None);
         }
@@ -279,7 +279,7 @@ impl ManagedAttachmentStore {
         command_id: &str,
         attachment_count: usize,
     ) -> Result<Option<ManagedAttachmentIngestPlan>> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         if attachment_count == 0 {
             return Ok(None);
         }
@@ -324,7 +324,7 @@ impl ManagedAttachmentStore {
 
     pub fn materialize_composer(
         &self,
-        authority_store: &CampAttachmentStore,
+        authority_store: &ThreadAttachmentStore,
         plan: &ManagedAttachmentIngestPlan,
     ) -> Result<PreparedManagedAttachmentIngest> {
         if plan.source != ManagedAttachmentIngestSource::Composer
@@ -577,7 +577,7 @@ impl ManagedAttachmentStore {
 
     pub fn cleanup_committed_composer_sources(
         &self,
-        authority_store: &CampAttachmentStore,
+        authority_store: &ThreadAttachmentStore,
         prepared: &PreparedManagedAttachmentIngest,
     ) -> Result<()> {
         if prepared.source != ManagedAttachmentIngestSource::Composer {
@@ -684,7 +684,7 @@ impl ManagedAttachmentStore {
     }
 
     fn ensure_managed_camp_root(&self, camp_id: &str) -> Result<PathBuf> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         let camps_root = self.runtime_root.join("camps");
         let camp_root = camps_root.join(camp_id);
         let attachment_root = camp_root.join("attachments");
@@ -710,7 +710,7 @@ impl ManagedAttachmentStore {
     }
 
     fn managed_camp_root(&self, camp_id: &str) -> Result<PathBuf> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         Ok(self
             .runtime_root
             .join("camps")
@@ -754,7 +754,7 @@ impl ManagedAttachmentService {
             created_by_id,
             now,
         } = input;
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         validate_intent_id(intent_id)?;
         let (intent_camp_id, source_kind, draft_revision, state, promoted_at, plan_json): (
             String,
@@ -964,7 +964,7 @@ pub fn resolve_managed_attachment_path(
     camp_id: &str,
     attachment_id: &str,
 ) -> Result<String> {
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     Uuid::parse_str(attachment_id).context("Managed Attachment ID is invalid")?;
     let relative: String = connection
         .query_row(
@@ -1340,7 +1340,7 @@ fn validate_materialized_evidence(
 }
 
 fn managed_payload_relative(camp_id: &str, attachment_id: &str, leaf: &str) -> Result<String> {
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     Uuid::parse_str(attachment_id).context("Managed Attachment ID is invalid")?;
     if leaf.is_empty()
         || Path::new(leaf).components().count() != 1
@@ -1416,7 +1416,7 @@ fn validate_existing_directory(path: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
-fn managed_camp_root_gate(identity: &Path) -> ManagedCampRootGate {
+fn managed_camp_root_gate(identity: &Path) -> ManagedThreadRootGate {
     let registry = MANAGED_CAMP_ROOT_GATES.get_or_init(|| Mutex::new(HashMap::new()));
     let mut registry = registry
         .lock()
@@ -1466,8 +1466,8 @@ fn sync_directory(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::{
-        camp_attachment::{CampAttachmentStore, insert_test_camp},
-        camp_attachment_view::CampAttachmentViewStore,
+        camp_attachment::{ThreadAttachmentStore, insert_test_camp},
+        camp_attachment_view::ThreadAttachmentViewStore,
     };
 
     fn fixture() -> (Database, PathBuf, String) {
@@ -1475,14 +1475,14 @@ mod tests {
             std::env::temp_dir().join(format!("rovai-managed-attachment-v2-{}", Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
         let runtime_root = directory.join("runtime-files");
-        let view = CampAttachmentViewStore::for_isolated_test_root(&runtime_root).unwrap();
+        let view = ThreadAttachmentViewStore::for_isolated_test_root(&runtime_root).unwrap();
         let mut database = Database::open_with_runtime_camp_files_root(
             &directory,
             view.root(),
             view.root_identity_digest(),
         )
         .unwrap();
-        let camp_id = CampId::new().to_string();
+        let camp_id = ThreadId::new().to_string();
         insert_test_camp(&database, &camp_id);
         view.ensure_empty_camp_ready(&mut database, &camp_id)
             .unwrap();
@@ -1493,7 +1493,7 @@ mod tests {
     #[test]
     fn composer_ingest_promotes_once_and_commits_only_v2_rows() {
         let (mut database, directory, camp_id) = fixture();
-        let draft_store = CampAttachmentStore::new(&directory);
+        let draft_store = ThreadAttachmentStore::new(&directory);
         let source = directory.join("managed-v2-source.txt");
         fs::write(&source, b"managed-v2").unwrap();
         let draft = draft_store
@@ -1640,7 +1640,7 @@ mod tests {
     #[test]
     fn startup_reconcile_abandons_staging_and_promoted_precommit_intents() {
         let (mut database, directory, camp_id) = fixture();
-        let draft_store = CampAttachmentStore::new(&directory);
+        let draft_store = ThreadAttachmentStore::new(&directory);
         let source = directory.join("managed-v2-crash-source.txt");
         fs::write(&source, b"survives until semantic commit").unwrap();
         let draft = draft_store

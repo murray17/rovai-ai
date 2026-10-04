@@ -9,25 +9,25 @@ import { captureTimelineReadingAnchor, restoreTimelineReadingAnchor, type Timeli
 export function usePublicMessageLayout(
   timelineRef: RefObject<HTMLElement | null>,
   revision: unknown,
-  campId: string,
+  threadId: string,
   visible: boolean,
   followingLatest: () => boolean
 ): ReadonlySet<string> {
-  const [layout, setLayout] = useState<{ campId: string; short: Set<string> }>({
-    campId, short: new Set()
+  const [layout, setLayout] = useState<{ threadId: string; short: Set<string> }>({
+    threadId, short: new Set()
   })
   const currentLayout = useRef(layout)
   currentLayout.current = layout
-  const pendingAnchor = useRef<{ campId: string; anchor: TimelineReadingAnchor; follow: boolean } | null>(null)
+  const pendingAnchor = useRef<{ threadId: string; anchor: TimelineReadingAnchor; follow: boolean } | null>(null)
 
   useLayoutEffect(() => {
     const scroll = timelineRef.current
     const pending = pendingAnchor.current
     pendingAnchor.current = null
-    if (!scroll || !pending || pending.campId !== campId) return
+    if (!scroll || !pending || pending.threadId !== threadId) return
     if (pending.follow) scroll.scrollTop = scroll.scrollHeight
     else restoreTimelineReadingAnchor(scroll, pending.anchor)
-  }, [layout, campId, timelineRef])
+  }, [layout, threadId, timelineRef])
 
   useLayoutEffect(() => {
     const scroll = timelineRef.current
@@ -51,7 +51,7 @@ export function usePublicMessageLayout(
         if (bottom - bounds.top < PUBLIC_MESSAGE_GROUP_HEIGHT) short.add(messageId)
       }
       const previous = currentLayout.current
-      if (previous.campId === campId && previous.short.size === short.size
+      if (previous.threadId === threadId && previous.short.size === short.size
         && [...short].every(id => previous.short.has(id))) return
       const viewport = scroll.getBoundingClientRect()
       const source = surfaces.find(surface => {
@@ -59,9 +59,9 @@ export function usePublicMessageLayout(
         return bounds.bottom > viewport.top && bounds.top < viewport.bottom
       })
       pendingAnchor.current = {
-        campId, anchor: captureTimelineReadingAnchor(scroll, source), follow: followingLatest()
+        threadId, anchor: captureTimelineReadingAnchor(scroll, source), follow: followingLatest()
       }
-      const next = { campId, short }
+      const next = { threadId, short }
       currentLayout.current = next
       setLayout(next)
     }
@@ -86,7 +86,7 @@ export function usePublicMessageLayout(
       scroll.removeEventListener('error', schedule, true)
       if (frame !== null) window.cancelAnimationFrame(frame)
     }
-  }, [campId, revision, visible, followingLatest, timelineRef])
+  }, [threadId, revision, visible, followingLatest, timelineRef])
 
-  return layout.campId === campId ? layout.short : new Set()
+  return layout.threadId === threadId ? layout.short : new Set()
 }

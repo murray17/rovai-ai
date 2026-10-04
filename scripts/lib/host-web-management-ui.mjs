@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 // Extends the existing actual Desktop/Web seam with production management
 // actions. Native requests only observe outcomes; no Runtime is configured.
-export async function exerciseBrowserManagement({ web, read, fixture, capture, openCamp, campId }) {
+export async function exerciseBrowserManagement({ web, read, fixture, capture, openCamp, threadId }) {
   const button = (label, scope = 'document') => `[...${scope}.querySelectorAll('button')].find(e=>e.getClientRects().length>0 && e.textContent.trim()===${JSON.stringify(label)})`
   const click = async label => { await web.wait(`Boolean(${button(label)}) && !(${button(label)}).disabled`); await web.click(button(label)) }
   const fill = async (selector, text) => {
@@ -126,14 +126,14 @@ export async function exerciseBrowserManagement({ web, read, fixture, capture, o
   await web.click(`document.querySelector('.task-submit')`)
   await web.wait(`document.querySelector('.task-editor-dialog')===null`)
   await web.wait(`document.querySelector('.task-detail h3')?.textContent==='Browser-updated durable task'`)
-  const task = (await read('camps.open', { campId, traceId: crypto.randomUUID() })).tasks.find(item=>item.title==='Browser-updated durable task')
+  const task = (await read('camps.open', { threadId, traceId: crypto.randomUUID() })).tasks.find(item=>item.title==='Browser-updated durable task')
   assert.ok(task && task.version > 1)
   await web.click(`document.querySelector('.task-cancel-action')`)
   await fill('.task-cancel-dialog textarea', 'Isolated acceptance complete.')
   await web.click(`document.querySelector('.task-cancel-dialog .danger-button')`)
   await web.wait(`document.querySelector('.task-cancel-dialog')===null`)
   await web.wait(`document.querySelector('.task-detail-status.state-cancelled')!==null`)
-  assert.equal((await read('camps.open', { campId, traceId: crypto.randomUUID() })).tasks.find(item=>item.taskId===task.taskId).status, 'cancelled')
+  assert.equal((await read('camps.open', { threadId, traceId: crypto.randomUUID() })).tasks.find(item=>item.taskId===task.taskId).status, 'cancelled')
   await capture('web-task-management.png')
   await web.click(`document.querySelector('[aria-label="收起会话详情"]')`)
 }

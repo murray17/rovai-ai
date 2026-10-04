@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use anyhow::Result;
-use rusqlite::{OptionalExtension, params};
-use serde::Deserialize;
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -142,7 +142,7 @@ pub fn create_member(
         },
     };
     let execution = AgentProfileService::default()
-        .create_profile(database, &envelope)
+        .create_profile_with_creation_source(database, &envelope, Some(authenticated_run))
         .map_err(|error| {
             if error.downcast_ref::<CommandGatewayError>().is_some() {
                 anyhow::Error::new(MemberCreateError {
@@ -158,6 +158,64 @@ pub fn create_member(
         execution,
         avatar_ref,
     })
+}
+
+/// Immutable product receipt. This is not a CampMessage or model input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberCreationView {
+    pub creation_id: String,
+    #[serde(default)]
+    pub source_agent_run_id: Option<String>,
+    pub agent_id: String,
+    pub display_name: String,
+    pub avatar_ref: Option<String>,
+    pub team_role: String,
+    pub professional_responsibilities: String,
+    pub personality_traits: Vec<String>,
+    pub creator_agent_id: String,
+    pub creator_display_name: String,
+    pub created_at: String,
+}
+
+pub(crate) fn record_member_creation(
+    transaction: &Transaction<'_>,
+    source: &AuthenticatedTeamToolRun,
+    receipt: &MemberCreationView,
+) -> Result<()> {
+    transaction.execute(
+        "INSERT INTO member_creation(creation_id, camp_id, snapshot_json, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![receipt.creation_id, source.camp_id, serde_json::to_string(receipt)?, receipt.created_at],
+    )?;
+    transaction.execute(
+        "INSERT INTO member_creation_preference(singleton, helper_agent_id) VALUES (1, ?1)
+         ON CONFLICT(singleton) DO UPDATE SET helper_agent_id=excluded.helper_agent_id",
+        [&source.agent_id],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn last_creation_helper(connection: &Connection) -> Result<Option<String>> {
+    Ok(connection
+        .query_row(
+            "SELECT helper_agent_id FROM member_creation_preference WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+pub(crate) fn list_member_creations(
+    connection: &Connection,
+    camp_id: &str,
+) -> Result<Vec<MemberCreationView>> {
+    let mut statement = connection.prepare("SELECT snapshot_json FROM member_creation WHERE camp_id=?1 ORDER BY created_at, creation_id")?;
+    let rows = statement
+        .query_map([camp_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(|row| Ok(serde_json::from_str(&row)?))
+        .collect()
 }
 
 fn require_direct_user_trigger(

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { isCampId, type RestorableLocation } from '@contracts'
+import { isThreadId, type RestorableLocation } from '@contracts'
 import { writePrivateJson } from './general-preferences'
 
 const MAX_STABLE_ID_LENGTH = 256
@@ -15,10 +15,10 @@ export function parseRestorableLocation(value: unknown): RestorableLocation | nu
   if (value.kind === 'memory' && hasExactKeys(value, ['kind'])) return { kind: 'memory' }
   if (
     value.kind === 'camp'
-    && hasExactKeys(value, ['kind', 'campId'])
-    && isCampId(value.campId)
+    && (hasExactKeys(value, ['kind', 'threadId']) || hasExactKeys(value, ['kind', 'campId']))
+    && isThreadId(value.threadId ?? value.campId)
   ) {
-    return { kind: 'camp', campId: value.campId }
+    return { kind: 'camp', threadId: (value.threadId ?? value.campId) as string }
   }
   if (
     value.kind === 'members'

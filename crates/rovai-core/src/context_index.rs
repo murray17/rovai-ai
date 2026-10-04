@@ -164,8 +164,8 @@ mod slow_tests {
     use super::*;
     use crate::{
         collaboration::{
-            AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
-            TestCampMessageAddress, TestCampMessageCommand,
+            AddThreadMemberCommand, CollaborationService, CreateTaskCommand, CreateThreadCommand,
+            TestThreadMessageAddress, TestThreadMessageCommand,
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
     };
@@ -196,13 +196,13 @@ mod slow_tests {
                 &user_envelope(
                     "create-index-camp",
                     None,
-                    CreateCampCommand::for_test(
+                    CreateThreadCommand::for_test(
                         directory.join("workspace").to_string_lossy().to_string(),
                     ),
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -212,7 +212,7 @@ mod slow_tests {
                 &user_envelope(
                     "add-index-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
                         expected_membership_generation: 1,
@@ -233,7 +233,6 @@ mod slow_tests {
                         title: "Indexed Task".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_1".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -245,12 +244,12 @@ mod slow_tests {
                 &user_envelope(
                     "send-index-message",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: format!("Review adr-49 PR-7 ISSUE-2 {task_id}; task-9 is not an ID."),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -260,7 +259,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(message.result.status, CommandResultStatus::Applied);
-        let message_id = message.result.payload["campMessageId"]
+        let message_id = message.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();

@@ -71,6 +71,11 @@ module.exports = async function assertCommandInteraction(window, run, capture) {
     assert.equal(await run('document.querySelectorAll(".tool-group-items .running-text-highlight").length'), 0)
     await userScroll('host.scrollTop = host.scrollHeight')
     await settle()
+    // The expanded history group has its own cursor; scroll through child pages.
+    for (let page = 0; page < 4 && !await run('document.querySelector("[data-execution-item-key=\\"tool:window-80\\"]")'); page++) {
+      await userScroll('host.scrollTop = host.scrollHeight')
+      await run('new Promise(resolve => setTimeout(resolve, 180))')
+    }
     // Pick the final command, which is kept in the measured child virtual list.
     await waitFor('document.querySelector("[data-execution-item-key=\\"tool:window-80\\"]") !== null')
     const command = '[data-execution-item-key="tool:window-80"] > summary'

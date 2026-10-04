@@ -1,14 +1,16 @@
 ---
 document_type: user-guide
 authority: server-access-guide
-last_updated: 2026-09-14
+last_updated: 2026-09-29
 ---
 
 # Rovai Server 部署与远程访问指南
 
 在 Linux 主机上运行服务，通过手机、平板或电脑浏览器访问。项目文件和执行进程保留在服务器上。
 
-> **TODO：尚无正式 Server Release。本文的下载与安装部分待补齐，以下配置以程序已安装为前提。**
+> Server **0.4.1**（`server-v0.4.1`）与 Desktop **0.4.1** 分别发布。完整中英文教程见[部署与访问总览](https://rovai.dev/zh/docs/remote.html)。本页保留 Linux 运维配方；桌面入口见[Desktop Web](https://rovai.dev/zh/docs/desktop-web.html)。
+>
+> **0.4.0 历史问题：** macOS arm64 旧包通过命令快捷链接可能找不到 WebUI，且缺少首次执行所需的内置 Skill。0.4.1 补齐这两处包问题；安装包通过不等于每个 Runtime 都通过验收，详情见[安装指南](https://rovai.dev/zh/docs/server-install.html)。
 
 ## 访问方式
 
@@ -26,11 +28,18 @@ last_updated: 2026-09-14
 
 ## 安装与准备
 
-### 安装（TODO）
+### 安装公开预编译包
 
-- [ ] 发布正式 Server Release 后，补充下载入口、安装命令和校验步骤。
+[Server 0.4.1 Release](https://github.com/murray17/rovai-ai/releases/tag/server-v0.4.1) 提供 macOS arm64/x64、Linux x64 GNU 和 Windows x64 包，以及安装脚本和 `SHA256SUMS`。Unix 安装示例：
 
-预览包操作暂见[原生 Server 安装说明](../development/server-preview.md#安装和启动)。
+```sh
+curl -fL https://github.com/murray17/rovai-ai/releases/download/server-v0.4.1/install-server.sh -o install-server.sh
+sh install-server.sh --version 0.4.1
+```
+
+安装器校验归档并管理程序目录，不安装系统服务、不迁移 Desktop 数据。Windows 安装、首次登录、macOS 启动路径与发布包限制见[官网安装教程](https://rovai.dev/zh/docs/server-install.html)。源码构建另见[原生 Server 开发验收](../development/server-preview.md#构建与包内容)。
+
+0.4.0 已安装程序的更新通道为 `scripts/server-channel.txt`；0.4.1 安装器与程序使用 `scripts/server-release-tag.txt`。本教程固定版本，更新时应同时检查实际 Release 附件与对应渠道指针。
 
 Linux 发布目标为 **GNU x86_64、glibc 2.35，Ubuntu 22.04+ / Debian 12+**，暂不包含 Alpine/musl 和 Linux ARM64。平台与 Runtime 支持状态分别记录，见[当前版本](../versions/README.md)和 [Runtime 兼容性清单](../runtime-compatibility.md)。
 

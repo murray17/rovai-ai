@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-09-19
+last_updated: 2026-09-28
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -28,8 +28,9 @@ DOM 形态，但 identity、候选来源、激活行为和发送校验保持强�
 `decorate()` 返回 null，不得挂载独立 React Root、Portal 或 Catalog 订阅。Atom 内没有独立可聚焦按钮，光标不能
 进入其中，键盘可以 NodeSelection，Backspace/Delete 一次删除整个 Atom。普通字符落在 Atom 前后的独立 TextNode。
 
-Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 解析；改名只刷新显示。离队或不可解析时
-保留 identity 和 fallback label，不按同名成员重新绑定。Skill 的唯一身份是 `skillId`，`nameAtSend` 保留发送时
+Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp 成员或可邀请的队员资料解析；改名只刷新显示。
+不可解析时保留 identity 和 fallback label，不按同名成员重新绑定。已离队但资料仍在的队员可以作为待邀请对象；
+资料离线、已移除或身份缺失时按不可用显示。Skill 的唯一身份是 `skillId`，`nameAtSend` 保留发送时
 语义/显示快照；当前描述、图标和来源不进入 Draft。Catalog 展示刷新不产生 dirty、Draft save 或 undo item。
 
 ## Member Typeahead
@@ -43,11 +44,19 @@ critical-priority command 从当前 selection 同步重算 trigger：Catalog loa
 当前候选必须保持在滚动区域内，并通过稳定 option ID 与编辑器的 `aria-activedescendant` 对应；
 Member 与 Skill 菜单共享这项焦点同步，菜单关闭后移除该关联。
 
-普通 Member 候选的主行显示当前 Camp Catalog 名称，副行显示同一 Catalog 的团队角色；团队角色为空时显示
-“团队角色未设置”。副行不得使用所有候选共享的“Camp 成员”等占位文案。All Members 候选继续显示广播说明。
+`@` 空查询先显示 `@所有队员` 和当前 Camp 可接收的队员，再显示“邀请其他队员”入口；该入口在长名册中仍须
+处于可见候选上限内。进入邀请层后显示返回入口和其他资料仍在的队员。输入查询时按名称或团队角色查找，
+当前 Camp 成员排在可邀请队员之前；队外候选标明邀请状态。普通 Member 候选主行显示当前名称，副行显示
+团队角色；团队角色为空时显示“团队角色未设置”。副行不得使用所有候选共享的“Camp 成员”等占位文案。
+All Members 候选继续显示广播说明，范围仍是发送时 Camp 中的全部可接收队员。
 
 选择 Member/All Members 后，匹配查询被一个 Atom 替换。右侧已有空白时复用；否则插入一个普通空格，并把
 光标放在空格之后。查询或显示文本都不构成 identity。
+
+队外 Member Atom 与在队 Member Atom 使用同一正文结构和逐处呈现。重复提及保留每一个 Atom；Composer 从当前
+正文中的 `agentId` 去重派生“待邀请”名单，不维护第二份持久名单。删除最后一个该身份的 Atom 就取消待邀请；
+删除部分重复 Atom 不取消。状态在路由轨提示“发送时邀请”，主按钮提示“邀请并发送”；待邀请身份只参与
+这次本机发送流程，不会因为选中候选就提前改变 Camp 名册。
 
 ## Skill Typeahead
 
@@ -78,11 +87,12 @@ Member 与 Skill 菜单共享这项焦点同步，菜单关闭后移除该关联
 读取 `skillId` 并调用 Skill 详情入口。激活只改变 presentation，不修改 `ComposerDocument`。
 
 Member 人物信息卡保持非模态，宽 392px，采用“布局 2”：左侧 128px 受控 4:5 portrait，右侧依次显示名称、
-团队角色、Presence、Agent 运行时、专业职责、工作准则和性格底色。它不是队员页链接、Dialog 或全局 Toast。
+团队角色、Presence、智能体、专业职责、工作准则和性格底色。它不是队员页链接、Dialog 或全局 Toast。
 点击外部或 Esc 关闭，Popover 不设 focus trap；拖选文本不得误触打开。Atom 本身不进入独立 tab 顺序；需要
 键盘激活时由编辑器 command 统一处理。
 
-已移除、离开或不可解析队员按可见 fallback 静态显示，不能打开人物卡。队员头像和显示名在身份可操作时可复用
+已移除或不可解析队员按可见 fallback 静态显示，不能打开人物卡。待邀请队员的 Atom 保持静态并显示发送时
+加入的可访问名称；队员头像和显示名在身份可操作时可复用
 同一卡片，降级规则一致。
 
 ## Reply 与 Continuation
@@ -140,15 +150,17 @@ Current User Mention 从 Desktop 当前个人资料解析名称；保存后历�
 保存资料后，已打开卡片同步刷新。点击外部或 Escape 关闭；键盘打开时焦点进入卡片，Escape 将焦点返回触发点。
 沿用队员信息卡的视口避让和单卡片互斥，选中文字时不因点击误打开。
 
-Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内结构化前缀；其余权威 Structured Content
-继续通过 sanitized GFM 呈现。正文里的 Agent Mention 在该路径只投影可见文本，显示名先按 Markdown literal
+Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解析位置；全部从当前用户资料读取昵称，
+保留所在位置及周围 sanitized GFM。前缀继续复用既有呈现；非前缀和重复提及通过来源无碰撞的内部占位与可信 UI 绑定，
+碰撞检查覆盖完整原始文本及独立于块语法的实体解码视图，缩进区域也显示真实昵称。
+不按字面名称解析 Markdown，不把昵称拼成 Markdown。正文里的 Agent Mention 在该路径只投影可见文本，显示名先按 Markdown literal
 转义并折叠换行，不能注入链接、标题、代码或表格结构。
 
 ## Authority and regression
 
 | 层级 | 权威入口 |
 | --- | --- |
-| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v15](../../contracts/camp-composer-draft-v15.md)与[Pending Camp Activation v2](../../contracts/pending-camp-activation-v2.md) |
+| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)与[Pending Camp Activation v4](../../contracts/pending-camp-activation-v4.md) |
 | Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
 | Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
 | Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |

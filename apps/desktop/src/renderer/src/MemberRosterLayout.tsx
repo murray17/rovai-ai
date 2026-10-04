@@ -12,6 +12,7 @@ import {
   type ReactNode,
   type SetStateAction
 } from 'react'
+import { UiText, uiAttribute } from './interface-language'
 
 const STORAGE_KEY = 'rovai-member-roster-width-v2'
 const LEGACY_STORAGE_KEY = 'rovai-member-roster-width-v1'
@@ -145,16 +146,16 @@ function MemberRosterSeparator({ dragging, setDragging }: {
       className={`member-roster-resizer ${dragging ? 'is-dragging' : ''}`}
       role="separator"
       tabIndex={sorting ? -1 : 0}
-      aria-label="队员列表宽度"
+      aria-label={uiAttribute("队员列表宽度")}
       aria-disabled={sorting || undefined}
       aria-orientation="vertical"
       aria-valuemin={COLLAPSED_WIDTH}
       aria-valuemax={maxWidth}
       aria-valuenow={collapsed ? COLLAPSED_WIDTH : width}
-      aria-valuetext={collapsed ? '已折叠，按右方向键展开' : `${width} 像素`}
+      aria-valuetext={collapsed ? uiAttribute("已折叠，按右方向键展开") : uiAttribute("{0} 像素", String(width))}
       aria-controls={id}
       aria-describedby={helpId}
-      title={collapsed ? '向右拖动展开；双击恢复默认' : '拖动调整宽度，继续向左拖动折叠；双击恢复默认'}
+      title={collapsed ? uiAttribute("向右拖动展开；双击恢复默认") : uiAttribute("拖动调整宽度，继续向左拖动折叠；双击恢复默认")}
       onPointerDown={(event) => {
         if (sorting || event.button !== 0) return
         event.preventDefault()
@@ -208,8 +209,8 @@ function MemberRosterSeparator({ dragging, setDragging }: {
         setWidth(next)
       }}
     >
-      <span className="member-roster-resize-hint" aria-hidden="true">{collapsed ? '已折叠' : `${width} px`}</span>
-      <span id={helpId} className="member-roster-sr-only">左右方向键调整；最窄时按左方向键折叠，右方向键展开，回车切换折叠，Home 恢复默认。也可使用名册选项和展开折叠按钮。</span>
+      <span className="member-roster-resize-hint" aria-hidden="true">{collapsed ? uiAttribute("已折叠") : `${width} px`}</span>
+      <span id={helpId} className="member-roster-sr-only"><UiText zh={"左右方向键调整；最窄时按左方向键折叠，右方向键展开，回车切换折叠，Home 恢复默认。"} /></span>
     </div>
   )
 }

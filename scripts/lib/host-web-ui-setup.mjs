@@ -69,9 +69,9 @@ export async function configureBrowserCamp({ browser, read, workspace, name }) {
   await browser.click(`document.querySelector('.new-camp-dialog .compact-primary')`)
   await browser.wait(`document.querySelector('[contenteditable=true]')!==null`)
   const navigation = await read('navigation.snapshot')
-  const candidates = [...navigation.quickChat.recentCamps, ...navigation.projects.flatMap(project => project.recentCamps)]
+  const candidates = [...navigation.quickChat.recentThreads, ...navigation.projects.flatMap(project => project.recentThreads)]
   const camp = candidates.find(item => item.title === name)
   assert.ok(camp, 'UI-created Camp was absent from the navigation projection')
   assert.equal(camp.projectPath, workspace)
-  return { campId: camp.id, member: configured }
+  return { threadId: camp.id, member: configured }
 }

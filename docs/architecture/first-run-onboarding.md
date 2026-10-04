@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-first-run-component-boundary
 status: accepted
-last_updated: 2026-09-18
+last_updated: 2026-09-30
 ---
 
 # First-run Onboarding
@@ -48,6 +48,15 @@ The state file intentionally stays outside Core. It is Desktop admission and pro
 object produced by the configured path is created through existing Core authority and remains after onboarding
 finishes. The deferred path creates no onboarding-owned product object and therefore has no partial Core state to
 reconcile.
+
+Core initially seeds four Chinese built-in profiles. Before recording the selected member checkpoint, configured
+English onboarding initializes every present factory profile with its English preset only when it has no Runtime
+configuration and all six identity fields still exactly match the Chinese factory preset. It uses existing versioned
+`members.update` commands: the selected member retains the provisioning member command ID; other seeds use IDs
+derived from that command ID and their member ID. Only the selected member receives Runtime configuration and joins
+the first Camp, using its returned version. Customized, configured or removed profiles retain their saved identity;
+a language switch after onboarding never translates saved member data. If initialization stops partway before the
+member checkpoint, recovery recognizes already initialized English profiles and writes only the remaining seeds.
 
 ## Recovery boundary
 

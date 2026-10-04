@@ -1,3 +1,4 @@
+import { uiAttribute, useInterfaceLanguage } from './interface-language'
 import { APPEARANCE_READING_CHANGED } from './reduced-motion'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
@@ -33,6 +34,7 @@ export function ReadonlyCodeViewer({
   theme: ResolvedTheme
   findScopeLabel?: string
 }): React.JSX.Element {
+  const interfaceLanguage = useInterfaceLanguage()
   const viewRef = useRef<EditorView | null>(null)
   const previousThemeRef = useRef(theme)
   const themeAnchorRef = useRef<{ theme: ResolvedTheme; view: EditorView; position: number } | null>(null)
@@ -71,12 +73,12 @@ export function ReadonlyCodeViewer({
   useFileFindAdapter(findAdapter)
 
   const extensions = useMemo(() => sourceReaderExtensions({
-    ariaLabel: `${fileName} 内容`,
+    ariaLabel: uiAttribute("{0} 内容", String(fileName)),
     language,
     startLine,
     target,
     theme
-  }), [fileName, language, startLine, targetEndLine, targetLine, theme])
+  }), [fileName, interfaceLanguage, language, startLine, targetEndLine, targetLine, theme])
 
   const targetScrollTop = useCallback((view: EditorView): number | null => {
     const local = sourceTargetLocalLines(startLine, view.state.doc.lines, target)
@@ -144,7 +146,7 @@ export function ReadonlyCodeViewer({
     <div
       className="file-preview-code"
       role="region"
-      aria-label={`${fileName} 内容`}
+      aria-label={uiAttribute("{0} 内容", String(fileName))}
       tabIndex={0}
       onKeyDown={(event) => {
         const view = viewRef.current

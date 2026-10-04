@@ -8,7 +8,7 @@ const examples = [
   '- Markdown：[v1.30 方案](docs/versions/v1.30/README.md)',
   '- HTML：[成员管理原型](docs/prototypes/camp-member-management/index.html)',
   '- 代码：[预览实现](apps/desktop/src/renderer/src/FilePreviewPane.tsx:1)',
-  '- 图片：[Camp 会话截图](docs/assets/readme/camp-conversation.png)',
+  '- 图片：[Thread 会话截图](docs/assets/readme/camp-conversation.png)',
   '- SVG：[应用图标](build/icon.svg)'
 ].join('\n')
 
@@ -38,7 +38,7 @@ describe.each(renderers)('file-link presentation in $name', ({ render, rendersWe
       ['v1.30 方案', 'docs/versions/v1.30/README.md'],
       ['成员管理原型', 'docs/prototypes/camp-member-management/index.html'],
       ['预览实现', 'apps/desktop/src/renderer/src/FilePreviewPane.tsx:1'],
-      ['Camp 会话截图', 'docs/assets/readme/camp-conversation.png'],
+      ['Thread 会话截图', 'docs/assets/readme/camp-conversation.png'],
       ['应用图标', 'build/icon.svg']
     ]) {
       expect(visibleText).toContain(label)

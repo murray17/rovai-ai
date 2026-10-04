@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AdapterInstallation, CampOpenProjection, CampSnapshot, ExecutionConsolePlacement } from '@contracts'
+import type { AdapterInstallation, ThreadOpenProjection, ThreadSnapshot, ExecutionConsolePlacement } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/AppHeader'
-import { CampWorkspace, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
-import { CampClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
+import { ThreadWorkspace, type ThreadInspectorTab } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
+import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { MobileLayoutProvider, useMobileViewport } from '../../../apps/desktop/src/renderer/src/MobileLayout'
 import { createReviewModel } from '../host-web-parity/model'
 import { agents, initial, initialDraft, installations, now, run } from '../host-web-parity/data'
@@ -33,7 +33,7 @@ const fixtureClient = {
       executionWindowReady = true
       return {
         schemaVersion: 1,
-        campId: initial.camp.id,
+        threadId: initial.thread.id,
         agentRunId: run.id,
         requestedBeforeSequence: request.beforeSequence ?? null,
         nextBeforeSequence: null,
@@ -45,7 +45,7 @@ const fixtureClient = {
     if (method === 'agentRunExecution.changes') {
       return {
         schemaVersion: 1,
-        campId: initial.camp.id,
+        threadId: initial.thread.id,
         agentRunId: run.id,
         requestedAfterSequence: request.afterSequence ?? 0,
         nextAfterSequence: request.afterSequence ?? 0,
@@ -72,13 +72,13 @@ const openCoverage = {
   agentRuns: completeCoverage,
   executionEvidence: completeCoverage,
   approvals: completeCoverage
-} satisfies CampOpenProjection['coverage']
+} satisfies ThreadOpenProjection['coverage']
 
 function Fixture() {
   const mobile = useMobileViewport(mode === 'mobile')
   const [phase, setPhase] = useState<Phase>('connecting')
   const [placement, setPlacement] = useState<ExecutionConsolePlacement>(mode === 'bottom' ? 'bottom' : 'inspector')
-  const [inspector, setInspector] = useState<CampInspectorTab | null>(null)
+  const [inspector, setInspector] = useState<ThreadInspectorTab | null>(null)
   const [entry, setEntry] = useState<HTMLElement | null>(null)
   useEffect(() => {
     window.executionTransition = {
@@ -87,7 +87,7 @@ function Fixture() {
       windowReady: () => executionWindowReady
     }
   }, [])
-  const snapshot = useMemo<CampSnapshot>(() => ({
+  const snapshot = useMemo<ThreadSnapshot>(() => ({
     ...initial,
     agentRuns: [{
       ...run, status: 'running',
@@ -99,12 +99,12 @@ function Fixture() {
       payload: { itemId: 'first-narration', delta: '开始检查。' }
     }] : phase === 'tools' ? model.get().snapshot.executionEvidence : []
   }), [phase])
-  return <MobileLayoutProvider value={mobile}><CampClientProvider client={windowed ? fixtureClient : model.client}>
+  return <MobileLayoutProvider value={mobile}><ThreadClientProvider client={windowed ? fixtureClient : model.client}>
     <div className="app-shell app-shell-camp" data-mobile-view={mobile ? 'camp' : undefined}>
       <aside className="unified-sidebar" aria-label="Fixture sidebar" />
-      <AppHeader campTitle={snapshot.camp.title} contextLabel="Fixture" camp={snapshot} detailEntryHostRef={setEntry} onFocusApprovals={() => {}} />
+      <AppHeader threadTitle={snapshot.thread.title} contextLabel="Fixture" thread={snapshot} detailEntryHostRef={setEntry} onFocusApprovals={() => {}} />
       <main className="content task-content camp-content">
-        <CampWorkspace snapshot={snapshot} projectName="Fixture" agents={agents} installations={installations as AdapterInstallation[]}
+        <ThreadWorkspace snapshot={snapshot} projectName="Fixture" agents={agents} installations={installations as AdapterInstallation[]}
           openCoverage={windowed ? openCoverage : null}
           initialComposerDraft={initialDraft} busy={false} onSend={model.send} onChangeLead={async () => {}}
           onTasksChanged={async () => {}} onResolveApproval={() => {}} stopping={false} onStop={() => {}}
@@ -116,6 +116,6 @@ function Fixture() {
           onNotify={() => {}} onNotifyError={message => { throw Error(message) }} />
       </main>
     </div>
-  </CampClientProvider></MobileLayoutProvider>
+  </ThreadClientProvider></MobileLayoutProvider>
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)

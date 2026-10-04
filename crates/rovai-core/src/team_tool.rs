@@ -48,7 +48,7 @@ pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 26] = [
+pub const TEAM_TOOL_NAMES: [&str; 27] = [
     "mission.list",
     "mission.get",
     "mission.update",
@@ -70,6 +70,7 @@ pub const TEAM_TOOL_NAMES: [&str; 26] = [
     CAMP_SEARCH_TOOL_NAME,
     HISTORY_SEARCH_TOOL_NAME,
     CAMP_READ_TOOL_NAME,
+    crate::thread_runs::THREAD_RUNS_TOOL_NAME,
     SINGLE_CHAT_HISTORY_TOOL_NAME,
     "memory.view",
     "memory.search",
@@ -85,7 +86,7 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CampMessageSendInput {
+pub struct ThreadMessageSendInput {
     #[serde(default)]
     pub body: String,
     #[serde(default)]
@@ -154,10 +155,11 @@ pub struct TeamListTasksInput {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMessageSendCommand {
+pub struct ThreadMessageSendCommand {
     native_binding_id: String,
     credential_digest: String,
     runtime_tool_call_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     camp_id: String,
     body: String,
     to: Vec<String>,
@@ -167,18 +169,18 @@ pub struct CampMessageSendCommand {
     files: Vec<String>,
 }
 
-impl sealed::Sealed for CampMessageSendCommand {}
-impl DomainCommand for CampMessageSendCommand {
+impl sealed::Sealed for ThreadMessageSendCommand {}
+impl DomainCommand for ThreadMessageSendCommand {
     const TYPE: &'static str = CAMP_MESSAGE_SEND_TOOL_NAME;
 }
 
 /// The raw credential is deliberately separate from the durable domain command.
 /// Command records contain only its digest, so the credential never reaches SQLite.
-pub struct CampMessageSendInvocation {
+pub struct ThreadMessageSendInvocation {
     pub native_binding_id: String,
     pub binding_credential: String,
     pub runtime_tool_call_id: String,
-    pub input: CampMessageSendInput,
+    pub input: ThreadMessageSendInput,
     pub source_files: Vec<LocalAttachmentSourceRef>,
 }
 
@@ -583,7 +585,7 @@ impl TeamToolService {
                 "assigneeAgentId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Required Current CampMember who owns the responsibility. Creation does not notify, wake, or start this Assignee."
+                    "description": "Required Current ThreadMember who owns the responsibility. Creation does not notify, wake, or start this Assignee."
                 }
             }
         })
@@ -621,7 +623,7 @@ impl TeamToolService {
                 "assigneeAgentId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Set an active Camp member, or omit to leave unchanged."
+                    "description": "Set an active Thread member, or omit to leave unchanged."
                 },
                 "clearAssignee": {
                     "type": "boolean",
@@ -1008,7 +1010,7 @@ impl TeamToolService {
     pub fn send_public_message(
         &self,
         database: &mut Database,
-        invocation: &CampMessageSendInvocation,
+        invocation: &ThreadMessageSendInvocation,
     ) -> Result<CommandExecution> {
         self.send_public_message_authorized(database, invocation, None)
     }
@@ -1016,7 +1018,7 @@ impl TeamToolService {
     pub fn send_public_message_attested(
         &self,
         database: &mut Database,
-        invocation: &CampMessageSendInvocation,
+        invocation: &ThreadMessageSendInvocation,
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Result<CommandExecution> {
@@ -1036,7 +1038,7 @@ impl TeamToolService {
     fn send_public_message_authorized(
         &self,
         database: &mut Database,
-        invocation: &CampMessageSendInvocation,
+        invocation: &ThreadMessageSendInvocation,
         attested_run: Option<(&str, i64)>,
     ) -> Result<CommandExecution> {
         validate_public_send_invocation(invocation)?;
@@ -1058,7 +1060,7 @@ impl TeamToolService {
                     "Recorded public send belongs to a different attested AgentRun",
                 ));
             }
-            let command = CampMessageSendCommand {
+            let command = ThreadMessageSendCommand {
                 native_binding_id: invocation.native_binding_id.clone(),
                 credential_digest: supplied_credential_digest.clone(),
                 runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
@@ -1107,7 +1109,7 @@ impl TeamToolService {
             &invocation.input.to,
             &command_id,
         )?;
-        let command = CampMessageSendCommand {
+        let command = ThreadMessageSendCommand {
             native_binding_id: invocation.native_binding_id.clone(),
             credential_digest: supplied_credential_digest.clone(),
             runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
@@ -1435,7 +1437,7 @@ impl TeamToolService {
     }
 }
 
-fn validate_public_send_invocation(invocation: &CampMessageSendInvocation) -> Result<()> {
+fn validate_public_send_invocation(invocation: &ThreadMessageSendInvocation) -> Result<()> {
     validate_invocation_identity(
         &invocation.native_binding_id,
         &invocation.binding_credential,
@@ -1724,10 +1726,10 @@ fn rejected(code: &str, message: &str) -> CommandHandlerResult {
 mod tests {
     use super::*;
     use crate::{
-        camp_attachment_view::CampAttachmentViewStore,
+        camp_attachment_view::ThreadAttachmentViewStore,
         collaboration::{
-            AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
-            ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
+            AddThreadMemberCommand, CollaborationService, CreateTaskCommand, CreateThreadCommand,
+            ExecutionRequest, TestThreadMessageAddress, TestThreadMessageCommand,
         },
         command::{CommandGatewayError, CommandResultStatus},
         memory::{
@@ -1746,7 +1748,7 @@ mod tests {
     };
     #[cfg(feature = "slow-tests")]
     use crate::{
-        collaboration::{RemoveCampMemberCommand, end_camp_membership},
+        collaboration::{RemoveThreadMemberCommand, end_camp_membership},
         context::{
             CharterDeliveryMode, ContextMaterialization, ContextService,
             DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest,
@@ -1754,7 +1756,6 @@ mod tests {
         managed_blob::ManagedBlobStore,
         memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
         memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
-        message_delivery::{DeliveryDispatchTrigger, dispatch_pending_for_recipient},
         runtime::{CancelAgentRunCommand, FailAgentRunCommand},
     };
 
@@ -1835,7 +1836,7 @@ mod tests {
                     &user_envelope(
                         "create-team-camp",
                         None,
-                        CreateCampCommand::for_test_with_members(
+                        CreateThreadCommand::for_test_with_members(
                             workspace.to_string_lossy().to_string(),
                             member_agent_ids,
                             "agent_1",
@@ -1843,8 +1844,11 @@ mod tests {
                     ),
                 )
                 .expect("Camp should be created");
-            let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
-            let view = CampAttachmentViewStore::for_test(&database)
+            let camp_id = camp.result.payload["threadId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let view = ThreadAttachmentViewStore::for_test(&database)
                 .expect("Runtime Camp Files Root should be admitted");
             view.ensure_empty_camp_ready(&mut database, &camp_id)
                 .expect("new Camp should have its production attachment root");
@@ -1856,7 +1860,7 @@ mod tests {
                         &user_envelope(
                             &format!("add-member-{index}"),
                             Some(&camp_id),
-                            AddCampMemberCommand {
+                            AddThreadMemberCommand {
                                 camp_id: camp_id.clone(),
                                 agent_id: (*agent_id).to_string(),
                                 expected_membership_generation: 1,
@@ -1878,7 +1882,6 @@ mod tests {
                             title: "Collaborative task".to_string(),
                             description: "Exercise A2A execution".to_string(),
                             assignee_agent_id: "agent_1".to_string(),
-                            ..Default::default()
                         },
                     ),
                 )
@@ -1890,12 +1893,12 @@ mod tests {
                     &user_envelope(
                         "queue-source-run",
                         Some(&camp_id),
-                        TestCampMessageCommand {
+                        TestThreadMessageCommand {
                             camp_id: camp_id.clone(),
                             draft_revision: None,
                             body: "Start the collaboration".to_string(),
                             prepared_attachment_ids: Vec::new(),
-                            address: TestCampMessageAddress::Explicit {
+                            address: TestThreadMessageAddress::Explicit {
                                 agent_ids: vec!["agent_1".to_string()],
                             },
                             reply_to_camp_message_id: None,
@@ -2001,12 +2004,12 @@ mod tests {
                     &user_envelope(
                         command_id,
                         Some(&self.camp_id),
-                        TestCampMessageCommand {
+                        TestThreadMessageCommand {
                             camp_id: self.camp_id.clone(),
                             draft_revision: None,
                             body: format!("Keep {agent_id} busy"),
                             prepared_attachment_ids: Vec::new(),
-                            address: TestCampMessageAddress::Explicit {
+                            address: TestThreadMessageAddress::Explicit {
                                 agent_ids: vec![agent_id.to_string()],
                             },
                             reply_to_camp_message_id: None,
@@ -2027,12 +2030,60 @@ mod tests {
                 .to_string()
         }
 
+        #[cfg(feature = "slow-tests")]
+        fn claim_delivery_run(
+            &mut self,
+            delivery_id: &str,
+            native_session_id: &str,
+        ) -> (String, i64, BuiltinToolBindingCredential) {
+            crate::delivery_queue::claim_waiting_delivery_batches(&mut self.database, 100)
+                .expect("waiting Deliveries should claim into batch Runs");
+            let run_id: String = self
+                .database
+                .connection()
+                .query_row(
+                    "SELECT claimed_agent_run_id FROM camp_message_delivery WHERE id = ?1",
+                    [delivery_id],
+                    |row| row.get(0),
+                )
+                .expect("Delivery should bind a batch Run");
+            let (epoch, credential) = self.claim_bind_and_issue(&run_id, native_session_id);
+            (run_id, epoch, credential)
+        }
+
+        #[cfg(feature = "slow-tests")]
+        fn remove_member(&mut self, agent_id: &str, command_id: &str) -> CommandExecution {
+            let collaboration = CollaborationService::default();
+            let preview = collaboration
+                .camp_member_removal_preview(&self.database, &self.camp_id, agent_id)
+                .unwrap()
+                .unwrap();
+            collaboration
+                .remove_camp_member(
+                    &mut self.database,
+                    &user_envelope(
+                        command_id,
+                        Some(&self.camp_id),
+                        RemoveThreadMemberCommand {
+                            camp_id: self.camp_id.clone(),
+                            agent_id: agent_id.to_string(),
+                            expected_membership_generation: preview.membership_generation,
+                            expected_membership_version: preview.membership_version,
+                            replacement_default_lead_agent_id: preview.next_default_lead_agent_id,
+                            reason: Some("test membership cutover".to_string()),
+                            source: None,
+                        },
+                    ),
+                )
+                .unwrap()
+        }
+
         fn public_send_invocation(
             &self,
             call_id: &str,
             body: &str,
             to: &[&str],
-        ) -> CampMessageSendInvocation {
+        ) -> ThreadMessageSendInvocation {
             self.public_send_invocation_for(&self.credential, call_id, body, to)
         }
 
@@ -2042,12 +2093,12 @@ mod tests {
             call_id: &str,
             body: &str,
             to: &[&str],
-        ) -> CampMessageSendInvocation {
-            CampMessageSendInvocation {
+        ) -> ThreadMessageSendInvocation {
+            ThreadMessageSendInvocation {
                 native_binding_id: credential.native_binding_id.clone(),
                 binding_credential: credential.binding_credential.clone(),
                 runtime_tool_call_id: call_id.to_string(),
-                input: CampMessageSendInput {
+                input: ThreadMessageSendInput {
                     body: body.to_string(),
                     to: to.iter().map(|value| (*value).to_string()).collect(),
                     mention_user: false,
@@ -2061,7 +2112,7 @@ mod tests {
 
         fn prepare_agent_source_attachment(
             &mut self,
-            invocation: &mut CampMessageSendInvocation,
+            invocation: &mut ThreadMessageSendInvocation,
             file_name: &str,
             bytes: &[u8],
         ) -> String {
@@ -2073,7 +2124,7 @@ mod tests {
 
         fn prepare_agent_source_attachments(
             &mut self,
-            invocation: &mut CampMessageSendInvocation,
+            invocation: &mut ThreadMessageSendInvocation,
             files: &[(&str, &[u8])],
         ) -> Vec<String> {
             let workspace = self.directory.join("workspace");
@@ -2395,6 +2446,48 @@ mod tests {
             growth_topic: "Shorten feedback loops.".to_string(),
             avatar_file: None,
         };
+        let original_messages: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE camp_id=?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // A receipt failure must roll back the member and helper preference as one command.
+        fixture.database.connection().execute_batch("CREATE TEMP TRIGGER reject_member_receipt BEFORE INSERT ON member_creation BEGIN SELECT RAISE(ABORT,'receipt failure'); END").unwrap();
+        assert!(
+            crate::member_studio::create_member(
+                &mut fixture.database,
+                &fixture.directory,
+                &authenticated_run,
+                input.clone()
+            )
+            .is_err()
+        );
+        assert!(
+            crate::member_studio::last_creation_helper(fixture.database.connection())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM agent_profile WHERE display_name='Nova Test Member'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        fixture
+            .database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_member_receipt")
+            .unwrap();
         let first = crate::member_studio::create_member(
             &mut fixture.database,
             &fixture.directory,
@@ -2416,6 +2509,79 @@ mod tests {
         assert_eq!(
             replay.execution.result.payload["agentId"],
             first.execution.result.payload["agentId"]
+        );
+        let receipts = crate::member_studio::list_member_creations(
+            fixture.database.connection(),
+            &fixture.camp_id,
+        )
+        .unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].display_name, "Nova Test Member");
+        assert_eq!(receipts[0].creator_agent_id, "agent_1");
+        assert_eq!(
+            receipts[0].source_agent_run_id.as_deref(),
+            Some(authenticated_run.agent_run_id.as_str())
+        );
+        // Pre-association snapshots stay readable; never reconstruct a Run from timestamps.
+        let mut legacy_receipt = serde_json::to_value(&receipts[0]).unwrap();
+        legacy_receipt
+            .as_object_mut()
+            .unwrap()
+            .remove("sourceAgentRunId");
+        assert!(
+            serde_json::from_value::<crate::member_studio::MemberCreationView>(legacy_receipt)
+                .unwrap()
+                .source_agent_run_id
+                .is_none()
+        );
+        assert_eq!(
+            crate::member_studio::last_creation_helper(fixture.database.connection())
+                .unwrap()
+                .as_deref(),
+            Some("agent_1")
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message WHERE camp_id=?1",
+                    [&fixture.camp_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            original_messages
+        );
+        let created_id = first.execution.result.payload["agentId"].as_str().unwrap();
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_member WHERE agent_id=?1",
+                    [created_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        fixture.database.connection().execute("UPDATE agent_profile SET display_name='Changed later', profile_status='away' WHERE id=?1", [created_id]).unwrap();
+        assert_eq!(
+            crate::member_studio::list_member_creations(
+                fixture.database.connection(),
+                &fixture.camp_id
+            )
+            .unwrap()[0]
+                .display_name,
+            "Nova Test Member"
+        );
+        assert_eq!(
+            crate::read_model::ReadModelService
+                .camp_open_projection(&mut fixture.database, &fixture.camp_id)
+                .unwrap()
+                .member_creations
+                .len(),
+            1
         );
         let changed = crate::member_studio::create_member(
             &mut fixture.database,
@@ -2733,7 +2899,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"edited replacement");
         // External, temporary, default-output and directory sources use the same
         // public send boundary; none enters the historical ingest/view tables.
-        let output = crate::storage_layout::CampOutputDirectory::prepare(
+        let output = crate::storage_layout::ThreadOutputDirectory::prepare(
             &fixture.database,
             &fixture.camp_id,
         )
@@ -3070,6 +3236,40 @@ mod tests {
         assert!(replay.replayed);
         assert_eq!(replay.result.payload["agentAddressingMode"], "public_only");
         assert_eq!(replay.result.payload["messageId"], message_id);
+
+        let mut mixed = fixture.public_send_invocation(
+            "public-only-inline-principal",
+            "\u{3000}@爱丽丝\u{a0}@鲍勃 @User @Principal 谢谢",
+            &[],
+        );
+        mixed.input.public_only = true;
+        let sent = service
+            .send_public_message(&mut fixture.database, &mixed)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+        let mixed_id = sent.result.payload["messageId"].as_str().unwrap();
+        let (content_json, attention_count, delivery_count): (String, i64, i64) = fixture.database.connection().query_row(
+            "SELECT structured_content_json,
+                (SELECT COUNT(*) FROM notification_occurrence WHERE source_message_id = message.id AND semantic = 'user_mention'),
+                (SELECT COUNT(*) FROM camp_message_delivery WHERE message_id = message.id)
+             FROM camp_message AS message WHERE id = ?1",
+            [mixed_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&content_json).unwrap(),
+            json!([
+                {"kind": "text", "text": "\u{3000}@爱丽丝\u{a0}@鲍勃 "},
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": " "},
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": " 谢谢"}
+            ])
+        );
+        assert_eq!(attention_count, 1);
+        assert_eq!(delivery_count, 0);
     }
 
     #[cfg(feature = "slow-tests")]
@@ -3109,7 +3309,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT message.body, message.structured_content_json,
-                       (SELECT COUNT(*) FROM message_delivery
+                       (SELECT COUNT(*) FROM camp_message_delivery
                         WHERE message_id = message.id)
                 FROM camp_message AS message
                 WHERE message.id = ?1
@@ -3161,7 +3361,9 @@ mod tests {
             serde_json::from_str::<Value>(&content_json).unwrap(),
             json!([
                 {"kind": "member_mention", "agentId": "agent_2"},
-                {"kind": "text", "text": " @Principal 请处理"}
+                {"kind": "text", "text": " "},
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": " 请处理"}
             ])
         );
     }
@@ -3213,14 +3415,14 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn public_only_send_consumes_no_a2a_slot() {
+    fn recipient_free_public_send_creates_no_delivery_and_replies_to_frozen_anchor() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let trigger_message_id: String = fixture
             .database
             .connection()
             .query_row(
-                "SELECT trigger_camp_message_id FROM agent_run WHERE id = ?1",
+                "SELECT anchor_message_id FROM agent_run WHERE id = ?1",
                 [&fixture.source_run_id],
                 |row| row.get(0),
             )
@@ -3228,11 +3430,9 @@ mod tests {
         let before: i64 = fixture
             .database
             .connection()
-            .query_row(
-                "SELECT SUM(a2a_run_slots_allocated) FROM camp_turn",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let invocation = fixture.public_send_invocation(
             "public-only-send",
@@ -3258,119 +3458,114 @@ mod tests {
         let after: i64 = fixture
             .database
             .connection()
-            .query_row(
-                "SELECT SUM(a2a_run_slots_allocated) FROM camp_turn",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(after, before);
 
-        // The Gather-capture deadline gate must not broaden into a new gate for
-        // recipient-free public narration, which historically consumes no
-        // execution-budget unit.
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE camp_turn SET execution_budget_deadline_at = '2000-01-01T00:00:00Z'",
-                [],
-            )
-            .unwrap();
-        let after_deadline = fixture.public_send_invocation(
-            "public-only-send-after-deadline",
+        let later = fixture.public_send_invocation(
+            "later-recipient-free-public-send",
             "A later recipient-free public fact.",
             &[],
         );
-        let after_deadline = service
-            .send_public_message(&mut fixture.database, &after_deadline)
+        let later = service
+            .send_public_message(&mut fixture.database, &later)
             .unwrap();
-        assert_eq!(after_deadline.result.status, CommandResultStatus::Accepted);
-        assert_eq!(after_deadline.result.payload["deliveryIds"], json!([]));
+        assert_eq!(later.result.status, CommandResultStatus::Accepted);
+        assert_eq!(later.result.payload["deliveryIds"], json!([]));
     }
 
     #[test]
     fn current_user_attention_is_orthogonal_atomic_and_replay_safe() {
-        let mut fixture = Fixture::new();
-        let service = TeamToolService::default();
-        let before_deliveries: i64 = fixture
-            .database
-            .connection()
-            .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        let mut invocation = fixture.public_send_invocation(
-            "public-current-user-attention",
-            "Please choose A or B",
-            &[],
-        );
-        invocation.input.mention_user = true;
+        for (source_body, explicit, public_only) in [
+            ("Please choose A or B", true, false),
+            ("@Principal Please choose A or B", false, false),
+            ("@Principal Please choose A or B", true, false),
+            ("@Principal Please choose A or B", false, true),
+            ("@Principal Please choose A or B", true, true),
+            ("@User Please choose A or B", false, false),
+            ("@User Please choose A or B", true, true),
+        ] {
+            let mut fixture = Fixture::new();
+            let service = TeamToolService::default();
+            let before_deliveries: i64 = fixture
+                .database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            let mut invocation =
+                fixture.public_send_invocation("public-current-user-attention", source_body, &[]);
+            invocation.input.mention_user = explicit;
+            invocation.input.public_only = public_only;
 
-        let sent = service
-            .send_public_message(&mut fixture.database, &invocation)
-            .unwrap();
-        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
-        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
-        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
-        let message_id = sent.result.payload["messageId"].as_str().unwrap();
-        let (body, content_json): (String, String) = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT body, structured_content_json FROM camp_message WHERE id = ?1",
-                [message_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(body, "@你 Please choose A or B");
-        assert_eq!(
-            serde_json::from_str::<Value>(&content_json).unwrap(),
-            json!([
-                {"kind": "current_user_mention", "userId": "local_user"},
-                {"kind": "text", "text": "Please choose A or B"}
-            ])
-        );
-        let notification: (String, String, String) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT semantic, recipient_user_id, source_message_id
-                FROM notification_occurrence
-                WHERE semantic = 'user_mention'
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(notification.0, "user_mention");
-        assert_eq!(notification.1, "local_user");
-        assert_eq!(notification.2, message_id);
-        let after_deliveries: i64 = fixture
-            .database
-            .connection()
-            .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(after_deliveries, before_deliveries);
+            let sent = service
+                .send_public_message(&mut fixture.database, &invocation)
+                .unwrap();
+            assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+            assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+            assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+            let message_id = sent.result.payload["messageId"].as_str().unwrap();
+            let (body, content_json): (String, String) = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT body, structured_content_json FROM camp_message WHERE id = ?1",
+                    [message_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(body, "@你 Please choose A or B");
+            assert_eq!(
+                serde_json::from_str::<Value>(&content_json).unwrap(),
+                json!([
+                    {"kind": "current_user_mention", "userId": "local_user"},
+                    {"kind": "text", "text": "Please choose A or B"}
+                ])
+            );
+            let notification: (String, String, String) = fixture
+                .database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT semantic, recipient_user_id, source_message_id
+                    FROM notification_occurrence
+                    WHERE semantic = 'user_mention'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(notification.0, "user_mention");
+            assert_eq!(notification.1, "local_user");
+            assert_eq!(notification.2, message_id);
+            let after_deliveries: i64 = fixture
+                .database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(after_deliveries, before_deliveries);
 
-        let replay = service
-            .send_public_message(&mut fixture.database, &invocation)
-            .unwrap();
-        assert!(replay.replayed);
-        assert_eq!(replay.result.payload["messageId"], message_id);
-        let notification_count: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM notification_occurrence WHERE semantic = 'user_mention'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(notification_count, 1);
+            let replay = service
+                .send_public_message(&mut fixture.database, &invocation)
+                .unwrap();
+            assert!(replay.replayed);
+            assert_eq!(replay.result.payload["messageId"], message_id);
+            let notification_count: i64 = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM notification_occurrence WHERE semantic = 'user_mention'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(notification_count, 1);
+        }
     }
 
     #[cfg(feature = "slow-tests")]
@@ -3525,14 +3720,14 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn agent_send_rejects_a_tombstoned_trigger_message() {
+    fn agent_send_rejects_a_tombstoned_frozen_reply_anchor() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         fixture
             .database
             .connection()
             .execute(
-                "UPDATE camp_message SET tombstoned_at = '2026-08-12T00:00:00Z' WHERE id = (SELECT trigger_camp_message_id FROM agent_run WHERE id = ?1)",
+                "UPDATE camp_message SET tombstoned_at = '2026-08-12T00:00:00Z' WHERE id = (SELECT anchor_message_id FROM agent_run WHERE id = ?1)",
                 [&fixture.source_run_id],
             )
             .unwrap();
@@ -3545,11 +3740,10 @@ mod tests {
         let error = service
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap_err();
-
         assert!(
             error
                 .to_string()
-                .contains("trigger CampMessage is tombstoned")
+                .contains("Agent-authored send reply anchor is unavailable")
         );
         let persisted: i64 = fixture
             .database
@@ -3564,7 +3758,7 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn a2a_send_rejects_a_missing_trigger_delivery() {
+    fn batch_a2a_send_does_not_require_a_legacy_trigger_delivery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let forward_invocation = fixture.public_send_invocation(
@@ -3575,17 +3769,9 @@ mod tests {
         let forward = service
             .send_public_message(&mut fixture.database, &forward_invocation)
             .unwrap();
-        let child_run_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [forward.result.payload["deliveryIds"][0].as_str().unwrap()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let (_child_epoch, child_credential) =
-            fixture.claim_bind_and_issue(&child_run_id, "native-missing-trigger");
+        let delivery_id = forward.result.payload["deliveryIds"][0].as_str().unwrap();
+        let (child_run_id, _child_epoch, child_credential) =
+            fixture.claim_delivery_run(delivery_id, "native-missing-trigger");
         fixture
             .database
             .connection()
@@ -3601,15 +3787,10 @@ mod tests {
             "This message must not be persisted either.",
             &[],
         );
-        let error = service
+        let sent = service
             .send_public_message(&mut fixture.database, &invocation)
-            .unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("A2A AgentRun has no trigger Message Delivery")
-        );
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
         let persisted: i64 = fixture
             .database
             .connection()
@@ -3619,11 +3800,11 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(persisted, 0);
+        assert_eq!(persisted, 1);
     }
 
     #[cfg(feature = "slow-tests")]
-    fn addressing_the_immediate_caller_deduplicates_into_a_return_delivery() {
+    fn reverse_a2a_message_queues_for_a_busy_caller_then_claims_as_a_batch() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let forward_invocation = fixture.public_send_invocation(
@@ -3634,26 +3815,10 @@ mod tests {
         let forward = service
             .send_public_message(&mut fixture.database, &forward_invocation)
             .unwrap();
-        let forward_message_id = forward.result.payload["messageId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let child_run_id = forward.result.payload["deliveryIds"][0]
-            .as_str()
-            .and_then(|delivery_id| {
-                fixture
-                    .database
-                    .connection()
-                    .query_row(
-                        "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                        [delivery_id],
-                        |row| row.get::<_, Option<String>>(0),
-                    )
-                    .unwrap()
-            })
-            .unwrap();
-        let (_child_epoch, child_credential) =
-            fixture.claim_bind_and_issue(&child_run_id, "native-child-return");
+        let forward_message_id = forward.result.payload["messageId"].as_str().unwrap();
+        let forward_delivery_id = forward.result.payload["deliveryIds"][0].as_str().unwrap();
+        let (_child_run_id, _child_epoch, child_credential) =
+            fixture.claim_delivery_run(forward_delivery_id, "native-child-return");
 
         let return_invocation = fixture.public_send_invocation_for(
             &child_credential,
@@ -3688,97 +3853,40 @@ mod tests {
             .unwrap();
         assert_eq!(reply_to_message_id, forward_message_id);
 
-        let return_delivery_id = returned.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let return_delivery: (
-            String,
-            Option<String>,
-            Option<String>,
-            i64,
-            String,
-            Option<String>,
-        ) = fixture
+        let return_delivery_id = returned.result.payload["deliveryIds"][0].as_str().unwrap();
+        let waiting: (String, Option<String>) = fixture
             .database
             .connection()
             .query_row(
-                r#"
-                SELECT edge_kind, target_parent_agent_run_id,
-                       return_to_agent_run_id, a2a_depth,
-                       wait_condition, target_agent_run_id
-                FROM message_delivery WHERE id = ?1
-                "#,
-                [&return_delivery_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                    ))
-                },
+                "SELECT status, claimed_agent_run_id FROM camp_message_delivery WHERE id = ?1",
+                [return_delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(return_delivery.0, "return");
-        assert_eq!(return_delivery.1, None);
-        assert_eq!(
-            return_delivery.2.as_deref(),
-            Some(fixture.source_run_id.as_str())
-        );
-        assert_eq!(return_delivery.3, 0);
-        assert_eq!(return_delivery.4, "target_busy");
-        assert_eq!(return_delivery.5, None);
+        assert_eq!(waiting, ("waiting".to_string(), None));
 
         let source_run_id = fixture.source_run_id.clone();
         fixture.succeed_run(&source_run_id, fixture.source_epoch, "caller yielded");
-        let status: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT status FROM message_delivery WHERE id = ?1",
-                [&return_delivery_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if status == "pending" {
-            dispatch_pending_for_recipient(
-                &mut fixture.database,
-                &fixture.camp_id,
-                "agent_1",
-                DeliveryDispatchTrigger::TargetRunEnded,
-                true,
-            )
-            .unwrap();
-        }
-        let returned_run: (String, Option<String>, Option<String>, i64) = fixture
+        crate::delivery_queue::claim_waiting_delivery_batches(&mut fixture.database, 100).unwrap();
+        let claimed: (String, String) = fixture
             .database
             .connection()
             .query_row(
                 r#"
-                SELECT target.id, target.a2a_parent_agent_run_id,
-                       target.a2a_root_agent_run_id, target.a2a_depth
-                FROM message_delivery AS delivery
-                JOIN agent_run AS target ON target.id = delivery.target_agent_run_id
+                SELECT delivery.status, run.invocation_kind
+                FROM camp_message_delivery AS delivery
+                JOIN agent_run AS run ON run.id = delivery.claimed_agent_run_id
                 WHERE delivery.id = ?1
                 "#,
-                [&return_delivery_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                [return_delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert!(!returned_run.0.is_empty());
-        assert_eq!(returned_run.1, None);
-        assert_eq!(
-            returned_run.2.as_deref(),
-            Some(fixture.source_run_id.as_str())
-        );
-        assert_eq!(returned_run.3, 0);
+        assert_eq!(claimed, ("claimed".to_string(), "batch".to_string()));
     }
 
     #[cfg(feature = "slow-tests")]
-    fn a_non_immediate_ancestor_remains_rejected() {
+    fn multi_hop_a2a_can_address_an_earlier_member_without_legacy_lineage_gates() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let to_agent_2_invocation =
@@ -3786,19 +3894,11 @@ mod tests {
         let to_agent_2 = service
             .send_public_message(&mut fixture.database, &to_agent_2_invocation)
             .unwrap();
-        let agent_2_run_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [to_agent_2.result.payload["deliveryIds"][0]
-                    .as_str()
-                    .unwrap()],
-                |row| row.get(0),
-            )
+        let agent_2_delivery_id = to_agent_2.result.payload["deliveryIds"][0]
+            .as_str()
             .unwrap();
-        let (agent_2_epoch, agent_2_credential) =
-            fixture.claim_bind_and_issue(&agent_2_run_id, "native-ancestor-agent-2");
+        let (_agent_2_run_id, _agent_2_epoch, agent_2_credential) =
+            fixture.claim_delivery_run(agent_2_delivery_id, "native-ancestor-agent-2");
         let to_agent_3_invocation = fixture.public_send_invocation_for(
             &agent_2_credential,
             "ancestor-chain-agent-3",
@@ -3808,524 +3908,39 @@ mod tests {
         let to_agent_3 = service
             .send_public_message(&mut fixture.database, &to_agent_3_invocation)
             .unwrap();
-        let agent_3_run_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [to_agent_3.result.payload["deliveryIds"][0]
-                    .as_str()
-                    .unwrap()],
-                |row| row.get(0),
-            )
+        let agent_3_delivery_id = to_agent_3.result.payload["deliveryIds"][0]
+            .as_str()
             .unwrap();
-        let (_agent_3_epoch, agent_3_credential) =
-            fixture.claim_bind_and_issue(&agent_3_run_id, "native-ancestor-agent-3");
-        let rejected_invocation = fixture.public_send_invocation_for(
+        let (_agent_3_run_id, _agent_3_epoch, agent_3_credential) =
+            fixture.claim_delivery_run(agent_3_delivery_id, "native-ancestor-agent-3");
+
+        let earlier_member_invocation = fixture.public_send_invocation_for(
             &agent_3_credential,
-            "reject-non-immediate-ancestor",
-            "Do not recurse to agent 1",
+            "agent-3-to-earlier-member",
+            "Report to agent 1",
             &["agent_1"],
         );
-        let rejected = service
-            .send_public_message(&mut fixture.database, &rejected_invocation)
+        let earlier_member = service
+            .send_public_message(&mut fixture.database, &earlier_member_invocation)
             .unwrap();
-        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(rejected.result.code, "message.addressing_invalid");
+        assert_eq!(earlier_member.result.status, CommandResultStatus::Accepted);
         assert_eq!(
-            rejected.result.payload["details"]["offending"],
-            json!([{
-                "source": "--to",
-                "value": "agent_1",
-                "reason": "ancestor_cycle"
-            }])
+            earlier_member.result.payload["effectiveRecipients"],
+            json!(["agent_1"])
         );
-
-        let return_to_agent_2_invocation = fixture.public_send_invocation_for(
-            &agent_3_credential,
-            "return-to-immediate-agent-2",
-            "Return to the direct caller",
-            &["agent_2"],
-        );
-        let returned_to_agent_2 = service
-            .send_public_message(&mut fixture.database, &return_to_agent_2_invocation)
-            .unwrap();
-        assert_eq!(
-            returned_to_agent_2.result.status,
-            CommandResultStatus::Accepted
-        );
-        let return_to_agent_2_delivery_id = returned_to_agent_2.result.payload["deliveryIds"][0]
+        let delivery_id = earlier_member.result.payload["deliveryIds"][0]
             .as_str()
-            .unwrap()
-            .to_string();
-        let popped_lineage: (String, Option<String>, Option<String>, i64) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT edge_kind, target_parent_agent_run_id,
-                       return_to_agent_run_id, a2a_depth
-                FROM message_delivery WHERE id = ?1
-                "#,
-                [&return_to_agent_2_delivery_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
             .unwrap();
-        assert_eq!(popped_lineage.0, "return");
-        assert_eq!(
-            popped_lineage.1.as_deref(),
-            Some(fixture.source_run_id.as_str())
-        );
-        assert_eq!(popped_lineage.2.as_deref(), Some(agent_2_run_id.as_str()));
-        assert_eq!(popped_lineage.3, 1);
-
-        fixture.succeed_run(&agent_2_run_id, agent_2_epoch, "caller yielded");
         let status: String = fixture
             .database
             .connection()
             .query_row(
-                "SELECT status FROM message_delivery WHERE id = ?1",
-                [&return_to_agent_2_delivery_id],
+                "SELECT status FROM camp_message_delivery WHERE id = ?1",
+                [delivery_id],
                 |row| row.get(0),
             )
             .unwrap();
-        if status == "pending" {
-            dispatch_pending_for_recipient(
-                &mut fixture.database,
-                &fixture.camp_id,
-                "agent_2",
-                DeliveryDispatchTrigger::TargetRunEnded,
-                true,
-            )
-            .unwrap();
-        }
-        let returned_agent_2_run_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [&return_to_agent_2_delivery_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let (_returned_agent_2_epoch, returned_agent_2_credential) =
-            fixture.claim_bind_and_issue(&returned_agent_2_run_id, "native-returned-agent-2");
-        let return_to_agent_1_invocation = fixture.public_send_invocation_for(
-            &returned_agent_2_credential,
-            "returned-agent-2-to-agent-1",
-            "Now return to the original caller",
-            &["agent_1"],
-        );
-        let returned_to_agent_1 = service
-            .send_public_message(&mut fixture.database, &return_to_agent_1_invocation)
-            .unwrap();
-        assert_eq!(
-            returned_to_agent_1.result.status,
-            CommandResultStatus::Accepted
-        );
-        let final_edge: (String, Option<String>, Option<String>, i64) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT edge_kind, target_parent_agent_run_id,
-                       return_to_agent_run_id, a2a_depth
-                FROM message_delivery WHERE id = ?1
-                "#,
-                [returned_to_agent_1.result.payload["deliveryIds"][0]
-                    .as_str()
-                    .unwrap()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(final_edge.0, "return");
-        assert_eq!(final_edge.1, None);
-        assert_eq!(
-            final_edge.2.as_deref(),
-            Some(fixture.source_run_id.as_str())
-        );
-        assert_eq!(final_edge.3, 0);
-    }
-
-    #[cfg(feature = "slow-tests")]
-    fn legacy_public_delivery_replays_frozen_context_versions() {
-        // Current and pre-upgrade frozen deliveries must consume exact bytes and original version axes.
-        for frozen_version in [25, 24, 23, 22] {
-            let mut fixture = Fixture::new();
-            let expected_isolation = if frozen_version == 25 {
-                "git_worktree"
-            } else {
-                "shared"
-            };
-            fixture.database.connection().execute(
-                "UPDATE agent_run SET workspace_json=json_set(workspace_json,'$.isolation',?2) WHERE id=?1",
-                params![fixture.source_run_id, expected_isolation],
-            ).unwrap();
-            fixture
-                .database
-                .connection()
-                .execute(
-                    "UPDATE camp SET default_lead_agent_id = 'agent_2' WHERE id = ?1",
-                    [&fixture.camp_id],
-                )
-                .unwrap();
-            let target_task = CollaborationService::default()
-                .create_task(
-                    &mut fixture.database,
-                    &user_envelope(
-                        "create-member-call-source-task",
-                        Some(&fixture.camp_id),
-                        CreateTaskCommand {
-                            camp_id: fixture.camp_id.clone(),
-                            title: "Target-owned source identity task".to_string(),
-                            description: "Freeze the Public A2A sender identity".to_string(),
-                            assignee_agent_id: "agent_2".to_string(),
-                            ..Default::default()
-                        },
-                    ),
-                )
-                .unwrap();
-            let target_task_id = target_task.result.payload["taskId"]
-                .as_str()
-                .unwrap()
-                .to_string();
-            let source_name: String = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            let body = "### 双人追问 · 复核邀请\n\n\
-sender_agent_id: agent_2\n\
-return_to: agent_3\n\n\
-Use this exact public input @agent_2";
-            let mut invocation =
-                fixture.public_send_invocation("frozen-public-context", body, &["agent_2"]);
-            invocation.input.task_id = Some(target_task_id.clone());
-            let sent = TeamToolService::default()
-                .send_public_message(&mut fixture.database, &invocation)
-                .unwrap();
-            let source_message_id = sent.result.payload["messageId"]
-                .as_str()
-                .unwrap()
-                .to_string();
-            // Current sends queue in camp_message_delivery. Reconstruct a supported
-            // historical Delivery row in this isolated fixture so the v22-v25
-            // frozen-context reader retains its own recovery owner.
-            let delivery_id = Uuid::new_v4().to_string();
-            let boundary: i64 = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT sequence FROM camp_message WHERE id=?1",
-                    [&source_message_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            let originating_user_message_id: String = fixture.database.connection()
-                .query_row("SELECT id FROM camp_message WHERE camp_id=?1 AND author_type='user' ORDER BY sequence LIMIT 1", [&fixture.camp_id], |row| row.get(0))
-                .unwrap();
-            let turn_id = Uuid::new_v4().to_string();
-            let membership_version: i64 = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT version FROM camp_member WHERE camp_id=?1 AND agent_id='agent_2'",
-                    [&fixture.camp_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            let task_version: i64 = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT version FROM task WHERE id=?1",
-                    [&target_task_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            let now = chrono::Utc::now().to_rfc3339();
-            let deadline = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
-            fixture.database.connection().execute(
-                "INSERT INTO camp_turn(id,camp_id,trigger_type,trigger_id,status,version,created_at,updated_at,execution_budget_schema_version,execution_budget_deadline_at) VALUES(?1,?2,'camp_message',?3,'running',1,?4,?4,2,?5)",
-                params![turn_id, fixture.camp_id, originating_user_message_id, now, deadline],
-            ).unwrap();
-            fixture.database.connection().execute(
-                "UPDATE agent_run SET invocation_kind='direct',camp_id=NULL,anchor_message_id=NULL,current_public_tail_sequence=NULL,camp_turn_id=?2,trigger_camp_message_id=?3 WHERE id=?1",
-                params![fixture.source_run_id, turn_id, originating_user_message_id],
-            ).unwrap();
-            fixture
-                .database
-                .connection()
-                .execute(
-                    r#"INSERT INTO message_delivery(
-                    id, camp_id, camp_turn_id, message_id, recipient_agent_id,
-                    recipient_canonical_position, recipient_digest, message_body_digest,
-                    task_id, task_version_at_admission, assignee_agent_id_at_admission,
-                    source_agent_run_id, edge_kind, target_parent_agent_run_id,
-                    a2a_root_agent_run_id, a2a_depth, ancestor_agent_ids_json,
-                    recipient_presentation_snapshot_json, frozen_snapshot_json,
-                    camp_message_boundary_sequence, recipient_membership_version_at_admission,
-                    queue_sequence, status, dispatch_phase, created_at, updated_at
-                ) VALUES (?1,?2,?3,?4,'agent_2',0,'sha256:recipient','sha256:body',
-                    ?5,?6,'agent_2',?7,'forward',?7,?7,1,'[]','{}','{}',
-                    ?8,?9,1,'pending','never_attempted',?10,?10)"#,
-                    params![
-                        delivery_id,
-                        fixture.camp_id,
-                        turn_id,
-                        source_message_id,
-                        target_task_id,
-                        task_version,
-                        fixture.source_run_id,
-                        boundary,
-                        membership_version,
-                        now
-                    ],
-                )
-                .unwrap();
-            let outcome = crate::message_delivery::dispatch_delivery(
-                &mut fixture.database,
-                &delivery_id,
-                DeliveryDispatchTrigger::Accepted,
-                true,
-            )
-            .unwrap();
-            let crate::message_delivery::DeliveryDispatchOutcome::Materialized {
-                agent_run_id: target_run_id,
-            } = outcome
-            else {
-                panic!("historical Delivery should materialize: {outcome:?}");
-            };
-            let frozen_snapshot: String = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT frozen_snapshot_json FROM message_delivery WHERE id=?1",
-                    [&delivery_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            let mut frozen_snapshot: Value = serde_json::from_str(&frozen_snapshot).unwrap();
-            let target_workspace: String = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT workspace_json FROM agent_run WHERE id=?1",
-                    [&target_run_id],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(
-                serde_json::from_str::<Value>(&target_workspace).unwrap()["isolation"],
-                expected_isolation,
-                "A2A must preserve the source worktree environment instead of freezing it as shared"
-            );
-            if frozen_version < 25 {
-                use sha2::{Digest, Sha256};
-                let hash = |text: &str| format!("sha256:{:x}", Sha256::digest(text.as_bytes()));
-                let (receipt, receipt_digest) =
-                    crate::camp_attachment_view::load_camp_attachment_view_receipt(
-                        fixture.database.connection(),
-                        &fixture.camp_id,
-                        Vec::<String>::new(),
-                    )
-                    .unwrap();
-                let legacy_root = fixture
-                    .database
-                    .runtime_camp_files_root()
-                    .join(&receipt.attachment_root_relative_path);
-                let frozen = &mut frozen_snapshot["frozenContext"];
-                let selection = &mut frozen["manifestSelection"];
-                selection["contextManifestVersion"] = json!(frozen_version);
-                selection["runFactsSchemaVersion"] =
-                    json!(if frozen_version == 24 { 3 } else { 2 });
-                selection["campAttachmentViewReceiptVersion"] = json!(2);
-                selection["campAttachmentViewReceipt"] = serde_json::to_value(receipt).unwrap();
-                selection["campAttachmentViewReceiptDigest"] = json!(receipt_digest);
-                {
-                    let mut old_profile = crate::context_delivery::CONTEXT_DELIVERY_PROFILE_V5;
-                    old_profile.profile_version = if frozen_version == 22 { 4 } else { 5 };
-                    selection["contextDeliveryProfileVersion"] = json!(old_profile.profile_version);
-                    selection["contextDeliveryProfileJson"] =
-                        serde_json::to_value(old_profile).unwrap();
-                    selection["contextDeliveryProfileDigest"] =
-                        json!(old_profile.canonical_digest().unwrap());
-                }
-                for key in [
-                    "workspaceFact",
-                    "workspaceFactDigest",
-                    "workspaceFactIncluded",
-                ] {
-                    selection.as_object_mut().unwrap().remove(key);
-                }
-                selection["currentInputSource"]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("missionStart");
-                let current_json = selection["runFactPayload"].as_str().unwrap().to_string();
-                let mut facts: Value = serde_json::from_str(&current_json).unwrap();
-                if frozen_version < 24 {
-                    facts
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("attachmentOutputRoot");
-                    facts["schemaVersion"] = json!(if frozen_version == 24 { 3 } else { 2 });
-                    facts["campResources"] = json!({"campId":fixture.camp_id,"publishedAttachmentRoot":legacy_root,"access":"enumerate_and_read","scope":"current_camp","mutability":"read_only"});
-                }
-                facts["schemaVersion"] = json!(if frozen_version == 24 { 3 } else { 2 });
-                let legacy_json = serde_json::to_string(&facts).unwrap();
-                selection["runFactPayload"] = json!(legacy_json);
-                selection["runFactDigest"] = json!(hash(&legacy_json));
-                for reference in selection["runFactRefs"].as_array_mut().unwrap() {
-                    if frozen_version < 24 && reference["fact"] == "attachment_output_root" {
-                        reference["fact"] = json!("camp_resources");
-                    }
-                }
-                for (payload, digest) in [
-                    ("renderedPayload", "renderedPayloadDigest"),
-                    ("runtimePayload", "runtimePayloadDigest"),
-                ] {
-                    let previous = frozen[payload].as_str().unwrap();
-                    assert!(previous.contains(&current_json));
-                    let legacy = previous.replace(&current_json, &legacy_json);
-                    frozen[digest] = json!(hash(&legacy));
-                    frozen[payload] = json!(legacy);
-                }
-                fixture
-                    .database
-                    .connection()
-                    .execute(
-                        "UPDATE message_delivery SET frozen_snapshot_json=?2 WHERE id=?1",
-                        params![
-                            delivery_id,
-                            serde_json::to_string(&frozen_snapshot).unwrap()
-                        ],
-                    )
-                    .unwrap();
-            }
-            let frozen_payload = frozen_snapshot["frozenContext"]["renderedPayload"]
-                .as_str()
-                .unwrap()
-                .to_string();
-            let current_input = |payload: &str| -> Value {
-                serde_json::from_str(
-                    payload
-                        .split("[CURRENT_INPUT]\n")
-                        .nth(1)
-                        .unwrap()
-                        .split("\n[/CURRENT_INPUT]")
-                        .next()
-                        .unwrap(),
-                )
-                .unwrap()
-            };
-            let frozen_current_input = current_input(&frozen_payload);
-            assert_eq!(
-                frozen_current_input["source"],
-                json!({
-                    "type": "member_call",
-                    "senderAgentId": "agent_1",
-                    "senderName": source_name,
-                })
-            );
-            assert_ne!(frozen_current_input["source"]["senderAgentId"], "agent_2");
-            let projected_message = frozen_current_input["message"].as_str().unwrap();
-            assert!(projected_message.starts_with("### 双人追问 · 复核邀请"));
-            assert!(projected_message.contains("sender_agent_id: agent_2"));
-            assert!(projected_message.contains("return_to: agent_3"));
-            assert!(projected_message.contains("Use this exact public input @"));
-            fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE agent_profile SET display_name = 'RENAMED_AFTER_PREFLIGHT' WHERE id = 'agent_1'",
-                [],
-            )
-            .unwrap();
-            let (target_epoch, _) =
-                fixture.claim_bind_and_issue(&target_run_id, "native-frozen-public-context");
-            let ContextMaterialization::Ready(context) = ContextService
-                .materialize(
-                    &mut fixture.database,
-                    &ManagedBlobStore::new(&fixture.directory),
-                    &MaterializeContextRequest {
-                        agent_run_id: &target_run_id,
-                        execution_epoch: target_epoch,
-                        charter_delivery_mode: CharterDeliveryMode::NativeAppend,
-                        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                    },
-                )
-                .unwrap()
-            else {
-                panic!("Public Delivery context should materialize");
-            };
-            assert_eq!(context.rendered_payload, frozen_payload);
-            assert_eq!(
-                current_input(&context.rendered_payload),
-                frozen_current_input
-            );
-            let manifest_id: String = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT context_manifest_id FROM message_delivery WHERE id = ?1",
-                    [&delivery_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(manifest_id, context.manifest_id);
-            let current_input_evidence: Value = fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT current_input_source_json FROM context_manifest WHERE id = ?1",
-                    [&context.manifest_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .map(|value| serde_json::from_str(&value).unwrap())
-                .unwrap();
-            assert_eq!(
-                current_input_evidence["sourceCampMessageId"],
-                source_message_id
-            );
-            let axes: (i64, i64, i64) = fixture.database.connection().query_row("SELECT formatter_version, context_manifest_version, context_delivery_profile_version FROM context_manifest WHERE id=?1", [&context.manifest_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
-            assert_eq!(
-                axes,
-                (
-                    frozen_version,
-                    frozen_version,
-                    if frozen_version == 22 {
-                        4
-                    } else if frozen_version == 23 || frozen_version == 24 {
-                        5
-                    } else {
-                        6
-                    }
-                )
-            );
-            // Reopening a materialized legacy manifest is a read-only replay, not a new render.
-            let ContextMaterialization::Ready(replayed) = ContextService
-                .materialize(
-                    &mut fixture.database,
-                    &ManagedBlobStore::new(&fixture.directory),
-                    &MaterializeContextRequest {
-                        agent_run_id: &target_run_id,
-                        execution_epoch: target_epoch,
-                        charter_delivery_mode: CharterDeliveryMode::NativeAppend,
-                        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                    },
-                )
-                .unwrap()
-            else {
-                panic!("frozen replay must be ready")
-            };
-            assert_eq!(replayed.rendered_payload, frozen_payload);
-            assert_eq!(replayed.manifest_id, context.manifest_id);
-        }
+        assert_eq!(status, "waiting");
     }
 
     #[cfg(feature = "slow-tests")]
@@ -4418,7 +4033,6 @@ Use this exact public input @agent_2";
                         title: "Frozen notice task".to_string(),
                         description: "Exercise exact Run Fact bytes".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -4544,7 +4158,7 @@ Use this exact public input @agent_2";
             false
         );
 
-        let message_id = completed.result.payload["finalCampMessageId"]
+        let message_id = completed.result.payload["finalThreadMessageId"]
             .as_str()
             .expect("recovery must link the public message");
         let message: (
@@ -4588,7 +4202,16 @@ Use this exact public input @agent_2";
         assert_eq!(message.3, "[]");
         assert_eq!(message.4, "[]");
         assert!(message.5.is_none());
-        assert!(message.6.is_none());
+        let frozen_anchor: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT anchor_message_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(message.6.as_deref(), Some(frozen_anchor.as_str()));
         assert_eq!(
             fixture
                 .database
@@ -4643,7 +4266,7 @@ Use this exact public input @agent_2";
                 &user_envelope(
                     "terminal-publication-membership-readded",
                     Some(&fixture.camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: fixture.camp_id.clone(),
                         agent_id: "agent_1".to_string(),
                         expected_membership_generation: membership_generation,
@@ -4896,16 +4519,8 @@ Use this exact public input @agent_2";
             .as_str()
             .unwrap()
             .to_string();
-        let target_run_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [&delivery_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let (target_epoch, _) = fixture.claim_bind_and_issue(&target_run_id, "native-a2a-recovery");
+        let (target_run_id, target_epoch, _) =
+            fixture.claim_delivery_run(&delivery_id, "native-a2a-recovery");
         let recovered = fixture.succeed_run_with_candidate(
             &target_run_id,
             target_epoch,
@@ -4919,7 +4534,7 @@ Use this exact public input @agent_2";
             recovered.result.payload["missingSendRecovery"]["decision"],
             "published"
         );
-        let recovery_message_id = recovered.result.payload["finalCampMessageId"]
+        let recovery_message_id = recovered.result.payload["finalThreadMessageId"]
             .as_str()
             .unwrap();
         let recovery_fact: (String, String, i64) = fixture
@@ -4928,7 +4543,7 @@ Use this exact public input @agent_2";
             .query_row(
                 r#"
                 SELECT source_agent_run_id, effective_recipient_ids_json,
-                       (SELECT COUNT(*) FROM message_delivery WHERE message_id = camp_message.id)
+                       (SELECT COUNT(*) FROM camp_message_delivery WHERE message_id = camp_message.id)
                 FROM camp_message WHERE id = ?1
                 "#,
                 [recovery_message_id],
@@ -5223,7 +4838,7 @@ Use this exact public input @agent_2";
             let properties = schema["properties"].as_object().unwrap();
             assert_eq!(properties["assigneeAgentId"]["type"], "string");
             for forbidden in [
-                "campId",
+                "threadId",
                 "agentId",
                 "sourceAgentRunId",
                 "executionEpoch",
@@ -5242,7 +4857,6 @@ Use this exact public input @agent_2";
         );
         let missing = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
-            "expectedVersion": 1,
             "status": "in_progress"
         }))
         .unwrap();
@@ -5250,7 +4864,6 @@ Use this exact public input @agent_2";
         assert!(!missing.clear_assignee);
         let clear = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
-            "expectedVersion": 1,
             "clearAssignee": true
         }))
         .unwrap();
@@ -5258,7 +4871,6 @@ Use this exact public input @agent_2";
         assert!(clear.clear_assignee);
         let assign = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
-            "expectedVersion": 1,
             "assigneeAgentId": "agent_1"
         }))
         .unwrap();
@@ -5267,7 +4879,6 @@ Use this exact public input @agent_2";
         assert!(
             serde_json::from_value::<TeamUpdateTaskInput>(json!({
                 "taskId": "task-1",
-                "expectedVersion": 1,
                 "assigneeAgentId": null
             }))
             .is_err()
@@ -5295,7 +4906,6 @@ Use this exact public input @agent_2";
                 title: "Persistent follow-up".to_string(),
                 description: "Track this across runs".to_string(),
                 assignee_agent_id: "agent_1".to_string(),
-                ..Default::default()
             },
         );
         let created = service
@@ -5318,7 +4928,6 @@ Use this exact public input @agent_2";
                 title: "Different payload".to_string(),
                 description: String::new(),
                 assignee_agent_id: "agent_1".to_string(),
-                ..Default::default()
             },
         );
         assert!(
@@ -5361,7 +4970,8 @@ Use this exact public input @agent_2";
             .update_task(&mut fixture.database, &update_invocation)
             .unwrap();
         assert_eq!(updated.result.status, CommandResultStatus::Applied);
-        assert_eq!(updated.result.payload["version"], 2);
+        assert!(updated.result.payload.get("version").is_none());
+        assert_eq!(updated.result.payload["status"], "in_progress");
         let execution_count_after: i64 = fixture
             .database
             .connection()
@@ -5393,7 +5003,6 @@ Use this exact public input @agent_2";
                         title: "Muwa private assignment".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -5486,7 +5095,7 @@ Use this exact public input @agent_2";
                 &user_envelope(
                     "team-tool-membership-readd",
                     Some(&fixture.camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: fixture.camp_id.clone(),
                         agent_id: "agent_1".to_string(),
                         expected_membership_generation: membership_generation,
@@ -5559,7 +5168,7 @@ Use this exact public input @agent_2";
                 &user_envelope(
                     "add-member-after-source-context-freeze",
                     Some(&fixture.camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: fixture.camp_id.clone(),
                         agent_id: "agent_3".to_string(),
                         expected_membership_generation: 1,
@@ -5590,17 +5199,17 @@ Use this exact public input @agent_2";
                 .database
                 .connection()
                 .query_row(
-                    "SELECT status FROM message_delivery WHERE id = ?1",
+                    "SELECT status FROM camp_message_delivery WHERE id = ?1",
                     [delivery_id],
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap(),
-            "running"
+            "waiting"
         );
     }
 
     #[cfg(feature = "slow-tests")]
-    fn user_run_cancellation_releases_the_next_target_busy_delivery() {
+    fn cancelled_recipient_run_leaves_the_next_delivery_for_batch_claim() {
         let mut fixture = Fixture::new();
         let busy_run_id = fixture.queue_direct_run("queue-run-cancel-recipient", "agent_2");
         let invocation = fixture.public_send_invocation(
@@ -5611,22 +5220,17 @@ Use this exact public input @agent_2";
         let sent = TeamToolService::default()
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap();
-        let delivery_id = sent.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT status || ':' || wait_condition FROM message_delivery WHERE id = ?1",
-                    [&delivery_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap(),
-            "pending:target_busy"
-        );
+        let delivery_id = sent.result.payload["deliveryIds"][0].as_str().unwrap();
+        let waiting: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, claimed_agent_run_id FROM camp_message_delivery WHERE id = ?1",
+                [delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(waiting, ("waiting".to_string(), None));
 
         let busy_run_version: i64 = fixture
             .database
@@ -5652,290 +5256,126 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         assert_eq!(cancelled.result.code, "agent_run.cancelled");
-        let delivery: (String, Option<String>, Option<String>) = fixture
+        crate::delivery_queue::claim_waiting_delivery_batches(&mut fixture.database, 100).unwrap();
+        let claimed: (String, Option<String>) = fixture
             .database
             .connection()
             .query_row(
-                "SELECT status, wait_condition, target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [&delivery_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                "SELECT status, claimed_agent_run_id FROM camp_message_delivery WHERE id = ?1",
+                [delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(delivery.0, "running");
-        assert!(delivery.1.is_none());
-        assert!(delivery.2.is_some());
+        assert_eq!(claimed.0, "claimed");
+        assert!(claimed.1.is_some());
     }
 
     #[cfg(feature = "slow-tests")]
-    fn pending_outbound_delivery_is_cancelled_when_source_membership_ends() {
+    fn source_membership_removal_keeps_an_admitted_recipient_delivery_waiting() {
         let mut fixture = Fixture::new();
-        let _busy_run_id = fixture.queue_direct_run("queue-pending-outbound-recipient", "agent_2");
         let invocation = fixture.public_send_invocation(
-            "pending-outbound-before-source-leaves",
-            "This old outbound work must not materialize",
+            "outbound-before-source-leaves",
+            "Recipient admission is independent of the source's later membership",
             &["agent_2"],
         );
         let sent = TeamToolService::default()
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap();
-        let delivery_id = sent.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT status || ':' || wait_condition FROM message_delivery WHERE id = ?1",
-                    [&delivery_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap(),
-            "pending:target_busy"
-        );
-
-        let collaboration = CollaborationService::default();
-        let preview = collaboration
-            .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_1")
-            .unwrap()
-            .unwrap();
-        assert_eq!(preview.pending_delivery_count, 1);
-        assert_eq!(preview.running_delivery_count, 0);
-        let removed = collaboration
-            .remove_camp_member(
-                &mut fixture.database,
-                &user_envelope(
-                    "remove-pending-outbound-source",
-                    Some(&fixture.camp_id),
-                    RemoveCampMemberCommand {
-                        camp_id: fixture.camp_id.clone(),
-                        agent_id: "agent_1".to_string(),
-                        expected_membership_generation: preview.membership_generation,
-                        expected_membership_version: preview.membership_version,
-                        replacement_default_lead_agent_id: preview.next_default_lead_agent_id,
-                        reason: Some("test source membership cutover".to_string()),
-                        source: None,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(removed.result.status, CommandResultStatus::Accepted);
-        assert_eq!(removed.result.payload["cancelledDeliveryCount"], 1);
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row(
-                    r#"
-                    SELECT status || ':' || failure_code || ':' ||
-                           COALESCE(target_agent_run_id, '')
-                    FROM message_delivery WHERE id = ?1
-                    "#,
-                    [&delivery_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap(),
-            "cancelled:source_membership_ended:"
-        );
-    }
-
-    #[cfg(feature = "slow-tests")]
-    fn running_outbound_delivery_target_is_reconciled_when_source_membership_ends() {
-        let mut fixture = Fixture::new();
-        let invocation = fixture.public_send_invocation(
-            "running-outbound-before-source-leaves",
-            "This materialized target belongs to the old source lifetime",
-            &["agent_2"],
-        );
-        let sent = TeamToolService::default()
-            .send_public_message(&mut fixture.database, &invocation)
-            .unwrap();
-        let delivery_id = sent.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let target_run_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [&delivery_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        let unrelated_source_run_id =
-            fixture.queue_direct_run("queue-unrelated-source-before-member-leaves", "agent_3");
-        let (_unrelated_source_epoch, unrelated_source_credential) =
-            fixture.claim_bind_and_issue(&unrelated_source_run_id, "native-unrelated-source");
-        let unrelated_invocation = fixture.public_send_invocation_for(
-            &unrelated_source_credential,
-            "unrelated-delivery-behind-affected-target",
-            "This delivery must advance after the affected target stops",
-            &["agent_2"],
-        );
-        let unrelated = TeamToolService::default()
-            .send_public_message(&mut fixture.database, &unrelated_invocation)
-            .unwrap();
-        let unrelated_delivery_id = unrelated.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT status || ':' || wait_condition FROM message_delivery WHERE id = ?1",
-                    [&unrelated_delivery_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap(),
-            "pending:target_busy"
-        );
-
-        let collaboration = CollaborationService::default();
-        let preview = collaboration
+        let delivery_id = sent.result.payload["deliveryIds"][0].as_str().unwrap();
+        let preview = CollaborationService::default()
             .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_1")
             .unwrap()
             .unwrap();
         assert_eq!(preview.pending_delivery_count, 0);
-        assert_eq!(preview.running_delivery_count, 1);
-        assert_eq!(preview.non_terminal_agent_run_count, 2);
-        let removed = collaboration
-            .remove_camp_member(
-                &mut fixture.database,
-                &user_envelope(
-                    "remove-running-outbound-source",
-                    Some(&fixture.camp_id),
-                    RemoveCampMemberCommand {
-                        camp_id: fixture.camp_id.clone(),
-                        agent_id: "agent_1".to_string(),
-                        expected_membership_generation: preview.membership_generation,
-                        expected_membership_version: preview.membership_version,
-                        replacement_default_lead_agent_id: preview.next_default_lead_agent_id,
-                        reason: Some("test source membership cutover".to_string()),
-                        source: None,
-                    },
-                ),
-            )
-            .unwrap();
+        let removed = fixture.remove_member("agent_1", "remove-source-after-outbound-send");
         assert_eq!(removed.result.status, CommandResultStatus::Accepted);
-        assert_eq!(removed.result.payload["cancelRequestedRunCount"], 2);
-        let target_state: (Option<String>, i64) = fixture
+        assert_eq!(removed.result.payload["cancelledDeliveryCount"], 0);
+        let delivery: (String, Option<String>) = fixture
             .database
             .connection()
             .query_row(
-                r#"
-                SELECT run.cancel_requested_at,
-                       (SELECT COUNT(*)
-                        FROM camp_membership_reconciliation_run AS link
-                        WHERE link.agent_run_id = run.id)
-                FROM agent_run AS run
-                WHERE run.id = ?1
-                "#,
-                [&target_run_id],
+                "SELECT status, failure_code FROM camp_message_delivery WHERE id = ?1",
+                [delivery_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert!(target_state.0.is_some());
-        assert_eq!(target_state.1, 1);
-        let unrelated_delivery: (String, Option<String>, Option<String>) = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT status, wait_condition, target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [&unrelated_delivery_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(unrelated_delivery.0, "running");
-        assert!(unrelated_delivery.1.is_none());
-        assert!(unrelated_delivery.2.is_some());
+        assert_eq!(delivery, ("waiting".to_string(), None));
     }
 
     #[cfg(feature = "slow-tests")]
-    fn dispatch_rejects_delivery_from_ended_source_membership() {
+    fn claimed_recipient_run_survives_the_source_membership_cutover() {
         let mut fixture = Fixture::new();
-        let busy_run_id = fixture.queue_direct_run("queue-source-fence-recipient", "agent_2");
         let invocation = fixture.public_send_invocation(
-            "source-fenced-outbound-delivery",
-            "Dispatch must independently fence the source lifetime",
+            "running-outbound-before-source-leaves",
+            "Already claimed recipient work belongs to the recipient lifetime",
             &["agent_2"],
         );
         let sent = TeamToolService::default()
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap();
-        let delivery_id = sent.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-
-        let now = chrono::Utc::now().to_rfc3339();
-        // Bypass the normal cutover cancellation to exercise the independent
-        // dispatch fence against a later membership lifetime.
-        fixture
-            .database
-            .connection()
-            .execute(
-                r#"
-                UPDATE camp_member
-                SET status = 'active', version = version + 2,
-                    joined_at = ?3, left_at = NULL
-                WHERE camp_id = ?1 AND agent_id = ?2
-                "#,
-                params![fixture.camp_id, "agent_1", now],
-            )
-            .unwrap();
-        fixture
-            .database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_run
-                SET status = 'succeeded', ended_at = ?2, updated_at = ?2,
-                    version = version + 1
-                WHERE id = ?1
-                "#,
-                params![busy_run_id, now],
-            )
-            .unwrap();
-
-        let dispatched = dispatch_pending_for_recipient(
-            &mut fixture.database,
-            &fixture.camp_id,
-            "agent_2",
-            DeliveryDispatchTrigger::TargetRunEnded,
-            true,
-        )
-        .unwrap();
-        assert!(matches!(
-            dispatched.as_slice(),
-            [crate::message_delivery::DeliveryDispatchOutcome::Terminal {
-                status,
-                failure_code,
-            }] if status == "failed" && failure_code == "source_membership_changed"
-        ));
-
-        let delivery_state: (String, Option<String>) = fixture
+        let delivery_id = sent.result.payload["deliveryIds"][0].as_str().unwrap();
+        let (target_run_id, _target_epoch, _) =
+            fixture.claim_delivery_run(delivery_id, "native-recipient-before-source-leaves");
+        let removed = fixture.remove_member("agent_1", "remove-source-after-recipient-claim");
+        assert_eq!(removed.result.status, CommandResultStatus::Accepted);
+        let target_cancel: Option<String> = fixture
             .database
             .connection()
             .query_row(
-                "SELECT status, failure_code FROM message_delivery WHERE id = ?1",
-                [&delivery_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                "SELECT cancel_requested_at FROM agent_run WHERE id = ?1",
+                [&target_run_id],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(delivery_state.0, "failed");
-        assert_eq!(
-            delivery_state.1.as_deref(),
-            Some("source_membership_changed")
-        );
+        assert!(target_cancel.is_none());
+        let delivery_status: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status FROM camp_message_delivery WHERE id = ?1",
+                [delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(delivery_status, "claimed");
     }
 
     #[cfg(feature = "slow-tests")]
-    fn terminal_delivery_stays_terminal_after_the_recipient_leaves_and_rejoins() {
+    fn batch_claim_uses_the_recipient_lifetime_after_source_membership_changes() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation(
+            "source-changes-after-outbound-admission",
+            "The recipient's admitted Delivery remains claimable",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0].as_str().unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_member SET version = version + 2 WHERE camp_id = ?1 AND agent_id = 'agent_1'",
+                [&fixture.camp_id],
+            )
+            .unwrap();
+        crate::delivery_queue::claim_waiting_delivery_batches(&mut fixture.database, 100).unwrap();
+        let claimed: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, claimed_agent_run_id FROM camp_message_delivery WHERE id = ?1",
+                [delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(claimed.0, "claimed");
+        assert!(claimed.1.is_some());
+    }
+
+    #[cfg(feature = "slow-tests")]
+    fn failed_batch_delivery_stays_terminal_after_recipient_rejoins() {
         let mut fixture = Fixture::new();
         let invocation = fixture.public_send_invocation(
             "delivery-before-membership-cutover",
@@ -5945,60 +5385,23 @@ Use this exact public input @agent_2";
         let sent = TeamToolService::default()
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap();
-        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
-        let delivery_id = sent.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let target_run_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
-                [&delivery_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let target_epoch = fixture
-            .claim_bind_and_issue(&target_run_id, "native-delivery-before-membership-cutover")
-            .0;
+        let delivery_id = sent.result.payload["deliveryIds"][0].as_str().unwrap();
+        let (target_run_id, target_epoch, _) =
+            fixture.claim_delivery_run(delivery_id, "native-delivery-before-membership-cutover");
         fixture.fail_run(
             &target_run_id,
             target_epoch,
             "recipient_failed_before_membership_cutover",
         );
-
-        let collaboration = CollaborationService::default();
-        let preview = collaboration
-            .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_2")
-            .unwrap()
-            .unwrap();
-        let removed = collaboration
-            .remove_camp_member(
-                &mut fixture.database,
-                &user_envelope(
-                    "remove-delivery-recipient",
-                    Some(&fixture.camp_id),
-                    RemoveCampMemberCommand {
-                        camp_id: fixture.camp_id.clone(),
-                        agent_id: "agent_2".to_string(),
-                        expected_membership_generation: preview.membership_generation,
-                        expected_membership_version: preview.membership_version,
-                        replacement_default_lead_agent_id: None,
-                        reason: Some("test membership cutover".to_string()),
-                        source: None,
-                    },
-                ),
-            )
-            .unwrap();
+        let removed = fixture.remove_member("agent_2", "remove-delivery-recipient");
         assert_eq!(removed.result.status, CommandResultStatus::Accepted);
-        let readded = collaboration
+        let readded = CollaborationService::default()
             .add_camp_member(
                 &mut fixture.database,
                 &user_envelope(
                     "readd-delivery-recipient",
                     Some(&fixture.camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: fixture.camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation:
@@ -6013,7 +5416,7 @@ Use this exact public input @agent_2";
             .unwrap();
         assert_eq!(readded.result.status, CommandResultStatus::Applied);
 
-        let delivery_state: (String, Option<String>, Option<i64>, i64) = fixture
+        let delivery_state: (String, Option<String>, i64, i64) = fixture
             .database
             .connection()
             .query_row(
@@ -6021,19 +5424,19 @@ Use this exact public input @agent_2";
                 SELECT delivery.status, delivery.failure_code,
                        delivery.recipient_membership_version_at_admission,
                        member.version
-                FROM message_delivery AS delivery
+                FROM camp_message_delivery AS delivery
                 JOIN camp_member AS member
                   ON member.camp_id = delivery.camp_id
                  AND member.agent_id = delivery.recipient_agent_id
                 WHERE delivery.id = ?1
                 "#,
-                [&delivery_id],
+                [delivery_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(delivery_state.0, "failed");
-        assert_eq!(delivery_state.1.as_deref(), Some("target_agent_run_failed"));
-        assert_ne!(delivery_state.2, Some(delivery_state.3));
+        assert!(delivery_state.1.is_some());
+        assert_ne!(delivery_state.2, delivery_state.3);
     }
 
     #[cfg(feature = "slow-tests")]
@@ -6050,7 +5453,7 @@ Use this exact public input @agent_2";
                 &user_envelope(
                     "remove-public-send-recipient",
                     Some(&fixture.camp_id),
-                    RemoveCampMemberCommand {
+                    RemoveThreadMemberCommand {
                         camp_id: fixture.camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: preview.membership_generation,
@@ -6085,7 +5488,7 @@ Use this exact public input @agent_2";
                 &user_envelope(
                     "add-new-public-send-recipient-membership",
                     Some(&fixture.camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: fixture.camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation:
@@ -6151,7 +5554,6 @@ Use this exact public input @agent_2";
                 title: "Must not exist".to_string(),
                 description: String::new(),
                 assignee_agent_id: "agent_1".to_string(),
-                ..Default::default()
             },
         );
         let allowed = service
@@ -8180,8 +7582,8 @@ Use this exact public input @agent_2";
             super::public_send_keeps_mid_line_display_name_alias_as_public_text();
         }
         #[test]
-        fn public_only_send_consumes_no_a2a_slot() {
-            super::public_only_send_consumes_no_a2a_slot();
+        fn recipient_free_public_send_creates_no_delivery_and_replies_to_frozen_anchor() {
+            super::recipient_free_public_send_creates_no_delivery_and_replies_to_frozen_anchor();
         }
         #[test]
         fn current_user_text_lookalikes_do_not_create_attention() {
@@ -8192,24 +7594,20 @@ Use this exact public input @agent_2";
             super::task_linkage_ignores_current_user_attention_for_recipient_cardinality();
         }
         #[test]
-        fn agent_send_rejects_a_tombstoned_trigger_message() {
-            super::agent_send_rejects_a_tombstoned_trigger_message();
+        fn agent_send_rejects_a_tombstoned_frozen_reply_anchor() {
+            super::agent_send_rejects_a_tombstoned_frozen_reply_anchor();
         }
         #[test]
-        fn a2a_send_rejects_a_missing_trigger_delivery() {
-            super::a2a_send_rejects_a_missing_trigger_delivery();
+        fn batch_a2a_send_does_not_require_a_legacy_trigger_delivery() {
+            super::batch_a2a_send_does_not_require_a_legacy_trigger_delivery();
         }
         #[test]
-        fn addressing_the_immediate_caller_deduplicates_into_a_return_delivery() {
-            super::addressing_the_immediate_caller_deduplicates_into_a_return_delivery();
+        fn reverse_a2a_message_queues_for_a_busy_caller_then_claims_as_a_batch() {
+            super::reverse_a2a_message_queues_for_a_busy_caller_then_claims_as_a_batch();
         }
         #[test]
-        fn a_non_immediate_ancestor_remains_rejected() {
-            super::a_non_immediate_ancestor_remains_rejected();
-        }
-        #[test]
-        fn legacy_public_delivery_replays_frozen_context_versions() {
-            super::legacy_public_delivery_replays_frozen_context_versions();
+        fn multi_hop_a2a_can_address_an_earlier_member_without_legacy_lineage_gates() {
+            super::multi_hop_a2a_can_address_an_earlier_member_without_legacy_lineage_gates();
         }
         #[test]
         fn batch_public_delivery_preserves_trusted_sender_in_run_input() {
@@ -8268,28 +7666,28 @@ Use this exact public input @agent_2";
             super::every_agent_business_tool_binding_is_fenced_after_leave_and_readd();
         }
         #[test]
-        fn terminal_delivery_stays_terminal_after_the_recipient_leaves_and_rejoins() {
-            super::terminal_delivery_stays_terminal_after_the_recipient_leaves_and_rejoins();
+        fn failed_batch_delivery_stays_terminal_after_recipient_rejoins() {
+            super::failed_batch_delivery_stays_terminal_after_recipient_rejoins();
         }
         #[test]
         fn an_existing_run_can_address_a_member_added_after_its_context_was_frozen() {
             super::an_existing_run_can_address_a_member_added_after_its_context_was_frozen();
         }
         #[test]
-        fn user_run_cancellation_releases_the_next_target_busy_delivery() {
-            super::user_run_cancellation_releases_the_next_target_busy_delivery();
+        fn cancelled_recipient_run_leaves_the_next_delivery_for_batch_claim() {
+            super::cancelled_recipient_run_leaves_the_next_delivery_for_batch_claim();
         }
         #[test]
-        fn pending_outbound_delivery_is_cancelled_when_source_membership_ends() {
-            super::pending_outbound_delivery_is_cancelled_when_source_membership_ends();
+        fn source_membership_removal_keeps_an_admitted_recipient_delivery_waiting() {
+            super::source_membership_removal_keeps_an_admitted_recipient_delivery_waiting();
         }
         #[test]
-        fn running_outbound_delivery_target_is_reconciled_when_source_membership_ends() {
-            super::running_outbound_delivery_target_is_reconciled_when_source_membership_ends();
+        fn claimed_recipient_run_survives_the_source_membership_cutover() {
+            super::claimed_recipient_run_survives_the_source_membership_cutover();
         }
         #[test]
-        fn dispatch_rejects_delivery_from_ended_source_membership() {
-            super::dispatch_rejects_delivery_from_ended_source_membership();
+        fn batch_claim_uses_the_recipient_lifetime_after_source_membership_changes() {
+            super::batch_claim_uses_the_recipient_lifetime_after_source_membership_changes();
         }
         #[test]
         fn public_send_rejects_a_left_recipient_and_accepts_a_new_membership() {

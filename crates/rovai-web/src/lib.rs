@@ -590,7 +590,7 @@ async fn request(
         operations::Operation::CampDelete | operations::Operation::CampDiscardPending
     )
     .then(|| {
-        body.params["command"]["campId"]
+        body.params["command"]["threadId"]
             .as_str()
             .map(str::to_string)
     })

@@ -595,7 +595,7 @@ function renderNonGroupItem(
     return [item.explanation, ...lines].filter(Boolean).join('\n').trim()
   }
   if (item.kind === 'diagnostic') {
-    return `○ 正在重试运行时请求（${item.diagnostic.attempt}/${item.diagnostic.maxAttempts}）`
+    return `○ 正在重试智能体请求（${item.diagnostic.attempt}/${item.diagnostic.maxAttempts}）`
   }
   if (item.kind === 'compaction') return ''
   return renderTool(item, runStatus)

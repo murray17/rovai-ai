@@ -13,39 +13,39 @@ pub const CAMP_ID_PATTERN: &str = "^rvcamp_[0-7][0123456789abcdefghjkmnpqrstvwxy
 
 /// The sole durable and public identity of a Rovai Camp.
 ///
-/// `CampId` accepts only canonical lower-case TypeID spelling whose 128-bit
+/// `ThreadId` accepts only canonical lower-case TypeID spelling whose 128-bit
 /// payload is an RFC-compatible UUIDv7. A parsed value is therefore safe to
 /// use as a managed filesystem component as well as a SQLite key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CampId(String);
+pub struct ThreadId(String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CampIdParseError {
+pub struct ThreadIdParseError {
     reason: &'static str,
 }
 
-impl CampIdParseError {
+impl ThreadIdParseError {
     const fn new(reason: &'static str) -> Self {
         Self { reason }
     }
 }
 
-impl fmt::Display for CampIdParseError {
+impl fmt::Display for ThreadIdParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "invalid Camp ID: {}", self.reason)
     }
 }
 
-impl std::error::Error for CampIdParseError {}
+impl std::error::Error for ThreadIdParseError {}
 
-impl CampId {
+impl ThreadId {
     pub fn new() -> Self {
         Self::from_uuid_v7(Uuid::now_v7())
     }
 
-    pub fn parse(value: &str) -> Result<Self, CampIdParseError> {
+    pub fn parse(value: &str) -> Result<Self, ThreadIdParseError> {
         if value.len() != TOTAL_LENGTH || !value.starts_with(PREFIX) {
-            return Err(CampIdParseError::new(
+            return Err(ThreadIdParseError::new(
                 "expected rvcamp_ followed by 26 canonical base32 characters",
             ));
         }
@@ -53,19 +53,19 @@ impl CampId {
         let mut decoded = 0_u128;
         for (index, byte) in suffix.iter().copied().enumerate() {
             let digit = crockford_value(byte).ok_or_else(|| {
-                CampIdParseError::new("suffix is not canonical lower-case Crockford Base32")
+                ThreadIdParseError::new("suffix is not canonical lower-case Crockford Base32")
             })?;
             if index == 0 && digit > 7 {
-                return Err(CampIdParseError::new("suffix overflows 128 bits"));
+                return Err(ThreadIdParseError::new("suffix overflows 128 bits"));
             }
             decoded = (decoded << 5) | u128::from(digit);
         }
         let uuid = Uuid::from_u128(decoded);
         if uuid.get_version_num() != 7 {
-            return Err(CampIdParseError::new("payload is not UUIDv7"));
+            return Err(ThreadIdParseError::new("payload is not UUIDv7"));
         }
         if uuid.get_variant() != Variant::RFC4122 {
-            return Err(CampIdParseError::new(
+            return Err(ThreadIdParseError::new(
                 "payload does not use the RFC 4122 variant",
             ));
         }
@@ -87,30 +87,30 @@ pub(crate) fn deserialize_camp_id_string<'de, D>(deserializer: D) -> Result<Stri
 where
     D: Deserializer<'de>,
 {
-    CampId::deserialize(deserializer).map(|camp_id| camp_id.to_string())
+    ThreadId::deserialize(deserializer).map(|camp_id| camp_id.to_string())
 }
 
-impl Default for CampId {
+impl Default for ThreadId {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl fmt::Display for CampId {
+impl fmt::Display for ThreadId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
-impl FromStr for CampId {
-    type Err = CampIdParseError;
+impl FromStr for ThreadId {
+    type Err = ThreadIdParseError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::parse(value)
     }
 }
 
-impl Serialize for CampId {
+impl Serialize for ThreadId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -119,7 +119,7 @@ impl Serialize for CampId {
     }
 }
 
-impl<'de> Deserialize<'de> for CampId {
+impl<'de> Deserialize<'de> for ThreadId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -129,13 +129,13 @@ impl<'de> Deserialize<'de> for CampId {
     }
 }
 
-impl ToSql for CampId {
+impl ToSql for ThreadId {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         Ok(ToSqlOutput::Borrowed(ValueRef::Text(self.0.as_bytes())))
     }
 }
 
-impl FromSql for CampId {
+impl FromSql for ThreadId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let value = value.as_str()?;
         Self::parse(value).map_err(|error| FromSqlError::Other(Box::new(error)))
@@ -169,34 +169,34 @@ mod tests {
 
     #[test]
     fn generated_ids_are_canonical_uuid_v7_typeids() {
-        let id = CampId::new();
+        let id = ThreadId::new();
         assert_eq!(id.as_str().len(), TOTAL_LENGTH);
         assert!(id.as_str().starts_with(PREFIX));
-        assert_eq!(CampId::parse(id.as_str()), Ok(id.clone()));
+        assert_eq!(ThreadId::parse(id.as_str()), Ok(id.clone()));
         assert_eq!(id.to_string(), id.as_str());
     }
 
     #[test]
     fn parser_rejects_noncanonical_or_non_v7_payloads() {
-        let valid = CampId::new().to_string();
-        assert!(CampId::parse(&valid.to_uppercase()).is_err());
-        assert!(CampId::parse("rvcamp_81h47kvsy5fk1shh6w1g60eecf").is_err());
+        let valid = ThreadId::new().to_string();
+        assert!(ThreadId::parse(&valid.to_uppercase()).is_err());
+        assert!(ThreadId::parse("rvcamp_81h47kvsy5fk1shh6w1g60eecf").is_err());
 
         let mut forbidden = valid.into_bytes();
         forbidden[PREFIX.len() + 1] = b'i';
-        assert!(CampId::parse(std::str::from_utf8(&forbidden).unwrap()).is_err());
+        assert!(ThreadId::parse(std::str::from_utf8(&forbidden).unwrap()).is_err());
 
         let encoded_v4 = format!("{PREFIX}{}", encode_uuid(Uuid::new_v4()));
-        assert!(CampId::parse(&encoded_v4).is_err());
-        assert!(CampId::parse("rvcamp_01h47kvsy5fk1hhh6w1g60eecf").is_err());
+        assert!(ThreadId::parse(&encoded_v4).is_err());
+        assert!(ThreadId::parse("rvcamp_01h47kvsy5fk1hhh6w1g60eecf").is_err());
     }
 
     #[test]
     fn serde_and_sqlite_round_trip_through_validation() {
-        let id = CampId::new();
+        let id = ThreadId::new();
         let json = serde_json::to_string(&id).unwrap();
-        assert_eq!(serde_json::from_str::<CampId>(&json).unwrap(), id);
-        assert!(serde_json::from_str::<CampId>(r#""camp-legacy""#).is_err());
+        assert_eq!(serde_json::from_str::<ThreadId>(&json).unwrap(), id);
+        assert!(serde_json::from_str::<ThreadId>(r#""camp-legacy""#).is_err());
 
         let connection = Connection::open_in_memory().unwrap();
         connection
@@ -205,7 +205,7 @@ mod tests {
         connection
             .execute("INSERT INTO camp_id_round_trip(id) VALUES (?1)", [&id])
             .unwrap();
-        let loaded: CampId = connection
+        let loaded: ThreadId = connection
             .query_row("SELECT id FROM camp_id_round_trip", [], |row| row.get(0))
             .unwrap();
         assert_eq!(loaded, id);

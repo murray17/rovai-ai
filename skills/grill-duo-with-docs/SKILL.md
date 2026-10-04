@@ -1,70 +1,40 @@
 ---
 name: grill-duo-with-docs
-description: 当用户希望在 Camp 中通过持续追问和一位固定搭档的独立复核，澄清计划或设计，并同步维护已确认的领域词汇、当前权威文档或版本决策记录时使用。邀请者继续处理用户回答或当前搭档建议，成员收到文档版双人追问复核任务时也使用。普通单人问答、无需维护领域文档的追问、多人讨论、无关发言和已经结束的会话不使用。
+description: Clarify a plan or design with one fixed Thread reviewer while maintaining confirmed domain language, current specifications and version decisions. Applies to the initiator and invited reviewer during that exchange; excludes solo questions, group debates and questioning without documentation work.
 ---
 
-# 双人追问与文档
+# Grill Duo with Docs
 
-邀请者负责持续追问和维护文档，一位固定搭档负责独立复核。搭档只提供建议，不修改项目文档。
+The initiator questions and maintains documents; one fixed partner independently advises without editing project documents. Investigate facts available from code, authoritative documents, tools, current input or Thread history. Ask the user for real choices. Use the user's language.
 
-## 角色与轮次关联
+## Roles and partner
 
-- 用户启动会话或回答当前开放轮次：作为邀请者继续。
-- 当前 AgentRun 由文档版双人追问复核请求直接触发：作为固定搭档，只处理当前请求。
-- 当前输入是固定搭档对本轮有效邀请的直接回复：作为邀请者继续。
+Use trusted sender identity, the triggering request and direct replies. A user start/answer or the current partner's direct reply to the valid invitation resumes the initiator. A direct request for this documentation variant makes you its reviewer only. Plain Grill Duo, old, invalid and late replies cannot advance, roll back or reopen this exchange.
 
-使用 Runtime 提供的可信发送者、当前触发消息和直接回复关系判断角色。邀请者只接受当前固定搭档对本轮有效邀请的直接回复；普通版、旧轮、失效或迟到建议只作补充，不能推进、回退或重开会话。
+Choose a relevant, available Thread partner other than yourself; address a trusted Agent ID and keep them throughout. Change only at the user's request, departure/unavailability, or a shift beyond their useful expertise; explain why. With none available, disclose solo questioning and keep the same round and documentation rules.
 
-邀请者按需读取[领域建模纪律](references/domain-modeling.md)、[词汇表格式](references/context-format.md)和[决定与当前权威路由](references/decision-routing.md)；搭档不读取这些文档规则。
+## One open round
 
-## 基本流程
+1. Prepare 1-4 independent questions with established prerequisites, numbered `Q1`-`Q4`; defer dependent questions.
+2. Send the goal, confirmed facts, options, constraints and affected documents to the partner without your recommendation.
+3. The partner returns one recommendation, main reason and risk per original number. They do not delegate, add questions or edit project files.
+4. Present all open questions together, including tradeoffs, your recommendation, the partner's view, disagreements and affected documents. Ask the user to answer by number.
+5. Maintain only confirmed content. Close questions when answered, cancelled or invalidated; start another round only after all close.
 
-1. 选择合格的固定搭档，每轮整理 1–4 个前提已确认、彼此不依赖的问题。
-2. 把本轮问题一次发给搭档，不附带自己的推荐。
-3. 搭档用一条消息逐题返回建议、理由和风险。
-4. 邀请者结合双方判断，一次向用户提出全部开放问题并给出推荐。
-5. 用户回答后继续当前轮，只维护已经确认的内容；当前轮全部关闭后才整理下一轮。
-6. 没有重要问题后，请用户确认共同理解；确认前不开始产品实现。
+Keep unanswered questions, numbers and advice. Add no new questions mid-round. For a changed question, retain its number and re-review only that item; accept only a direct reply to the updated invitation. Partial answers confirm only the answered portion.
 
-依赖本轮其它答案的问题留到下一轮。能从代码、权威文档、工具、当前输入或 Camp 公共历史查明的事实，不问用户。
+## Messages
 
-## 固定搭档
+- Request: `rovai send --to <partner-agent-id> --body <questions>`.
+- Advice: `rovai send --to <requester-agent-id> --body <advice>`.
+- User questions/final confirmation: `rovai send --public-only --to-user --body <questions-or-summary>`.
 
-固定搭档必须不是自己、仍在当前 Camp、能够接收请求。使用可信 Agent ID 寻址，不根据显示名或正文猜测。优先选择最匹配的成员，整场保持固定；只有用户要求、搭档离场或不可用，或者问题进入其无法有效判断的领域时才更换，并说明原因。
+After dispatch, finish other current inputs and end while waiting. Follow CLI recovery on failure; do not blindly resend.
 
-没有合格搭档时，明确降级为单人追问并继续相同轮次和文档规则，不虚构第二个观点。
+## Confirmed documentation
 
-## 开放轮次
+The initiator reads [Domain modeling](references/domain-modeling.md), [Glossary format](references/context-format.md) and [Decision routing](references/decision-routing.md) as needed. The partner need not load these authoring rules.
 
-一轮在所有问题被明确回答、取消或失效前保持开放，使用稳定编号 `Q1`–`Q4`。
+For each confirmed decision, determine whether to update domain vocabulary, Architecture, Contract, current-version decisions, implementation/acceptance notes, or no durable document. Apply repository rules. Unanswered, ambiguous or partner-only advice is not a confirmed fact. Do not create numbered ADR files.
 
-- 未回答问题保留原编号、原问题和已有搭档建议；内容未变时不重复复核。
-- 开放轮次期间不混入新问题。
-- 用户改变某题的问题、选项或约束时保留编号，只重新复核该题；此后只采用搭档对更新邀请的直接回复。
-- 用户只回答部分问题时，只维护已确认部分，并继续列出仍开放的原编号和已有建议。
-
-## 消息方式
-
-- 邀请者请求搭档：`rovai send --to <搭档 Agent ID> --body <本轮问题>`
-- 搭档返回建议：`rovai send --to <邀请者 Agent ID> --body <本轮建议>`
-- 邀请者询问用户或请求最终确认：`rovai send --to-user --body <正文>`
-
-使用可信 Agent ID。消息发送成功后结束当前响应；失败时按 CLI 返回指示处理，不盲目重发。
-
-## 本轮内容
-
-复核请求列出用户目标、已确认内容、每个问题的主要选项与约束，以及可能影响的文档。
-
-搭档不得继续委派、增加问题或修改 `CONTEXT.md`、Architecture、Contract、Version Decisions 等项目文件，按原编号逐题给出建议、最主要理由和风险。
-
-邀请者一次呈现全部开放问题，逐题说明主要取舍、自己的推荐、搭档看法和可能影响的文档；存在分歧时准确说明，并请用户按原编号回答。
-
-## 维护文档
-
-只维护用户明确确认的内容。领域词汇、当前权威、决定准入与格式、仓库规则和校验方式分别由上述三个 reference 及项目文档拥有；未回答、含糊或仅由搭档建议的内容不得写成已确认事实。
-
-确认一项决定后，邀请者必须判断它应更新领域词汇、Architecture、Contract、当前版本 Decisions、Version 实施/验收文档中的哪几项，或者是否无需长期文档。不得创建新的数字 ADR 文件。
-
-## 完成
-
-没有重要问题后，总结已确认决定、关键约束和风险、文档变化及未确认但不阻塞的事项，并请求用户确认共同理解。用户确认后结束会话。
+When no important questions remain, summarize confirmed decisions, constraints, risks, document changes and nonblocking unknowns. Obtain the user's confirmation of the shared understanding before product implementation, then close the exchange. Unrelated messages and completed exchanges do not restart it.

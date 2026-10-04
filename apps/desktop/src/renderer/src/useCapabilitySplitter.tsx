@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { uiAttribute } from './interface-language'
 
 export const DEFAULT_CAPABILITY_WIDTH = 320
 export function defaultCapabilityWidth(viewport: number): number {
@@ -38,7 +39,7 @@ export function useCapabilitySplitter(storageKey: string, controls: string, enab
       'aria-valuemax',
       String(Math.max(240, Math.min(560, Math.floor(available.current - 391))))
     )
-    divider.current?.setAttribute('aria-valuetext', `列表宽度 ${width} 像素`)
+    divider.current?.setAttribute('aria-valuetext', uiAttribute("列表宽度 {0} 像素", String(width)))
     if (save) {
       preferred.current = width
       try {
@@ -86,13 +87,13 @@ export function useCapabilitySplitter(storageKey: string, controls: string, enab
         className="capability-divider"
         role="separator"
         tabIndex={0}
-        aria-label="调整列表宽度"
+        aria-label={uiAttribute("调整列表宽度")}
         aria-orientation="vertical"
         aria-valuemin={240}
         aria-valuemax={560}
         aria-valuenow={DEFAULT_CAPABILITY_WIDTH}
         aria-controls={controls}
-        title="拖动调整宽度，双击复位；方向键也可调整"
+        title={uiAttribute("拖动调整宽度，双击复位；方向键也可调整")}
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.preventDefault()

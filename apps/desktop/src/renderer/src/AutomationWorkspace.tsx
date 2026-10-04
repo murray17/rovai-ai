@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -16,9 +16,10 @@ import { automationScheduleError } from './automation-schedule-validation'
 import { AutomationGlyph, AutomationTemplates } from './AutomationControls'
 import {
   AUTOMATION_DEFAULT_LIST_WIDTH, AUTOMATION_MIN_LIST_WIDTH, AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
-  draftFingerprint, draftFromAutomation, filterAutomations, scheduleLabel, templates,
+  draftFingerprint, draftFromAutomation, filterAutomations, scheduleLabel, localizedAutomationTemplate,
   type AutomationDraft, type AutomationFilter, type AutomationIssue, type SaveState, type TemplateId
 } from './automation-workspace-model'
+import { UiText, uiAttribute } from './interface-language'
 
 
 export type AutomationLeaveGuard = () => Promise<boolean>
@@ -28,7 +29,7 @@ export function AutomationWorkspace({
   projects,
   defaultMemberId,
   topNotices,
-  onOpenCamp,
+  onOpenThread,
   onNotify,
   onLeaveGuardChange
 }: {
@@ -36,11 +37,11 @@ export function AutomationWorkspace({
   projects: ProjectNavigationGroup[]
   defaultMemberId: string
   topNotices?: React.ReactNode
-  onOpenCamp(campId: string): void
+  onOpenThread(threadId: string): void
   onNotify(message: string): void
   onLeaveGuardChange?(guard: AutomationLeaveGuard | null): void
 }): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const [automations, setAutomations] = useState<AutomationView[]>([])
   const refreshGeneration = useRef(0)
   useEffect(() => () => { refreshGeneration.current++ }, [client])
@@ -125,7 +126,7 @@ export function AutomationWorkspace({
         loaded.push(...page.automations)
         if (!page.truncated) break
         if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
-          throw new Error('任务列表分页状态无效，请重试。')
+          throw new Error(uiAttribute('任务列表分页状态无效，请重试。'))
         }
         seenCursors.add(page.nextCursor)
         cursor = page.nextCursor
@@ -146,7 +147,7 @@ export function AutomationWorkspace({
             setSaveState('conflict')
             setIssue({
               kind: 'conflict',
-              message: '任务已在其他位置更新。请重新载入，或确认用当前草稿覆盖最新内容。'
+              message:uiAttribute("任务已在其他位置更新。请重新载入，或确认用当前草稿覆盖最新内容。")
             })
           } else if (!localDirty) {
             const latestDraft = draftFromAutomation(latest)
@@ -319,7 +320,7 @@ export function AutomationWorkspace({
     if (!(await flushBeforeLeave())) return
     setCreateChooserOpen(false)
     const context = selectedIdRef.current === 'new' ? draftRef.current : defaultDraft(defaultMemberId)
-    const template = templateId ? templates[templateId] : null
+    const template = templateId ? localizedAutomationTemplate(templateId) : null
     const next = { ...context, name: template?.name ?? '', prompt: template?.prompt ?? '', schedule: template?.schedule ?? context.schedule }
     draftRef.current = next
     setDraft(next)
@@ -379,7 +380,7 @@ export function AutomationWorkspace({
       savedFingerprints.current.set(created.automationId, draftFingerprint(normalizedDraft))
       setSelectedId(created.automationId)
       setDraft(normalizedDraft)
-      onNotify('定时任务已保存')
+      onNotify(uiAttribute('定时任务已保存'))
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
     } finally {
@@ -396,11 +397,11 @@ export function AutomationWorkspace({
       const result = await client.request<StoredCommandResult>('automations.run', {
         commandId: newCommandId(), command: { automationId: current.automationId }
       })
-      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? '任务未能开始。'))
+      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务未能开始。')))
       const status = String(result.payload.status ?? '')
       onNotify(status === 'skipped'
-        ? '已有一次运行正在进行，本次已跳过'
-        : status === 'failed' ? '任务未能开始，请查看运行状态' : '任务已开始运行')
+        ? uiAttribute('已有一次运行正在进行，本次已跳过')
+        : status === 'failed' ? uiAttribute('任务未能开始，请查看运行状态') : uiAttribute('任务已开始运行'))
       await refresh(true)
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
@@ -424,7 +425,7 @@ export function AutomationWorkspace({
       })
       const updated = automationFromResult(result)
       replaceAutomation(updated)
-      onNotify(enabled ? '任务已重新开启' : '任务已关闭')
+      onNotify(enabled ? uiAttribute('任务已重新开启') : uiAttribute('任务已关闭'))
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
     } finally {
@@ -442,14 +443,14 @@ export function AutomationWorkspace({
         commandId: newCommandId(),
         command: { automationId: current.automationId, expectedVersion: current.version }
       })
-      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? '任务删除失败。'))
+      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务删除失败。')))
       savedFingerprints.current.delete(automationId)
       savedVersions.current.delete(automationId)
       const next = automationsRef.current.filter((item) => item.automationId !== automationId)
       setAutomations(next)
       automationsRef.current = next
       if (selectedIdRef.current === automationId) setSelectedId(null)
-      onNotify('定时任务已删除')
+      onNotify(uiAttribute('定时任务已删除'))
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
     } finally {
@@ -461,15 +462,15 @@ export function AutomationWorkspace({
   const selectedDirty = selected
     ? savedFingerprints.current.get(selected.automationId) !== draftFingerprint(draft)
     : false
-  const saveLabel = automationScheduleError(draft.schedule) ? '未保存，请修正运行时间' : saveState === 'saving'
-    ? '正在保存…'
+  const saveLabel = automationScheduleError(draft.schedule) ? uiAttribute('未保存，请修正运行时间') : saveState === 'saving'
+    ? uiAttribute('正在保存…')
     : saveState === 'failed'
-      ? '保存失败'
+      ? uiAttribute('保存失败')
       : saveState === 'conflict'
-        ? '需要确认版本'
+        ? uiAttribute('需要确认版本')
         : selectedDirty
-          ? '等待自动保存…'
-          : '已保存'
+          ? uiAttribute('等待自动保存…')
+          : uiAttribute('已保存')
 
   const overview = selectedId === null
   const width = automationListWidth(listWidth, availableWidth)
@@ -487,8 +488,8 @@ export function AutomationWorkspace({
   }
 
   const filters = (
-    <div className="automation-filter-tabs" role="group" aria-label="筛选定时任务">
-      {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{['全部', '开启', '关闭'][index]}</button>)}
+    <div className="automation-filter-tabs" role="group" aria-label={uiAttribute("筛选定时任务")}>
+      {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{uiAttribute(['全部', '开启', '关闭'][index])}</button>)}
     </div>
   )
 
@@ -497,75 +498,75 @@ export function AutomationWorkspace({
       {topNotices}
       {issue && (
         <div className="automation-error" role="alert">
-          <div><strong>操作未完成</strong><span>{issue.message}</span></div>
+          <div><strong><UiText zh={"操作未完成"} /></strong><span>{issue.message}</span></div>
           <div className="automation-error-actions">
-            {issue.kind === 'load' && <button type="button" className="quiet-button compact" onClick={() => void refresh()}>重试读取</button>}
-            {issue.kind === 'save' && selected && <button type="button" className="quiet-button compact" onClick={() => void retrySave()}>重试保存</button>}
+            {issue.kind === 'load' && <button type="button" className="quiet-button compact" onClick={() => void refresh()}><UiText zh={"重试读取"} /></button>}
+            {issue.kind === 'save' && selected && <button type="button" className="quiet-button compact" onClick={() => void retrySave()}><UiText zh={"重试保存"} /></button>}
             {issue.kind === 'conflict' && selected && <>
-              <button type="button" className="quiet-button compact" onClick={() => void reloadSelected()}>重新载入</button>
-              <button type="button" className="quiet-button compact" onClick={() => void retrySave()}>保留草稿并重试</button>
+              <button type="button" className="quiet-button compact" onClick={() => void reloadSelected()}><UiText zh={"重新载入"} /></button>
+              <button type="button" className="quiet-button compact" onClick={() => void retrySave()}><UiText zh={"保留草稿并重试"} /></button>
             </>}
-            {issue.kind === 'action' && <button type="button" className="quiet-button compact" onClick={() => setIssue(null)}>关闭提示</button>}
+            {issue.kind === 'action' && <button type="button" className="quiet-button compact" onClick={() => setIssue(null)}><UiText zh={"关闭提示"} /></button>}
           </div>
         </div>
       )}
       <div ref={splitRef} className="automation-split" style={{ '--automation-list-width': `${width}px` } as CSSProperties}>
-        <aside className="automation-list" aria-label="定时任务列表">
+        <aside className="automation-list" aria-label={uiAttribute("定时任务列表")}>
           {overview && <header className="automation-page-header">
-            <div><h1>定时任务</h1><p>安排一次，按时执行。</p></div>
-            <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}><AutomationGlyph name="plus" />新建</button>
+            <div><h1><UiText zh={"定时任务"} /></h1><p><UiText zh={"安排一次，按时执行。"} /></p></div>
+            <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}><AutomationGlyph name="plus" /><UiText zh={"新建"} /></button>
           </header>}
           {(!overview || automations.length > 0) && <div className="automation-list-controls">
             {overview && filters}
-            {!overview && <h2 className="automation-list-title">定时任务<span>{automations.length}</span></h2>}
+            {!overview && <h2 className="automation-list-title"><UiText zh={"定时任务"} /><span>{automations.length}</span></h2>}
             {!overview && <div className="automation-list-navigation">
               <button ref={createTriggerRef} className="primary-button" type="button" disabled={busy !== null}
                 aria-expanded={createChooserOpen} aria-controls={createChooserId}
-                onClick={() => setCreateChooserOpen((open) => !open)}><AutomationGlyph name="plus" />新建</button>
+                onClick={() => setCreateChooserOpen((open) => !open)}><AutomationGlyph name="plus" /><UiText zh={"新建"} /></button>
             </div>}
-            <label className="automation-search"><AutomationGlyph name="search" /><input type="search" aria-label="搜索定时任务" placeholder="搜索定时任务" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+            <label className="automation-search"><AutomationGlyph name="search" /><input type="search" aria-label={uiAttribute("搜索定时任务")} placeholder={uiAttribute("搜索定时任务")} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
             {!overview && filters}
           </div>}
-          {!overview && <section ref={createChooserRef} id={createChooserId} className="automation-create-choices" aria-label="选择创建方式" hidden={!createChooserOpen}>
-            <p>从空白或模板开始</p>
+          {!overview && <section ref={createChooserRef} id={createChooserId} className="automation-create-choices" aria-label={uiAttribute("选择创建方式")} hidden={!createChooserOpen}>
+            <p><UiText zh={"从空白或模板开始"} /></p>
             <AutomationTemplates compact onChoose={(id) => void beginNew(id)} />
           </section>}
           <div className="automation-list-scroll" aria-busy={loadState === 'loading'}>
-            {loadState === 'loading' && automations.length === 0 && <p className="automation-list-message" role="status">正在读取任务…</p>}
-            {loadState === 'error' && automations.length === 0 && <p className="automation-list-message">任务列表暂时不可用。</p>}
-            {loadState === 'ready' && automations.length === 0 && <p className="automation-list-message automation-empty-message">{overview ? '还没有定时任务，从空白或下面的模板开始。' : '还没有定时任务，创建后会显示在这里。'}</p>}
-            {automations.length > 0 && visibleAutomations.length === 0 && <p className="automation-list-message">没有匹配的定时任务</p>}
+            {loadState === 'loading' && automations.length === 0 && <p className="automation-list-message" role="status"><UiText zh={"正在读取任务…"} /></p>}
+            {loadState === 'error' && automations.length === 0 && <p className="automation-list-message"><UiText zh={"任务列表暂时不可用。"} /></p>}
+            {loadState === 'ready' && automations.length === 0 && <p className="automation-list-message automation-empty-message">{overview ? uiAttribute("还没有定时任务，从空白或下面的模板开始。") : uiAttribute("还没有定时任务，创建后会显示在这里。")}</p>}
+            {automations.length > 0 && visibleAutomations.length === 0 && <p className="automation-list-message"><UiText zh={"没有匹配的定时任务"} /></p>}
             {visibleAutomations.map((automation) => {
               const member = agents.find((agent) => agent.agentId === automation.memberId)
               return <div key={automation.automationId} className={`automation-list-item ${selectedId === automation.automationId ? 'active' : ''}`}>
                 <button type="button" className="automation-task-open" onClick={() => void choose(automation.automationId)} aria-current={selectedId === automation.automationId ? 'true' : undefined}>
-                  <span className={`automation-state-icon ${automation.enabled ? 'enabled' : 'closed'}`} role="img" aria-label={automation.enabled ? '已开启' : '已关闭'} title={automation.enabled ? '已开启' : '已关闭'}><AutomationGlyph name={automation.enabled ? 'clock' : 'pause'} /></span>
+                  <span className={`automation-state-icon ${automation.enabled ? 'enabled' : 'closed'}`} role="img" aria-label={automation.enabled ? uiAttribute("已开启") : uiAttribute("已关闭")} title={automation.enabled ? uiAttribute("已开启") : uiAttribute("已关闭")}><AutomationGlyph name={automation.enabled ? 'clock' : 'pause'} /></span>
                   <span className="automation-list-copy"><strong>{automation.name}</strong><small>{scheduleLabel(automation.schedule)}</small></span>
-                  <span title={member?.displayName ?? '队员不可用'}><MemberAvatar agentId={automation.memberId} avatarRef={member?.avatarRef ?? null} displayName={member?.displayName ?? '未知队员'} size="mention" /></span>
+                  <span title={member?.displayName ?? uiAttribute('队员不可用')}><MemberAvatar agentId={automation.memberId} avatarRef={member?.avatarRef ?? null} displayName={member?.displayName ?? uiAttribute('未知队员')} size="mention" /></span>
                 </button>
                 <DropdownMenu.Root onOpenChange={(open) => { if (!open) setDeleteArmed(null) }}>
-                  <DropdownMenu.Trigger asChild><button className="automation-icon-button automation-task-more" type="button" aria-label={`${automation.name}的操作`} disabled={busy !== null}><AutomationGlyph name="more" /></button></DropdownMenu.Trigger>
+                  <DropdownMenu.Trigger asChild><button className="automation-icon-button automation-task-more" type="button" aria-label={uiAttribute("{0}的操作", String(automation.name))} disabled={busy !== null}><AutomationGlyph name="more" /></button></DropdownMenu.Trigger>
                   <DropdownMenu.Portal><DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="automation-menu" align="end" sideOffset={4} collisionPadding={12} loop>
-                    <DropdownMenu.Item className="automation-menu-item" onSelect={() => void runNow(automation.automationId)}><AutomationGlyph name="play" />运行一次</DropdownMenu.Item>
-                    <DropdownMenu.Item className="automation-menu-item" onSelect={() => void setEnabled(automation.automationId, !automation.enabled)}><AutomationGlyph name={automation.enabled ? 'pause' : 'clock'} />{automation.enabled ? '关闭' : '开启'}</DropdownMenu.Item>
+                    <DropdownMenu.Item className="automation-menu-item" onSelect={() => void runNow(automation.automationId)}><AutomationGlyph name="play" /><UiText zh={"运行一次"} /></DropdownMenu.Item>
+                    <DropdownMenu.Item className="automation-menu-item" onSelect={() => void setEnabled(automation.automationId, !automation.enabled)}><AutomationGlyph name={automation.enabled ? 'pause' : 'clock'} />{automation.enabled ? uiAttribute("关闭") : uiAttribute("开启")}</DropdownMenu.Item>
                     <DropdownMenu.Separator className="automation-menu-separator" />
                     <DropdownMenu.Item className="automation-menu-item danger" onSelect={(event) => {
                       if (deleteArmed === automation.automationId) void remove(automation.automationId)
                       else { event.preventDefault(); setDeleteArmed(automation.automationId) }
-                    }}><AutomationGlyph name="trash" />{deleteArmed === automation.automationId ? '确认删除任务' : '删除'}</DropdownMenu.Item>
-                    {deleteArmed === automation.automationId && <p className="automation-menu-note">删除定义，保留已有运行与对话。</p>}
+                    }}><AutomationGlyph name="trash" />{deleteArmed === automation.automationId ? uiAttribute("确认删除任务") : uiAttribute("删除")}</DropdownMenu.Item>
+                    {deleteArmed === automation.automationId && <p className="automation-menu-note"><UiText zh={"删除定义，保留已有运行与对话。"} /></p>}
                   </DropdownMenu.Content></DropdownMenu.Portal>
                 </DropdownMenu.Root>
               </div>
             })}
           </div>
           {overview && <section className="automation-template-library" aria-labelledby="automation-templates-heading">
-            <div><h2 id="automation-templates-heading">模板</h2><p>选择后可在任务页继续调整</p></div>
+            <div><h2 id="automation-templates-heading"><UiText zh={"模板"} /></h2><p><UiText zh={"选择后可在任务页继续调整"} /></p></div>
             <AutomationTemplates onChoose={(id) => void beginNew(id)} />
           </section>}
         </aside>
         {!overview && <>
-          <div className="automation-splitter" role="separator" tabIndex={0} aria-label="调整任务列表宽度" aria-orientation="vertical" aria-valuemin={AUTOMATION_MIN_LIST_WIDTH} aria-valuemax={Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7)} aria-valuenow={editorClosed ? Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7) : width} aria-valuetext={editorClosed ? '详情已收起，向左调整可重新打开' : `任务列表宽度 ${width} 像素`} title={editorClosed ? '向左拖动打开任务页' : '拖动调整宽度，拖到最右侧收起详情'}
+          <div className="automation-splitter" role="separator" tabIndex={0} aria-label={uiAttribute("调整任务列表宽度")} aria-orientation="vertical" aria-valuemin={AUTOMATION_MIN_LIST_WIDTH} aria-valuemax={Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7)} aria-valuenow={editorClosed ? Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7) : width} aria-valuetext={editorClosed ? uiAttribute("详情已收起，向左调整可重新打开") : uiAttribute("任务列表宽度 {0} 像素", String(width))} title={editorClosed ? uiAttribute("向左拖动打开任务页") : uiAttribute("拖动调整宽度，拖到最右侧收起详情")}
             onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.dataset.resizing = 'true'; dragRef.current = { pointerId: event.pointerId, x: event.clientX, width: editorClosed ? availableWidth - 7 : width }; event.currentTarget.setPointerCapture(event.pointerId) }}
             onPointerMove={(event) => { const drag = dragRef.current; if (drag?.pointerId === event.pointerId) resize(drag.width + event.clientX - drag.x) }}
             onPointerUp={(event) => { delete event.currentTarget.dataset.resizing; dragRef.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
@@ -577,9 +578,9 @@ export function AutomationWorkspace({
               else if (event.key === 'End') { event.preventDefault(); void closeEditor() }
               else if (event.key === 'Enter') { event.preventDefault(); setEditorClosed(false); setListWidth(AUTOMATION_DEFAULT_LIST_WIDTH) }
             }}><span /></div>
-          <section className="automation-editor" aria-label={selectedId === 'new' ? '新建定时任务' : '定时任务详情'} hidden={editorClosed}>
-            <header className="automation-editor-toolbar"><span>{selectedId === 'new' ? '新建' : '详情'}</span><small role="status">{selected ? saveLabel : ''}</small><button type="button" className="automation-icon-button" aria-label="返回定时任务总览" onClick={() => void showOverview()}><AutomationGlyph name="close" /></button></header>
-            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenCamp={onOpenCamp} onCreate={() => void create()} />
+          <section className="automation-editor" aria-label={selectedId === 'new' ? uiAttribute("新建定时任务") : uiAttribute("定时任务详情")} hidden={editorClosed}>
+            <header className="automation-editor-toolbar"><span>{selectedId === 'new' ? uiAttribute("新建") : uiAttribute("详情")}</span><small role="status">{selected ? saveLabel : ''}</small><button type="button" className="automation-icon-button" aria-label={uiAttribute("返回定时任务总览")} onClick={() => void showOverview()}><AutomationGlyph name="close" /></button></header>
+            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenThread={onOpenThread} onCreate={() => void create()} />
           </section>
         </>}
       </div>

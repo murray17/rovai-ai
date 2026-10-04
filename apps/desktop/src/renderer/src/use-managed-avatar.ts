@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { useEffect, useState } from 'react'
 import { parseControlledMemberAvatarRef } from '@contracts'
 import {
@@ -17,7 +17,7 @@ export function useManagedAvatarUrl(
   avatarRef: string | null,
   rendition: ManagedAvatarRenditionKind
 ): { loading: boolean; url: string | null } {
-  const client = useCampClient()
+  const client = useThreadClient()
   const parsed = avatarRef ? parseControlledMemberAvatarRef(avatarRef) : null
   const read = parsed?.kind === 'managed' ? client.memberAvatars.read : null
   const key = parsed?.kind === 'managed' ? `${avatarRef}\u0000${rendition}` : null

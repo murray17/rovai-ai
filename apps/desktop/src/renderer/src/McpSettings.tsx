@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type {
   AgentProfile,
@@ -26,6 +26,7 @@ import { PRODUCT_RUNTIME_LOGOS } from './runtime-products'
 import { NewConversationQuickHelp } from './NewConversationQuickHelp'
 import { CapabilityDeleteDialog } from './CapabilityDeleteDialog'
 import { AppDialogGlyph, DialogControlIcon } from './AppDialog'
+import { UiText, uiAttribute } from './interface-language'
 
 /** A name is one import choice. Keep Core's first candidate and its private commit identity. */
 export function groupMcpImportCandidates(candidates: McpImportCandidate[]): {
@@ -108,7 +109,7 @@ export function McpSettings({
   agents: AgentProfile[]
   platform?: NodeJS.Platform
 }): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const members = useMemo(
     () =>
       agents
@@ -190,10 +191,10 @@ export function McpSettings({
     }
     if (result.status === 'conflict') {
       await load()
-      throw new Error('配置已更新。已保留你的更改；编辑时可重新载入，导入时请重新扫描。')
+      throw new Error(uiAttribute('配置已更新。已保留你的更改；编辑时可重新载入，导入时请重新扫描。'))
     }
     if (result.status === 'invalid') throw new Error(issueText(result.issues[0]))
-    throw new Error('MCP 配置未能保存，请重新读取后再试。')
+    throw new Error(uiAttribute('MCP 配置未能保存，请重新读取后再试。'))
   }
   const selected =
     selectedId === 'new' || selectedId === 'import'
@@ -236,10 +237,10 @@ export function McpSettings({
       try {
         JSON.parse(text)
       } catch {
-        throw new Error('JSON 格式不正确，请检查括号、引号和逗号。')
+        throw new Error(uiAttribute('JSON 格式不正确，请检查括号、引号和逗号。'))
       }
       if (server && drafts[server.serverId]?.baseDefinition !== server.definitionJson)
-        throw new Error('该连接已在其他位置更新。请保留需要的内容，再点击“重新载入”后编辑。')
+        throw new Error(uiAttribute('该连接已在其他位置更新。请保留需要的内容，再点击“重新载入”后编辑。'))
       const result = await client.request<McpMutationResult>(
         adding ? 'mcp.servers.create' : 'mcp.servers.update',
         {
@@ -310,7 +311,7 @@ export function McpSettings({
       })
       if (result.status === 'conflict') {
         await load()
-        throw new Error('配置已更新，请取消后重新确认要删除的 MCP。')
+        throw new Error(uiAttribute('配置已更新，请取消后重新确认要删除的 MCP。'))
       }
       await apply(result)
       setDeleteTarget(null)
@@ -339,9 +340,9 @@ export function McpSettings({
         .map((candidate) => {
           const draft = importDrafts[candidate.candidateId]
           if (!draft.action)
-            throw new Error(`请为 ${candidate.proposedName} 选择覆盖配置或另存为。`)
+            throw new Error(uiAttribute("请为 {0} 选择覆盖配置或另存为。", String(candidate.proposedName)))
           if (draft.action === 'replace' && draft.replaceServerId && drafts[draft.replaceServerId])
-            throw new Error('该 MCP 有未保存更改，请先保存或放弃更改，再替换。')
+            throw new Error(uiAttribute('该 MCP 有未保存更改，请先保存或放弃更改，再替换。'))
           return {
             candidateId: candidate.candidateId,
             action: draft.action,
@@ -350,7 +351,7 @@ export function McpSettings({
             hasBlockingIssues: false
           }
         })
-      if (!selections.length) throw new Error('请选择要导入的 MCP。')
+      if (!selections.length) throw new Error(uiAttribute('请选择要导入的 MCP。'))
       const next = await apply(
         await client.request<McpMutationResult>('mcp.import.commit', {
           expectedConfigDigest: inspection.configDigest,
@@ -385,24 +386,20 @@ export function McpSettings({
     selectedId === 'import' ? (
       <>
         <header className="capability-detail-heading">
-          <h2>从本机导入 MCP</h2>
+          <h2><UiText zh={"从本机导入 MCP"} /></h2>
           <div className="capability-actions">
             <button
               type="button"
               className="quiet-button compact"
               disabled={busy !== null}
               onClick={() => choose(null)}
-            >
-              取消
-            </button>
+            ><UiText zh={"取消"} /></button>
             <button
               type="button"
               className="quiet-button compact"
               disabled={busy !== null}
               onClick={scan}
-            >
-              重新扫描
-            </button>
+            ><UiText zh={"重新扫描"} /></button>
             <button
               type="button"
               className="primary-button"
@@ -410,18 +407,18 @@ export function McpSettings({
               onClick={commitImport}
             >
               {busy === 'import'
-                ? '正在导入…'
-                : `导入${selectedImports ? ` ${selectedImports} 项` : ''}`}
+                ? uiAttribute("正在导入…")
+                : uiAttribute("导入{0}", String(selectedImports ? uiAttribute(" {0} 项", String(selectedImports)) : ''))}
             </button>
           </div>
         </header>
-        <p className="capability-header-description">从本机已有应用中选择 MCP</p>
+        <p className="capability-header-description"><UiText zh={"从本机已有应用中选择 MCP"} /></p>
       </>
     ) : selectedId === 'new' || selected ? (
       <>
         <header className="capability-detail-heading">
           <div className="capability-title">
-            <h2>{selected?.name ?? '添加 MCP'}</h2>
+            <h2>{selected?.name ?? uiAttribute("添加 MCP")}</h2>
             {selected && (
               <span className="capability-source">
                 {selected.transport === 'stdio' ? 'Stdio' : 'HTTP'}
@@ -435,9 +432,7 @@ export function McpSettings({
                 className="quiet-button compact"
                 disabled={busy !== null}
                 onClick={() => choose(null)}
-              >
-                取消
-              </button>
+              ><UiText zh={"取消"} /></button>
             )}
             {selected && drafts[selected.serverId] && (
               <button
@@ -450,8 +445,8 @@ export function McpSettings({
                 }}
               >
                 {drafts[selected.serverId].baseDigest === config?.configDigest
-                  ? '放弃更改'
-                  : '重新载入'}
+                  ? uiAttribute("放弃更改")
+                  : uiAttribute("重新载入")}
               </button>
             )}
             <button
@@ -464,10 +459,10 @@ export function McpSettings({
             >
               <DialogControlIcon name={selected ? 'save' : 'plus'} />
               {busy === 'save'
-                ? '正在保存…'
+                ? uiAttribute("正在保存…")
                 : selected
-                  ? '保存'
-                  : '添加 MCP'}
+                  ? uiAttribute("保存")
+                  : uiAttribute("添加 MCP")}
             </button>
             {selected && (
               <>
@@ -475,7 +470,7 @@ export function McpSettings({
                 <button
                   type="button"
                   className="quiet-button compact danger-text"
-                  aria-label="删除 MCP"
+                  aria-label={uiAttribute("删除 MCP")}
                   disabled={disabled}
                   onClick={() => {
                     setError(null)
@@ -486,9 +481,7 @@ export function McpSettings({
                     })
                   }}
                 >
-                  <AppDialogGlyph name="trash" />
-                  删除
-                </button>
+                  <AppDialogGlyph name="trash" /><UiText zh={"删除"} /></button>
               </>
             )}
           </div>
@@ -519,19 +512,16 @@ export function McpSettings({
       importAction={
         <button
           className="quiet-button compact"
-          aria-label="从本机导入 MCP"
+          aria-label={uiAttribute("从本机导入 MCP")}
           type="button"
           disabled={disabled}
           onClick={scan}
         >
-          <AppDialogGlyph name="download" />导入
-        </button>
+          <AppDialogGlyph name="download" /><UiText zh={"导入"} /></button>
       }
       list={
         !config ? (
-          <div className="capability-empty" role="status">
-            正在读取 MCP 配置…
-          </div>
+          <div className="capability-empty" role="status"><UiText zh={"正在读取 MCP 配置…"} /></div>
         ) : visible.length ? (
           visible.map((server) => (
             <McpListItem
@@ -544,15 +534,15 @@ export function McpSettings({
           ))
         ) : (
           <div className="capability-empty">
-            {config.servers.length ? '没有匹配的 MCP。' : '还没有 MCP。'}
+            {config.servers.length ? uiAttribute("没有匹配的 MCP。") : uiAttribute("还没有 MCP。")}
           </div>
         )
       }
     >
       <CapabilityDeleteDialog
         open={deleteTarget !== null}
-        title={`删除 MCP “${deleteTarget?.name ?? ''}”？`}
-        description="删除后，队员将无法使用此 MCP。"
+        title={uiAttribute("删除 MCP “{0}”？", String(deleteTarget?.name ?? ''))}
+        description={uiAttribute("删除后，队员将无法使用此 MCP。")}
         busy={busy === 'delete'}
         error={error}
         onCancel={cancelDelete}
@@ -572,7 +562,7 @@ export function McpSettings({
       />
       {config?.fileIssue && (
         <div className="capability-error" role="alert">
-          <span>配置暂时无法读取，请修正后重新读取。</span>
+          <span><UiText zh={"配置暂时无法读取，请修正后重新读取。"} /></span>
           <div className="capability-actions">
             <button
               type="button"
@@ -583,9 +573,7 @@ export function McpSettings({
                   await load()
                 })
               }}
-            >
-              重新读取
-            </button>
+            ><UiText zh={"重新读取"} /></button>
             {client.revealMcpConfig && <button
               type="button"
               className="quiet-button compact"
@@ -595,15 +583,13 @@ export function McpSettings({
                   await client.revealMcpConfig?.()
                 })
               }}
-            >
-              打开文件
-            </button>}
+            ><UiText zh={"打开文件"} /></button>}
           </div>
         </div>
       )}
       {config?.permissionIssue && !config.fileIssue && (
         <div className="capability-error">
-          <span>配置文件权限需要收紧。</span>
+          <span><UiText zh={"配置文件权限需要收紧。"} /></span>
           <button
             type="button"
             className="quiet-button compact"
@@ -613,17 +599,13 @@ export function McpSettings({
                 setConfig(await client.request<McpConfigView>('mcp.config.repairPermissions'))
               )
             }}
-          >
-            修复权限
-          </button>
+          ><UiText zh={"修复权限"} /></button>
         </div>
       )}
 
       {selectedId === 'import' ? (
         busy === 'scan' ? (
-          <div className="capability-empty" role="status">
-            正在查找本机配置…
-          </div>
+          <div className="capability-empty" role="status"><UiText zh={"正在查找本机配置…"} /></div>
         ) : inspection ? (
           <McpImportPanel
             inspection={inspection}
@@ -652,8 +634,7 @@ export function McpSettings({
               {selected.configurationIssues?.map((issue) => (
                 <p key={`${issue.code}:${issue.field}`}>
                   {issue.message}
-                  <br />
-                  受影响字段：{issue.field}
+                  <br /><UiText zh={"受影响字段："} />{issue.field}
                 </p>
               ))}
             </div>
@@ -702,24 +683,24 @@ export function McpSettings({
       ) : (
         !config?.fileIssue && (
         libraryEmpty ? (
-          <section className="mcp-first-connection" aria-label="开始添加 MCP">
+          <section className="mcp-first-connection" aria-label={uiAttribute("开始添加 MCP")}>
             <AppDialogGlyph name="server" />
-            <h2>添加第一个 MCP</h2>
-            <p>连接外部工具，让队员在协作时使用。</p>
+            <h2><UiText zh={"添加第一个 MCP"} /></h2>
+            <p><UiText zh={"连接外部工具，让队员在协作时使用。"} /></p>
             <div className="mcp-first-connection-actions">
-              <button type="button" aria-label="添加配置" disabled={disabled} onClick={() => choose('new')}>
+              <button type="button" aria-label={uiAttribute("添加配置")} disabled={disabled} onClick={() => choose('new')}>
                 <DialogControlIcon name="plus" />
-                <span><strong>添加配置</strong><small>粘贴 MCP JSON</small></span>
+                <span><strong><UiText zh={"添加配置"} /></strong><small><UiText zh={"粘贴 MCP JSON"} /></small></span>
                 <DialogControlIcon name="chevron" />
               </button>
-              <button type="button" aria-label="从本机导入 MCP" disabled={disabled} onClick={scan}>
+              <button type="button" aria-label={uiAttribute("从本机导入 MCP")} disabled={disabled} onClick={scan}>
                 <AppDialogGlyph name="download" />
-                <span><strong>从本机导入</strong><small>选择已有应用中的配置</small></span>
+                <span><strong><UiText zh={"从本机导入"} /></strong><small><UiText zh={"选择已有应用中的配置"} /></small></span>
                 <DialogControlIcon name="chevron" />
               </button>
             </div>
           </section>
-        ) : <div className="capability-empty">从左侧选择 MCP，或添加新的连接。</div>
+        ) : <div className="capability-empty"><UiText zh={"从左侧选择 MCP，或添加新的连接。"} /></div>
         )
       )}
     </CapabilityWorkspace>
@@ -752,7 +733,7 @@ export function McpListItem({
           {serverInitial(server)}
         </span>
       }
-      summary={`${dirty ? '未保存 · ' : ''}${server.transport === 'stdio' ? 'Stdio' : 'HTTP'} · ${server.enabled ? server.assignedAgentIds.length : 0} 位队员使用`}
+      summary={uiAttribute("{0}{1} · {2} 位队员使用", String(dirty ? uiAttribute("未保存 · ") : ''), String(server.transport === 'stdio' ? 'Stdio' : 'HTTP'), String(server.enabled ? server.assignedAgentIds.length : 0))}
       selected={selected}
       onSelect={onSelect}
     />
@@ -778,10 +759,8 @@ export function McpMemberChoices({
     <section className="capability-members-section">
       <div className="capability-scope-heading">
         <div className="capability-title">
-          <h3>使用队员</h3>
-          <NewConversationQuickHelp label="MCP 使用队员说明">
-            只向所选队员提供此 MCP。不选择任何队员时，不会加载。
-          </NewConversationQuickHelp>
+          <h3><UiText zh={"使用队员"} /></h3>
+          <NewConversationQuickHelp label={uiAttribute("MCP 使用队员说明")}><UiText zh={"只向所选队员提供此 MCP。不选择任何队员时，不会加载。"} /></NewConversationQuickHelp>
         </div>
         {onAll && (
           <div className="capability-actions">
@@ -790,17 +769,13 @@ export function McpMemberChoices({
               className="quiet-button compact"
               disabled={disabled}
               onClick={() => onAll(members.map((member) => member.agentId))}
-            >
-              全选
-            </button>
+            ><UiText zh={"全选"} /></button>
             <button
               type="button"
               className="quiet-button compact"
               disabled={disabled}
               onClick={() => onAll([])}
-            >
-              清空
-            </button>
+            ><UiText zh={"清空"} /></button>
           </div>
         )}
       </div>
@@ -829,7 +804,7 @@ export function McpMemberChoices({
           </button>
         ))}
       </div>
-      {!members.length && <p className="capability-note">暂无队员。</p>}
+      {!members.length && <p className="capability-note"><UiText zh={"暂无队员。"} /></p>}
     </section>
   )
 }
@@ -860,7 +835,7 @@ export function McpImportPanel({
     onChange({ ...drafts, [id]: { ...drafts[id], ...patch } })
   return (
     <>
-      <div className="capability-import-filters" role="group" aria-label="MCP 配置来源">
+      <div className="capability-import-filters" role="group" aria-label={uiAttribute("MCP 配置来源")}>
         {[
           'all',
           ...new Set(
@@ -874,15 +849,14 @@ export function McpImportPanel({
             onClick={() => setSourceFilter(source)}
           >
             {source === 'all'
-              ? '全部来源'
+              ? uiAttribute("全部来源")
               : sourceLabel(source as McpImportCandidate['sourceKind'])}
           </button>
         ))}
       </div>
       <div className="capability-scope-heading">
         <span className="capability-note">
-          {available.length} 项可选择 · 已选择 {selected.length} 项
-        </span>
+          {available.length}<UiText zh={" 项可选择 · 已选择 "} />{selected.length}<UiText zh={" 项"} /></span>
         <button
           type="button"
           className="quiet-button compact"
@@ -912,8 +886,8 @@ export function McpImportPanel({
                 origins(candidate).some((origin) => origin.sourceKind === sourceFilter)
             )
             .every((candidate) => drafts[candidate.candidateId]?.selected)
-            ? '取消选择'
-            : '全选'}
+            ? uiAttribute("取消选择")
+            : uiAttribute("全选")}
         </button>
       </div>
       <div className="capability-import-items">
@@ -954,7 +928,7 @@ export function McpImportPanel({
                         {candidate.normalizedDefinitionJson?.includes('\"command\"')
                           ? 'Stdio'
                           : 'HTTP'}
-                        {candidate.conflict === 'name_conflict' ? ' · 已有同名项' : ''}
+                        {candidate.conflict === 'name_conflict' ? uiAttribute(" · 已有同名项") : ''}
                       </small>
                     </span>
                     <span className="capability-check" aria-hidden="true">
@@ -976,7 +950,7 @@ export function McpImportPanel({
                 </div>
                 {draft.selected && candidate.conflict === 'name_conflict' && (
                   <div className="capability-import-resolution">
-                    <span className="capability-note">Rovai 中的同名配置与此处不同</span>
+                    <span className="capability-note"><UiText zh={"Rovai 中的同名配置与此处不同"} /></span>
                     <div className="capability-actions">
                       <button
                         type="button"
@@ -984,9 +958,7 @@ export function McpImportPanel({
                         aria-pressed={draft.action === 'replace'}
                         disabled={busy}
                         onClick={() => update(candidate.candidateId, { action: 'replace' })}
-                      >
-                        覆盖配置
-                      </button>
+                      ><UiText zh={"覆盖配置"} /></button>
                       <button
                         type="button"
                         className="quiet-button compact"
@@ -998,12 +970,10 @@ export function McpImportPanel({
                             open: true
                           })
                         }
-                      >
-                        另存为
-                      </button>
+                      ><UiText zh={"另存为"} /></button>
                     </div>
                     {draft.action === 'create' && (
-                      <p className="capability-note">请在 JSON 中修改 MCP 名称。</p>
+                      <p className="capability-note"><UiText zh={"请在 JSON 中修改 MCP 名称。"} /></p>
                     )}
                   </div>
                 )}
@@ -1014,30 +984,29 @@ export function McpImportPanel({
                       .map((issue) => (
                         <p key={`${issue.code}:${issue.field}:${issue.message}`}>
                           {issue.message}
-                          <br />
-                          受影响字段：{issue.field}
+                          <br /><UiText zh={"受影响字段："} />{issue.field}
                         </p>
                       ))}
-                    <p>可先导入为停用配置。</p>
+                    <p><UiText zh={"可先导入为停用配置。"} /></p>
                   </div>
                 )}
                 <button
                   type="button"
                   className="capability-import-disclosure"
-                  aria-label={`${draft.open ? '收起' : '查看'} ${candidate.proposedName} 配置`}
+                  aria-label={uiAttribute("{0} {1} 配置", String(draft.open ? uiAttribute("收起") : uiAttribute("查看")), String(candidate.proposedName))}
                   aria-expanded={draft.open}
                   aria-controls={`mcp-import-config-${candidate.candidateId}`}
                   disabled={busy}
                   onClick={() => update(candidate.candidateId, { open: !draft.open })}
                 >
                   <DialogControlIcon name="chevron" />
-                  {draft.open ? '收起配置' : '查看配置'}
+                  {draft.open ? uiAttribute("收起配置") : uiAttribute("查看配置")}
                 </button>
                 {draft.open && (
                   <label className="capability-json-field capability-import-json" id={`mcp-import-config-${candidate.candidateId}`}>
-                    <span className="capability-import-config-heading">配置 JSON<small title={candidate.sourcePath}>来自 {sourceLabel(candidate.sourceKind)}</small></span>
+                    <span className="capability-import-config-heading"><UiText zh={"配置 JSON"} /><small title={candidate.sourcePath}><UiText zh={"来自 "} />{sourceLabel(candidate.sourceKind)}</small></span>
                     <textarea
-                      aria-label={`${candidate.proposedName} 导入 JSON`}
+                      aria-label={uiAttribute("{0} 导入 JSON", String(candidate.proposedName))}
                       spellCheck={false}
                       disabled={busy}
                       value={draft.definitionJson}
@@ -1053,10 +1022,10 @@ export function McpImportPanel({
             )
           })}
       </div>
-      {!available.length && <p className="capability-note">没有新的可导入配置。</p>}
+      {!available.length && <p className="capability-note"><UiText zh={"没有新的可导入配置。"} /></p>}
       {other.length > 0 && (
         <details className="capability-import-other">
-          <summary>其他 {other.length} 项</summary>
+          <summary><UiText zh={"其他 "} />{other.length}<UiText zh={" 项"} /></summary>
           {other.map((candidate) => (
             <article className="capability-import-other-item" key={candidate.candidateId}>
               <div className="capability-import-other-heading">
@@ -1068,7 +1037,7 @@ export function McpImportPanel({
                   </span>
                 ))}
                 <span className="capability-import-other-status">
-                  {candidate.conflict === 'same' ? '已添加' : '暂不支持'}
+                  {candidate.conflict === 'same' ? uiAttribute("已添加") : uiAttribute("暂不支持")}
                 </span>
               </div>
               {candidate.conflict !== 'same' && <McpImportIssueList issues={groups.find((group) => group.candidate === candidate)?.issues ?? candidate.issues} />}
@@ -1088,7 +1057,7 @@ export function McpImportPanel({
                     {sourceLabel(source.sourceKind)}
                   </span>
                 </div>
-                <p className="capability-note">请检查该应用的 MCP 配置后重新扫描。</p>
+                <p className="capability-note"><UiText zh={"请检查该应用的 MCP 配置后重新扫描。"} /></p>
               </article>
             ))}
         </div>
@@ -1106,20 +1075,20 @@ function McpImportIssueList({ issues }: { issues: McpImportIssue[] }): React.JSX
   }
   const groups = new Map<string, { message: string; fields: Set<string> }>()
   for (const issue of issues.filter((issue) => issue.blocking)) {
-    const message = messages[issue.code] ?? issue.message
+    const message = messages[issue.code] ? uiAttribute(messages[issue.code]) : issue.message
     const key = `${issue.code}:${message}`
     const group = groups.get(key) ?? { message, fields: new Set<string>() }
     if (issue.field) group.fields.add(issue.field)
     groups.set(key, group)
   }
   return (
-    <ul className="capability-import-issues" aria-label="导入限制">
+    <ul className="capability-import-issues" aria-label={uiAttribute("导入限制")}>
       {[...groups].map(([key, group]) => (
         <li key={key}>
           <p className="capability-note">{group.message}</p>
           {group.fields.size > 0 && (
             <div className="capability-import-issue-fields">
-              <span>受影响字段</span>
+              <span><UiText zh={"受影响字段"} /></span>
               <div>
                 {[...group.fields].map((field) => <code key={field}>{field}</code>)}
               </div>
@@ -1155,8 +1124,8 @@ export function mcpTransportLabel(transport: McpServerView['transport']): string
 }
 
 export function mcpSourceLabel(source: McpServerView['source']): string {
-  if (source === 'import') return '本机导入'
-  return '用户添加'
+  if (source === 'import') return uiAttribute("本机导入")
+  return uiAttribute("用户添加")
 }
 
 function sourceLabel(source: McpImportCandidate['sourceKind']): string {
@@ -1181,7 +1150,7 @@ function serverInitial(server: McpServerView): string {
 }
 
 function issueText(issue: McpConfigIssue | undefined): string {
-  if (!issue) return '配置未通过检查，请检查 JSON 后重试。'
+  if (!issue) return uiAttribute("配置未通过检查，请检查 JSON 后重试。")
   const known: Record<string, string> = {
     'mcp.name_conflict': 'Server Name 已被使用。',
     'mcp.not_found': '该 MCP Server 已不存在，请重新读取。',
@@ -1190,7 +1159,7 @@ function issueText(issue: McpConfigIssue | undefined): string {
     'mcp.unknown_agent_profile': '该队员已不存在。',
     'mcp.import_candidate_unsupported': '该候选包含当前不支持自动迁移的配置。'
   }
-  return known[issue.code] ?? issue.message
+  return known[issue.code] ? uiAttribute(known[issue.code]) : issue.message
 }
 
 function errorMessage(error: unknown): string {

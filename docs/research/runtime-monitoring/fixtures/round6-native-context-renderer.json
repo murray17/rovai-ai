@@ -1,0 +1,671 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-01",
+  "signedCoreDigest": "d75184b866e623ec4fe68b37e79b476d205c6b6c9a43f515411c05485a1aef9e",
+  "apps": [
+    {
+      "runtime": "qoder-cli",
+      "version": "1.1.64",
+      "status": "succeeded",
+      "coreDigest": "d75184b866e623ec4fe68b37e79b476d205c6b6c9a43f515411c05485a1aef9e",
+      "elapsedMs": 148281,
+      "publicUnits": 87025,
+      "reasoningUnits": 48950,
+      "thoughtScopeSpeedWitness": {
+        "atMs": 58539,
+        "value": {
+          "agentRunId": "run-1",
+          "algorithmVersion": "observable-output-heuristic-v3",
+          "counterGeneration": "counter-generation-1",
+          "executionEpoch": 1,
+          "lastOutputAtMs": 79343,
+          "publicTextUnits": 6175,
+          "reasoningSource": "stream_text",
+          "reasoningUnits": 23025,
+          "sampledAtMs": 79389,
+          "sequence": 50,
+          "streamConfirmed": true,
+          "unicodeDataVersion": "icu4x-2.2.0"
+        },
+        "ui": {
+          "speed": "75.9 tok/s",
+          "scope": "当前估算输出速度：75.9 tok/s — 根据当前执行收到的可观测思考增量估算",
+          "selectedAgentId": "agent_101",
+          "overview": false,
+          "duration": "0分 59秒",
+          "speedInCard": false,
+          "sameLine": true
+        }
+      },
+      "rendererPublications": 36,
+      "minPublicationIntervalMs": 994.5999999996275,
+      "maxPublicationsIn30s": 19,
+      "finalSpeed": null,
+      "projection": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 76160,
+            "cacheWriteTokens": null,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:15:42.562647+00:00",
+            "lastObservedAt": "2026-10-01T06:15:42.027Z",
+            "outputTokens": 3442,
+            "promptInputTotalTokens": 104732
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+            "dialectId": "qoder-native-context-ratio-1.1.64",
+            "nativeRatio": 0.02684952380952381,
+            "observedAt": "2026-10-01T06:15:42.027Z",
+            "runtimeKind": "qoder-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_private_extension",
+            "usedTokens": null,
+            "windowTokens": null
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "afterCoreRestart": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 76160,
+            "cacheWriteTokens": null,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:15:42.562647+00:00",
+            "lastObservedAt": "2026-10-01T06:15:42.027Z",
+            "outputTokens": 3442,
+            "promptInputTotalTokens": 104732
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+            "dialectId": "qoder-native-context-ratio-1.1.64",
+            "nativeRatio": 0.02684952380952381,
+            "observedAt": "2026-10-01T06:15:42.027Z",
+            "runtimeKind": "qoder-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_private_extension",
+            "usedTokens": null,
+            "windowTokens": null
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "usageRows": [
+        [
+          "Input Token",
+          "104.7k"
+        ],
+        [
+          "Output Token",
+          "3.4k"
+        ],
+        [
+          "Cache Read",
+          "76.2k"
+        ],
+        [
+          "Cache Write",
+          "—"
+        ],
+        [
+          "执行耗时",
+          "2分 29秒"
+        ]
+      ],
+      "contextLabel": "当前原生会话上下文：— / —，2.7%",
+      "sourceRecords": []
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.30",
+      "status": "succeeded",
+      "coreDigest": "d75184b866e623ec4fe68b37e79b476d205c6b6c9a43f515411c05485a1aef9e",
+      "elapsedMs": 57932,
+      "publicUnits": 92900,
+      "reasoningUnits": 0,
+      "thoughtScopeSpeedWitness": null,
+      "rendererPublications": 30,
+      "minPublicationIntervalMs": 999.9000000003725,
+      "maxPublicationsIn30s": 21,
+      "finalSpeed": null,
+      "projection": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 8320,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:14:05.076275+00:00",
+            "lastObservedAt": "2026-10-01T06:14:04.646+00:00",
+            "outputTokens": 920,
+            "promptInputTotalTokens": 34388
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "sub2api/gpt-6.1-sol",
+            "dialectId": "opencode-native-call-context-1.18.30",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T06:14:04.646+00:00",
+            "runtimeKind": "opencode-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_private_extension",
+            "usedTokens": 9282,
+            "windowTokens": null
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "afterCoreRestart": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 8320,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:14:05.076275+00:00",
+            "lastObservedAt": "2026-10-01T06:14:04.646+00:00",
+            "outputTokens": 920,
+            "promptInputTotalTokens": 34388
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "sub2api/gpt-6.1-sol",
+            "dialectId": "opencode-native-call-context-1.18.30",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T06:14:04.646+00:00",
+            "runtimeKind": "opencode-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_private_extension",
+            "usedTokens": 9282,
+            "windowTokens": null
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "usageRows": [
+        [
+          "Input Token",
+          "34.4k"
+        ],
+        [
+          "Output Token",
+          "0.9k"
+        ],
+        [
+          "Cache Read",
+          "8.3k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "0分 59秒"
+        ]
+      ],
+      "contextLabel": "当前原生会话上下文：9.3k / —，比例未知",
+      "sourceRecords": []
+    },
+    {
+      "runtime": "grok-build",
+      "version": "grok 1.0.44 (5b807183dd79)",
+      "status": "succeeded",
+      "coreDigest": "d75184b866e623ec4fe68b37e79b476d205c6b6c9a43f515411c05485a1aef9e",
+      "elapsedMs": 63904,
+      "publicUnits": 90300,
+      "reasoningUnits": 750,
+      "thoughtScopeSpeedWitness": null,
+      "rendererPublications": 32,
+      "minPublicationIntervalMs": 999.7999999988824,
+      "maxPublicationsIn30s": 20,
+      "finalSpeed": null,
+      "projection": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 53504,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:17:50.903280+00:00",
+            "lastObservedAt": "2026-10-01T06:17:50.870256+00:00",
+            "outputTokens": 928,
+            "promptInputTotalTokens": 72933
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "gpt-6.1-sol",
+            "dialectId": "grok-acp-meta-context-1.0.44",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T06:17:50.172868+00:00",
+            "runtimeKind": "grok-build",
+            "sessionGeneration": 1,
+            "source": "runtime_event",
+            "usedTokens": 19015,
+            "windowTokens": 1050000
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "afterCoreRestart": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 53504,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:17:50.903280+00:00",
+            "lastObservedAt": "2026-10-01T06:17:50.870256+00:00",
+            "outputTokens": 928,
+            "promptInputTotalTokens": 72933
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "gpt-6.1-sol",
+            "dialectId": "grok-acp-meta-context-1.0.44",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T06:17:50.172868+00:00",
+            "runtimeKind": "grok-build",
+            "sessionGeneration": 1,
+            "source": "runtime_event",
+            "usedTokens": 19015,
+            "windowTokens": 1050000
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "usageRows": [
+        [
+          "Input Token",
+          "72.9k"
+        ],
+        [
+          "Output Token",
+          "0.9k"
+        ],
+        [
+          "Cache Read",
+          "53.5k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 05秒"
+        ]
+      ],
+      "contextLabel": "当前原生会话上下文：19k / 1050k，1.8%",
+      "sourceRecords": []
+    },
+    {
+      "runtime": "copilot-cli",
+      "version": "GitHub Copilot CLI 1.0.83.",
+      "status": "succeeded",
+      "coreDigest": "d75184b866e623ec4fe68b37e79b476d205c6b6c9a43f515411c05485a1aef9e",
+      "elapsedMs": 73800,
+      "publicUnits": 176485,
+      "reasoningUnits": 7125,
+      "thoughtScopeSpeedWitness": {
+        "atMs": 33085,
+        "value": {
+          "agentRunId": "run-1",
+          "algorithmVersion": "observable-output-heuristic-v3",
+          "counterGeneration": "counter-generation-1",
+          "executionEpoch": 1,
+          "lastOutputAtMs": 49194,
+          "publicTextUnits": 70750,
+          "reasoningSource": "stream_text",
+          "reasoningUnits": 7125,
+          "sampledAtMs": 49239,
+          "sequence": 151,
+          "streamConfirmed": true,
+          "unicodeDataVersion": "icu4x-2.2.0"
+        },
+        "ui": {
+          "speed": "62.9 tok/s",
+          "scope": "当前估算输出速度：62.9 tok/s — 根据当前执行收到的公开正文与可观测思考增量估算",
+          "selectedAgentId": "agent_101",
+          "overview": false,
+          "duration": "0分 35秒",
+          "speedInCard": false,
+          "sameLine": true
+        }
+      },
+      "rendererPublications": 40,
+      "minPublicationIntervalMs": 996.8000000007451,
+      "maxPublicationsIn30s": 20,
+      "finalSpeed": null,
+      "projection": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 116115,
+            "cacheWriteTokens": 31679,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:17:19.060070+00:00",
+            "lastObservedAt": "2026-10-01T06:17:19.039Z",
+            "outputTokens": 3367,
+            "promptInputTotalTokens": 147804
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "claude-opus-5",
+            "dialectId": "acp-session-context-gauge-v1",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T06:17:16.558716+00:00",
+            "runtimeKind": "copilot-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_event",
+            "usedTokens": 24881,
+            "windowTokens": 200000
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "afterCoreRestart": {
+        "runs": [
+          {
+            "agentRunId": "run-1",
+            "cacheReadTokens": 116115,
+            "cacheWriteTokens": 31679,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T06:17:19.060070+00:00",
+            "lastObservedAt": "2026-10-01T06:17:19.039Z",
+            "outputTokens": 3367,
+            "promptInputTotalTokens": 147804
+          }
+        ],
+        "sessions": [
+          {
+            "agentId": "agent-1",
+            "conversationId": "conversation-1",
+            "modelKey": "claude-opus-5",
+            "dialectId": "acp-session-context-gauge-v1",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T06:17:16.558716+00:00",
+            "runtimeKind": "copilot-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_event",
+            "usedTokens": 24881,
+            "windowTokens": 200000
+          }
+        ],
+        "schemaVersion": 1
+      },
+      "usageRows": [
+        [
+          "Input Token",
+          "147.8k"
+        ],
+        [
+          "Output Token",
+          "3.4k"
+        ],
+        [
+          "Cache Read",
+          "116.1k"
+        ],
+        [
+          "Cache Write",
+          "31.7k"
+        ],
+        [
+          "执行耗时",
+          "1分 15秒"
+        ]
+      ],
+      "contextLabel": "当前原生会话上下文：24.9k / 200k，12.4%",
+      "sourceRecords": [
+        {
+          "raw": {
+            "method": "github.com/copilot/sessionEvent",
+            "params": {
+              "sessionId": "session-1",
+              "type": "assistant.usage",
+              "timestamp": "2026-10-01T06:16:25.595Z",
+              "data": {
+                "inputTokens": 27189,
+                "outputTokens": 1069,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 27187,
+                "reasoningTokens": 145,
+                "model": "claude-opus-5"
+              }
+            }
+          },
+          "expectedParsed": {
+            "promptInputTotalTokens": 27189,
+            "outputTokens": 1069,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 27187
+          }
+        },
+        {
+          "raw": {
+            "method": "github.com/copilot/sessionEvent",
+            "params": {
+              "sessionId": "session-1",
+              "type": "assistant.usage",
+              "timestamp": "2026-10-01T06:16:49.811Z",
+              "data": {
+                "inputTokens": 28281,
+                "outputTokens": 1004,
+                "cacheReadTokens": 27187,
+                "cacheWriteTokens": 1092,
+                "reasoningTokens": 18,
+                "model": "claude-opus-5"
+              }
+            }
+          },
+          "expectedParsed": {
+            "promptInputTotalTokens": 28281,
+            "outputTokens": 1004,
+            "cacheReadTokens": 27187,
+            "cacheWriteTokens": 1092
+          }
+        },
+        {
+          "raw": {
+            "method": "github.com/copilot/sessionEvent",
+            "params": {
+              "sessionId": "session-1",
+              "type": "assistant.usage",
+              "timestamp": "2026-10-01T06:17:12.686Z",
+              "data": {
+                "inputTokens": 29308,
+                "outputTokens": 973,
+                "cacheReadTokens": 28279,
+                "cacheWriteTokens": 1027,
+                "reasoningTokens": 0,
+                "model": "claude-opus-5"
+              }
+            }
+          },
+          "expectedParsed": {
+            "promptInputTotalTokens": 29308,
+            "outputTokens": 973,
+            "cacheReadTokens": 28279,
+            "cacheWriteTokens": 1027
+          }
+        },
+        {
+          "raw": {
+            "method": "github.com/copilot/sessionEvent",
+            "params": {
+              "sessionId": "session-1",
+              "type": "assistant.usage",
+              "timestamp": "2026-10-01T06:17:16.477Z",
+              "data": {
+                "inputTokens": 31345,
+                "outputTokens": 243,
+                "cacheReadTokens": 29306,
+                "cacheWriteTokens": 2037,
+                "reasoningTokens": 0,
+                "model": "claude-opus-5"
+              }
+            }
+          },
+          "expectedParsed": {
+            "promptInputTotalTokens": 31345,
+            "outputTokens": 243,
+            "cacheReadTokens": 29306,
+            "cacheWriteTokens": 2037
+          }
+        },
+        {
+          "raw": {
+            "method": "github.com/copilot/sessionEvent",
+            "params": {
+              "sessionId": "session-1",
+              "type": "assistant.usage",
+              "timestamp": "2026-10-01T06:17:19.039Z",
+              "data": {
+                "inputTokens": 31681,
+                "outputTokens": 78,
+                "cacheReadTokens": 31343,
+                "cacheWriteTokens": 336,
+                "reasoningTokens": 0,
+                "model": "claude-opus-5"
+              }
+            }
+          },
+          "expectedParsed": {
+            "promptInputTotalTokens": 31681,
+            "outputTokens": 78,
+            "cacheReadTokens": 31343,
+            "cacheWriteTokens": 336
+          }
+        }
+      ]
+    }
+  ],
+  "controlledPrivateBoundary": {
+    "runtime": "copilot-cli",
+    "source": "controlled ACP fixture, not a real provider response",
+    "coreDigest": "d75184b866e623ec4fe68b37e79b476d205c6b6c9a43f515411c05485a1aef9e",
+    "numericSample": {
+      "agentRunId": "run-1",
+      "algorithmVersion": "observable-output-heuristic-v3",
+      "counterGeneration": "counter-generation-1",
+      "executionEpoch": 1,
+      "lastOutputAtMs": 15657,
+      "publicTextUnits": 17100,
+      "reasoningSource": "stream_text",
+      "reasoningUnits": 4725,
+      "sampledAtMs": 16000,
+      "sequence": 7,
+      "streamConfirmed": true,
+      "unicodeDataVersion": "icu4x-2.2.0"
+    },
+    "leakedEvidence": 0,
+    "leakedRenderer": false,
+    "leakedIpc": 0,
+    "leakedFiles": [],
+    "reopened": {
+      "speed": null,
+      "duration": "0分 04秒"
+    },
+    "switched": {
+      "activeSpeed": "27.8 tok/s",
+      "activeDuration": "0分 06秒",
+      "sameLine": true,
+      "activeExpanded": false,
+      "historyExpanded": true,
+      "historyHasSpeed": false,
+      "historyVisible": true
+    },
+    "speedChanges": [
+      {
+        "at": 18671.5,
+        "speed": "27.8 tok/s"
+      },
+      {
+        "at": 20171.400000000373,
+        "speed": "26.3 tok/s"
+      },
+      {
+        "at": 21171.5,
+        "speed": "15.5 tok/s"
+      },
+      {
+        "at": 22171.699999999255,
+        "speed": "9.6 tok/s"
+      },
+      {
+        "at": 23172,
+        "speed": "6.1 tok/s"
+      },
+      {
+        "at": 24672.199999999255,
+        "speed": null
+      },
+      {
+        "at": 26171.299999998882,
+        "speed": "38.0 tok/s"
+      },
+      {
+        "at": 27171.299999998882,
+        "speed": "38.1 tok/s"
+      },
+      {
+        "at": 28671.5,
+        "speed": "38.0 tok/s"
+      },
+      {
+        "at": 30185.400000000373,
+        "speed": null
+      }
+    ],
+    "usageRows": [
+      [
+        "Input Token",
+        "1.5k"
+      ],
+      [
+        "Output Token",
+        "0.5k"
+      ],
+      [
+        "Cache Read",
+        "0.3k"
+      ],
+      [
+        "Cache Write",
+        "0k"
+      ],
+      [
+        "执行耗时",
+        "0分 18秒"
+      ]
+    ],
+    "lateUsageRefreshVerified": true
+  }
+}

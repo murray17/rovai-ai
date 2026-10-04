@@ -1,0 +1,7 @@
+flowchart TB
+  browser["访问设备：浏览器"]
+  browser -->|"Desktop 地址与登录"| desktop["Desktop Web :8766"]
+  browser -->|"Server 地址与登录"| server["Rovai Server :8767"]
+  desktop -->|"使用"| dd["Desktop 数据、主机智能体与项目文件"]
+  server -->|"使用"| sd["Server 数据、主机智能体与项目文件"]
+  note["实例之间没有自动同步"]

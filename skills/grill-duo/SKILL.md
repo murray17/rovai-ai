@@ -1,62 +1,38 @@
 ---
 name: grill-duo
-description: 当用户希望在 Camp 中通过持续追问和一位固定搭档的独立复核，澄清或压力测试计划、需求、设计或决定时使用。邀请者继续处理用户回答或当前搭档建议，成员收到普通双人追问复核任务时也使用。普通单人问答、多人讨论、需要同步维护领域词汇或 ADR 的追问、无关发言和已经结束的会话不使用。
+description: Clarify or stress-test a plan, requirement, design or decision through user questions and one fixed Thread partner's independent review. Applies to the initiator and invited reviewer during that exchange; use grill-duo-with-docs when confirmed project documentation must also be maintained.
 ---
 
-# 双人追问
+# Grill Duo
 
-邀请者负责持续追问，一位固定搭档负责独立复核。能查明的事实由成员自行查找，真正需要取舍的决定交给用户。
+The initiator asks questions; one fixed partner reviews independently. Investigate facts available in code, authoritative documents, tools, current input or Thread history. Ask the user for genuine choices. Use the user's language.
 
-## 角色与轮次关联
+## Roles and partner
 
-- 用户启动会话或回答当前开放轮次：作为邀请者继续。
-- 当前 AgentRun 由普通双人追问复核请求直接触发：作为固定搭档，只处理当前请求。
-- 当前输入是固定搭档对本轮有效邀请的直接回复：作为邀请者继续。
+Use trusted sender identity, the triggering request and direct replies:
 
-使用 Runtime 提供的可信发送者、当前触发消息和直接回复关系判断角色。邀请者只接受当前固定搭档对本轮有效邀请的直接回复；旧轮、失效或迟到建议只作补充，不能推进、回退或重开会话。
+- A user start/answer or the current partner's direct reply to the valid current invitation resumes the initiator.
+- A direct Grill Duo review request makes you the partner for that request only.
+- Old, invalid or late replies are supplementary; they cannot advance, roll back or reopen the exchange.
 
-## 基本流程
+Choose a relevant partner who is not you, remains in the Thread and can receive work. Address a trusted Agent ID. Keep that partner unless the user requests a change, they leave or become unavailable, or the topic moves beyond their useful expertise; explain a change. With none available, disclose solo questioning and keep the same round rules.
 
-1. 选择合格的固定搭档，每轮整理 1–4 个前提已确认、彼此不依赖的问题。
-2. 把本轮问题一次发给搭档，不附带自己的推荐。
-3. 搭档用一条消息逐题返回建议、理由和风险。
-4. 邀请者结合双方判断，一次向用户提出全部开放问题并给出推荐。
-5. 用户回答后继续当前开放轮次；当前轮全部关闭后才整理下一轮。
-6. 没有重要问题后，请用户确认共同理解；确认前不开始实施。
+## One open round
 
-依赖本轮其它答案的问题留到下一轮。能从代码、权威文档、工具、当前输入或 Camp 公共历史查明的事实，不问用户。
+1. Prepare 1-4 independent questions with established prerequisites, numbered `Q1`-`Q4`. Defer questions that depend on this round's answers.
+2. Send the partner the goal, confirmed facts, options and constraints, without your recommendation.
+3. The partner returns one reply with a recommendation, main reason and risk for each original number. They do not delegate, add questions, decide for the user or implement.
+4. Present all open questions to the user together: choices, tradeoffs, your recommendation and the partner's view, including disagreements. Ask for answers by number.
+5. Close each question only when answered, cancelled or invalidated. Start the next round after all current questions close.
 
-## 固定搭档
+Keep unanswered questions, numbers and existing advice unchanged. Add no new questions mid-round. If the user changes a question, options or constraints, keep its number and re-review only that question; accept only a direct reply to the updated invitation. Partial answers close only the answered items.
 
-固定搭档必须不是自己、仍在当前 Camp、能够接收请求。使用可信 Agent ID 寻址，不根据显示名或正文猜测。优先选择最匹配的成员，整场保持固定；只有用户要求、搭档离场或不可用，或者问题进入其无法有效判断的领域时才更换，并说明原因。
+## Messages and completion
 
-没有合格搭档时，明确降级为单人追问并继续相同轮次，不虚构第二个观点。
+- Partner request: `rovai send --to <partner-agent-id> --body <questions>`.
+- Partner response: `rovai send --to <requester-agent-id> --body <advice>`.
+- User questions or final confirmation: `rovai send --public-only --to-user --body <questions-or-summary>`.
 
-## 开放轮次
+After dispatch, finish other current inputs and end while waiting for the reply. Follow CLI recovery on failure; do not blindly resend.
 
-一轮在所有问题被明确回答、取消或失效前保持开放，使用稳定编号 `Q1`–`Q4`。
-
-- 未回答问题保留原编号、原问题和已有搭档建议；内容未变时不重复复核。
-- 开放轮次期间不混入新问题。
-- 用户改变某题的问题、选项或约束时保留编号，只重新复核该题；此后只采用搭档对更新邀请的直接回复。
-- 用户只回答部分问题时，确认已关闭项并继续列出仍开放的原编号和已有建议。
-
-## 消息方式
-
-- 邀请者请求搭档：`rovai send --to <搭档 Agent ID> --body <本轮问题>`
-- 搭档返回建议：`rovai send --to <邀请者 Agent ID> --body <本轮建议>`
-- 邀请者询问用户或请求最终确认：`rovai send --to-user --body <正文>`
-
-使用可信 Agent ID。消息发送成功后结束当前响应；失败时按 CLI 返回指示处理，不盲目重发。
-
-## 本轮内容
-
-复核请求列出用户目标、已确认内容，以及每个问题的主要选项和重要约束。
-
-搭档不得继续委派或增加问题，按原编号逐题给出建议、最主要理由和风险，不替用户决定或开始实施。
-
-邀请者一次呈现全部开放问题，逐题说明主要取舍、自己的推荐和搭档看法；存在分歧时准确说明，并请用户按原编号回答。
-
-## 完成
-
-没有重要问题后，总结目标、已确认决定、关键约束和主要风险，并请求用户确认共同理解。用户确认后结束会话。
+When no important questions remain, summarize the goal, decisions, constraints and major risks. Obtain the user's confirmation of that shared understanding before implementation, then close the questioning exchange. Solo questions, group debates, unrelated messages and closed exchanges do not start this workflow.

@@ -14,6 +14,7 @@ import { previewPathIsVisible, previewTabLabel, previewTabLabels } from './file-
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
 import { selectPreviewContents } from './file-preview-selection'
+import { UiText, uiAttribute, useInterfaceLanguage } from './interface-language'
 
 function FilePathButton({
   path,
@@ -52,7 +53,7 @@ function FilePathButton({
         type="button"
         className="file-preview-path-button"
         title={path}
-        aria-label={`在文件夹中显示 ${path}`}
+        aria-label={uiAttribute("在文件夹中显示 {0}", String(path))}
         aria-describedby={tooltipId}
         onClick={onReveal}
       ><span className="file-preview-path-parts" aria-hidden="true">
@@ -70,7 +71,7 @@ function FilePathButton({
         type="button"
         className="file-preview-path-button"
         title={path}
-        aria-label={`在文件夹中显示 ${path}`}
+        aria-label={uiAttribute("在文件夹中显示 {0}", String(path))}
         aria-describedby={tooltipId}
         onClick={onReveal}
       ><span className="file-preview-path-parts" aria-hidden="true">
@@ -108,7 +109,7 @@ function SourceViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element 
       fileName={tab.presentation.fileName}
       text={text}
       startLine={startLine}
-      findScopeLabel={tab.content?.kind === 'page' ? '仅查找当前已加载页' : ''}
+      findScopeLabel={tab.content?.kind === 'page' ? uiAttribute("仅查找当前已加载页") : ''}
       target={target}
       theme={resolvedTheme}
     />
@@ -138,8 +139,8 @@ function ImageViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   if (imageError) {
     return (
       <div className="file-preview-error" role="alert">
-        <strong>无法显示图片</strong>
-        <span>可以从文件标签页菜单使用系统默认应用打开。</span>
+        <strong><UiText zh={"无法显示图片"} /></strong>
+        <span><UiText zh={"可以从文件标签页菜单使用系统默认应用打开。"} /></span>
       </div>
     )
   }
@@ -173,11 +174,11 @@ function ImageViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
         {dimensions ? `${dimensions.width} × ${dimensions.height} · ` : ''}{tab.file ? fileSizeLabel(tab.file.size) : ''}
         {scale === null ? '' : ` · ${Math.round(effectiveScale * 100)}%`}
       </div>
-      <div className="file-preview-image-controls" aria-label="图片缩放">
-        <button type="button" aria-label="缩小" onClick={() => changeScale(.8)}>−</button>
-        <button type="button" onClick={() => { setScale(null); saveReading(tab.id, { imageScale: null }) }}>适应</button>
+      <div className="file-preview-image-controls" aria-label={uiAttribute("图片缩放")}>
+        <button type="button" aria-label={uiAttribute("缩小")} onClick={() => changeScale(.8)}>−</button>
+        <button type="button" onClick={() => { setScale(null); saveReading(tab.id, { imageScale: null }) }}><UiText zh={"适应"} /></button>
         <button type="button" onClick={() => setScale(1)}>100%</button>
-        <button type="button" aria-label="放大" onClick={() => changeScale(1.25)}>＋</button>
+        <button type="button" aria-label={uiAttribute("放大")} onClick={() => changeScale(1.25)}>＋</button>
       </div>
     </div>
   )
@@ -193,7 +194,7 @@ function OpeningIndicator(): React.JSX.Element | null {
   return (
     <div className="file-preview-loading" role="status">
       <i aria-hidden="true" />
-      <span>正在打开文件</span>
+      <span><UiText zh={"正在打开文件"} /></span>
     </div>
   )
 }
@@ -225,7 +226,7 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     <div className="file-preview-patch" ref={root} tabIndex={0}
       onKeyDown={(event) => selectPreviewContents(event, event.currentTarget.querySelector('.file-preview-patch-document'))}>
       <FileFindDomAdapter root={root} selector=".file-preview-patch-line:not(.is-metadata) code" revision={text} />
-      <nav className="file-preview-patch-outline" aria-label="补丁目录">
+      <nav className="file-preview-patch-outline" aria-label={uiAttribute("补丁目录")}>
         {patch.files.map((file) => (
           <div key={file.id}>
             <button type="button" title={file.displayPath} onClick={() => scrollTo(file.id)}>
@@ -253,7 +254,7 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
               <button
                 type="button"
                 disabled={!file.rawReference}
-                title={file.rawReference ? `打开 ${file.displayPath}` : undefined}
+                title={file.rawReference ? uiAttribute("打开 {0}", String(file.displayPath)) : undefined}
                 onClick={() => openFile(file.rawReference)}
               >
                 {file.displayPath}
@@ -268,10 +269,10 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
                 <div>
                   {hunk.lines.map((line, index) => (
                     <div className={`file-preview-patch-line is-${line.kind}`} key={`${index}:${line.text}`}>
-                      <span aria-label={line.oldLine === null ? '' : `旧文件第 ${line.oldLine} 行`}>
+                      <span aria-label={line.oldLine === null ? '' : uiAttribute("旧文件第 {0} 行", String(line.oldLine))}>
                         {line.oldLine ?? ''}
                       </span>
-                      <span aria-label={line.newLine === null ? '' : `新文件第 ${line.newLine} 行`}>
+                      <span aria-label={line.newLine === null ? '' : uiAttribute("新文件第 {0} 行", String(line.newLine))}>
                         {line.newLine ?? ''}
                       </span>
                       <code>{line.text || ' '}</code>
@@ -295,7 +296,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const headingTarget = tab.reading ? undefined : file?.target?.heading
   const api = useFilePreviewApi()
   const readImage = useCallback((rawReference: string) => {
-    if (!file || !api.readChildImage) throw new Error('图片资源适配不可用。')
+    if (!file || !api.readChildImage) throw new Error(uiAttribute('图片资源适配不可用。'))
     return api.readChildImage({ handleId: file.handleId, expectedGeneration: file.contentGeneration, rawReference })
   }, [api, file])
   if (!tab.content) return <div className="file-preview-empty-content" />
@@ -309,7 +310,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
           source={tab.content.text}
           theme={resolvedTheme}
           headingTarget={headingTarget}
-          onHeadingTargetResult={(found) => setLinkError(found ? null : '未找到指定的标题，已保持在文件顶部。')}
+          onHeadingTargetResult={(found) => setLinkError(found ? null : uiAttribute('未找到指定的标题，已保持在文件顶部。'))}
           localImageContent={api.readChildImage && file.capabilities.includes('read_child') ? readImage : undefined}
           localImageUrl={file.capabilities.includes('preview_asset') ? (rawReference) => filePreviewAssetUrl(
             rawReference,
@@ -356,7 +357,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
       onClick={() => void reload(tab.id)}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.5V2.8l-1.2 1.1A5.4 5.4 0 1 0 13.2 9" /></svg>
-      {tab.isRefreshing ? '正在重新加载' : '有更新'}
+      {tab.isRefreshing ? uiAttribute("正在重新加载") : uiAttribute("有更新")}
     </button>
   ) : null
   const pathControl = showPath ? <>
@@ -368,7 +369,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
         void revealInFolder(tab.id).then((result) => {
           setPathActionError(result.ok ? null : result.error.message)
         }).catch(() => {
-          setPathActionError('暂时无法显示这个文件的位置')
+          setPathActionError(uiAttribute('暂时无法显示这个文件的位置'))
         })
       }}
     />
@@ -394,8 +395,8 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
           <div className="file-preview-recovery-stage">
             <div className="file-preview-recovery" role="status" aria-live="polite">
               <ResourceReferenceIcon kind="file" className="file-preview-recovery-icon" />
-              <p>{tab.error?.message ?? '暂时无法读取文件'}</p>
-              {tab.file?.kind === 'html' && <button type="button" onClick={() => void retry(tab.id)}>重试</button>}
+              <p>{tab.error?.message ?? uiAttribute("暂时无法读取文件")}</p>
+              {tab.file?.kind === 'html' && <button type="button" onClick={() => void retry(tab.id)}><UiText zh={"重试"} /></button>}
             </div>
           </div>
         )}
@@ -403,16 +404,16 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
         {tab.refreshError && (
           <div className="file-preview-refresh-error" role="alert">
             <span>{tab.refreshError}</span>
-            <button type="button" onClick={() => void reload(tab.id)}>重试</button>
+            <button type="button" onClick={() => void reload(tab.id)}><UiText zh={"重试"} /></button>
           </div>
         )}
       </div>
       {page && (
         <footer className="file-preview-page-controls">
-          <span>第 {page.startLine} 行起</span>
+          <span><UiText zh={"第 "} />{page.startLine}<UiText zh={" 行起"} /></span>
           <div>
-            <button type="button" disabled={!page.hasPrevious} onClick={() => void changePage(tab.id, -1)}>上一页</button>
-            <button type="button" disabled={!page.hasNext} onClick={() => void changePage(tab.id, 1)}>下一页</button>
+            <button type="button" disabled={!page.hasPrevious} onClick={() => void changePage(tab.id, -1)}><UiText zh={"上一页"} /></button>
+            <button type="button" disabled={!page.hasNext} onClick={() => void changePage(tab.id, 1)}><UiText zh={"下一页"} /></button>
           </div>
         </footer>
       )}
@@ -422,12 +423,12 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
 
 function ReadingPanel({ tab, children }: { tab: import('./FilePreviewContext').PreviewTabModel; children: React.ReactNode }): React.JSX.Element {
   const root = useRef<HTMLDivElement>(null)
-  const { saveReading, isCurrentCamp } = useFilePreview()
+  const { saveReading, isCurrentThread } = useFilePreview()
   const content = tab.kind === 'file'
     ? tab.content
     : tab.kind === 'file_change'
       ? tab.detail
-      : tab.kind === 'mission_activity' && isCurrentCamp
+      : tab.kind === 'mission_activity' && isCurrentThread
         ? tab.missionId
         : null
   const restoring = useRef(false)
@@ -479,14 +480,15 @@ export function FilePreviewPaneContent({ visible, missionActivity, executionHost
   missionActivity?: React.ReactNode
   executionHostRef?(element: HTMLDivElement | null): void
 }): React.JSX.Element {
+  const language = useInterfaceLanguage()
   const { tabs, activeTabId, paneVisible } = useFilePreview()
-  const tabLabels = useMemo(() => previewTabLabels(tabs), [tabs])
+  const tabLabels = useMemo(() => previewTabLabels(tabs, language), [tabs, language])
   return (
-    <section id={visible ? "file-preview-pane" : undefined} className="file-preview-pane" hidden={!paneVisible} aria-label="文件预览">
+    <section id={visible ? "file-preview-pane" : undefined} className="file-preview-pane" hidden={!paneVisible} aria-label={uiAttribute("文件预览")}>
       {tabs.length === 0 && <div className="file-preview-empty">
         <FilePreviewTabIcon kind="text" />
-        <h2>选择一个文件预览</h2>
-        <p>点击会话中的文件链接或 File Change 卡片，在这里查看文件和变更。</p>
+        <h2><UiText zh={"选择一个文件预览"} /></h2>
+        <p><UiText zh={"点击会话中的文件链接或 File Change 卡片，在这里查看文件和变更。"} /></p>
       </div>}
       {tabs.map((tab) => <section
         key={tab.id}
@@ -495,7 +497,7 @@ export function FilePreviewPaneContent({ visible, missionActivity, executionHost
         hidden={!visible || tab.id !== activeTabId}
         role="tabpanel"
         tabIndex={0}
-        aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab)}
+        aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab, language)}
         aria-labelledby={`file-preview-tab-${tab.id}`}
       >
         {tab.kind === 'execution'

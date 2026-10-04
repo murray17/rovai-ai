@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, AutomationRunSummary, AutomationView, CoreEvent, ProjectNavigationGroup, RovaiApi } from '@contracts'
 import { AutomationWorkspace } from '../../../apps/desktop/src/renderer/src/AutomationWorkspace'
-import { CampNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
+import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
 import { templates } from '../../../apps/desktop/src/renderer/src/automation-workspace-model'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
@@ -22,14 +22,14 @@ const agents: AgentProfile[] = [
   presence: 'present', runtimeConfiguration: { adapterKind: 'codex-cli', model: { mode: 'explicit', modelId: 'gpt-5.4', options: {} }, permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: {} } },
   runtimeReadiness: { status: 'ready', blockers: [] }, memberOrder, version: 1, createdAt: now, updatedAt: now, removedAt: null
 }))
-const projects: ProjectNavigationGroup[] = [{ projectKey: '/workspace/rovai-ai', projectPath: '/workspace/rovai-ai', name: 'rovai-ai', lastActivityAt: now, lastActivityGlobalSequence: 0, totalCount: 0, recentCamps: [] }]
+const projects: ProjectNavigationGroup[] = [{ projectKey: '/workspace/rovai-ai', projectPath: '/workspace/rovai-ai', name: 'rovai-ai', lastActivityAt: now, lastActivityGlobalSequence: 0, totalCount: 0, recentThreads: [] }]
 const history: Record<string, AutomationRunSummary[]> = {}
 let automations: AutomationView[] = Object.entries(templates).map(([id, template], index) => {
   history[id] = Array.from({ length: 24 }, (_, position): AutomationRunSummary => {
     const status = position === 0 ? 'running' : position === 1 ? 'skipped' : position === 2 ? 'failed' : 'completed'
     const createdAt = new Date(Date.parse(now) - position * 86_400_000).toISOString()
     return { runId: `${id}-run-${position}`, status, reason: status === 'skipped' ? 'overlap' : status === 'failed' ? 'timeout' : null,
-      campId: status === 'skipped' ? null : `fixture-camp-${position}`, resultMessageId: status === 'completed' ? `message-${position}` : null,
+      threadId: status === 'skipped' ? null : `fixture-camp-${position}`, resultMessageId: status === 'completed' ? `message-${position}` : null,
       scheduledFor: createdAt, createdAt, endedAt: status === 'running' ? null : createdAt, notificationStatus: position === 3 ? 'failed' : 'none' }
   })
   return { automationId: id, version: 1, name: template.name, prompt: template.prompt, schedule: template.schedule,
@@ -108,11 +108,11 @@ function Fixture(): React.JSX.Element {
   const idle = (): void => undefined
   return <div className="app-shell">
     <WindowDragStrip page="automations" />
-    <CampNavigation view="automations" state="ready" navigation={{ schemaVersion: 3, throughGlobalSequence: 0, quickChat: { totalCount: 0, recentCamps: [] }, projects }} activeCampId={null}
+    <ThreadNavigation view="automations" state="ready" navigation={{ schemaVersion: 3, throughGlobalSequence: 0, quickChat: { totalCount: 0, recentThreads: [] }, projects }} activeThreadId={null}
       onNewConversation={idle} onMembers={idle} onAutomations={() => setKey(value => value + 1)} onMemory={idle} pendingMemoryCount={0} onSettings={idle}
       onOpenProject={idle} onCamp={idle} onRemoveProject={async () => undefined} onRename={async () => undefined} onDelete={async () => undefined} onError={error => setNotice(String(error))} />
     <main className="content automation-content"><AutomationWorkspace key={key} agents={agents} projects={projects} defaultMemberId={agents[0]?.agentId ?? ''}
-      onNotify={setNotice} onOpenCamp={campId => setNotice(`打开执行对话：${campId}`)} /></main>
+      onNotify={setNotice} onOpenCamp={threadId => setNotice(`打开执行对话：${threadId}`)} /></main>
     {notice && <output role="status" style={{ position: 'fixed', bottom: 20, left: 290, padding: '10px 14px', color: 'var(--ink)', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 7 }}>{notice}</output>}
     <details style={{ position: 'fixed', left: 10, bottom: 42, maxWidth: 245, fontSize: 10, color: 'var(--muted)' }}><summary>验收记录</summary><pre style={{ maxHeight: 220, overflow: 'auto' }}>{JSON.stringify(calls, null, 2)}</pre></details>
   </div>

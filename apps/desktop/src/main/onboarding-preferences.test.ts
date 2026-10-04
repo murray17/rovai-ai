@@ -57,9 +57,13 @@ describe('onboarding preferences', () => {
       origin: 'existing_installation',
       selectedMemberRole: null,
       memberAgentId: null,
-      quickChatCampId: null
+      quickChatThreadId: null
     })
     expect(await store.initialize(false)).toEqual(completed)
+    const legacy = { ...completed, quickChatCampId: null } as Record<string, unknown>
+    delete legacy.quickChatThreadId
+    expect(parseOnboardingSnapshot(legacy)).toEqual(completed)
+    expect(parseOnboardingSnapshot({ ...legacy, quickChatThreadId: null })).toBeNull()
   })
 
   it('persists every required page and restores the Runtime draft', async () => {
@@ -153,7 +157,7 @@ describe('onboarding preferences', () => {
         memberAgentId: null,
         memberVersionBeforeRuntime: null,
         memberVersionAfterRuntime: null,
-        quickChatCampId: null
+        quickChatThreadId: null
       }
     })
     const replay = await store.beginProvisioning({
@@ -164,14 +168,17 @@ describe('onboarding preferences', () => {
 
     await store.recordProvisionedMember('agent-1', 1)
     await store.recordProvisionedRuntime(2)
-    await store.recordProvisionedCamp(CAMP_ID)
+    await store.recordProvisionedThread(CAMP_ID)
+    const checkpoint = store.get()
+    const legacyCheckpoint = JSON.parse(JSON.stringify(checkpoint).replace('quickChatThreadId', 'quickChatCampId'))
+    expect(parseOnboardingSnapshot(legacyCheckpoint)).toEqual(checkpoint)
     const completed = await store.complete()
     expect(completed).toMatchObject({
       status: 'completed',
       origin: 'onboarding',
       selectedMemberRole: 'mianzhi',
       memberAgentId: 'agent-1',
-      quickChatCampId: CAMP_ID
+      quickChatThreadId: CAMP_ID
     })
     if (process.platform !== 'win32') {
       expect((await stat(filePath)).mode & 0o777).toBe(0o600)
@@ -194,7 +201,7 @@ describe('onboarding preferences', () => {
       origin: 'runtime_deferred',
       selectedMemberRole: null,
       memberAgentId: null,
-      quickChatCampId: null
+      quickChatThreadId: null
     })
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(completed)
 
@@ -206,7 +213,7 @@ describe('onboarding preferences', () => {
     const filePath = await temporaryFile()
     const store = await OnboardingStore.load(filePath)
     await store.initialize(false)
-    await expect(store.deferRuntimeSetup()).rejects.toThrow('运行时配置页')
+    await expect(store.deferRuntimeSetup()).rejects.toThrow('智能体配置页')
     await store.completeWelcome()
     await store.completeMemberSelection()
     await store.beginProvisioning({
@@ -268,7 +275,7 @@ describe('onboarding preferences', () => {
       completedAt: 'not-a-date',
       selectedMemberRole: 'luoke',
       memberAgentId: 'agent-1',
-      quickChatCampId: 'camp-1'
+      quickChatThreadId: 'camp-1'
     })).toBeNull()
     expect(parseOnboardingSnapshot({
       schemaVersion: 2,
@@ -277,7 +284,7 @@ describe('onboarding preferences', () => {
       completedAt: '2026-08-23T00:00:00.000Z',
       selectedMemberRole: 'luoke',
       memberAgentId: null,
-      quickChatCampId: null
+      quickChatThreadId: null
     })).toBeNull()
   })
 
@@ -289,7 +296,7 @@ describe('onboarding preferences', () => {
       completedAt: '2026-08-23T00:00:00.000Z',
       selectedMemberRole: null,
       memberAgentId: null,
-      quickChatCampId: null
+      quickChatThreadId: null
     })).toEqual({
       schemaVersion: 2,
       status: 'completed',
@@ -297,7 +304,7 @@ describe('onboarding preferences', () => {
       completedAt: '2026-08-23T00:00:00.000Z',
       selectedMemberRole: null,
       memberAgentId: null,
-      quickChatCampId: null
+      quickChatThreadId: null
     })
   })
 })

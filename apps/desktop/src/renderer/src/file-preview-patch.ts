@@ -1,3 +1,5 @@
+import { uiAttribute } from './interface-language'
+
 export type UnifiedPatchLineKind =
   | 'context'
   | 'addition'
@@ -42,7 +44,7 @@ function cleanPatchPath(raw: string): string | null {
 }
 
 function fileLabel(oldPath: string | null, newPath: string | null, fallbackIndex: number): string {
-  return newPath ?? oldPath ?? `变更 ${fallbackIndex + 1}`
+  return newPath ?? oldPath ?? uiAttribute('变更 {0}', fallbackIndex + 1)
 }
 
 export function parseUnifiedPatch(text: string): UnifiedPatchDocument | null {

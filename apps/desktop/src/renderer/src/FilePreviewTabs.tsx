@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { prefersReducedMotion } from './reduced-motion'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -7,6 +7,7 @@ import { FilePreviewTabIcon } from './FilePreviewTabIcon'
 import { Icon } from './MissionControls'
 import { ExecutionIcon } from './ExecutionIcons'
 import { previewTabLabel, previewTabLabels, previewTabPresentation } from './file-preview-tab-presentation'
+import { UiText, uiAttribute, useInterfaceLanguage } from './interface-language'
 
 function tabDomId(tabId: string): string {
   return `file-preview-tab-${tabId}`
@@ -31,7 +32,8 @@ function revealTab(strip: HTMLDivElement, tab: HTMLElement): void {
 }
 
 export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
-  const client = useCampClient()
+  const language = useInterfaceLanguage()
+  const client = useThreadClient()
   const {
     tabs,
     activeTabId,
@@ -59,7 +61,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
   const menuRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ tabId: string; left: number; top: number } | null>(null)
   const [announcement, setAnnouncement] = useState('')
-  const tabLabels = useMemo(() => previewTabLabels(tabs), [tabs])
+  const tabLabels = useMemo(() => previewTabLabels(tabs, language), [tabs, language])
 
   const updateEdges = useCallback((): void => {
     const strip = listRef.current
@@ -160,7 +162,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
 
   const focusConversation = (): void => {
     window.requestAnimationFrame(() => {
-      const target = document.querySelector<HTMLElement>('.camp-timeline:not([hidden])')
+      const target = document.querySelector<HTMLElement>('.thread-timeline:not([hidden])')
         ?? document.querySelector<HTMLElement>('.timeline-pane')
       target?.focus({ preventScroll: true })
     })
@@ -234,35 +236,35 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
         }}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.5 3.5-4.5 4.5 4.5 4.5M5 8h7" /></svg>
-        <span>返回会话</span>
+        <span><UiText zh={"返回会话"} /></span>
       </button>
       <div className={`file-preview-tab-rail${edges.left ? ' can-scroll-left' : ''}${edges.right ? ' can-scroll-right' : ''}`}>
         <button
           ref={leftButtonRef}
           className="file-preview-tab-scroll is-left"
           type="button"
-          aria-label="向左滚动预览标签"
-          title="向左滚动预览标签"
+          aria-label={uiAttribute("向左滚动预览标签")}
+          title={uiAttribute("向左滚动预览标签")}
           aria-controls={listId}
           aria-hidden={!edges.left}
           disabled={!edges.left}
           onClick={() => scrollTabs(-1)}
         ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3.5-4.5 4.5 4.5 4.5" /></svg></button>
-        <div className="file-preview-tab-strip" id={listId} role={tabs.length ? 'tablist' : undefined} aria-label="打开的预览" ref={listRef}
+        <div className="file-preview-tab-strip" id={listId} role={tabs.length ? 'tablist' : undefined} aria-label={uiAttribute("打开的预览")} ref={listRef}
           onWheel={() => { arrowScrollTarget.current = null }}
           onPointerDown={() => { arrowScrollTarget.current = null }}
         >
-          {tabs.length === 0 && <span className="file-preview-tabs-empty">文件预览</span>}
+          {tabs.length === 0 && <span className="file-preview-tabs-empty"><UiText zh={"文件预览"} /></span>}
           {tabs.map((tab, index) => {
             const active = tab.id === activeTabId
-            const label = tabLabels.get(tab.id) ?? previewTabLabel(tab)
-            const { displayPath, fileName, icon } = previewTabPresentation(tab)
+            const label = tabLabels.get(tab.id) ?? previewTabLabel(tab, language)
+            const { displayPath, fileName, icon } = previewTabPresentation(tab, language)
             const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
             const statusLabel = tab.kind !== 'file' ? ''
-              : tab.loadState === 'missing' ? '，找不到文件'
-                : tab.loadState === 'unavailable' ? '，访问已失效'
-                  : tab.loadState === 'error' ? '，读取失败'
-                    : tab.loadState === 'opening' ? '，正在打开'
+              : tab.loadState === 'missing' ? uiAttribute('，找不到文件')
+                : tab.loadState === 'unavailable' ? uiAttribute('，访问已失效')
+                  : tab.loadState === 'error' ? uiAttribute('，读取失败')
+                    : tab.loadState === 'opening' ? uiAttribute('，正在打开')
                       : ''
             const feedback = openFeedback?.tabId === tab.id ? openFeedback : null
             return (
@@ -293,7 +295,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   className="file-preview-tab-activate"
                   type="button"
                   role="tab"
-                  aria-label={`${label}${statusLabel}${hasExternalUpdate ? '，有更新' : ''}`}
+                  aria-label={`${label}${statusLabel}${hasExternalUpdate ? uiAttribute("，有更新") : ''}`}
                   aria-selected={active}
                   aria-controls={panelDomId(tab.id)}
                   tabIndex={active ? 0 : -1}
@@ -315,8 +317,8 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                 <button
                   className="file-preview-tab-close"
                   type="button"
-                  aria-label={`关闭 ${label}`}
-                  title={`关闭 ${label}`}
+                  aria-label={uiAttribute("关闭 {0}", String(label))}
+                  title={uiAttribute("关闭 {0}", String(label))}
                   onClick={() => closeAndRestoreFocus(index)}
                 >
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
@@ -337,8 +339,8 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
           ref={rightButtonRef}
           className="file-preview-tab-scroll is-right"
           type="button"
-          aria-label="向右滚动预览标签"
-          title="向右滚动预览标签"
+          aria-label={uiAttribute("向右滚动预览标签")}
+          title={uiAttribute("向右滚动预览标签")}
           aria-controls={listId}
           aria-hidden={!edges.right}
           disabled={!edges.right}
@@ -350,7 +352,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
         const tab = tabs[index]
         if (!tab) return null
         const platform = document.documentElement.dataset.rovaiPlatform
-        const revealLabel = platform === 'win32' ? '在文件资源管理器中显示' : '在 Finder 中显示'
+        const revealLabel = platform === 'win32' ? uiAttribute('在文件资源管理器中显示') : uiAttribute('在 Finder 中显示')
         const closeRight = tabs.slice(index + 1).map((entry) => entry.id)
         const closeOthers = tabs.filter((entry) => entry.id !== tab.id).map((entry) => entry.id)
         return (
@@ -358,25 +360,25 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             ref={menuRef}
             className="file-preview-tab-menu"
             role="menu"
-            aria-label={`${tabLabels.get(tab.id) ?? previewTabLabel(tab)} 操作`}
+            aria-label={uiAttribute("{0} 操作", String(tabLabels.get(tab.id) ?? previewTabLabel(tab, language)))}
             style={{ left: menu.left, top: menu.top }}
           >
             {tab.kind === 'file' && <>
             {(tab.file?.capabilities ?? tab.retainedCapabilities)?.includes('download') && <button role="menuitem" type="button" onClick={() => void runSystemAction(
-              () => download(tab.id), '已开始下载'
-            )}>下载文件</button>}
+              () => download(tab.id), uiAttribute('已开始下载')
+            )}><UiText zh={"下载文件"} /></button>}
             {(tab.file?.capabilities ?? tab.retainedCapabilities)?.includes('open_in_system') && <><button role="menuitem" type="button" disabled={!tab.file && !tab.sourceRequest} onClick={() => void runSystemAction(
               () => openInSystem(tab.id),
-              '已交给系统默认应用打开'
-            )}>使用默认应用打开</button>
+              uiAttribute('已交给系统默认应用打开')
+            )}><UiText zh={"使用默认应用打开"} /></button>
             <button role="menuitem" type="button" disabled={!tab.file && !tab.sourceRequest} onClick={() => void runSystemAction(
               () => revealInFolder(tab.id),
-              '已在文件夹中定位'
+              uiAttribute('已在文件夹中定位')
             )}>{revealLabel}</button></>}
             <button role="menuitem" type="button" disabled={!tab.file && !tab.sourceRequest} onClick={() => void runSystemAction(
               () => copyPath(tab.id),
-              tab.presentation.pathPresentation === 'file_name_only' ? '已复制文件名' : '已复制完整路径'
-            )}>{tab.presentation.pathPresentation === 'file_name_only' ? '复制文件名' : '复制完整路径'}</button>
+              tab.presentation.pathPresentation === 'file_name_only' ? uiAttribute('已复制文件名') : uiAttribute('已复制完整路径')
+            )}>{tab.presentation.pathPresentation === 'file_name_only' ? uiAttribute("复制文件名") : uiAttribute("复制完整路径")}</button>
             <button
               role="menuitem"
               type="button"
@@ -386,31 +388,31 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                 if (tab.content && tab.loadState === 'ready') void reload(tab.id)
                 else void reopen(tab.id)
               }}
-            >{tab.content && tab.loadState === 'ready' ? '重新加载' : '重新打开'}</button>
+            >{tab.content && tab.loadState === 'ready' ? uiAttribute("重新加载") : uiAttribute("重新打开")}</button>
             {tab.content?.kind === 'html' && <button role="menuitem" type="button" onClick={() => {
               setMenu(null)
               activate(tab.id)
               toggleHtmlSource(tab.id)
               focusTab(tab.id)
-            }}>{tab.htmlSourceMode ? '交互预览' : '查看源码'}</button>}
+            }}>{tab.htmlSourceMode ? uiAttribute("交互预览") : uiAttribute("查看源码")}</button>}
             <div role="separator" /></>}
             <button role="menuitem" type="button" onClick={() => {
               setMenu(null)
               close(tab.id)
-            }}>关闭</button>
+            }}><UiText zh={"关闭"} /></button>
             <button role="menuitem" type="button" disabled={closeOthers.length === 0} onClick={() => {
               setMenu(null)
               activate(tab.id)
               closeMany(closeOthers)
-            }}>关闭其他标签页</button>
+            }}><UiText zh={"关闭其他标签页"} /></button>
             <button role="menuitem" type="button" disabled={closeRight.length === 0} onClick={() => {
               setMenu(null)
               closeMany(closeRight)
-            }}>关闭右侧标签页</button>
+            }}><UiText zh={"关闭右侧标签页"} /></button>
             <button role="menuitem" type="button" onClick={() => {
               setMenu(null)
               closeMany(tabs.map((entry) => entry.id))
-            }}>关闭全部标签页</button>
+            }}><UiText zh={"关闭全部标签页"} /></button>
           </div>
         )
       })(), document.body)}

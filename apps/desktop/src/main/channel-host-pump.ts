@@ -89,7 +89,19 @@ export class AdaptiveChannelHostPump {
       this.wake()
       return
     }
-    if (!this.#active) return
+    if (event.method === 'navigation.invalidated'
+      && typeof event.params === 'object'
+      && event.params !== null
+      && 'reason' in event.params
+      && event.params.reason === 'delivery_batch.claimed') {
+      this.wake()
+      return
+    }
+    // A channel-bound Thread can start another AgentRun after its inbound request
+    // has settled. Keep lifecycle events able to discover that durable work.
+    if (!this.#active
+      && event.method !== 'agent_run.started'
+      && event.method !== 'agent_run.terminal') return
     const wake = this.#dependencies.classifyCoreEvent?.(event) ?? defaultCoreEventWake(event)
     if (wake === 'terminal') {
       this.#requestImmediate()

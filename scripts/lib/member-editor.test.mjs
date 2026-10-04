@@ -34,6 +34,7 @@ test(
       })
       const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
       delete env.ELECTRON_RUN_AS_NODE
+      console.log(`Automatic acceptance userData: ${join(fixture, 'user-data')}; Skill Library: ${join(fixture, 'user-data/managed-skill-library')}; no Core or Runtime`)
       child = spawn(
         electron,
         [

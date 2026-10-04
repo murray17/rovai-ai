@@ -48,8 +48,8 @@ arrow-key navigation, `Esc` dismissal and focus return.
 2. **队员 / 队长** — initialize from the saved team filtered to currently available teammates,
    otherwise all available teammates in Member Order. A candidate is available only when its runtime
    configuration is saved and readiness is `ready` or `light_ready`; both display green “可用”.
-   Unconfigured candidates display “未配置运行时”; configured but unavailable candidates display
-   “运行时不可用”. Both remain visible, gray and unselectable. All-selection and Lead candidates use
+   Unconfigured candidates display “未配置智能体”; configured but unavailable candidates display
+   “智能体不可用”. Both remain visible, gray and unselectable. All-selection and Lead candidates use
    the same rule; do not prefer deep readiness over light readiness. No routine explanatory footer or
    runtime warning appears. When no candidates are available, show the empty state.
    These are shared selection rules; they do not change Core structural preflight or dispatch checks.

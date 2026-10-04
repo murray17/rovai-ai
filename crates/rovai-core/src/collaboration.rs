@@ -19,15 +19,15 @@ use crate::{
     camp_attachment::{
         consume_prepared_attachments, consume_prepared_attachments_for_managed_ingest,
     },
-    camp_attachment_publication::CampAttachmentPublicationCoordinator,
+    camp_attachment_publication::ThreadAttachmentPublicationCoordinator,
     camp_attachment_view::commit_publication_in_message_transaction,
     camp_content::{
-        ComposerDocument, StructuredCampMessageContent, StructuredCampMessageSegment,
+        ComposerDocument, StructuredThreadMessageContent, StructuredThreadMessageSegment,
         canonical_content_digest, composer_document_to_content, has_all_members_mention,
         member_mention_ids, mentions_current_user, normalize_content, parse_composer_document_json,
         render_plain_text, validate_content, validate_user_authored_content,
     },
-    camp_id::CampId,
+    camp_id::ThreadId,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, erase_command_result_receipt,
@@ -36,7 +36,9 @@ use crate::{
     context_index::index_camp_message,
     db::Database,
     delivery_queue::enqueue_message_deliveries,
-    execution_budget::{CampTurnExecutionBudgetExhaustionReason, CampTurnExecutionBudgetRequest},
+    execution_budget::{
+        ThreadTurnExecutionBudgetExhaustionReason, ThreadTurnExecutionBudgetRequest,
+    },
     local_attachment_source::{
         LocalAttachmentSourceRef, parse_source_attachments, serialize_source_attachments,
         validate_source_attachments,
@@ -51,19 +53,19 @@ use crate::camp_content::{composer_document_from_content, serialize_composer_doc
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateCampCommand {
+pub struct CreateThreadCommand {
     pub name: Option<String>,
     pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
     pub member_agent_ids: Vec<String>,
     pub default_lead_agent_id: String,
-    pub collaboration_mode: CampCollaborationMode,
+    pub collaboration_mode: ThreadCollaborationMode,
     #[serde(default)]
-    pub activation_state: CampActivationState,
+    pub activation_state: ThreadActivationState,
 }
 
 #[cfg(test)]
-impl CreateCampCommand {
+impl CreateThreadCommand {
     pub fn for_test(project_path: String) -> Self {
         Self::for_test_with_members(project_path, &["agent_1"], "agent_1")
     }
@@ -79,14 +81,14 @@ impl CreateCampCommand {
             project_path,
             member_agent_ids: members.iter().map(|member| (*member).to_string()).collect(),
             default_lead_agent_id: default_lead.to_string(),
-            collaboration_mode: CampCollaborationMode::Peer,
-            activation_state: CampActivationState::Active,
+            collaboration_mode: ThreadCollaborationMode::Peer,
+            activation_state: ThreadActivationState::Active,
         }
     }
 }
 
-impl sealed::Sealed for CreateCampCommand {}
-impl DomainCommand for CreateCampCommand {
+impl sealed::Sealed for CreateThreadCommand {}
+impl DomainCommand for CreateThreadCommand {
     const TYPE: &'static str = "camp.create";
 }
 
@@ -108,12 +110,12 @@ impl ProjectBindingKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CampCollaborationMode {
+pub enum ThreadCollaborationMode {
     Peer,
     LeadCoordinated,
 }
 
-impl CampCollaborationMode {
+impl ThreadCollaborationMode {
     fn as_str(self) -> &'static str {
         match self {
             Self::Peer => "peer",
@@ -124,13 +126,13 @@ impl CampCollaborationMode {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CampActivationState {
+pub enum ThreadActivationState {
     Pending,
     #[default]
     Active,
 }
 
-impl CampActivationState {
+impl ThreadActivationState {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -141,13 +143,13 @@ impl CampActivationState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CampNameOrigin {
+pub enum ThreadNameOrigin {
     Default,
     Generated,
     User,
 }
 
-impl CampNameOrigin {
+impl ThreadNameOrigin {
     fn as_str(self) -> &'static str {
         match self {
             Self::Default => "default",
@@ -159,29 +161,31 @@ impl CampNameOrigin {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RenameCampCommand {
+pub struct RenameThreadCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub title: String,
     pub expected_version: i64,
 }
 
-impl sealed::Sealed for RenameCampCommand {}
-impl DomainCommand for RenameCampCommand {
+impl sealed::Sealed for RenameThreadCommand {}
+impl DomainCommand for RenameThreadCommand {
     const TYPE: &'static str = "camp.rename";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WithdrawCampMessageCommand {
+pub struct WithdrawThreadMessageCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub message_id: String,
     pub expected_version: i64,
 }
 
-impl sealed::Sealed for WithdrawCampMessageCommand {}
-impl DomainCommand for WithdrawCampMessageCommand {
+impl sealed::Sealed for WithdrawThreadMessageCommand {}
+impl DomainCommand for WithdrawThreadMessageCommand {
     const TYPE: &'static str = "camp_message.withdraw";
 }
 
@@ -189,6 +193,7 @@ impl DomainCommand for WithdrawCampMessageCommand {
 #[serde(rename_all = "camelCase")]
 pub struct ChangeDefaultLeadCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub successor_agent_id: String,
     pub expected_version: i64,
@@ -203,6 +208,7 @@ impl DomainCommand for ChangeDefaultLeadCommand {
 #[serde(rename_all = "camelCase")]
 pub struct ReconcileDefaultLeadCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
 }
 
@@ -213,8 +219,9 @@ impl DomainCommand for ReconcileDefaultLeadCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeleteCampCommand {
+pub struct DeleteThreadCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub expected_version: i64,
     #[serde(default)]
@@ -231,39 +238,41 @@ pub enum MissionWorkspaceDisposition {
     Cleanup,
 }
 
-impl sealed::Sealed for DeleteCampCommand {}
-impl DomainCommand for DeleteCampCommand {
+impl sealed::Sealed for DeleteThreadCommand {}
+impl DomainCommand for DeleteThreadCommand {
     const TYPE: &'static str = "camp.delete";
     const ALLOWED_WHILE_CAMP_DELETING: bool = true;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiscardPendingCampCommand {
+pub struct DiscardPendingThreadCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
 }
 
-impl sealed::Sealed for DiscardPendingCampCommand {}
-impl DomainCommand for DiscardPendingCampCommand {
+impl sealed::Sealed for DiscardPendingThreadCommand {}
+impl DomainCommand for DiscardPendingThreadCommand {
     const TYPE: &'static str = "camp.pending.discard";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AddCampMemberCommand {
+pub struct AddThreadMemberCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
     pub expected_membership_generation: i64,
     #[serde(default = "empty_json_object")]
     pub capability_overrides: Value,
     #[serde(default)]
-    pub source: Option<CampMembershipMutationSource>,
+    pub source: Option<ThreadMembershipMutationSource>,
 }
 
-impl sealed::Sealed for AddCampMemberCommand {}
-impl DomainCommand for AddCampMemberCommand {
+impl sealed::Sealed for AddThreadMemberCommand {}
+impl DomainCommand for AddThreadMemberCommand {
     const TYPE: &'static str = "camp.member.add";
 }
 
@@ -273,7 +282,7 @@ fn empty_json_object() -> Value {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMembershipMutationSource {
+pub struct ThreadMembershipMutationSource {
     pub namespace: String,
     pub binding_id: String,
     pub reconciliation_generation: i64,
@@ -281,8 +290,9 @@ pub struct CampMembershipMutationSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RemoveCampMemberCommand {
+pub struct RemoveThreadMemberCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
     pub expected_membership_generation: i64,
@@ -292,17 +302,18 @@ pub struct RemoveCampMemberCommand {
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]
-    pub source: Option<CampMembershipMutationSource>,
+    pub source: Option<ThreadMembershipMutationSource>,
 }
 
-impl sealed::Sealed for RemoveCampMemberCommand {}
-impl DomainCommand for RemoveCampMemberCommand {
+impl sealed::Sealed for RemoveThreadMemberCommand {}
+impl DomainCommand for RemoveThreadMemberCommand {
     const TYPE: &'static str = "camp.member.remove";
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMemberRemovalPreview {
+pub struct ThreadMemberRemovalPreview {
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
     pub display_name: String,
@@ -326,7 +337,7 @@ pub struct ExecutionRequest {
     #[serde(default = "required_completion_role")]
     pub completion_role: String,
     #[serde(default)]
-    pub budget: Option<CampTurnExecutionBudgetRequest>,
+    pub budget: Option<ThreadTurnExecutionBudgetRequest>,
 }
 
 fn required_completion_role() -> String {
@@ -335,20 +346,21 @@ fn required_completion_role() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SendUserCampDraftCommand {
+pub struct SendUserThreadDraftCommand {
     #[serde(
         default,
         skip_serializing_if = "crate::draft_client::DraftClient::is_desktop"
     )]
     pub draft_client: DraftClient,
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub draft_revision: i64,
     pub execution: Option<ExecutionRequest>,
 }
 
-impl sealed::Sealed for SendUserCampDraftCommand {}
-impl DomainCommand for SendUserCampDraftCommand {
+impl sealed::Sealed for SendUserThreadDraftCommand {}
+impl DomainCommand for SendUserThreadDraftCommand {
     const TYPE: &'static str = "camp.message.send_user_draft";
 }
 
@@ -356,41 +368,44 @@ impl DomainCommand for SendUserCampDraftCommand {
 /// receives only the immutable content that this command publishes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SendUserCampMessageCommand {
+pub struct SendUserThreadMessageCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub content: ComposerDocument,
     #[serde(default)]
     pub source_attachments: Vec<LocalAttachmentSourceRef>,
     #[serde(default)]
     pub quotes: Vec<MessageQuoteSnapshot>,
+    #[serde(rename = "replyToThreadMessageId", alias = "replyToCampMessageId")]
     pub reply_to_camp_message_id: Option<String>,
     pub execution: Option<ExecutionRequest>,
 }
 
-impl sealed::Sealed for SendUserCampMessageCommand {}
-impl DomainCommand for SendUserCampMessageCommand {
+impl sealed::Sealed for SendUserThreadMessageCommand {}
+impl DomainCommand for SendUserThreadMessageCommand {
     const TYPE: &'static str = "camp.message.send_user";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SendUserAutomationCampMessageCommand {
+pub struct SendUserAutomationThreadMessageCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
     pub body: String,
     pub execution: Option<ExecutionRequest>,
 }
 
-impl sealed::Sealed for SendUserAutomationCampMessageCommand {}
-impl DomainCommand for SendUserAutomationCampMessageCommand {
+impl sealed::Sealed for SendUserAutomationThreadMessageCommand {}
+impl DomainCommand for SendUserAutomationThreadMessageCommand {
     const TYPE: &'static str = "camp.message.send_user_automation";
 }
 
 #[cfg(test)]
 #[derive(Debug, Clone, Serialize)]
-pub(crate) enum TestCampMessageAddress {
+pub(crate) enum TestThreadMessageAddress {
     Default,
     Explicit {
         agent_ids: Vec<String>,
@@ -401,23 +416,25 @@ pub(crate) enum TestCampMessageAddress {
 
 #[cfg(test)]
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct TestCampMessageCommand {
+pub(crate) struct TestThreadMessageCommand {
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub draft_revision: Option<i64>,
     pub body: String,
     pub prepared_attachment_ids: Vec<String>,
-    pub address: TestCampMessageAddress,
+    pub address: TestThreadMessageAddress,
+    #[serde(rename = "replyToThreadMessageId", alias = "replyToCampMessageId")]
     pub reply_to_camp_message_id: Option<String>,
     pub execution: Option<ExecutionRequest>,
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
 #[derive(Debug, Clone)]
-pub(crate) struct TestCampConversationCommand {
+pub(crate) struct TestThreadConversationCommand {
     pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
     pub body: String,
-    pub address: TestCampMessageAddress,
+    pub address: TestThreadMessageAddress,
     pub purpose: String,
 }
 
@@ -425,6 +442,7 @@ pub(crate) struct TestCampConversationCommand {
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub title: String,
     pub description: String,
@@ -494,6 +512,7 @@ impl DomainCommand for UpdateTaskCommand {
 pub struct TaskRecord {
     #[serde(rename = "taskId")]
     pub id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub title: String,
     pub description: String,
@@ -578,16 +597,16 @@ pub struct CollaborationService {
 }
 
 impl CollaborationService {
-    pub fn validate_send_message_input(command: &SendUserCampDraftCommand) -> Result<()> {
+    pub fn validate_send_message_input(command: &SendUserThreadDraftCommand) -> Result<()> {
         validate_camp_message_input(command)
     }
 
     pub fn send_user_camp_message(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SendUserCampMessageCommand>,
+        envelope: &CommandEnvelope<SendUserThreadMessageCommand>,
     ) -> Result<CommandExecution> {
-        let command = SendUserCampDraftCommand {
+        let command = SendUserThreadDraftCommand {
             draft_client: DraftClient::default(),
             camp_id: envelope.payload.camp_id.clone(),
             draft_revision: 1,
@@ -597,10 +616,10 @@ impl CollaborationService {
             database,
             envelope,
             &command,
-            UserCampMessageAttachmentCommit {
+            UserThreadMessageAttachmentCommit {
                 legacy_publication_operation_id: None,
                 managed_ingest_intent_id: None,
-                source: UserCampMessageSource::Inline(&envelope.payload.quotes),
+                source: UserThreadMessageSource::Inline(&envelope.payload.quotes),
             },
             |transaction| {
                 if envelope.payload.quotes.iter().any(|quote| {
@@ -629,7 +648,7 @@ impl CollaborationService {
     pub fn withdraw_camp_message(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<WithdrawCampMessageCommand>,
+        envelope: &CommandEnvelope<WithdrawThreadMessageCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let ActorRef::User { user_id } = &envelope.actor else {
@@ -782,7 +801,7 @@ impl CollaborationService {
             erase_command_result_receipt(
                 transaction,
                 &source_command_id,
-                SendUserCampMessageCommand::TYPE,
+                SendUserThreadMessageCommand::TYPE,
                 &envelope.actor,
                 &envelope.payload.camp_id,
                 &envelope.payload.message_id,
@@ -817,24 +836,24 @@ impl CollaborationService {
     pub(crate) fn send_test_camp_message(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<TestCampMessageCommand>,
+        envelope: &CommandEnvelope<TestThreadMessageCommand>,
     ) -> Result<CommandExecution> {
         let draft_revision = if let Some(revision) = envelope.payload.draft_revision {
             revision
         } else {
             let mut content = match &envelope.payload.address {
-                TestCampMessageAddress::Default => Vec::new(),
-                TestCampMessageAddress::Explicit { agent_ids } => agent_ids
+                TestThreadMessageAddress::Default => Vec::new(),
+                TestThreadMessageAddress::Explicit { agent_ids } => agent_ids
                     .iter()
                     .cloned()
-                    .map(|agent_id| StructuredCampMessageSegment::MemberMention { agent_id })
+                    .map(|agent_id| StructuredThreadMessageSegment::MemberMention { agent_id })
                     .collect(),
                 #[cfg(feature = "slow-tests")]
-                TestCampMessageAddress::Broadcast => {
-                    vec![StructuredCampMessageSegment::AllMembersMention]
+                TestThreadMessageAddress::Broadcast => {
+                    vec![StructuredThreadMessageSegment::AllMembersMention]
                 }
             };
-            content.push(StructuredCampMessageSegment::Text {
+            content.push(StructuredThreadMessageSegment::Text {
                 text: envelope.payload.body.clone(),
             });
             let content = normalize_content(content);
@@ -879,7 +898,7 @@ impl CollaborationService {
             camp_id: envelope.camp_id.clone(),
             expected_versions: envelope.expected_versions.clone(),
             execution_epoch: envelope.execution_epoch,
-            payload: SendUserCampDraftCommand {
+            payload: SendUserThreadDraftCommand {
                 draft_client: DraftClient::default(),
                 camp_id: envelope.payload.camp_id.clone(),
                 draft_revision,
@@ -893,10 +912,10 @@ impl CollaborationService {
             database,
             &command,
             &command.payload,
-            UserCampMessageAttachmentCommit {
+            UserThreadMessageAttachmentCommit {
                 legacy_publication_operation_id: None,
                 managed_ingest_intent_id: None,
-                source: UserCampMessageSource::FixtureComposer,
+                source: UserThreadMessageSource::FixtureComposer,
             },
             |transaction| {
                 load_structured_draft_submission(
@@ -921,7 +940,7 @@ impl CollaborationService {
     pub(crate) fn create_test_camp_conversation(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<TestCampConversationCommand>,
+        envelope: &CommandEnvelope<TestThreadConversationCommand>,
     ) -> Result<CommandExecution> {
         let profiles = {
             let mut statement = database.connection().prepare(
@@ -958,21 +977,21 @@ impl CollaborationService {
                 camp_id: None,
                 expected_versions: envelope.expected_versions.clone(),
                 execution_epoch: envelope.execution_epoch,
-                payload: CreateCampCommand {
+                payload: CreateThreadCommand {
                     name: None,
                     project_binding_kind: envelope.payload.project_binding_kind,
                     project_path: envelope.payload.project_path.clone(),
                     member_agent_ids,
                     default_lead_agent_id,
-                    collaboration_mode: CampCollaborationMode::Peer,
-                    activation_state: CampActivationState::Active,
+                    collaboration_mode: ThreadCollaborationMode::Peer,
+                    activation_state: ThreadActivationState::Active,
                 },
             },
         )?;
         if created.result.status == crate::command::CommandResultStatus::Rejected {
             return Ok(created);
         }
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .context("test Camp creation returned no Camp ID")?
             .to_string();
@@ -984,7 +1003,7 @@ impl CollaborationService {
                 camp_id: Some(camp_id.clone()),
                 expected_versions: envelope.expected_versions.clone(),
                 execution_epoch: envelope.execution_epoch,
-                payload: TestCampMessageCommand {
+                payload: TestThreadMessageCommand {
                     camp_id: camp_id.clone(),
                     draft_revision: None,
                     body: envelope.payload.body.clone(),
@@ -1001,7 +1020,7 @@ impl CollaborationService {
             },
         )?;
         if let Some(payload) = sent.result.payload.as_object_mut() {
-            payload.insert("campId".to_string(), Value::String(camp_id));
+            payload.insert("threadId".to_string(), Value::String(camp_id));
         }
         Ok(sent)
     }
@@ -1009,10 +1028,10 @@ impl CollaborationService {
     pub fn create_camp(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<CreateCampCommand>,
+        envelope: &CommandEnvelope<CreateThreadCommand>,
     ) -> Result<CommandExecution> {
         validate_project_path(&envelope.payload.project_path)?;
-        let camp_id = CampId::new();
+        let camp_id = ThreadId::new();
         self.gateway.execute(database, envelope, |transaction| {
             create_camp_in_tx(
                 transaction,
@@ -1027,7 +1046,7 @@ impl CollaborationService {
     pub fn rename_camp(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<RenameCampCommand>,
+        envelope: &CommandEnvelope<RenameThreadCommand>,
     ) -> Result<CommandExecution> {
         let title = normalize_camp_name(&envelope.payload.title);
         if envelope.payload.title.trim().is_empty() {
@@ -1105,7 +1124,7 @@ impl CollaborationService {
             Ok(CommandHandlerResult::applied(
                 "camp.renamed",
                 json!({
-                    "campId": envelope.payload.camp_id,
+                    "threadId": envelope.payload.camp_id,
                     "title": title,
                     "version": version + 1,
                 }),
@@ -1196,7 +1215,7 @@ impl CollaborationService {
             Ok(CommandHandlerResult::applied(
                 "camp.default_lead_changed",
                 json!({
-                    "campId": envelope.payload.camp_id,
+                    "threadId": envelope.payload.camp_id,
                     "defaultLeadAgentId": envelope.payload.successor_agent_id,
                     "version": version + 1,
                 }),
@@ -1243,7 +1262,7 @@ impl CollaborationService {
                 return Ok(CommandHandlerResult::applied(
                     "camp.default_lead_unchanged",
                     json!({
-                        "campId": envelope.payload.camp_id,
+                        "threadId": envelope.payload.camp_id,
                         "defaultLeadAgentId": current_lead_id,
                         "version": version,
                     }),
@@ -1276,7 +1295,7 @@ impl CollaborationService {
                 return Ok(CommandHandlerResult::applied(
                     "camp.default_lead_unchanged",
                     json!({
-                        "campId": envelope.payload.camp_id,
+                        "threadId": envelope.payload.camp_id,
                         "defaultLeadAgentId": successor,
                         "version": version,
                     }),
@@ -1311,7 +1330,7 @@ impl CollaborationService {
             Ok(CommandHandlerResult::applied(
                 "camp.default_lead_reconciled",
                 json!({
-                    "campId": envelope.payload.camp_id,
+                    "threadId": envelope.payload.camp_id,
                     "defaultLeadAgentId": successor,
                     "version": version + 1,
                 }),
@@ -1326,7 +1345,7 @@ impl CollaborationService {
     pub fn delete_camp(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<DeleteCampCommand>,
+        envelope: &CommandEnvelope<DeleteThreadCommand>,
     ) -> Result<CommandExecution> {
         self.delete_camp_after_settlement(database, envelope, &[])
     }
@@ -1334,7 +1353,7 @@ impl CollaborationService {
     pub fn delete_camp_after_settlement(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<DeleteCampCommand>,
+        envelope: &CommandEnvelope<DeleteThreadCommand>,
         prior_blockers: &[Value],
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
@@ -1372,7 +1391,7 @@ impl CollaborationService {
             if !blockers.is_empty() && !envelope.payload.force {
                 return Ok(CommandHandlerResult::rejected(
                     "camp.delete_blocked",
-                    json!({ "campId": envelope.payload.camp_id, "blockers": blockers }),
+                    json!({ "threadId": envelope.payload.camp_id, "blockers": blockers }),
                 ));
             }
 
@@ -1386,7 +1405,7 @@ impl CollaborationService {
                 if cleanup_running {
                     return Ok(CommandHandlerResult::rejected(
                         "camp.workspace_cleanup_pending",
-                        json!({"campId": envelope.payload.camp_id}),
+                        json!({"threadId": envelope.payload.camp_id}),
                     ));
                 }
             }
@@ -1411,7 +1430,7 @@ impl CollaborationService {
             Ok(CommandHandlerResult::applied(
                 "camp.deleted",
                 json!({
-                    "campId": envelope.payload.camp_id,
+                    "threadId": envelope.payload.camp_id,
                     "forced": forced,
                     "bypassedBlockers": if forced { blockers } else { Vec::new() },
                     "workspaceCleanupScheduled": workspace_cleanup_scheduled > 0,
@@ -1424,7 +1443,7 @@ impl CollaborationService {
     pub fn discard_pending_camp(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<DiscardPendingCampCommand>,
+        envelope: &CommandEnvelope<DiscardPendingThreadCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
@@ -1453,7 +1472,7 @@ impl CollaborationService {
                 return Ok(CommandHandlerResult::applied(
                     "camp.pending_absent",
                     json!({
-                        "campId": envelope.payload.camp_id,
+                        "threadId": envelope.payload.camp_id,
                         "discarded": false,
                     }),
                     None,
@@ -1499,17 +1518,22 @@ impl CollaborationService {
                 params![envelope.payload.camp_id, version, last_message_sequence],
                 |row| row.get(0),
             )?;
-            if meaningful_draft || has_domain_facts {
+            let local_draft_present: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pending_camp_draft_presence WHERE camp_id=?1)",
+                [&envelope.payload.camp_id],
+                |row| row.get(0),
+            )?;
+            if meaningful_draft || local_draft_present || has_domain_facts {
                 return Ok(CommandHandlerResult::rejected(
                     "camp.pending_not_empty",
-                    json!({ "campId": envelope.payload.camp_id }),
+                    json!({ "threadId": envelope.payload.camp_id }),
                 ));
             }
             delete_camp_aggregate(transaction, &envelope.payload.camp_id)?;
             Ok(CommandHandlerResult::applied(
                 "camp.pending_discarded",
                 json!({
-                    "campId": envelope.payload.camp_id,
+                    "threadId": envelope.payload.camp_id,
                     "discarded": true,
                 }),
                 None,
@@ -1541,6 +1565,7 @@ impl CollaborationService {
                 SELECT camp.id
                 FROM camp
                 WHERE camp.activation_state = 'pending'
+                  AND NOT EXISTS(SELECT 1 FROM pending_camp_draft_presence WHERE camp_id=camp.id)
                   AND camp.id IN (SELECT value FROM json_each(?1))
                   AND camp.version = 1
                   AND camp.last_message_sequence = 0
@@ -1577,7 +1602,7 @@ impl CollaborationService {
     pub fn add_camp_member(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<AddCampMemberCommand>,
+        envelope: &CommandEnvelope<AddThreadMemberCommand>,
     ) -> Result<CommandExecution> {
         validate_capability_overrides(&envelope.payload.capability_overrides)?;
         if envelope.payload.expected_membership_generation < 1 {
@@ -1678,7 +1703,7 @@ impl CollaborationService {
                 return Ok(CommandHandlerResult::applied(
                     "camp.member_unchanged",
                     json!({
-                        "campId": envelope.payload.camp_id,
+                        "threadId": envelope.payload.camp_id,
                         "agentId": envelope.payload.agent_id,
                         "membershipStatus": "active",
                         "membershipVersion": membership_version,
@@ -1789,7 +1814,7 @@ impl CollaborationService {
             Ok(CommandHandlerResult::applied(
                 "camp.member_added",
                 json!({
-                    "campId": envelope.payload.camp_id,
+                    "threadId": envelope.payload.camp_id,
                     "agentId": envelope.payload.agent_id,
                     "membershipStatus": "active",
                     "membershipVersion": membership_version,
@@ -1812,7 +1837,7 @@ impl CollaborationService {
         database: &Database,
         camp_id: &str,
         agent_id: &str,
-    ) -> Result<Option<CampMemberRemovalPreview>> {
+    ) -> Result<Option<ThreadMemberRemovalPreview>> {
         let connection = database.connection();
         let target = connection
             .query_row(
@@ -1895,8 +1920,14 @@ impl CollaborationService {
             WHERE run.camp_id = ?1 AND conversation.agent_id = ?2
               AND run.invocation_kind = 'batch'
               AND run.status IN ('queued', 'running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM agent_run_input AS input
+                  JOIN camp_message_delivery AS delivery ON delivery.id = input.delivery_id
+                  WHERE input.agent_run_id = run.id
+                    AND delivery.recipient_membership_version_at_admission = ?3
+              )
             "#,
-            params![camp_id, agent_id],
+            params![camp_id, agent_id, membership_version],
             |row| row.get(0),
         )?;
         let non_terminal_agent_run_count =
@@ -1926,14 +1957,15 @@ impl CollaborationService {
                     COALESCE(SUM(status = 'claimed'), 0)
                 FROM camp_message_delivery
                 WHERE camp_id = ?1 AND recipient_agent_id = ?2
+                  AND recipient_membership_version_at_admission = ?3
                 "#,
-            params![camp_id, agent_id],
+            params![camp_id, agent_id, membership_version],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let pending_delivery_count = legacy_pending_delivery_count + batch_pending_delivery_count;
         let running_delivery_count = legacy_running_delivery_count + batch_running_delivery_count;
         let removable = status == "active" && active_member_count > 1;
-        Ok(Some(CampMemberRemovalPreview {
+        Ok(Some(ThreadMemberRemovalPreview {
             camp_id: camp_id.to_string(),
             agent_id: agent_id.to_string(),
             display_name,
@@ -1959,7 +1991,7 @@ impl CollaborationService {
     pub fn remove_camp_member(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<RemoveCampMemberCommand>,
+        envelope: &CommandEnvelope<RemoveThreadMemberCommand>,
     ) -> Result<CommandExecution> {
         if envelope.payload.expected_membership_generation < 1
             || envelope.payload.expected_membership_version < 1
@@ -2138,7 +2170,7 @@ impl CollaborationService {
             Ok(CommandHandlerResult::accepted(
                 "camp.member_removed",
                 json!({
-                    "campId": envelope.payload.camp_id,
+                    "threadId": envelope.payload.camp_id,
                     "agentId": envelope.payload.agent_id,
                     "membershipStatus": "left",
                     "membershipVersion": outcome.membership_version,
@@ -2552,6 +2584,12 @@ impl CollaborationService {
                     "assigneeAgentId": projected.assignee_agent_id,
                 }),
             )?;
+            if original.status != projected.status {
+                crate::notification::record_status_transition(transaction, &envelope.actor, crate::notification::StatusTransition {
+                    kind: "task", id: &envelope.payload.task_id, camp_id: &projected.camp_id,
+                    status: projected.status.as_str(), source_message_id: None,
+                })?;
+            }
             let detail = load_task_detail(
                 transaction,
                 &envelope.payload.task_id,
@@ -2734,7 +2772,7 @@ impl CollaborationService {
     pub fn send_user_camp_draft(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SendUserCampDraftCommand>,
+        envelope: &CommandEnvelope<SendUserThreadDraftCommand>,
     ) -> Result<CommandExecution> {
         self.send_user_camp_draft_with_publication(database, envelope, None)
     }
@@ -2742,17 +2780,17 @@ impl CollaborationService {
     pub fn send_user_camp_draft_with_managed_ingest(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SendUserCampDraftCommand>,
+        envelope: &CommandEnvelope<SendUserThreadDraftCommand>,
         managed_attachment_ingest_intent_id: Option<&str>,
     ) -> Result<CommandExecution> {
         self.execute_user_camp_message(
             database,
             envelope,
             &envelope.payload,
-            UserCampMessageAttachmentCommit {
+            UserThreadMessageAttachmentCommit {
                 legacy_publication_operation_id: None,
                 managed_ingest_intent_id: managed_attachment_ingest_intent_id,
-                source: UserCampMessageSource::Composer,
+                source: UserThreadMessageSource::Composer,
             },
             |transaction| {
                 load_structured_draft_submission(
@@ -2769,17 +2807,17 @@ impl CollaborationService {
     pub fn send_user_camp_draft_with_publication(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SendUserCampDraftCommand>,
+        envelope: &CommandEnvelope<SendUserThreadDraftCommand>,
         attachment_publication_operation_id: Option<&str>,
     ) -> Result<CommandExecution> {
         self.execute_user_camp_message(
             database,
             envelope,
             &envelope.payload,
-            UserCampMessageAttachmentCommit {
+            UserThreadMessageAttachmentCommit {
                 legacy_publication_operation_id: attachment_publication_operation_id,
                 managed_ingest_intent_id: None,
-                source: UserCampMessageSource::Composer,
+                source: UserThreadMessageSource::Composer,
             },
             |transaction| {
                 load_structured_draft_submission(
@@ -2795,7 +2833,7 @@ impl CollaborationService {
     pub fn send_user_automation_camp_message(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SendUserAutomationCampMessageCommand>,
+        envelope: &CommandEnvelope<SendUserAutomationThreadMessageCommand>,
     ) -> Result<CommandExecution> {
         if envelope.payload.agent_id.trim().is_empty() {
             anyhow::bail!("agentId must not be empty");
@@ -2806,15 +2844,15 @@ impl CollaborationService {
         let camp_id = envelope.payload.camp_id.clone();
         let body = envelope.payload.body.clone();
         let content = normalize_content(vec![
-            StructuredCampMessageSegment::MemberMention {
+            StructuredThreadMessageSegment::MemberMention {
                 agent_id: envelope.payload.agent_id.clone(),
             },
-            StructuredCampMessageSegment::Text {
+            StructuredThreadMessageSegment::Text {
                 text: format!(" {body}"),
             },
         ]);
         validate_user_authored_content(&content)?;
-        let command = SendUserCampDraftCommand {
+        let command = SendUserThreadDraftCommand {
             draft_client: DraftClient::default(),
             camp_id: camp_id.clone(),
             // Automation does not consume Composer authority or attachments.
@@ -2826,10 +2864,10 @@ impl CollaborationService {
             database,
             envelope,
             &command,
-            UserCampMessageAttachmentCommit {
+            UserThreadMessageAttachmentCommit {
                 legacy_publication_operation_id: None,
                 managed_ingest_intent_id: None,
-                source: UserCampMessageSource::Automation,
+                source: UserThreadMessageSource::Automation,
             },
             move |transaction| {
                 let camp_exists = transaction
@@ -2868,12 +2906,12 @@ impl CollaborationService {
                 let generated_camp_name = generated_camp_name(&content, |agent_id| {
                     (agent_id == envelope.payload.agent_id).then(|| display_name.clone())
                 })?;
-                Ok(Ok(CampMessageSubmission {
+                Ok(Ok(ThreadMessageSubmission {
                     body: rendered_body,
                     structured_content: content,
                     source_attachments: Vec::new(),
                     prepared_attachment_ids: Vec::new(),
-                    address: CampMessageAddress::Explicit {
+                    address: ThreadMessageAddress::Explicit {
                         agent_ids: vec![envelope.payload.agent_id.clone()],
                     },
                     reply_to_camp_message_id: None,
@@ -2900,10 +2938,9 @@ impl CollaborationService {
         input.structured_content = normalize_content(input.structured_content);
         validate_content(&input.structured_content)?;
         if mentions_current_user(&input.structured_content)
-            || input
-                .structured_content
-                .iter()
-                .any(|segment| matches!(segment, StructuredCampMessageSegment::SkillMention { .. }))
+            || input.structured_content.iter().any(|segment| {
+                matches!(segment, StructuredThreadMessageSegment::SkillMention { .. })
+            })
         {
             return Ok(Err(rejected(
                 "channel.message.invalid_content",
@@ -2942,7 +2979,7 @@ impl CollaborationService {
         if !camp_exists {
             return Ok(Err(rejected("camp.not_found", "Camp does not exist")));
         }
-        let address = CampMessageAddress::Explicit {
+        let address = ThreadMessageAddress::Explicit {
             agent_ids: input.addressed_agent_ids.clone(),
         };
         let system_actor = ActorRef::System {
@@ -2990,12 +3027,12 @@ impl CollaborationService {
         let camp_message_id = Uuid::new_v4().to_string();
         let queued = queue_camp_message_and_runs(
             transaction,
-            QueueCampMessageInput {
+            QueueThreadMessageInput {
                 camp_message_id: &camp_message_id,
                 camp_id: &input.camp_id,
                 body: &input.body,
                 structured_content: &input.structured_content,
-                source_attachments: &[],
+                source_attachments: &input.source_attachments,
                 prepared_attachment_ids: &[],
                 managed_attachment_ingest_intent_id: None,
                 legacy_attachment_publication_operation_id: None,
@@ -3007,7 +3044,7 @@ impl CollaborationService {
                 resolution: &resolution,
                 execution: Some(&execution),
                 actor: &system_actor,
-                message_author: Some(CampMessageAuthor {
+                message_author: Some(ThreadMessageAuthor {
                     author_type: "external_principal",
                     author_id: &input.external_principal_id,
                     source_agent_run_id: None,
@@ -3050,7 +3087,7 @@ impl CollaborationService {
             )));
         }
 
-        let camp_id = CampId::new().to_string();
+        let camp_id = ThreadId::new().to_string();
         let system_actor = ActorRef::System {
             component_id: "automation-scheduler".to_string(),
         };
@@ -3083,7 +3120,7 @@ impl CollaborationService {
             "#,
             params![camp_id, input.member_id, input.now],
         )?;
-        let address = CampMessageAddress::Explicit {
+        let address = ThreadMessageAddress::Explicit {
             agent_ids: vec![input.member_id.clone()],
         };
         let mut resolution = match resolve_address(transaction, &camp_id, &address, &system_actor)?
@@ -3115,7 +3152,7 @@ impl CollaborationService {
             }),
         )?;
         let camp_message_id = Uuid::new_v4().to_string();
-        let content = normalize_content(vec![StructuredCampMessageSegment::Text {
+        let content = normalize_content(vec![StructuredThreadMessageSegment::Text {
             text: input.prompt.clone(),
         }]);
         let execution = ExecutionRequest {
@@ -3127,7 +3164,7 @@ impl CollaborationService {
         };
         let queued = queue_camp_message_and_runs(
             transaction,
-            QueueCampMessageInput {
+            QueueThreadMessageInput {
                 camp_message_id: &camp_message_id,
                 camp_id: &camp_id,
                 body: &input.prompt,
@@ -3144,7 +3181,7 @@ impl CollaborationService {
                 resolution: &resolution,
                 execution: Some(&execution),
                 actor: &system_actor,
-                message_author: Some(CampMessageAuthor {
+                message_author: Some(ThreadMessageAuthor {
                     author_type: "system",
                     author_id: &input.automation_run_id,
                     source_agent_run_id: None,
@@ -3172,16 +3209,17 @@ impl CollaborationService {
         &self,
         database: &mut Database,
         envelope: &CommandEnvelope<C>,
-        command: &SendUserCampDraftCommand,
-        attachment_commit: UserCampMessageAttachmentCommit<'_>,
+        command: &SendUserThreadDraftCommand,
+        attachment_commit: UserThreadMessageAttachmentCommit<'_>,
         prepare: Prepare,
     ) -> Result<CommandExecution>
     where
         C: DomainCommand,
         Prepare: FnOnce(
             &Transaction<'_>,
-        )
-            -> Result<std::result::Result<CampMessageSubmission, CommandHandlerResult>>,
+        ) -> Result<
+            std::result::Result<ThreadMessageSubmission, CommandHandlerResult>,
+        >,
     {
         Self::validate_send_message_input(command)?;
         let camp_message_id = Uuid::new_v4().to_string();
@@ -3293,12 +3331,12 @@ impl CollaborationService {
                     }
 
                     let input_quotes = match attachment_commit.source {
-                        UserCampMessageSource::Composer => load_quotes(
+                        UserThreadMessageSource::Composer => load_quotes(
                             transaction,
                             QuoteStorage::ClientCampDraft(&command.draft_client),
                             &command.camp_id,
                         )?,
-                        UserCampMessageSource::Inline(quotes) => quotes.to_vec(),
+                        UserThreadMessageSource::Inline(quotes) => quotes.to_vec(),
                         _ => Vec::new(),
                     };
                     anyhow::ensure!(
@@ -3307,7 +3345,7 @@ impl CollaborationService {
                     );
                     let queued = queue_camp_message_and_runs(
                         transaction,
-                        QueueCampMessageInput {
+                        QueueThreadMessageInput {
                             camp_message_id: &camp_message_id,
                             camp_id: &command.camp_id,
                             body: &submission.body,
@@ -3344,7 +3382,7 @@ impl CollaborationService {
                         &input_quotes,
                     )?;
                     let result_payload = json!({
-                        "campMessageId": camp_message_id,
+                        "threadMessageId": camp_message_id,
                         "sequence": queued.camp_sequence,
                         "deliveryIds": queued.delivery_ids,
                     });
@@ -3377,8 +3415,8 @@ pub(crate) fn create_camp_in_tx(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
-    command: &CreateCampCommand,
-    camp_id: &CampId,
+    command: &CreateThreadCommand,
+    camp_id: &ThreadId,
 ) -> Result<CommandHandlerResult> {
     validate_project_path(&command.project_path)?;
     let normalized_name = normalize_camp_name(command.name.as_deref().unwrap_or(""));
@@ -3394,7 +3432,7 @@ pub(crate) fn create_camp_in_tx(
             "Camp name must not exceed 80 Unicode scalar values",
         ));
     }
-    if command.collaboration_mode != CampCollaborationMode::Peer {
+    if command.collaboration_mode != ThreadCollaborationMode::Peer {
         return Ok(rejected(
             "camp.unsupported_collaboration_mode",
             "This collaboration mode is not available",
@@ -3439,9 +3477,9 @@ pub(crate) fn create_camp_in_tx(
     }
     let now = chrono::Utc::now().to_rfc3339();
     let (title, name_origin) = if normalized_name.is_empty() {
-        (DEFAULT_CAMP_TITLE.to_string(), CampNameOrigin::Default)
+        (DEFAULT_CAMP_TITLE.to_string(), ThreadNameOrigin::Default)
     } else {
-        (normalized_name.clone(), CampNameOrigin::User)
+        (normalized_name.clone(), ThreadNameOrigin::User)
     };
     transaction.execute(
         r#"
@@ -3480,7 +3518,7 @@ pub(crate) fn create_camp_in_tx(
             params![camp_id, member_id, now],
         )?;
     }
-    if command.activation_state == CampActivationState::Active {
+    if command.activation_state == ThreadActivationState::Active {
         append_domain_event(
             transaction,
             "camp.created",
@@ -3499,7 +3537,7 @@ pub(crate) fn create_camp_in_tx(
             }),
         )?;
     }
-    let result_code = if command.activation_state == CampActivationState::Pending {
+    let result_code = if command.activation_state == ThreadActivationState::Pending {
         "camp.pending_created"
     } else {
         "camp.created"
@@ -3507,7 +3545,7 @@ pub(crate) fn create_camp_in_tx(
     Ok(CommandHandlerResult::applied(
         result_code,
         json!({
-            "campId": camp_id,
+            "threadId": camp_id,
             "title": title,
             "activationState": command.activation_state,
             "defaultLeadAgentId": command.default_lead_agent_id,
@@ -3523,7 +3561,7 @@ pub(crate) fn create_camp_in_tx(
     ))
 }
 
-struct QueuedCampMessage {
+struct QueuedThreadMessage {
     camp_sequence: i64,
     delivery_ids: Vec<String>,
 }
@@ -3541,7 +3579,7 @@ pub(crate) fn admit_mission_start(
             "Mission needs a current Default Lead",
         ));
     };
-    let address = CampMessageAddress::Explicit {
+    let address = ThreadMessageAddress::Explicit {
         agent_ids: vec![lead.clone()],
     };
     let mut resolution = match resolve_address(transaction, camp_id, &address, actor)? {
@@ -3552,8 +3590,8 @@ pub(crate) fn admit_mission_start(
     let now_text = now.to_rfc3339();
     ensure_resolution_conversations(transaction, camp_id, &mut resolution, &now_text)?;
     let message_id = Uuid::new_v4().to_string();
-    let body = "开始使命".to_string();
-    let content = normalize_content(vec![StructuredCampMessageSegment::Text {
+    let body = "Start the current Mission.".to_string();
+    let content = normalize_content(vec![StructuredThreadMessageSegment::Text {
         text: body.clone(),
     }]);
     let execution = ExecutionRequest {
@@ -3564,7 +3602,7 @@ pub(crate) fn admit_mission_start(
     };
     let queued = queue_camp_message_and_runs(
         transaction,
-        QueueCampMessageInput {
+        QueueThreadMessageInput {
             camp_message_id: &message_id,
             camp_id,
             body: &body,
@@ -3606,7 +3644,7 @@ pub(crate) fn admit_mission_start(
     )?;
     Ok(CommandHandlerResult::accepted(
         "mission.started",
-        json!({"missionId":mission.info.mission_id,"campId":camp_id,"campMessageId":message_id,"deliveryIds":queued.delivery_ids}),
+        json!({"missionId":mission.info.mission_id,"threadId":camp_id,"threadMessageId":message_id,"deliveryIds":queued.delivery_ids}),
         Some(EntityReference {
             entity_type: "mission".into(),
             entity_id: mission.info.mission_id.clone(),
@@ -3616,10 +3654,11 @@ pub(crate) fn admit_mission_start(
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExternalChannelAdmissionInput {
+    pub source_attachments: Vec<LocalAttachmentSourceRef>,
     pub camp_id: String,
     pub external_principal_id: String,
     pub body: String,
-    pub structured_content: StructuredCampMessageContent,
+    pub structured_content: StructuredThreadMessageContent,
     pub addressed_agent_ids: Vec<String>,
     pub command_id: String,
     pub now: String,
@@ -3651,21 +3690,21 @@ pub(crate) struct ScheduledAutomationAdmissionResult {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct CampMessageAuthor<'a> {
+struct ThreadMessageAuthor<'a> {
     author_type: &'a str,
     author_id: &'a str,
     source_agent_run_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct UserCampMessageAttachmentCommit<'a> {
+struct UserThreadMessageAttachmentCommit<'a> {
     legacy_publication_operation_id: Option<&'a str>,
     managed_ingest_intent_id: Option<&'a str>,
-    source: UserCampMessageSource<'a>,
+    source: UserThreadMessageSource<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum UserCampMessageSource<'a> {
+enum UserThreadMessageSource<'a> {
     Composer,
     Inline(&'a [MessageQuoteSnapshot]),
     Automation,
@@ -3673,7 +3712,7 @@ enum UserCampMessageSource<'a> {
     FixtureComposer,
 }
 
-impl UserCampMessageSource<'_> {
+impl UserThreadMessageSource<'_> {
     fn consumes_composer(self) -> bool {
         match self {
             Self::Composer => true,
@@ -3684,24 +3723,24 @@ impl UserCampMessageSource<'_> {
     }
 }
 
-struct CampMessageSubmission {
+struct ThreadMessageSubmission {
     body: String,
-    structured_content: StructuredCampMessageContent,
+    structured_content: StructuredThreadMessageContent,
     source_attachments: Vec<LocalAttachmentSourceRef>,
     prepared_attachment_ids: Vec<String>,
-    address: CampMessageAddress,
+    address: ThreadMessageAddress,
     reply_to_camp_message_id: Option<String>,
     generated_camp_name: String,
 }
 
 #[derive(Debug, Clone)]
-enum CampMessageAddress {
+enum ThreadMessageAddress {
     Default,
     Explicit { agent_ids: Vec<String> },
     Broadcast,
 }
 
-impl CampMessageAddress {
+impl ThreadMessageAddress {
     fn mode(&self) -> &'static str {
         match self {
             Self::Default => "default",
@@ -3712,19 +3751,22 @@ impl CampMessageAddress {
 }
 
 fn materialize_leading_member_mention(
-    content: &mut StructuredCampMessageContent,
+    content: &mut StructuredThreadMessageContent,
     agent_id: String,
 ) {
-    content.insert(0, StructuredCampMessageSegment::MemberMention { agent_id });
+    content.insert(
+        0,
+        StructuredThreadMessageSegment::MemberMention { agent_id },
+    );
     let has_leading_whitespace = matches!(
         content.get(1),
-        Some(StructuredCampMessageSegment::Text { text })
+        Some(StructuredThreadMessageSegment::Text { text })
             if text.chars().next().is_some_and(char::is_whitespace)
     );
     if !has_leading_whitespace {
         content.insert(
             1,
-            StructuredCampMessageSegment::Text {
+            StructuredThreadMessageSegment::Text {
                 text: " ".to_string(),
             },
         );
@@ -3737,7 +3779,7 @@ fn load_structured_draft_submission(
     transaction: &Transaction<'_>,
     camp_id: &str,
     expected_revision: i64,
-) -> Result<std::result::Result<CampMessageSubmission, CommandHandlerResult>> {
+) -> Result<std::result::Result<ThreadMessageSubmission, CommandHandlerResult>> {
     let stored = transaction
         .query_row(
             &format!(
@@ -3873,12 +3915,12 @@ fn load_structured_draft_submission(
 fn load_structured_content_submission(
     transaction: &Transaction<'_>,
     camp_id: &str,
-    content: StructuredCampMessageContent,
+    content: StructuredThreadMessageContent,
     source_attachments: Vec<LocalAttachmentSourceRef>,
     reply_to_camp_message_id: Option<String>,
     recipient_required: bool,
     prepared_attachment_ids: Vec<String>,
-) -> Result<std::result::Result<CampMessageSubmission, CommandHandlerResult>> {
+) -> Result<std::result::Result<ThreadMessageSubmission, CommandHandlerResult>> {
     if recipient_required {
         return Ok(Err(rejected(
             "reply_recipient_required",
@@ -3939,15 +3981,15 @@ fn load_structured_content_submission(
         generated_camp_name(&content, |agent_id| member_names.get(agent_id).cloned())?;
 
     let address = if has_all_members_mention(&content) {
-        CampMessageAddress::Broadcast
+        ThreadMessageAddress::Broadcast
     } else if mentioned_agent_ids.is_empty() {
-        CampMessageAddress::Default
+        ThreadMessageAddress::Default
     } else {
-        CampMessageAddress::Explicit {
+        ThreadMessageAddress::Explicit {
             agent_ids: mentioned_agent_ids,
         }
     };
-    Ok(Ok(CampMessageSubmission {
+    Ok(Ok(ThreadMessageSubmission {
         body,
         structured_content: content,
         source_attachments,
@@ -3958,11 +4000,11 @@ fn load_structured_content_submission(
     }))
 }
 
-struct QueueCampMessageInput<'a> {
+struct QueueThreadMessageInput<'a> {
     camp_message_id: &'a str,
     camp_id: &'a str,
     body: &'a str,
-    structured_content: &'a [StructuredCampMessageSegment],
+    structured_content: &'a [StructuredThreadMessageSegment],
     source_attachments: &'a [LocalAttachmentSourceRef],
     prepared_attachment_ids: &'a [String],
     legacy_attachment_publication_operation_id: Option<&'a str>,
@@ -3975,7 +4017,7 @@ struct QueueCampMessageInput<'a> {
     resolution: &'a AddressResolution,
     execution: Option<&'a ExecutionRequest>,
     actor: &'a ActorRef,
-    message_author: Option<CampMessageAuthor<'a>>,
+    message_author: Option<ThreadMessageAuthor<'a>>,
     origin_kind: Option<&'a str>,
     execution_epoch: Option<i64>,
     command_id: &'a str,
@@ -3985,8 +4027,8 @@ struct QueueCampMessageInput<'a> {
 
 fn queue_camp_message_and_runs(
     transaction: &Transaction<'_>,
-    input: QueueCampMessageInput<'_>,
-) -> Result<QueuedCampMessage> {
+    input: QueueThreadMessageInput<'_>,
+) -> Result<QueuedThreadMessage> {
     let activation_state: String = transaction.query_row(
         "SELECT activation_state FROM camp WHERE id = ?1",
         [input.camp_id],
@@ -4051,7 +4093,7 @@ fn queue_camp_message_and_runs(
     let structured_content_json = serde_json::to_string(input.structured_content)?;
     let source_attachments_json = serialize_source_attachments(input.source_attachments)?;
     let content_digest = canonical_content_digest(input.structured_content)?;
-    let origin_kind = input.origin_kind.unwrap_or_else(|| match author_type {
+    let origin_kind = input.origin_kind.unwrap_or(match author_type {
         "agent" => "agent",
         "external_principal" => "channel",
         "user" if matches!(input.actor, ActorRef::User { .. }) => "local_composer",
@@ -4120,7 +4162,7 @@ fn queue_camp_message_and_runs(
         && input.legacy_attachment_publication_operation_id.is_none()
         && input.managed_attachment_ingest_intent_id.is_none()
     {
-        CampAttachmentPublicationCoordinator.commit_composer_intent(
+        ThreadAttachmentPublicationCoordinator.commit_composer_intent(
             transaction,
             input.camp_id,
             input.camp_message_id,
@@ -4176,7 +4218,7 @@ fn queue_camp_message_and_runs(
             input.prepared_attachment_ids,
         )?;
     } else if let Some(publication) = attachment_publication.as_ref() {
-        CampAttachmentPublicationCoordinator.bind_message_attachments(
+        ThreadAttachmentPublicationCoordinator.bind_message_attachments(
             transaction,
             input.camp_message_id,
             publication,
@@ -4235,7 +4277,7 @@ fn queue_camp_message_and_runs(
             }),
         )?;
     }
-    Ok(QueuedCampMessage {
+    Ok(QueuedThreadMessage {
         camp_sequence,
         delivery_ids,
     })
@@ -4292,11 +4334,11 @@ enum AddressingOutcome {
 fn resolve_address(
     transaction: &Connection,
     camp_id: &str,
-    address: &CampMessageAddress,
+    address: &ThreadMessageAddress,
     actor: &ActorRef,
 ) -> Result<AddressingOutcome> {
     match address {
-        CampMessageAddress::Default => {
+        ThreadMessageAddress::Default => {
             let default_lead = transaction.query_row(
                 "SELECT default_lead_agent_id FROM camp WHERE id = ?1",
                 [camp_id],
@@ -4326,7 +4368,7 @@ fn resolve_address(
                 targets: vec![target],
             }))
         }
-        CampMessageAddress::Explicit { agent_ids } => {
+        ThreadMessageAddress::Explicit { agent_ids } => {
             if agent_ids.is_empty() {
                 return Ok(AddressingOutcome::Rejected(rejected(
                     "camp_message.empty_explicit_address",
@@ -4352,7 +4394,7 @@ fn resolve_address(
                 targets,
             }))
         }
-        CampMessageAddress::Broadcast => {
+        ThreadMessageAddress::Broadcast => {
             let sender_agent_id = match actor {
                 ActorRef::Agent { agent_id, .. } => Some(agent_id.as_str()),
                 _ => None,
@@ -4796,7 +4838,7 @@ fn actor_has_capability(
         }))
 }
 
-fn validate_camp_message_input(command: &SendUserCampDraftCommand) -> Result<()> {
+fn validate_camp_message_input(command: &SendUserThreadDraftCommand) -> Result<()> {
     if command.draft_revision < 1 {
         anyhow::bail!("draftRevision must be a positive Core Revision");
     }
@@ -4951,7 +4993,7 @@ fn normalize_camp_name(value: &str) -> String {
 }
 
 fn generated_camp_name(
-    content: &[StructuredCampMessageSegment],
+    content: &[StructuredThreadMessageSegment],
     member_name: impl FnMut(&str) -> Option<String>,
 ) -> Result<String> {
     let title_content = content_after_leading_mentions(content);
@@ -4967,12 +5009,12 @@ fn generated_camp_name(
 }
 
 fn content_after_leading_mentions(
-    content: &[StructuredCampMessageSegment],
-) -> &[StructuredCampMessageSegment] {
+    content: &[StructuredThreadMessageSegment],
+) -> &[StructuredThreadMessageSegment] {
     let mut cursor = 0;
     while matches!(
         content.get(cursor),
-        Some(StructuredCampMessageSegment::Text { text }) if text.trim().is_empty()
+        Some(StructuredThreadMessageSegment::Text { text }) if text.trim().is_empty()
     ) {
         cursor += 1;
     }
@@ -4981,13 +5023,13 @@ fn content_after_leading_mentions(
     loop {
         match content.get(cursor) {
             Some(
-                StructuredCampMessageSegment::MemberMention { .. }
-                | StructuredCampMessageSegment::AllMembersMention,
+                StructuredThreadMessageSegment::MemberMention { .. }
+                | StructuredThreadMessageSegment::AllMembersMention,
             ) => {
                 removed_mention = true;
                 cursor += 1;
             }
-            Some(StructuredCampMessageSegment::Text { text })
+            Some(StructuredThreadMessageSegment::Text { text })
                 if removed_mention && text.trim().is_empty() =>
             {
                 cursor += 1;
@@ -5124,7 +5166,7 @@ pub(crate) fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> R
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CampTurnExecutionBudgetExhaustion {
+pub(crate) struct ThreadTurnExecutionBudgetExhaustion {
     pub newly_exhausted: bool,
     pub camp_id: String,
     pub agent_runs_fenced: i64,
@@ -5135,12 +5177,12 @@ pub(crate) struct CampTurnExecutionBudgetExhaustion {
 pub(crate) fn exhaust_camp_turn_execution_budget(
     transaction: &Transaction<'_>,
     camp_turn_id: &str,
-    reason: CampTurnExecutionBudgetExhaustionReason,
+    reason: ThreadTurnExecutionBudgetExhaustionReason,
     command_id: &str,
     now: &str,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
-) -> Result<CampTurnExecutionBudgetExhaustion> {
+) -> Result<ThreadTurnExecutionBudgetExhaustion> {
     let state = transaction
         .query_row(
             r#"
@@ -5183,7 +5225,7 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
         deadline_at,
     ) = state;
     if exhausted_at.is_some() {
-        return Ok(CampTurnExecutionBudgetExhaustion {
+        return Ok(ThreadTurnExecutionBudgetExhaustion {
             newly_exhausted: false,
             camp_id,
             agent_runs_fenced: 0,
@@ -5241,7 +5283,7 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
             "messageDeliveriesCancelled": message_deliveries_cancelled,
         }),
     )?;
-    Ok(CampTurnExecutionBudgetExhaustion {
+    Ok(ThreadTurnExecutionBudgetExhaustion {
         newly_exhausted: true,
         camp_id,
         agent_runs_fenced,
@@ -5718,7 +5760,7 @@ fn validate_membership_mutation_source(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
     camp_id: &str,
-    source: Option<&CampMembershipMutationSource>,
+    source: Option<&ThreadMembershipMutationSource>,
 ) -> Result<Option<CommandHandlerResult>> {
     let ActorRef::System { component_id } = actor else {
         if source.is_some() {
@@ -5785,7 +5827,7 @@ fn advance_membership_source_generation(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
     camp_id: &str,
-    source: Option<&CampMembershipMutationSource>,
+    source: Option<&ThreadMembershipMutationSource>,
     now: &str,
 ) -> Result<()> {
     let (ActorRef::System { component_id }, Some(source)) = (actor, source) else {
@@ -5826,7 +5868,7 @@ fn actor_parts(actor: &ActorRef) -> (&'static str, &str, Option<&str>) {
 }
 
 #[derive(Debug)]
-struct CampMembershipAffectedDelivery {
+struct ThreadMembershipAffectedDelivery {
     id: String,
     camp_turn_id: String,
     status: String,
@@ -5841,7 +5883,7 @@ fn camp_membership_affected_deliveries(
     camp_id: &str,
     agent_id: &str,
     membership_version: i64,
-) -> Result<Vec<CampMembershipAffectedDelivery>> {
+) -> Result<Vec<ThreadMembershipAffectedDelivery>> {
     let mut statement = connection.prepare(
         r#"
         WITH affected AS (
@@ -5910,7 +5952,7 @@ fn camp_membership_affected_deliveries(
     )?;
     Ok(statement
         .query_map(params![camp_id, agent_id, membership_version], |row| {
-            Ok(CampMembershipAffectedDelivery {
+            Ok(ThreadMembershipAffectedDelivery {
                 id: row.get(0)?,
                 camp_turn_id: row.get(1)?,
                 status: row.get(2)?,
@@ -5928,7 +5970,7 @@ fn camp_membership_affected_run_ids(
     camp_id: &str,
     agent_id: &str,
     membership_version: i64,
-    affected_deliveries: &[CampMembershipAffectedDelivery],
+    affected_deliveries: &[ThreadMembershipAffectedDelivery],
 ) -> Result<Vec<String>> {
     let mut statement = connection.prepare(
         r#"
@@ -5962,7 +6004,7 @@ fn camp_membership_affected_run_ids(
 }
 
 #[derive(Debug)]
-pub(crate) struct CampMembershipEndOutcome {
+pub(crate) struct ThreadMembershipEndOutcome {
     pub membership_version: i64,
     pub membership_generation: i64,
     pub cancel_requested_run_count: usize,
@@ -5985,7 +6027,7 @@ pub(crate) fn end_camp_membership(
     actor: &ActorRef,
     execution_epoch: Option<i64>,
     now: &str,
-) -> Result<CampMembershipEndOutcome> {
+) -> Result<ThreadMembershipEndOutcome> {
     let current_member_count = current_member_count(transaction, camp_id)?;
     if current_member_count <= 1 {
         anyhow::bail!("camp.last_member_required: a Camp must retain at least one member");
@@ -6105,11 +6147,20 @@ pub(crate) fn end_camp_membership(
               AND conversation.agent_id = ?2
               AND run.invocation_kind = 'batch'
               AND run.status IN ('queued', 'running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM agent_run_input AS input
+                  JOIN camp_message_delivery AS delivery ON delivery.id = input.delivery_id
+                  WHERE input.agent_run_id = run.id
+                    AND delivery.recipient_membership_version_at_admission = ?3
+              )
             ORDER BY run.created_at, run.id
             "#,
         )?;
         statement
-            .query_map(params![camp_id, agent_id], |row| row.get::<_, String>(0))?
+            .query_map(
+                params![camp_id, agent_id, current_membership_version],
+                |row| row.get::<_, String>(0),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     affected_run_ids.extend(batch_run_ids);
@@ -6122,8 +6173,9 @@ pub(crate) fn end_camp_membership(
         SET status = 'cancelled', failure_code = 'recipient_membership_ended',
             ended_at = ?3, version = version + 1, updated_at = ?3
         WHERE camp_id = ?1 AND recipient_agent_id = ?2 AND status = 'waiting'
+          AND recipient_membership_version_at_admission = ?4
         "#,
-        params![camp_id, agent_id, now],
+        params![camp_id, agent_id, now, current_membership_version],
     )?;
 
     let changed = transaction.execute(
@@ -6345,6 +6397,19 @@ pub(crate) fn end_camp_membership(
             "#,
             params![task_id, now],
         )?;
+        if previous_status != "pending" {
+            crate::notification::record_status_transition(
+                transaction,
+                actor,
+                crate::notification::StatusTransition {
+                    kind: "task",
+                    id: &task_id,
+                    camp_id,
+                    status: "pending",
+                    source_message_id: None,
+                },
+            )?;
+        }
         append_domain_event(
             transaction,
             "task.assignee_membership_ended",
@@ -6422,7 +6487,7 @@ pub(crate) fn end_camp_membership(
             "targetRunCount": affected_run_ids.len(),
         }),
     )?;
-    Ok(CampMembershipEndOutcome {
+    Ok(ThreadMembershipEndOutcome {
         membership_version,
         membership_generation: next_membership_generation,
         cancel_requested_run_count: affected_run_ids.len(),
@@ -6581,9 +6646,9 @@ mod slow_tests {
             AdapterKind, AgentProfileService, RemoveMemberCommand, SetMemberPresenceCommand,
             configure_test_runtime,
         },
-        camp_attachment::CampAttachmentStore,
-        camp_attachment_view::CampAttachmentViewStore,
-        camp_content::StructuredCampMessageSegment as Segment,
+        camp_attachment::ThreadAttachmentStore,
+        camp_attachment_view::ThreadAttachmentViewStore,
+        camp_content::StructuredThreadMessageSegment as Segment,
         command::CommandResultStatus,
         current_input_skill::parse_skill_selection_snapshot,
         current_user::CURRENT_USER_ID,
@@ -6597,15 +6662,15 @@ mod slow_tests {
     }
 
     fn composer_document(
-        content: StructuredCampMessageContent,
+        content: StructuredThreadMessageContent,
     ) -> crate::camp_content::ComposerDocument {
         composer_document_from_content(&content).unwrap()
     }
 
     #[test]
     fn add_camp_member_command_defaults_capability_overrides_to_an_object() {
-        let command: AddCampMemberCommand = serde_json::from_value(json!({
-            "campId": "rvcamp_01m0wzxbb8e1ht984tsbjmysfe",
+        let command: AddThreadMemberCommand = serde_json::from_value(json!({
+            "threadId": "rvcamp_01m0wzxbb8e1ht984tsbjmysfe",
             "agentId": "agent_2",
             "expectedMembershipGeneration": 1
         }))
@@ -6757,7 +6822,7 @@ mod slow_tests {
         let create = user_envelope(
             "create-camp",
             None,
-            CreateCampCommand::for_test_with_members(
+            CreateThreadCommand::for_test_with_members(
                 directory.join("workspace").to_string_lossy().to_string(),
                 members,
                 members.first().copied().expect("test Camp needs a member"),
@@ -6766,7 +6831,7 @@ mod slow_tests {
         let created = service
             .create_camp(database, &create)
             .expect("Camp should be created");
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .expect("Camp result should include ID")
             .to_string();
@@ -6782,7 +6847,7 @@ mod slow_tests {
         let command = user_envelope(
             "automation-send",
             Some(&camp_id),
-            SendUserAutomationCampMessageCommand {
+            SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_1".to_string(),
                 body: "diagnose runtime".to_string(),
@@ -6805,8 +6870,9 @@ mod slow_tests {
         assert_eq!(first.result.status, CommandResultStatus::Accepted);
         assert!(replay.replayed);
         assert_eq!(row_count(&database, "camp_message"), 1);
-        assert_eq!(row_count(&database, "camp_turn"), 1);
-        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
 
         drop(database);
@@ -6818,14 +6884,14 @@ mod slow_tests {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
-        let composer = CampAttachmentStore::new(&directory);
+        let composer = ThreadAttachmentStore::new(&directory);
         let draft_before = composer
             .save_body(&mut database, &camp_id, "user is still drafting")
             .unwrap();
         let command = user_envelope(
             "automation-send-with-user-draft",
             Some(&camp_id),
-            SendUserAutomationCampMessageCommand {
+            SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_1".to_string(),
                 body: "independent automation message".to_string(),
@@ -6856,7 +6922,7 @@ mod slow_tests {
         let command = user_envelope(
             "automation-send-unavailable-member",
             Some(&camp_id),
-            SendUserAutomationCampMessageCommand {
+            SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_999".to_string(),
                 body: "must reject atomically".to_string(),
@@ -6894,14 +6960,15 @@ mod slow_tests {
         directory: &Path,
         command_id: &str,
     ) -> String {
-        let mut command =
-            CreateCampCommand::for_test(directory.join("workspace").to_string_lossy().to_string());
-        command.activation_state = CampActivationState::Pending;
+        let mut command = CreateThreadCommand::for_test(
+            directory.join("workspace").to_string_lossy().to_string(),
+        );
+        command.activation_state = ThreadActivationState::Pending;
         service
             .create_camp(database, &user_envelope(command_id, None, command))
             .expect("pending Camp should be created")
             .result
-            .payload["campId"]
+            .payload["threadId"]
             .as_str()
             .expect("pending Camp should return its ID")
             .to_string()
@@ -6944,7 +7011,7 @@ mod slow_tests {
                 &user_envelope(
                     "pending-camp-rename",
                     Some(&camp_id),
-                    RenameCampCommand {
+                    RenameThreadCommand {
                         camp_id: camp_id.clone(),
                         title: "不应提前生效".to_string(),
                         expected_version: 1,
@@ -6962,7 +7029,7 @@ mod slow_tests {
             0
         );
 
-        let draft = CampAttachmentStore::new(&directory)
+        let draft = ThreadAttachmentStore::new(&directory)
             .save_body(&mut database, &camp_id, "先保留为草稿")
             .unwrap();
         let draft_navigation = ReadModelService.navigation_snapshot(&mut database).unwrap();
@@ -6986,12 +7053,12 @@ mod slow_tests {
                 &user_envelope(
                     "pending-camp-rejected-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(draft.revision + 1),
                         body: String::new(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -7015,12 +7082,12 @@ mod slow_tests {
                 &user_envelope(
                     "pending-camp-first-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(draft.revision),
                         body: String::new(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -7067,7 +7134,7 @@ mod slow_tests {
                 &user_envelope(
                     "pending-empty-discard",
                     Some(&empty_id),
-                    DiscardPendingCampCommand {
+                    DiscardPendingThreadCommand {
                         camp_id: empty_id.clone(),
                     },
                 ),
@@ -7082,7 +7149,7 @@ mod slow_tests {
             &directory,
             "pending-retained-create",
         );
-        CampAttachmentStore::new(&directory)
+        ThreadAttachmentStore::new(&directory)
             .save_body(&mut database, &retained_id, "需要跨重启保留")
             .unwrap();
         let rejected = service
@@ -7091,7 +7158,7 @@ mod slow_tests {
                 &user_envelope(
                     "pending-retained-discard",
                     Some(&retained_id),
-                    DiscardPendingCampCommand {
+                    DiscardPendingThreadCommand {
                         camp_id: retained_id.clone(),
                     },
                 ),
@@ -7143,14 +7210,14 @@ mod slow_tests {
     fn configured_camp_creation_persists_only_the_selected_structure() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let command = CreateCampCommand {
+        let command = CreateThreadCommand {
             name: Some("  重构\n\tMCP   设置页  ".to_string()),
             project_path: directory.join("workspace").to_string_lossy().to_string(),
             project_binding_kind: ProjectBindingKind::Directory,
             member_agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
             default_lead_agent_id: "agent_1".to_string(),
-            collaboration_mode: CampCollaborationMode::Peer,
-            activation_state: CampActivationState::Active,
+            collaboration_mode: ThreadCollaborationMode::Peer,
+            activation_state: ThreadActivationState::Active,
         };
         let created = service
             .create_camp(
@@ -7159,7 +7226,7 @@ mod slow_tests {
             )
             .expect("configured Camp should be created");
         assert_eq!(created.result.status, CommandResultStatus::Applied);
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let persisted: (String, String, String, String, i64) = database
             .connection()
             .query_row(
@@ -7213,19 +7280,19 @@ mod slow_tests {
         let create = |command_id: &str,
                       members: Vec<&str>,
                       lead: &str,
-                      mode: CampCollaborationMode,
+                      mode: ThreadCollaborationMode,
                       name: Option<String>| {
             user_envelope(
                 command_id,
                 None,
-                CreateCampCommand {
+                CreateThreadCommand {
                     name,
                     project_path: directory.join("workspace").to_string_lossy().to_string(),
                     project_binding_kind: ProjectBindingKind::Directory,
                     member_agent_ids: members.into_iter().map(str::to_string).collect(),
                     default_lead_agent_id: lead.to_string(),
                     collaboration_mode: mode,
-                    activation_state: CampActivationState::Active,
+                    activation_state: ThreadActivationState::Active,
                 },
             )
         };
@@ -7236,7 +7303,7 @@ mod slow_tests {
                     "configured-camp-stale-member",
                     vec!["agent_2"],
                     "agent_2",
-                    CampCollaborationMode::Peer,
+                    ThreadCollaborationMode::Peer,
                     None,
                 ),
             )
@@ -7249,7 +7316,7 @@ mod slow_tests {
                     "configured-camp-invalid-lead",
                     vec!["agent_1"],
                     "agent_2",
-                    CampCollaborationMode::Peer,
+                    ThreadCollaborationMode::Peer,
                     None,
                 ),
             )
@@ -7262,7 +7329,7 @@ mod slow_tests {
                     "configured-camp-unsupported-mode",
                     vec!["agent_1"],
                     "agent_1",
-                    CampCollaborationMode::LeadCoordinated,
+                    ThreadCollaborationMode::LeadCoordinated,
                     None,
                 ),
             )
@@ -7278,7 +7345,7 @@ mod slow_tests {
                     "configured-camp-long-name",
                     vec!["agent_1"],
                     "agent_1",
-                    CampCollaborationMode::Peer,
+                    ThreadCollaborationMode::Peer,
                     Some("😀".repeat(81)),
                 ),
             )
@@ -7372,12 +7439,12 @@ mod slow_tests {
                 &user_envelope(
                     "configured-camp-first-message",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "  第一条\n\t目标  ".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -7414,7 +7481,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn initial_execution_atomically_freezes_the_requested_camp_turn_budget() {
+    fn legacy_execution_budget_does_not_create_a_turn_for_claimed_delivery_work() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
@@ -7424,18 +7491,18 @@ mod slow_tests {
                 &user_envelope(
                     "budgeted-initial-execution",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "在冻结预算内完成任务".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证原子预算".to_string(),
                             completion_role: "required".to_string(),
-                            budget: Some(CampTurnExecutionBudgetRequest {
+                            budget: Some(ThreadTurnExecutionBudgetRequest {
                                 elapsed_seconds: Some(300),
                                 max_agent_run_responsibilities: 3,
                                 max_accepted_a2a: 2,
@@ -7446,77 +7513,40 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
-        let camp_turn_id = accepted.result.payload["campTurnId"].as_str().unwrap();
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["schemaVersion"],
-            1
-        );
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["elapsedSeconds"],
-            300
-        );
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["maxAgentRunResponsibilities"],
-            3
-        );
-        assert_eq!(
-            accepted.result.payload["executionBudget"]["maxAcceptedA2a"],
-            2
-        );
-        let snapshot = ReadModelService
-            .camp_snapshot(&mut database, &camp_id)
-            .unwrap();
-        let turn = snapshot
-            .turns
-            .iter()
-            .find(|turn| turn.id == camp_turn_id)
-            .unwrap();
-        assert_eq!(turn.execution_budget.schema_version, 1);
-        assert_eq!(turn.execution_budget.elapsed_seconds, Some(300));
-        assert_eq!(turn.execution_budget.max_agent_run_responsibilities, 3);
-        assert_eq!(turn.execution_budget.max_accepted_a2a, 2);
-        assert_eq!(
-            turn.execution_budget.allocated_agent_run_responsibilities,
-            1
-        );
-        assert_eq!(turn.execution_budget.accepted_a2a, 0);
-        assert_eq!(turn.execution_budget.exhausted_at, None);
-        let accepted_at =
-            chrono::DateTime::parse_from_rfc3339(&turn.execution_budget.accepted_at).unwrap();
-        let deadline_at = chrono::DateTime::parse_from_rfc3339(
-            turn.execution_budget.deadline_at.as_deref().unwrap(),
-        )
-        .unwrap();
-        assert_eq!((deadline_at - accepted_at).num_seconds(), 300);
+        assert!(accepted.result.payload.get("threadTurnId").is_none());
+        assert!(accepted.result.payload.get("executionBudget").is_none());
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn initial_execution_rejects_a_root_fanout_that_cannot_fit_without_partial_send_state() {
+    fn legacy_execution_budget_does_not_restrict_delivery_fanout() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
-        let rejected = service
+        let accepted = service
             .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "budget-too-small-for-root-fanout",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "两位队员一起处理".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Broadcast,
+                        address: TestThreadMessageAddress::Broadcast,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证 root admission".to_string(),
                             completion_role: "required".to_string(),
-                            budget: Some(CampTurnExecutionBudgetRequest {
+                            budget: Some(ThreadTurnExecutionBudgetRequest {
                                 elapsed_seconds: Some(300),
                                 max_agent_run_responsibilities: 1,
                                 max_accepted_a2a: 0,
@@ -7526,19 +7556,18 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(rejected.result.code, "camp_turn.execution_budget_invalid");
-        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 2);
         assert_eq!(row_count(&database, "camp_turn"), 0);
-        assert_eq!(row_count(&database, "agent_run"), 0);
-        assert_eq!(row_count(&database, "conversation"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 2);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn failed_multi_target_admission_removes_every_new_conversation() {
+    fn multi_target_send_admits_waiting_deliveries_without_ready_runtime() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let created = service
@@ -7547,7 +7576,7 @@ mod slow_tests {
                 &user_envelope(
                     "configured-camp-unready",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         directory.join("workspace").to_string_lossy().to_string(),
                         &["agent_1", "agent_2"],
                         "agent_1",
@@ -7555,22 +7584,22 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
-        let rejected = service
+        let accepted = service
             .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "configured-camp-unready-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请一起处理".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_1".to_string(), "agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -7584,9 +7613,9 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(row_count(&database, "conversation"), 0);
-        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 2);
         assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 0);
         drop(database);
@@ -7594,7 +7623,7 @@ mod slow_tests {
     }
 
     #[derive(Debug, PartialEq, Eq)]
-    struct CampMemberAddTestState {
+    struct ThreadMemberAddTestState {
         membership_generation: i64,
         membership_version: i64,
         profile_presence: String,
@@ -7605,14 +7634,14 @@ mod slow_tests {
         database: &mut Database,
         camp_id: &str,
         agent_id: &str,
-    ) -> CampMemberAddTestState {
+    ) -> ThreadMemberAddTestState {
         let snapshot = ReadModelService.camp_snapshot(database, camp_id).unwrap();
         let member = snapshot
             .members
             .iter()
             .find(|member| member.agent_id == agent_id)
             .unwrap();
-        CampMemberAddTestState {
+        ThreadMemberAddTestState {
             membership_generation: snapshot.camp.membership_generation,
             membership_version: member.version,
             profile_presence: member.profile_presence.clone(),
@@ -7663,7 +7692,7 @@ mod slow_tests {
                 &user_envelope(
                     "active-away-member-idempotent-add",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: before.membership_generation,
@@ -7682,7 +7711,7 @@ mod slow_tests {
                 &user_envelope(
                     "active-away-member-capability-conflict",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: before.membership_generation,
@@ -7728,12 +7757,12 @@ mod slow_tests {
                     "external-add-before-member-goes-away",
                     &camp_id,
                     "channel-membership-sync",
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
                         capability_overrides: json!({}),
-                        source: Some(CampMembershipMutationSource {
+                        source: Some(ThreadMembershipMutationSource {
                             namespace: "channel.membership".to_string(),
                             binding_id: "channel-away-member".to_string(),
                             reconciliation_generation: 1,
@@ -7758,12 +7787,12 @@ mod slow_tests {
                     "external-noop-for-active-away-member",
                     &camp_id,
                     "channel-membership-sync",
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: before.membership_generation,
                         capability_overrides: json!({}),
-                        source: Some(CampMembershipMutationSource {
+                        source: Some(ThreadMembershipMutationSource {
                             namespace: "channel.membership".to_string(),
                             binding_id: "channel-away-member".to_string(),
                             reconciliation_generation: 2,
@@ -7802,8 +7831,8 @@ mod slow_tests {
     #[test]
     fn adding_or_readding_a_member_is_generation_fenced_idempotent_and_conversation_free() {
         assert!(
-            serde_json::from_value::<AddCampMemberCommand>(json!({
-                "campId": "rvcamp_01k2ez7xpfe0zsx9nz0wxr9dby",
+            serde_json::from_value::<AddThreadMemberCommand>(json!({
+                "threadId": "rvcamp_01k2ez7xpfe0zsx9nz0wxr9dby",
                 "agentId": "agent_2"
             }))
             .is_err(),
@@ -7818,7 +7847,7 @@ mod slow_tests {
                 &user_envelope(
                     "configured-camp-add-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -7841,7 +7870,7 @@ mod slow_tests {
                 &user_envelope(
                     "configured-camp-add-member-unchanged",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 2,
@@ -7872,7 +7901,7 @@ mod slow_tests {
                 &user_envelope(
                     "configured-camp-add-member-capability-conflict",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 2,
@@ -7936,7 +7965,7 @@ mod slow_tests {
                 &user_envelope(
                     "configured-camp-reactivate-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 2,
@@ -7970,7 +7999,7 @@ mod slow_tests {
                 &user_envelope(
                     "configured-camp-add-member-stale",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_3".to_string(),
                         expected_membership_generation: 2,
@@ -8025,12 +8054,12 @@ mod slow_tests {
                 &user_envelope(
                     "membership-removal-run",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请处理这项工作".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -8080,7 +8109,7 @@ mod slow_tests {
                 &user_envelope(
                     "membership-removal-cutover",
                     Some(&camp_id),
-                    RemoveCampMemberCommand {
+                    RemoveThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: preview.membership_generation,
@@ -8147,7 +8176,7 @@ mod slow_tests {
                 &user_envelope(
                     "membership-removal-last-member",
                     Some(&camp_id),
-                    RemoveCampMemberCommand {
+                    RemoveThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
                         expected_membership_generation: last_member_preview.membership_generation,
@@ -8174,7 +8203,7 @@ mod slow_tests {
                 &user_envelope(
                     "membership-removal-readd",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 2,
@@ -8216,7 +8245,7 @@ mod slow_tests {
                 &user_envelope(
                     "membership-removal-new-lifetime",
                     Some(&camp_id),
-                    RemoveCampMemberCommand {
+                    RemoveThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: second_preview.membership_generation,
@@ -8294,7 +8323,7 @@ mod slow_tests {
                 &user_envelope(
                     "remove-away-camp-member",
                     Some(&camp_id),
-                    RemoveCampMemberCommand {
+                    RemoveThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: preview.membership_generation,
@@ -8340,7 +8369,7 @@ mod slow_tests {
                 &user_envelope(
                     "remove-lead-with-only-away-members-left",
                     Some(&camp_id),
-                    RemoveCampMemberCommand {
+                    RemoveThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
                         expected_membership_generation: preview.membership_generation,
@@ -8388,7 +8417,7 @@ mod slow_tests {
                 [&camp_id],
             )
             .unwrap();
-        let source = CampMembershipMutationSource {
+        let source = ThreadMembershipMutationSource {
             namespace: "channel.membership".to_string(),
             binding_id: "channel-42".to_string(),
             reconciliation_generation: 1,
@@ -8400,7 +8429,7 @@ mod slow_tests {
                 &user_envelope(
                     "membership-source-user",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -8422,7 +8451,7 @@ mod slow_tests {
                     "membership-source-component",
                     &camp_id,
                     "untrusted-sync",
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -8441,7 +8470,7 @@ mod slow_tests {
             "membership-source-accepted",
             &camp_id,
             "channel-membership-sync",
-            AddCampMemberCommand {
+            AddThreadMemberCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_2".to_string(),
                 expected_membership_generation: 1,
@@ -8465,7 +8494,7 @@ mod slow_tests {
                     "membership-source-stale",
                     &camp_id,
                     "channel-membership-sync",
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 2,
@@ -8487,12 +8516,12 @@ mod slow_tests {
                     "membership-source-next",
                     &camp_id,
                     "channel-membership-sync",
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 2,
                         capability_overrides: json!({}),
-                        source: Some(CampMembershipMutationSource {
+                        source: Some(ThreadMembershipMutationSource {
                             namespace: "channel.membership".to_string(),
                             binding_id: "channel-42".to_string(),
                             reconciliation_generation: 2,
@@ -8529,7 +8558,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn legacy_pending_execution_intents_do_not_gate_message_or_run_admission() {
+    fn legacy_pending_execution_intents_do_not_gate_delivery_admission() {
         let (mut database, directory) = test_database();
         let collaboration = CollaborationService::default();
         let camp_id =
@@ -8538,12 +8567,12 @@ mod slow_tests {
             user_envelope(
                 command_id,
                 Some(&camp_id),
-                TestCampMessageCommand {
+                TestThreadMessageCommand {
                     camp_id: camp_id.clone(),
                     draft_revision: None,
                     body: body.to_string(),
                     prepared_attachment_ids: Vec::new(),
-                    address: TestCampMessageAddress::Default,
+                    address: TestThreadMessageAddress::Default,
                     reply_to_camp_message_id: None,
                     execution: Some(ExecutionRequest {
                         task_id: None,
@@ -8583,7 +8612,8 @@ mod slow_tests {
             .unwrap();
         assert_eq!(cancelled.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_message"), 1);
-        assert_eq!(row_count(&database, "camp_turn"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 1);
 
         let mismatched_command = command("pending-mismatch", "原始请求");
@@ -8613,8 +8643,9 @@ mod slow_tests {
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_message"), 2);
-        assert_eq!(row_count(&database, "camp_turn"), 2);
-        assert_eq!(row_count(&database, "agent_run"), 2);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 2);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 1);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -8639,11 +8670,11 @@ mod slow_tests {
                 &user_envelope(
                     "mentioned-first-message",
                     None,
-                    TestCampConversationCommand {
+                    TestThreadConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "请分别回答".to_string(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         purpose: "并行回答".to_string(),
@@ -8660,7 +8691,7 @@ mod slow_tests {
                 .len(),
             2
         );
-        let camp_id = result.result.payload["campId"].as_str().unwrap();
+        let camp_id = result.result.payload["threadId"].as_str().unwrap();
         let (title, address_mode, addressed): (String, String, String) = database
             .connection()
             .query_row(
@@ -8698,7 +8729,7 @@ mod slow_tests {
                 &user_envelope(
                     "rename-camp",
                     Some(&camp_id),
-                    RenameCampCommand {
+                    RenameThreadCommand {
                         camp_id: camp_id.clone(),
                         title: "  新的\n标题 ".to_string(),
                         expected_version: rename_version,
@@ -8729,12 +8760,12 @@ mod slow_tests {
                 &user_envelope(
                     "message-before-delete",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "仅保存历史".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -8747,12 +8778,12 @@ mod slow_tests {
                 &user_envelope(
                     "completed-execution-before-delete",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "执行后再删除".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -8822,7 +8853,6 @@ mod slow_tests {
                         title: "随 Camp 删除".to_string(),
                         description: "验证从属 Task 不残留".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -8866,7 +8896,7 @@ mod slow_tests {
         let delete_envelope = user_envelope(
             "delete-camp",
             Some(&camp_id),
-            DeleteCampCommand {
+            DeleteThreadCommand {
                 camp_id: camp_id.clone(),
                 expected_version: delete_version,
                 force: false,
@@ -8932,17 +8962,17 @@ mod slow_tests {
                 &user_envelope(
                     "camp-with-running-work",
                     None,
-                    TestCampConversationCommand {
+                    TestThreadConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "开始执行".to_string(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         purpose: "执行".to_string(),
                     },
                 ),
             )
             .expect("Camp should be created");
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -8964,7 +8994,7 @@ mod slow_tests {
             )
             .unwrap();
         assert!(
-            crate::camp_attachment_view::CampAttachmentViewStore::for_test(&database)
+            crate::camp_attachment_view::ThreadAttachmentViewStore::for_test(&database)
                 .unwrap()
                 .camp_has_active_runtime(&database, &camp_id)
                 .unwrap(),
@@ -8977,7 +9007,7 @@ mod slow_tests {
                 &user_envelope(
                     "delete-running-camp",
                     Some(&camp_id),
-                    DeleteCampCommand {
+                    DeleteThreadCommand {
                         camp_id: camp_id.clone(),
                         expected_version: delete_version,
                         force: false,
@@ -9031,7 +9061,7 @@ mod slow_tests {
                 &user_envelope(
                     "force-delete-running-camp",
                     Some(&camp_id),
-                    DeleteCampCommand {
+                    DeleteThreadCommand {
                         camp_id: camp_id.clone(),
                         expected_version: delete_version,
                         force: true,
@@ -9048,7 +9078,7 @@ mod slow_tests {
                 &user_envelope(
                     "force-delete-running-camp",
                     Some(&camp_id),
-                    DeleteCampCommand {
+                    DeleteThreadCommand {
                         camp_id: camp_id.clone(),
                         expected_version: delete_version,
                         force: true,
@@ -9095,12 +9125,12 @@ mod slow_tests {
         let send = user_envelope(
             "send-plain-message",
             Some(&camp_id),
-            TestCampMessageCommand {
+            TestThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: None,
                 body: "只记录这条公共消息。".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: TestCampMessageAddress::Default,
+                address: TestThreadMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
             },
@@ -9125,7 +9155,7 @@ mod slow_tests {
         let send = user_envelope(
             "withdrawable-local-composer-message",
             Some(&camp_id),
-            SendUserCampMessageCommand {
+            SendUserThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 content: composer_document(vec![
                     Segment::MemberMention {
@@ -9150,7 +9180,7 @@ mod slow_tests {
             .send_user_camp_message(&mut database, &send)
             .expect("one-shot Composer message should be admitted");
         assert_eq!(sent.result.status, CommandResultStatus::Accepted);
-        let message_id = sent.result.payload["campMessageId"]
+        let message_id = sent.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -9171,7 +9201,7 @@ mod slow_tests {
                 &user_envelope(
                     "withdraw-local-composer-message",
                     Some(&camp_id),
-                    WithdrawCampMessageCommand {
+                    WithdrawThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         message_id: message_id.clone(),
                         expected_version: before.1,
@@ -9279,7 +9309,7 @@ mod slow_tests {
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let plain_content = vec![Segment::Text {
             text: "普通文字 @luoke；邮箱 dev@muwa.example 不属于 mention。".to_string(),
         }];
@@ -9292,12 +9322,12 @@ mod slow_tests {
                 &user_envelope(
                     "plain-at-control-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(plain_draft.revision),
                         body: "ignored".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -9336,12 +9366,12 @@ mod slow_tests {
         let send = user_envelope(
             "structured-mention-send",
             Some(&camp_id),
-            TestCampMessageCommand {
+            TestThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: Some(draft.revision),
                 body: "caller supplied body must be ignored".to_string(),
                 prepared_attachment_ids: vec!["caller-supplied-attachment".to_string()],
-                address: TestCampMessageAddress::Broadcast,
+                address: TestThreadMessageAddress::Broadcast,
                 reply_to_camp_message_id: None,
                 execution: Some(ExecutionRequest {
                     task_id: None,
@@ -9379,7 +9409,7 @@ mod slow_tests {
                 FROM camp_message
                 WHERE id = ?1
                 "#,
-                [sent.result.payload["campMessageId"].as_str().unwrap()],
+                [sent.result.payload["threadMessageId"].as_str().unwrap()],
                 |row| {
                     Ok((
                         row.get(0)?,
@@ -9394,7 +9424,7 @@ mod slow_tests {
         assert!(body.starts_with("普通文字 @luoke；请 @"));
         assert_ne!(body, send.payload.body);
         assert_eq!(
-            serde_json::from_str::<StructuredCampMessageContent>(
+            serde_json::from_str::<StructuredThreadMessageContent>(
                 stored_content
                     .as_deref()
                     .expect("new user message is structured")
@@ -9451,7 +9481,7 @@ mod slow_tests {
                 "#,
             )
             .unwrap();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let content = vec![
             Segment::MemberMention {
                 agent_id: "agent_1".to_string(),
@@ -9481,12 +9511,12 @@ mod slow_tests {
                 &user_envelope(
                     "structured-skill-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(draft.revision),
                         body: "ignored".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -9512,7 +9542,8 @@ mod slow_tests {
                        run.skill_selection_snapshot_json,
                        run.skill_selection_snapshot_digest
                 FROM camp_message AS message
-                JOIN agent_run AS run ON run.trigger_camp_message_id = message.id
+                JOIN agent_run_input AS input ON input.message_id = message.id
+                JOIN agent_run AS run ON run.id = input.agent_run_id
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -9520,7 +9551,7 @@ mod slow_tests {
             .unwrap();
         assert!(body.contains("/review-pr"));
         assert_eq!(
-            serde_json::from_str::<StructuredCampMessageContent>(&stored_content).unwrap(),
+            serde_json::from_str::<StructuredThreadMessageContent>(&stored_content).unwrap(),
             content
         );
         let snapshot = parse_skill_selection_snapshot(&snapshot_json, &snapshot_digest).unwrap();
@@ -9540,7 +9571,7 @@ mod slow_tests {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
-        let draft = CampAttachmentStore::new(&directory)
+        let draft = ThreadAttachmentStore::new(&directory)
             .save_content(
                 &mut database,
                 &camp_id,
@@ -9572,12 +9603,12 @@ mod slow_tests {
         let send = user_envelope(
             "reject-tampered-current-user-mention",
             Some(&camp_id),
-            TestCampMessageCommand {
+            TestThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: Some(draft.revision),
                 body: "caller body ignored".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: TestCampMessageAddress::Default,
+                address: TestThreadMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
             },
@@ -9604,7 +9635,7 @@ mod slow_tests {
         let service = CollaborationService::default();
         let members = ["agent_2", "agent_1", "agent_3"];
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &members);
-        let draft = CampAttachmentStore::new(&directory)
+        let draft = ThreadAttachmentStore::new(&directory)
             .save_content(
                 &mut database,
                 &camp_id,
@@ -9629,12 +9660,12 @@ mod slow_tests {
                 &user_envelope(
                     "structured-all-members-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(draft.revision),
                         body: String::new(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -9648,15 +9679,15 @@ mod slow_tests {
             .unwrap();
         assert_eq!(result.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "agent_run"), 3);
-        let run_creation_boundaries: i64 = database
+        let delivery_recipients: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(DISTINCT created_at) FROM agent_run",
+                "SELECT COUNT(DISTINCT recipient_agent_id) FROM camp_message_delivery",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(run_creation_boundaries, 1);
+        assert_eq!(delivery_recipients, 3);
         let (mode, addressed): (String, String) = database
             .connection()
             .query_row(
@@ -9679,7 +9710,7 @@ mod slow_tests {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let unavailable = store
             .save_content(
                 &mut database,
@@ -9693,12 +9724,12 @@ mod slow_tests {
         let invalid_send = user_envelope(
             "unavailable-structured-mention",
             Some(&camp_id),
-            TestCampMessageCommand {
+            TestThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: Some(unavailable.revision),
                 body: String::new(),
                 prepared_attachment_ids: Vec::new(),
-                address: TestCampMessageAddress::Default,
+                address: TestThreadMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
             },
@@ -9746,7 +9777,7 @@ mod slow_tests {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
 
         let rejected_empty = service
             .send_test_camp_message(
@@ -9754,12 +9785,12 @@ mod slow_tests {
                 &user_envelope(
                     "empty-draft-without-attachment",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: String::new(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -9798,7 +9829,7 @@ mod slow_tests {
                 &user_envelope(
                     "empty-draft-with-non-ready-attachment",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: not_ready.revision,
@@ -9830,7 +9861,7 @@ mod slow_tests {
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
         let source = directory.join("用户原始文件.txt");
         std::fs::write(&source, b"public camp attachment").unwrap();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store
             .prepare_from_path(&mut database, &camp_id, 0, &source, "说明.txt")
             .unwrap();
@@ -9843,7 +9874,7 @@ mod slow_tests {
             .verify_send(&database, &camp_id, &attachment_ids)
             .unwrap();
 
-        let view_store = CampAttachmentViewStore::for_test(&database).unwrap();
+        let view_store = ThreadAttachmentViewStore::for_test(&database).unwrap();
         let command_id = Uuid::new_v4().to_string();
         let publication = view_store
             .stage_publication(&mut database, &store, &camp_id, &command_id, draft.revision)
@@ -9862,7 +9893,7 @@ mod slow_tests {
                 &user_envelope(
                     &command_id,
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -9885,7 +9916,8 @@ mod slow_tests {
         assert_eq!(row_count(&database, "prepared_attachment"), 0);
         assert_eq!(row_count(&database, "camp_message"), 1);
         assert_eq!(row_count(&database, "message_attachment"), 1);
-        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 0);
         let (body, content_json): (String, String) = database
             .connection()
             .query_row(
@@ -9896,11 +9928,6 @@ mod slow_tests {
             .unwrap();
         assert_eq!(body, "");
         assert_eq!(content_json, "[]");
-        let purpose: String = database
-            .connection()
-            .query_row("SELECT purpose FROM agent_run", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(purpose, "Camp attachment-only message");
         let (stored_id, stored_path, stored_digest): (String, String, String) = database
             .connection()
             .query_row(
@@ -9938,11 +9965,11 @@ mod slow_tests {
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
         let source = directory.join("rollback.txt");
         std::fs::write(&source, b"must remain private").unwrap();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store
             .prepare_from_path(&mut database, &camp_id, 0, &source, "rollback.txt")
             .unwrap();
-        let view_store = CampAttachmentViewStore::for_test(&database).unwrap();
+        let view_store = ThreadAttachmentViewStore::for_test(&database).unwrap();
         let command_id = Uuid::new_v4().to_string();
         let publication = view_store
             .stage_publication(&mut database, &store, &camp_id, &command_id, draft.revision)
@@ -9973,7 +10000,7 @@ mod slow_tests {
                 &user_envelope(
                     &command_id,
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -10038,23 +10065,23 @@ mod slow_tests {
                 &user_envelope(
                     "reply-parent-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "原消息".into(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
                 ),
             )
             .unwrap();
-        let parent_id = parent.result.payload["campMessageId"]
+        let parent_id = parent.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store
             .save_body(&mut database, &camp_id, "引用用户消息")
             .unwrap();
@@ -10067,7 +10094,7 @@ mod slow_tests {
                 &user_envelope(
                     "reply-draft-only-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -10077,7 +10104,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(sent.result.status, CommandResultStatus::Applied);
-        let reply_id = sent.result.payload["campMessageId"].as_str().unwrap();
+        let reply_id = sent.result.payload["threadMessageId"].as_str().unwrap();
         let stored_reply: Option<String> = database
             .connection()
             .query_row(
@@ -10105,12 +10132,12 @@ mod slow_tests {
                 &user_envelope(
                     "continuation-source-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "先交给第二位成员".into(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".into()],
                         },
                         reply_to_camp_message_id: None,
@@ -10120,11 +10147,11 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(source.result.status, CommandResultStatus::Applied);
-        let source_message_id = source.result.payload["campMessageId"]
+        let source_message_id = source.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let empty = store.load_draft(&database, &camp_id).unwrap();
         assert_eq!(
             empty
@@ -10152,7 +10179,7 @@ mod slow_tests {
                 &user_envelope(
                     "continuation-materialized-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -10186,7 +10213,7 @@ mod slow_tests {
         );
         assert!(continued_reply.is_none());
         assert!(matches!(
-            serde_json::from_str::<StructuredCampMessageContent>(
+            serde_json::from_str::<StructuredThreadMessageContent>(
                 continued_content.as_deref().unwrap()
             )
             .unwrap()
@@ -10226,7 +10253,7 @@ mod slow_tests {
                 &user_envelope(
                     "continuation-unavailable-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: blocked_draft.revision,
@@ -10253,7 +10280,7 @@ mod slow_tests {
                 &user_envelope(
                     "continuation-repaired-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: repaired.revision,
@@ -10285,7 +10312,7 @@ mod slow_tests {
         );
         assert!(reply_to.is_none());
         assert!(matches!(
-            serde_json::from_str::<StructuredCampMessageContent>(content.as_deref().unwrap())
+            serde_json::from_str::<StructuredThreadMessageContent>(content.as_deref().unwrap())
                 .unwrap()
                 .first(),
             Some(Segment::MemberMention { agent_id }) if agent_id == "agent_1"
@@ -10307,19 +10334,19 @@ mod slow_tests {
                 &user_envelope(
                     "unavailable-reply-parent",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "Agent 原消息".into(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
                 ),
             )
             .unwrap();
-        let parent_id = parent.result.payload["campMessageId"]
+        let parent_id = parent.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -10337,7 +10364,7 @@ mod slow_tests {
                 [],
             )
             .unwrap();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store
             .save_body(&mut database, &camp_id, "不得回退给负责人")
             .unwrap();
@@ -10362,7 +10389,7 @@ mod slow_tests {
                 &user_envelope(
                     "unresolved-reply-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -10387,7 +10414,7 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 draft.revision,
-                crate::camp_attachment::CampComposerReplyRecipient::Member {
+                crate::camp_attachment::ThreadComposerReplyRecipient::Member {
                     agent_id: "agent_1".into(),
                 },
             )
@@ -10398,7 +10425,7 @@ mod slow_tests {
                 &user_envelope(
                     "resolved-reply-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: resolved.revision,
@@ -10412,7 +10439,7 @@ mod slow_tests {
             .connection()
             .query_row(
                 "SELECT addressed_agent_ids_json FROM camp_message WHERE id = ?1",
-                [accepted.result.payload["campMessageId"].as_str().unwrap()],
+                [accepted.result.payload["threadMessageId"].as_str().unwrap()],
                 |row| row.get(0),
             )
             .unwrap();
@@ -10445,7 +10472,7 @@ mod slow_tests {
                 &user_envelope(
                     "reply-author-race-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: race_draft.revision,
@@ -10471,7 +10498,7 @@ mod slow_tests {
                 &user_envelope(
                     "reply-parent-tombstoned-send",
                     Some(&camp_id),
-                    SendUserCampDraftCommand {
+                    SendUserThreadDraftCommand {
                         draft_client: DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: race_draft.revision,
@@ -10488,7 +10515,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn one_fanout_trigger_creates_one_turn_and_independent_frozen_runs() {
+    fn one_fanout_trigger_claims_independent_deliveries() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id =
@@ -10496,12 +10523,12 @@ mod slow_tests {
         let plain = user_envelope(
             "message-before-run",
             Some(&camp_id),
-            TestCampMessageCommand {
+            TestThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: None,
                 body: "公共前置信息".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: TestCampMessageAddress::Default,
+                address: TestThreadMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
             },
@@ -10513,12 +10540,12 @@ mod slow_tests {
         let fanout = user_envelope(
             "fanout-message",
             Some(&camp_id),
-            TestCampMessageCommand {
+            TestThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: None,
                 body: "请分别给出方案。".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: TestCampMessageAddress::Explicit {
+                address: TestThreadMessageAddress::Explicit {
                     agent_ids: vec![
                         "agent_2".to_string(),
                         "agent_1".to_string(),
@@ -10544,60 +10571,23 @@ mod slow_tests {
         assert_eq!(first.result.status, CommandResultStatus::Accepted);
         assert!(replay.replayed);
         assert_eq!(row_count(&database, "camp_message"), 2);
-        assert_eq!(row_count(&database, "camp_turn"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 2);
-        let frozen_runs: i64 = database
+        let deliveries = database
             .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM agent_run
-                WHERE status = 'queued'
-                  AND input_ready_at IS NOT NULL
-                  AND initial_camp_context_through_sequence = 2
-                  AND initial_conversation_context_through_sequence = 0
-                  AND trigger_camp_message_id IS NOT NULL
-                  AND trigger_conversation_message_id IS NULL
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(frozen_runs, 2);
-        let frozen_configs = database
-            .connection()
-            .prepare("SELECT effective_config_json FROM agent_run ORDER BY conversation_id")
+            .prepare("SELECT recipient_agent_id, status FROM camp_message_delivery ORDER BY recipient_agent_id")
             .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert!(frozen_configs.iter().all(|config| {
-            let config = serde_json::from_str::<Value>(config).unwrap();
-            config["schemaVersion"] == 3 && config.get("memberIdentity").is_none()
-        }));
-        database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_profile
-                SET display_name = '稍后生效的名称', team_role = '稍后生效的角色',
-                    professional_responsibilities = '稍后生效的职责',
-                    personality_traits_json = '["稍后生效"]',
-                    working_principles = '稍后生效的准则', growth_topic = '稍后生效的课题'
-                WHERE id = 'agent_1'
-                "#,
-                [],
-            )
-            .unwrap();
-        let frozen_after_profile_edit = database
-            .connection()
-            .prepare("SELECT effective_config_json FROM agent_run ORDER BY conversation_id")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert_eq!(frozen_after_profile_edit, frozen_configs);
+        assert_eq!(
+            deliveries,
+            vec![
+                ("agent_1".to_string(), "claimed".to_string()),
+                ("agent_2".to_string(), "claimed".to_string()),
+            ]
+        );
         let materialized_messages: i64 = database
             .connection()
             .query_row(
@@ -10632,7 +10622,6 @@ mod slow_tests {
                         title: "  实现轻量 Task  ".to_string(),
                         description: "  不自动唤醒任何队员  ".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -10936,7 +10925,6 @@ mod slow_tests {
                     title: command_id.to_string(),
                     description: format!("description:{command_id}"),
                     assignee_agent_id: assignee_agent_id.to_string(),
-                    ..Default::default()
                 },
             )
         };
@@ -11136,7 +11124,6 @@ mod slow_tests {
                     title: command_id.to_string(),
                     description: String::new(),
                     assignee_agent_id: assignee_agent_id.to_string(),
-                    ..Default::default()
                 },
             )
         };
@@ -11164,12 +11151,12 @@ mod slow_tests {
                 &user_envelope(
                     "start-luoke-task-run",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请处理 Task".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -11284,7 +11271,6 @@ mod slow_tests {
                         title: "普通 Agent 不得创建".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_1".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -11348,6 +11334,38 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(lead_update.result.status, CommandResultStatus::Applied);
+        let task_signals = crate::notification::NotificationEpisodeService::default()
+            .changes_since(&mut database, "local_user", 0, 100)
+            .unwrap();
+        let task_signals = task_signals
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .filter(|s| s.semantic == crate::notification::NotificationSemantic::TaskStatusChanged)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            task_signals.len(),
+            1,
+            "a title edit does not duplicate the blocked transition"
+        );
+        assert_eq!(
+            task_signals[0].action.subject.as_ref().unwrap().id,
+            owned_id
+        );
+        assert_eq!(
+            task_signals[0]
+                .action
+                .subject
+                .as_ref()
+                .unwrap()
+                .status
+                .as_deref(),
+            Some("blocked")
+        );
+        assert_eq!(
+            task_signals[0].action.kind,
+            crate::notification::NotificationActionKind::OpenTask
+        );
 
         let lead_created = service
             .create_task(
@@ -11363,7 +11381,6 @@ mod slow_tests {
                         title: "Lead 定义责任".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_1".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -11454,7 +11471,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn accepted_task_linked_run_keeps_frozen_admission_after_task_changes() {
+    fn queued_run_remains_dispatchable_after_task_changes() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id =
@@ -11470,7 +11487,6 @@ mod slow_tests {
                         title: "一次性准入".to_string(),
                         description: "Task 后续变化不得撤销已经接受的执行".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
                     },
                 ),
             )
@@ -11485,12 +11501,12 @@ mod slow_tests {
                 &user_envelope(
                     "queue-linked-task-run",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请按执行合同完成工作。".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -11516,7 +11532,7 @@ mod slow_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(admission.as_deref(), Some("agent_2"));
+        assert_eq!(admission, None);
 
         let reassigned = service
             .update_task(
@@ -11559,7 +11575,7 @@ mod slow_tests {
         assert!(candidates.iter().any(|candidate| {
             candidate.agent_run_id == agent_run_id
                 && candidate.agent_id == "agent_2"
-                && candidate.task_id.as_deref() == Some(task_id.as_str())
+                && candidate.task_id.is_none()
         }));
 
         let frozen_after: (Option<String>, String) = database
@@ -11570,10 +11586,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(
-            frozen_after,
-            (Some("agent_2".to_string()), "queued".to_string())
-        );
+        assert_eq!(frozen_after, (None, "queued".to_string()));
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -11600,7 +11613,6 @@ mod slow_tests {
                         title: "成员删除时释放".to_string(),
                         description: String::new(),
                         assignee_agent_id: "agent_4".to_string(),
-                        ..Default::default()
                     },
                 ),
             )

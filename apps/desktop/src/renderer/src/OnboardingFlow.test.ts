@@ -46,7 +46,7 @@ describe('first-run onboarding flow', () => {
       selectedMemberRole: 'luoke'
     }, 'checking')
     expect(markup).toContain('查找安装入口')
-    expect(markup).toContain('确认运行时身份')
+    expect(markup).toContain('确认智能体身份')
     expect(markup).toContain('读取运行配置')
     expect(markup).not.toContain('检查登录与版本')
     expect(markup).not.toContain('读取模型目录')
@@ -58,7 +58,7 @@ describe('first-run onboarding flow', () => {
       ...snapshot('runtime'),
       selectedMemberRole: 'luoke'
     }, 'ready', emptyHealth())
-    expect(markup).toContain('暂未找到可用的运行时')
+    expect(markup).toContain('暂未找到可用的智能体')
     expect(markup).toContain('查看安装引导')
     expect(markup).toContain('重新扫描')
     expect(markup).toContain('稍后配置')
@@ -79,7 +79,7 @@ describe('first-run onboarding flow', () => {
     }, 'ready', health, [installation])
     expect(markup).toContain('onboarding-runtime-list')
     expect(markup).toContain('onboarding-model-panel')
-    expect(markup).not.toContain('暂未找到可用的运行时')
+    expect(markup).not.toContain('暂未找到可用的智能体')
     expect(markup).not.toContain('Cursor Agent')
     expect(onboardingHasUsableRuntime('ready', health, [installation])).toBe(true)
     expect(onboardingHasUsableRuntime('error', health, [installation])).toBe(false)
@@ -118,7 +118,7 @@ describe('first-run onboarding flow', () => {
     expect(markup).toContain('这次扫描未完成')
     expect(markup).toContain('重新扫描')
     expect(markup).toContain('稍后配置')
-    expect(markup).not.toContain('暂未找到可用的运行时')
+    expect(markup).not.toContain('暂未找到可用的智能体')
     expect(markup).not.toContain('onboarding-model-panel')
   })
 
@@ -196,6 +196,7 @@ function renderOnboarding(
     runtimePhase,
     busy: false,
     error: null,
+    onLanguageChange: () => undefined,
     onThemeChange: () => undefined,
     onShowWelcome: () => undefined,
     onCompleteWelcome: () => undefined,

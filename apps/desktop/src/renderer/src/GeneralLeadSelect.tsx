@@ -3,6 +3,7 @@ import * as Popover from '@radix-ui/react-popover'
 import type { AgentProfile } from '@contracts'
 import { DialogControlIcon } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
+import { UiText, uiAttribute } from './interface-language'
 
 function selectable(agent: AgentProfile): boolean {
   return agent.presence === 'present' && agent.removedAt === null
@@ -87,38 +88,38 @@ export function GeneralLeadSelect({ agents, value, disabled, onChange }: {
   return (
     <Popover.Root open={open} onOpenChange={changeOpen}>
       <Popover.Trigger asChild>
-        <button type="button" className="general-lead-trigger" role="combobox" aria-label="默认队长"
+        <button type="button" className="general-lead-trigger" role="combobox" aria-label={uiAttribute("默认队长")}
           aria-expanded={open} aria-controls={open ? id : undefined} aria-haspopup="listbox"
           aria-activedescendant={activeDescendant} disabled={disabled}
           onPointerDown={() => { keyboardOpened.current = false }} onKeyDown={handleKey}>
           {selected && <MemberAvatar agentId={selected.agentId} avatarRef={selected.avatarRef} displayName={selected.displayName} size="mention" decorative />}
-          <span className="general-lead-value"><strong>{selected?.displayName ?? '请选择队长'}</strong><small>{selected ? selectable(selected) ? selected.teamRole : '已失效' : '从默认队员中选择'}</small></span>
+          <span className="general-lead-value"><strong>{selected?.displayName ?? uiAttribute("请选择队长")}</strong><small>{selected ? selectable(selected) ? selected.teamRole : uiAttribute("已失效") : uiAttribute("从默认队员中选择")}</small></span>
           <DialogControlIcon name="chevron" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content className="general-lead-popover" align="end" sideOffset={6} collisionPadding={12}
-          aria-label="选择默认队长" onKeyDown={handleKey}
+          aria-label={uiAttribute("选择默认队长")} onKeyDown={handleKey}
           onOpenAutoFocus={event => {
             event.preventDefault()
             if (keyboardOpened.current) (searchable ? search.current : list.current)?.focus()
           }}>
           {searchable && <div className="general-lead-search">
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
-            <input ref={search} type="search" aria-label="搜索队长" placeholder="搜索已选队员"
+            <input ref={search} type="search" aria-label={uiAttribute("搜索队长")} placeholder={uiAttribute("搜索已选队员")}
               aria-controls={id} aria-activedescendant={activeDescendant} autoComplete="off" value={query}
               onChange={event => { setQuery(event.target.value); setActiveId('') }} />
           </div>}
-          <div ref={list} id={id} role="listbox" aria-label="默认队长候选" aria-activedescendant={activeDescendant} tabIndex={-1} className="general-lead-options">
+          <div ref={list} id={id} role="listbox" aria-label={uiAttribute("默认队长候选")} aria-activedescendant={activeDescendant} tabIndex={-1} className="general-lead-options">
             {filtered.map((agent, index) => <div id={`${id}-${index}`} data-option-index={index} key={agent.agentId}
               role="option" aria-selected={agent.agentId === value} aria-disabled={!selectable(agent)}
               className={`general-lead-option${agent.agentId === active?.agentId ? ' is-active' : ''}`}
               onClick={() => choose(agent)} title={agent.displayName}>
               <MemberAvatar agentId={agent.agentId} avatarRef={agent.avatarRef} displayName={agent.displayName} size="mention" decorative />
-              <span className="general-lead-option-copy"><strong>{agent.displayName}</strong><small>{selectable(agent) ? agent.teamRole : '已失效'}</small></span>
+              <span className="general-lead-option-copy"><strong>{agent.displayName}</strong><small>{selectable(agent) ? agent.teamRole : uiAttribute("已失效")}</small></span>
               {agent.agentId === value && <DialogControlIcon name="check" />}
             </div>)}
-            {!filtered.length && <p className="general-lead-empty">没有匹配的队员</p>}
+            {!filtered.length && <p className="general-lead-empty"><UiText zh={"没有匹配的队员"} /></p>}
           </div>
         </Popover.Content>
       </Popover.Portal>

@@ -4,6 +4,7 @@ import {
   type MemberAvatarSourceSelection
 } from '@contracts'
 import { avatarCropToPixels, clampAvatarCrop } from './member-avatar-crop'
+import { uiAttribute } from './interface-language'
 
 export type NormalizedMemberAvatarSource = {
   sourcePng: Uint8Array
@@ -21,24 +22,24 @@ export function validateDecodedMemberAvatarDimensions(
   height: number
 ): void {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
-    throw new Error('角色图片尺寸无效')
+    throw new Error(uiAttribute('角色图片尺寸无效'))
   }
   if (
     width < MEMBER_AVATAR_LIMITS.minimumDecodedEdge
     || height < MEMBER_AVATAR_LIMITS.minimumDecodedEdge
   ) {
     throw new Error(
-      `角色图片至少需要 ${MEMBER_AVATAR_LIMITS.minimumDecodedEdge}×${MEMBER_AVATAR_LIMITS.minimumDecodedEdge}px`
+      uiAttribute('角色图片至少需要 {0}×{1}px', MEMBER_AVATAR_LIMITS.minimumDecodedEdge, MEMBER_AVATAR_LIMITS.minimumDecodedEdge)
     )
   }
   if (
     width > MEMBER_AVATAR_LIMITS.maximumDecodedEdge
     || height > MEMBER_AVATAR_LIMITS.maximumDecodedEdge
   ) {
-    throw new Error(`角色图片单边不能超过 ${MEMBER_AVATAR_LIMITS.maximumDecodedEdge}px`)
+    throw new Error(uiAttribute('角色图片单边不能超过 {0}px', MEMBER_AVATAR_LIMITS.maximumDecodedEdge))
   }
   if (width * height > MEMBER_AVATAR_LIMITS.maximumDecodedPixels) {
-    throw new Error('角色图片总像素不能超过 3200 万')
+    throw new Error(uiAttribute('角色图片总像素不能超过 3200 万'))
   }
 }
 

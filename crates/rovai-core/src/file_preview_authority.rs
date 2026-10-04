@@ -21,6 +21,7 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct ResolveFilePreviewSourceParams {
     pub kind: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     #[serde(default)]
     pub message_id: Option<String>,
@@ -45,7 +46,7 @@ pub fn resolve_skill_preview_source(
     data_dir: &Path,
     params: &ResolveFilePreviewSourceParams,
 ) -> Result<Option<ResolvedFilePreviewSource>> {
-    let camp_id = required_bounded(Some(&params.camp_id), "campId", 128)?;
+    let camp_id = required_bounded(Some(&params.camp_id), "threadId", 128)?;
     let skill_id = required_bounded(params.skill_id.as_deref(), "skillId", 128)?;
     if params.raw_reference.as_deref() != Some("SKILL.md") {
         return Ok(None);
@@ -126,7 +127,7 @@ pub fn resolve_skill_preview_source(
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResolvedFilePreviewSource {
     FileTarget {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId")]
         camp_id: String,
         #[serde(rename = "sourceKind")]
         source_kind: String,
@@ -142,7 +143,7 @@ pub enum ResolvedFilePreviewSource {
         allow_children: bool,
     },
     EvidenceReview {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId")]
         camp_id: String,
         #[serde(rename = "agentRunId")]
         agent_run_id: String,
@@ -152,7 +153,7 @@ pub enum ResolvedFilePreviewSource {
         evidence_file_id: String,
     },
     EvidenceIdentityUnavailable {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId")]
         camp_id: String,
         #[serde(rename = "agentRunId")]
         agent_run_id: String,
@@ -715,7 +716,7 @@ pub fn resolve_file_preview_source(
     blob_store: &ManagedBlobStore,
     params: ResolveFilePreviewSourceParams,
 ) -> Result<Option<ResolvedFilePreviewSource>> {
-    let camp_id = required_bounded(Some(&params.camp_id), "campId", 128)?;
+    let camp_id = required_bounded(Some(&params.camp_id), "threadId", 128)?;
     match params.kind.as_str() {
         "camp_workspace" => {
             let raw_reference =
@@ -1196,7 +1197,7 @@ mod tests {
     fn open_current_resolves_run_relative_and_external_absolute_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
         let external_file = root.join("external-worktree/src/shared.ts");
-        let external_path = external_file.to_string_lossy().into_owned();
+        let external_path = external_file.to_string_lossy().replace('\\', "/");
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1445,7 +1446,7 @@ mod tests {
     fn direct_camp_run_activity_file_uses_exact_evidence_for_run_and_external_files() {
         let (mut database, data_dir, root, execution_root) = run_workspace_fixture();
         let external_file = root.join("external-worktree/src/shared.ts");
-        let external_path = external_file.to_string_lossy().into_owned();
+        let external_path = external_file.to_string_lossy().replace('\\', "/");
         let project_root: PathBuf = database
             .connection()
             .query_row(
@@ -1685,6 +1686,8 @@ mod tests {
         assert!(is_supported_run_evidence_path("generated.txt"));
         assert!(!is_supported_run_evidence_path("../generated.txt"));
         assert!(!is_supported_run_evidence_path("src/../../generated.txt"));
-        assert!(is_supported_run_evidence_path("/tmp/generated.txt"));
+        assert!(is_supported_run_evidence_path(
+            &crate::test_support::absolute_test_path("/tmp/generated.txt")
+        ));
     }
 }

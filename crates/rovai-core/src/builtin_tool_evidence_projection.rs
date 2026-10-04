@@ -22,7 +22,7 @@ use crate::{
     },
 };
 
-pub const BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION: i64 = 3;
+pub const BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION: i64 = 4;
 
 const SEMANTIC_TEXT_LIMIT_CHARS: usize = 512;
 const IDENTIFIER_LIMIT_CHARS: usize = 256;
@@ -55,7 +55,14 @@ pub fn project_builtin_tool_invocation(
         _ => anyhow::bail!("Built-in Tool Evidence result and digest presence mismatch"),
     }
 
-    let canonical_input = project_input(operation, raw_input)?;
+    let operation = crate::thread_compat::canonical_operation(operation);
+    let input = crate::thread_compat::normalize_builtin_input(operation, raw_input.clone())?;
+    let mut result = raw_result.cloned();
+    if let Some(result) = result.as_mut() {
+        crate::thread_compat::project_builtin_result(operation, result)?;
+    }
+    let raw_result = result.as_ref();
+    let canonical_input = project_input(operation, &input)?;
     let canonical_result = raw_result
         .map(|result| project_result(operation, result))
         .transpose()?;
@@ -85,6 +92,15 @@ pub fn project_builtin_tool_invocation(
 fn project_input(operation: &str, input: &Value) -> Result<Value> {
     let mut projected = Map::new();
     match operation {
+        "thread.runs" => {
+            for field in ["threadId", "agentId"] {
+                insert_identifier(&mut projected, field, input.get(field));
+            }
+            insert_bool(&mut projected, "active", input.get("active"));
+            insert_enum(&mut projected, "status", input.get("status"));
+            insert_i64(&mut projected, "limit", input.get("limit"));
+            insert_opaque_cursor(&mut projected, input.get("cursor"));
+        }
         "mission.list" => {
             insert_query(&mut projected, input.get("query"));
             insert_enum(&mut projected, "status", input.get("status"));
@@ -212,13 +228,13 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
         }
         HISTORY_SEARCH_TOOL_NAME => {
             insert_query(&mut projected, input.get("query"));
-            insert_string_array(&mut projected, "campIds", input.get("campIds"));
+            insert_string_array(&mut projected, "threadIds", input.get("threadIds"));
             insert_bounded_string(&mut projected, "dateFrom", input.get("dateFrom"), 64);
             insert_bounded_string(&mut projected, "dateTo", input.get("dateTo"), 64);
             insert_i64(&mut projected, "limit", input.get("limit"));
         }
         CAMP_READ_TOOL_NAME => {
-            insert_identifier(&mut projected, "campId", input.get("campId"));
+            insert_identifier(&mut projected, "threadId", input.get("threadId"));
             insert_enum(&mut projected, "mode", input.get("mode"));
             insert_identifier(&mut projected, "messageId", input.get("messageId"));
             insert_enum(&mut projected, "direction", input.get("direction"));
@@ -311,11 +327,36 @@ fn project_memory_mutation_input(projected: &mut Map<String, Value>, input: &Val
 fn project_result(operation: &str, result: &Value) -> Result<Value> {
     let mut projected = Map::new();
     match operation {
+        "thread.runs" => {
+            insert_identifier(&mut projected, "threadId", result.get("threadId"));
+            insert_bounded_string(&mut projected, "observedAt", result.get("observedAt"), 64);
+            let items = project_object_array(result.get("items"), |item| {
+                let mut value = Map::new();
+                for field in ["agentRunId", "agentId"] {
+                    if item.get(field).is_some_and(Value::is_null) {
+                        value.insert(field.into(), Value::Null);
+                    } else {
+                        insert_identifier(&mut value, field, item.get(field));
+                    }
+                }
+                insert_enum(&mut value, "status", item.get("status"));
+                if item.get("messageCount").is_some_and(Value::is_null) {
+                    value.insert("messageCount".into(), Value::Null);
+                } else {
+                    insert_i64(&mut value, "messageCount", item.get("messageCount"));
+                }
+                Value::Object(value)
+            });
+            projected.insert("items".into(), Value::Array(items.values));
+            projected.insert("itemCount".into(), json!(items.total));
+            projected.insert("itemsTruncated".into(), json!(items.truncated));
+            insert_bool(&mut projected, "hasMore", result.get("hasMore"));
+        }
         "mission.list" => {
             let missions = project_object_array(result.get("missions"), |item| {
                 let mut value = Map::new();
                 insert_identifier(&mut value, "missionId", item.get("missionId"));
-                insert_identifier(&mut value, "campId", item.get("campId"));
+                insert_identifier(&mut value, "threadId", item.get("threadId"));
                 insert_enum(&mut value, "status", item.get("status"));
                 Value::Object(value)
             });
@@ -373,14 +414,14 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             insert_cursor_facts(&mut projected, result.get("nextCursor"));
         }
         CAMP_LIST_TOOL_NAME => {
-            let camps = project_object_array(result.get("camps"), |item| {
+            let camps = project_object_array(result.get("threads"), |item| {
                 let mut value = Map::new();
-                insert_identifier(&mut value, "campId", item.get("campId"));
+                insert_identifier(&mut value, "threadId", item.get("threadId"));
                 Value::Object(value)
             });
-            projected.insert("camps".to_string(), Value::Array(camps.values));
-            projected.insert("campCount".to_string(), json!(camps.total));
-            projected.insert("campsTruncated".to_string(), json!(camps.truncated));
+            projected.insert("threads".to_string(), Value::Array(camps.values));
+            projected.insert("threadCount".to_string(), json!(camps.total));
+            projected.insert("threadsTruncated".to_string(), json!(camps.truncated));
             insert_bool(&mut projected, "truncated", result.get("truncated"));
         }
         CAMP_SEARCH_TOOL_NAME | HISTORY_SEARCH_TOOL_NAME => {
@@ -396,7 +437,7 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             );
         }
         CAMP_READ_TOOL_NAME => {
-            insert_identifier(&mut projected, "campId", result.get("campId"));
+            insert_identifier(&mut projected, "threadId", result.get("threadId"));
             insert_enum(&mut projected, "mode", result.get("mode"));
             insert_identifier(
                 &mut projected,
@@ -405,8 +446,8 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             );
             insert_identifier(
                 &mut projected,
-                "threadRootMessageId",
-                result.get("threadRootMessageId"),
+                "replyChainRootMessageId",
+                result.get("replyChainRootMessageId"),
             );
             insert_enum(&mut projected, "direction", result.get("direction"));
             let items = project_object_array(result.get("items"), project_read_item);
@@ -517,7 +558,7 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
         }
         AUTOMATION_RUN_TOOL_NAME => {
             insert_identifier(&mut projected, "runId", result.get("runId"));
-            insert_identifier(&mut projected, "campId", result.get("campId"));
+            insert_identifier(&mut projected, "threadId", result.get("threadId"));
             insert_enum(&mut projected, "status", result.get("status"));
             insert_enum(&mut projected, "reason", result.get("reason"));
         }
@@ -546,7 +587,7 @@ fn project_task_item(item: &Value) -> Value {
 
 fn project_search_result(item: &Value) -> Value {
     let mut projected = Map::new();
-    insert_identifier(&mut projected, "campId", item.get("campId"));
+    insert_identifier(&mut projected, "threadId", item.get("threadId"));
     insert_identifier(&mut projected, "messageId", item.get("messageId"));
     insert_i64(&mut projected, "sequence", item.get("sequence"));
     insert_identifier(
@@ -817,7 +858,7 @@ mod tests {
             json!({"query": "handoff decision", "limit": 4}),
             json!({
                 "results": [{
-                    "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                    "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
                     "messageId": "message-1",
                     "sequence": 9,
                     "snippet": "private full search result"
@@ -1074,7 +1115,7 @@ mod tests {
                 "recipientPresentation": {"private": "not measurement evidence"}
             }),
         );
-        assert_eq!(projected["operation"], "camp.message.send");
+        assert_eq!(projected["operation"], "thread.message.send");
         assert_eq!(
             projected["canonicalInput"]["recipientAgentIds"][0],
             "agent_5"
@@ -1241,7 +1282,7 @@ mod tests {
             json!({"query": "find the review", "limit": 20}),
             json!({
                 "results": (0..100).map(|index| json!({
-                    "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                    "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
                     "messageId": format!("message-{index}"),
                     "sequence": index,
                     "body": "RAW_BODY_MUST_NOT_PERSIST",
@@ -1283,5 +1324,17 @@ mod tests {
         );
         assert_eq!(projected["canonicalResult"]["resultCount"], 100);
         assert_eq!(projected["canonicalResult"]["resultsTruncated"], true);
+        let runs = projection(
+            "thread.runs",
+            json!({"active":true, "agentId":"agent_1"}),
+            json!({
+                "threadId":"thread", "observedAt":"2026-10-03T00:00:00Z", "hasMore":false,
+                "items":[{"agentRunId":null,"agentId":"agent_1","status":"queued","messageCount":2,
+                "messagePreview":{"text":"RAW_PREVIEW_MUST_NOT_PERSIST","messageId":"m","truncated":false}}]
+            }),
+        );
+        assert!(!runs.to_string().contains("RAW_PREVIEW_MUST_NOT_PERSIST"));
+        assert_eq!(runs["canonicalResult"]["items"][0]["messageCount"], 2);
+        assert!(runs["canonicalResult"]["items"][0]["agentRunId"].is_null());
     }
 }

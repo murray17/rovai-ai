@@ -3,7 +3,7 @@ document_type: ui-platform-contract
 authority: renderer-windows-interaction-delta
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-22
+last_updated: 2026-10-02
 ---
 
 # Windows Interaction Delta
@@ -64,8 +64,18 @@ Windows `BrowserWindow` 保留系统 frame，但以 `titleBarStyle: hidden` 隐�
 `.window-drag-strip` 与 `.unified-sidebar-drag` 受控拖拽区；既有按钮继续保持 `no-drag`。
 
 Windows 的统一侧栏只把 traffic-light 预留从 38px 收至 8px；品牌、一级导航、Project / Camp、设置和所有右侧
-页面结构、内容与尺寸不变。关闭按钮继续进入 Planned Shutdown；Renderer 不劫持 Alt+F4、caption close 或系统关机
-来显示另一套关闭流程。
+页面结构、内容与尺寸不变。Windows 主窗口的 caption close / Alt+F4 由 Main 统一处理；默认显示现有 AppDialog
+风格的“关闭窗口”，提供“最小化到托盘”“退出 Rovai”和默认未选中的“记住我的选择”。取消、Esc 和弹窗 × 保留窗口。
+不记住只执行本次选择；记住后立即同步设置并在重启后保留。设置 → 通用 → 窗口提供“每次询问 / 最小化到系统托盘 /
+退出 Rovai”，可随时改回询问。Web 与 macOS 没有此项，macOS 不创建托盘且沿用原来的关窗流程。
+
+托盘创建成功才隐藏原窗口；失败保持可见并提示重试或退出。隐藏不销毁 Renderer、不执行 Draft teardown 或 Core shutdown；
+托盘单击、“打开 Rovai”和再次启动均显示并聚焦原窗口。右键菜单只有“打开 Rovai”和“退出 Rovai”。切换到非托盘行为时，
+先显示窗口，再保存选项并移除图标；失败保留之前的选项。普通最小化不受影响。
+
+明确退出、安装更新和重启绕过关闭选择，继续原有 Planned Shutdown。保存失败留在原窗口，退出准备失败恢复可见并提供重试。
+OS session-end 不被询问或托盘策略拦截；不把该 best-effort 生命周期当作受控退出完成的证据。
+精确状态和 IPC 见 [Windows Window Close v1](../contracts/windows-window-close-v1.md)。
 
 全局快捷键由一个平台文案映射提供。例如 Command Palette 在 macOS 显示 `⌘K`、Windows 显示 `Ctrl+K`；页面
 缩放继续执行 `CommandOrControl + / - / 0`。可访问名称描述动作，不把符号作为唯一名称。

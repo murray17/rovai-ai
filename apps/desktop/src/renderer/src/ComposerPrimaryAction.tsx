@@ -1,9 +1,11 @@
 import type { JSX, MouseEventHandler } from 'react'
+import { uiAttribute } from './interface-language'
 
 type ComposerPrimaryActionProps = {
   action: 'send' | 'stop'
   busy: boolean
   disabled: boolean
+  invite?: boolean
   onClick?: MouseEventHandler<HTMLButtonElement>
   type: 'button' | 'submit'
 }
@@ -12,16 +14,18 @@ export function ComposerPrimaryAction({
   action,
   busy,
   disabled,
+  invite = false,
   onClick,
   type
 }: ComposerPrimaryActionProps): JSX.Element {
   const label = action === 'stop'
-    ? busy ? '正在提交停止请求' : '停止当前执行'
-    : busy ? '正在发送消息' : '发送消息'
+    ? busy ?uiAttribute("正在提交停止请求") :uiAttribute("停止当前执行")
+    : invite ? busy ? uiAttribute('正在邀请并发送') : uiAttribute('邀请并发送')
+      : busy ?uiAttribute("正在发送消息") :uiAttribute("发送消息")
 
   return (
     <button
-      className={`composer-primary-action is-${action}`}
+      className={`composer-primary-action is-${action}${action === 'send' && invite ? ' is-invite' : ''}`}
       type={type}
       aria-label={label}
       title={label}
@@ -43,6 +47,9 @@ export function ComposerPrimaryAction({
               </svg>
             )}
       </span>
+      {action === 'send' && invite && <span className="composer-primary-action-label">
+        {busy ? uiAttribute('正在邀请…') : uiAttribute('邀请并发送')}
+      </span>}
     </button>
   )
 }

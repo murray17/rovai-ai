@@ -1,3 +1,4 @@
+import { uiAttribute } from './interface-language'
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react'
 
 type Pointer = { pointerId: number; pointerType: string; isPrimary: boolean; button: number; clientX: number; clientY: number }
@@ -33,9 +34,9 @@ export function createNavigationPressGesture(onOpen: () => void) {
         cancel()
       }
     },
-    openContext(): void {
+    openContext(suppressReleaseClick = true): void {
       cancel()
-      suppressClick = true
+      suppressClick = suppressReleaseClick
       onOpen()
     },
     consumeClick(): boolean {
@@ -47,11 +48,21 @@ export function createNavigationPressGesture(onOpen: () => void) {
 }
 
 export function useNavigationPressMenu(enabled: boolean) {
-  const [open, setOpen] = useState(false)
+  const [open, updateOpen] = useState(false)
+  const [contextPoint, setContextPoint] = useState<{ x: number; y: number } | null>(null)
+  const setOpen = (next: boolean): void => {
+    if (!next) setContextPoint(null)
+    updateOpen(next)
+  }
   const ignoreMenuRelease = useRef(false)
+  const lastPointerType = useRef('mouse')
+  const rowFocusTarget = useRef<HTMLElement | null>(null)
+  const rememberRow = (row: HTMLElement): void => {
+    rowFocusTarget.current = row.matches('button') ? row : row.querySelector('button')
+  }
   const gesture = useMemo(() => createNavigationPressGesture(() => {
     ignoreMenuRelease.current = true
-    setOpen(true)
+    updateOpen(true)
   }), [])
   const stopWatching = useRef(() => {})
   const cancel = (): void => { gesture.cancel(); stopWatching.current() }
@@ -61,10 +72,12 @@ export function useNavigationPressMenu(enabled: boolean) {
     return () => { gesture.cancel(); stopWatching.current() }
   }, [enabled, gesture])
 
-  const rowProps: HTMLAttributes<HTMLButtonElement> = enabled ? {
+  const rowProps: HTMLAttributes<HTMLElement> = enabled ? {
     'aria-haspopup': 'menu',
-    'aria-description': '长按或按 Shift+F10 显示操作',
+    'aria-description': uiAttribute('右键、长按或按 Shift+F10 显示操作'),
     onPointerDown: event => {
+      lastPointerType.current = event.pointerType
+      rememberRow(event.currentTarget)
       cancel()
       if (!gesture.start(event)) return
       const otherPointer = (next: PointerEvent): void => { if (!next.isPrimary) cancel() }
@@ -87,15 +100,19 @@ export function useNavigationPressMenu(enabled: boolean) {
       if (gesture.consumeClick()) { event.preventDefault(); event.stopPropagation() }
     },
     onContextMenu: event => {
+      rememberRow(event.currentTarget)
       event.preventDefault()
       cancel()
-      gesture.openContext()
+      setContextPoint({ x: event.clientX, y: event.clientY })
+      gesture.openContext(['touch', 'pen'].includes((event.nativeEvent as PointerEvent).pointerType || lastPointerType.current))
     },
     onKeyDown: event => {
       gesture.consumeClick()
       if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        rememberRow(event.currentTarget)
         event.preventDefault()
         cancel()
+        setContextPoint(null)
         setOpen(true)
       }
     }
@@ -109,5 +126,17 @@ export function useNavigationPressMenu(enabled: boolean) {
       cancel()
     }
   }
-  return { open, setOpen, rowProps, menuProps }
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (): void => { setContextPoint(null); updateOpen(false) }
+    document.addEventListener('scroll', close, true)
+    document.addEventListener('visibilitychange', close)
+    window.addEventListener('blur', close)
+    return () => {
+      document.removeEventListener('scroll', close, true)
+      document.removeEventListener('visibilitychange', close)
+      window.removeEventListener('blur', close)
+    }
+  }, [open])
+  return { open, setOpen, contextPoint, rowProps, menuProps, restoreRowFocus: () => rowFocusTarget.current?.focus({ preventScroll: true }) }
 }

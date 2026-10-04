@@ -149,7 +149,7 @@ SELECT EXISTS(
 | Native Bootstrap | 新 Binding：v5／Formatter 5；普通 Camp Charter **14**，平台技能 section 按 main 已确认规则输出 | 已有 Binding：原 v4 或 v5 Bootstrap、Charter、系统提示词及证据原字节；旧 Binding 继续使用 main 的 v4／Formatter 4／Charter **13**／非 batch 26 **兼容摘要投影**，其他安装、协议、配置、权限、特定指导版本等相等检查不放松 |
 | 其他 | Profile 10 的冻结 JSON `{"profileVersion":10,"maxSelfActiveTasks":8}`、选择与预算数值不变 | `camp.read` 默认 20／显式上限 100／分页不变；`RUN_INPUT` 完整有序、Skills Selection／Resolution v2、附件与其他 Run Facts 字段不变 |
 
-实际新 Bootstrap v5／Formatter 5、非 batch v27 与 Binding **兼容摘要**中的旧 v4／Formatter 4／非 batch v26 本来就由 main 分开计算；此次只让实际新建 Charter 到 14，摘要中的 Charter 兼容值继续保持 **13**。不得把实际新建 Charter 14、新公开 Manifest 31 或实际 Bootstrap 5 代入旧 Binding 的兼容投影，也不得删掉该投影里的 Charter 字段。只有文案这一受限兼容变更不旋转已有健康 Binding；其他真实不兼容仍依原机制切换。旧 Session 若缺失／损坏原 Bootstrap Evidence，不能伪造新 Charter 作为其原系统提示词，须拒绝该投递并显式报错。真正新建 Binding 才使用新版 Charter 与 v5 Bootstrap。不得把这条例外解释为忽略未来所有 Charter 变更。
+实际新 Bootstrap v5／Formatter 5、非 batch v27 与 Binding **兼容摘要**中的旧 v4／Formatter 4／非 batch v26 本来就由 main 分开计算；此次只让实际新建 Charter 到 14，摘要中的 Charter 兼容值继续保持 **13**。不得把实际新建 Charter 14、新公开 Manifest 31 或实际 Bootstrap 5 代入旧 Binding 的兼容投影，也不得删掉该投影里的 Charter 字段。只有文案这一受限兼容变更不旋转已有健康 Binding；其他真实不兼容仍依原机制切换。已有 Bootstrap Evidence 的 Binding 继续加载原字节并校验 delivery mode、Blob 与平台 Skills 摘要，损坏时拒绝；缺失证据的 Binding 按原有首次准备路径冻结一次，不因 `native_session_id` 已存在单独拒绝。是否实际交付仍由原有 Input Delivery 与 Charter digest 门禁决定，不默认重建 Session 或重复注入 Bootstrap。不得把这条例外解释为忽略未来所有 Charter 变更。
 
 ## 数据迁移、准入与恢复
 
@@ -166,9 +166,9 @@ SELECT EXISTS(
 3. 新公开 31／10／8 按上文 Skills section 顺序、完整 Run Facts shape 和 Profile 10 JSON 输出，完整 hint 参与 claim 原有容量估算与最终 payload 字节校验，`RUN_INPUT` 不截断。**不扩修**既有容量临界估算低估，作为已知限制记录。
 4. 旧 29／9／7、main 30／10／7、非 batch 26／6／5 以及 27／7／5 已物化的冻结证据与 payload 原字节有界恢复；旧公开 28 拒绝派发；旧 30 只有冻结 Input 而尚未物化 Manifest 时，因缺完整动态 Skills section 冻结证据拒绝物化，不能临时生成原版或替换为新版。混搭 30／9／8、31／9／8、31／10／7、伪造新写入 30、缺失 Skills 证据均不得误放行。
 5. 从 main 的 `v1.69`／123 经 174 到 `v1.70`／124；旧行、Bootstrap 和 Skills 证据不重写，行数／摘要／外键一致；分支专有 173 虽同号同标记仍被识别并拒绝自动升级，不发生数据清空或部分迁移。
-6. 相同 Binding 安装／协议／权限／配置未变时，新 Run 31／10／8 在同一 Native Session 投递，新 Charter 不重发；旧 v4／v5 Bootstrap 在 compaction 只按原字节重投。自然新建 Session 使用 Charter 14 与 Bootstrap v5；旧证据缺失或损坏时不得以 Charter 14 补旧 Session；真正不兼容仍依现有检查切换。
+6. 相同 Binding 安装／协议／权限／配置未变时，新 Run 31／10／8 在同一 Native Session 投递，新 Charter 不重发；已有旧 v4／v5 Bootstrap 在 compaction 只按原字节重投。自然新建 Session 使用 Charter 14 与 Bootstrap v5；证据缺失时沿原首次准备路径冻结，已存证据损坏时拒绝；真正不兼容仍依现有检查切换。验证各 Runtime 首轮与续轮不重复注入 Bootstrap。
 
-Principal 已明确要求停止测试、不委派子 Agent 验收、容量低估不处理；以上为**待验证**场景，不暗示已有通过结果，也不自行运行编译、测试或双轨真实任务 Gate。旧分支扩展 DB 测试此前为 73 通过、14 失败，随后静态调整未复测；主线 Skills 的既有验证不能替代本合并验证。
+此前 Principal 曾要求停止测试、不委派子 Agent 验收、容量低估不处理；2026-09-25 的新指令已明确要求验证本次 Bootstrap 修复的首轮、续轮和目标 Camp 重试。旧分支扩展 DB 测试此前为 73 通过、14 失败，随后静态调整未复测；主线 Skills 的既有验证不能替代本次修复验证。容量低估仍不在本次修复范围。
 
 ## 二次确认记录
 

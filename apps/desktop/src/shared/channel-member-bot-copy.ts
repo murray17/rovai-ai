@@ -3,6 +3,7 @@ import type { ChannelKind } from '@contracts'
 export const FEISHU_MEMBER_BOT_LABEL = 'Rovai AI Teammate'
 const MEMBER_BOT_LABELS = {
   feishu: FEISHU_MEMBER_BOT_LABEL,
+  lark: FEISHU_MEMBER_BOT_LABEL,
   dingtalk: FEISHU_MEMBER_BOT_LABEL
 } satisfies Record<ChannelKind, string>
 

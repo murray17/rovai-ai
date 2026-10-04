@@ -53,12 +53,12 @@ try {
   if (created.status !== 'accepted') {
     throw new Error(`Camp intake was not accepted: ${JSON.stringify(created)}`)
   }
-  const campId = created.payload.campId
+  const threadId = created.payload.threadId
   const agentRunId = created.payload.agentRunIds?.[0]
   if (!agentRunId) throw new Error(`Camp intake returned no AgentRun: ${JSON.stringify(created)}`)
 
   let beforeCrash = await waitFor(async () => {
-    const snapshot = await firstCore.request('camps.snapshot', { campId })
+    const snapshot = await firstCore.request('camps.snapshot', { threadId })
     failOnApproval(snapshot)
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     const manifest = snapshot.contextManifests.find((candidate) =>
@@ -77,7 +77,7 @@ try {
   // Runtime tools are not necessarily reflected as Rovai-ai Action rows, so the
   // durable condition here is accepted input plus a still-running AgentRun.
   await wait(1_500)
-  const crashSnapshot = await firstCore.request('camps.snapshot', { campId })
+  const crashSnapshot = await firstCore.request('camps.snapshot', { threadId })
   const crashRun = crashSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
   if (crashRun?.status !== 'running') {
     throw new Error(`AgentRun completed before crash injection: ${JSON.stringify(crashSnapshot)}`)
@@ -86,7 +86,7 @@ try {
   const taskCommandId = crypto.randomUUID()
   const taskRequest = {
     commandId: taskCommandId,
-    campId,
+    threadId,
     title: 'Durable recovery checkpoint',
     assigneeAgentId: agentId,
     description: 'Must survive a hard Core restart exactly once without re-enqueueing the accepted input.'
@@ -107,7 +107,7 @@ try {
 
   recoveredCore = startCore(dataDir)
   const immediatelyRecovered = await waitFor(async () => {
-    const snapshot = await recoveredCore.request('camps.snapshot', { campId })
+    const snapshot = await recoveredCore.request('camps.snapshot', { threadId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     return run?.status === 'waiting' && run.waitReason === 'recovery_blocked'
       ? { snapshot, run }
@@ -127,7 +127,7 @@ try {
       || replayedTask.payload?.taskId !== taskId) {
     throw new Error(`Task command replay changed its durable result: ${JSON.stringify(replayedTask)}`)
   }
-  const finalSnapshot = await recoveredCore.request('camps.snapshot', { campId })
+  const finalSnapshot = await recoveredCore.request('camps.snapshot', { threadId })
   const finalRun = finalSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
   const finalManifest = finalSnapshot.contextManifests.find((candidate) =>
     candidate.agentRunId === agentRunId
@@ -155,7 +155,7 @@ try {
   recoveredCore = null
   restartedCore = startCore(dataDir)
   await restartedCore.request('health.check')
-  const afterSecondRestart = await restartedCore.request('camps.snapshot', { campId })
+  const afterSecondRestart = await restartedCore.request('camps.snapshot', { threadId })
   if (afterSecondRestart.agentRuns.length !== 1
       || afterSecondRestart.messages.length !== finalSnapshot.messages.length
       || afterSecondRestart.contextManifests.length !== 1
@@ -173,7 +173,7 @@ try {
   const resolution = await restartedCore.request('agentRuns.resolveRecoveryBlocker', {
     commandId: crypto.randomUUID(),
     command: {
-      campId,
+      threadId,
       agentRunId,
       expectedVersion: blocker.version
     }
@@ -182,7 +182,7 @@ try {
       || resolution.code !== 'agent_run.accepted_input_outcome_unknown') {
     throw new Error(`Recovery blocker did not close safely: ${JSON.stringify(resolution)}`)
   }
-  const terminalSnapshot = await restartedCore.request('camps.snapshot', { campId })
+  const terminalSnapshot = await restartedCore.request('camps.snapshot', { threadId })
   await restartedCore.stop()
   restartedCore = null
   const terminalRun = terminalSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
@@ -209,7 +209,7 @@ try {
     coreBinary,
     adapterKind,
     runtimeVersion,
-    campId,
+    threadId,
     agentRunId,
     originalExecutionEpoch: originalEpoch,
     recoveredExecutionEpoch: finalRun.executionEpoch,

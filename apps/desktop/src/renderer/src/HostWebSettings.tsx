@@ -7,6 +7,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { CopyIcon } from './CopyIcon'
 import { readErrorMessage } from './error-message'
 import './remote-connection.css'
+import { UiText, uiAttribute } from './interface-language'
 
 export function HostWebSettings({ api, portDraft, onPortDraftChange }: {
   api: HostWebApi
@@ -54,7 +55,7 @@ export function HostWebSettings({ api, portDraft, onPortDraftChange }: {
   async function change(operation: 'start' | 'stop'): Promise<void> {
     if (changing.current) return
     if (operation === 'start' && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)) {
-      setError('请输入 1–65535 之间的端口。'); document.getElementById('remote-port')?.focus(); return
+      setError(uiAttribute('请输入 1–65535 之间的端口。')); document.getElementById('remote-port')?.focus(); return
     }
     changing.current = true
     const current = ++generation.current
@@ -82,7 +83,7 @@ export function HostWebSettings({ api, portDraft, onPortDraftChange }: {
   }
   async function copy(value: string, label: string): Promise<boolean> {
     try { await navigator.clipboard.writeText(value); setFeedback(''); return true }
-    catch { setFeedback(label === '连接地址' ? `无法自动复制，请手动复制：${value}` : `无法自动复制，请选择${label}后手动复制。`); return false }
+    catch { setFeedback(label === '连接地址' ? uiAttribute("无法自动复制，请手动复制：{0}", String(value)) : uiAttribute("无法自动复制，请选择{0}后手动复制。", String(label))); return false }
   }
   const addresses = status?.addresses ?? []
   const localAddresses = addresses.filter(item => isLocalAddress(item.origin))
@@ -90,41 +91,41 @@ export function HostWebSettings({ api, portDraft, onPortDraftChange }: {
   const selected = remoteAddresses.some(item => item.origin === address) ? address : remoteAddresses[0]?.origin ?? ''
   const local = localAddresses[0]?.origin ?? ''
   return <div className="general-settings remote-connection-page">
-    <SettingsPageHeader eyebrow="Settings / Remote connection" title="远程连接" description="通过浏览器连接这台电脑。" />
+    <SettingsPageHeader eyebrow="Settings / Remote connection" title={uiAttribute("远程连接")} description={uiAttribute("通过浏览器连接这台电脑。")} />
     <div className="general-settings-body">
-      <section className="general-settings-section remote-access-fields" aria-label="远程访问设置">
+      <section className="general-settings-section remote-access-fields" aria-label={uiAttribute("远程访问设置")}>
         <div className="remote-setting-row">
-          <div className="remote-copy"><label htmlFor="remote-enabled">远程访问</label></div>
-          {(busy || status === null) && <span className="remote-state" role="status">{busy ? '正在更新…' : error ? '读取失败' : '正在读取…'}</span>}
-          <input id="remote-enabled" type="checkbox" role="switch" aria-label="远程访问" checked={enabled} disabled={busy || status === null} onChange={() => void change(enabled ? 'stop' : 'start')} />
+          <div className="remote-copy"><label htmlFor="remote-enabled"><UiText zh={"远程访问"} /></label></div>
+          {(busy || status === null) && <span className="remote-state" role="status">{busy ? uiAttribute("正在更新…") : error ? uiAttribute("读取失败") : uiAttribute("正在读取…")}</span>}
+          <input id="remote-enabled" type="checkbox" role="switch" aria-label={uiAttribute("远程访问")} checked={enabled} disabled={busy || status === null} onChange={() => void change(enabled ? 'stop' : 'start')} />
         </div>
         <div className="remote-setting-row">
-          <div className="remote-copy"><label htmlFor="remote-port">端口</label><p id="remote-port-note">修改后，下次开启时生效。</p></div>
+          <div className="remote-copy"><label htmlFor="remote-port"><UiText zh={"端口"} /></label><p id="remote-port-note"><UiText zh={"修改后，下次开启时生效。"} /></p></div>
           <input id="remote-port" className="remote-port" inputMode="numeric" aria-describedby="remote-port-note" value={port} disabled={busy} onChange={event => onPortDraftChange(event.target.value)} />
         </div>
-        <p className="remote-footnote">HTTP 明文连接，请仅在可信网络开启。</p>
+        <p className="remote-footnote"><UiText zh={"HTTP 明文连接，请仅在可信网络开启。"} /></p>
         {enabled &&
           <div className="remote-addresses">
-            <RemoteAddress api={api} label="本机地址" description="在这台电脑上访问" value={local} onCopy={() => copy(local, '连接地址')} />
-            <RemoteAddress api={api} label="远程地址" description="在其他设备上访问" value={selected} onCopy={() => copy(selected, '连接地址')}>
-              {remoteAddresses.length > 1 && <select id="remote-address" aria-label="选择远程地址" className="remote-address-select" value={selected} onChange={event => { setAddress(event.target.value); setFeedback('') }}>{remoteAddresses.map(item => <option key={item.origin} value={item.origin}>{item.origin} · {item.interface}</option>)}</select>}
+            <RemoteAddress api={api} label={uiAttribute("本机地址")} description={uiAttribute("在这台电脑上访问")} value={local} onCopy={() => copy(local, uiAttribute('连接地址'))} />
+            <RemoteAddress api={api} label={uiAttribute("远程地址")} description={uiAttribute("在其他设备上访问")} value={selected} onCopy={() => copy(selected, uiAttribute('连接地址'))}>
+              {remoteAddresses.length > 1 && <select id="remote-address" aria-label={uiAttribute("选择远程地址")} className="remote-address-select" value={selected} onChange={event => { setAddress(event.target.value); setFeedback('') }}>{remoteAddresses.map(item => <option key={item.origin} value={item.origin}>{item.origin} · {item.interface}</option>)}</select>}
             </RemoteAddress>
           </div>
         }
         <div className="remote-field">
-          <label htmlFor="remote-token">登录 Token</label>
+          <label htmlFor="remote-token"><UiText zh={"登录 Token"} /></label>
           <div className="remote-token">
             <input id="remote-token" type={visible ? 'text' : 'password'} value={token} readOnly autoComplete="off" spellCheck={false} />
             <div className="remote-token-actions">
-              <button type="button" className="message-copy-button" disabled={!token} onClick={() => setVisible(value => !value)} aria-pressed={visible} aria-label={visible ? '隐藏登录 Token' : '显示登录 Token'} title={visible ? '隐藏登录 Token' : '显示登录 Token'}>
+              <button type="button" className="message-copy-button" disabled={!token} onClick={() => setVisible(value => !value)} aria-pressed={visible} aria-label={visible ? uiAttribute("隐藏登录 Token") : uiAttribute("显示登录 Token")} title={visible ? uiAttribute("隐藏登录 Token") : uiAttribute("显示登录 Token")}>
                 <svg viewBox="0 0 24 24" aria-hidden="true">{visible ? <><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.5 5.4A10 10 0 0 1 12 5c6 0 10 7 10 7a18 18 0 0 1-3 3.8M6 6.5A20 20 0 0 0 2 12s4 7 10 7a11 11 0 0 0 5-1.4" /></> : <><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>}</svg>
               </button>
-              <RemoteCopyButton key={token} label="复制登录 Token" value={token} onCopy={() => copy(token, '登录 Token')} />
+              <RemoteCopyButton key={token} label={uiAttribute("复制登录 Token")} value={token} onCopy={() => copy(token, uiAttribute('登录 Token'))} />
             </div>
           </div>
         </div>
       </section>
-      {error && <div><p className="remote-error" role="alert">{error}</p><button type="button" className="quiet-button compact" disabled={busy} onClick={() => setReload(value => value + 1)}>重新读取</button></div>}
+      {error && <div><p className="remote-error" role="alert">{error}</p><button type="button" className="quiet-button compact" disabled={busy} onClick={() => setReload(value => value + 1)}><UiText zh={"重新读取"} /></button></div>}
       {feedback && <p className="remote-feedback" role="status">{feedback}</p>}
     </div>
   </div>
@@ -145,12 +146,12 @@ function RemoteAddress({ api, label, description, value, onCopy, children }: {
 }): React.JSX.Element {
   return <div className="remote-connection-address" data-address={value} aria-label={label}>
     <div className="remote-copy"><strong>{label}</strong><p>{description}</p></div>
-    <div className="remote-address-value">{value ? <a href={value} target="_blank" rel="noopener noreferrer">{value}</a> : <span>暂无可用地址</span>}{children}</div>
+    <div className="remote-address-value">{value ? <a href={value} target="_blank" rel="noopener noreferrer">{value}</a> : <span><UiText zh={"暂无可用地址"} /></span>}{children}</div>
     <div className="remote-address-actions">
-      <RemoteCopyButton key={value} label={`复制${label}`} value={value} onCopy={onCopy} />
-      <Dialog.Root><Dialog.Trigger asChild><button type="button" className="message-copy-button" aria-label={`${label}二维码`} title="扫码登录" disabled={!value}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><path d="M14 14h3v3h3v3h-6v-3M20 14h.01M7 7h.01M17 7h.01M7 17h.01" /></svg></button></Dialog.Trigger>
+      <RemoteCopyButton key={value} label={uiAttribute("复制{0}", String(label))} value={value} onCopy={onCopy} />
+      <Dialog.Root><Dialog.Trigger asChild><button type="button" className="message-copy-button" aria-label={uiAttribute("{0}二维码", String(label))} title={uiAttribute("扫码登录")} disabled={!value}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><path d="M14 14h3v3h3v3h-6v-3M20 14h.01M7 7h.01M17 7h.01M7 17h.01" /></svg></button></Dialog.Trigger>
         {value && <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><AppDialogContent onCloseAutoFocus={() => {}}>
-          <AppDialogHeader title="扫码登录" description="2 分钟内有效，仅可使用一次。" />
+          <AppDialogHeader title={uiAttribute("扫码登录")} description={uiAttribute("2 分钟内有效，仅可使用一次。")} />
           <LoginQr key={value} api={api} origin={value} label={label} />
         </AppDialogContent></Dialog.Portal>}
       </Dialog.Root>
@@ -177,17 +178,17 @@ function LoginQr({ api, origin, label }: { api: HostWebApi; origin: string; labe
       url.hash = `login-ticket=${result.ticket}`
       setCode(url.href)
       expiry = setTimeout(() => setCode(null), remaining)
-    }).catch(() => { if (active) setError('二维码未能生成，请重试。') })
+    }).catch(() => { if (active) setError(uiAttribute('二维码未能生成，请重试。')) })
       .finally(() => { if (active) setBusy(false) })
     return () => { active = false; clearTimeout(expiry) }
   }, [api, origin, attempt])
   return <AppDialogBody className="remote-qr">
     <div className="remote-qr-frame">
-      {code ? <QRCodeSVG value={code} size={208} marginSize={4} level="M" role="img" title={`${label}扫码登录`} />
-        : <p role={error ? 'alert' : 'status'}>{busy ? '正在生成二维码…' : error || '二维码已过期'}</p>}
+      {code ? <QRCodeSVG value={code} size={208} marginSize={4} level="M" role="img" title={uiAttribute("{0}扫码登录", String(label))} />
+        : <p role={error ? 'alert' : 'status'}>{busy ? uiAttribute("正在生成二维码…") : error ||uiAttribute("二维码已过期")}</p>}
     </div>
     <code>{origin}</code>
-    <button type="button" className="quiet-button compact" disabled={busy} onClick={() => setAttempt(value => value + 1)}>重新生成</button>
+    <button type="button" className="quiet-button compact" disabled={busy} onClick={() => setAttempt(value => value + 1)}><UiText zh={"重新生成"} /></button>
   </AppDialogBody>
 }
 
@@ -200,7 +201,7 @@ function RemoteCopyButton({ label, value, onCopy }: { label: string; value: stri
     return () => clearTimeout(timer)
   }, [copiedAt])
   return <>
-    <button type="button" className="message-copy-button" aria-label={label} title={copied ? '已复制' : label} disabled={!value} onClick={() => { void onCopy().then(success => setCopiedAt(success ? Date.now() : null)) }}><CopyIcon copied={copied} /></button>
-    <span className="copy-feedback" role="status" aria-live="polite">{copied ? '已复制' : ''}</span>
+    <button type="button" className="message-copy-button" aria-label={label} title={copied ? uiAttribute("已复制") : label} disabled={!value} onClick={() => { void onCopy().then(success => setCopiedAt(success ? Date.now() : null)) }}><CopyIcon copied={copied} /></button>
+    <span className="copy-feedback" role="status" aria-live="polite">{copied ? uiAttribute("已复制") : ''}</span>
   </>
 }

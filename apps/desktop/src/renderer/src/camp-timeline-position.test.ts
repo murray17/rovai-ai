@@ -3,24 +3,24 @@ import {
   campTimelineContentChanged,
   campTimelineFollowingLatestAfterScroll,
   campTimelineIsNearBottom,
-  followLatestCampTimeline,
-  restoredCampTimelineScrollTop
+  followLatestThreadTimeline,
+  restoredThreadTimelineScrollTop
 } from './camp-timeline-position'
 
-describe('Camp timeline reading positions', () => {
-  it('restores a reading offset unless the Camp was following the latest message', () => {
-    expect(restoredCampTimelineScrollTop(null, 1_000, 300)).toBe(700)
-    expect(restoredCampTimelineScrollTop(
+describe('Thread timeline reading positions', () => {
+  it('restores a reading offset unless the Thread was following the latest message', () => {
+    expect(restoredThreadTimelineScrollTop(null, 1_000, 300)).toBe(700)
+    expect(restoredThreadTimelineScrollTop(
       { scrollTop: 240, followingLatest: false },
       1_000,
       300
     )).toBe(240)
-    expect(restoredCampTimelineScrollTop(
+    expect(restoredThreadTimelineScrollTop(
       { scrollTop: 900, followingLatest: false },
       1_000,
       300
     )).toBe(700)
-    expect(restoredCampTimelineScrollTop(
+    expect(restoredThreadTimelineScrollTop(
       { scrollTop: 240, followingLatest: true },
       1_000,
       300
@@ -35,7 +35,7 @@ describe('Camp timeline reading positions', () => {
   it('moves an earlier reading position to the latest message after user submission', () => {
     const scroll = { scrollTop: 240, scrollHeight: 1_000, clientHeight: 300 }
 
-    expect(followLatestCampTimeline(scroll)).toEqual({
+    expect(followLatestThreadTimeline(scroll)).toEqual({
       scrollTop: 700,
       followingLatest: true
     })
@@ -56,7 +56,7 @@ describe('Camp timeline reading positions', () => {
   it('moves to the new bottom when the visible timeline height shrinks', () => {
     const scroll = { scrollTop: 700, scrollHeight: 1_000, clientHeight: 180 }
 
-    expect(followLatestCampTimeline(scroll)).toEqual({
+    expect(followLatestThreadTimeline(scroll)).toEqual({
       scrollTop: 820,
       followingLatest: true
     })

@@ -5,23 +5,29 @@ authority: channel-host-adaptive-maintenance-and-quiescence
 status: accepted
 version: 5
 source_version: v1.38
-last_updated: 2026-09-02
+last_updated: 2026-09-28
 ---
 
 # Channel Host Maintenance v5
 
 继承 [v4](channel-host-maintenance-v4.md) 的封闭 tick、Main Actor、单事务维护、provider-scoped outstanding、
 无 poll receipt、FIFO、取消收口、suppression、delivery lease、迟到 sent、按需 watchdog 和 terminal/retry one-shot。
-本版只收紧飞书 Host 的 Core event 快路径，并把飞书历史群 roster sweep 移出启动恢复热路径；钉钉行为不变，
+本版收紧飞书 Host 的 Core event 快路径，并把飞书历史群 roster sweep 移出启动恢复热路径；钉钉事件与 roster 行为不变，
 不增加通用 WorkItem、deadline journal、持久映射或第二份权威状态。
 
 ## 1. Tick 响应与静默判定
 
-`channels.host.tick` 与 `channels.dingtalk.host.tick` 的请求仍为：
+`channels.host.tick`、`channels.lark.host.tick` 与 `channels.dingtalk.host.tick` 共享 `workerId` 和 `limit`。
+三个 Host 都传当前可处理附件的 App ID：飞书与 Lark 来自各自托管连接，钉钉来自已发布且凭据已加载的 App client。
 
 ```json
-{ "workerId": "host-worker", "limit": 20 }
+{ "workerId": "host-worker", "limit": 20, "inboundAttachmentAppIds": ["cli_connected_bot"] }
 ```
+
+`inboundAttachmentAppIds` 只筛选附件下载候选，不改变 Delivery claim、维护或 outstanding 判定。
+省略或空数组表示本次没有可处理附件的 Bot。Core 先按 Host provider 和请求的 acknowledgement App 匹配该集合，
+再按原顺序取最多 20 条，避免未连接 Bot 占满窗口。未选中的请求保留原状态和重试次数，恢复连接后可继续下载；
+消息发布仍遵守各会话的 FIFO。
 
 响应必填布尔字段保持不变：
 
@@ -29,6 +35,7 @@ last_updated: 2026-09-02
 {
   "deliveries": [],
   "rosterRefreshes": [],
+  "inboundAttachments": [],
   "hasOutstandingWork": false
 }
 ```
@@ -37,6 +44,7 @@ Core 在同一个 IMMEDIATE 事务完成超时、投影、终态封存、FIFO、
 计算 `hasOutstandingWork`。以下任一事实仍存在即为 `true`：
 
 - `channel_turn_request` 为 `queued | admitted`；
+- 已完成的渠道 Request 仍有 `waiting` 的 Camp 消息交付，或 `claimed` 交付对应的 Run 仍为 `queued | running | waiting`；此时 Agent 可能尚未生成执行台或回复，Host 不得休眠；
 - `channel_delivery` 为 `pending | attempting`；
 - `channel_execution_console` 为 `opening | active | terminal_pending | recall_pending`；
 - `channel_inbound_aggregate` 为 `collecting`；
@@ -53,7 +61,12 @@ Main 不再永久运行 750ms/800ms provider interval。每个 Core generation �
 `false`，不保留任何维护定时器。渠道入站、会改变渠道状态的卡片回调、Bot 重连/roster 变化和 Delivery settlement
 都会立即请求一次串行、可合并的 pump。
 
-飞书 provider 已处于 outstanding 状态时，Core event 快路径必须按以下范围处理：
+`delivery_batch.claimed` 的 navigation invalidation，以及 `agent_run.started` 和 `agent_run.terminal`，
+即使在 Host 已休眠时也要触发一次探测。渠道入站 Request 可以先完成，
+其 Agent 随后发出 A2A 消息，使另一名队员开始新的 Run；新 Run 的执行卡和正文投递不能依赖原 Request 保持 active。
+此类探测仍由 Core 按 provider 判断是否有实际工作，没有工作就立即恢复休眠。其余 live event 只在 active 时处理。
+
+飞书与 Lark 的 Core event 快路径按以下范围处理：
 
 - `agent_run.started` 立即唤醒；
 - `agent_run.terminal` 立即唤醒，并再安排一次 1000ms one-shot，跨过执行卡 900ms terminal quiet window；
@@ -61,21 +74,27 @@ Main 不再永久运行 750ms/800ms provider interval。每个 Core generation �
   `opening | active | terminal_pending` 时，才最多每 500ms 合并为一次 live refresh；
 - 其他 `agent_run.*`、非 live Runtime event、未跟踪 Run 和 `terminal_sealed` Run 的事件全部忽略。
 
-该过滤只使用飞书既有的 execution card state，不新增持久字段、映射或集合。普通 Core event 必须继续经过 Pump 的
-active 门禁；已经休眠的 Host 不得被这些事件重新激活。渠道入站、卡片操作、Bot/roster 变化和 settlement 仍可通过
+该过滤只使用飞书/Lark 既有的 execution card state，不新增持久字段、映射或集合。除上述 Delivery claim、
+两种 Run 生命周期事件及自动化通知外，普通 Core event 继续经过 Pump 的 active 门禁。渠道入站、卡片操作、Bot/roster 变化和 settlement 仍可通过
 既有显式 `wake()` 激活。Web 执行台继续直接消费自己的 Core event/SSE 刷新链路，不受该过滤影响。
 
-钉钉继续沿用 v4：provider active 时，`runtime.*` 连续事件最多每 500ms 合并一次，`agent_run.*` 直接唤醒，
-`agent_run.terminal` 保留立即维护和 1000ms one-shot。本版不修改钉钉事件过滤或 roster 机制。
+钉钉的 `agent_run.started/terminal` 同样能唤醒已休眠的 Host；provider active 时，`runtime.*` 连续事件最多每
+500ms 合并一次，其他 `agent_run.*` 直接唤醒。`agent_run.terminal` 保留立即维护和 1000ms one-shot。
 
 飞书 Service 在启动恢复探测前先把历史群 roster sweep deadline 推迟一个正常 sweep 周期。首次 Pump 必须直接完成
 遗留 Request、Delivery 与 Execution Console 的 Core 恢复，不得先遍历全部历史群发起 roster 网络请求。若首次 tick
 返回 `false`，Host 可以直接休眠，不承诺在 deadline 到达时仅为全量 sweep 自行唤醒；之后的实际渠道活动超过 deadline
-时仍可执行运行期 fallback。新群消息的精确刷新、Core 请求的 exact roster refresh 和 Bot roster 事件保持不变。
+时仍可执行运行期 fallback。历史群 roster sweep 和待完成聚合的恢复在后台执行，不能先等待外部 roster 请求再调用
+Core tick 或处理已领取的投递；后台恢复产生新工作后唤醒 Pump。新群消息的精确刷新、Core 请求的 exact roster refresh 和 Bot roster 事件保持不变。
 钉钉启动 roster 行为本版不变。
 
 Delivery settlement 必须追泵，以便 Core 结算 exact Request 并提升 FIFO；若 retry settlement 返回 `availableAt`，
 Main 还需在该时刻安排 one-shot，不得把 2–32 秒退避延长到兜底周期。
+
+飞书、Lark 与钉钉入站附件使用同一 queued Request 与各自的 Host tick，响应的 `inboundAttachments` 只返回当前 provider 可处理的待下载资源。
+Main 以最多两个后台任务处理，按 Request 去重，不占住串行 pump；完成后唤醒 pump，`retryAt` 安排 one-shot。
+Host 停止时取消未完成下载并清理临时文件；持久 queued 状态由下一次启动恢复。详细字段、重试和消息准入见
+[Channel Message Bridge v1](channel-message-bridge-v1.md#inbound-attachments)。
 
 同一时间最多执行一个 provider pump。执行期间收到的唤醒必须合并为一次后续 pump，不能因“当前正在执行”而丢弃。
 Core event 和本地 Notify 只负责提早唤醒，不承担不丢失保证，也不成为持久队列。
@@ -84,6 +103,8 @@ Core event 和本地 Notify 只负责提早唤醒，不承担不丢失保证，�
 payload；`attempting` 时只推进 console 的 `latest_sequence/digest`，不得创建第二条 Delivery。原 Delivery 成功 settle
 后，若 `delivered_sequence < latest_sequence`，必须在同一 settlement 事务只创建或合并一次 latest-sequence follow-up。
 该 latest-wins 流控独立于 500ms Main debounce；终态 quiet window 也不得被 live debounce 吞并。
+首次发现时已终态且结束时间早于 quiet window 的 A2A 后续 Run，可以在同一次 Core tick 冻结终态快照并投递卡片；
+仍处于 quiet window 的 Run 保留 `terminal_pending`，等待窗口结束后再封存。
 
 ## 3. 十分钟恢复 watchdog
 

@@ -15,13 +15,13 @@ const sent = { messageId: 'message-1', agentAddressingMode: 'public_only', effec
 function canonical(id: string, overrides: Partial<CanonicalRuntimeActivityView> = {}): CanonicalRuntimeActivityView {
   return {
     operationId: id, classifierVersion: 'activity-v3', activityDomain: 'tool', semanticKind: 'tool.call',
-    toolName: 'camp.message.send', presentationHint: 'camp.message.send', phase: 'terminal', outcome: 'succeeded',
+    toolName: 'thread.message.send', presentationHint: 'thread.message.send', phase: 'terminal', outcome: 'succeeded',
     credibility: 'core_verified', coverageLevel: 'fine_grained', sourceAuthority: 'core',
     sourceEvidenceIds: [], firstEvidenceSequence: 2, lastEvidenceSequence: 3, revision: 1, ...overrides
   }
 }
 
-function builtin(operation = 'camp.message.send', input: unknown = { recipientAgentIds: ['agent-5'] }, result: unknown = sent): LiveRuntimeEvent {
+function builtin(operation = 'thread.message.send', input: unknown = { recipientAgentIds: ['agent-5'] }, result: unknown = sent): LiveRuntimeEvent {
   return {
     id: 'core-event', agentRunId: 'run-1', eventType: 'runtime.action', createdAt: '2026-09-12T00:00:01Z',
     canonical: canonical('core-1', { toolName: operation, presentationHint: operation }),
@@ -52,7 +52,7 @@ describe('Built-in input presentation', () => {
   it('uses the CLI catalog for all display names without changing internal identities', () => {
     const source = readFileSync('crates/rovai-core/src/builtin_tool_transport.rs', 'utf8')
     const identities = [...source.matchAll(/BuiltinToolCliIdentity\s*\{\s*operation: "([^"]+)",\s*group: "([^"]+)",\s*action: "([^"]*)"/gu)]
-    expect(identities).toHaveLength(26)
+    expect(identities).toHaveLength(27)
     expect(BUILTIN_CLI_NAMES).toEqual(Object.fromEntries(identities.map(([, operation, group, action]) =>
       [operation, ['rovai', group, action].filter(Boolean).join(' ')])))
     for (const [operation, name] of Object.entries(BUILTIN_CLI_NAMES)) {
@@ -72,7 +72,7 @@ describe('Built-in input presentation', () => {
       expect(executionEvidenceResultText('runtime.action', { ...(event.payload as object),
         status, coreEnvelope: { ok: false, error: { message: 'DO_NOT_SHOW_ERROR' } } })).toBe(step.detail)
       const markup = renderToStaticMarkup(createElement(ToolCallRow, {
-        campId: 'camp-1', runId: 'run-1', runStatus: 'running', step,
+        threadId: 'camp-1', runId: 'run-1', runStatus: 'running', step,
         completeEvidence: { id: 'blob-result' } as PresentableExecutionEvidence, onFileOpenError: () => {}
       }))
       expect(markup).toContain('rovai task update')
@@ -85,18 +85,18 @@ describe('Built-in input presentation', () => {
     'keeps absent/omitted input static even when a complete result blob is available: %j', input => {
       const event = builtin()
       const payload = event.payload as Record<string, unknown>
-      payload.operationProjection = { operation: 'camp.message.send', canonicalInput: input }
+      payload.operationProjection = { operation: 'thread.message.send', canonicalInput: input }
       const [step] = steps([event])
       expect(step.detail).toBe('')
       const markup = renderToStaticMarkup(createElement(ToolCallRow, {
-        campId: 'camp-1', runId: 'run-1', runStatus: 'succeeded', step,
+        threadId: 'camp-1', runId: 'run-1', runStatus: 'succeeded', step,
         completeEvidence: { id: 'blob-result' } as PresentableExecutionEvidence, onFileOpenError: () => {}
       }))
       expect(markup).not.toMatch(/<details|<summary|已隐藏|\{\}|结果|messageId/)
     })
 
   it('omits send bodies and projection metadata while preserving actual public parameters', () => {
-    for (const operation of ['camp.message.send']) {
+    for (const operation of ['thread.message.send']) {
       const [step] = steps([builtin(operation, { body: 'message', recipientAgentIds: ['agent-5'],
         mentionsCurrentUser: false, recipientAgentIdsCount: 1, recipientAgentIdsOmittedCount: 0,
         contentCharCount: 7, contentDigest: 'hash', contentSecretDetected: false })])
@@ -105,7 +105,7 @@ describe('Built-in input presentation', () => {
     expect(JSON.parse(steps([builtin('memory.write', { body: 'a public memory', bodyCharCount: 15 })])[0].detail))
       .toEqual({ body: 'a public memory' })
     const event = builtin()
-    ;(event.payload as Record<string, unknown>).operationProjection = { operation: 'camp.read', canonicalInput: { query: 'mismatch' } }
+    ;(event.payload as Record<string, unknown>).operationProjection = { operation: 'thread.read', canonicalInput: { query: 'mismatch' } }
     expect(steps([event])[0].detail).toBe('')
   })
 })
@@ -135,8 +135,8 @@ describe('Rovai Shell carrier presentation', () => {
     const before = JSON.stringify(events)
     expect(steps(events).map(step => step.id)).toEqual(['core-1'])
     expect(steps(events)[0]).toMatchObject({
-      builtinOperation: 'camp.message.send', detailOperationId: 'shell-1',
-      activityDomain: 'tool', toolName: 'camp.message.send', iconKind: 'rovai',
+      builtinOperation: 'thread.message.send', detailOperationId: 'shell-1',
+      activityDomain: 'tool', toolName: 'thread.message.send', iconKind: 'rovai',
       detail: `$ rovai send --to agent-5 --body 'message'\n${JSON.stringify(sent)}`
     })
     expect(executionStepPublicTitle(steps(events)[0])).toBe("rovai send --to agent-5 --body 'message'")
@@ -149,14 +149,14 @@ describe('Rovai Shell carrier presentation', () => {
     const { internalFact: _, ...cliTask } = task
     expect(steps([builtin('team.create_task', { title: 'Task' }, task), shell("rovai task create --title Task", cliTask)])).toHaveLength(1)
     const pagedShell = shell()
-    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message', status: 'completed' }, executionWindowBuiltinOperation: 'camp.message.send' }
+    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message', status: 'completed' }, executionWindowBuiltinOperation: 'thread.message.send' }
     expect(steps([pagedShell])).toEqual([])
     const pagedCore = builtin()
     delete (pagedCore.payload as Record<string, unknown>).coreEnvelope
     expect(steps([pagedCore, pagedShell])[0]).toMatchObject({
       id: 'core-1', detailOperationId: 'shell-1', detail: '$ rovai send --body message'
     })
-    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message && git status', status: 'completed' }, executionWindowBuiltinOperation: 'camp.message.send' }
+    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message && git status', status: 'completed' }, executionWindowBuiltinOperation: 'thread.message.send' }
     expect(steps([pagedShell])).toHaveLength(1)
   })
 
@@ -165,8 +165,8 @@ describe('Rovai Shell carrier presentation', () => {
     const corePayload = core.payload as Record<string, unknown>
     corePayload.agentOutputDigest = 'digest:agent-output'
     corePayload.rawOutputDigest = 'digest:raw-business-result'
-    corePayload.coreEnvelope = { operation: 'camp.message.send', ok: true }
-    corePayload.operationProjection = { operation: 'camp.message.send', canonicalInput: {} }
+    corePayload.coreEnvelope = { operation: 'thread.message.send', ok: true }
+    corePayload.operationProjection = { operation: 'thread.message.send', canonicalInput: {} }
     const carrier = shell()
     const carrierPayload = carrier.payload as { resultDigest?: string, item: Record<string, unknown> }
     carrierPayload.resultDigest = 'digest:agent-output'
@@ -175,6 +175,67 @@ describe('Rovai Shell carrier presentation', () => {
     expect(steps([core, carrier]).map(step => step.id)).toEqual(['core-1'])
     carrierPayload.resultDigest = 'digest:different-output'
     expect(steps([core, carrier])).toHaveLength(2)
+  })
+
+  it('folds a digest-matched CLI with adjacent coalesced Shell and Core rows', () => {
+    const core = builtin()
+    core.canonical = canonical('core-1', { firstEvidenceSequence: 2, lastEvidenceSequence: 2 })
+    const carrier = shell('/bin/zsh -lc "rovai send --public-only --input-file /tmp/request.json"')
+    carrier.canonical = canonical('shell-1', {
+      activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'commandExecution',
+      sourceAuthority: 'runtime', credibility: 'runtime_structured',
+      firstEvidenceSequence: 3, lastEvidenceSequence: 3
+    })
+    ;(core.payload as Record<string, unknown>).agentOutputDigest = 'same-agent-output'
+    ;(carrier.payload as Record<string, unknown>).resultDigest = 'same-agent-output'
+
+    expect(steps([core, carrier]).map(step => [step.id, step.detailOperationId]))
+      .toEqual([['core-1', 'shell-1']])
+    expect(executionStepPublicTitle(steps([core, carrier])[0])).toContain('rovai send --public-only')
+
+    carrier.canonical = { ...carrier.canonical!, firstEvidenceSequence: 1, lastEvidenceSequence: 1 }
+    expect(steps([carrier, core]).map(step => [step.id, step.detailOperationId]))
+      .toEqual([['core-1', 'shell-1']])
+    carrier.canonical = { ...carrier.canonical!, firstEvidenceSequence: 3, lastEvidenceSequence: 3 }
+
+    ;(carrier.payload as Record<string, unknown>).resultDigest = 'different-agent-output'
+    expect(steps([core, carrier]).map(step => step.id)).toEqual(['core-1', 'shell-1'])
+    ;(carrier.payload as Record<string, unknown>).resultDigest = 'same-agent-output'
+    core.executionEpoch = 0
+    expect(steps([core, carrier]).map(step => step.id)).toEqual(['core-1', 'shell-1'])
+    carrier.executionEpoch = 1
+    expect(steps([core, carrier]).map(step => step.id)).toEqual(['core-1', 'shell-1'])
+    carrier.executionEpoch = 0
+    carrier.canonical = { ...carrier.canonical!, firstEvidenceSequence: 4, lastEvidenceSequence: 4 }
+    expect(steps([core, carrier]).map(step => step.id)).toEqual(['core-1', 'shell-1'])
+  })
+
+  it('folds a Trae runtime.action CLI carrier while retaining a separate help command', () => {
+    const help = shell('rovai send --help')
+    help.eventType = 'runtime.action'
+    help.executionEpoch = 1
+    help.canonical = canonical('help-shell', { activityDomain: 'shell', semanticKind: 'shell.execute',
+      sourceAuthority: 'runtime', credibility: 'runtime_structured',
+      firstEvidenceSequence: 6, lastEvidenceSequence: 6 })
+    help.payload = { kind: 'execute', input: 'rovai send --help', output: 'help text', status: 'completed',
+      resultDigest: 'help-digest' }
+
+    const carrier = shell("rovai send --public-only --body 'hello'")
+    carrier.eventType = 'runtime.action'
+    carrier.executionEpoch = 1
+    carrier.canonical = canonical('shell-1', { activityDomain: 'shell', semanticKind: 'shell.execute',
+      sourceAuthority: 'runtime', credibility: 'runtime_structured',
+      firstEvidenceSequence: 7, lastEvidenceSequence: 7 })
+    carrier.payload = { kind: 'execute', input: "rovai send --public-only --body 'hello'",
+      output: JSON.stringify(sent), status: 'completed', resultDigest: 'same-agent-output' }
+
+    const core = builtin()
+    core.executionEpoch = 1
+    core.canonical = canonical('core-1', { firstEvidenceSequence: 8, lastEvidenceSequence: 8 })
+    ;(core.payload as Record<string, unknown>).agentOutputDigest = 'same-agent-output'
+
+    expect(steps([help, carrier, core]).map(step => [step.id, step.detailOperationId]))
+      .toEqual([['help-shell', undefined], ['core-1', 'shell-1']])
   })
 
   it('preserves multiline input, long values and complete JSON output on the one retained Tool', () => {
@@ -189,7 +250,7 @@ describe('Rovai Shell carrier presentation', () => {
     expect(executionStepPublicTitle(step).length).toBeGreaterThan(5_000)
     expect(executionEvidenceResultText('activity.completed', events[1].payload, events[1].canonical)).toBe(step.detail)
     const markup = renderToStaticMarkup(createElement(ToolCallRow, {
-      campId: 'camp-1', runId: 'run-1', runStatus: 'succeeded', step: { ...step, detail: '' },
+      threadId: 'camp-1', runId: 'run-1', runStatus: 'succeeded', step: { ...step, detail: '' },
       completeEvidence: { id: 'existing-shell-result' } as PresentableExecutionEvidence, onFileOpenError: () => {}
     }))
     expect(markup).toContain('<details')
@@ -198,7 +259,7 @@ describe('Rovai Shell carrier presentation', () => {
 
   it('does not borrow a window carrier for an ambiguous or unverified Core identity', () => {
     const pagedShell = shell()
-    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message' }, executionWindowBuiltinOperation: 'camp.message.send' }
+    pagedShell.payload = { item: { type: 'commandExecution', command: 'rovai send --body message' }, executionWindowBuiltinOperation: 'thread.message.send' }
     const second = { ...builtin(), canonical: canonical('core-2') }
     expect(steps([builtin(), second, pagedShell]).every(step => step.detailOperationId === undefined)).toBe(true)
     const unverified = { ...builtin(), canonical: canonical('core-1', { credibility: 'runtime_structured' }) }
@@ -211,9 +272,9 @@ describe('Rovai Shell carrier presentation', () => {
     const started = { ...builtin(), id: 'core-started', payload: { ...(builtin().payload as object), status: 'running' } }
     const second = { ...builtin(), id: 'core-second', canonical: canonical('core-2', { firstEvidenceSequence: 6, lastEvidenceSequence: 7 }) }
     const secondShell = { ...shell(), id: 'shell-second', canonical: { ...shell().canonical!, operationId: 'shell-2', firstEvidenceSequence: 5, lastEvidenceSequence: 8 } }
-    ;(secondShell.payload as Record<string, unknown>).executionWindowBuiltinOperation = 'camp.message.send'
+    ;(secondShell.payload as Record<string, unknown>).executionWindowBuiltinOperation = 'thread.message.send'
     const firstShell = shell()
-    ;(firstShell.payload as Record<string, unknown>).executionWindowBuiltinOperation = 'camp.message.send'
+    ;(firstShell.payload as Record<string, unknown>).executionWindowBuiltinOperation = 'thread.message.send'
     expect(steps([started, builtin(), firstShell]).map(step => step.id)).toEqual(['core-1'])
     expect(steps([started, builtin(), firstShell, second, secondShell]).map(step => step.id)).toEqual(['core-1', 'core-2'])
   })

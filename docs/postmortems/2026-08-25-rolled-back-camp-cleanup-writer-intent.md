@@ -346,5 +346,5 @@ evidence，并不要求保留一个旧 gate。
 - [V1.28-D10：attachment-local integrity degradation](../versions/v1.28/decisions.md#v1-28-d10)
 - [Cleanup lifecycle 实现与回归](../../crates/rovai-core/src/camp_attachment_view.rs)
 - [Writer-intent admission predicate](../../crates/rovai-core/src/camp_attachment_publication.rs)
-- [Pending-Camp leave lifecycle](../../apps/desktop/src/renderer/src/CampWorkspace.tsx)
+- [Pending-Camp leave lifecycle](../../apps/desktop/src/renderer/src/ThreadWorkspace.tsx)
 - [Pending-Camp discard caller](../../apps/desktop/src/renderer/src/App.tsx)

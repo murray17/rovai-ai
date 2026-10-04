@@ -154,7 +154,7 @@ export function buildEvidenceIndex({
 
   if (snapshot) {
     for (const turn of snapshot.turns ?? []) {
-      if (turn.id !== dispatchBoundary?.campTurnId) continue
+      if (turn.id !== (dispatchBoundary?.threadTurnId ?? dispatchBoundary?.campTurnId)) continue
       addSourceRecord({
         evidenceId: stableEvidenceId('core.turn', turn.id),
         evidenceType: 'core_domain',
@@ -235,7 +235,7 @@ export function buildEvidenceIndex({
       )
     }
     for (const input of snapshot.conversationInputs ?? []) {
-      if (input.campTurnId !== dispatchBoundary?.campTurnId) continue
+      if ((input.threadTurnId ?? input.campTurnId) !== (dispatchBoundary?.threadTurnId ?? dispatchBoundary?.campTurnId)) continue
       addSourceRecord({
         evidenceId: stableEvidenceId('core.input', input.id),
         evidenceType: 'core_domain',
@@ -268,7 +268,7 @@ export function buildEvidenceIndex({
       const isPublicTrialMessage = message.authorType === 'agent'
         && trialRunIds.has(message.sourceAgentRunId)
         && (isBatchTrialBoundary(dispatchBoundary)
-          || message.campTurnId === dispatchBoundary?.campTurnId)
+          || (message.threadTurnId ?? message.campTurnId) === (dispatchBoundary?.threadTurnId ?? dispatchBoundary?.campTurnId))
       addSourceRecord({
         evidenceId,
         evidenceType: isFinalResponse ? 'final_response' : 'core_domain',

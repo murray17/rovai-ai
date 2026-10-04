@@ -1,16 +1,16 @@
 import { ExecutionContentCache } from './execution-content-cache'
-import type { AgentRunExecutionEvidenceView as Evidence, AgentRunExecutionWindowChanges, AgentRunExecutionWindowPage as Page } from '@contracts'
+import type { AgentRunExecutionEvidenceView as Evidence, AgentRunExecutionBlock as Block, AgentRunExecutionBlockChanges, AgentRunExecutionBlockPage as Page } from '@contracts'
 
 export type ExecutionWindowRequest = (params: {
-  campId: string; agentRunId: string; beforeSequence: number | null; afterSequence?: number; limit: number
+  threadId: string; agentRunId: string; beforeSequence: number | null; afterSequence?: number; limit: number
 }) => Promise<Page>
 export type ExecutionChangesRequest = (params: {
-  campId: string; agentRunId: string; afterChangeSequence: number; refreshEvidenceIds: string[]; limit: number
-}) => Promise<AgentRunExecutionWindowChanges>
+  threadId: string; agentRunId: string; afterChangeSequence: number; refreshEvidenceIds: string[]; limit: number
+}) => Promise<AgentRunExecutionBlockChanges>
 type Direction = 'earlier' | 'newer' | 'latest'
 type CacheBudget = { maxItems: number; maxBytes: number }
 const DEFAULT_BUDGET: CacheBudget = { maxItems: 2048, maxBytes: 8 * 1024 * 1024 }
-const HISTORY_LIMIT = 64
+const HISTORY_LIMIT = 12
 
 /** A contiguous loaded interval. Rendering and cache retention have independent budgets. */
 export class ExecutionWindow {
@@ -20,7 +20,14 @@ export class ExecutionWindow {
     if (this.projection?.input !== input) this.projection = { input, value: build() }
     return this.projection.value as T
   }
-  evidence: Evidence[] = []
+  blocks: Block[] = []
+  private evidenceProjection: { blocks: Block[]; evidence: Evidence[] } | null = null
+  get evidence(): Evidence[] {
+    if (this.evidenceProjection?.blocks !== this.blocks) {
+      this.evidenceProjection = { blocks: this.blocks, evidence: this.blocks.flatMap(block => block.evidence) }
+    }
+    return this.evidenceProjection.evidence
+  }
   loaded = false
   loading = false
   error: string | null = null
@@ -38,11 +45,11 @@ export class ExecutionWindow {
   private refreshing = false
   private queuedRefresh: (() => boolean) | null = null
   private pending = new Map<string, Promise<Page>>()
-  private sizes = new WeakMap<Evidence, number>()
+  private sizes = new WeakMap<Block, number>()
   private viewport: [number, number] | null = null
 
   constructor(
-    readonly campId: string, readonly agentRunId: string, readonly limit: number,
+    readonly threadId: string, readonly agentRunId: string, readonly limit: number,
     private readonly request: ExecutionWindowRequest,
     private readonly changed: () => void,
     private readonly changes: ExecutionChangesRequest,
@@ -50,7 +57,7 @@ export class ExecutionWindow {
   ) {}
 
   get byteSize(): number {
-    return this.content.bytes + [...new Set([...this.evidence, ...(this.neighbor?.evidence ?? []), ...(this.latestPage?.evidence ?? [])])]
+    return this.content.bytes + [...new Set([...this.blocks, ...(this.neighbor?.blocks ?? []), ...(this.latestPage?.blocks ?? [])])]
       .reduce((sum, item) => sum + this.size(item), 0)
   }
   setViewport(first: number, last: number): void { this.viewport = [first, last] }
@@ -59,27 +66,32 @@ export class ExecutionWindow {
     this.active = false; this.generation++; this.queuedRefresh = null
     this.loading = false; this.refreshing = false; this.pending.clear()
   }
-  private size(item: Evidence): number {
+  private size(item: Block): number {
     let bytes = this.sizes.get(item)
     if (bytes === undefined) { bytes = JSON.stringify(item).length * 2; this.sizes.set(item, bytes) }
     return bytes
   }
-  private merge(items: Evidence[]): void {
-    const entries = new Map(this.evidence.map(item => [item.id, item]))
+  private merge(items: Block[]): void {
+    const entries = new Map(this.blocks.map(item => [item.key, item]))
     let dirty = false
     for (const item of items) {
-      const previous = entries.get(item.id)
-      if (previous && (item.revision ?? 0) < (previous.revision ?? 0)) continue
-      if (previous && item.revision === previous.revision
-        && (item.changeSequence ?? 0) < (previous.changeSequence ?? 0)) continue
+      const previous = entries.get(item.key)
+      if (previous && (item.changeSequence) < (previous.changeSequence)) continue
       if (previous && JSON.stringify(previous) === JSON.stringify(item)) continue
-      entries.set(item.id, item); dirty = true
+      entries.set(item.key, item); dirty = true
     }
     if (!dirty) return
-    this.evidence = [...entries.values()].sort((a, b) => a.sequence - b.sequence)
+    this.blocks = [...entries.values()].sort((a, b) => a.sequence - b.sequence)
   }
-  private valid(items: Evidence[], through: number): boolean {
-    return items.every(item => item.agentRunId === this.agentRunId && Number.isSafeInteger(item.sequence)
+  private valid(items: Block[], through: number): boolean {
+    return items.every(item => (item.kind === 'item' || item.kind === 'toolGroup') && typeof item.key === 'string'
+      && Number.isSafeInteger(item.changeSequence) && item.changeSequence >= 0
+      && Number.isSafeInteger(item.lastSequence) && item.lastSequence >= item.sequence && item.lastSequence <= through
+      && Number.isSafeInteger(item.toolCount) && item.toolCount >= 0 && item.evidence.length <= 4
+      && Object.values(item.counts).every(count => Number.isSafeInteger(count) && count >= 0)
+      && item.evidence.every(evidence => evidence.agentRunId === this.agentRunId
+        && Number.isSafeInteger(evidence.sequence) && evidence.sequence >= item.sequence && evidence.sequence <= item.lastSequence)
+      && Number.isSafeInteger(item.sequence)
       && item.sequence > 0 && item.sequence <= through)
   }
   private async fetch(before: number | null, after?: number): Promise<Page> {
@@ -88,14 +100,14 @@ export class ExecutionWindow {
     if (pending) return pending
     const limit = before === null && after === undefined ? this.limit : HISTORY_LIMIT
     const generation = this.generation
-    const promise = this.request({ campId: this.campId, agentRunId: this.agentRunId, beforeSequence: before,
+    const promise = this.request({ threadId: this.threadId, agentRunId: this.agentRunId, beforeSequence: before,
       ...(after === undefined ? {} : { afterSequence: after }), limit }).then(page => {
-      const items = page.evidence
-      if (page.schemaVersion !== 2 || page.campId !== this.campId || page.agentRunId !== this.agentRunId
+      const items = page.blocks
+      if (page.schemaVersion !== 3 || page.threadId !== this.threadId || page.agentRunId !== this.agentRunId
         || page.requestedBeforeSequence !== before || (page.requestedAfterSequence ?? undefined) !== after
         || !Number.isSafeInteger(page.throughSequence) || page.throughSequence < 0 || items.length > limit
         || !Number.isSafeInteger(page.throughChangeSequence) || page.throughChangeSequence < 0
-        || !this.valid([...items, ...(page.activeEvidence ?? [])], page.throughSequence)
+        || !this.valid([...items, ...(page.activeBlocks ?? [])], page.throughSequence)
         || items.some((item, i) => (i > 0 && item.sequence <= items[i - 1].sequence)
           || (before !== null && item.sequence >= before) || (after !== undefined && item.sequence <= after))
         || (after === undefined && (page.hasMore ? page.nextBeforeSequence !== items[0]?.sequence : page.nextBeforeSequence !== null))
@@ -123,27 +135,27 @@ export class ExecutionWindow {
     this.changed()
     try {
       const before = direction === 'earlier' ? this.before : null
-      const after = direction === 'newer' ? this.evidence.at(-1)?.sequence : undefined
+      const after = direction === 'newer' ? this.blocks.at(-1)?.sequence : undefined
       const page = direction === 'earlier' && this.neighbor?.requestedBeforeSequence === before
         ? this.neighbor : direction === 'latest' && !this.latestDirty && this.latestPage
           ? this.latestPage : await this.fetch(before, after)
       if (generation !== this.generation) return
       if (direction === 'latest') {
         // A discontinuity can occur only after cache eviction or a long absence.
-        const overlaps = page.evidence.some(item => this.evidence.some(old => old.sequence === item.sequence))
+        const overlaps = page.blocks.some(item => this.blocks.some(old => old.sequence === item.sequence))
         if (!overlaps || this.hasNewer) {
-          this.evidence = []; this.before = page.nextBeforeSequence; this.hasEarlier = page.hasMore
+          this.blocks = []; this.before = page.nextBeforeSequence; this.hasEarlier = page.hasMore
         }
-        this.merge([...page.evidence, ...(page.activeEvidence ?? [])])
+        this.merge([...page.blocks, ...(page.activeBlocks ?? [])])
         this.latestPage = page; this.cursor = page.throughChangeSequence
         this.runtimePhase = page.runtimePhase
         this.latestDirty = false; this.hasNewer = false; this.viewport = null
       } else if (direction === 'earlier') {
         // A prefetched page may contain an older version of an already loaded operation.
-        this.merge(page.evidence.filter(item => !this.evidence.some(old => old.sequence === item.sequence)))
+        this.merge(page.blocks.filter(item => !this.blocks.some(old => old.sequence === item.sequence)))
         this.before = page.nextBeforeSequence; this.hasEarlier = page.hasMore; this.neighbor = null
       } else {
-        this.merge(page.evidence); this.hasNewer = page.hasMore
+        this.merge(page.blocks); this.hasNewer = page.hasMore
         if (!page.hasMore) this.cursor = page.throughChangeSequence
       }
       this.loaded = true
@@ -167,19 +179,21 @@ export class ExecutionWindow {
       let more = true
       while (more && generation === this.generation && !this.hasNewer) {
         const after = this.cursor
-        const refreshEvidenceIds = this.evidence
-          .filter(item => item.revision == null && (item.phase === 'updated' || item.phase === 'started'))
+        const refreshEvidenceIds = this.evidence.filter(item =>
+          item.eventType === 'agent.text.block' && item.payload !== null && typeof item.payload === 'object'
+            && 'status' in item.payload && item.payload.status === 'streaming'
+          || item.revision == null && (item.phase === 'updated' || item.phase === 'started'))
           .slice(0, 256).map(item => item.id)
-        const page = await this.changes({ campId: this.campId, agentRunId: this.agentRunId,
+        const page = await this.changes({ threadId: this.threadId, agentRunId: this.agentRunId,
           afterChangeSequence: after, refreshEvidenceIds, limit: 96 })
         if (generation !== this.generation) return
-        if (page.schemaVersion !== 2 || page.campId !== this.campId || page.agentRunId !== this.agentRunId
+        if (page.schemaVersion !== 3 || page.threadId !== this.threadId || page.agentRunId !== this.agentRunId
           || page.requestedAfterChangeSequence !== after || !Number.isSafeInteger(page.nextAfterChangeSequence)
           || !Number.isSafeInteger(page.throughChangeSequence) || page.nextAfterChangeSequence < after
           || page.nextAfterChangeSequence > page.throughChangeSequence || (page.hasMore && page.nextAfterChangeSequence <= after)
           || (!page.hasMore && page.nextAfterChangeSequence !== page.throughChangeSequence)
-          || page.evidence.length > 96 || page.refreshedEvidence.length > 256
-          || !this.valid([...page.evidence, ...page.refreshedEvidence], page.throughSequence)) {
+          || page.blocks.length > 96 || (page.refreshedBlocks?.length ?? 0) > 256
+          || !this.valid([...page.blocks, ...(page.refreshedBlocks ?? [])], page.throughSequence)) {
           throw new Error('执行记录增量数据不兼容')
         }
         // Returning after a long absence must not replay an entire Run before reaching its tail.
@@ -192,13 +206,13 @@ export class ExecutionWindow {
         this.runtimePhase = page.runtimePhase
         // Ignore old operation updates outside the contiguous loaded interval.
         const first = this.before === null ? 0 : this.before
-        this.merge([...page.evidence, ...page.refreshedEvidence].filter(item => item.sequence >= first
-          || this.evidence.some(old => old.sequence === item.sequence)))
-        this.latestPage = { schemaVersion: 2, campId: this.campId, agentRunId: this.agentRunId,
-          requestedBeforeSequence: null, throughSequence: this.evidence.at(-1)?.sequence ?? 0,
-          throughChangeSequence: this.cursor, runtimePhase: this.runtimePhase, evidence: this.evidence.slice(-this.limit),
-          hasMore: this.hasEarlier || this.evidence.length > this.limit,
-          nextBeforeSequence: this.hasEarlier || this.evidence.length > this.limit ? this.evidence.slice(-this.limit)[0]?.sequence ?? null : null }
+        this.merge([...page.blocks, ...(page.refreshedBlocks ?? [])].filter(item => item.sequence >= first
+          || this.blocks.some(old => old.sequence === item.sequence)))
+        this.latestPage = { schemaVersion: 3, threadId: this.threadId, agentRunId: this.agentRunId,
+          requestedBeforeSequence: null, throughSequence: page.throughSequence,
+          throughChangeSequence: this.cursor, runtimePhase: this.runtimePhase, blocks: this.blocks.slice(-this.limit),
+          hasMore: this.hasEarlier || this.blocks.length > this.limit,
+          nextBeforeSequence: this.hasEarlier || this.blocks.length > this.limit ? this.blocks.slice(-this.limit)[0]?.sequence ?? null : null }
         this.prune(!accept())
         this.changed()
         more = page.hasMore
@@ -229,22 +243,22 @@ export class ExecutionWindow {
     } catch { /* Only explicit navigation presents errors. */ }
   }
   private prune(fromTail: boolean): void {
-    let bytes = this.evidence.reduce((sum, item) => sum + this.size(item), 0)
-    let start = 0, end = this.evidence.length
+    let bytes = this.blocks.reduce((sum, item) => sum + this.size(item), 0)
+    let start = 0, end = this.blocks.length
     while (end - start > 1 && (end - start > this.budget.maxItems || bytes > this.budget.maxBytes)) {
       const index = fromTail ? end - 1 : start
-      const item = this.evidence[index]
+      const item = this.blocks[index]
       if (this.viewport && item.sequence >= this.viewport[0] && item.sequence <= this.viewport[1]) break
       bytes -= this.size(item)
       if (fromTail) end--; else start++
     }
-    if (end < this.evidence.length) { this.hasNewer = true; this.latestDirty = true }
-    if (start > 0) { this.hasEarlier = true; this.before = this.evidence[start].sequence; this.neighbor = null }
-    if (start > 0 || end < this.evidence.length) {
+    if (end < this.blocks.length) { this.hasNewer = true; this.latestDirty = true }
+    if (start > 0) { this.hasEarlier = true; this.before = this.blocks[start].sequence; this.neighbor = null }
+    if (start > 0 || end < this.blocks.length) {
       // Active operations can precede the historical cursor and must remain visible until settled.
-      const active = (item: Evidence) => item.phase === 'started' || item.phase === 'updated'
-      this.evidence = [...this.evidence.slice(0, start).filter(active), ...this.evidence.slice(start, end),
-        ...this.evidence.slice(end).filter(active)]
+      const active = (item: Block) => item.counts.running > 0 || item.counts.waiting > 0
+      this.blocks = [...this.blocks.slice(0, start).filter(active), ...this.blocks.slice(start, end),
+        ...this.blocks.slice(end).filter(active)]
     }
   }
 }
@@ -278,7 +292,7 @@ export class ExecutionWindowCache {
     }
   }
 }
-// Retain Camp history within one transport/Host connection. A replacement
+// Retain Thread history within one transport/Host connection. A replacement
 // Web client must never revive a window whose fetchers hold an old credential.
 const executionWindowCaches = new WeakMap<object, ExecutionWindowCache>()
 export function executionWindowCacheFor(client: object): ExecutionWindowCache {
@@ -287,5 +301,5 @@ export function executionWindowCacheFor(client: object): ExecutionWindowCache {
   return cache
 }
 export function executionWindowPageSize(viewportHeight: number): number {
-  return Math.max(12, Math.min(48, Math.ceil(viewportHeight / 36) + 8))
+  return Math.max(4, Math.min(24, Math.ceil(viewportHeight / 112) + 2))
 }

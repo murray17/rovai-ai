@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { useMobileLayout } from './MobileLayout'
 import { newCommandId } from '../../shared/command-id'
 import { RunningText } from './RunningText'
@@ -25,7 +25,7 @@ import type {
   AgentProfile,
   ActionApprovalView,
   NotificationSingleChatSource,
-  CampMemberView,
+  ThreadMemberView,
   CoreEvent,
   SingleChatPendingInputView,
   SingleChatConversationView,
@@ -43,7 +43,7 @@ import {
   type AttachmentDragKind
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
-import { ApprovalDock, rectanglesOverlap, type CampLeavePreparation, type NotificationFocusTarget, type VisibleNotificationSources } from './CampWorkspace'
+import { ApprovalDock, rectanglesOverlap, type ThreadLeavePreparation, type NotificationFocusTarget, type VisibleNotificationSources } from './ThreadWorkspace'
 import {
   CompactionEventRow,
   RuntimeRetryNotice,
@@ -67,6 +67,8 @@ import {
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './execution-tool-grouping'
+import { UiText, uiAttribute } from './interface-language'
+import { useThreadDetailCopy } from './camp-detail-copy'
 
 const NON_TERMINAL_RUNS = new Set<SingleChatRunView['status']>(['queued', 'running', 'waiting'])
 export const SINGLE_CHAT_POLL_INTERVAL_MS = 800
@@ -78,7 +80,7 @@ export type SingleChatTargetRequest = {
 }
 
 export type SingleChatEndTarget = {
-  campId: string
+  threadId: string
   conversationId: string
   displayName: string
 }
@@ -108,7 +110,7 @@ export function singleChatEndTargetFromSnapshot(
   displayName: string
 ): SingleChatEndTarget {
   return {
-    campId: snapshot.conversation.campId,
+    threadId: snapshot.conversation.threadId,
     conversationId: snapshot.conversation.id,
     displayName
   }
@@ -117,11 +119,11 @@ export function singleChatEndTargetFromSnapshot(
 export function singleChatEndCommand(
   target: SingleChatEndTarget
 ): {
-  campId: string
+  threadId: string
   conversationId: string
 } {
   return {
-    campId: target.campId,
+    threadId: target.threadId,
     conversationId: target.conversationId
   }
 }
@@ -182,12 +184,12 @@ function nonEmptyEventString(value: unknown): string | null {
 
 export function singleChatChangeRefreshTarget(
   event: CoreEvent,
-  campId: string,
+  threadId: string,
   currentConversationId: string | null
 ): SingleChatChangeRefreshTarget {
   if (event.method !== 'single_chat.changed') return 'none'
   const params = eventRecord(event.params)
-  if (params?.campId !== campId) return 'none'
+  if (params?.threadId !== threadId) return 'none'
   const result = eventRecord(params.result)
   const resultPayload = eventRecord(result?.payload)
   const conversationId = nonEmptyEventString(params.conversationId)
@@ -241,7 +243,7 @@ type PreparingSingleChatAttachment = {
 
 
 function SingleChatAttachmentStrip({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <div className="composer-attachment-strip" role="group" aria-label="待发送附件">{children}</div>
+  return <div className="composer-attachment-strip" role="group" aria-label={uiAttribute("待发送附件")}>{children}</div>
 }
 
 function SingleChatAttachmentPlaceholder({ item, onRemove }: {
@@ -255,9 +257,9 @@ function SingleChatAttachmentPlaceholder({ item, onRemove }: {
       </span>
       <span className="attachment-copy">
         <strong title={item.name}>{item.name}</strong>
-        <small>{item.error ?? '正在安全接入…'}</small>
+        <small>{item.error ?? uiAttribute("正在安全接入…")}</small>
       </span>
-      {item.error && onRemove && <button className="attachment-remove" type="button" aria-label={`移除失败附件 ${item.name}`} onClick={onRemove}>×</button>}
+      {item.error && onRemove && <button className="attachment-remove" type="button" aria-label={uiAttribute("移除失败附件 {0}", String(item.name))} onClick={onRemove}>×</button>}
     </div>
   )
 }
@@ -281,12 +283,12 @@ function storeBoolean(key: string, value: boolean): void {
 function resultMessage(result: StoredCommandResult): string {
   const message = result.payload.message
   if (typeof message === 'string' && message.trim()) return message
-  if (result.code === 'single_chat.runtime_not_ready') return '这位队员的运行时暂不可用。'
-  if (result.code === 'single_chat.member_unavailable') return '这位队员已不在当前会话中。'
-  if (result.code === 'single_chat.draft_changed') return '附件草稿刚刚发生变化，请重试。'
-  if (result.code === 'single_chat.pending_input_changed') return '这条排队消息刚刚发生变化，请重试。'
-  if (result.code === 'single_chat.pending_input_edit_open') return '另一处正在编辑这条排队消息。'
-  return `操作未完成：${result.code}`
+  if (result.code === 'single_chat.runtime_not_ready') return uiAttribute("这位队员的智能体暂不可用。")
+  if (result.code === 'single_chat.member_unavailable') return uiAttribute("这位队员已不在当前会话中。")
+  if (result.code === 'single_chat.draft_changed') return uiAttribute("附件草稿刚刚发生变化，请重试。")
+  if (result.code === 'single_chat.pending_input_changed') return uiAttribute("这条排队消息刚刚发生变化，请重试。")
+  if (result.code === 'single_chat.pending_input_edit_open') return uiAttribute("另一处正在编辑这条排队消息。")
+  return uiAttribute("操作未完成：{0}", String(result.code))
 }
 
 function resultPayloadString(result: StoredCommandResult, field: string): string | null {
@@ -305,14 +307,14 @@ export function singleChatEvidenceForRun(
     .sort((left, right) => left.sequence - right.sequence)
 }
 
-function memberCanSingleChat(member: CampMemberView): boolean {
+function memberCanSingleChat(member: ThreadMemberView): boolean {
   return member.membershipStatus === 'active'
     && member.leaveRequestedAt === null
     && member.profilePresence === 'present'
 }
 
 export function SingleChatRunHistory({
-  campId,
+  threadId,
   conversationId,
   run,
   evidence,
@@ -321,7 +323,7 @@ export function SingleChatRunHistory({
   cancelling = false,
   onNotify = () => undefined
 }: {
-  campId: string
+  threadId: string
   conversationId: string
   run: SingleChatRunView
   evidence: AgentRunExecutionEvidenceView[]
@@ -362,16 +364,16 @@ export function SingleChatRunHistory({
   )
   const hasActiveCompaction = executionHasActiveCompaction(processItems)
   const retry = !terminal ? processItems.findLast((item) => item.kind === 'diagnostic') : null
-  const feedback = run.status === 'waiting' ? '等待继续'
+  const feedback = run.status === 'waiting' ? uiAttribute('等待继续')
     : retry?.kind === 'diagnostic'
-      ? `等待 Claude Code 自动重试（${retry.diagnostic.attempt}/${retry.diagnostic.maxAttempts}）`
+      ? uiAttribute("等待 Claude Code 自动重试（{0}/{1}）", String(retry.diagnostic.attempt), String(retry.diagnostic.maxAttempts))
       : executionInitialFeedback(run.status, processItems, finalMessage !== null)
 
   const renderItem = (item: GroupedExecutionProgressItem): React.JSX.Element | null => {
     if (item.kind === 'toolGroup' || item.kind === 'tool') {
       return <ToolActivityGroup
         key={item.key}
-        campId={campId}
+        threadId={threadId}
         items={item.kind === 'toolGroup' ? item.items : [item]}
         liveTail={item.key === liveTailKey}
         cancelling={stopping}
@@ -401,7 +403,7 @@ export function SingleChatRunHistory({
     if (item.kind === 'compaction') {
       return <CompactionEventRow
         key={item.key}
-        campId={campId}
+        threadId={threadId}
         compaction={item.compaction}
         runId={run.id}
         runStatus={run.status}
@@ -412,7 +414,7 @@ export function SingleChatRunHistory({
   }
 
   return (
-    <section className="single-chat-agent-response" aria-label="队员回复" data-single-chat-run-id={run.id} tabIndex={-1}>
+    <section className="single-chat-agent-response" aria-label={uiAttribute("队员回复")} data-single-chat-run-id={run.id} tabIndex={-1}>
       <div className="single-chat-agent-column">
         <details
           className={`single-chat-run-history${terminal ? ' is-terminal' : ' is-live'}`}
@@ -420,7 +422,7 @@ export function SingleChatRunHistory({
           onToggle={(event) => { if (terminal) setOpen(event.currentTarget.open) }}
         >
           <summary hidden={!terminal}>
-            <span className="single-chat-run-summary" data-notification-turn-id={terminal ? run.campTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
+            <span className="single-chat-run-summary" data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
             <span className="single-chat-disclosure" aria-hidden="true"><ChevronGlyph /></span>
           </summary>
           <div className="single-chat-execution-content process-content">
@@ -431,15 +433,15 @@ export function SingleChatRunHistory({
                 <RunningText text={feedback} />
               </div>
             )}
-            {stopping && <div className="process-action cancelling" role="status">正在提交停止请求，完成后即可继续发送。</div>}
+            {stopping && <div className="process-action cancelling" role="status"><UiText zh={"正在提交停止请求，完成后即可继续发送。"} /></div>}
             {grouped.length === 0 && run.status === 'failed' && (
-              <p className="single-chat-process-note is-error">本轮回复失败，可以重新发送。</p>
+              <p className="single-chat-process-note is-error"><UiText zh={"本轮回复失败，可以重新发送。"} /></p>
             )}
           </div>
         </details>
         {finalMessage && <>
           <hr className="single-chat-final-rule" />
-          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-turn-id={run.campTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
+          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-turn-id={run.threadTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
         </>}
       </div>
     </section>
@@ -489,13 +491,13 @@ function SingleChatTranscript({
               <MessageQuotes history quotes={message.quotes ?? []} onReveal={revealPrivateQuote} />
               {message.body && <div className="single-chat-user-bubble" data-message-quote-body={message.id} data-quote-owner={`single_chat:${snapshot.conversation.id}`}>{message.body}</div>}
               {message.attachments.length > 0 && (
-                <div className="single-chat-message-attachments" role="group" aria-label={`附件 ${message.attachments.length} 个`}>
+                <div className="single-chat-message-attachments" role="group" aria-label={uiAttribute("附件 {0} 个", String(message.attachments.length))}>
                   {message.attachments.map((attachment) => (
                     <AttachmentCard
                       attachment={attachment}
                       locator={{
                         owner: 'single_chat_message',
-                        campId: snapshot.conversation.campId,
+                        threadId: snapshot.conversation.threadId,
                         conversationId: snapshot.conversation.id,
                         conversationMessageId: message.id,
                         attachmentRefId: attachment.id
@@ -512,7 +514,7 @@ function SingleChatTranscript({
           {run && (
             <SingleChatRunHistory
               conversationId={snapshot.conversation.id}
-              campId={snapshot.conversation.campId}
+              threadId={snapshot.conversation.threadId}
               cancelling={cancelling && run.id === snapshot.conversation.activeAgentRunId}
               onNotify={onNotify}
               run={run}
@@ -529,10 +531,10 @@ function SingleChatTranscript({
 
 function singleChatPendingError(code: string | null): string | null {
   if (!code) return null
-  if (code === 'attachment_missing') return '附件已被移动或删除，请编辑这条消息。'
-  if (code === 'attachment_unreadable') return '附件当前无法读取，请检查权限或编辑这条消息。'
-  if (code === 'attachment_kind_changed') return '附件类型已变化，请编辑这条消息。'
-  return `发送未完成（${code}），消息已保留。`
+  if (code === 'attachment_missing') return uiAttribute("附件已被移动或删除，请编辑这条消息。")
+  if (code === 'attachment_unreadable') return uiAttribute("附件当前无法读取，请检查权限或编辑这条消息。")
+  if (code === 'attachment_kind_changed') return uiAttribute("附件类型已变化，请编辑这条消息。")
+  return uiAttribute("发送未完成（{0}），消息已保留。", String(code))
 }
 
 function SingleChatPendingQueue({ snapshot, busyOutside, onRefresh, onNotify, onReturnToComposer }: {
@@ -542,7 +544,7 @@ function SingleChatPendingQueue({ snapshot, busyOutside, onRefresh, onNotify, on
   onNotify(message: string): void
   onReturnToComposer(item: SingleChatPendingInputView, editToken: string | null): Promise<void>
 }): React.JSX.Element | null {
-  const client = useCampClient()
+  const client = useThreadClient()
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const queue = snapshot.pendingInputs
@@ -555,14 +557,14 @@ function SingleChatPendingQueue({ snapshot, busyOutside, onRefresh, onNotify, on
       const editToken = session?.pendingInputId === item.id ? session.editToken : null
       if (remove) {
         const result = await client.request<StoredCommandResult>('singleChat.pendingInputs.edit', {
-          commandId: newCommandId(), command: { campId: snapshot.conversation.campId,
+          commandId: newCommandId(), command: { threadId: snapshot.conversation.threadId,
             conversationId: snapshot.conversation.id, pendingInputId: item.id,
             expectedRevision: item.revision, editToken, action: { type: 'delete' } }
         })
         if (result.status === 'rejected') throw new Error(resultMessage(result))
       } else await onReturnToComposer(item, editToken)
     } catch (error) {
-      onNotify(readErrorMessage(error, '待发送消息操作未完成。'))
+      onNotify(readErrorMessage(error, uiAttribute('待发送消息操作未完成。')))
     } finally {
       await onRefresh().catch(() => undefined)
       busyRef.current = false
@@ -572,8 +574,8 @@ function SingleChatPendingQueue({ snapshot, busyOutside, onRefresh, onNotify, on
   if (queue.items.length === 0) return null
 
   return (
-    <section className="pending-input-queue single-chat-pending-queue" aria-label="单聊待发送消息">
-      <div className="pending-input-heading"><span>待发送 · {queue.items.length}</span></div>
+    <section className="pending-input-queue single-chat-pending-queue" aria-label={uiAttribute("单聊待发送消息")}>
+      <div className="pending-input-heading"><span><UiText zh={"待发送 · "} />{queue.items.length}</span></div>
       <ul className="pending-input-list">
         {queue.items.map((item) => {
           const repairMessage = singleChatPendingError(item.lastAttemptErrorCode)
@@ -581,15 +583,15 @@ function SingleChatPendingQueue({ snapshot, busyOutside, onRefresh, onNotify, on
             <li className="pending-input-row" key={item.id}>
               <div className="pending-input-preview" title={item.body}>
                 <span className="pending-input-mark" aria-hidden="true" />
-                <span className="pending-input-copy">{item.body || `附件消息 · ${item.attachments.length}`}</span>
-                {item.attachments.length > 0 && <small>{item.attachments.length} 个附件</small>}
-                {session?.pendingInputId === item.id && <small>上次编辑未完成 · 请移回输入框</small>}
+                <span className="pending-input-copy">{item.body || uiAttribute("附件消息 · {0}", String(item.attachments.length))}</span>
+                {item.attachments.length > 0 && <small>{item.attachments.length}<UiText zh={" 个附件"} /></small>}
+                {session?.pendingInputId === item.id && <small><UiText zh={"上次编辑未完成 · 请移回输入框"} /></small>}
               </div>
               <span className="pending-input-actions">
-                <button className="pending-input-edit" type="button" disabled={busy || busyOutside} onClick={() => { void perform(item, false) }} aria-label="编辑待发送消息" title="移回输入框编辑（覆盖当前内容）">
+                <button className="pending-input-edit" type="button" disabled={busy || busyOutside} onClick={() => { void perform(item, false) }} aria-label={uiAttribute("编辑待发送消息")} title={uiAttribute("移回输入框编辑（覆盖当前内容）")}>
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.2 11.9.7-3.2 6.8-6.8a1.25 1.25 0 0 1 1.8 0l1.6 1.6a1.25 1.25 0 0 1 0 1.8L6.3 12l-3.1.7Z" /><path d="m9.8 2.8 3.4 3.4" /></svg>
                 </button>
-                <button className="pending-input-delete" type="button" disabled={busy || busyOutside} onClick={() => { void perform(item, true) }} aria-label="删除待发送消息">
+                <button className="pending-input-delete" type="button" disabled={busy || busyOutside} onClick={() => { void perform(item, true) }} aria-label={uiAttribute("删除待发送消息")}>
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
                 </button>
               </span>
@@ -602,7 +604,7 @@ function SingleChatPendingQueue({ snapshot, busyOutside, onRefresh, onNotify, on
                       attachment={attachment}
                       locator={{
                         owner: 'single_chat_pending',
-                        campId: snapshot.conversation.campId,
+                        threadId: snapshot.conversation.threadId,
                         conversationId: snapshot.conversation.id,
                         pendingInputId: item.id,
                         attachmentRefId: attachment.id
@@ -629,7 +631,7 @@ type PendingReturnRecovery = {
 }
 
 export function SingleChatPanel({
-  campId,
+  threadId,
   members,
   entryHost,
   visible,
@@ -652,17 +654,18 @@ export function SingleChatPanel({
   profileById?: Map<string, AgentProfile>
   busy?: boolean
   onResolveApproval?(approval: ActionApprovalView, optionId: string): void
-  campId: string
-  members: CampMemberView[]
+  threadId: string
+  members: ThreadMemberView[]
   entryHost?: HTMLElement | null
   visible: boolean
   onOpen(): void
   onClose(): void
-  onLeaveGuardChange?(guard: (() => CampLeavePreparation) | null): void
+  onLeaveGuardChange?(guard: (() => ThreadLeavePreparation) | null): void
   onNotify?(message: string): void
 }): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const mobile = useMobileLayout()
+  const copy = useThreadDetailCopy()
   const panelId = useId()
   const initialAgentId = members.find((member) => memberCanSingleChat(member) && member.isDefaultLead)?.agentId
     ?? members.find(memberCanSingleChat)?.agentId
@@ -671,7 +674,7 @@ export function SingleChatPanel({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const focusPanel = useRef(false)
   const visibleRef = useRef(visible)
-  const campIdRef = useRef(campId)
+  const campIdRef = useRef(threadId)
   const selectedAgentIdRef = useRef<string | null>(initialAgentId)
   const currentConversationIdRef = useRef<string | null>(null)
   const conversationsRef = useRef<SingleChatConversationView[]>([])
@@ -694,7 +697,7 @@ export function SingleChatPanel({
   const [conversations, setConversations] = useState<SingleChatConversationView[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(initialAgentId)
   const [snapshot, setSnapshot] = useState<SingleChatSnapshot | null>(null)
-  const recoveryKey = `single-chat:${campId}`
+  const recoveryKey = `single-chat:${threadId}`
   const [bodyDrafts, updateBodyDrafts] = useState<Record<string, string>>(() => {
     const saved = client.editingRecovery?.get(recoveryKey)
     return saved && typeof saved === 'object' ? Object.fromEntries(Object.entries(saved).filter(([, value]) => typeof value === 'string')) : {}
@@ -727,7 +730,7 @@ export function SingleChatPanel({
   useLayoutEffect(() => {
     onLeaveGuardChange?.(() => {
       if (returningPendingRef.current) {
-        throw new Error('单聊消息移回结果尚未确认，请先在单聊中重试恢复消息。')
+        throw new Error(uiAttribute('单聊消息移回结果尚未确认，请先在单聊中重试恢复消息。'))
       }
       leaveLeaseCountRef.current += 1
       setLeaving(true)
@@ -758,19 +761,19 @@ export function SingleChatPanel({
   const currentTargetReady = singleChatConversationReady(snapshot, selectedAgentId, loading)
   const currentSnapshot = currentTargetReady ? snapshot : null
   const bodyDraftKey = snapshot?.conversation.agentId === selectedAgentId
-    ? `${campId}:${snapshot.conversation.id}` : `${campId}:pending:${selectedAgentId ?? ''}`
+    ? `${threadId}:${snapshot.conversation.id}` : `${threadId}:pending:${selectedAgentId ?? ''}`
   const draft = bodyDrafts[bodyDraftKey] ?? ''
   const setDraft = (value: string): void => setBodyDrafts((current) => ({ ...current, [bodyDraftKey]: value }))
   useEffect(() => {
     if (!snapshot || snapshot.conversation.agentId !== selectedAgentId) return
-    const pendingKey = `${campId}:pending:${selectedAgentId ?? ''}`
+    const pendingKey = `${threadId}:pending:${selectedAgentId ?? ''}`
     setBodyDrafts((current) => {
       if (!(pendingKey in current)) return current
       const next = { ...current, [bodyDraftKey]: current[bodyDraftKey] ?? current[pendingKey] }
       delete next[pendingKey]
       return next
     })
-  }, [campId, selectedAgentId, snapshot?.conversation.id, bodyDraftKey])
+  }, [threadId, selectedAgentId, snapshot?.conversation.id, bodyDraftKey])
   const activeRun = currentSnapshot?.agentRuns.find((run) => NON_TERMINAL_RUNS.has(run.status)) ?? null
   const runningCount = conversations.filter((conversation) => (
     conversation.id === currentSnapshot?.conversation.id
@@ -779,7 +782,7 @@ export function SingleChatPanel({
   )).length
 
   visibleRef.current = visible
-  campIdRef.current = campId
+  campIdRef.current = threadId
   activeMembersRef.current = activeMembers
   memberByIdRef.current = memberById
 
@@ -796,7 +799,7 @@ export function SingleChatPanel({
   ): void => {
     if (
       !visibleRef.current
-      || campIdRef.current !== campId
+      || campIdRef.current !== threadId
       || currentConversationIdRef.current !== conversationId
     ) return
     if (next && snapshotRef.current?.conversation.id === conversationId
@@ -804,14 +807,14 @@ export function SingleChatPanel({
     snapshotRef.current = next
     setSnapshot(next)
     setError(null)
-  }, [campId])
+  }, [threadId])
 
   const refreshCurrent = useCallback((
     conversationId = currentConversationIdRef.current
   ): Promise<SingleChatSnapshot | null | undefined> => {
     if (
       !visibleRef.current
-      || campIdRef.current !== campId
+      || campIdRef.current !== threadId
       || !conversationId
       || currentConversationIdRef.current !== conversationId
       || !selectedAgentIdRef.current
@@ -847,7 +850,7 @@ export function SingleChatPanel({
         currentReadAgainRef.current = false
         if (
           !visibleRef.current
-          || campIdRef.current !== campId
+          || campIdRef.current !== threadId
           || currentConversationIdRef.current !== currentRead.conversationId
           || !singleChatTargetRequestIsCurrent(
             currentRead.targetRequest,
@@ -861,12 +864,12 @@ export function SingleChatPanel({
             'singleChat.get',
             { conversationId: currentRead.conversationId }
           )
-          const next = !loaded || (loaded.conversation.campId === campId
+          const next = !loaded || (loaded.conversation.threadId === threadId
             && loaded.conversation.id === currentRead.conversationId) ? loaded : null
           if (
             currentReadInFlightRef.current === currentRead
             && visibleRef.current
-            && campIdRef.current === campId
+            && campIdRef.current === threadId
             && currentConversationIdRef.current === currentRead.conversationId
             && singleChatTargetRequestIsCurrent(
               currentRead.targetRequest,
@@ -883,7 +886,7 @@ export function SingleChatPanel({
           if (
             currentReadInFlightRef.current === currentRead
             && visibleRef.current
-            && campIdRef.current === campId
+            && campIdRef.current === threadId
             && currentConversationIdRef.current === currentRead.conversationId
             && singleChatTargetRequestIsCurrent(
               currentRead.targetRequest,
@@ -892,7 +895,7 @@ export function SingleChatPanel({
             )
             && !currentReadAgainRef.current
           ) {
-            setError(readErrorMessage(nextError, '单聊暂时无法读取。'))
+            setError(readErrorMessage(nextError, uiAttribute('单聊暂时无法读取。')))
             latest = undefined
           }
         }
@@ -905,23 +908,23 @@ export function SingleChatPanel({
     }
     void reading.then(clearCurrentRead, clearCurrentRead)
     return reading
-  }, [acceptSnapshot, campId])
+  }, [acceptSnapshot, threadId])
 
   const refreshList = useCallback(async (): Promise<SingleChatConversationView[] | undefined> => {
-    if (!visibleRef.current || campIdRef.current !== campId) return undefined
+    if (!visibleRef.current || campIdRef.current !== threadId) return undefined
     try {
-      const nextConversations = await client.request<SingleChatConversationView[]>('singleChat.list', { campId })
-      if (!visibleRef.current || campIdRef.current !== campId) return undefined
+      const nextConversations = await client.request<SingleChatConversationView[]>('singleChat.list', { threadId })
+      if (!visibleRef.current || campIdRef.current !== threadId) return undefined
       conversationsRef.current = nextConversations
       setConversations(nextConversations)
       return nextConversations
     } catch (nextError) {
-      if (visibleRef.current && campIdRef.current === campId) {
-        setError(readErrorMessage(nextError, '单聊列表暂时无法读取。'))
+      if (visibleRef.current && campIdRef.current === threadId) {
+        setError(readErrorMessage(nextError, uiAttribute('单聊列表暂时无法读取。')))
       }
       return undefined
     }
-  }, [campId])
+  }, [threadId])
 
   useEffect(() => {
     if (!visible) {
@@ -932,7 +935,7 @@ export function SingleChatPanel({
     const requestSequence = ++targetRequestSequenceRef.current
     const requestIsCurrent = (): boolean => (
       visibleRef.current
-      && campIdRef.current === campId
+      && campIdRef.current === threadId
       && requestSequence === targetRequestSequenceRef.current
     )
     followLatestRef.current = true
@@ -952,7 +955,7 @@ export function SingleChatPanel({
         if (target && (!availableMemberById.has(target.agentId)
           || !nextConversations.some((conversation) => conversation.id === target.conversationId
             && conversation.agentId === target.agentId))) {
-          throw new Error('原单聊已结束或来源不可用。')
+          throw new Error(uiAttribute('原单聊已结束或来源不可用。'))
         }
         let agentId = target?.agentId ?? selectedAgentIdRef.current
         if (!agentId || !availableMemberById.has(agentId)) {
@@ -971,7 +974,7 @@ export function SingleChatPanel({
         currentConversationIdRef.current = conversation?.id ?? null
         if (conversation) await refreshCurrent(conversation.id)
       } catch (nextError) {
-        if (requestIsCurrent()) setError(readErrorMessage(nextError, '无法打开原单聊。'))
+        if (requestIsCurrent()) setError(readErrorMessage(nextError, uiAttribute('无法打开原单聊。')))
       } finally {
         if (requestIsCurrent()) {
           loadingRef.current = false
@@ -984,7 +987,7 @@ export function SingleChatPanel({
       currentReadAgainRef.current = false
     }
   // Only actual target eligibility changes should repeat the panel-open list read.
-  }, [activeMemberIdsKey, campId, refreshCurrent, refreshList, target, visible])
+  }, [activeMemberIdsKey, threadId, refreshCurrent, refreshList, target, visible])
 
   const pollingRequired = singleChatSnapshotNeedsPolling(currentSnapshot)
   useEffect(() => {
@@ -1003,7 +1006,7 @@ export function SingleChatPanel({
     return client.onEvent?.((event) => {
       const target = singleChatChangeRefreshTarget(
         event,
-        campId,
+        threadId,
         currentConversationIdRef.current
       )
       if (target === 'current-conversation') {
@@ -1012,7 +1015,7 @@ export function SingleChatPanel({
         void refreshList().catch(() => undefined)
       }
     })
-  }, [campId, client, refreshCurrent, refreshList, visible])
+  }, [threadId, client, refreshCurrent, refreshList, visible])
 
   useEffect(() => {
     if (!visible) return
@@ -1077,7 +1080,7 @@ export function SingleChatPanel({
           })) approvalIds.add(node.dataset.approvalId!)
         }
       }
-      const sources: VisibleNotificationSources = { campId,
+      const sources: VisibleNotificationSources = { threadId,
         conversationId: currentSnapshot?.conversation.id ?? null, surfaceVisible: canObserve,
         snapshotSequence: 0, messageIds: [], campTurnIds: [...campTurnIds].sort(),
         agentRunIds: [], approvalIds: [...approvalIds].sort() }
@@ -1104,7 +1107,7 @@ export function SingleChatPanel({
       window.removeEventListener('focus', schedule)
       document.removeEventListener('visibilitychange', schedule)
     }
-  }, [campId, currentSnapshot, onVisibleNotificationSources, visible])
+  }, [threadId, currentSnapshot, onVisibleNotificationSources, visible])
 
   useEffect(() => {
     if (!visible || !notificationFocus?.active || notificationFocus.approvalId
@@ -1118,7 +1121,7 @@ export function SingleChatPanel({
   }, [currentSnapshot, notificationFocus, onNotificationFocusPresented, visible])
 
   const performPendingReturn = async (transfer: PendingReturnRecovery): Promise<void> => {
-    if (leaveLeaseCountRef.current > 0) throw new Error('正在离开当前会话，请稍后再编辑待发送消息。')
+    if (leaveLeaseCountRef.current > 0) throw new Error(uiAttribute('正在离开当前会话，请稍后再编辑待发送消息。'))
     if (returnRequestInFlightRef.current) return
     const { snapshot: current, item, editToken, commandId } = transfer
     returnRequestInFlightRef.current = true
@@ -1131,7 +1134,7 @@ export function SingleChatPanel({
       let result: StoredCommandResult
       try {
         result = await client.request<StoredCommandResult>('singleChat.pendingInputs.edit', {
-          commandId, command: { campId: current.conversation.campId,
+          commandId, command: { threadId: current.conversation.threadId,
             conversationId: item.conversationId, pendingInputId: item.id, expectedRevision: item.revision,
             editToken, action: { type: 'return_to_composer', expectedDraftRevision: current.draft.revision } }
         })
@@ -1140,12 +1143,12 @@ export function SingleChatPanel({
         // Draft. Retry this exact command to recover a lost successful response.
         uncertain = true
         setPendingReturnRecovery(transfer)
-        throw new Error('移回结果尚未确认，请重试恢复消息。当前输入已保留。')
+        throw new Error(uiAttribute('移回结果尚未确认，请重试恢复消息。当前输入已保留。'))
       }
       if (result.status === 'rejected') throw new Error(resultMessage(result))
       const body = resultPayloadString(result, 'body') ?? ''
       const returnedDraft = result.payload.draft as unknown as SingleChatSnapshot['draft']
-      const key = `${current.conversation.campId}:${item.conversationId}`
+      const key = `${current.conversation.threadId}:${item.conversationId}`
       setBodyDrafts((drafts) => ({ ...drafts, [key]: body }))
       if (currentConversationIdRef.current === item.conversationId) {
         const latest = snapshotRef.current?.conversation.id === item.conversationId ? snapshotRef.current : current
@@ -1171,7 +1174,7 @@ export function SingleChatPanel({
     const current = snapshotRef.current
     if (!current || current.conversation.id !== item.conversationId || returningPendingRef.current
       || sending || ending || quoteOperationCount.current > 0 || preparingAttachments.some((entry) => !entry.error)) {
-      throw new Error('输入框正在处理变更，请稍后再试。')
+      throw new Error(uiAttribute('输入框正在处理变更，请稍后再试。'))
     }
     await performPendingReturn({ snapshot: current, item, editToken, commandId: newCommandId() })
   }
@@ -1190,11 +1193,11 @@ export function SingleChatPanel({
   ): Promise<SingleChatSnapshot | null> => {
     const result = await client.request<StoredCommandResult>('singleChat.open', {
       commandId: newCommandId(),
-      command: { campId, agentId }
+      command: { threadId, agentId }
     })
     if (
       !visibleRef.current
-      || campIdRef.current !== campId
+      || campIdRef.current !== threadId
       || !singleChatTargetRequestIsCurrent(
         targetRequest,
         targetRequestSequenceRef.current,
@@ -1203,7 +1206,7 @@ export function SingleChatPanel({
     ) return null
     if (result.status === 'rejected') throw new Error(resultMessage(result))
     const conversationId = resultPayloadString(result, 'conversationId')
-    if (!conversationId) throw new Error('单聊已打开，但未返回对话标识。')
+    if (!conversationId) throw new Error(uiAttribute('单聊已打开，但未返回对话标识。'))
     currentConversationIdRef.current = conversationId
     await refreshList()
     const next = await refreshCurrent(conversationId)
@@ -1213,7 +1216,7 @@ export function SingleChatPanel({
       selectedAgentIdRef.current
     )) return null
     if (!next || next.conversation.id !== conversationId) {
-      throw new Error('单聊已不在当前会话中。')
+      throw new Error(uiAttribute('单聊已不在当前会话中。'))
     }
     return next
   }
@@ -1225,7 +1228,7 @@ export function SingleChatPanel({
       sequence: ++targetRequestSequenceRef.current
     }
     const requestIsCurrent = (): boolean => visibleRef.current
-      && campIdRef.current === campId
+      && campIdRef.current === threadId
       && singleChatTargetRequestIsCurrent(
         targetRequest,
         targetRequestSequenceRef.current,
@@ -1245,7 +1248,7 @@ export function SingleChatPanel({
     try {
       await openConversation(agentId, targetRequest)
     } catch (nextError) {
-      if (requestIsCurrent()) setError(readErrorMessage(nextError, '无法打开这段单聊。'))
+      if (requestIsCurrent()) setError(readErrorMessage(nextError, uiAttribute('无法打开这段单聊。')))
     } finally {
       if (requestIsCurrent()) {
         loadingRef.current = false
@@ -1271,7 +1274,7 @@ export function SingleChatPanel({
       : null
     try {
       if (!current) current = await openConversation(agentId)
-      if (!current) throw new Error('单聊已不在当前会话中。')
+      if (!current) throw new Error(uiAttribute('单聊已不在当前会话中。'))
       for (const [index, file] of files.entries()) {
         const item = pending[index]
         try {
@@ -1284,14 +1287,14 @@ export function SingleChatPanel({
           acceptMutationSnapshot(next)
           setPreparingAttachments((items) => items.filter(({ id }) => id !== item.id))
         } catch (nextError) {
-          const message = readErrorMessage(nextError, '附件处理失败，请移除后重试。')
+          const message = readErrorMessage(nextError, uiAttribute('附件处理失败，请移除后重试。'))
           setPreparingAttachments((items) => items.map((candidate) => (
             candidate.id === item.id ? { ...candidate, error: message } : candidate
           )))
         }
       }
     } catch (nextError) {
-      const message = readErrorMessage(nextError, '无法为这段单聊添加附件。')
+      const message = readErrorMessage(nextError, uiAttribute('无法为这段单聊添加附件。'))
       setPreparingAttachments((items) => items.map((candidate) => (
         pending.some(({ id }) => id === candidate.id) ? { ...candidate, error: message } : candidate
       )))
@@ -1409,12 +1412,12 @@ export function SingleChatPanel({
       )
       acceptMutationSnapshot(next)
     } catch (nextError) {
-      setError(readErrorMessage(nextError, '附件未能移除，请重试。'))
+      setError(readErrorMessage(nextError, uiAttribute('附件未能移除，请重试。')))
     }
   }
 
   const mutateDraftQuote = (action: MessageQuoteAction): Promise<void> => {
-    if (returningPendingRef.current) return Promise.reject(new Error('消息正在移回输入框，请稍后再试。'))
+    if (returningPendingRef.current) return Promise.reject(new Error(uiAttribute('消息正在移回输入框，请稍后再试。')))
     const owner = snapshotRef.current?.conversation.id
     const commandId = newCommandId()
     if (!owner) return Promise.reject(new Error('quote.owner_unavailable'))
@@ -1424,7 +1427,7 @@ export function SingleChatPanel({
       const current = snapshotRef.current
       if (!current || current.conversation.id !== owner || currentConversationIdRef.current !== owner) throw new Error('quote.owner_unavailable')
       const next = await client.request<SingleChatSnapshot>('messageQuotes.mutateDraft', {
-        commandId, command: { campId, conversationId: owner, expectedRevision: current.draft.revision, action }
+        commandId, command: { threadId, conversationId: owner, expectedRevision: current.draft.revision, action }
       })
       acceptSnapshot(owner, next)
     })
@@ -1451,13 +1454,13 @@ export function SingleChatPanel({
       const current = snapshotRef.current?.conversation.agentId === agentId
         ? snapshotRef.current
         : await openConversation(agentId)
-      if (!current) throw new Error('无法打开这段单聊。')
-      if (!body && (current.draft.quotes?.length ?? 0) > 0) throw new Error('请填写这次的问题后再发送。')
+      if (!current) throw new Error(uiAttribute('无法打开这段单聊。'))
+      if (!body && (current.draft.quotes?.length ?? 0) > 0) throw new Error(uiAttribute('请填写这次的问题后再发送。'))
       if (!body && current.draft.attachments.length === 0) return
       const result = await client.request<StoredCommandResult>('singleChat.send', {
         commandId: newCommandId(),
         command: {
-          campId,
+          threadId,
           conversationId: current.conversation.id,
           body,
           draftRevision: current.draft.revision
@@ -1468,7 +1471,7 @@ export function SingleChatPanel({
       setPreparingAttachments([])
       await refreshCurrent(current.conversation.id)
     } catch (nextError) {
-      setError(readErrorMessage(nextError, '消息未发送，请重试。'))
+      setError(readErrorMessage(nextError, uiAttribute('消息未发送，请重试。')))
     } finally {
       setSending(false)
     }
@@ -1489,13 +1492,13 @@ export function SingleChatPanel({
     try {
       const result = await client.request<StoredCommandResult>('agentRuns.cancel', {
         commandId: newCommandId(),
-        command: { campId, agentRunId: run.id, expectedVersion: run.version }
+        command: { threadId, agentRunId: run.id, expectedVersion: run.version }
       })
       if (result.status === 'rejected') throw new Error(resultMessage(result))
       await refreshCurrent(current.conversation.id)
     } catch (nextError) {
       if (currentConversationIdRef.current === current.conversation.id) {
-        setError(readErrorMessage(nextError, '停止请求未完成，请重试。'))
+        setError(readErrorMessage(nextError, uiAttribute('停止请求未完成，请重试。')))
       }
     } finally {
       setCancelling(false)
@@ -1516,7 +1519,7 @@ export function SingleChatPanel({
       setEndDialogOpen(false)
       setEndTarget(null)
       if (
-        campIdRef.current === target.campId
+        campIdRef.current === target.threadId
         && currentConversationIdRef.current === target.conversationId
       ) {
         setPreparingAttachments([])
@@ -1525,7 +1528,7 @@ export function SingleChatPanel({
         snapshotRef.current = null
         setSnapshot(null)
       }
-      if (campIdRef.current === target.campId) {
+      if (campIdRef.current === target.threadId) {
         const remainingConversations = conversationsRef.current.filter((conversation) => (
           conversation.id !== target.conversationId
         ))
@@ -1533,9 +1536,9 @@ export function SingleChatPanel({
         setConversations(remainingConversations)
         await refreshList()
       }
-      onNotify('单聊已结束')
+      onNotify(uiAttribute('单聊已结束'))
     } catch (nextError) {
-      setError(readErrorMessage(nextError, '单聊未结束，请重试。'))
+      setError(readErrorMessage(nextError, uiAttribute('单聊未结束，请重试。')))
     } finally {
       setEnding(false)
     }
@@ -1551,7 +1554,7 @@ export function SingleChatPanel({
     ) return
     const target = singleChatEndTargetFromSnapshot(
       current,
-      memberByIdRef.current.get(current.conversation.agentId)?.displayName ?? '这位队员'
+      memberByIdRef.current.get(current.conversation.agentId)?.displayName ?? uiAttribute('这位队员')
     )
     if (safeStoredBoolean(END_CONFIRMATION_STORAGE_KEY)) {
       void endConversation(target)
@@ -1563,12 +1566,13 @@ export function SingleChatPanel({
   }
 
   const entries = (
-    <div className="camp-detail-entries" role="group" aria-label="单聊入口">
+    <div className="camp-detail-entries" role="group" aria-label={uiAttribute("单聊入口")}>
       <button
         ref={triggerRef}
         className="camp-detail-entry"
         type="button"
         data-detail="single-chat"
+        title={copy.singleChatTitle}
         aria-expanded={visible}
         aria-controls={panelId}
         aria-haspopup="dialog"
@@ -1582,10 +1586,12 @@ export function SingleChatPanel({
         }}
       >
         {runningCount > 0
-          ? <span className="camp-loading-spinner" role="img" aria-label={`${runningCount} 段单聊正在回复`} />
+          ? <span className="camp-loading-spinner" role="img" aria-label={uiAttribute("{0} 段单聊正在回复", String(runningCount))} />
           : <SingleChatGlyph />}
-        <span>单聊</span>
-        <small>{conversations.length}</small>
+        <span className="camp-detail-entry-copy">
+          <span>{copy.singleChat}</span>
+          <small>{conversations.length}</small>
+        </span>
       </button>
     </div>
   )
@@ -1609,9 +1615,9 @@ export function SingleChatPanel({
     >
       <header className="single-chat-heading">
         <SingleChatGlyph />
-        <strong id={`${panelId}-title`}>单聊</strong>
-        <span>当前会话</span>
-        <button className="icon-button" type="button" aria-label="收起单聊" title="收起 · Esc" onClick={() => {
+        <strong id={`${panelId}-title`}>{copy.singleChatTitle}</strong>
+        <span><UiText zh={"当前会话"} /></span>
+        <button className="icon-button" type="button" aria-label={uiAttribute("收起单聊")} title={uiAttribute("收起 · Esc")} onClick={() => {
           onClose()
         }}><CloseGlyph /></button>
       </header>
@@ -1622,8 +1628,8 @@ export function SingleChatPanel({
             <button className={`single-chat-target-trigger${selectedMember ? '' : ' no-target'}`} type="button" disabled={activeMembers.length === 0 || ending || returningPending || sending || quoteBusy || preparingAttachments.some((item) => !item.error)}>
               {selectedMember && <MemberAvatar agentId={selectedMember.agentId} avatarRef={selectedMember.avatarRef} displayName={selectedMember.displayName} size="mention" decorative />}
               <span className="single-chat-target-copy">
-                <strong>{selectedMember?.displayName ?? '选择单聊对象'}</strong>
-                <small>{selectedMember?.teamRole ?? '当前会话中的队员'}</small>
+                <strong>{selectedMember?.displayName ?? uiAttribute("选择单聊对象")}</strong>
+                <small>{selectedMember?.teamRole ?? uiAttribute("当前会话中的队员")}</small>
               </span>
               <span className="single-chat-target-chevron"><ChevronGlyph /></span>
             </button>
@@ -1631,8 +1637,8 @@ export function SingleChatPanel({
           <DropdownMenu.Portal>
             <DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="single-chat-target-menu" sideOffset={6} align="start" collisionPadding={12}>
               <div className="single-chat-target-menu-heading">
-                <strong>选择单聊对象</strong>
-                <span>单聊正文不会进入公屏</span>
+                <strong><UiText zh={"选择单聊对象"} /></strong>
+                <span><UiText zh={"单聊正文不会进入公屏"} /></span>
               </div>
               {activeMembers.map((member) => (
                 <DropdownMenu.Item className="single-chat-target-option" key={member.agentId} onSelect={() => void chooseTarget(member.agentId)}>
@@ -1641,15 +1647,15 @@ export function SingleChatPanel({
                     <strong>{member.displayName}</strong>
                     <span>{member.teamRole}</span>
                   </span>
-                  {selectedAgentId === member.agentId && <span className="single-chat-target-current" aria-label="当前对象"><CheckGlyph /></span>}
+                  {selectedAgentId === member.agentId && <span className="single-chat-target-current" aria-label={uiAttribute("当前对象")}><CheckGlyph /></span>}
                 </DropdownMenu.Item>
               ))}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
-        <span className="single-chat-private-label"><LockGlyph />仅你可见</span>
-        <button className="single-chat-end-button" type="button" disabled={!snapshot || !currentTargetReady || returningPending || ending} aria-label={selectedMember ? `结束与${selectedMember.displayName}的单聊` : '结束单聊'} onClick={requestEnd}>
-          {ending ? '结束中…' : '结束'}
+        <span className="single-chat-private-label"><LockGlyph /><UiText zh={"仅你可见"} /></span>
+        <button className="single-chat-end-button" type="button" disabled={!snapshot || !currentTargetReady || returningPending || ending} aria-label={selectedMember ? uiAttribute("结束与{0}的单聊", String(selectedMember.displayName)) : uiAttribute("结束单聊")} onClick={requestEnd}>
+          {ending ? uiAttribute("结束中…") : uiAttribute("结束")}
         </button>
       </div>
 
@@ -1657,7 +1663,7 @@ export function SingleChatPanel({
       <section
         ref={viewportRef}
         className="single-chat-viewport"
-        aria-label={selectedMember ? `与${selectedMember.displayName}的单聊消息` : '单聊消息'}
+        aria-label={selectedMember ? uiAttribute("与{0}的单聊消息", String(selectedMember.displayName)) : uiAttribute("单聊消息")}
         onScroll={() => {
           const viewport = viewportRef.current
           if (!viewport) return
@@ -1665,20 +1671,20 @@ export function SingleChatPanel({
         }}
       >
         <div className="single-chat-transcript">
-          {loading && <div className="single-chat-empty" role="status"><span className="single-chat-spinner" /><strong>正在打开单聊</strong></div>}
-          {!loading && !selectedMember && <div className="single-chat-empty"><strong>当前没有可单聊的队员</strong><span>队员回到当前会话后即可开始单聊。</span></div>}
-          {!loading && !sending && selectedMember && !currentSnapshot && <div className="single-chat-empty"><strong>和 {selectedMember.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
-          {!sending && currentSnapshot && currentSnapshot.messages.length === 0 && <div className="single-chat-empty"><strong>和 {selectedMember?.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
+          {loading && <div className="single-chat-empty" role="status"><span className="single-chat-spinner" /><strong><UiText zh={"正在打开单聊"} /></strong></div>}
+          {!loading && !selectedMember && <div className="single-chat-empty"><strong><UiText zh={"当前没有可单聊的队员"} /></strong><span><UiText zh={"队员回到当前会话后即可开始单聊。"} /></span></div>}
+          {!loading && !sending && selectedMember && !currentSnapshot && <div className="single-chat-empty"><strong><UiText zh={"和 "} />{selectedMember.displayName}<UiText zh={" 单独聊聊"} /></strong><span><UiText zh={"发送第一条消息开始这段对话。"} /></span></div>}
+          {!sending && currentSnapshot && currentSnapshot.messages.length === 0 && <div className="single-chat-empty"><strong><UiText zh={"和 "} />{selectedMember?.displayName}<UiText zh={" 单独聊聊"} /></strong><span><UiText zh={"发送第一条消息开始这段对话。"} /></span></div>}
           {currentSnapshot && <SingleChatTranscript snapshot={currentSnapshot} now={now} cancelling={cancelling} onNotify={onNotify} />}
           {sending && !activeRun && <div className="process-action current single-chat-send-feedback" role="status">
-            <span className="process-spinner" aria-hidden="true" /><RunningText text="连接中" />
+            <span className="process-spinner" aria-hidden="true" /><RunningText text={uiAttribute("连接中")} />
           </div>}
         </div>
       </section>
 
       <ReturnToLatest
         viewportRef={viewportRef}
-        ownerKey={campId + ':' + (currentSnapshot?.conversation.id ?? selectedAgentId)}
+        ownerKey={threadId + ':' + (currentSnapshot?.conversation.id ?? selectedAgentId)}
         contentRevision={String(currentSnapshot?.conversation.lastMessageSequence ?? 0) + ':' + (activeRun?.executionEvidenceCount ?? 0)}
         scope="single"
         enabled={visible && currentSnapshot !== null}
@@ -1719,7 +1725,7 @@ export function SingleChatPanel({
                     attachment={attachment}
                     locator={{
                       owner: 'single_chat_composer',
-                      campId,
+                      threadId,
                       conversationId: currentSnapshot.conversation.id,
                       attachmentRefId: attachment.id
                     }}
@@ -1743,13 +1749,13 @@ export function SingleChatPanel({
             <MessageQuotes key={currentSnapshot?.conversation.id ?? 'empty'} quotes={currentSnapshot?.draft.quotes ?? []}
               onEmptyFocus={() => composerRef.current?.focus()}
               disabled={sending || returningPending || quoteBusy} onReveal={revealPrivateQuote} onMutate={mutateDraftQuote} />
-            <label className="sr-only" htmlFor={`${panelId}-composer`}>发送单聊消息</label>
+            <label className="sr-only" htmlFor={`${panelId}-composer`}><UiText zh={"发送单聊消息"} /></label>
             <textarea
               ref={composerRef}
               id={`${panelId}-composer`}
               value={draft}
               disabled={!selectedMember || !currentTargetReady || sending || returningPending || ending}
-              placeholder={selectedMember ? `给 ${selectedMember.displayName} 发消息…` : '选择一位队员后开始单聊'}
+              placeholder={selectedMember ? uiAttribute("给 {0} 发消息…", String(selectedMember.displayName)) : uiAttribute("选择一位队员后开始单聊")}
               onChange={(event) => setDraft(event.target.value)}
               onPaste={(event) => {
                 const files = Array.from(event.clipboardData.files)
@@ -1786,8 +1792,8 @@ export function SingleChatPanel({
               <button
                 className="composer-attachment-button"
                 type="button"
-                aria-label="添加文件"
-                title="添加文件"
+                aria-label={uiAttribute("添加文件")}
+                title={uiAttribute("添加文件")}
                 disabled={!selectedMember || !currentTargetReady || sending || returningPending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -1797,9 +1803,9 @@ export function SingleChatPanel({
             <div className="composer-actions">
               {!activeRun && (
                 <span className="composer-hint">
-                  <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
+                  <span className="sr-only"><UiText zh={"Enter 发送，Shift+Enter 换行"} /></span>
                   <span className="composer-hint-visual" aria-hidden="true">
-                    <kbd>↵</kbd><span>发送</span><span className="composer-hint-separator">·</span><kbd>⇧↵</kbd><span>换行</span>
+                    <kbd>↵</kbd><span><UiText zh={"发送"} /></span><span className="composer-hint-separator">·</span><kbd>⇧↵</kbd><span><UiText zh={"换行"} /></span>
                   </span>
                 </span>
               )}
@@ -1815,31 +1821,31 @@ export function SingleChatPanel({
           </div>
         </div>
         {pendingReturnRecovery && <div className="single-chat-error" role="alert">
-          <span>移回结果尚未确认，当前输入已保留。</span>
+          <span><UiText zh={"移回结果尚未确认，当前输入已保留。"} /></span>
           <button type="button" onClick={() => {
             void performPendingReturn(pendingReturnRecovery).catch((nextError) => setError(readErrorMessage(nextError)))
-          }}>重试移回消息</button>
+          }}><UiText zh={"重试移回消息"} /></button>
         </div>}
-        {error && <div className="single-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}
+        {error && <div className="single-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}><UiText zh={"关闭"} /></button></div>}
       </form>
       <footer className="single-chat-footer">
-        <span>单聊正文不会进入公屏</span>
-        <span><kbd>Esc</kbd> 收起</span>
+        <span><UiText zh={"单聊正文不会进入公屏"} /></span>
+        <span><kbd>Esc</kbd><UiText zh={" 收起"} /></span>
       </footer>
       {attachmentDragState && (
         <div className="single-chat-drop-layer" aria-hidden="true">
           <div className="single-chat-drop-callout">
-            <strong>{'松手添加到当前消息'}</strong>
+            <strong>{uiAttribute("松手添加到当前消息")}</strong>
             <span>
               {attachmentDragState === 'directory'
-                ? '将引用此文件夹的当前位置，不会移动原文件'
-                : '支持文件与文件夹 · 原位置移动或删除后可能不可用'}
+                ? uiAttribute("将引用此文件夹的当前位置，不会移动原文件")
+                : uiAttribute("支持文件与文件夹 · 原位置移动或删除后可能不可用")}
             </span>
           </div>
         </div>
       )}
       <span className="sr-only" aria-live="polite">
-        {attachmentDragState ? '已进入单聊附件区域，释放以添加文件或文件夹。' : ''}
+        {attachmentDragState ? uiAttribute("已进入单聊附件区域，释放以添加文件或文件夹。") : ''}
       </span>
     </aside>
 
@@ -1852,8 +1858,8 @@ export function SingleChatPanel({
         <Dialog.Overlay className="dialog-overlay" />
         <AppDialogContent tone="danger" aria-describedby={`${panelId}-end-description`}>
           <AppDialogHeader
-            title={endTarget ? `结束与${endTarget.displayName}的单聊？` : '结束单聊？'}
-            description="这段对话将被删除且无法回复。"
+            title={endTarget ? uiAttribute("结束与{0}的单聊？", String(endTarget.displayName)) : uiAttribute("结束单聊？")}
+            description={uiAttribute("这段对话将被删除且无法回复。")}
             descriptionId={`${panelId}-end-description`}
             icon="trash"
             hideClose
@@ -1861,12 +1867,12 @@ export function SingleChatPanel({
           <AppDialogBody>
             <label className="single-chat-confirm-choice">
               <input type="checkbox" checked={skipEndConfirmation} onChange={(event) => setSkipEndConfirmation(event.target.checked)} />
-              <span>不再询问</span>
+              <span><UiText zh={"不再询问"} /></span>
             </label>
           </AppDialogBody>
           <AppDialogFooter>
-            <Dialog.Close asChild><button className="quiet-button" type="button" data-dialog-autofocus disabled={ending}>取消</button></Dialog.Close>
-            <button className="danger-button" type="button" disabled={ending || !endTarget} onClick={() => endTarget && void endConversation(endTarget)}>{ending ? '结束中…' : '结束'}</button>
+            <Dialog.Close asChild><button className="quiet-button" type="button" data-dialog-autofocus disabled={ending}><UiText zh={"取消"} /></button></Dialog.Close>
+            <button className="danger-button" type="button" disabled={ending || !endTarget} onClick={() => endTarget && void endConversation(endTarget)}>{ending ? uiAttribute("结束中…") : uiAttribute("结束")}</button>
           </AppDialogFooter>
         </AppDialogContent>
       </Dialog.Portal>

@@ -43,15 +43,15 @@ try {
     body: `Reply with exactly ${nonce}. Do not call tools.`, address: { mode: 'explicit', agentIds: ['agent_2'] },
     purpose: 'Verify official account execution in an isolated acceptance Camp.' })
   const accepted = sent.commandResult ?? sent
-  const campId = sent.campId ?? accepted.payload?.campId, runId = accepted.payload?.agentRunIds?.[0]
-  assert(campId && runId)
+  const threadId = sent.threadId ?? accepted.payload?.threadId, runId = accepted.payload?.agentRunIds?.[0]
+  assert(threadId && runId)
   const deadline = Date.now() + 120_000
   let snapshot, run
   while (Date.now() < deadline) {
-    snapshot = await core.request('camps.snapshot', { campId })
+    snapshot = await core.request('camps.snapshot', { threadId })
     run = snapshot.agentRuns.find(r => r.id === runId)
     if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
-      if (run.status !== 'succeeded' || snapshot.turns.find(t => t.id === run.campTurnId)?.status === 'completed') break
+      if (run.status !== 'succeeded' || snapshot.turns.find(t => t.id === run.threadTurnId)?.status === 'completed') break
     }
     assert(!run || run.status !== 'waiting', `Account execution entered recovery: ${run?.waitReason}`)
     await new Promise(done => setTimeout(done, 250))

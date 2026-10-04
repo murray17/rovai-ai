@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { CoreClient } from './core-client'
 
+export type ChannelStorageProvider = 'feishu' | 'lark' | 'dingtalk'
+export type OpenPlatformCredentialProvider = Exclude<ChannelStorageProvider, 'dingtalk'>
+
 export interface FeishuAppCredential {
   appId: string
   appSecret: string
@@ -15,7 +18,7 @@ export interface DingTalkAppCredential {
 export type PublishedChannelCredential = {
   agentId: string
   credentialRef: string
-  provider: 'feishu' | 'dingtalk'
+  provider: ChannelStorageProvider
   remoteAppId: string
   credential: FeishuAppCredential | DingTalkAppCredential
   revision: number
@@ -34,7 +37,7 @@ export interface ChannelCredentialStore {
 }
 
 export type StoredChannelDeveloperSession<TIdentity, TSession> = {
-  provider: 'feishu' | 'dingtalk'
+  provider: ChannelStorageProvider
   accountId: string
   identity: TIdentity
   session: TSession
@@ -52,6 +55,15 @@ implements ChannelCredentialStore, DingTalkCredentialStore {
 
   read(credentialRef: string): Promise<FeishuAppCredential | null> {
     return this.#read(credentialRef, 'feishu')
+  }
+
+  // Feishu and Lark Hosts share one batch load but read and delete only their own partition.
+  forProvider(provider: OpenPlatformCredentialProvider): ChannelCredentialStore {
+    return {
+      read: (credentialRef) => this.#read(credentialRef, provider),
+      delete: (credentialRef) => this.#delete(credentialRef, provider),
+      listPublished: () => this.listPublished()
+    }
   }
 
   readDingTalk(credentialRef: string): Promise<DingTalkAppCredential | null> {
@@ -79,7 +91,7 @@ implements ChannelCredentialStore, DingTalkCredentialStore {
 
   async #read(
     credentialRef: string,
-    provider: 'feishu'
+    provider: OpenPlatformCredentialProvider
   ): Promise<FeishuAppCredential | null>
   async #read(
     credentialRef: string,
@@ -87,7 +99,7 @@ implements ChannelCredentialStore, DingTalkCredentialStore {
   ): Promise<DingTalkAppCredential | null>
   async #read(
     credentialRef: string,
-    provider: 'feishu' | 'dingtalk'
+    provider: ChannelStorageProvider
   ): Promise<FeishuAppCredential | DingTalkAppCredential | null> {
     const stored = await this.#core.request<unknown>('channels.credentials.get', {
       credentialRef,
@@ -99,7 +111,7 @@ implements ChannelCredentialStore, DingTalkCredentialStore {
 
   async #delete(
     credentialRef: string,
-    provider: 'feishu' | 'dingtalk'
+    provider: ChannelStorageProvider
   ): Promise<void> {
     const result = await this.#core.request<StoredCommandResult>(
       'channels.credentials.delete',
@@ -121,7 +133,7 @@ export class SqliteChannelDeveloperSessionStore {
   }
 
   async read<TIdentity, TSession>(
-    provider: 'feishu' | 'dingtalk'
+    provider: ChannelStorageProvider
   ): Promise<StoredChannelDeveloperSession<TIdentity, TSession> | null> {
     const value = await this.#core.request<unknown>('channels.developerSession.get', {
       provider
@@ -131,7 +143,7 @@ export class SqliteChannelDeveloperSessionStore {
   }
 
   async replace<TIdentity, TSession>(input: {
-    provider: 'feishu' | 'dingtalk'
+    provider: ChannelStorageProvider
     accountId: string
     identity: TIdentity
     session: TSession
@@ -150,7 +162,7 @@ export class SqliteChannelDeveloperSessionStore {
     return revision
   }
 
-  async delete(provider: 'feishu' | 'dingtalk'): Promise<void> {
+  async delete(provider: ChannelStorageProvider): Promise<void> {
     const result = await this.#core.request<StoredCommandResult>(
       'channels.developerSession.delete',
       {
@@ -191,7 +203,7 @@ function parsePublishedCredentials(value: unknown): readonly PublishedChannelCre
 
 function parseCredentialRecord(
   value: unknown,
-  expectedProvider: 'feishu' | 'dingtalk'
+  expectedProvider: ChannelStorageProvider
 ): Omit<PublishedChannelCredential, 'agentId'> {
   const record = asRecord(value)
   const provider = providerAt(record, 'provider')
@@ -207,7 +219,7 @@ function parseCredentialRecord(
     || revision === null
     || !appSecret
   ) throw new Error('channel_credential_response_invalid')
-  if (provider === 'feishu') {
+  if (provider !== 'dingtalk') {
     return {
       credentialRef,
       provider,
@@ -229,7 +241,7 @@ function parseCredentialRecord(
 
 function parseDeveloperSession<TIdentity, TSession>(
   value: unknown,
-  expectedProvider: 'feishu' | 'dingtalk'
+  expectedProvider: ChannelStorageProvider
 ): StoredChannelDeveloperSession<TIdentity, TSession> {
   const record = asRecord(value)
   const provider = providerAt(record, 'provider')
@@ -254,9 +266,9 @@ function parseDeveloperSession<TIdentity, TSession>(
 function providerAt(
   value: Record<string, unknown> | null,
   key: string
-): 'feishu' | 'dingtalk' {
+): ChannelStorageProvider {
   const provider = value?.[key]
-  if (provider !== 'feishu' && provider !== 'dingtalk') {
+  if (provider !== 'feishu' && provider !== 'lark' && provider !== 'dingtalk') {
     throw new Error('channel_storage_provider_invalid')
   }
   return provider

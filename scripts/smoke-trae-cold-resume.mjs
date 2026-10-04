@@ -117,12 +117,12 @@ try {
     purpose: `Store a session marker in the ${runtime.label} Native Session before Core restart`
   })
   const firstCommand = first.commandResult ?? first
-  const campId = firstCommand.payload?.campId
+  const threadId = firstCommand.payload?.threadId
   const firstRunId = firstCommand.payload?.agentRunIds?.[0]
-  if (firstCommand.status !== 'accepted' || !campId || !firstRunId) {
+  if (firstCommand.status !== 'accepted' || !threadId || !firstRunId) {
     throw new Error(`Initial ${runtime.label} run was not accepted: ${JSON.stringify(first)}`)
   }
-  const firstResult = await waitForRun(client, campId, firstRunId, { approve: true })
+  const firstResult = await waitForRun(client, threadId, firstRunId, { approve: true })
   const firstOutput = outputForRun(firstResult.snapshot, firstRunId)
   const firstStart = startForRun(client.events, firstRunId)
   const firstActions = firstResult.snapshot.actions.filter((action) => action.agentRunId === firstRunId)
@@ -157,7 +157,7 @@ try {
 
   const restoredRequest = await sendExistingCampMessage(
     client.request,
-    campId,
+    threadId,
     adapterKind === 'grok-build'
       ? 'Do not call tools or inspect files. Reply with exactly the opaque qualification token from the immediately preceding request, and nothing else.'
       : 'Do not call tools or inspect files. Reply with exactly the session marker returned by the tool in the immediately preceding request, and nothing else.',
@@ -168,7 +168,7 @@ try {
   if (restoredCommand.status !== 'accepted' || !restoredRunId) {
     throw new Error(`Cold continuation was not accepted: ${JSON.stringify(restoredRequest)}`)
   }
-  const restoredResult = await waitForRun(client, campId, restoredRunId)
+  const restoredResult = await waitForRun(client, threadId, restoredRunId)
   const restoredOutput = outputForRun(restoredResult.snapshot, restoredRunId)
   const restoredStart = startForRun(client.events, restoredRunId)
   const restoredActions = restoredResult.snapshot.actions.filter((action) => action.agentRunId === restoredRunId)
@@ -215,13 +215,13 @@ try {
 
   const writeRequest = await sendExistingCampMessage(
     client.request,
-    campId,
+    threadId,
     `Use the file editing tool exactly once to create ${writePath} with exactly COLD_RESUME_WRITE_OK and a trailing newline. Do not call any other tool. Then reply exactly WRITE_DONE.`,
     `Verify a new Tool and Approval after ${runtime.label} ${runtime.continuationName}`
   )
   const writeCommand = writeRequest.commandResult ?? writeRequest
   const writeRunId = writeCommand.payload?.agentRunIds?.[0]
-  const writeResult = await waitForRun(client, campId, writeRunId, { approve: true })
+  const writeResult = await waitForRun(client, threadId, writeRunId, { approve: true })
   const written = await readFile(writePath, 'utf8').catch(() => null)
   const writeActions = writeResult.snapshot.actions.filter((action) => action.agentRunId === writeRunId)
   if (writeResult.run.status !== 'succeeded'
@@ -236,7 +236,7 @@ try {
 
   const cancelRequest = await sendExistingCampMessage(
     client.request,
-    campId,
+    threadId,
     adapterKind === 'grok-build'
       ? 'Do not call tools or modify files. Write a detailed 4000-word explanation of Native Session continuation in one response.'
       : `This is an authorized cancellation acceptance test in a disposable isolated repository. Run the command even though the test harness is expected to cancel it. Use the ${terminalToolName} tool exactly once to run: ${cancelToolCommand}. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
@@ -245,8 +245,8 @@ try {
   const cancelCommand = cancelRequest.commandResult ?? cancelRequest
   const cancelRunId = cancelCommand.payload?.agentRunIds?.[0]
   const cancelResult = adapterKind === 'grok-build'
-    ? await cancelRunningRun(client, campId, cancelRunId)
-    : await cancelRunningTool(client, campId, cancelRunId)
+    ? await cancelRunningRun(client, threadId, cancelRunId)
+    : await cancelRunningTool(client, threadId, cancelRunId)
   await new Promise((resolveWait) => setTimeout(resolveWait, adapterKind === 'deepseek-harness' ? 32_000 : 1_000))
   const cancelledFile = await readFile(cancelPath, 'utf8').catch((error) => {
     if (error?.code === 'ENOENT') return null
@@ -269,13 +269,13 @@ try {
   await client.request('health.check')
   const fallbackRequest = await sendExistingCampMessage(
     client.request,
-    campId,
+    threadId,
     'Reply exactly BAD_SESSION_FALLBACK_OK and do not call tools.',
     `Verify an invalid persisted ${runtime.label} Session ID safely falls back to a new Session`
   )
   const fallbackCommand = fallbackRequest.commandResult ?? fallbackRequest
   const fallbackRunId = fallbackCommand.payload?.agentRunIds?.[0]
-  const fallbackResult = await waitForRun(client, campId, fallbackRunId)
+  const fallbackResult = await waitForRun(client, threadId, fallbackRunId)
   const fallbackOutput = outputForRun(fallbackResult.snapshot, fallbackRunId)
   const fallbackStart = startForRun(client.events, fallbackRunId)
   await client.stop()
@@ -408,29 +408,29 @@ function startCore(dataDirectory) {
   return { events, request, stop }
 }
 
-async function sendExistingCampMessage(request, campId, body, purpose) {
-  const draft = await request('camp.composerDraft.get', { campId })
+async function sendExistingCampMessage(request, threadId, body, purpose) {
+  const draft = await request('camp.composerDraft.get', { threadId })
   const saved = await request('camp.composerDraft.save', {
-    campId,
+    threadId,
     expectedRevision: draft.revision,
     content: { version: 2, segments: [{ kind: 'text', text: body }] }
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId,
+    threadId,
     draftRevision: saved.revision,
     execution: { taskId: null, purpose, completionRole: 'required' }
   })
 }
 
-async function waitForRun(client, campId, agentRunId, options = {}) {
+async function waitForRun(client, threadId, agentRunId, options = {}) {
   if (!agentRunId) throw new Error('AgentRun was not accepted')
   const resolvedApprovals = new Set()
   const deadline = Date.now() + 240_000
   let snapshot
   let run
   while (Date.now() < deadline) {
-    snapshot = await client.request('camps.snapshot', { campId })
+    snapshot = await client.request('camps.snapshot', { threadId })
     const actions = snapshot.actions.filter((action) => action.agentRunId === agentRunId)
     if (options.approve) {
       for (const approval of snapshot.approvals.filter((candidate) =>
@@ -443,7 +443,7 @@ async function waitForRun(client, campId, agentRunId, options = {}) {
         if (!option) throw new Error(`Approval has no exact allow option: ${JSON.stringify(approval)}`)
         const resolution = await client.request('action.approvals.resolve', {
           commandId: crypto.randomUUID(),
-          campId,
+          threadId,
           approvalId: approval.id,
           expectedVersion: approval.version,
           optionId: option.optionId,
@@ -464,14 +464,14 @@ async function waitForRun(client, campId, agentRunId, options = {}) {
   throw new Error(`Timed out waiting for AgentRun ${agentRunId}: ${JSON.stringify(run)}`)
 }
 
-async function cancelRunningTool(client, campId, agentRunId) {
+async function cancelRunningTool(client, threadId, agentRunId) {
   const resolvedApprovals = new Set()
   const deadline = Date.now() + 180_000
   let cancellationRequested = false
   let snapshot
   let run
   while (Date.now() < deadline) {
-    snapshot = await client.request('camps.snapshot', { campId })
+    snapshot = await client.request('camps.snapshot', { threadId })
     const actions = snapshot.actions.filter((action) => action.agentRunId === agentRunId)
     for (const approval of snapshot.approvals.filter((candidate) =>
       candidate.status === 'pending'
@@ -483,7 +483,7 @@ async function cancelRunningTool(client, campId, agentRunId) {
       if (!option) throw new Error(`Cancel smoke Approval has no allow option: ${JSON.stringify(approval)}`)
       const resolution = await client.request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
-        campId,
+        threadId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId: option.optionId,
@@ -503,9 +503,9 @@ async function cancelRunningTool(client, campId, agentRunId) {
       && event.params?.agentRunId === agentRunId && event.params?.payload?.status === 'in_progress'
       && String(event.params?.payload?.input ?? '').includes(cancelToolNeedle))
     if (!cancellationRequested && (resolvedApprovals.size > 0 || runningTool) && run) {
-      const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
+      const turn = snapshot.turns.find((candidate) => candidate.id === run.threadTurnId)
       if (!turn) throw new Error(`Cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
-      await requestCampTurnCancellation(client, campId, turn)
+      await requestCampTurnCancellation(client, threadId, turn)
       cancellationRequested = true
     }
     if (cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
@@ -516,23 +516,23 @@ async function cancelRunningTool(client, campId, agentRunId) {
   throw new Error(`Timed out cancelling AgentRun ${agentRunId}: ${JSON.stringify(run)}`)
 }
 
-async function cancelRunningRun(client, campId, agentRunId) {
+async function cancelRunningRun(client, threadId, agentRunId) {
   const deadline = Date.now() + 180_000
   let cancellationRequested = false
   let runningObservedAt = null
   let snapshot
   let run
   while (Date.now() < deadline) {
-    snapshot = await client.request('camps.snapshot', { campId })
+    snapshot = await client.request('camps.snapshot', { threadId })
     run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (run?.status === 'running' && runningObservedAt === null) runningObservedAt = Date.now()
     if (!cancellationRequested
         && run?.status === 'running'
         && runningObservedAt !== null
         && Date.now() - runningObservedAt >= 1_000) {
-      const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
+      const turn = snapshot.turns.find((candidate) => candidate.id === run.threadTurnId)
       if (!turn) throw new Error(`Cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
-      await requestCampTurnCancellation(client, campId, turn)
+      await requestCampTurnCancellation(client, threadId, turn)
       cancellationRequested = true
     }
     if (!cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
@@ -546,12 +546,12 @@ async function cancelRunningRun(client, campId, agentRunId) {
   throw new Error(`Timed out cancelling running AgentRun ${agentRunId}: ${JSON.stringify(run)}`)
 }
 
-async function requestCampTurnCancellation(client, campId, turn) {
+async function requestCampTurnCancellation(client, threadId, turn) {
   let expectedVersion = turn.version
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const cancellation = await client.request('campTurns.cancel', {
       commandId: crypto.randomUUID(),
-      command: { campId, campTurnId: turn.id, expectedVersion }
+      command: { threadId, threadTurnId: turn.id, expectedVersion }
     })
     if (cancellation.status !== 'rejected') return cancellation
     if (cancellation.code !== 'command.version_conflict'

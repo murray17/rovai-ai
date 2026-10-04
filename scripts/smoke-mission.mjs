@@ -77,12 +77,12 @@ async function setRuntime(agentId) {
 async function createMission(title, description, path, members) {
   const payload = applied(await command('missions.create', { title, description, projectPath: path, projectBindingKind: 'directory',
     memberAgentIds: members, defaultLeadAgentId: members[0], tags: ['验收'] }))
-  return { missionId: payload.missionId, campId: payload.campId }
+  return { missionId: payload.missionId, threadId: payload.threadId }
 }
-async function waitForIdle(campId, minimumRuns) {
+async function waitForIdle(threadId, minimumRuns) {
   const deadline = Date.now() + 600_000
   while (Date.now() < deadline) {
-    const snapshot = await client.request('camps.snapshot', { campId })
+    const snapshot = await client.request('camps.snapshot', { threadId })
     const failed = snapshot.agentRuns.find(run => ['failed', 'cancelled'].includes(run.status))
     if (failed) { await writeFile(join(output, 'failed-snapshot.json'), JSON.stringify(snapshot, null, 2)); throw new Error(`Mission Run failed: ${JSON.stringify(failed)}`) }
     if (snapshot.agentRuns.length >= minimumRuns && snapshot.agentRuns.every(run => run.status === 'succeeded')) return snapshot
@@ -90,9 +90,9 @@ async function waitForIdle(campId, minimumRuns) {
   }
   throw new Error('Mission Run did not settle before 600 seconds')
 }
-async function sendMessage(campId, body) {
-  const sent = await client.request('camp.messages.send', { commandId: crypto.randomUUID(), campId,
-    content: { version: 2, segments: [{ kind: 'text', text: body }] }, sourceAttachments: [], quotes: [], replyToCampMessageId: null,
+async function sendMessage(threadId, body) {
+  const sent = await client.request('camp.messages.send', { commandId: crypto.randomUUID(), threadId,
+    content: { version: 2, segments: [{ kind: 'text', text: body }] }, sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
     execution: { taskId: null, purpose: '验证后续普通输入复用使命工作区', completionRole: 'required' } })
   assert.equal((sent.commandResult ?? sent).status, 'accepted', JSON.stringify(sent))
 }
@@ -139,7 +139,7 @@ try {
   await writeFile(nonGit, generatedPreamble + `assert.equal(info.status,'not_started');cli(['send'],{publicOnly:true,body:'MISSION_NON_GIT_OK'});writeFileSync(join(output,'non-git-evidence.json'),JSON.stringify({cwd:process.cwd(),info}));\n`)
   const mission = await createMission('持久使命工作区验收', `执行 node ${shellQuote(lead)}。脚本通过 Rovai CLI 验证权限和交付，并将独立检查交给队员。无需修改脚本。`, project, members)
   report.mission = mission
-  assert.equal(db.prepare('SELECT count(*) n FROM agent_run r JOIN camp_turn t ON t.id=r.camp_turn_id WHERE t.camp_id=?').get(mission.campId).n, 0)
+  assert.equal(db.prepare('SELECT count(*) n FROM agent_run r JOIN camp_turn t ON t.id=r.camp_turn_id WHERE t.camp_id=?').get(mission.threadId).n, 0)
   assert.equal(db.prepare('SELECT count(*) n FROM mission_workspace').get().n, 0)
   assert.equal((await client.request('missions.delivery', { missionId: mission.missionId })).workspace, null)
   report.cases.push('save creates Mission and main Camp without Run or worktree')
@@ -147,7 +147,7 @@ try {
   const started = await client.request('missions.start', startParams)
   assert.equal(started.status, 'accepted', JSON.stringify(started))
   assert.deepEqual(await client.request('missions.start', startParams), started)
-  const snapshot = await waitForIdle(mission.campId, 2)
+  const snapshot = await waitForIdle(mission.threadId, 2)
   await writeFile(join(output, 'first-snapshot.json'), JSON.stringify(snapshot, null, 2))
   const workspace = db.prepare('SELECT * FROM mission_workspace WHERE mission_id=?').get(mission.missionId)
   assert.equal(workspace.base_sha, baseSha); assert.equal(workspace.branch, 'rovai/mission/001')
@@ -188,8 +188,8 @@ try {
   report.cases.push('activity view follows the actual checkout while managed branch identity stays unchanged; old file views are rejected without reusing their temporary index')
   db.close(); db = null; await client.stop(); client = startCore(); await client.request('members.list')
   db = new DatabaseSync(join(dataDirectory, 'rovai.sqlite')); db.exec('PRAGMA busy_timeout=5000')
-  await sendMessage(mission.campId, `只验证原使命目录和当前状态：node ${shellQuote(continuation)}。不要推进或重开使命。`)
-  const resumed = await waitForIdle(mission.campId, 3)
+  await sendMessage(mission.threadId, `只验证原使命目录和当前状态：node ${shellQuote(continuation)}。不要推进或重开使命。`)
+  const resumed = await waitForIdle(mission.threadId, 3)
   const newManifest = resumed.contextManifests.find(m => !manifests.some(old => old.id === m.id))
   assert(newManifest); assert.equal(newManifest.workspaceFactIncluded, true)
   assert.equal(newManifest.workspaceFact.workingDirectory, workspace.working_directory)
@@ -205,14 +205,14 @@ try {
   const unavailableDiff = await client.request('missions.changes', { missionId: mission.missionId })
   assert.deepEqual(unavailableDiff.checkoutState, { kind: 'detached', head: detachedHead })
   assert.equal(unavailableDiff.viewId, null); assert.equal(unavailableDiff.files, null); assert.match(unavailableDiff.diffError, /mission.base_unavailable/)
-  await sendMessage(mission.campId, `在 detached HEAD 且比较基准不可用时继续执行：node ${shellQuote(detached)}。不要修改使命状态。`)
-  const detachedResumed = await waitForIdle(mission.campId, 4)
+  await sendMessage(mission.threadId, `在 detached HEAD 且比较基准不可用时继续执行：node ${shellQuote(detached)}。不要修改使命状态。`)
+  const detachedResumed = await waitForIdle(mission.threadId, 4)
   assert.equal(JSON.parse(await readFile(join(output, 'detached-evidence.json'))).cwd, workspace.working_directory)
   db.prepare('UPDATE mission_workspace SET base_sha=? WHERE mission_id=?').run(baseSha, mission.missionId)
   report.cases.push('detached HEAD and an unavailable fixed diff base degrade activity data but do not block the real Runtime dispatch path')
   const simple = await createMission('非 Git 使命', '', plain, members)
-  await sendMessage(simple.campId, `执行 node ${shellQuote(nonGit)}，只核对环境，不修改使命状态。`)
-  const plainSnapshot = await waitForIdle(simple.campId, 1)
+  await sendMessage(simple.threadId, `执行 node ${shellQuote(nonGit)}，只核对环境，不修改使命状态。`)
+  const plainSnapshot = await waitForIdle(simple.threadId, 1)
   const plainDelivery = await client.request('missions.delivery', { missionId: simple.missionId })
   assert.equal(plainDelivery.git, false); assert.equal(plainDelivery.workspace, null)
   assert.deepEqual(plainSnapshot.contextManifests[0].workspaceFact, { workingDirectory: plain })
@@ -237,16 +237,16 @@ try {
   await assert.rejects(access(workspace.worktree_path))
   assert.throws(() => git(source, 'rev-parse', '--verify', `refs/heads/${workspace.branch}`))
   assert.equal(git(source, 'rev-parse', '--verify', 'refs/heads/external/mission-validation'), managedCommit)
-  await sendMessage(mission.campId, `验证清理后的使命工作区重建：node ${shellQuote(rebuilt)}。不要修改使命状态。`)
-  const rebuiltSnapshot = await waitForIdle(mission.campId, 5)
+  await sendMessage(mission.threadId, `验证清理后的使命工作区重建：node ${shellQuote(rebuilt)}。不要修改使命状态。`)
+  const rebuiltSnapshot = await waitForIdle(mission.threadId, 5)
   const rebuiltWorkspace = await waitForWorkspaceState(mission.missionId, 'ready')
   assert.equal(rebuiltWorkspace.worktree_path, workspace.worktree_path)
   assert.equal(JSON.parse(await readFile(join(output, 'rebuilt-evidence.json'))).cwd, workspace.working_directory)
   assert.equal(git(source, 'rev-parse', '--verify', 'refs/heads/external/mission-validation'), managedCommit)
   applied(await command('missions.workspace.cleanup', { missionId: mission.missionId }))
   await waitForWorkspaceCleanupFinished(mission.missionId)
-  const currentMission = await client.request('camps.snapshot', { campId: mission.campId })
-  accepted(await command('camps.delete', { campId: mission.campId, expectedVersion: currentMission.camp.version, force: false, workspaceDisposition: 'retain' }))
+  const currentMission = await client.request('camps.snapshot', { threadId: mission.threadId })
+  accepted(await command('camps.delete', { threadId: mission.threadId, expectedVersion: currentMission.thread.version, force: false, workspaceDisposition: 'retain' }))
   assert.equal(db.prepare('SELECT count(*) n FROM mission_workspace WHERE mission_id=?').get(mission.missionId).n, 0)
   report.cases.push('dirty cleanup is refused asynchronously without leaving cleanup_failed; a legacy untouched failure recovers on retry; clean non-managed checkout cleanup preserves its branch and the next Run rebuilds through the preparation path')
   report.runs = [...rebuiltSnapshot.agentRuns, ...plainSnapshot.agentRuns].map(({ id, status, workspace }) => ({ id, status, workspace }))

@@ -8,7 +8,7 @@ use std::{
     ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -27,8 +27,8 @@ use crate::db::Database;
 use crate::runtime_startup::RuntimeStartupConfiguration;
 use crate::skill::{SkillContentFile, SkillContentView};
 
-const CONTEXT_CACHE_CAPACITY: usize = 32;
-const CONTEXT_CACHE_TTL: Duration = Duration::from_secs(60);
+const DIRECTORY_CACHE_CAPACITY: usize = 128;
+const DIRECTORY_CACHE_TTL: Duration = Duration::from_secs(300);
 const MAX_SKILLS_PER_ROOT: usize = 512;
 const MAX_NATIVE_PREVIEW_FILES: usize = 512;
 const MAX_NATIVE_PREVIEW_BYTES: u64 = 1024 * 1024;
@@ -169,32 +169,49 @@ pub fn remember_native_skill_references(
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CacheKey {
-    adapter: AdapterKind,
-    home: PathBuf,
-    project: Option<PathBuf>,
-    user_only: bool,
-    roots: Vec<(&'static str, PathBuf)>,
-    native_config_digest: String,
+#[derive(Debug, Clone)]
+struct DirectorySkill {
+    relative_entry_path: PathBuf,
+    id: String,
+    name: String,
+    description: String,
+    canonical_path: String,
 }
 
 #[derive(Debug, Clone)]
-struct CacheEntry {
-    key: CacheKey,
-    value: NativeSkillScan,
+struct DirectoryScan {
+    skills: Vec<DirectorySkill>,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct DirectoryCacheEntry {
+    key: PathBuf,
+    value: DirectoryScan,
     scanned_at: Instant,
 }
 
 #[derive(Default)]
+struct DirectoryCache {
+    entries: VecDeque<DirectoryCacheEntry>,
+    inflight: HashMap<PathBuf, Arc<OnceLock<DirectoryScan>>>,
+}
+
+#[derive(Default)]
 pub struct NativeSkillDiscovery {
-    cache: Mutex<VecDeque<CacheEntry>>,
+    cache: Mutex<DirectoryCache>,
+}
+
+pub struct NativeSkillDiscoveryRequest<'a> {
+    discovery: &'a NativeSkillDiscovery,
+    refresh: bool,
+    directories: HashMap<PathBuf, DirectoryScan>,
 }
 
 impl NativeSkillDiscovery {
     pub fn invalidate_cache(&self) {
-        if let Ok(mut entries) = self.cache.lock() {
-            entries.clear();
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.entries.clear();
         }
     }
 
@@ -204,6 +221,74 @@ impl NativeSkillDiscovery {
         project: Option<&Path>,
         user_only: bool,
         refresh: bool,
+        configuration: &RuntimeStartupConfiguration,
+    ) -> Result<NativeSkillScan> {
+        self.request(refresh)
+            .discover(adapter, project, user_only, configuration)
+    }
+
+    pub fn request(&self, refresh: bool) -> NativeSkillDiscoveryRequest<'_> {
+        NativeSkillDiscoveryRequest {
+            discovery: self,
+            refresh,
+            directories: HashMap::new(),
+        }
+    }
+
+    fn ensure_directory(&self, key: &Path, adapter: AdapterKind, refresh: bool) -> DirectoryScan {
+        let flight = {
+            let mut cache = self.cache.lock().unwrap_or_else(|error| error.into_inner());
+            if let Some(flight) = cache.inflight.get(key) {
+                Arc::clone(flight)
+            } else {
+                if !refresh
+                    && let Some(index) = cache.entries.iter().position(|entry| entry.key == key)
+                {
+                    let entry = cache.entries.remove(index).expect("cached index exists");
+                    if entry.scanned_at.elapsed() < DIRECTORY_CACHE_TTL {
+                        let value = entry.value.clone();
+                        cache.entries.push_back(entry);
+                        return value;
+                    }
+                }
+                let flight = Arc::new(OnceLock::new());
+                cache
+                    .inflight
+                    .insert(key.to_path_buf(), Arc::clone(&flight));
+                flight
+            }
+        };
+        // One initializer scans outside the cache lock; other callers wait on this cell.
+        let value = flight.get_or_init(|| scan_directory(key, adapter)).clone();
+        let mut cache = self.cache.lock().unwrap_or_else(|error| error.into_inner());
+        if cache
+            .inflight
+            .get(key)
+            .is_some_and(|current| Arc::ptr_eq(current, &flight))
+        {
+            cache.inflight.remove(key);
+            if let Some(index) = cache.entries.iter().position(|entry| entry.key == key) {
+                cache.entries.remove(index);
+            }
+            cache.entries.push_back(DirectoryCacheEntry {
+                key: key.to_path_buf(),
+                value: value.clone(),
+                scanned_at: Instant::now(),
+            });
+            while cache.entries.len() > DIRECTORY_CACHE_CAPACITY {
+                cache.entries.pop_front();
+            }
+        }
+        value
+    }
+}
+
+impl NativeSkillDiscoveryRequest<'_> {
+    pub fn discover(
+        &mut self,
+        adapter: AdapterKind,
+        project: Option<&Path>,
+        user_only: bool,
         configuration: &RuntimeStartupConfiguration,
     ) -> Result<NativeSkillScan> {
         let home = runtime_variable(
@@ -223,33 +308,11 @@ impl NativeSkillDiscovery {
             ensure!(project.is_absolute(), "project path is not absolute");
         }
         let mut roots = user_roots(adapter, &home, configuration);
-        if !user_only {
-            if let Some(project) = &project {
-                roots.extend(project_roots(adapter, project));
-            }
+        if !user_only && let Some(project) = &project {
+            roots.extend(project_roots(adapter, project));
         }
-        let (disabled_paths, disabled_names, config_errors, native_config_digest) =
+        let (disabled_paths, disabled_names, config_errors) =
             codex_disabled_skill_folders(adapter, &home, project.as_deref(), configuration);
-        let key = CacheKey {
-            adapter,
-            home: home.clone(),
-            project: project.clone(),
-            user_only,
-            roots: roots.clone(),
-            native_config_digest,
-        };
-        if !refresh {
-            if let Ok(mut entries) = self.cache.lock() {
-                if let Some(index) = entries.iter().position(|entry| entry.key == key) {
-                    let entry = entries.remove(index).expect("cached index exists");
-                    if entry.scanned_at.elapsed() < CONTEXT_CACHE_TTL {
-                        let value = entry.value.clone();
-                        entries.push_back(entry);
-                        return Ok(value);
-                    }
-                }
-            }
-        }
         let mut scan = NativeSkillScan {
             skills: Vec::new(),
             errors: config_errors,
@@ -257,11 +320,32 @@ impl NativeSkillDiscovery {
         let mut seen_roots = HashSet::new();
         let mut seen_files = HashSet::new();
         for (scope, root) in roots {
-            let normalized = root.canonicalize().unwrap_or(root.clone());
-            if !seen_roots.insert((scope, normalized)) {
+            let key = directory_key(&root);
+            if !seen_roots.insert((scope, key.clone())) {
                 continue;
             }
-            scan_root(adapter, scope, &root, &mut seen_files, &mut scan);
+            let directory = self
+                .directories
+                .entry(key.clone())
+                .or_insert_with(|| self.discovery.ensure_directory(&key, adapter, self.refresh));
+            scan.errors.extend(directory.errors.iter().cloned());
+            for skill in &directory.skills {
+                if !seen_files.insert(skill.canonical_path.clone()) {
+                    continue;
+                }
+                scan.skills.push(NativeSkill {
+                    id: skill.id.clone(),
+                    name: skill.name.clone(),
+                    description: skill.description.clone(),
+                    entry_path: root
+                        .join(&skill.relative_entry_path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    canonical_path: skill.canonical_path.clone(),
+                    source_scope: scope.to_owned(),
+                    adapter_kind: adapter,
+                });
+            }
         }
         scan.skills.retain(|skill| {
             let path = Path::new(&skill.canonical_path);
@@ -277,20 +361,48 @@ impl NativeSkillDiscovery {
                 .then_with(|| left.source_scope.cmp(&right.source_scope))
                 .then_with(|| left.entry_path.cmp(&right.entry_path))
         });
-        if let Ok(mut entries) = self.cache.lock() {
-            if let Some(index) = entries.iter().position(|entry| entry.key == key) {
-                entries.remove(index);
-            }
-            entries.push_back(CacheEntry {
-                key,
-                value: scan.clone(),
-                scanned_at: Instant::now(),
-            });
-            while entries.len() > CONTEXT_CACHE_CAPACITY {
-                entries.pop_front();
+        Ok(scan)
+    }
+}
+
+fn directory_key(root: &Path) -> PathBuf {
+    root.canonicalize().unwrap_or_else(|_| {
+        let mut normalized = PathBuf::new();
+        for part in root.components() {
+            match part {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    normalized.pop();
+                }
+                _ => normalized.push(part.as_os_str()),
             }
         }
-        Ok(scan)
+        normalized
+    })
+}
+
+fn scan_directory(root: &Path, adapter: AdapterKind) -> DirectoryScan {
+    let mut scan = NativeSkillScan {
+        skills: Vec::new(),
+        errors: Vec::new(),
+    };
+    scan_root(adapter, "user", root, &mut HashSet::new(), &mut scan);
+    DirectoryScan {
+        skills: scan
+            .skills
+            .into_iter()
+            .map(|skill| DirectorySkill {
+                relative_entry_path: Path::new(&skill.entry_path)
+                    .strip_prefix(root)
+                    .expect("scanned Skill entry stays below its root")
+                    .to_path_buf(),
+                id: skill.id,
+                name: skill.name,
+                description: skill.description,
+                canonical_path: skill.canonical_path,
+            })
+            .collect(),
+        errors: scan.errors,
     }
 }
 
@@ -299,9 +411,9 @@ fn codex_disabled_skill_folders(
     home: &Path,
     project: Option<&Path>,
     configuration: &RuntimeStartupConfiguration,
-) -> (HashSet<PathBuf>, HashSet<String>, Vec<String>, String) {
+) -> (HashSet<PathBuf>, HashSet<String>, Vec<String>) {
     if adapter != AdapterKind::CodexCli {
-        return (HashSet::new(), HashSet::new(), Vec::new(), String::new());
+        return (HashSet::new(), HashSet::new(), Vec::new());
     }
     let mut paths =
         vec![configured_root("CODEX_HOME", home.join(".codex"), configuration).join("config.toml")];
@@ -311,9 +423,7 @@ fn codex_disabled_skill_folders(
     let mut path_state = HashMap::<PathBuf, bool>::new();
     let mut name_state = HashMap::<String, bool>::new();
     let mut errors = Vec::new();
-    let mut digest = Sha256::new();
     for config_path in paths {
-        digest.update(config_path.to_string_lossy().as_bytes());
         let contents = match fs::read_to_string(&config_path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -322,7 +432,6 @@ fn codex_disabled_skill_folders(
                 continue;
             }
         };
-        digest.update(contents.as_bytes());
         let config: toml::Value = match toml::from_str(&contents) {
             Ok(value) => value,
             Err(error) => {
@@ -368,7 +477,6 @@ fn codex_disabled_skill_folders(
             .filter_map(|(name, enabled)| (!enabled).then_some(name))
             .collect(),
         errors,
-        format!("{:x}", digest.finalize()),
     )
 }
 
@@ -922,6 +1030,63 @@ mod tests {
         assert_ne!(scan.skills[0].id, scan.skills[1].id);
         assert_eq!(scan.errors.len(), 1);
         assert!(scan.errors[0].contains("broken"));
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn shared_directory_keeps_runtime_paths_and_refreshes_once_per_request() {
+        let fixture = std::env::temp_dir().join(format!("rovai-native-shared-{}", Uuid::new_v4()));
+        let home = fixture.join("home");
+        let shared = home.join(".agents/skills");
+        let entry = shared.join("review/SKILL.md");
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(&entry, "---\nname: review\ndescription: One\n---\n").unwrap();
+        #[cfg(unix)]
+        {
+            let pi_root = home.join(".pi/agent/skills");
+            fs::create_dir_all(pi_root.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&shared, &pi_root).unwrap();
+        }
+        let configuration = RuntimeStartupConfiguration {
+            program_path: None,
+            environment: vec![RuntimeEnvironmentVariable {
+                name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
+                value: home.to_string_lossy().into_owned(),
+            }],
+        };
+        let discovery = NativeSkillDiscovery::default();
+        let codex = discovery
+            .discover(AdapterKind::CodexCli, None, true, false, &configuration)
+            .unwrap();
+        fs::write(&entry, "---\nname: review\ndescription: Two\n---\n").unwrap();
+        let pi = discovery
+            .discover(AdapterKind::Pi, None, true, false, &configuration)
+            .unwrap();
+        assert_eq!(codex.skills[0].description, "One");
+        assert_eq!(pi.skills[0].description, "One");
+        assert_eq!(codex.skills[0].id, pi.skills[0].id);
+        assert_eq!(pi.skills[0].adapter_kind, AdapterKind::Pi);
+        #[cfg(unix)]
+        assert_eq!(
+            pi.skills[0].entry_path,
+            home.join(".pi/agent/skills/review/SKILL.md")
+                .to_string_lossy()
+        );
+
+        let mut refresh = discovery.request(true);
+        let updated = refresh
+            .discover(AdapterKind::CodexCli, None, true, &configuration)
+            .unwrap();
+        assert_eq!(updated.skills[0].description, "Two");
+        fs::write(&entry, "---\nname: review\ndescription: Three\n---\n").unwrap();
+        let reused = refresh
+            .discover(AdapterKind::Pi, None, true, &configuration)
+            .unwrap();
+        assert_eq!(reused.skills[0].description, "Two");
+        let next_request = discovery
+            .discover(AdapterKind::Pi, None, true, true, &configuration)
+            .unwrap();
+        assert_eq!(next_request.skills[0].description, "Three");
         fs::remove_dir_all(fixture).unwrap();
     }
 }

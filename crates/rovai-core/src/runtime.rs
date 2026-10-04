@@ -14,7 +14,7 @@ use crate::{
         AdapterKind, AgentProfileService, FrozenAgentRuntimeConfig, MissingSendRecoveryMode,
         PublicOutputMode,
     },
-    camp_content::{StructuredCampMessageSegment, canonical_content_digest},
+    camp_content::{StructuredThreadMessageSegment, canonical_content_digest},
     collaboration::exhaust_camp_turn_execution_budget,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -23,7 +23,7 @@ use crate::{
     context_index::index_camp_message,
     db::Database,
     delivery_queue::settle_run_deliveries,
-    execution_budget::{CampTurnExecutionBudgetExhaustionReason, camp_turn_execution_budget_now},
+    execution_budget::{ThreadTurnExecutionBudgetExhaustionReason, camp_turn_execution_budget_now},
     execution_evidence::AgentRunExecutionEvidence,
     git::GitObservation,
     message_delivery::{
@@ -35,6 +35,49 @@ use crate::{
     planned_shutdown::{ActiveExecutionKey, RuntimeTerminalOutcome, TerminalSettlementPermit},
     runtime_failure::RuntimeFailureView,
 };
+
+/// Reject explicit child ownership, replay and complete snapshots before an
+/// adapter strips private payload fields. Native Session/turn fencing still
+/// belongs to the transport; this helper cannot establish ownership by itself.
+pub fn is_root_output(payload: &Value) -> bool {
+    [
+        payload,
+        &payload["_meta"],
+        &payload["content"],
+        &payload["content"]["_meta"],
+        &payload["message"],
+        &payload["assistantMessageEvent"],
+        &payload["assistantMessageEvent"]["partial"],
+        &payload["payload"],
+        &payload["payload"]["_meta"],
+    ]
+    .iter()
+    .all(|value| {
+        ![
+            "agentId",
+            "sourceAgentId",
+            "subagentId",
+            "parentAgentId",
+            "parentSessionId",
+            "parent_tool_use_id",
+            "parentToolCallId",
+            "parent_tool_call_id",
+            "subAgentId",
+            "source_agent_id",
+            "replay",
+            "isReplay",
+            "historical",
+            "snapshot",
+            "isSnapshot",
+        ]
+        .iter()
+        .any(|field| {
+            value
+                .get(*field)
+                .is_some_and(|value| !value.is_null() && value != false)
+        })
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -172,6 +215,7 @@ impl DomainCommand for CompleteAgentRunNetworkRecoveryCommand {
 #[serde(rename_all = "camelCase")]
 pub struct ResolveAcceptedInputRecoveryBlockerCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_run_id: String,
     pub expected_version: i64,
@@ -184,15 +228,17 @@ impl DomainCommand for ResolveAcceptedInputRecoveryBlockerCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CancelCampTurnCommand {
+pub struct CancelThreadTurnCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
     pub expected_version: i64,
 }
 
-impl sealed::Sealed for CancelCampTurnCommand {}
-impl DomainCommand for CancelCampTurnCommand {
+impl sealed::Sealed for CancelThreadTurnCommand {}
+impl DomainCommand for CancelThreadTurnCommand {
     const TYPE: &'static str = "camp_turn.cancel";
 }
 
@@ -200,6 +246,7 @@ impl DomainCommand for CancelCampTurnCommand {
 #[serde(rename_all = "camelCase")]
 pub struct CancelAgentRunCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_run_id: String,
     pub expected_version: i64,
@@ -357,8 +404,10 @@ pub struct PlannedShutdownAbortiveTerminal {
 #[serde(rename_all = "camelCase")]
 pub struct PlannedShutdownTerminalSettlement {
     pub agent_run_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
     pub agent_run_status: String,
+    #[serde(rename = "threadTurnStatus", alias = "campTurnStatus")]
     pub camp_turn_status: String,
     pub terminal_reason_code: String,
     pub already_settled: bool,
@@ -425,7 +474,9 @@ impl DomainCommand for RebindAgentRunRuntimeCommand {
 #[serde(rename_all = "camelCase")]
 pub struct QueuedAgentRunCandidate {
     pub agent_run_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
     pub conversation_id: String,
     pub agent_id: String,
@@ -442,7 +493,9 @@ pub struct QueuedAgentRunCandidate {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunCancellationCandidate {
     pub agent_run_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -455,7 +508,7 @@ pub struct AgentRunCancellationCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CampRuntimeCleanupTarget {
+pub struct ThreadRuntimeCleanupTarget {
     pub agent_run_id: String,
     pub execution_epoch: i64,
     pub adapter_kind: AdapterKind,
@@ -463,8 +516,10 @@ pub struct CampRuntimeCleanupTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampTurnExecutionBudgetExpiry {
+pub struct ThreadTurnExecutionBudgetExpiry {
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub deadline_at: String,
     pub agent_runs_fenced: i64,
@@ -506,7 +561,9 @@ impl QueuedAgentRunCandidate {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunExecution {
     pub agent_run_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
     pub conversation_id: String,
     pub conversation_version: i64,
@@ -800,7 +857,7 @@ impl ExecutionRuntimeService {
                     "agent_run.runtime_model_observation_fenced",
                     json!({
                         "agentRunId": envelope.payload.agent_run_id,
-                        "campId": camp_id,
+                        "threadId": camp_id,
                         "changed": false,
                         "reason": "cancellation_requested",
                     }),
@@ -812,7 +869,7 @@ impl ExecutionRuntimeService {
                     "agent_run.runtime_model_not_recorded",
                     json!({
                         "agentRunId": envelope.payload.agent_run_id,
-                        "campId": camp_id,
+                        "threadId": camp_id,
                         "changed": false,
                         "reason": if existing_model_id.is_some() {
                             "already_observed"
@@ -848,7 +905,7 @@ impl ExecutionRuntimeService {
                     "agent_run.runtime_model_observation_fenced",
                     json!({
                         "agentRunId": envelope.payload.agent_run_id,
-                        "campId": camp_id,
+                        "threadId": camp_id,
                         "changed": false,
                         "reason": "concurrent_change",
                     }),
@@ -872,7 +929,7 @@ impl ExecutionRuntimeService {
                 "agent_run.runtime_model_observed",
                 json!({
                     "agentRunId": envelope.payload.agent_run_id,
-                    "campId": camp_id,
+                    "threadId": camp_id,
                     "changed": true,
                     "modelId": model_id,
                 }),
@@ -1066,7 +1123,7 @@ impl ExecutionRuntimeService {
         observed_budget_now: chrono::DateTime<chrono::Utc>,
         audit_now: chrono::DateTime<chrono::Utc>,
         limit: i64,
-    ) -> Result<Vec<CampTurnExecutionBudgetExpiry>> {
+    ) -> Result<Vec<ThreadTurnExecutionBudgetExpiry>> {
         if !(1..=100).contains(&limit) {
             anyhow::bail!("CampTurn Execution Budget expiry limit must be between 1 and 100");
         }
@@ -1106,14 +1163,14 @@ impl ExecutionRuntimeService {
             let exhaustion = exhaust_camp_turn_execution_budget(
                 &transaction,
                 &camp_turn_id,
-                CampTurnExecutionBudgetExhaustionReason::Elapsed,
+                ThreadTurnExecutionBudgetExhaustionReason::Elapsed,
                 &command_id,
                 &audit_now,
                 &actor,
                 None,
             )?;
             if exhaustion.newly_exhausted {
-                expired.push(CampTurnExecutionBudgetExpiry {
+                expired.push(ThreadTurnExecutionBudgetExpiry {
                     camp_turn_id,
                     camp_id,
                     deadline_at,
@@ -1210,10 +1267,10 @@ impl ExecutionRuntimeService {
                 "UPDATE camp_turn SET cancel_requested_at = COALESCE(cancel_requested_at, ?2), cancel_request_command_id = COALESCE(cancel_request_command_id, ?3) WHERE id = ?1",
                 params![turn_id, now, command_id],
             )?;
-            settle_abortive_camp_turn_in_tx(&transaction, &turn_id, "camp_deleted", &actor, &now)?;
+            settle_abortive_camp_turn_in_tx(transaction, &turn_id, "camp_deleted", &actor, &now)?;
         }
         for run_id in batch_run_ids {
-            settle_abortive_agent_run_in_tx(&transaction, &run_id, "camp_deleted", &actor, &now)?;
+            settle_abortive_agent_run_in_tx(transaction, &run_id, "camp_deleted", &actor, &now)?;
         }
         transaction.execute(
             r#"
@@ -1231,7 +1288,7 @@ impl ExecutionRuntimeService {
         &self,
         database: &Database,
         camp_id: &str,
-    ) -> Result<Vec<CampRuntimeCleanupTarget>> {
+    ) -> Result<Vec<ThreadRuntimeCleanupTarget>> {
         let mut statement = database.connection().prepare(
             r#"
             SELECT target.id, target.execution_epoch, target.runtime_adapter_kind
@@ -1274,7 +1331,7 @@ impl ExecutionRuntimeService {
         Ok(rows
             .into_iter()
             .filter_map(|(agent_run_id, execution_epoch, adapter_kind)| {
-                Some(CampRuntimeCleanupTarget {
+                Some(ThreadRuntimeCleanupTarget {
                     agent_run_id,
                     execution_epoch,
                     adapter_kind: adapter_kind?.parse::<AdapterKind>().ok()?,
@@ -2172,8 +2229,8 @@ impl ExecutionRuntimeService {
                 "agent_run.network_recovery_waiting",
                 json!({
                     "agentRunId": run.id,
-                    "campTurnId": run.camp_turn_id,
-                    "campTurnStatus": camp_turn_status,
+                    "threadTurnId": run.camp_turn_id,
+                    "threadTurnStatus": camp_turn_status,
                     "executionEpoch": run.execution_epoch,
                     "version": run.version + 1,
                 }),
@@ -2622,8 +2679,8 @@ impl ExecutionRuntimeService {
                 "agent_run.accepted_input_outcome_unknown",
                 json!({
                     "agentRunId": envelope.payload.agent_run_id,
-                    "campTurnId": (!camp_turn_id.is_empty()).then_some(camp_turn_id),
-                    "campTurnStatus": camp_turn_status,
+                    "threadTurnId": (!camp_turn_id.is_empty()).then_some(camp_turn_id),
+                    "threadTurnStatus": camp_turn_status,
                     "acceptedInputPreserved": true,
                 }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
@@ -2640,7 +2697,7 @@ impl ExecutionRuntimeService {
     pub fn request_camp_turn_cancellation(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<CancelCampTurnCommand>,
+        envelope: &CommandEnvelope<CancelThreadTurnCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
@@ -2679,8 +2736,8 @@ impl ExecutionRuntimeService {
                 return Ok(CommandHandlerResult::applied(
                     "camp_turn.already_terminal",
                     json!({
-                        "campTurnId": envelope.payload.camp_turn_id,
-                        "campTurnStatus": status,
+                        "threadTurnId": envelope.payload.camp_turn_id,
+                        "threadTurnStatus": status,
                         "status": status,
                     }),
                     Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
@@ -2720,8 +2777,8 @@ impl ExecutionRuntimeService {
             Ok(CommandHandlerResult::applied(
                 "camp_turn.cancelled",
                 json!({
-                    "campTurnId": envelope.payload.camp_turn_id,
-                    "campTurnStatus": settlement.terminal_status,
+                    "threadTurnId": envelope.payload.camp_turn_id,
+                    "threadTurnStatus": settlement.terminal_status,
                     "agentRunCount": settlement.runs.len(),
                     "runs": settlement.runs,
                     "messageDeliveriesCancelled": settlement.message_deliveries_cancelled,
@@ -2847,8 +2904,8 @@ impl ExecutionRuntimeService {
                 settlement.terminal_code,
                 json!({
                     "agentRunId": envelope.payload.agent_run_id,
-                    "campTurnId": (!camp_turn_id.is_empty()).then_some(camp_turn_id),
-                    "campTurnStatus": camp_turn_status,
+                    "threadTurnId": (!camp_turn_id.is_empty()).then_some(camp_turn_id),
+                    "threadTurnStatus": camp_turn_status,
                     "status": settlement.terminal_status,
                 }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
@@ -3611,7 +3668,7 @@ impl ExecutionRuntimeService {
                 .unwrap_or(PublicOutputMode::ExplicitSendOnly);
             let publication_allowed = terminal_publication_allowed(transaction, &target)?;
             let final_output_digest =
-                canonical_content_digest(&[StructuredCampMessageSegment::Text {
+                canonical_content_digest(&[StructuredThreadMessageSegment::Text {
                     text: envelope.payload.final_output.clone(),
                 }])?;
             let (ordinary_final_camp_message_id, automatic_public_output_suppressed) =
@@ -3718,7 +3775,7 @@ impl ExecutionRuntimeService {
                 Some(envelope.payload.execution_epoch),
                 &json!({
                     "nativeTurnId": envelope.payload.native_turn_id,
-                    "finalCampMessageId": final_camp_message_id,
+                    "finalThreadMessageId": final_camp_message_id,
                     "finalOutputDigest": final_output_digest,
                     "publicOutputMode": public_output_mode.as_str(),
                     "recipientFree": true,
@@ -3765,10 +3822,10 @@ impl ExecutionRuntimeService {
                 "agent_run.succeeded",
                 json!({
                     "agentRunId": target.agent_run_id,
-                    "campTurnId": (!target.camp_turn_id.is_empty())
+                    "threadTurnId": (!target.camp_turn_id.is_empty())
                         .then_some(target.camp_turn_id),
-                    "campTurnStatus": camp_turn_status,
-                    "finalCampMessageId": final_camp_message_id,
+                    "threadTurnStatus": camp_turn_status,
+                    "finalThreadMessageId": final_camp_message_id,
                     "finalOutputDigest": final_output_digest,
                     "publicOutputMode": public_output_mode.as_str(),
                     "automaticPublicOutputSuppressed": automatic_public_output_suppressed,
@@ -4128,9 +4185,9 @@ impl ExecutionRuntimeService {
                 "agent_run.dispatch_rejected",
                 json!({
                     "agentRunId": target.agent_run_id,
-                    "campTurnId": (!target.camp_turn_id.is_empty())
+                    "threadTurnId": (!target.camp_turn_id.is_empty())
                         .then_some(target.camp_turn_id),
-                    "campTurnStatus": camp_turn_status,
+                    "threadTurnStatus": camp_turn_status,
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
@@ -4302,9 +4359,9 @@ impl ExecutionRuntimeService {
                 "agent_run.failed",
                 json!({
                     "agentRunId": target.agent_run_id,
-                    "campTurnId": (!target.camp_turn_id.is_empty())
+                    "threadTurnId": (!target.camp_turn_id.is_empty())
                         .then_some(target.camp_turn_id),
-                    "campTurnStatus": camp_turn_status,
+                    "threadTurnStatus": camp_turn_status,
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
@@ -4956,7 +5013,7 @@ fn persist_single_chat_success(
     envelope: &CommandEnvelope<SucceedAgentRunCommand>,
     terminal_reason_code: Option<&str>,
 ) -> Result<CommandHandlerResult> {
-    let final_output_digest = canonical_content_digest(&[StructuredCampMessageSegment::Text {
+    let final_output_digest = canonical_content_digest(&[StructuredThreadMessageSegment::Text {
         text: envelope.payload.final_output.clone(),
     }])?;
     let final_conversation_message_id = Uuid::new_v4().to_string();
@@ -5051,7 +5108,7 @@ fn persist_single_chat_success(
             "nativeTurnId": envelope.payload.native_turn_id,
             "conversationId": target.conversation_id,
             "finalConversationMessageId": final_conversation_message_id,
-            "finalCampMessageId": Value::Null,
+            "finalThreadMessageId": Value::Null,
             "finalOutputDigest": final_output_digest,
             "responseDelivery": "conversation_message",
             "operationPolicy": "single_chat_v1",
@@ -5085,10 +5142,10 @@ fn persist_single_chat_success(
         "agent_run.succeeded",
         json!({
             "agentRunId": target.agent_run_id,
-            "campTurnId": target.camp_turn_id,
-            "campTurnStatus": camp_turn_status,
+            "threadTurnId": target.camp_turn_id,
+            "threadTurnStatus": camp_turn_status,
             "finalConversationMessageId": final_conversation_message_id,
-            "finalCampMessageId": Value::Null,
+            "finalThreadMessageId": Value::Null,
             "finalOutputDigest": final_output_digest,
             "responseDelivery": "conversation_message",
             "automaticPublicOutputSuppressed": true,
@@ -5175,7 +5232,7 @@ fn decide_missing_send_recovery(
     if candidate.body.len() > CAMP_MESSAGE_SEND_MAX_BODY_BYTES {
         return Ok(outcome("skipped_candidate_too_large", None, None));
     }
-    let candidate_digest = canonical_content_digest(&[StructuredCampMessageSegment::Text {
+    let candidate_digest = canonical_content_digest(&[StructuredThreadMessageSegment::Text {
         text: candidate.body.clone(),
     }])?;
     let message_id = persist_recipient_free_agent_publication(
@@ -5254,7 +5311,7 @@ fn persist_recipient_free_agent_publication(
     )?;
     let message_id = Uuid::new_v4().to_string();
     let addressed_agents_json = "[]";
-    let structured_content = vec![StructuredCampMessageSegment::Text {
+    let structured_content = vec![StructuredThreadMessageSegment::Text {
         text: body.to_string(),
     }];
     let structured_content_json = serde_json::to_string(&structured_content)?;
@@ -5564,7 +5621,9 @@ pub fn settle_legacy_retry_waits(database: &mut Database) -> Result<()> {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AbortiveRunSettlement {
     pub agent_run_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
     pub conversation_id: String,
     pub execution_epoch: i64,
@@ -5706,7 +5765,7 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
             ("agent_run", agent_run_id),
             actor,
             Some(execution_epoch),
-            &json!({"campTurnId": camp_turn_id, "reasonCode": reason_code}),
+            &json!({"threadTurnId": camp_turn_id, "reasonCode": reason_code}),
         )?;
     }
     append_domain_event(
@@ -6206,7 +6265,7 @@ fn claim_admission_rejection(
             let exhaustion = exhaust_camp_turn_execution_budget(
                 transaction,
                 &run.camp_turn_id,
-                CampTurnExecutionBudgetExhaustionReason::Elapsed,
+                ThreadTurnExecutionBudgetExhaustionReason::Elapsed,
                 &envelope.command_id,
                 &audit_now_text,
                 &envelope.actor,
@@ -6217,7 +6276,7 @@ fn claim_admission_rejection(
                 json!({
                     "message": "CampTurn Execution Budget deadline has elapsed",
                     "reason": "elapsed",
-                    "campTurnId": run.camp_turn_id,
+                    "threadTurnId": run.camp_turn_id,
                     "deadlineAt": run.execution_budget_deadline_at,
                     "agentRunsFenced": exhaustion.agent_runs_fenced,
                 }),
@@ -6872,8 +6931,8 @@ mod tests {
             AdapterKind, AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
         },
         collaboration::{
-            AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
-            ProjectBindingKind, TestCampMessageAddress, TestCampMessageCommand,
+            AddThreadMemberCommand, CollaborationService, CreateThreadCommand, ExecutionRequest,
+            ProjectBindingKind, TestThreadMessageAddress, TestThreadMessageCommand,
         },
         command::CommandResultStatus,
         planned_shutdown::{
@@ -6926,7 +6985,7 @@ mod tests {
         let service = CollaborationService::default();
         let mut camps = Vec::new();
         for index in 0..2 {
-            let mut create = CreateCampCommand::for_test_with_members(
+            let mut create = CreateThreadCommand::for_test_with_members(
                 database
                     .directory()
                     .join(format!("startup-recovery-{index}"))
@@ -6942,7 +7001,7 @@ mod tests {
                     &user_envelope(&format!("recovery-create-{index}"), None, create),
                 )
                 .unwrap();
-            let camp_id = created.result.payload["campId"]
+            let camp_id = created.result.payload["threadId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -6952,12 +7011,12 @@ mod tests {
                     &user_envelope(
                         &format!("recovery-send-{index}"),
                         Some(&camp_id),
-                        TestCampMessageCommand {
+                        TestThreadMessageCommand {
                             camp_id: camp_id.clone(),
                             draft_revision: None,
                             body: "recover persisted cancellation".into(),
                             prepared_attachment_ids: Vec::new(),
-                            address: TestCampMessageAddress::Explicit {
+                            address: TestThreadMessageAddress::Explicit {
                                 agent_ids: vec!["agent_1".into(), "agent_2".into()],
                             },
                             reply_to_camp_message_id: None,
@@ -7423,7 +7482,7 @@ mod tests {
             .restart_native_session(&mut database, &envelope)
             .unwrap();
         assert!(replay.replayed);
-        let state: (
+        type RestartedConversationState = (
             String,
             String,
             i64,
@@ -7432,7 +7491,8 @@ mod tests {
             Option<String>,
             Option<String>,
             Option<String>,
-        ) = database
+        );
+        let state: RestartedConversationState = database
             .connection()
             .query_row(
                 r#"
@@ -7507,7 +7567,7 @@ mod tests {
                 &user_envelope(
                     "planned-shutdown-create",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
                         &["agent_2"],
                         "agent_2",
@@ -7515,14 +7575,17 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         collaboration
             .add_camp_member(
                 &mut database,
                 &user_envelope(
                     "planned-shutdown-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -7538,12 +7601,12 @@ mod tests {
                 &user_envelope(
                     "planned-shutdown-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "执行关闭语义测试".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -8737,9 +8800,7 @@ mod tests {
             execution_lease_expires_at: Option<String>,
             terminal_resolution_source: Option<String>,
             terminal_reason_code: Option<String>,
-            turn_status: String,
-            aggregate_reason_code: Option<String>,
-            turn_cancel_requested_at: Option<String>,
+            delivery_status: String,
         }
 
         for wait_reason in ["approval"] {
@@ -8748,7 +8809,7 @@ mod tests {
                     directory,
                     mut database,
                     _camp_id,
-                    camp_turn_id,
+                    _camp_turn_id,
                     agent_run_id,
                     execution_epoch,
                 ) = claimed_run_for_planned_shutdown("required");
@@ -8788,14 +8849,13 @@ mod tests {
                                agent_run.execution_lease_expires_at,
                                agent_run.terminal_resolution_source,
                                agent_run.terminal_reason_code,
-                               camp_turn.status,
-                               camp_turn.aggregate_reason_code,
-                               camp_turn.cancel_requested_at
+                               camp_message_delivery.status
                         FROM agent_run
-                        JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                        WHERE agent_run.id = ?1 AND camp_turn.id = ?2
+                        JOIN camp_message_delivery
+                          ON camp_message_delivery.claimed_agent_run_id = agent_run.id
+                        WHERE agent_run.id = ?1
                         "#,
-                        params![agent_run_id, camp_turn_id],
+                        params![agent_run_id],
                         |row| {
                             Ok(WaitingTerminalState {
                                 run_status: row.get(0)?,
@@ -8806,9 +8866,7 @@ mod tests {
                                 execution_lease_expires_at: row.get(5)?,
                                 terminal_resolution_source: row.get(6)?,
                                 terminal_reason_code: row.get(7)?,
-                                turn_status: row.get(8)?,
-                                aggregate_reason_code: row.get(9)?,
-                                turn_cancel_requested_at: row.get(10)?,
+                                delivery_status: row.get(8)?,
                             })
                         },
                     )
@@ -8827,13 +8885,7 @@ mod tests {
                     state.terminal_reason_code.as_deref(),
                     Some(expected_terminal_reason)
                 );
-                assert_eq!(state.turn_status, "failed");
-                assert_eq!(
-                    state.aggregate_reason_code.as_deref(),
-                    (outcome == RuntimeTerminalOutcome::Cancelled)
-                        .then_some("required_run_incomplete")
-                );
-                assert!(state.turn_cancel_requested_at.is_none());
+                assert_eq!(state.delivery_status, "failed");
 
                 drop(database);
                 std::fs::remove_dir_all(directory).unwrap();
@@ -8894,8 +8946,8 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {
-        let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
+    async fn planned_shutdown_optional_cancelled_still_settles_its_delivery() {
+        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("optional");
         let permit = planned_terminal_permit(
             &agent_run_id,
@@ -8918,28 +8970,23 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(settlement.camp_turn_status, "completed");
-        let turn: (String, Option<String>, Option<String>) = database
+        assert_eq!(settlement.camp_turn_status, "cancelled");
+        let delivery_status: String = database
             .connection()
             .query_row(
-                r#"
-                SELECT status, aggregate_reason_code, cancel_requested_at
-                FROM camp_turn WHERE id = ?1
-                "#,
-                [&camp_turn_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                "SELECT status FROM camp_message_delivery WHERE claimed_agent_run_id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(turn.0, "completed");
-        assert!(turn.1.is_none());
-        assert!(turn.2.is_none());
+        assert_eq!(delivery_status, "cancelled");
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(feature = "slow-tests")]
-    async fn planned_shutdown_optional_failed_does_not_block_turn_completion() {
-        let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
+    async fn planned_shutdown_optional_failed_still_settles_its_delivery() {
+        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("optional");
         let permit = planned_terminal_permit(
             &agent_run_id,
@@ -8952,7 +8999,7 @@ mod tests {
                 &mut database,
                 &permit,
                 &PlannedShutdownAbortiveTerminal {
-                    agent_run_id,
+                    agent_run_id: agent_run_id.clone(),
                     execution_epoch,
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
@@ -8963,28 +9010,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(settlement.agent_run_status, "failed");
-        assert_eq!(settlement.camp_turn_status, "completed");
-        let turn: (String, Option<String>, Option<String>) = database
+        assert_eq!(settlement.camp_turn_status, "failed");
+        let delivery_status: String = database
             .connection()
             .query_row(
-                r#"
-                SELECT status, aggregate_reason_code, cancel_requested_at
-                FROM camp_turn WHERE id = ?1
-                "#,
-                [&camp_turn_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                "SELECT status FROM camp_message_delivery WHERE claimed_agent_run_id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(turn.0, "completed");
-        assert!(turn.1.is_none());
-        assert!(turn.2.is_none());
+        assert_eq!(delivery_status, "failed");
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(feature = "slow-tests")]
     async fn planned_shutdown_failed_uses_abortive_terminal_source_without_camp_cancellation() {
-        let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
+        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("required");
         let permit = planned_terminal_permit(
             &agent_run_id,
@@ -9009,42 +9051,27 @@ mod tests {
             .unwrap();
         assert_eq!(settlement.agent_run_status, "failed");
         assert_eq!(settlement.camp_turn_status, "failed");
-        let state: (
-            String,
-            Option<String>,
-            Option<String>,
-            String,
-            Option<String>,
-        ) = database
+        let state: (String, Option<String>, Option<String>, String) = database
             .connection()
             .query_row(
                 r#"
                 SELECT agent_run.status,
                        agent_run.terminal_resolution_source,
                        agent_run.terminal_reason_code,
-                       camp_turn.status,
-                       camp_turn.cancel_requested_at
+                       camp_message_delivery.status
                 FROM agent_run
-                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                WHERE agent_run.id = ?1 AND camp_turn.id = ?2
+                JOIN camp_message_delivery
+                  ON camp_message_delivery.claimed_agent_run_id = agent_run.id
+                WHERE agent_run.id = ?1
                 "#,
-                params![agent_run_id, camp_turn_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
+                params![agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(state.0, "failed");
         assert_eq!(state.1.as_deref(), Some("runtime_terminal"));
         assert_eq!(state.2.as_deref(), Some("planned_shutdown_failed"));
         assert_eq!(state.3, "failed");
-        assert!(state.4.is_none());
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -9361,7 +9388,7 @@ mod tests {
                 &user_envelope(
                     "runtime-create-camp",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
                         &["agent_2"],
                         "agent_2",
@@ -9369,14 +9396,17 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         collaboration
             .add_camp_member(
                 &mut database,
                 &user_envelope(
                     "runtime-add-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -9395,12 +9425,12 @@ mod tests {
                     &user_envelope(
                         &format!("runtime-turn-{index}"),
                         Some(&camp_id),
-                        TestCampMessageCommand {
+                        TestThreadMessageCommand {
                             camp_id: camp_id.clone(),
                             draft_revision: None,
                             body: format!("执行职责 {index}"),
                             prepared_attachment_ids: Vec::new(),
-                            address: TestCampMessageAddress::Default,
+                            address: TestThreadMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: Some(ExecutionRequest {
                                 task_id: None,
@@ -9659,7 +9689,7 @@ mod tests {
                 &user_envelope(
                     "dispatch-reject-create",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
                         &["agent_2"],
                         "agent_2",
@@ -9667,14 +9697,17 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         collaboration
             .add_camp_member(
                 &mut database,
                 &user_envelope(
                     "dispatch-reject-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -9690,12 +9723,12 @@ mod tests {
                 &user_envelope(
                     "dispatch-reject-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "消息必须保留".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -9743,11 +9776,12 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT agent_run.status, camp_turn.status,
+                SELECT agent_run.status, camp_message_delivery.status,
                        agent_run.started_at, agent_run.starting_git_observation_json,
                        agent_run.last_error_code
                 FROM agent_run
-                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN camp_message_delivery
+                  ON camp_message_delivery.claimed_agent_run_id = agent_run.id
                 WHERE agent_run.id = ?1
                 "#,
                 [&run_id],
@@ -9797,7 +9831,7 @@ mod tests {
                 &user_envelope(
                     "runtime-rebind-create",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
                         &["agent_2"],
                         "agent_2",
@@ -9805,14 +9839,17 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         collaboration
             .add_camp_member(
                 &mut database,
                 &user_envelope(
                     "runtime-rebind-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -9842,7 +9879,7 @@ mod tests {
             user_envelope(
                 command_id,
                 Some(&camp_id),
-                crate::camp_fast::SetCampMemberFastCommand {
+                crate::camp_fast::SetThreadMemberFastCommand {
                     camp_id: camp_id.clone(),
                     agent_id: "agent_2".into(),
                     expected_runtime_binding_revision: fast_target.runtime_binding_revision.clone(),
@@ -9857,12 +9894,12 @@ mod tests {
                 &user_envelope(
                     "runtime-rebind-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "允许可信 Runtime 原地升级".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -10058,7 +10095,7 @@ mod tests {
                 &user_envelope(
                     "run-cancel-create-camp",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
                         &["agent_2", "agent_1"],
                         "agent_2",
@@ -10066,7 +10103,10 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         for agent_id in ["agent_2", "agent_1"] {
             collaboration
                 .add_camp_member(
@@ -10074,7 +10114,7 @@ mod tests {
                     &user_envelope(
                         &format!("run-cancel-add-{agent_id}"),
                         Some(&camp_id),
-                        AddCampMemberCommand {
+                        AddThreadMemberCommand {
                             camp_id: camp_id.clone(),
                             agent_id: agent_id.to_string(),
                             expected_membership_generation: 1,
@@ -10091,12 +10131,12 @@ mod tests {
                 &user_envelope(
                     "run-cancel-send",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "并行处理两项职责".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -10347,7 +10387,7 @@ mod tests {
                 &user_envelope(
                     "fanout-runtime-create-camp",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
                         &["agent_2", "agent_1"],
                         "agent_2",
@@ -10355,7 +10395,10 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         for agent_id in ["agent_2", "agent_1"] {
             collaboration
                 .add_camp_member(
@@ -10363,7 +10406,7 @@ mod tests {
                     &user_envelope(
                         &format!("fanout-runtime-add-{agent_id}"),
                         Some(&camp_id),
-                        AddCampMemberCommand {
+                        AddThreadMemberCommand {
                             camp_id: camp_id.clone(),
                             agent_id: agent_id.to_string(),
                             expected_membership_generation: 1,
@@ -10380,12 +10423,12 @@ mod tests {
                 &user_envelope(
                     "fanout-runtime-message",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请独立分析并公开各自结论。".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Explicit {
+                        address: TestThreadMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -10399,10 +10442,13 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_turn_id = queued.result.payload["campTurnId"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        assert_eq!(
+            queued.result.payload["agentRunIds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
         database
             .connection()
             .execute(
@@ -10430,8 +10476,8 @@ mod tests {
         let queued_count: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM agent_run WHERE camp_turn_id = ?1 AND status = 'queued'",
-                [&camp_turn_id],
+                "SELECT COUNT(*) FROM agent_run WHERE camp_id = ?1 AND status = 'queued'",
+                [&camp_id],
                 |row| row.get(0),
             )
             .unwrap();
@@ -10517,21 +10563,18 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(completed.result.status, CommandResultStatus::Applied);
-            assert_eq!(
-                completed.result.payload["campTurnStatus"],
-                if index == 0 { "running" } else { "completed" }
-            );
+            assert!(completed.result.payload["threadTurnStatus"].is_null());
         }
 
-        let turn_status: String = database
+        let settled_deliveries: i64 = database
             .connection()
             .query_row(
-                "SELECT status FROM camp_turn WHERE id = ?1",
-                [&camp_turn_id],
+                "SELECT COUNT(*) FROM camp_message_delivery WHERE camp_id = ?1 AND status = 'settled'",
+                [&camp_id],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(turn_status, "completed");
+        assert_eq!(settled_deliveries, 2);
         let automatic_final_outputs: i64 = database
             .connection()
             .query_row(
@@ -10615,12 +10658,12 @@ mod tests {
             super::planned_shutdown_failed_clears_live_waiting_state().await;
         }
         #[tokio::test]
-        async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {
-            super::planned_shutdown_optional_cancelled_does_not_block_turn_completion().await;
+        async fn planned_shutdown_optional_cancelled_still_settles_its_delivery() {
+            super::planned_shutdown_optional_cancelled_still_settles_its_delivery().await;
         }
         #[tokio::test]
-        async fn planned_shutdown_optional_failed_does_not_block_turn_completion() {
-            super::planned_shutdown_optional_failed_does_not_block_turn_completion().await;
+        async fn planned_shutdown_optional_failed_still_settles_its_delivery() {
+            super::planned_shutdown_optional_failed_still_settles_its_delivery().await;
         }
         #[tokio::test]
         async fn planned_shutdown_failed_uses_abortive_terminal_source_without_camp_cancellation() {

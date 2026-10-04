@@ -152,7 +152,7 @@ pub fn server_runtime_root(canonical_data_dir: &Path) -> Result<PathBuf> {
 /// The existing platform layout owns the instance identity. Output files are
 /// ordinary siblings of legacy runtime storage, never an import destination.
 pub fn camp_attachment_output_root(runtime_files_root: &Path, camp_id: &str) -> Result<PathBuf> {
-    crate::camp_id::CampId::parse(camp_id)?;
+    crate::camp_id::ThreadId::parse(camp_id)?;
     Ok(runtime_files_root
         .parent()
         .context("Runtime storage has no instance directory")?
@@ -176,12 +176,12 @@ pub fn resolve_attachment_output_root(
 }
 
 #[derive(Debug, Clone)]
-pub struct CampOutputDirectory {
+pub struct ThreadOutputDirectory {
     pub camp_id: String,
     pub output_root: PathBuf,
 }
 
-impl CampOutputDirectory {
+impl ThreadOutputDirectory {
     pub fn prepare(database: &crate::db::Database, camp_id: &str) -> Result<Self> {
         ensure!(
             database.connection().query_row(
@@ -250,12 +250,12 @@ mod tests {
     // standalone cases and also exercises Windows native private-directory ACLs.
     #[test]
     fn standalone_runtime_root_preserves_native_admission_and_owner() {
-        use crate::camp_attachment_view::CampAttachmentViewStore;
+        use crate::camp_attachment_view::ThreadAttachmentViewStore;
         let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
         let requested = parent.join(format!("rovai-server-layout-{}", uuid::Uuid::new_v4()));
         let paths = ServerPaths::prepare(&requested).unwrap();
         let root = &paths.runtime_camp_files_root;
-        let server = CampAttachmentViewStore::admit(
+        let server = ThreadAttachmentViewStore::admit(
             root,
             &paths.data_dir,
             std::slice::from_ref(&paths.skill_library_root),
@@ -263,11 +263,11 @@ mod tests {
         .unwrap();
         assert_eq!(server.root(), root);
         assert!(
-            CampAttachmentViewStore::admit(root, &paths.data_dir, &[]).is_err(),
+            ThreadAttachmentViewStore::admit(root, &paths.data_dir, &[]).is_err(),
             "the standalone root still has one owner"
         );
         assert!(
-            CampAttachmentViewStore::admit(
+            ThreadAttachmentViewStore::admit(
                 &paths.data_dir.join("instances/wrong/runtime-files"),
                 &paths.data_dir,
                 &[],
@@ -276,7 +276,7 @@ mod tests {
         );
         drop(server);
         assert!(
-            CampAttachmentViewStore::admit(
+            ThreadAttachmentViewStore::admit(
                 root,
                 &paths.data_dir,
                 &[paths.data_dir.join("instances")],
@@ -304,7 +304,7 @@ mod tests {
             std::fs::read(paths.logs.join("server.log")).unwrap(),
             b"first\nsecond\nthird\n"
         );
-        let server = CampAttachmentViewStore::admit(root, &paths.data_dir, &[]).unwrap();
+        let server = ThreadAttachmentViewStore::admit(root, &paths.data_dir, &[]).unwrap();
         drop(server);
         std::fs::remove_dir_all(requested).unwrap();
     }

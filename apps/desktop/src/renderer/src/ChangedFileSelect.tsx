@@ -4,6 +4,7 @@ import type { AgentRunFileChangesView } from '@contracts'
 import { DialogControlIcon } from './AppDialog'
 import { useOptionalFileFind } from './FilePreviewFind'
 import { agentRunFilePathParts } from './file-changes-presentation'
+import { UiText, uiAttribute } from './interface-language'
 
 export function ChangedFileSelect({ files, value, onChange }: {
   files: AgentRunFileChangesView['files']
@@ -84,7 +85,7 @@ export function ChangedFileSelect({ files, value, onChange }: {
     <Popover.Root open={open} onOpenChange={changeOpen}>
       <Popover.Trigger asChild>
         <button ref={trigger} type="button" className="changed-file-trigger"
-          aria-label={`选择变更文件，当前 ${path.basename}`} title={selected?.path}
+          aria-label={uiAttribute("选择变更文件，当前 {0}", String(path.basename))} title={selected?.path}
           onKeyDown={event => {
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault()
@@ -98,15 +99,15 @@ export function ChangedFileSelect({ files, value, onChange }: {
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content className="changed-file-popover" align="start" sideOffset={5} collisionPadding={12}
-          aria-label="选择变更文件"
+          aria-label={uiAttribute("选择变更文件")}
           onCloseAutoFocus={event => { if (openingFind.current) event.preventDefault() }}
           onOpenAutoFocus={event => { event.preventDefault(); search.current?.focus() }}>
-          <input ref={search} type="search" role="combobox" aria-label="筛选变更文件" placeholder="筛选文件…"
+          <input ref={search} type="search" role="combobox" aria-label={uiAttribute("筛选变更文件")} placeholder={uiAttribute("筛选文件…")}
             aria-expanded={open} aria-autocomplete="list" aria-controls={id}
             aria-activedescendant={activeIndex >= 0 ? `${id}-${activeIndex}` : undefined}
             autoComplete="off" value={query} onKeyDown={handleKey}
             onChange={event => { setQuery(event.target.value); setActiveId('') }} />
-          <div ref={list} id={id} role="listbox" aria-label="变更文件候选" className="changed-file-options">
+          <div ref={list} id={id} role="listbox" aria-label={uiAttribute("变更文件候选")} className="changed-file-options">
             {filtered.map((file, index) => {
               const parts = agentRunFilePathParts(file.path)
               return <div key={file.evidenceFileId} id={`${id}-${index}`} data-option-index={index}
@@ -117,7 +118,7 @@ export function ChangedFileSelect({ files, value, onChange }: {
                 {file.evidenceFileId === value && <DialogControlIcon name="check" />}
               </div>
             })}
-            {!filtered.length && <p className="changed-file-empty" role="status">没有匹配的文件</p>}
+            {!filtered.length && <p className="changed-file-empty" role="status"><UiText zh={"没有匹配的文件"} /></p>}
           </div>
         </Popover.Content>
       </Popover.Portal>

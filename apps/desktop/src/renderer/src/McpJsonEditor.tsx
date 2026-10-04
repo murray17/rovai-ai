@@ -1,7 +1,8 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { McpRevealResult } from '@contracts'
 import { NewConversationQuickHelp } from './NewConversationQuickHelp'
+import { UiText, uiAttribute } from './interface-language'
 
 const MASK = '********'
 const PRESERVE = '__ROVAI_PRESERVE_STORED_VALUE__'
@@ -96,7 +97,7 @@ export function McpJsonEditor({
   onConcealed(concealed: boolean): void
   onError(message: string | null): void
 }): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const [text, setText] = useState(() => maskMcpJson(value) ?? value)
   const latestText = useRef(text)
   latestText.current = text
@@ -210,7 +211,7 @@ export function McpJsonEditor({
           result.serverId !== serverId ||
           result.configDigest !== configDigest
         )
-          throw new Error('配置已更新，请重新载入后再显示。')
+          throw new Error(uiAttribute('配置已更新，请重新载入后再显示。'))
         original ??= result.definitionJson
       }
       const raw = materializeMcpDraft(latestText.current, original)
@@ -223,8 +224,8 @@ export function McpJsonEditor({
       if (attempt === request.current)
         onError(
           error instanceof SyntaxError
-            ? '请先修正 JSON 格式，再显示凭证。'
-            : '暂时无法显示凭证，请重新载入配置后重试。'
+            ? uiAttribute('请先修正 JSON 格式，再显示凭证。')
+            : uiAttribute('暂时无法显示凭证，请重新载入配置后重试。')
         )
     } finally {
       if (attempt === request.current) setPending(false)
@@ -233,13 +234,11 @@ export function McpJsonEditor({
   return (
     <div className="capability-json-field">
       <div className="capability-scope-heading">
-        <h3>配置 JSON</h3>
+        <h3><UiText zh={"配置 JSON"} /></h3>
         {secret && (
           <span className="capability-credential-state">
-            {shown ? '凭证已显示' : '凭证已隐藏'}
-            <NewConversationQuickHelp label="凭证显示说明">
-              原值随配置保留。点击“显示”查看明文；切换 MCP 或保存后重新隐藏。
-            </NewConversationQuickHelp>
+            {shown ? uiAttribute("凭证已显示") : uiAttribute("凭证已隐藏")}
+            <NewConversationQuickHelp label={uiAttribute("凭证显示说明")}><UiText zh={"原值随配置保留。点击“显示”查看明文；切换 MCP 或保存后重新隐藏。"} /></NewConversationQuickHelp>
           </span>
         )}
       </div>
@@ -251,12 +250,12 @@ export function McpJsonEditor({
               <button
                 type="button"
                 className="quiet-button compact"
-                aria-label={pending ? '取消显示凭证' : shown ? '隐藏疑似凭证' : '显示疑似凭证'}
+                aria-label={pending ? uiAttribute("取消显示凭证") : shown ? uiAttribute("隐藏疑似凭证") : uiAttribute("显示疑似凭证")}
                 aria-pressed={shown}
                 disabled={disabled}
                 onClick={() => void visibility()}
               >
-                {pending ? '取消显示' : shown ? '隐藏' : '显示'}
+                {pending ? uiAttribute("取消显示") : shown ? uiAttribute("隐藏") : uiAttribute("显示")}
               </button>
             )}
             <button
@@ -267,24 +266,22 @@ export function McpJsonEditor({
                 try {
                   change(JSON.stringify(JSON.parse(text), null, 2))
                 } catch {
-                  onError('JSON 格式有误，暂时无法格式化。')
+                  onError(uiAttribute('JSON 格式有误，暂时无法格式化。'))
                 }
               }}
-            >
-              格式化
-            </button>
+            ><UiText zh={"格式化"} /></button>
           </div>
         </div>
         <textarea
           ref={textarea}
-          aria-label="MCP 配置 JSON"
+          aria-label={uiAttribute("MCP 配置 JSON")}
           aria-describedby={issuesId}
           spellCheck={false}
           autoComplete="off"
           autoCapitalize="off"
           disabled={disabled}
           readOnly={concealed}
-          placeholder={concealed ? 'JSON 尚未完成，内容已隐藏。点击“显示”继续编辑。' : undefined}
+          placeholder={concealed ? uiAttribute("JSON 尚未完成，内容已隐藏。点击“显示”继续编辑。") : undefined}
           value={text}
           onChange={(event) => change(event.target.value)}
         />

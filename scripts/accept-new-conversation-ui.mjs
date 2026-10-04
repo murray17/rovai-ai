@@ -5,7 +5,7 @@ const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
 const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
 const scale = Number(process.env.ROVAI_CAPTURE_SCALE ?? 1)
 const theme = process.env.ROVAI_CAPTURE_THEME ?? 'day'
-const createCamp = process.env.ROVAI_ACCEPT_CREATE === '1'
+const createThread = process.env.ROVAI_ACCEPT_CREATE === '1'
 const enableOneClick = process.env.ROVAI_ACCEPT_ONE_CLICK === '1'
 const expectPreferenceFailure = process.env.ROVAI_ACCEPT_PREFERENCE_FAILURE === '1'
 const reducedMotion = process.env.ROVAI_REDUCED_MOTION === '1'
@@ -329,7 +329,7 @@ try {
     fromSurface: true
   })
   await writeFile(output, Buffer.from(screenshot.result.data, 'base64'))
-  if (createCamp) {
+  if (createThread) {
     await cdp.send('Runtime.evaluate', {
       expression: `document.querySelector('.new-camp-dialog .compact-primary')?.click()`
     })
@@ -369,21 +369,21 @@ try {
   }
 
   const savedPreferences = await evaluate(cdp, 'window.rovai.generalPreferences.get()')
-  if (createCamp && enableOneClick && !expectPreferenceFailure) {
+  if (createThread && enableOneClick && !expectPreferenceFailure) {
     const createdCamp = await evaluate(cdp, `(async () => {
       const target = document.querySelector('.camp-nav-row.selected')?.querySelector('[data-sidebar-menu-target]')?.dataset.sidebarMenuTarget
       if (!target?.startsWith('camp:')) throw new Error('Missing selected Camp identity')
-      return window.rovai.request('camps.open', { campId: target.slice(5), traceId: crypto.randomUUID() })
+      return window.rovai.request('camps.open', { threadId: target.slice(5), traceId: crypto.randomUUID() })
     })()`)
     if (savedPreferences.oneClickNewConversationEnabled !== true
       || savedPreferences.newConversationDefaultsRequireConfirmation !== false
-      || savedPreferences.newConversationDefaults?.defaultLeadAgentId !== createdCamp.camp.defaultLeadAgentId
+      || savedPreferences.newConversationDefaults?.defaultLeadAgentId !== createdCamp.thread.defaultLeadAgentId
       || JSON.stringify([...savedPreferences.newConversationDefaults.memberAgentIds].sort())
         !== JSON.stringify(createdCamp.members.map(member => member.agentId).sort())) {
       throw new Error('Saved defaults do not match the successfully created Camp')
     }
     // The next click must open a new Pending Camp directly, using the saved team.
-    const previousId = createdCamp.camp.id
+    const previousId = createdCamp.thread.id
     await waitForExpression(cdp, `document.querySelector('button[aria-label="新对话"]')?.disabled === false`, 10_000)
     await evaluate(cdp, `void (window.__previousAcceptanceComposer = document.getElementById('camp-message'))`)
     await evaluate(cdp, `document.querySelector('button[aria-label="新对话"]').click()`)
@@ -394,11 +394,11 @@ try {
     await waitForExpression(cdp, `document.activeElement?.id === 'camp-message'`, 5_000)
     const nextCamp = await evaluate(cdp, `(async () => {
       const target = document.querySelector('.camp-nav-row.selected [data-sidebar-menu-target]').dataset.sidebarMenuTarget
-      return window.rovai.request('camps.open', { campId: target.slice(5), traceId: crypto.randomUUID() })
+      return window.rovai.request('camps.open', { threadId: target.slice(5), traceId: crypto.randomUUID() })
     })()`)
     if (nextCamp.messages.length !== 0 || nextCamp.agentRuns.length !== 0
-      || nextCamp.camp.activationState !== 'pending'
-      || nextCamp.camp.defaultLeadAgentId !== savedPreferences.newConversationDefaults.defaultLeadAgentId
+      || nextCamp.thread.activationState !== 'pending'
+      || nextCamp.thread.defaultLeadAgentId !== savedPreferences.newConversationDefaults.defaultLeadAgentId
       || JSON.stringify(nextCamp.members.map(member => member.agentId).sort())
         !== JSON.stringify([...savedPreferences.newConversationDefaults.memberAgentIds].sort())) {
       throw new Error('One-click did not create a Pending Camp with the saved team')

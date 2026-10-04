@@ -1,5 +1,5 @@
 export async function createConfiguredCampAndSend(request, input) {
-  const preflight = await request('camps.creationPreflight')
+  const preflight = await request('threads.creationPreflight')
   if (!preflight.admissible || !preflight.initialLeadAgentId) {
     throw new Error(`Camp creation preflight failed: ${JSON.stringify(preflight)}`)
   }
@@ -8,7 +8,7 @@ export async function createConfiguredCampAndSend(request, input) {
     ?? preflight.presentMembers.map((member) => member.agentId)
   const defaultLeadAgentId = input.defaultLeadAgentId
     ?? preflight.initialLeadAgentId
-  const createResult = await request('camps.create', {
+  const createResult = await request('threads.create', {
     commandId: `${input.commandId}:camp`,
     name: input.name ?? null,
     workspace: input.workspace
@@ -18,22 +18,19 @@ export async function createConfiguredCampAndSend(request, input) {
     defaultLeadAgentId,
     collaborationMode: 'peer'
   })
-  const campId = createResult.payload?.campId
+  const campId = (createResult.payload?.threadId ?? createResult.payload?.campId)
   if (createResult.status !== 'applied' || !campId) {
     throw new Error(`Configured Camp creation failed: ${JSON.stringify(createResult)}`)
   }
 
-  const currentDraft = await request('camp.composerDraft.get', { campId })
   const content = composerDocumentForAddress(input.address ?? { mode: 'default' }, input.body)
-  const savedDraft = await request('camp.composerDraft.save', {
-    campId,
-    expectedRevision: currentDraft.revision,
-    content
-  })
-  const sent = await request('camp.messages.send', {
+  const sent = await request('thread.messages.send', {
     commandId: input.commandId,
-    campId,
-    draftRevision: savedDraft.revision,
+    threadId: campId,
+    content,
+    sourceAttachments: [],
+    quotes: [],
+    replyToThreadMessageId: null,
     execution: {
       taskId: null,
       purpose: input.purpose,
@@ -45,6 +42,7 @@ export async function createConfiguredCampAndSend(request, input) {
     ...sent.commandResult,
     payload: {
       ...sent.commandResult.payload,
+      threadId: campId,
       campId
     }
   }

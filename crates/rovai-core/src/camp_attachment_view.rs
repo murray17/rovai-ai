@@ -16,10 +16,10 @@ use uuid::Uuid;
 
 use crate::{
     camp_attachment::{
-        CampAttachmentStore, DIRECTORY_MEDIA_TYPE, RuntimeAttachmentCopyReceipt,
+        DIRECTORY_MEDIA_TYPE, RuntimeAttachmentCopyReceipt, ThreadAttachmentStore,
         inspect_runtime_attachment_copy,
     },
-    camp_id::CampId,
+    camp_id::ThreadId,
     collaboration::append_domain_event,
     command::{ActorRef, canonical_json_digest},
     db::Database,
@@ -54,7 +54,7 @@ struct RuntimeFilesRootMarker {
 }
 
 #[derive(Debug)]
-pub struct CampAttachmentViewStore {
+pub struct ThreadAttachmentViewStore {
     root: PathBuf,
     root_identity_digest: String,
     instance_key: String,
@@ -62,7 +62,7 @@ pub struct CampAttachmentViewStore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedCampAttachmentPublication {
+pub struct PreparedThreadAttachmentPublication {
     pub operation_id: String,
     pub camp_id: String,
     pub command_id: String,
@@ -70,14 +70,14 @@ pub struct PreparedCampAttachmentPublication {
 }
 
 #[derive(Debug)]
-pub enum CampAttachmentPublicationStaging {
+pub enum ThreadAttachmentPublicationStaging {
     None,
-    Ready(PreparedCampAttachmentPublication),
-    Copy(CampAttachmentPublicationCopyPlan),
+    Ready(PreparedThreadAttachmentPublication),
+    Copy(ThreadAttachmentPublicationCopyPlan),
 }
 
 #[derive(Debug, Clone)]
-pub struct CampAttachmentPublicationCopyPlan {
+pub struct ThreadAttachmentPublicationCopyPlan {
     operation_id: String,
     camp_id: String,
     command_id: String,
@@ -86,15 +86,15 @@ pub struct CampAttachmentPublicationCopyPlan {
     rows: Vec<AuthorityAttachmentRow>,
 }
 
-impl CampAttachmentPublicationCopyPlan {
+impl ThreadAttachmentPublicationCopyPlan {
     pub fn operation_id(&self) -> &str {
         &self.operation_id
     }
 }
 
 #[derive(Debug)]
-pub struct CopiedCampAttachmentPublication {
-    plan: CampAttachmentPublicationCopyPlan,
+pub struct CopiedThreadAttachmentPublication {
+    plan: ThreadAttachmentPublicationCopyPlan,
     entries: Vec<CopiedPublicationEntry>,
 }
 
@@ -106,15 +106,15 @@ struct CopiedPublicationEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedCampAttachmentCleanup {
+pub struct PreparedThreadAttachmentCleanup {
     pub operation_id: String,
     pub camp_id: String,
     pub command_id: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PreparedCampAttachmentCleanupCompletion {
-    cleanup: PreparedCampAttachmentCleanup,
+pub(crate) struct PreparedThreadAttachmentCleanupCompletion {
+    cleanup: PreparedThreadAttachmentCleanup,
     cleanup_root_relative_path: PathBuf,
     cleanup_root_identity_digest: Option<String>,
 }
@@ -134,7 +134,7 @@ pub struct SemanticAttachmentEntryV1 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CampAttachmentViewReceiptV2 {
+pub struct ThreadAttachmentViewReceiptV2 {
     pub schema_version: i64,
     pub camp_id: String,
     pub attachment_root_relative_path: String,
@@ -146,12 +146,12 @@ pub struct CampAttachmentViewReceiptV2 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CampAttachmentVisibilityMode {
+pub enum ThreadAttachmentVisibilityMode {
     LiveAppendV1,
     GenerationFencedV1,
 }
 
-impl CampAttachmentVisibilityMode {
+impl ThreadAttachmentVisibilityMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LiveAppendV1 => "live_append_v1",
@@ -182,17 +182,17 @@ pub struct RuntimeAttachmentAuthReceiptV1 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CampAttachmentRuntimeAuthorization {
+pub struct ThreadAttachmentRuntimeAuthorization {
     pub camp_id: String,
     pub attachment_root: PathBuf,
     pub root_identity_digest: String,
     pub generation: i64,
     pub catalog_digest: String,
-    pub visibility_mode: CampAttachmentVisibilityMode,
+    pub visibility_mode: ThreadAttachmentVisibilityMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ReadyCampViewReceipt {
+struct ReadyThreadViewReceipt {
     generation: i64,
     root_relative_path: String,
     root_identity_digest: String,
@@ -207,45 +207,45 @@ struct ReadyCampViewReceipt {
 }
 
 #[derive(Debug)]
-struct CampAttachmentViewVerification {
+struct ThreadAttachmentViewVerification {
     camp_id: String,
     root: PathBuf,
-    receipt: ReadyCampViewReceipt,
+    receipt: ReadyThreadViewReceipt,
     filesystem_ids: std::collections::BTreeSet<String>,
     entries: Vec<CommittedViewEntryRow>,
 }
 
 #[derive(Debug)]
-pub struct CampAttachmentRuntimeAuthorizationVerification {
-    view: CampAttachmentViewVerification,
+pub struct ThreadAttachmentRuntimeAuthorizationVerification {
+    view: ThreadAttachmentViewVerification,
     workspace: Option<PathBuf>,
-    visibility_mode: CampAttachmentVisibilityMode,
+    visibility_mode: ThreadAttachmentVisibilityMode,
 }
 
-impl CampAttachmentRuntimeAuthorizationVerification {
-    pub fn verify(self) -> Result<VerifiedCampAttachmentRuntimeAuthorization> {
+impl ThreadAttachmentRuntimeAuthorizationVerification {
+    pub fn verify(self) -> Result<VerifiedThreadAttachmentRuntimeAuthorization> {
         if let Some(workspace) = self.workspace.as_deref() {
             let canonical_workspace = fs::canonicalize(workspace)
                 .context("AgentRun workspace cannot be canonicalized")?;
             reject_overlap(&self.view.root, &canonical_workspace)?;
         }
         inspect_ready_camp_view(&self.view)?;
-        Ok(VerifiedCampAttachmentRuntimeAuthorization { verification: self })
+        Ok(VerifiedThreadAttachmentRuntimeAuthorization { verification: self })
     }
 }
 
 #[derive(Debug)]
-pub struct VerifiedCampAttachmentRuntimeAuthorization {
-    verification: CampAttachmentRuntimeAuthorizationVerification,
+pub struct VerifiedThreadAttachmentRuntimeAuthorization {
+    verification: ThreadAttachmentRuntimeAuthorizationVerification,
 }
 
 #[derive(Debug)]
-pub struct CampAttachmentPublicationCompletionVerification {
+pub struct ThreadAttachmentPublicationCompletionVerification {
     operation_id: String,
-    view: CampAttachmentViewVerification,
+    view: ThreadAttachmentViewVerification,
 }
 
-impl CampAttachmentPublicationCompletionVerification {
+impl ThreadAttachmentPublicationCompletionVerification {
     pub fn operation_id(&self) -> &str {
         &self.operation_id
     }
@@ -254,15 +254,15 @@ impl CampAttachmentPublicationCompletionVerification {
         &self.view.camp_id
     }
 
-    pub fn verify(self) -> Result<VerifiedCampAttachmentPublicationCompletion> {
+    pub fn verify(self) -> Result<VerifiedThreadAttachmentPublicationCompletion> {
         inspect_ready_camp_view(&self.view)?;
-        Ok(VerifiedCampAttachmentPublicationCompletion { verification: self })
+        Ok(VerifiedThreadAttachmentPublicationCompletion { verification: self })
     }
 }
 
 #[derive(Debug)]
-pub struct VerifiedCampAttachmentPublicationCompletion {
-    verification: CampAttachmentPublicationCompletionVerification,
+pub struct VerifiedThreadAttachmentPublicationCompletion {
+    verification: ThreadAttachmentPublicationCompletionVerification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,7 +321,7 @@ struct SemanticCatalogEntryReceipt<'a> {
     root_relative_payload_path: String,
 }
 
-impl CampAttachmentViewStore {
+impl ThreadAttachmentViewStore {
     #[cfg(any(test, feature = "slow-tests"))]
     pub fn for_test(database: &Database) -> Result<Self> {
         let root = database.runtime_camp_files_root().to_path_buf();
@@ -366,7 +366,7 @@ impl CampAttachmentViewStore {
         database: &mut Database,
         camp_id: &str,
     ) -> Result<()> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         database.connection().execute(
             r#"
             UPDATE camp_attachment_view
@@ -482,7 +482,7 @@ impl CampAttachmentViewStore {
     pub fn reconcile(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
+        attachment_store: &ThreadAttachmentStore,
     ) -> Result<()> {
         self.recover_incomplete_operations(database, attachment_store)?;
         let camp_ids = {
@@ -519,7 +519,7 @@ impl CampAttachmentViewStore {
     }
 
     pub fn ensure_empty_camp_ready(&self, database: &mut Database, camp_id: &str) -> Result<()> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         let published_count: i64 = database.connection().query_row(
             "SELECT COUNT(*) FROM message_attachment WHERE camp_id = ?1",
             [camp_id],
@@ -570,8 +570,8 @@ impl CampAttachmentViewStore {
         camp_id: &str,
         command_id: &str,
         draft_revision: i64,
-    ) -> Result<CampAttachmentPublicationStaging> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadAttachmentPublicationStaging> {
+        ThreadId::parse(camp_id)?;
         Uuid::parse_str(command_id).context("publication command ID must be a UUID")?;
         let existing_operation = database
             .connection()
@@ -588,7 +588,7 @@ impl CampAttachmentViewStore {
             if status == "staged" {
                 return self
                     .load_prepared_publication(database.connection(), &operation_id)
-                    .map(CampAttachmentPublicationStaging::Ready);
+                    .map(ThreadAttachmentPublicationStaging::Ready);
             }
             if status == "rolled_back" {
                 let staging = self.staging_operation_root(&operation_id)?;
@@ -605,9 +605,9 @@ impl CampAttachmentViewStore {
                 anyhow::bail!("camp_attachment_view_recovery_required");
             } else if status == "committed" {
                 self.complete_publication(database, &operation_id)?;
-                return Ok(CampAttachmentPublicationStaging::None);
+                return Ok(ThreadAttachmentPublicationStaging::None);
             } else if status == "completed" {
-                return Ok(CampAttachmentPublicationStaging::None);
+                return Ok(ThreadAttachmentPublicationStaging::None);
             } else {
                 anyhow::bail!("camp_attachment_view_busy");
             }
@@ -616,7 +616,7 @@ impl CampAttachmentViewStore {
         let rows = load_prepared_authority_rows(database.connection(), camp_id)?;
         if rows.is_empty() {
             self.verify_camp_ready_receipt(database, camp_id)?;
-            return Ok(CampAttachmentPublicationStaging::None);
+            return Ok(ThreadAttachmentPublicationStaging::None);
         }
         let requested_bytes = rows.iter().try_fold(0_u64, |total, row| {
             total
@@ -700,8 +700,8 @@ impl CampAttachmentViewStore {
             )?;
         }
         transaction.commit()?;
-        Ok(CampAttachmentPublicationStaging::Copy(
-            CampAttachmentPublicationCopyPlan {
+        Ok(ThreadAttachmentPublicationStaging::Copy(
+            ThreadAttachmentPublicationCopyPlan {
                 operation_root: self.staging_operation_root(&operation_id)?,
                 operation_id,
                 camp_id: camp_id.to_string(),
@@ -716,8 +716,8 @@ impl CampAttachmentViewStore {
         &self,
         database: &mut Database,
         camp_id: &str,
-    ) -> Result<Option<CampAttachmentPublicationCopyPlan>> {
-        CampId::parse(camp_id)?;
+    ) -> Result<Option<ThreadAttachmentPublicationCopyPlan>> {
+        ThreadId::parse(camp_id)?;
         let transaction = database.connection_mut().transaction()?;
         let head = transaction
             .query_row(
@@ -764,7 +764,7 @@ impl CampAttachmentViewStore {
             anyhow::bail!("camp_attachment_view_busy");
         }
         transaction.commit()?;
-        Ok(Some(CampAttachmentPublicationCopyPlan {
+        Ok(Some(ThreadAttachmentPublicationCopyPlan {
             operation_root: self.staging_operation_root(&operation_id)?,
             operation_id,
             camp_id: camp_id.to_string(),
@@ -775,9 +775,9 @@ impl CampAttachmentViewStore {
     }
 
     pub fn copy_publication(
-        attachment_store: &CampAttachmentStore,
-        plan: CampAttachmentPublicationCopyPlan,
-    ) -> Result<CopiedCampAttachmentPublication> {
+        attachment_store: &ThreadAttachmentStore,
+        plan: ThreadAttachmentPublicationCopyPlan,
+    ) -> Result<CopiedThreadAttachmentPublication> {
         ensure_private_directory(&plan.operation_root)?;
         #[cfg(all(test, feature = "extended-tests"))]
         pause_publication_copy_for_test(&plan.operation_id);
@@ -803,15 +803,15 @@ impl CampAttachmentViewStore {
             });
         }
         sync_directory(&plan.operation_root)?;
-        Ok(CopiedCampAttachmentPublication { plan, entries })
+        Ok(CopiedThreadAttachmentPublication { plan, entries })
     }
 
     pub fn finish_publication_staging(
         &self,
         database: &mut Database,
-        copied: CopiedCampAttachmentPublication,
-    ) -> Result<PreparedCampAttachmentPublication> {
-        let CopiedCampAttachmentPublication { plan, entries } = copied;
+        copied: CopiedThreadAttachmentPublication,
+    ) -> Result<PreparedThreadAttachmentPublication> {
+        let CopiedThreadAttachmentPublication { plan, entries } = copied;
         let transaction = database.connection_mut().transaction()?;
         let operation: (String, String, Option<i64>, String, String) = transaction.query_row(
             r#"
@@ -875,7 +875,7 @@ impl CampAttachmentViewStore {
             anyhow::bail!("camp_attachment_view_recovery_required");
         }
         transaction.commit()?;
-        Ok(PreparedCampAttachmentPublication {
+        Ok(PreparedThreadAttachmentPublication {
             operation_id: plan.operation_id,
             camp_id: plan.camp_id,
             command_id: plan.command_id,
@@ -887,16 +887,16 @@ impl CampAttachmentViewStore {
     pub fn stage_publication(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
+        attachment_store: &ThreadAttachmentStore,
         camp_id: &str,
         command_id: &str,
         draft_revision: i64,
-    ) -> Result<Option<PreparedCampAttachmentPublication>> {
+    ) -> Result<Option<PreparedThreadAttachmentPublication>> {
         let plan = self.plan_publication(database, camp_id, command_id, draft_revision)?;
         match plan {
-            CampAttachmentPublicationStaging::None => Ok(None),
-            CampAttachmentPublicationStaging::Ready(publication) => Ok(Some(publication)),
-            CampAttachmentPublicationStaging::Copy(plan) => {
+            ThreadAttachmentPublicationStaging::None => Ok(None),
+            ThreadAttachmentPublicationStaging::Ready(publication) => Ok(Some(publication)),
+            ThreadAttachmentPublicationStaging::Copy(plan) => {
                 let operation_id = plan.operation_id.clone();
                 let result = match Self::copy_publication(attachment_store, plan) {
                     Ok(copied) => self.finish_publication_staging(database, copied),
@@ -920,7 +920,7 @@ impl CampAttachmentViewStore {
     pub fn promote_publication(
         &self,
         database: &mut Database,
-        publication: &PreparedCampAttachmentPublication,
+        publication: &PreparedThreadAttachmentPublication,
     ) -> Result<()> {
         self.verify_publication_state(database.connection(), publication, "gated")?;
         let attachment_root = self.prepare_camp_directories(&publication.camp_id)?;
@@ -1017,7 +1017,7 @@ impl CampAttachmentViewStore {
     pub fn gate_publication(
         &self,
         database: &mut Database,
-        publication: &PreparedCampAttachmentPublication,
+        publication: &PreparedThreadAttachmentPublication,
     ) -> Result<()> {
         self.verify_publication_state(database.connection(), publication, "staged")?;
         let source_kind: String = database.connection().query_row(
@@ -1044,7 +1044,7 @@ impl CampAttachmentViewStore {
     fn publication_matches_current_draft(
         &self,
         connection: &Connection,
-        publication: &PreparedCampAttachmentPublication,
+        publication: &PreparedThreadAttachmentPublication,
     ) -> Result<bool> {
         let draft_revision = connection
             .query_row(
@@ -1075,7 +1075,7 @@ impl CampAttachmentViewStore {
         &self,
         database: &mut Database,
         operation_id: &str,
-    ) -> Result<CampAttachmentPublicationCompletionVerification> {
+    ) -> Result<ThreadAttachmentPublicationCompletionVerification> {
         validate_operation_id(operation_id)?;
         let (camp_id, operation_kind): (String, String) = database.connection().query_row(
             "SELECT camp_id, kind FROM camp_attachment_view_operation WHERE id = ?1 AND status = 'committed'",
@@ -1105,7 +1105,7 @@ impl CampAttachmentViewStore {
                     "camp_attachment_view_recovery_required: committed publication entries are incomplete"
                 );
             }
-            Ok(CampAttachmentPublicationCompletionVerification {
+            Ok(ThreadAttachmentPublicationCompletionVerification {
                 operation_id: operation_id.to_string(),
                 view,
             })
@@ -1122,7 +1122,7 @@ impl CampAttachmentViewStore {
     pub fn complete_verified_publication(
         &self,
         database: &mut Database,
-        verified: VerifiedCampAttachmentPublicationCompletion,
+        verified: VerifiedThreadAttachmentPublicationCompletion,
     ) -> Result<()> {
         let verification = verified.verification;
         confirm_ready_camp_view(database.connection(), &verification.view)?;
@@ -1160,7 +1160,7 @@ impl CampAttachmentViewStore {
         camp_id: &str,
     ) -> Result<()> {
         validate_operation_id(operation_id)?;
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         let now = chrono::Utc::now().to_rfc3339();
         database.connection().execute(
             r#"
@@ -1527,8 +1527,8 @@ impl CampAttachmentViewStore {
         database: &Database,
         camp_id: &str,
         workspace: Option<&Path>,
-        visibility_mode: CampAttachmentVisibilityMode,
-    ) -> Result<CampAttachmentRuntimeAuthorizationVerification> {
+        visibility_mode: ThreadAttachmentVisibilityMode,
+    ) -> Result<ThreadAttachmentRuntimeAuthorizationVerification> {
         if has_unresolved_publication(database.connection(), camp_id)? {
             anyhow::bail!("camp_attachment_view_not_ready");
         }
@@ -1538,7 +1538,7 @@ impl CampAttachmentViewStore {
             &self.root_identity_digest,
             camp_id,
         )?;
-        Ok(CampAttachmentRuntimeAuthorizationVerification {
+        Ok(ThreadAttachmentRuntimeAuthorizationVerification {
             view,
             workspace: workspace.map(Path::to_path_buf),
             visibility_mode,
@@ -1548,15 +1548,15 @@ impl CampAttachmentViewStore {
     pub fn complete_verified_camp_runtime_authorization(
         &self,
         database: &Database,
-        verified: VerifiedCampAttachmentRuntimeAuthorization,
-    ) -> Result<CampAttachmentRuntimeAuthorization> {
+        verified: VerifiedThreadAttachmentRuntimeAuthorization,
+    ) -> Result<ThreadAttachmentRuntimeAuthorization> {
         let verification = verified.verification;
         confirm_ready_camp_view(database.connection(), &verification.view)?;
         let camp_id = verification.view.camp_id;
         let receipt = verification.view.receipt;
         let attachment_root = self.camp_attachment_root(&camp_id)?;
         validate_runtime_attachment_root(&attachment_root)?;
-        Ok(CampAttachmentRuntimeAuthorization {
+        Ok(ThreadAttachmentRuntimeAuthorization {
             camp_id,
             attachment_root,
             root_identity_digest: receipt.root_identity_digest,
@@ -1571,8 +1571,8 @@ impl CampAttachmentViewStore {
         database: &Database,
         camp_id: &str,
         workspace: Option<&Path>,
-        visibility_mode: CampAttachmentVisibilityMode,
-    ) -> Result<CampAttachmentRuntimeAuthorization> {
+        visibility_mode: ThreadAttachmentVisibilityMode,
+    ) -> Result<ThreadAttachmentRuntimeAuthorization> {
         let verification =
             self.prepare_camp_runtime_authorization(database, camp_id, workspace, visibility_mode)?;
         let verified = verification.verify()?;
@@ -1584,8 +1584,8 @@ impl CampAttachmentViewStore {
         database: &Database,
         camp_id: &str,
         workspace: Option<&Path>,
-    ) -> Result<CampAttachmentRuntimeAuthorization> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadAttachmentRuntimeAuthorization> {
+        ThreadId::parse(camp_id)?;
         if database.runtime_camp_files_root_identity_digest() != self.root_identity_digest {
             anyhow::bail!("runtime_camp_files_root_invalid: admitted root identity changed");
         }
@@ -1599,13 +1599,13 @@ impl CampAttachmentViewStore {
         }
         let attachment_root = self.camp_attachment_root(camp_id)?;
         validate_camp_root_authorization(&attachment_root)?;
-        Ok(CampAttachmentRuntimeAuthorization {
+        Ok(ThreadAttachmentRuntimeAuthorization {
             camp_id: camp_id.to_string(),
             attachment_root,
             root_identity_digest: self.root_identity_digest.clone(),
             generation: 0,
             catalog_digest: camp_root_authorization_digest(camp_id, &self.root_identity_digest)?,
-            visibility_mode: CampAttachmentVisibilityMode::LiveAppendV1,
+            visibility_mode: ThreadAttachmentVisibilityMode::LiveAppendV1,
         })
     }
 
@@ -1637,7 +1637,7 @@ impl CampAttachmentViewStore {
     }
 
     pub fn camp_has_active_runtime(&self, database: &Database, camp_id: &str) -> Result<bool> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         database
             .connection()
             .query_row(
@@ -1670,8 +1670,8 @@ impl CampAttachmentViewStore {
         database: &mut Database,
         camp_id: &str,
         command_id: &str,
-    ) -> Result<Option<PreparedCampAttachmentCleanup>> {
-        CampId::parse(camp_id)?;
+    ) -> Result<Option<PreparedThreadAttachmentCleanup>> {
+        ThreadId::parse(camp_id)?;
         Uuid::parse_str(command_id).context("Camp delete command ID must be a UUID")?;
         let existing = database
             .connection()
@@ -1685,7 +1685,7 @@ impl CampAttachmentViewStore {
             )
             .optional()?;
         if let Some(operation_id) = existing {
-            return Ok(Some(PreparedCampAttachmentCleanup {
+            return Ok(Some(PreparedThreadAttachmentCleanup {
                 operation_id,
                 camp_id: camp_id.to_string(),
                 command_id: command_id.to_string(),
@@ -1772,7 +1772,7 @@ impl CampAttachmentViewStore {
             anyhow::bail!("camp_attachment_view_busy");
         }
         transaction.commit()?;
-        Ok(Some(PreparedCampAttachmentCleanup {
+        Ok(Some(PreparedThreadAttachmentCleanup {
             operation_id,
             camp_id: camp_id.to_string(),
             command_id: command_id.to_string(),
@@ -1782,9 +1782,9 @@ impl CampAttachmentViewStore {
     pub fn cancel_camp_delete_cleanup(
         &self,
         database: &mut Database,
-        cleanup: &PreparedCampAttachmentCleanup,
+        cleanup: &PreparedThreadAttachmentCleanup,
     ) -> Result<()> {
-        CampId::parse(&cleanup.camp_id)?;
+        ThreadId::parse(&cleanup.camp_id)?;
         validate_operation_id(&cleanup.operation_id)?;
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
@@ -1829,7 +1829,7 @@ impl CampAttachmentViewStore {
     pub fn commit_camp_delete_cleanup(
         &self,
         database: &mut Database,
-        cleanup: &PreparedCampAttachmentCleanup,
+        cleanup: &PreparedThreadAttachmentCleanup,
     ) -> Result<()> {
         let camp_exists: bool = database.connection().query_row(
             "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1)",
@@ -1874,9 +1874,9 @@ impl CampAttachmentViewStore {
     pub(crate) fn commit_camp_delete_cleanup_in_transaction(
         &self,
         transaction: &Transaction<'_>,
-        cleanup: &PreparedCampAttachmentCleanup,
+        cleanup: &PreparedThreadAttachmentCleanup,
     ) -> Result<()> {
-        CampId::parse(&cleanup.camp_id)?;
+        ThreadId::parse(&cleanup.camp_id)?;
         validate_operation_id(&cleanup.operation_id)?;
         let deletion_operation_id: Option<String> = transaction
             .query_row(
@@ -1928,8 +1928,8 @@ impl CampAttachmentViewStore {
     pub fn complete_camp_delete_cleanup(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
-        cleanup: &PreparedCampAttachmentCleanup,
+        attachment_store: &ThreadAttachmentStore,
+        cleanup: &PreparedThreadAttachmentCleanup,
     ) -> Result<()> {
         let Some(completion) = self.prepare_camp_delete_cleanup_completion(database, cleanup)?
         else {
@@ -1942,9 +1942,9 @@ impl CampAttachmentViewStore {
     pub(crate) fn prepare_camp_delete_cleanup_completion(
         &self,
         database: &Database,
-        cleanup: &PreparedCampAttachmentCleanup,
-    ) -> Result<Option<PreparedCampAttachmentCleanupCompletion>> {
-        CampId::parse(&cleanup.camp_id)?;
+        cleanup: &PreparedThreadAttachmentCleanup,
+    ) -> Result<Option<PreparedThreadAttachmentCleanupCompletion>> {
+        ThreadId::parse(&cleanup.camp_id)?;
         validate_operation_id(&cleanup.operation_id)?;
         let operation = database
             .connection()
@@ -1981,7 +1981,7 @@ impl CampAttachmentViewStore {
         if relative != expected_relative {
             anyhow::bail!("camp_attachment_view_recovery_required: cleanup path changed");
         }
-        Ok(Some(PreparedCampAttachmentCleanupCompletion {
+        Ok(Some(PreparedThreadAttachmentCleanupCompletion {
             cleanup: cleanup.clone(),
             cleanup_root_relative_path: relative,
             cleanup_root_identity_digest: operation.2,
@@ -1990,16 +1990,16 @@ impl CampAttachmentViewStore {
 
     pub(crate) fn apply_camp_delete_cleanup_files(
         &self,
-        attachment_store: &CampAttachmentStore,
-        completion: &PreparedCampAttachmentCleanupCompletion,
+        attachment_store: &ThreadAttachmentStore,
+        completion: &PreparedThreadAttachmentCleanupCompletion,
     ) -> Result<()> {
         Self::apply_camp_delete_cleanup_files_at_root(&self.root, attachment_store, completion)
     }
 
     pub(crate) fn apply_camp_delete_cleanup_files_at_root(
         view_root: &Path,
-        attachment_store: &CampAttachmentStore,
-        completion: &PreparedCampAttachmentCleanupCompletion,
+        attachment_store: &ThreadAttachmentStore,
+        completion: &PreparedThreadAttachmentCleanupCompletion,
     ) -> Result<()> {
         let cleanup = &completion.cleanup;
         // The journal owns both attachment authorities after the aggregate is
@@ -2035,7 +2035,7 @@ impl CampAttachmentViewStore {
     pub(crate) fn finalize_camp_delete_cleanup(
         &self,
         database: &mut Database,
-        completion: &PreparedCampAttachmentCleanupCompletion,
+        completion: &PreparedThreadAttachmentCleanupCompletion,
     ) -> Result<()> {
         let cleanup = &completion.cleanup;
         let now = chrono::Utc::now().to_rfc3339();
@@ -2115,7 +2115,7 @@ impl CampAttachmentViewStore {
 
     #[cfg(all(test, feature = "extended-tests"))]
     pub(crate) fn remove_camp_view(&self, database: &mut Database, camp_id: &str) -> Result<()> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         let camp_root = self.camp_root(camp_id)?;
         if path_entry_exists(&camp_root)? {
             let camps_root = self.root.join("camps");
@@ -2140,7 +2140,7 @@ impl CampAttachmentViewStore {
     pub fn reconcile_camp(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
+        attachment_store: &ThreadAttachmentStore,
         camp_id: &str,
     ) -> Result<()> {
         self.restore_recoverable_authority_attachments(database, attachment_store, camp_id)?;
@@ -2287,7 +2287,7 @@ impl CampAttachmentViewStore {
             "initial_backfill",
             &missing,
         )?;
-        let publication = PreparedCampAttachmentPublication {
+        let publication = PreparedThreadAttachmentPublication {
             operation_id: operation_id.clone(),
             camp_id: camp_id.to_string(),
             command_id: operation_id.clone(),
@@ -2313,7 +2313,7 @@ impl CampAttachmentViewStore {
     fn rebuild_integrity_failed_camp(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
+        attachment_store: &ThreadAttachmentStore,
         camp_id: &str,
         desired: &[AuthorityAttachmentRow],
         reason: &str,
@@ -2350,7 +2350,7 @@ impl CampAttachmentViewStore {
             &desired,
         )?;
 
-        let publication = PreparedCampAttachmentPublication {
+        let publication = PreparedThreadAttachmentPublication {
             operation_id: operation_id.clone(),
             camp_id: camp_id.to_string(),
             command_id: operation_id.clone(),
@@ -2376,7 +2376,7 @@ impl CampAttachmentViewStore {
     fn restore_recoverable_authority_attachments(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
+        attachment_store: &ThreadAttachmentStore,
         camp_id: &str,
     ) -> Result<()> {
         let recoverable = load_recoverable_authority_rows(database.connection(), camp_id)?;
@@ -2421,7 +2421,7 @@ impl CampAttachmentViewStore {
     fn retain_runtime_readable_authority_attachments(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
+        attachment_store: &ThreadAttachmentStore,
         camp_id: &str,
         rows: &[AuthorityAttachmentRow],
     ) -> Result<Vec<AuthorityAttachmentRow>> {
@@ -2506,7 +2506,7 @@ impl CampAttachmentViewStore {
     fn stage_backfill_operation(
         &self,
         database: &mut Database,
-        attachment_store: &CampAttachmentStore,
+        attachment_store: &ThreadAttachmentStore,
         camp_id: &str,
         operation_id: &str,
         operation_kind: &str,
@@ -2775,7 +2775,7 @@ impl CampAttachmentViewStore {
     fn recover_incomplete_operations(
         &self,
         database: &mut Database,
-        _attachment_store: &CampAttachmentStore,
+        _attachment_store: &ThreadAttachmentStore,
     ) -> Result<()> {
         // Builds after Migration 102 could cancel a cleanup without settling
         // its writer intent. Repair only that terminal legacy shape before the
@@ -2812,7 +2812,7 @@ impl CampAttachmentViewStore {
             operations
         {
             if kind == "camp_delete_cleanup" {
-                let cleanup = PreparedCampAttachmentCleanup {
+                let cleanup = PreparedThreadAttachmentCleanup {
                     operation_id,
                     camp_id: camp_id.clone(),
                     command_id,
@@ -2974,7 +2974,7 @@ impl CampAttachmentViewStore {
             let Some(name) = name.to_str() else {
                 anyhow::bail!("camp_attachment_view_integrity_failed: non-UTF8 Camp directory");
             };
-            if CampId::parse(name).is_err() {
+            if ThreadId::parse(name).is_err() {
                 anyhow::bail!("camp_attachment_view_integrity_failed: unknown Camp directory");
             }
             if !known.contains(name) {
@@ -3104,7 +3104,7 @@ impl CampAttachmentViewStore {
     fn verify_publication_state(
         &self,
         connection: &Connection,
-        publication: &PreparedCampAttachmentPublication,
+        publication: &PreparedThreadAttachmentPublication,
         expected_status: &str,
     ) -> Result<()> {
         let status: String = connection.query_row(
@@ -3125,7 +3125,7 @@ impl CampAttachmentViewStore {
     fn verify_staged_publication_entries(
         &self,
         connection: &Connection,
-        publication: &PreparedCampAttachmentPublication,
+        publication: &PreparedThreadAttachmentPublication,
     ) -> Result<()> {
         let mut statement = connection.prepare(
             r#"
@@ -3201,14 +3201,14 @@ impl CampAttachmentViewStore {
         &self,
         connection: &Connection,
         operation_id: &str,
-    ) -> Result<PreparedCampAttachmentPublication> {
+    ) -> Result<PreparedThreadAttachmentPublication> {
         let (camp_id, command_id): (String, String) = connection.query_row(
             "SELECT camp_id, command_id FROM camp_attachment_view_operation WHERE id = ?1",
             [operation_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let attachment_ids = load_all_operation_attachment_ids(connection, operation_id)?;
-        Ok(PreparedCampAttachmentPublication {
+        Ok(PreparedThreadAttachmentPublication {
             operation_id: operation_id.to_string(),
             camp_id,
             command_id,
@@ -3229,7 +3229,7 @@ impl CampAttachmentViewStore {
     }
 
     fn camp_root(&self, camp_id: &str) -> Result<PathBuf> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         Ok(self.root.join("camps").join(camp_id))
     }
 
@@ -3355,7 +3355,7 @@ fn publication_operation_has_business_commit(
         && published_entry_count == entry_count)
 }
 
-impl Drop for CampAttachmentViewStore {
+impl Drop for ThreadAttachmentViewStore {
     fn drop(&mut self) {
         unlock(&self.lock_file);
     }
@@ -3663,12 +3663,12 @@ pub fn load_camp_attachment_view_receipt(
     connection: &Connection,
     camp_id: &str,
     mut referenced_attachment_ids: Vec<String>,
-) -> Result<(CampAttachmentViewReceiptV2, String)> {
-    CampId::parse(camp_id)?;
+) -> Result<(ThreadAttachmentViewReceiptV2, String)> {
+    ThreadId::parse(camp_id)?;
     referenced_attachment_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
     referenced_attachment_ids.dedup();
     if referenced_attachment_ids.is_empty() {
-        let receipt = CampAttachmentViewReceiptV2 {
+        let receipt = ThreadAttachmentViewReceiptV2 {
             schema_version: CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION,
             camp_id: camp_id.to_string(),
             attachment_root_relative_path: camp_attachment_root_relative(camp_id),
@@ -3748,7 +3748,7 @@ pub fn load_camp_attachment_view_receipt(
         anyhow::bail!("camp_attachment_view_not_ready: semantic catalog is inconsistent");
     }
     let referenced_entries_digest = canonical_json_digest(&json!(referenced_entries))?;
-    let receipt = CampAttachmentViewReceiptV2 {
+    let receipt = ThreadAttachmentViewReceiptV2 {
         schema_version: CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION,
         camp_id: camp_id.to_string(),
         attachment_root_relative_path: row.1,
@@ -3767,7 +3767,7 @@ pub fn resolve_published_attachment_path(
     camp_id: &str,
     attachment_id: &str,
 ) -> Result<String> {
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     validate_attachment_id(attachment_id)?;
     let relative: String = connection
         .query_row(
@@ -3795,7 +3795,7 @@ pub fn resolve_published_attachment_path(
 }
 
 pub fn resolve_camp_attachment_root(connection: &Connection, camp_id: &str) -> Result<String> {
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     Ok(
         resolve_root_relative_runtime_path(connection, &camp_attachment_root_relative(camp_id))?
             .to_string_lossy()
@@ -3804,7 +3804,7 @@ pub fn resolve_camp_attachment_root(connection: &Connection, camp_id: &str) -> R
 }
 
 pub fn resolve_published_attachment_root(connection: &Connection, camp_id: &str) -> Result<String> {
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     let relative: String = connection
         .query_row(
             r#"
@@ -3829,9 +3829,9 @@ pub fn runtime_attachment_auth_receipt(
     connection: &Connection,
     camp_id: &str,
     manifest_view_receipt_digest: &str,
-    visibility_mode: CampAttachmentVisibilityMode,
+    visibility_mode: ThreadAttachmentVisibilityMode,
 ) -> Result<(RuntimeAttachmentAuthReceiptV1, String)> {
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     if has_unresolved_publication(connection, camp_id)? {
         anyhow::bail!("camp_attachment_view_not_ready");
     }
@@ -3860,8 +3860,8 @@ pub fn runtime_attachment_auth_receipt(
         anyhow::bail!("camp_attachment_view_not_ready");
     }
     let compatibility_generation = match visibility_mode {
-        CampAttachmentVisibilityMode::LiveAppendV1 => None,
-        CampAttachmentVisibilityMode::GenerationFencedV1 => Some(current.1),
+        ThreadAttachmentVisibilityMode::LiveAppendV1 => None,
+        ThreadAttachmentVisibilityMode::GenerationFencedV1 => Some(current.1),
     };
     let auth = RuntimeAttachmentAuthReceiptV1 {
         schema_version: RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
@@ -3885,7 +3885,7 @@ pub fn runtime_camp_root_attachment_auth_receipt(
     camp_id: &str,
     manifest_view_receipt_digest: &str,
 ) -> Result<(RuntimeAttachmentAuthReceiptV1, String)> {
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     let root_identity_digest = connection
         .query_row(
             "SELECT rovai_runtime_camp_files_root_identity_digest()",
@@ -3900,7 +3900,7 @@ pub fn runtime_camp_root_attachment_auth_receipt(
         root_identity_digest: root_identity_digest.clone(),
         dispatch_generation: 0,
         catalog_digest_at_dispatch: camp_root_authorization_digest(camp_id, &root_identity_digest)?,
-        visibility_mode: CampAttachmentVisibilityMode::LiveAppendV1
+        visibility_mode: ThreadAttachmentVisibilityMode::LiveAppendV1
             .as_str()
             .to_string(),
         compatibility_generation: None,
@@ -3920,9 +3920,9 @@ fn camp_root_authorization_digest(camp_id: &str, root_identity_digest: &str) -> 
 }
 
 pub fn validate_frozen_camp_attachment_view_receipt(
-    receipt: &CampAttachmentViewReceiptV2,
+    receipt: &ThreadAttachmentViewReceiptV2,
 ) -> Result<()> {
-    CampId::parse(&receipt.camp_id)?;
+    ThreadId::parse(&receipt.camp_id)?;
     if receipt.schema_version != CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION
         || receipt.attachment_root_relative_path != camp_attachment_root_relative(&receipt.camp_id)
     {
@@ -3963,7 +3963,7 @@ pub fn validate_frozen_camp_attachment_view_receipt(
 
 pub fn validate_append_only_view_receipt(
     connection: &Connection,
-    receipt: &CampAttachmentViewReceiptV2,
+    receipt: &ThreadAttachmentViewReceiptV2,
 ) -> Result<()> {
     validate_frozen_camp_attachment_view_receipt(receipt)?;
     if receipt.catalog_revision == LEGACY_VIEW_NOT_REQUIRED_REVISION {
@@ -4144,7 +4144,7 @@ fn commit_operation_entries(
     attachment_ids: &[String],
 ) -> Result<()> {
     validate_operation_id(operation_id)?;
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     let (operation_kind, status): (String, String) = transaction.query_row(
         "SELECT kind, status FROM camp_attachment_view_operation WHERE id = ?1 AND camp_id = ?2",
         params![operation_id, camp_id],
@@ -4325,7 +4325,7 @@ fn mark_operation_committing(
     camp_id: &str,
 ) -> Result<()> {
     validate_operation_id(operation_id)?;
-    CampId::parse(camp_id)?;
+    ThreadId::parse(camp_id)?;
     let changed = transaction.execute(
         r#"
         UPDATE camp_attachment_view_operation
@@ -4502,7 +4502,7 @@ pub(crate) fn backfill_semantic_catalog_receipts_v100(connection: &Connection) -
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for camp_id in camp_ids {
-        CampId::parse(&camp_id)?;
+        ThreadId::parse(&camp_id)?;
         let (entry_count, aggregate_bytes, semantic_catalog_digest) =
             semantic_catalog_state(connection, &camp_id)?;
         let catalog_revision = i64::from(entry_count > 0);
@@ -4546,8 +4546,8 @@ fn prepare_ready_camp_view_verification(
     root: &Path,
     root_identity_digest: &str,
     camp_id: &str,
-) -> Result<CampAttachmentViewVerification> {
-    CampId::parse(camp_id)?;
+) -> Result<ThreadAttachmentViewVerification> {
+    ThreadId::parse(camp_id)?;
     let receipt = load_ready_camp_view_receipt(connection, root_identity_digest, camp_id)?;
 
     let desired = load_published_authority_rows(connection, camp_id)?;
@@ -4576,7 +4576,7 @@ fn prepare_ready_camp_view_verification(
         anyhow::bail!("Camp Attachment View semantic receipt is inconsistent");
     }
     verify_resolution_ledger(connection, camp_id, &receipt)?;
-    Ok(CampAttachmentViewVerification {
+    Ok(ThreadAttachmentViewVerification {
         camp_id: camp_id.to_string(),
         root: root.to_path_buf(),
         receipt,
@@ -4589,7 +4589,7 @@ fn load_ready_camp_view_receipt(
     connection: &Connection,
     root_identity_digest: &str,
     camp_id: &str,
-) -> Result<ReadyCampViewReceipt> {
+) -> Result<ReadyThreadViewReceipt> {
     let view = connection
         .query_row(
             r#"
@@ -4635,7 +4635,7 @@ fn load_ready_camp_view_receipt(
     {
         anyhow::bail!("Camp Attachment View state receipt is inconsistent");
     }
-    Ok(ReadyCampViewReceipt {
+    Ok(ReadyThreadViewReceipt {
         generation: view.1,
         root_relative_path: view.2,
         root_identity_digest: view.3,
@@ -4653,7 +4653,7 @@ fn load_ready_camp_view_receipt(
 fn verify_resolution_ledger(
     connection: &Connection,
     camp_id: &str,
-    receipt: &ReadyCampViewReceipt,
+    receipt: &ReadyThreadViewReceipt,
 ) -> Result<()> {
     let empty_digest = empty_catalog_digest()?;
     let rows = {
@@ -4813,7 +4813,7 @@ fn verify_resolution_ledger(
     Ok(())
 }
 
-fn inspect_ready_camp_view(verification: &CampAttachmentViewVerification) -> Result<()> {
+fn inspect_ready_camp_view(verification: &ThreadAttachmentViewVerification) -> Result<()> {
     #[cfg(all(test, feature = "extended-tests"))]
     pause_view_verification_for_test(&verification.camp_id);
     if directory_identity_digest(&verification.root)? != verification.receipt.root_identity_digest {
@@ -4840,7 +4840,7 @@ fn inspect_ready_camp_view(verification: &CampAttachmentViewVerification) -> Res
 
 fn confirm_ready_camp_view(
     connection: &Connection,
-    verification: &CampAttachmentViewVerification,
+    verification: &ThreadAttachmentViewVerification,
 ) -> Result<()> {
     let current = load_ready_camp_view_receipt(
         connection,
@@ -5499,7 +5499,7 @@ fn admit_runtime_root_marker(
         }
 
         // Schema 1 persisted macOS `st_dev`, whose APFS mount assignment may
-        // change across reboot. `CampAttachmentViewStore::admit` reaches this
+        // change across reboot. `ThreadAttachmentViewStore::admit` reaches this
         // migration only after the deterministic instance path, current-user
         // ownership, local filesystem, no-symlink tree, and exclusive root
         // lock have all been admitted. The View is derived and is fully
@@ -6117,9 +6117,10 @@ fn unlock(file: &File) {
 mod tests {
     use super::*;
     use crate::{
-        camp_attachment::CampAttachmentStore,
+        camp_attachment::ThreadAttachmentStore,
         collaboration::{
-            CollaborationService, CreateCampCommand, DeleteCampCommand, SendUserCampDraftCommand,
+            CollaborationService, CreateThreadCommand, DeleteThreadCommand,
+            SendUserThreadDraftCommand,
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
     };
@@ -6128,7 +6129,7 @@ mod tests {
         crate::test_support::OwnedTestDatabase,
         PathBuf,
         String,
-        CampAttachmentViewStore,
+        ThreadAttachmentViewStore,
     ) {
         let mut database = crate::test_support::seeded_runtime_database_owned();
         let data_dir = database.directory().to_path_buf();
@@ -6146,12 +6147,15 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test(workspace.display().to_string()),
+                    payload: CreateThreadCommand::for_test(workspace.display().to_string()),
                 },
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
-        let view = CampAttachmentViewStore::for_test(&database).unwrap();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let view = ThreadAttachmentViewStore::for_test(&database).unwrap();
         view.ensure_empty_camp_ready(&mut database, &camp_id)
             .unwrap();
         (database, data_dir, camp_id, view)
@@ -6203,9 +6207,9 @@ mod tests {
         database: &mut Database,
         data_dir: &Path,
         camp_id: &str,
-        view: &CampAttachmentViewStore,
+        view: &ThreadAttachmentViewStore,
         draft_revision: i64,
-    ) -> PreparedCampAttachmentPublication {
+    ) -> PreparedThreadAttachmentPublication {
         let publication = commit_current_draft(database, data_dir, camp_id, view, draft_revision);
         view.complete_publication(database, &publication.operation_id)
             .unwrap();
@@ -6216,14 +6220,14 @@ mod tests {
         database: &mut Database,
         data_dir: &Path,
         camp_id: &str,
-        view: &CampAttachmentViewStore,
+        view: &ThreadAttachmentViewStore,
         draft_revision: i64,
-    ) -> PreparedCampAttachmentPublication {
+    ) -> PreparedThreadAttachmentPublication {
         let command_id = Uuid::new_v4().to_string();
         let publication = view
             .stage_publication(
                 database,
-                &CampAttachmentStore::new(data_dir),
+                &ThreadAttachmentStore::new(data_dir),
                 camp_id,
                 &command_id,
                 draft_revision,
@@ -6243,7 +6247,7 @@ mod tests {
                     camp_id: Some(camp_id.to_string()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendUserCampDraftCommand {
+                    payload: SendUserThreadDraftCommand {
                         draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.to_string(),
                         draft_revision,
@@ -6261,10 +6265,10 @@ mod tests {
         database: &mut Database,
         data_dir: &Path,
         camp_id: &str,
-        view: &CampAttachmentViewStore,
+        view: &ThreadAttachmentViewStore,
     ) {
         view.remove_camp_view(database, camp_id).unwrap();
-        CampAttachmentStore::new(data_dir)
+        ThreadAttachmentStore::new(data_dir)
             .remove_camp(camp_id)
             .unwrap();
         set_directory_mode(&view.root().join("camps"), 0o700).unwrap();
@@ -6279,7 +6283,7 @@ mod tests {
         camp_id: &str,
         body: &str,
     ) -> (String, String) {
-        let attachment_store = CampAttachmentStore::new(data_dir);
+        let attachment_store = ThreadAttachmentStore::new(data_dir);
         let source = data_dir.join(format!("{}.txt", Uuid::new_v4()));
         fs::write(&source, body.as_bytes()).unwrap();
         let saved = attachment_store.save_body(database, camp_id, body).unwrap();
@@ -6305,7 +6309,7 @@ mod tests {
                     camp_id: Some(camp_id.to_string()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendUserCampDraftCommand {
+                    payload: SendUserThreadDraftCommand {
                         draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.to_string(),
                         draft_revision: draft.revision,
@@ -6330,10 +6334,10 @@ mod tests {
         database: &mut Database,
         data_dir: &Path,
         camp_id: &str,
-        view: &CampAttachmentViewStore,
+        view: &ThreadAttachmentViewStore,
         operation_id: &str,
     ) {
-        view.reconcile(database, &CampAttachmentStore::new(data_dir))
+        view.reconcile(database, &ThreadAttachmentStore::new(data_dir))
             .unwrap();
         assert_eq!(
             database
@@ -6351,9 +6355,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(plan.operation_id(), operation_id);
-        let copied =
-            CampAttachmentViewStore::copy_publication(&CampAttachmentStore::new(data_dir), plan)
-                .unwrap();
+        let copied = ThreadAttachmentViewStore::copy_publication(
+            &ThreadAttachmentStore::new(data_dir),
+            plan,
+        )
+        .unwrap();
         let publication = view.finish_publication_staging(database, copied).unwrap();
         view.gate_publication(database, &publication).unwrap();
         view.promote_publication(database, &publication).unwrap();
@@ -6539,8 +6545,8 @@ mod tests {
                 .contains("camp_attachment_view_busy"),
             "the follower must not overtake a copying FIFO head"
         );
-        let first_copy = CampAttachmentViewStore::copy_publication(
-            &CampAttachmentStore::new(&data_dir),
+        let first_copy = ThreadAttachmentViewStore::copy_publication(
+            &ThreadAttachmentStore::new(&data_dir),
             first_plan,
         )
         .unwrap();
@@ -6573,8 +6579,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(second_plan.operation_id(), second_operation);
-        let second_copy = CampAttachmentViewStore::copy_publication(
-            &CampAttachmentStore::new(&data_dir),
+        let second_copy = ThreadAttachmentViewStore::copy_publication(
+            &ThreadAttachmentStore::new(&data_dir),
             second_plan,
         )
         .unwrap();
@@ -6631,8 +6637,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(
-            CampAttachmentViewStore::copy_publication(&CampAttachmentStore::new(&data_dir), plan,)
-                .is_err()
+            ThreadAttachmentViewStore::copy_publication(
+                &ThreadAttachmentStore::new(&data_dir),
+                plan,
+            )
+            .is_err()
         );
         assert!(
             view.resolve_semantic_publication_terminal_failure(
@@ -6865,7 +6874,7 @@ mod tests {
     #[test]
     fn follow_up_without_new_attachments_preserves_published_view() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("published.txt");
         fs::write(&source, b"published once").unwrap();
         let initial = attachment_store
@@ -6919,7 +6928,7 @@ mod tests {
     #[test]
     fn publication_keeps_drafts_private_and_projects_files_and_directories_read_only() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let saved = attachment_store
             .save_body(&mut database, &camp_id, "Inspect the shared files")
             .unwrap();
@@ -7014,7 +7023,7 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendUserCampDraftCommand {
+                    payload: SendUserThreadDraftCommand {
                         draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -7051,7 +7060,7 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendUserCampDraftCommand {
+                    payload: SendUserThreadDraftCommand {
                         draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -7130,7 +7139,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn publication_copy_phase_releases_the_shared_database_mutex() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("copy-without-database-lock.txt");
         fs::write(&source, vec![b'x'; 1024 * 1024]).unwrap();
         let saved = attachment_store
@@ -7154,7 +7163,7 @@ mod tests {
             )
             .unwrap()
         {
-            CampAttachmentPublicationStaging::Copy(plan) => plan,
+            ThreadAttachmentPublicationStaging::Copy(plan) => plan,
             other => panic!("expected copy plan, got {other:?}"),
         };
         let operation_id = plan.operation_id().to_string();
@@ -7165,7 +7174,7 @@ mod tests {
             .insert(operation_id.clone(), pause.clone());
         let database = std::sync::Arc::new(tokio::sync::Mutex::new(database));
         let copy_task = tokio::task::spawn_blocking(move || {
-            CampAttachmentViewStore::copy_publication(&attachment_store, plan)
+            ThreadAttachmentViewStore::copy_publication(&attachment_store, plan)
         });
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             while !pause.started.load(std::sync::atomic::Ordering::Acquire) {
@@ -7193,7 +7202,7 @@ mod tests {
                         .unwrap(),
                     "copying"
                 );
-                CampAttachmentStore::new(&data_dir)
+                ThreadAttachmentStore::new(&data_dir)
                     .save_body(&mut database, &camp_id, "Draft changed during copy")
                     .unwrap();
                 true
@@ -7224,7 +7233,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn runtime_authorization_scan_releases_database_mutex_and_rejects_receipt_drift() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("verify-without-database-lock.txt");
         fs::write(&source, vec![b'v'; 1024 * 1024]).unwrap();
         let saved = attachment_store
@@ -7246,7 +7255,7 @@ mod tests {
                 &database,
                 &camp_id,
                 None,
-                CampAttachmentVisibilityMode::GenerationFencedV1,
+                ThreadAttachmentVisibilityMode::GenerationFencedV1,
             )
             .unwrap();
         let pause = std::sync::Arc::new(PublicationCopyTestPause::new());
@@ -7315,7 +7324,7 @@ mod tests {
     #[test]
     fn publication_completion_verifies_only_new_entries_but_dispatch_verifies_the_full_view() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
 
         let first_source = data_dir.join("existing-entry.txt");
         let first_body = b"existing published body";
@@ -7381,7 +7390,7 @@ mod tests {
                 &database,
                 &camp_id,
                 None,
-                CampAttachmentVisibilityMode::GenerationFencedV1,
+                ThreadAttachmentVisibilityMode::GenerationFencedV1,
             )
             .unwrap();
         let error = verification
@@ -7402,7 +7411,7 @@ mod tests {
     #[test]
     fn same_camp_allows_only_one_nonterminal_publish_operation() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("single-publication.txt");
         fs::write(&source, b"single Camp publication slot").unwrap();
         let saved = attachment_store
@@ -7463,7 +7472,7 @@ mod tests {
                 "DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;",
             )
             .unwrap();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("legacy-duplicate.txt");
         fs::write(&source, b"legacy duplicate publication").unwrap();
         let saved = attachment_store
@@ -7529,7 +7538,7 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendUserCampDraftCommand {
+                    payload: SendUserThreadDraftCommand {
                         draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -7566,7 +7575,7 @@ mod tests {
     #[test]
     fn camp_delete_cleanup_journal_rolls_back_or_recovers_from_the_business_commit() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let output = crate::storage_layout::CampOutputDirectory::prepare(&database, &camp_id)
+        let output = crate::storage_layout::ThreadOutputDirectory::prepare(&database, &camp_id)
             .unwrap()
             .output_root;
         fs::write(output.join("unpublished.txt"), b"edited current contents").unwrap();
@@ -7633,7 +7642,7 @@ mod tests {
             )
             .unwrap()
         );
-        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
+        view.reconcile(&mut database, &ThreadAttachmentStore::new(&data_dir))
             .unwrap();
         assert_eq!(
             database
@@ -7660,7 +7669,7 @@ mod tests {
             .prepare_camp_delete_cleanup(&mut database, &camp_id, &Uuid::new_v4().to_string())
             .unwrap()
             .unwrap();
-        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
+        view.reconcile(&mut database, &ThreadAttachmentStore::new(&data_dir))
             .unwrap();
         let recovered: (String, String, Option<String>) = database
             .connection()
@@ -7704,7 +7713,7 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: DeleteCampCommand {
+                    payload: DeleteThreadCommand {
                         camp_id: camp_id.clone(),
                         expected_version: version,
                         force: true,
@@ -7719,7 +7728,7 @@ mod tests {
         // cleanup operation advances from planned. Startup reconciliation must
         // use Camp absence as the durable outcome and commit the handoff; the
         // bounded deletion coordinator then finishes the exact tree.
-        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
+        view.reconcile(&mut database, &ThreadAttachmentStore::new(&data_dir))
             .unwrap();
         assert_eq!(
             database
@@ -7734,7 +7743,7 @@ mod tests {
         );
         view.complete_camp_delete_cleanup(
             &mut database,
-            &CampAttachmentStore::new(&data_dir),
+            &ThreadAttachmentStore::new(&data_dir),
             &cleanup,
         )
         .unwrap();
@@ -7802,7 +7811,7 @@ mod tests {
     #[test]
     fn committed_publication_integrity_failure_rebuilds_instead_of_rolling_back() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("commit-recovery.txt");
         fs::write(&source, b"committed authority body").unwrap();
         let saved = attachment_store
@@ -7843,7 +7852,7 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendUserCampDraftCommand {
+                    payload: SendUserThreadDraftCommand {
                         draft_client: crate::draft_client::DraftClient::default(),
                         camp_id: camp_id.clone(),
                         draft_revision: draft.revision,
@@ -7897,7 +7906,7 @@ mod tests {
     #[test]
     fn rollback_append_only_validation_and_controlled_rebuild_preserve_committed_entries() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let first_source = data_dir.join("first.txt");
         fs::write(&first_source, b"first published body").unwrap();
         let saved = attachment_store
@@ -8006,7 +8015,7 @@ mod tests {
             database.connection(),
             &camp_id,
             "sha256:frozen-manifest",
-            CampAttachmentVisibilityMode::GenerationFencedV1,
+            ThreadAttachmentVisibilityMode::GenerationFencedV1,
         )
         .unwrap();
         let semantic_before: (i64, String, i64) = database
@@ -8058,7 +8067,7 @@ mod tests {
             database.connection(),
             &camp_id,
             "sha256:frozen-manifest",
-            CampAttachmentVisibilityMode::GenerationFencedV1,
+            ThreadAttachmentVisibilityMode::GenerationFencedV1,
         )
         .unwrap();
         assert_ne!(rebuilt_auth_digest, auth_digest_before_rebuild);
@@ -8083,7 +8092,7 @@ mod tests {
     #[test]
     fn startup_reconcile_degrades_missing_authority_without_blocking_camp() {
         let (mut database, data_dir, affected_camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("missing-authority.txt");
         let valid_source = data_dir.join("still-readable.txt");
         fs::write(&source, b"published before authority loss").unwrap();
@@ -8150,13 +8159,13 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test(
+                    payload: CreateThreadCommand::for_test(
                         unaffected_workspace.display().to_string(),
                     ),
                 },
             )
             .unwrap();
-        let unaffected_camp_id = unaffected.result.payload["campId"]
+        let unaffected_camp_id = unaffected.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -8260,7 +8269,7 @@ mod tests {
             database.connection(),
             &affected_camp_id,
             "sha256:degraded-camp-manifest",
-            CampAttachmentVisibilityMode::GenerationFencedV1,
+            ThreadAttachmentVisibilityMode::GenerationFencedV1,
         )
         .unwrap();
         validate_append_only_view_receipt(database.connection(), &frozen_receipt).unwrap();
@@ -8343,7 +8352,7 @@ mod tests {
             )
             .unwrap();
 
-        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
+        view.reconcile(&mut database, &ThreadAttachmentStore::new(&data_dir))
             .unwrap();
 
         view.verify_camp_ready(&database, &camp_id).unwrap();
@@ -8394,7 +8403,7 @@ mod tests {
     #[test]
     fn authority_hardlink_is_rejected_and_the_same_command_can_retry_after_cleanup() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&data_dir);
         let source = data_dir.join("hardlink-source.txt");
         fs::write(&source, b"hardlink preflight").unwrap();
         let saved = attachment_store
@@ -8516,7 +8525,7 @@ mod tests {
     #[test]
     fn runtime_root_lock_rejects_a_second_owner() {
         let (mut database, data_dir, camp_id, view) = fixture();
-        let error = CampAttachmentViewStore::for_test(&database).unwrap_err();
+        let error = ThreadAttachmentViewStore::for_test(&database).unwrap_err();
         assert!(error.to_string().contains("already locked"));
         cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
     }

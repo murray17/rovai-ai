@@ -17,7 +17,7 @@ const RUNTIME_TOOL_ITEM_TYPES = new Set([
 ])
 const MUTATING_CORE_TOOLS = new Set([
   'team.call_member',
-  'camp.message.send',
+  'camp.message.send', 'thread.message.send',
   'team.create_task',
   'team.update_task',
   'memory.write',
@@ -26,10 +26,10 @@ const MUTATING_CORE_TOOLS = new Set([
 const READ_ONLY_CORE_TOOLS = new Set([
   'team.get_task',
   'team.list_tasks',
-  'camp.list',
-  'camp.search',
+  'camp.list', 'thread.list',
+  'camp.search', 'thread.search',
   'history.search',
-  'camp.read',
+  'camp.read', 'thread.read',
   'memory.view',
   'memory.search',
   'memory.read'
@@ -306,7 +306,7 @@ function buildToolCallRecord(group) {
     timing,
     retryRelation,
     receiptId,
-    sideEffectIdentity: ['team.call_member', 'camp.message.send'].includes(canonicalTool)
+    sideEffectIdentity: ['team.call_member', 'camp.message.send', 'thread.message.send'].includes(canonicalTool)
       ? receiptId
       : null,
     duplicateEffect,
@@ -486,7 +486,7 @@ function fieldCoverage({
     receipt: receiptId
       ? completeCoverage()
       : partialCoverage('tool_evidence.receipt_unavailable'),
-    sideEffect: ['team.call_member', 'camp.message.send'].includes(canonicalTool) && receiptId
+    sideEffect: ['team.call_member', 'camp.message.send', 'thread.message.send'].includes(canonicalTool) && receiptId
       ? completeCoverage()
       : partialCoverage('tool_evidence.side_effect_identity_unavailable'),
     mutation: mutationIntent === 'indeterminate'

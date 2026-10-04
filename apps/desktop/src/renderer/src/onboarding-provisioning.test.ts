@@ -13,11 +13,12 @@ import {
   provisionFirstRun,
   type OnboardingProvisioningApi
 } from './onboarding-provisioning'
+import { builtinMemberPresetsForLanguage, type BuiltinMemberPreset } from './member-presets'
 
 type InProgress = Extract<OnboardingSnapshot, { status: 'in_progress' }>
 
 describe('first-run provisioning', () => {
-  it('retains the selected built-in member, applies adapter defaults, creates a durable Camp, then completes', async () => {
+  it('retains the selected built-in member, applies adapter defaults, creates a durable Thread, then completes', async () => {
     const events: string[] = []
     const harness = onboardingHarness(events)
 
@@ -29,7 +30,7 @@ describe('first-run provisioning', () => {
 
     expect(result).toMatchObject({
       memberAgentId: 'agent-luoke',
-      quickChatCampId: 'camp-first',
+      quickChatThreadId: 'camp-first',
       snapshot: {
         status: 'completed',
         origin: 'onboarding',
@@ -56,7 +57,7 @@ describe('first-run provisioning', () => {
       }
     })
     expect(harness.requests[2]).toEqual({
-      method: 'camps.create',
+      method: 'threads.create',
       params: {
         commandId: 'camp-command',
         name: FIRST_RUN_CAMP_TITLE,
@@ -73,7 +74,7 @@ describe('first-run provisioning', () => {
       'checkpoint:member',
       'request:members.runtime.set',
       'checkpoint:runtime',
-      'request:camps.create',
+      'request:threads.create',
       'checkpoint:camp',
       'commit:camp-first',
       'complete'
@@ -88,16 +89,207 @@ describe('first-run provisioning', () => {
       memberVersionAfterRuntime: 2
     })
 
-    await provisionFirstRun(harness.api, harness.snapshot, [])
+    await provisionFirstRun(harness.api, harness.snapshot, [], () => undefined, 'en')
 
-    expect(harness.requests.map(({ method }) => method)).toEqual(['camps.create'])
+    expect(harness.requests.map(({ method }) => method)).toEqual(['threads.create'])
     expect(events).toEqual([
       'begin',
-      'request:camps.create',
+      'request:threads.create',
       'checkpoint:camp',
       'commit:camp-first',
       'complete'
     ])
+  })
+
+  it('creates the selected English preset once without changing the Thread workflow', async () => {
+    const harness = onboardingHarness([], {}, [])
+    await provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en')
+
+    const create = harness.requests.find(({ method }) => method === 'members.create')
+    expect(create?.params).toMatchObject({
+      command: {
+        displayName: 'Dingding',
+        teamRole: 'Traveling Scholar',
+        personalityTraits: ['Curious', 'Adaptable', 'Diligent'],
+        avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
+      }
+    })
+    expect(harness.requests.filter(({ method }) => method === 'members.create')).toHaveLength(1)
+    expect(harness.requests.find(({ method }) => method === 'threads.create')?.params).toMatchObject({
+      name: '初次集结',
+      memberAgentIds: ['agent-first']
+    })
+  })
+
+  it.each(builtinMemberPresetsForLanguage('en'))('initializes the untouched $displayName seed with its English identity', async (preset) => {
+    const seed = builtinMember(preset.role)
+    const harness = onboardingHarness([], {}, [seed])
+    harness.snapshot.selectedMemberRole = preset.role
+
+    const result = await provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en')
+
+    expect(result.memberAgentId).toBe(seed.agentId)
+    expect(harness.requests.find(({ method }) => method === 'members.update')?.params).toEqual({
+      commandId: 'member-command',
+      command: {
+        agentId: seed.agentId,
+        expectedVersion: seed.version,
+        ...identityFor(preset)
+      }
+    })
+    expect(harness.requests.some(({ method }) => method === 'members.create')).toBe(false)
+    expect(harness.requests.find(({ method }) => method === 'members.runtime.set')?.params).toMatchObject({
+      command: { agentId: seed.agentId, expectedVersion: seed.version + 1 }
+    })
+  })
+
+  it.each(builtinMemberPresetsForLanguage('en'))('initializes all four seeds when $displayName is selected', async (selected) => {
+    const members = builtinMemberPresetsForLanguage('zh-CN').map((preset) => builtinMember(preset.role))
+    const harness = onboardingHarness([], {}, members)
+    harness.snapshot.selectedMemberRole = selected.role
+
+    const result = await provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en')
+
+    const updates = harness.requests.filter(({ method }) => method === 'members.update')
+    expect(updates).toHaveLength(4)
+    for (const preset of builtinMemberPresetsForLanguage('en')) {
+      const member = members.find((candidate) => candidate.avatarRef === preset.avatarRef)!
+      expect(updates).toContainEqual({
+        method: 'members.update',
+        params: {
+          commandId: preset.role === selected.role ? 'member-command' : `member-command:seed:${member.agentId}`,
+          command: { agentId: member.agentId, expectedVersion: member.version, ...identityFor(preset) }
+        }
+      })
+    }
+    const selectedMember = members.find((member) => member.avatarRef === selected.avatarRef)!
+    expect(result.memberAgentId).toBe(selectedMember.agentId)
+    expect(harness.requests.filter(({ method }) => method === 'members.runtime.set')).toEqual([{
+      method: 'members.runtime.set',
+      params: {
+        commandId: 'runtime-command',
+        command: {
+          agentId: selectedMember.agentId,
+          expectedVersion: selectedMember.version + 1,
+          adapterKind: 'codex-cli',
+          model: { mode: 'runtime_default' },
+          permissions: codexPermissions()
+        }
+      }
+    }])
+    expect(harness.requests.find(({ method }) => method === 'threads.create')?.params).toMatchObject({
+      memberAgentIds: [selectedMember.agentId], defaultLeadAgentId: selectedMember.agentId
+    })
+  })
+
+  it('preserves edited, configured and removed unselected profiles', async () => {
+    const edited = { ...builtinMember('muwa'), displayName: 'My teammate' }
+    const configured = { ...builtinMember('mianzhi'), runtimeConfiguration: {
+      adapterKind: 'codex-cli' as const, model: { mode: 'runtime_default' as const }, permissions: codexPermissions()
+    } }
+    const removed = { ...builtinMember('qilu'), presence: 'removed' as const, removedAt: '2026-09-30T00:00:00Z' }
+    const harness = onboardingHarness([], {}, [builtinMember(), edited, configured, removed])
+
+    await provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en')
+
+    expect(harness.requests.filter(({ method }) => method === 'members.update')).toHaveLength(1)
+    expect(harness.requests.find(({ method }) => method === 'members.update')?.params).toMatchObject({
+      command: { agentId: 'agent-luoke' }
+    })
+  })
+
+  it('recovers a partial four-seed initialization without repeating committed writes', async () => {
+    const members = builtinMemberPresetsForLanguage('zh-CN').map((preset) => builtinMember(preset.role))
+    const selectedMember = members[3]
+    const harness = onboardingHarness([], {}, members)
+    harness.snapshot.selectedMemberRole = 'qilu'
+    const request = harness.api.request.bind(harness.api)
+    let updates = 0
+    harness.api.request = async <T>(method: CoreMethod, params?: unknown): Promise<T> => {
+      const result = await request<T>(method, params)
+      if (method === 'members.update') {
+        const { command } = params as { command: { agentId: string } }
+        const member = members.find((candidate) => candidate.agentId === command.agentId)!
+        const preset = builtinMemberPresetsForLanguage('en').find((candidate) => candidate.avatarRef === member.avatarRef)!
+        Object.assign(member, identityFor(preset), { version: member.version + 1 })
+        if (++updates === 2) throw new Error('reply lost after second seed commit')
+      }
+      return result
+    }
+
+    await expect(provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en'))
+      .rejects.toThrow('reply lost after second seed commit')
+    expect((harness.current() as InProgress).provisioning?.memberAgentId).toBeNull()
+
+    await provisionFirstRun(harness.api, harness.current() as InProgress, [], () => undefined, 'en')
+
+    expect(updates).toBe(4)
+    expect(members.map((member) => member.displayName)).toEqual(['Dingding', 'Cheese', 'Gugu', 'Bunny'])
+    expect(harness.requests.find(({ method }) => method === 'members.runtime.set')?.params).toMatchObject({
+      command: { agentId: selectedMember.agentId, expectedVersion: selectedMember.version }
+    })
+  })
+
+  it.each([
+    { displayName: 'My teammate' },
+    { teamRole: 'My role' },
+    { professionalResponsibilities: 'My responsibilities' },
+    { personalityTraits: ['My trait'] },
+    { workingPrinciples: 'My principles' },
+    { growthTopic: 'My focus' },
+    { runtimeConfiguration: { adapterKind: 'codex-cli', model: { mode: 'runtime_default' }, permissions: codexPermissions() } }
+  ] satisfies Partial<AgentProfile>[])('preserves an existing profile with changes %j', async (patch) => {
+    const seed = { ...builtinMember(), ...patch }
+    const harness = onboardingHarness([], {}, [seed])
+
+    const result = await provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en')
+
+    expect(result.memberAgentId).toBe(seed.agentId)
+    expect(harness.requests.map(({ method }) => method)).toEqual(['members.list', 'members.runtime.set', 'threads.create'])
+  })
+
+  it('recovers an identity commit before its checkpoint without repeating the update', async () => {
+    const seed = builtinMember()
+    const harness = onboardingHarness([], {}, [seed])
+    const request = harness.api.request.bind(harness.api)
+    const preset = builtinMemberPresetsForLanguage('en')[0]
+    harness.api.request = async <T>(method: CoreMethod, params?: unknown): Promise<T> => {
+      const result = await request<T>(method, params)
+      if (method === 'members.update') {
+        Object.assign(seed, identityFor(preset), { version: seed.version + 1 })
+        throw new Error('reply lost after commit')
+      }
+      return result
+    }
+
+    await expect(provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en'))
+      .rejects.toThrow('reply lost after commit')
+    expect((harness.current() as InProgress).provisioning?.memberAgentId).toBeNull()
+    harness.api.request = request
+
+    await provisionFirstRun(harness.api, harness.current() as InProgress, [], () => undefined, 'en')
+
+    expect(harness.requests.filter(({ method }) => method === 'members.update')).toHaveLength(1)
+    expect(harness.requests.some(({ method }) => method === 'members.create')).toBe(false)
+    expect(harness.requests.find(({ method }) => method === 'members.runtime.set')?.params).toMatchObject({
+      command: { agentId: seed.agentId, expectedVersion: seed.version }
+    })
+  })
+
+  it('stops before Runtime configuration when the seed identity update conflicts', async () => {
+    const harness = onboardingHarness([])
+    const request = harness.api.request.bind(harness.api)
+    harness.api.request = async <T>(method: CoreMethod, params?: unknown): Promise<T> => {
+      const result = await request<StoredCommandResult>(method, params)
+      return (method === 'members.update'
+        ? { ...result, status: 'rejected', code: 'agent_profile.version_conflict' }
+        : result) as T
+    }
+
+    await expect(provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en'))
+      .rejects.toThrow('agent_profile.version_conflict')
+    expect(harness.requests.map(({ method }) => method)).toEqual(['members.list', 'members.update'])
+    expect((harness.current() as InProgress).provisioning?.memberAgentId).toBeNull()
   })
 
   it('does not mark training complete until the fourth-page location is restorable', async () => {
@@ -106,7 +298,7 @@ describe('first-run provisioning', () => {
       memberAgentId: 'agent-first',
       memberVersionBeforeRuntime: 1,
       memberVersionAfterRuntime: 2,
-      quickChatCampId: 'camp-first'
+      quickChatThreadId: 'camp-first'
     })
     harness.api.desktopSession.commitRestorableLocation = vi.fn(async () => {
       events.push('commit:failed')
@@ -123,7 +315,8 @@ describe('first-run provisioning', () => {
 
 function onboardingHarness(
   events: string[],
-  checkpoints: Partial<OnboardingProvisioningOperation> = {}
+  checkpoints: Partial<OnboardingProvisioningOperation> = {},
+  members: AgentProfile[] = [builtinMember()]
 ): {
   api: OnboardingProvisioningApi
   snapshot: InProgress
@@ -138,7 +331,7 @@ function onboardingHarness(
     memberAgentId: null,
     memberVersionBeforeRuntime: null,
     memberVersionAfterRuntime: null,
-    quickChatCampId: null,
+    quickChatThreadId: null,
     ...checkpoints
   }
   let current: OnboardingSnapshot = {
@@ -150,7 +343,7 @@ function onboardingHarness(
       adapterKind: 'codex-cli',
       model: { mode: 'runtime_default' }
     },
-    provisioning: checkpoints.memberAgentId || checkpoints.quickChatCampId ? operation : null
+    provisioning: checkpoints.memberAgentId || checkpoints.quickChatThreadId ? operation : null
   }
   const snapshot = current as InProgress
   const requests: Array<{ method: CoreMethod; params: unknown }> = []
@@ -158,12 +351,13 @@ function onboardingHarness(
     async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
       requests.push({ method, params })
       events.push(`request:${method}`)
-      if (method === 'members.list') return [builtinLuoke()] as T
+      if (method === 'members.list') return members as T
+      const command = (params as { command: { agentId: string; expectedVersion: number } })?.command
       const result = method === 'members.create'
         ? commandResult(method, { agentId: 'agent-first', version: 1 }, 'agent_profile', 'agent-first')
-        : method === 'members.runtime.set'
-          ? commandResult(method, { agentId: 'agent-luoke', version: 5 }, 'agent_profile', 'agent-luoke')
-          : commandResult(method, { campId: 'camp-first' }, 'camp', 'camp-first')
+        : method === 'members.runtime.set' || method === 'members.update'
+          ? commandResult(method, { agentId: command.agentId, version: command.expectedVersion + 1 }, 'agent_profile', command.agentId)
+          : commandResult(method, { threadId: 'camp-first' }, 'camp', 'camp-first')
       return result as T
     },
     onboarding: {
@@ -192,14 +386,14 @@ function onboardingHarness(
         current = updateOperation(current, { memberVersionAfterRuntime: version })
         return current
       },
-      async recordProvisionedCamp(campId): Promise<OnboardingSnapshot> {
+      async recordProvisionedThread(threadId): Promise<OnboardingSnapshot> {
         events.push('checkpoint:camp')
-        current = updateOperation(current, { quickChatCampId: campId })
+        current = updateOperation(current, { quickChatThreadId: threadId })
         return current
       },
       async complete(): Promise<OnboardingSnapshot> {
         events.push('complete')
-        if (current.status !== 'in_progress' || !current.provisioning?.memberAgentId || !current.provisioning.quickChatCampId) {
+        if (current.status !== 'in_progress' || !current.provisioning?.memberAgentId || !current.provisioning.quickChatThreadId) {
           throw new Error('incomplete')
         }
         current = {
@@ -207,16 +401,16 @@ function onboardingHarness(
           status: 'completed',
           origin: 'onboarding',
           completedAt: '2026-08-17T00:00:00.000Z',
-          selectedMemberRole: 'luoke',
+          selectedMemberRole: current.selectedMemberRole,
           memberAgentId: current.provisioning.memberAgentId,
-          quickChatCampId: current.provisioning.quickChatCampId
+          quickChatThreadId: current.provisioning.quickChatThreadId
         }
         return current
       }
     },
     desktopSession: {
       async commitRestorableLocation(location): Promise<void> {
-        events.push(`commit:${location.kind === 'camp' ? location.campId : location.kind}`)
+        events.push(`commit:${location.kind === 'camp' ? location.threadId : location.kind}`)
       }
     }
   }
@@ -310,17 +504,24 @@ function customCodexInstallation(): AdapterInstallation {
   }
 }
 
-function builtinLuoke(): AgentProfile {
+function identityFor(preset: BuiltinMemberPreset) {
   return {
-    agentId: 'agent-luoke',
-    displayName: '叮叮',
-    avatarRef: 'rovai://member-avatar/builtin/luoke/v1',
-    accent: '#4F7F9F',
-    teamRole: '游学者',
-    professionalResponsibilities: '负责理解需求。',
-    personalityTraits: ['好奇'],
-    workingPrinciples: '',
-    growthTopic: '',
+    displayName: preset.displayName,
+    teamRole: preset.teamRole,
+    professionalResponsibilities: preset.professionalResponsibilities,
+    personalityTraits: preset.personalityTraits,
+    workingPrinciples: preset.workingPrinciples,
+    growthTopic: preset.growthTopic
+  }
+}
+
+function builtinMember(role: BuiltinMemberPreset['role'] = 'luoke'): AgentProfile {
+  const preset = builtinMemberPresetsForLanguage('zh-CN').find((candidate) => candidate.role === role)!
+  return {
+    ...identityFor(preset),
+    agentId: `agent-${role}`,
+    avatarRef: preset.avatarRef,
+    accent: preset.accentSample,
     defaultCapabilities: [],
     presence: 'present',
     runtimeConfiguration: null,

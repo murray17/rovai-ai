@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-availability-and-authority-startup-boundary
 status: accepted
-last_updated: 2026-09-20
+last_updated: 2026-09-28
 ---
 
 # Availability-first Runtime
@@ -125,6 +125,12 @@ SHM 不参与 existing/migration ticket 的绝对字节稳定要求。
 此历史锚点继续保留，但普通 Upgrade 已改为原位事务。入口只消费 lease-bound ticket，不允许额外传路径；
 READ_WRITE/NOFOLLOW/NO_MUTEX 打开且不带 CREATE。任何写入前，在同一只读事务重验 contract/schema/classifier、
 完整 receipt（含 applied_at）和 schema cookie，并再次验证文件身份；漂移返回非重试 `authority_contract_changed`。
+
+macOS 首次由新版 App 打开旧 authority 时，系统可能给原 main 文件添加 `com.apple.provenance`，只改变 ctime。
+普通票据仍按完整身份严格拒绝。仅在确认 provenance 从无到有、main 对象/长度/mtime/属主/权限未变、
+WAL 与 journal 无数据变化且另一 namespace 为空时，Core 才可在任何应用迁移写入前丢弃旧票据，
+完整重新准入一次；新旧 source contract 与全部 receipt 必须一致。任一条件不满足或再次漂移仍停止，
+不得把这条兼容路径用于一般 ctime 变化或未知文件替换。
 
 复用既有逐版本 IMMEDIATE 事务，DDL/DML、marker 和 receipt 一起提交，失败只回滚当前步骤；重启从缺失步骤继续。
 正常迁移不创建 staging、backup、manifest，不替换 main，不默认执行全库 quick_check/foreign_key_check。关键对象

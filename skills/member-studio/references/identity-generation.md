@@ -1,93 +1,32 @@
-# 队员身份规则
+# Identity rules
 
-队员身份用于长期协作，应当让队员清楚自己负责什么、采用什么做事方式，以及当前希望改善什么。
+Describe the member's lasting contribution, working habits, and a skill to practice. Use the user's language.
 
-## 字段限制
+## Limits
 
-| 字段 | 要求 |
-|---|---|
-| 名称 | 1–80 个 Unicode 字符 |
-| 团队角色 | 最多 120 个字符；描述主要贡献类型，不表达权限 |
-| 专业职责 | 最多 300 个字符；说明长期负责什么及通常交付什么结果 |
-| 性格底色 | 有序去重，最多 6 项；每项 1–16 个字符 |
-| 工作准则 | 最多 300 个字符；写可执行的做事方式、质量标准和协作边界 |
-| 成长课题 | 最多 300 个字符；写一个可练习、可改善的方向，不做诊断或评分 |
+| Field | Limit and purpose |
+| --- | --- |
+| Name | 1-80 Unicode characters |
+| Team role | At most 120 characters; contribution, not authority |
+| Professional responsibilities | At most 300 characters; recurring work and outcomes |
+| Personality traits | Ordered, deduplicated; at most 6, each 1-16 characters |
+| Working principles | At most 300 characters; actionable methods and boundaries |
+| Growth topic | At most 300 characters; one trainable direction, no diagnosis or score |
 
-## 使用用户输入
+## Use supplied information
 
-### 用户已经写明
+Preserve explicit user meaning; edit only for valid format and length unless asked otherwise. Turn fragments into concise sentences, remove duplication, and ask about at most one ambiguity that blocks drafting. Label substantive additions as suggestions.
 
-用户内容是权威输入。只做合法性、格式和长度整理；除非用户明确要求，不改变原意。
+Fill gaps from the name, role, and stated requirements. Without evidence about a real person, present a role design rather than a factual personal profile.
 
-### 用户只给出要点
+## Write each field
 
-保留用户的事实和价值判断，可以：
+- **Team role:** a clear, stable contribution such as research and evidence synthesis. It confers no rank or Default Lead status.
+- **Responsibilities:** 1-3 sentences covering the problem or object, recurring actions, and expected outcomes. Do not grant approval, filesystem, network, Runtime, or governance authority.
+- **Traits:** neutral, observable work habits such as curiosity, patience, or directness. Avoid sensitive attributes, medical judgments, private relationships, and moral labels. For real or historical people, use only their public persona and the user's work brief, not a psychological profile.
+- **Working principles:** 2-4 actionable rules about quality, evidence, and collaboration. Prefer concrete behaviors, such as stating uncertainty with evidence or making reversible changes, over slogans.
+- **Growth topic:** one tension the member can practice managing. Do not create scores, background tasks, growth records, or changes to Memory.
 
-- 去重、排序和压缩；
-- 把片段整理成完整句子；
-- 在不改变含义的前提下收敛到字段上限；
-- 只追问一处真正阻止成稿的歧义。
+## Check before presentation
 
-新增的重要职责、属性或原则必须作为建议表达，不能冒充用户原话。
-
-### 字段缺失
-
-根据名称、团队角色和用户明确给出的属性直接起草。没有可靠依据时，把内容写成适合该工作角色的设计，不写成对现实人物的事实判断。
-
-## 字段写法
-
-### 团队角色
-
-使用清晰、稳定的贡献定位，例如“战略与系统规划顾问”“研究与证据整理员”。团队角色不是职位等级，也不自动成为 Default Lead。
-
-### 专业职责
-
-用 1–3 句覆盖：
-
-1. 面向什么问题或对象；
-2. 长期采取哪些行动；
-3. 通常交付什么结果。
-
-职责不授予审批、文件系统、网络、Runtime 或团队治理权限。
-
-### 性格底色
-
-优先使用工作中可观察的中性标签，例如：
-
-- 审慎
-- 好奇
-- 直接
-- 耐心
-- 系统化
-- 温和坚定
-
-避免敏感属性、医学判断、私人关系和道德定性。使用真人或历史人物名称时，只依据公开形象和用户给出的工作定位，不把标签写成心理档案。
-
-### 工作准则
-
-写 2–4 条可以落实到实际工作的原则，覆盖质量、证据和协作边界，例如：
-
-- 重要判断同时说明依据与不确定性；
-- 先建立可回滚的小步，再扩大改动；
-- 发现关键风险时尽早公开。
-
-避免“追求卓越”“保持专业”一类无法检验的口号。
-
-### 成长课题
-
-选择一个主要张力，写成可以持续练习的方向，例如：
-
-> 在高标准分析与快速试验之间建立更短的反馈回路。
-
-成长课题不创建评分、后台任务或成长记录，也不修改已经形成的 Memory。
-
-## 一致性检查
-
-展示队员名牌前确认：
-
-1. 团队角色与专业职责互相支持；
-2. 工作准则能约束职责中的真实工作；
-3. 成长课题是可练习方向，不是羞辱性缺陷；
-4. 性格标签不重复、不明显冲突；
-5. 所有字段满足长度、数量和控制字符限制；
-6. 内容没有暗示 Runtime、权限、Camp 归属或 Lead 地位已经配置。
+The role and responsibilities should agree; principles should guide that work; growth should be trainable and respectful. Remove duplicate or contradictory traits. Check all length, count, and control-character limits. Do not imply that Runtime, permissions, Thread membership, or Lead status is configured.

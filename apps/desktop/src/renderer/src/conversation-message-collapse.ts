@@ -1,4 +1,4 @@
-import type { StructuredCampMessageContent } from '@contracts'
+import type { StructuredThreadMessageContent } from '@contracts'
 
 export const LONG_MESSAGE_LINE_THRESHOLD = 20
 export const COLLAPSED_MESSAGE_VISIBLE_LINE_COUNT = 19
@@ -6,7 +6,7 @@ export const COLLAPSED_MESSAGE_VISIBLE_LINE_COUNT = 19
 export interface CollapsedMessageProjection {
   lineCount: number
   body: string
-  content: StructuredCampMessageContent | null
+  content: StructuredThreadMessageContent | null
 }
 
 export function explicitMessageLineCount(body: string): number {
@@ -28,11 +28,11 @@ function firstExplicitLines(body: string, lineCount: number): string {
 }
 
 function firstStructuredContentLines(
-  content: StructuredCampMessageContent,
+  content: StructuredThreadMessageContent,
   lineCount: number
-): StructuredCampMessageContent {
+): StructuredThreadMessageContent {
   if (lineCount <= 0) return []
-  const projection: StructuredCampMessageContent = []
+  const projection: StructuredThreadMessageContent = []
   let remainingLineBreaks = lineCount
 
   for (const segment of content) {
@@ -60,7 +60,7 @@ function firstStructuredContentLines(
 
 export function collapsedMessageProjection(
   body: string,
-  content: StructuredCampMessageContent | null
+  content: StructuredThreadMessageContent | null
 ): CollapsedMessageProjection | null {
   const lineCount = explicitMessageLineCount(body)
   if (lineCount <= LONG_MESSAGE_LINE_THRESHOLD) return null

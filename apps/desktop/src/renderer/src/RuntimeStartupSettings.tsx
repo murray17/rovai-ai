@@ -1,5 +1,5 @@
 import { newCommandId } from '../../shared/command-id'
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { AdapterKind, HealthStatus, RuntimeStartupConfiguration, RuntimeStartupInspection, RuntimeStartupSettings as StartupSettings } from '@contracts'
@@ -7,6 +7,7 @@ import { AppDialogContent, AppDialogFooter, AppDialogHeader, DialogControlIcon }
 import { adapterLabel, PRODUCT_RUNTIME_LOGOS } from './runtime-products'
 import { normalizedStartupConfiguration, runtimeEnvironmentErrors, runtimeStartupKey } from './runtime-startup-draft'
 import { readErrorMessage } from './error-message'
+import { UiText, uiAttribute } from './interface-language'
 
 const EMPTY: RuntimeStartupConfiguration = { programPath: null, environment: [] }
 const INSPECTION_LABELS: Record<RuntimeStartupInspection['status'], string> = {
@@ -17,7 +18,7 @@ const INSPECTION_LABELS: Record<RuntimeStartupInspection['status'], string> = {
 export function RuntimeStartupSettings({ runtimeKind, health, onBack, onReload }: {
   runtimeKind: AdapterKind; health: HealthStatus | null; onBack(): void; onReload(): Promise<void>
 }): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const [saved, setSaved] = useState<StartupSettings | null>(null)
   const [draft, setDraft] = useState<RuntimeStartupConfiguration>(EMPTY)
   const [rowIds, setRowIds] = useState<string[]>([])
@@ -126,7 +127,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, onReload }
         runtimeKind, expectedRevision: saved.revision, configuration: next
       })
       applySaved(settings)
-      try { await onReload() } catch { setError('已保存，列表刷新失败。') }
+      try { await onReload() } catch { setError(uiAttribute('已保存，列表刷新失败。')) }
     } catch (nextError) { setError(readErrorMessage(nextError)) }
     finally { setBusy(null) }
   }
@@ -143,7 +144,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, onReload }
     ? item?.status === 'authentication_required' ? 'authentication_required'
       : initialPath ? 'recognized' : item?.discovery.discoveryStatus === 'missing' ? 'missing' : null
     : null)
-  const statusLabel = busy === 'inspect' ? '正在验证程序…' : busy === 'check' ? '正在检查状态…' : status ? INSPECTION_LABELS[status] : null
+  const statusLabel = busy === 'inspect' ? uiAttribute('正在验证程序…') : busy === 'check' ? uiAttribute('正在检查状态…') : status ? uiAttribute(INSPECTION_LABELS[status]) : null
   const locked = busy !== null || saved === null
   const displayedPath = draft.programPath ?? (inspection ? inspection.executablePath :
     !dirty && !error && busy !== 'inspect' && busy !== 'check' ? initialPath : null)
@@ -151,44 +152,44 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, onReload }
 
   return <section className="runtime-startup-page" aria-busy={busy === 'load' || busy === 'save'}>
     <button className="quiet-button runtime-startup-back" type="button" disabled={busy !== null}
-      onClick={() => dirty ? setConfirmBack(true) : onBack()}><DialogControlIcon name="back" />运行时</button>
+      onClick={() => dirty ? setConfirmBack(true) : onBack()}><DialogControlIcon name="back" /><UiText zh={"智能体"} /></button>
     <header className="runtime-startup-heading">
       <span className="runtime-product-logo" aria-hidden="true"><img src={PRODUCT_RUNTIME_LOGOS[runtimeKind]} alt="" /></span>
-      <div><h1>{label}</h1><p>启动设置</p></div>
+      <div><h1>{label}</h1><p><UiText zh={"启动设置"} /></p></div>
     </header>
-    {busy === 'load' && <p role="status">正在读取…</p>}
+    {busy === 'load' && <p role="status"><UiText zh={"正在读取…"} /></p>}
     <form className="runtime-startup-form" onSubmit={(event) => { event.preventDefault(); void save() }}>
       <section className="runtime-startup-section">
-        <div className="runtime-startup-section-heading"><label htmlFor={`${id}-path`}>程序路径</label>
+        <div className="runtime-startup-section-heading"><label htmlFor={`${id}-path`}><UiText zh={"程序路径"} /></label>
           <button className="quiet-button" type="button" disabled={locked || draft.programPath === null}
-            onClick={() => { const next = { ...draft, programPath: null }; change(next); void inspect(next) }}>恢复自动</button></div>
+            onClick={() => { const next = { ...draft, programPath: null }; change(next); void inspect(next) }}><UiText zh={"恢复自动"} /></button></div>
         <div className="runtime-startup-path">
-          <input id={`${id}-path`} value={displayedPath ?? ''} placeholder={client.selectRuntimeExecutable ? "自动检测" : "Host 上的程序绝对路径"} readOnly={Boolean(client.selectRuntimeExecutable)} disabled={locked} onChange={(event) => change({ ...draft, programPath: event.target.value || null })} title={displayedPath ?? undefined} />
-          {client.selectRuntimeExecutable && <button className="quiet-button" type="button" disabled={locked} onClick={() => void choose()}>选择文件<DialogControlIcon name="folder" /></button>}
+          <input id={`${id}-path`} value={displayedPath ?? ''} placeholder={client.selectRuntimeExecutable ? uiAttribute("自动检测") : uiAttribute("Host 上的程序绝对路径")} readOnly={Boolean(client.selectRuntimeExecutable)} disabled={locked} onChange={(event) => change({ ...draft, programPath: event.target.value || null })} title={displayedPath ?? undefined} />
+          {client.selectRuntimeExecutable && <button className="quiet-button" type="button" disabled={locked} onClick={() => void choose()}><UiText zh={"选择文件"} /><DialogControlIcon name="folder" /></button>}
         </div>
         <div className="runtime-startup-inspection">
           <span role="status" className={`runtime-startup-result${status === 'authentication_required' || status === 'version_unverified' ? ' is-warning' : status === 'missing' || status === 'check_failed' ? ' is-error' : ''}`}>
             {statusLabel}{statusLabel && inspection?.reportedVersion && <span className="runtime-startup-version">{inspection.reportedVersion}</span>}
           </span>
-          <button className="quiet-button" type="button" disabled={locked} onClick={() => void inspect(draft, true)}>检查状态<DialogControlIcon name="refresh" /></button>
+          <button className="quiet-button" type="button" disabled={locked} onClick={() => void inspect(draft, true)}><UiText zh={"检查状态"} /><DialogControlIcon name="refresh" /></button>
         </div>
-        {environmentIncomplete && <p className="runtime-startup-result is-warning" role="status">部分查找来源不可用，本次结果使用已读取的可用环境。</p>}
+        {environmentIncomplete && <p className="runtime-startup-result is-warning" role="status"><UiText zh={"部分查找来源不可用，本次结果使用已读取的可用环境。"} /></p>}
       </section>
       <section className="runtime-startup-section">
-        <div className="runtime-startup-section-heading"><h2>环境变量</h2><button className="quiet-button" type="button" disabled={locked || draft.environment.length >= 128}
-          onClick={() => { setRowIds([...rowIds, newCommandId()]); change({ ...draft, environment: [...draft.environment, { name: '', value: '' }] }) }}><DialogControlIcon name="plus" />添加变量</button></div>
+        <div className="runtime-startup-section-heading"><h2><UiText zh={"环境变量"} /></h2><button className="quiet-button" type="button" disabled={locked || draft.environment.length >= 128}
+          onClick={() => { setRowIds([...rowIds, newCommandId()]); change({ ...draft, environment: [...draft.environment, { name: '', value: '' }] }) }}><DialogControlIcon name="plus" /><UiText zh={"添加变量"} /></button></div>
         {draft.environment.length > 0 && <div className="runtime-startup-environment">
-          <div className="runtime-environment-labels" aria-hidden="true"><span>变量名</span><span>值</span></div>
+          <div className="runtime-environment-labels" aria-hidden="true"><span><UiText zh={"变量名"} /></span><span><UiText zh={"值"} /></span></div>
           {draft.environment.map((variable, index) => <div key={rowIds[index]} className="runtime-environment-row">
-            <input aria-label={`变量名 ${index + 1}`} autoComplete="off" spellCheck={false} disabled={locked} value={variable.name}
+            <input aria-label={uiAttribute("变量名 {0}", String(index + 1))} autoComplete="off" spellCheck={false} disabled={locked} value={variable.name}
               aria-invalid={Boolean(errors[index])} aria-describedby={errors[index] ? `${id}-error-${index}` : undefined}
               onChange={(event) => change({ ...draft, environment: draft.environment.map((entry, position) => position === index ? { ...entry, name: event.target.value } : entry) })} />
-            <div className="runtime-environment-value"><input aria-label={`变量值 ${index + 1}`} autoComplete="off" spellCheck={false} disabled={locked}
+            <div className="runtime-environment-value"><input aria-label={uiAttribute("变量值 {0}", String(index + 1))} autoComplete="off" spellCheck={false} disabled={locked}
               type={revealed.has(rowIds[index]) ? 'text' : 'password'} value={variable.value}
               onChange={(event) => change({ ...draft, environment: draft.environment.map((entry, position) => position === index ? { ...entry, value: event.target.value } : entry) })} />
-              <button className="quiet-button runtime-startup-icon" type="button" disabled={locked} aria-label={`${revealed.has(rowIds[index]) ? '隐藏' : '显示'}变量值 ${index + 1}`} aria-pressed={revealed.has(rowIds[index])}
+              <button className="quiet-button runtime-startup-icon" type="button" disabled={locked} aria-label={uiAttribute("{0}变量值 {1}", String(revealed.has(rowIds[index]) ? uiAttribute("隐藏") : uiAttribute("显示")), String(index + 1))} aria-pressed={revealed.has(rowIds[index])}
                 onClick={() => setRevealed((current) => { const next = new Set(current); if (next.has(rowIds[index])) next.delete(rowIds[index]); else next.add(rowIds[index]); return next })}><DialogControlIcon name={revealed.has(rowIds[index]) ? 'eye-off' : 'eye'} /></button></div>
-            <button className="quiet-button runtime-startup-icon" type="button" disabled={locked} aria-label={`删除变量 ${index + 1}`} onClick={() => {
+            <button className="quiet-button runtime-startup-icon" type="button" disabled={locked} aria-label={uiAttribute("删除变量 {0}", String(index + 1))} onClick={() => {
               setRowIds(rowIds.filter((_, position) => position !== index)); change({ ...draft, environment: draft.environment.filter((_, position) => position !== index) })
             }}><DialogControlIcon name="trash" /></button>
             {errors[index] && <p className="runtime-environment-error" id={`${id}-error-${index}`} role="alert">{errors[index]}</p>}
@@ -197,14 +198,14 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, onReload }
       </section>
       {saved && error && <p className="inline-error" role="alert">{error}</p>}
       <footer className="runtime-startup-actions">
-        <button className="quiet-button" type="button" disabled={!dirty || locked} onClick={discard}>放弃更改</button>
-        <button className="quiet-button member-editor-save" type="submit" disabled={!dirty || locked}><DialogControlIcon name="save" />{busy === 'save' ? '正在保存…' : '保存'}</button>
+        <button className="quiet-button" type="button" disabled={!dirty || locked} onClick={discard}><UiText zh={"放弃更改"} /></button>
+        <button className="quiet-button member-editor-save" type="submit" disabled={!dirty || locked}><DialogControlIcon name="save" />{busy === 'save' ? uiAttribute("正在保存…") : uiAttribute("保存")}</button>
       </footer>
     </form>
-    {!saved && error && <div className="inline-error" role="alert">{error}<button className="quiet-button" type="button" onClick={() => setLoadAttempt((value) => value + 1)}>重新读取</button></div>}
+    {!saved && error && <div className="inline-error" role="alert">{error}<button className="quiet-button" type="button" onClick={() => setLoadAttempt((value) => value + 1)}><UiText zh={"重新读取"} /></button></div>}
     <Dialog.Root open={confirmBack} onOpenChange={setConfirmBack}><Dialog.Portal><Dialog.Overlay className="dialog-overlay app-dialog-overlay" /><AppDialogContent width="compact" tone="attention">
-      <AppDialogHeader title="放弃更改？" description="当前编辑的启动设置尚未保存。" />
-      <AppDialogFooter><button className="quiet-button" data-dialog-autofocus onClick={() => setConfirmBack(false)}>继续编辑</button><button className="danger-button" onClick={onBack}>放弃更改</button></AppDialogFooter>
+      <AppDialogHeader title={uiAttribute("放弃更改？")} description={uiAttribute("当前编辑的启动设置尚未保存。")} />
+      <AppDialogFooter><button className="quiet-button" data-dialog-autofocus onClick={() => setConfirmBack(false)}><UiText zh={"继续编辑"} /></button><button className="danger-button" onClick={onBack}><UiText zh={"放弃更改"} /></button></AppDialogFooter>
     </AppDialogContent></Dialog.Portal></Dialog.Root>
   </section>
 }

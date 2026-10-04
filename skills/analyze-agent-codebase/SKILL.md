@@ -1,125 +1,43 @@
 ---
 name: analyze-agent-codebase
-description: 当用户希望依据源码、配置、schema 和测试，分析 Coding Agent、Agent 框架或多 Agent 系统的真实架构、执行流程、上下文、记忆、工具、权限或扩展点时使用。继续回答同一分析中的定向机制问题或整理专题文档时也使用。普通代码评审、实现或修复任务，以及不需要仓库证据的概念问答不使用。
+description: Use to analyze an agent system's architecture or mechanisms from repository evidence, including follow-up questions and analysis documents. Exclude ordinary code review, implementation, fixes, and conceptual questions that need no repository evidence.
 ---
 
-# Agent 代码库分析
+# Analyze Agent Codebases
 
-从真实入口、调用链、状态变化和持久化边界还原系统如何运行。文档用于解释设计意图，但架构结论必须回到可执行代码和测试证据。
+Reconstruct behavior from real entry points, call chains, state transitions, and persistence. Documentation explains intent; code and tests establish implementation. Respond in the user's language unless asked otherwise.
 
-## 分析边界
+## Boundaries
 
-- 先遵守目标仓库的 `AGENTS.md`、`CLAUDE.md`、文档导航和只读规则。
-- 默认只读。只有用户明确要求创建或维护分析文档时才写文件，不顺手修改实现。
-- 以源码、依赖装配、配置、schema、migration 和测试为实现证据。
-- 每个重要结论标为 `已确认`、`推断` 或 `未知`；推断说明依据，未知不凭常见框架行为补齐。
-- 重要结论给出代码位置和相关 symbol；跨模块行为给出入口到副作用的调用链。
-- 不因名称中出现 `agent`、`memory`、`plan`、`tool` 或 `middleware` 就认定对应能力存在。
-- 使用用户要求的语言；未指定时沿用用户输入语言。
+- Follow repository instructions, documentation routes, and read-only constraints.
+- Default to read-only. Write analysis documents only when requested; do not modify implementation.
+- Use source, dependency wiring, configuration, schemas, migrations, and tests as evidence.
+- Label important claims `confirmed`, `inferred`, or `unknown`, localizing these labels in the report. Explain inferences and gaps.
+- Cite paths, symbols, and relevant entry-to-effect call chains. Names such as agent, memory, plan, or tool do not prove capabilities.
 
-## 选择分析范围
+## Choose the scope
 
-根据用户目标选择最小充分范围：
+Use the smallest sufficient scope: a vertical slice for a mechanism question, an architecture report for several mechanisms, or a dossier when multiple documents are requested. For a dossier, read [analysis axes and structure](references/dossier-structure.md).
 
-1. **定向机制问题**：只追踪回答该问题所需的纵向切片。
-2. **代码库架构报告**：覆盖用户指定的多个机制，并形成整体运行时图景。
-3. **专题文档集**：用户明确要求沉淀多篇文档或完整分析时，读取
-   [分析轴与专题文档](references/dossier-structure.md)。
+Check existing analyses for scope, evidence, and revision; update the appropriate document instead of creating duplicate overviews.
 
-如果仓库已有同类分析，先检查其范围、依据和版本；更新正确归宿，不建立重复总览。
+## Investigate
 
-## 工作流
+1. **Freeze scope.** Record repository root, revision, requested questions, exclusions, output format, languages, build entry points, generated directories, and initial worktree state. Distinguish production code from tests, fixtures, examples, generated code, vendors, and historical documents.
+2. **Trace the runtime.** Follow entry point -> configuration and dependency wiring -> agent/workflow construction -> execution loop -> model, tool, collaboration, and persistence effects -> events, recovery, and presentation. Follow registries through loaders, macros, decorators, or configuration until the actual implementation is connected.
+3. **Trace each question vertically.** Use a real trigger: input -> authorization and validation -> state change -> effects -> result -> error and recovery. Select only mechanisms present in the code.
+4. **Record evidence as you read.** Use the table below. A claim about subagents, for example, needs the creator, context transfer, isolation, and result path.
+5. **Explain ownership.** Identify control and state authority, sync/async connections, context/session/Memory/history lifecycles, tool/Skill/prompt/permission boundaries, and failure, retry, cancellation, idempotency, and recovery limits. Record documentation drift.
+6. **Cross-check.** Reverse-reference key symbols to verify production wiring. Inspect tests, schemas, flags, platforms, adapters, and alternate entries. Tests prove only covered behavior; mark unexecuted checks `not_run`. Compare authoritative documentation unless the user prohibits reading it.
 
-### 1. 固定范围
-
-记录：
-
-- 仓库根目录和可用的 revision；
-- 用户关心的问题、排除项和交付形式；
-- 主要语言、构建入口和生成代码目录；
-- 开始时的工作区状态。
-
-区分生产源码、测试、生成物、vendor、fixture、示例和历史文档，不把测试夹具或示例当作生产路径。
-
-### 2. 建立运行时骨架
-
-先从真实入口向内追踪：
-
-```text
-入口
-  → 配置与依赖装配
-  → Agent 或工作流构造
-  → 执行与调度循环
-  → 模型、工具、协作和持久化副作用
-  → 事件、恢复和展示
-```
-
-优先寻找 binary/package 入口、路由注册、factory、registry、核心状态类型和持久化边界。动态注册系统继续追到加载器、宏、装饰器或配置解析器，直到能够解释具体实现如何进入运行时。
-
-### 3. 追踪纵向切片
-
-为每个问题选择一个真实触发场景，沿调用链追到：
-
-```text
-输入 → 权限与校验 → 状态转换 → 外部副作用 → 结果 → 错误与恢复
-```
-
-完整分析时，从 reference 中选择代码里真实存在的分析轴，不为了填满清单虚构子系统。
-
-### 4. 建立证据表
-
-边读边记录，不在最后凭印象补引用：
-
-| 结论 | 状态 | 代码证据 | 测试或运行证据 | 限制或反证 |
+| Claim | Status | Source and call chain | Test or runtime evidence | Limits or counterevidence |
 | --- | --- | --- | --- | --- |
-| `<可证伪的完整句子>` | 已确认 / 推断 / 未知 | `<path:line + symbol 或调用链>` | `<test / fixture / trace>` | `<冲突、动态边界或缺口>` |
+| Falsifiable statement | confirmed / inferred / unknown | path:line + symbol | test / fixture / trace | gap or conflicting path |
 
-证据必须支持完整结论。例如认定“支持子 Agent”时，应说明谁创建、如何传递上下文、隔离边界在哪里，以及结果如何返回调用者。
+## Deliver
 
-### 5. 形成架构判断
+Lead with conclusions and the runtime picture. Include scope and revision, key flows, each requested mechanism and its evidence status, tradeoffs, constraints, documentation drift, valuable unknowns and verification steps, and source locations or dossier reading order. Quote only the minimum useful code.
 
-从证据中说明：
+For independent evidence domains, bounded collaboration may help when authorized and available. Specify the question, permitted scope, exclusions, evidence format, and stopping condition. The lead retains runtime topology, cross-domain flows, evidence spot checks, conflict resolution, and final conclusions. Avoid overlapping overviews; proceed alone without a suitable collaborator.
 
-- 哪一层拥有控制权和状态真源；
-- 主要同步与异步流程如何连接；
-- 上下文、会话恢复、长期记忆和业务历史分别由谁负责；
-- Tool、Skill、prompt 和 permission 如何连接但保持职责分离；
-- 错误、重试、取消、幂等和恢复边界到哪里为止；
-- 文档主张与生产实现有哪些一致、漂移或尚未接通之处。
-
-详细分类判据由 reference 负责。
-
-### 6. 交叉验证
-
-- 用测试、fixture、schema 或可执行路径核对关键调用链。
-- 对关键 symbol 做反向引用，确认它进入生产装配而不是孤立实现。
-- 检查 feature flag、平台分支、adapter 和替代入口，避免把一个实现概括成全系统行为。
-- 测试只证明实际覆盖的行为；没有运行的验证明确标为 `not_run`。
-- 用户没有禁止读取文档时，对照权威文档并记录代码—文档漂移。
-
-### 7. 交付
-
-先给结论和系统图景，再给证据与限制。通常包含：
-
-- 分析范围、revision 和排除项；
-- 运行时拓扑与关键端到端流程；
-- 用户点名机制的结论和证据状态；
-- 主要设计取舍、真实约束和代码—文档漂移；
-- 高价值未知项及继续验证方式；
-- 代码位置或专题文档阅读顺序。
-
-不要大段复制源码或已有文档。引用最小必要片段，并以路径、symbol 和解释为主。
-
-## 可选协作
-
-存在彼此独立的证据域时，可以把有界的证据收集交给其他成员。每项请求明确问题、允许检查的范围、排除项、证据格式和停止条件。
-
-主分析者始终负责运行时骨架、跨域调用链、证据抽查、冲突消解和最终结论。不要让多人分别编写相互重叠的总览；没有合适协作者时直接单人完成。
-
-## 完成条件
-
-- 每个高层结论都能回到入口、调用链、状态或持久化证据。
-- `已确认`、`推断`、`未知` 和代码—文档漂移彼此分开。
-- 分析覆盖用户指定问题，不适用内容明确略过。
-- 专题文档只有一个入口和清楚的阅读顺序。
-- 只读任务结束时没有产生未授权改动；文档任务只包含授权的分析产物。
+Before delivery, trace each major claim back to evidence, separate confirmed facts from inference and unknowns, cover all requested topics, and preserve one dossier entry point. Verify that changes are limited to authorized analysis artifacts.

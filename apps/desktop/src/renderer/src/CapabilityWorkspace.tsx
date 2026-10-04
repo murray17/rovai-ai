@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { AppDialogGlyph, DialogControlIcon } from './AppDialog'
+import { useMobileLayout } from './MobileLayout'
 import { useCapabilitySplitter } from './useCapabilitySplitter'
+import { UiText, uiAttribute } from './interface-language'
 export { DEFAULT_CAPABILITY_WIDTH, defaultCapabilityWidth, capabilityListWidth } from './useCapabilitySplitter'
 
 export type CapabilityFilter = 'all' | 'enabled' | 'disabled'
@@ -40,18 +42,19 @@ export function CapabilityWorkspace({
   header?: ReactNode
   libraryEmpty?: boolean
 }): React.JSX.Element {
+  const mobile = useMobileLayout()
   const detail = useRef<HTMLDivElement>(null)
   const previousSelection = useRef<string | null>(null)
   const [showDetail, setShowDetail] = useState(false)
   const id = useId()
   const { root, compact, separator } = useCapabilitySplitter(WIDTH_KEY, `${id}-list ${id}-detail`, !libraryEmpty)
   useEffect(() => {
-    if (selectionKey && previousSelection.current !== selectionKey) {
+    if (selectionKey && previousSelection.current !== selectionKey && (!mobile || previousSelection.current !== null)) {
       setShowDetail(true)
       if (detail.current) detail.current.scrollTop = 0
     }
     previousSelection.current = selectionKey
-  }, [selectionKey])
+  }, [selectionKey, mobile])
   return (
     <div
       ref={root}
@@ -60,7 +63,7 @@ export function CapabilityWorkspace({
       data-compact={compact}
       data-pane={showDetail ? 'detail' : 'list'}
     >
-      {!libraryEmpty && <aside className="capability-library" id={`${id}-list`} aria-label={`${title} 列表`}>
+      {!libraryEmpty && <aside className="capability-library" id={`${id}-list`} aria-label={uiAttribute("{0} 列表", String(title))}>
         <header className="capability-library-heading">
           <h1>
             {title}
@@ -77,23 +80,23 @@ export function CapabilityWorkspace({
               disabled={addDisabled}
             >
               {title === 'Skills' ? <AppDialogGlyph name="download" /> : <DialogControlIcon name="plus" />}
-              {title === 'Skills' ? '导入' : '添加'}
+              {title === 'Skills' ? uiAttribute("导入") : uiAttribute("添加")}
             </button>
             {importAction}
           </div>
         </header>
         <label className="capability-search">
-          <span className="sr-only">搜索 {title}</span>
+          <span className="sr-only"><UiText zh={"搜索 "} />{title}</span>
           <input
             type="search"
-            aria-label={`搜索 ${title}`}
-            placeholder={`搜索 ${title === 'Skills' ? 'Skill' : 'MCP'}`}
+            aria-label={uiAttribute("搜索 {0}", String(title))}
+            placeholder={uiAttribute("搜索 {0}", String(title === 'Skills' ? 'Skill' : 'MCP'))}
             value={search}
             onChange={(event) => onSearch(event.target.value)}
           />
         </label>
         {filter !== undefined && (
-          <div className="capability-filters" role="group" aria-label={`${title} 启用状态`}>
+          <div className="capability-filters" role="group" aria-label={uiAttribute("{0} 启用状态", String(title))}>
             {(['all', 'enabled', 'disabled'] as const).map((value) => (
               <button
                 type="button"
@@ -102,7 +105,7 @@ export function CapabilityWorkspace({
                 aria-controls={`${id}-items`}
                 onClick={() => onFilter?.(value)}
               >
-                {{ all: '全部', enabled: '已启用', disabled: '已停用' }[value]}
+                {uiAttribute({ all: '全部', enabled: '已启用', disabled: '已停用' }[value])}
               </button>
             ))}
           </div>
@@ -118,14 +121,12 @@ export function CapabilityWorkspace({
         </div>
       </aside>}
       {!libraryEmpty && separator}
-      <section id={`${id}-detail`} className="capability-detail" aria-label={`${title} 内容与配置`}>
+      <section id={`${id}-detail`} className="capability-detail" aria-label={uiAttribute("{0} 内容与配置", String(title))}>
         <button
           type="button"
           className="quiet-button compact capability-back"
           onClick={() => setShowDetail(false)}
-        >
-          ← 返回列表
-        </button>
+        ><UiText zh={"← 返回列表"} /></button>
         {header && <div className="capability-detail-header">{header}</div>}
         <div className="capability-detail-scroll" ref={detail}>
           <div className="capability-detail-inner">{children}</div>
@@ -170,7 +171,7 @@ export function CapabilityListItem({
             <span
               className="capability-item-state"
               data-enabled={enabled}
-              aria-label={enabled ? '已启用' : '已停用'}
+              aria-label={enabled ? uiAttribute("已启用") : uiAttribute("已停用")}
             />
           )}
         </span>
@@ -197,13 +198,13 @@ export function CapabilityToggle({
         className="skill-toggle"
         role="switch"
         aria-checked={enabled}
-        aria-label={`${enabled ? '停用' : '启用'} ${name}`}
+        aria-label={`${enabled ? uiAttribute("停用") : uiAttribute("启用")} ${name}`}
         disabled={disabled}
         onClick={onToggle}
       >
         <span aria-hidden="true" />
       </button>
-      <span>{enabled ? '已启用' : '已停用'}</span>
+      <span>{enabled ? uiAttribute("已启用") : uiAttribute("已停用")}</span>
     </div>
   )
 }
@@ -218,9 +219,7 @@ export function CapabilityError({
     <div className="capability-error" role="alert">
       <span>{error}</span>
       {onRetry && (
-        <button type="button" className="quiet-button compact" onClick={onRetry}>
-          重试
-        </button>
+        <button type="button" className="quiet-button compact" onClick={onRetry}><UiText zh={"重试"} /></button>
       )}
     </div>
   ) : null

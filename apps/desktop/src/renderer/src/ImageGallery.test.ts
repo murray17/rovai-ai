@@ -1,8 +1,8 @@
-import { desktopCampClient } from './desktop-camp-client'
+import { desktopThreadClient } from './desktop-camp-client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { CampMessageAttachmentView } from '@contracts'
+import type { ThreadMessageAttachmentView } from '@contracts'
 import {
   ImageGallery,
   ImagePayloadCache,
@@ -15,15 +15,15 @@ import {
   type GalleryImage
 } from './ImageGallery'
 
-const attachment = (id: string, image = true): CampMessageAttachmentView => ({
+const attachment = (id: string, image = true): ThreadMessageAttachmentView => ({
   id, displayName: id, kind: 'file', fileCount: 1, mediaType: image ? 'image/png' : 'application/pdf',
   byteSize: 12, previewKind: image ? 'image' : 'none', availability: 'unknown'
 })
 
 const attachmentSource = (id: string): GalleryImage => ({
   kind: 'attachment',
-  campId: 'camp',
-  locator: { owner: 'message', campId: 'camp', messageId: 'message-1', attachmentRefId: id },
+  threadId: 'camp',
+  locator: { owner: 'message', threadId: 'camp', messageId: 'message-1', attachmentRefId: id },
   image: attachment(id)
 })
 
@@ -56,7 +56,7 @@ describe('shared image presentation', () => {
     vi.stubGlobal('window', { rovai: { platform: 'darwin' } })
     const html = renderToStaticMarkup(createElement(ImageGallery, {
       images: Array.from({ length: 20 }, (_, index) => ({
-        kind: 'runtime' as const, campId: 'camp', image: {
+        kind: 'runtime' as const, threadId: 'camp', image: {
           id: `image-${index}`, displayName: `图片 ${index}`, mediaType: 'image/png', byteSize: 12
         }
       }))
@@ -123,13 +123,13 @@ describe('shared image presentation', () => {
     const request = vi.fn(() => response)
     vi.stubGlobal('window', { rovai: { request } })
     const source: GalleryImage = {
-      kind: 'runtime', campId: 'camp', image: {
+      kind: 'runtime', threadId: 'camp', image: {
         id: 'runtime-image', displayName: 'runtime-image', mediaType: 'image/png', byteSize: 999
       }
     }
 
-    const first = fetchImagePayload(source, desktopCampClient)
-    const concurrent = fetchImagePayload(source, desktopCampClient)
+    const first = fetchImagePayload(source, desktopThreadClient)
+    const concurrent = fetchImagePayload(source, desktopThreadClient)
     expect(concurrent).toBe(first)
     expect(request).toHaveBeenCalledOnce()
     resolveRead({ mediaType: 'image/png', data: 'AQID' })
@@ -137,17 +137,17 @@ describe('shared image presentation', () => {
     expect(payload?.byteSize).toBe(3)
     if (!payload) throw new Error('expected image payload')
 
-    cacheDecodedImagePayload(source, payload, desktopCampClient)
-    const cached = await getOrLoadImagePayload(source, desktopCampClient)
+    cacheDecodedImagePayload(source, payload, desktopThreadClient)
+    const cached = await getOrLoadImagePayload(source, desktopThreadClient)
     expect(cached?.blob).toBe(payload.blob)
     expect(cached?.byteSize).toBe(3)
     expect(request).toHaveBeenCalledOnce()
 
-    expect((await fetchImagePayload(source, desktopCampClient))?.byteSize).toBe(3)
+    expect((await fetchImagePayload(source, desktopThreadClient))?.byteSize).toBe(3)
     expect(request).toHaveBeenCalledTimes(2)
 
     const otherRequest = vi.fn().mockResolvedValue(null)
-    const otherClient = { ...desktopCampClient, request: otherRequest }
+    const otherClient = { ...desktopThreadClient, request: otherRequest }
     expect(await getOrLoadImagePayload(source, otherClient)).toBeNull()
     expect(otherRequest).toHaveBeenCalledOnce()
   })
@@ -160,8 +160,8 @@ describe('shared image presentation', () => {
     }
     const payload = { blob: new Blob([new Uint8Array([1, 2, 3])]), byteSize: 3 }
 
-    cacheDecodedImagePayload(source, payload, desktopCampClient)
-    const cached = await getOrLoadImagePayload(source, desktopCampClient)
+    cacheDecodedImagePayload(source, payload, desktopThreadClient)
+    const cached = await getOrLoadImagePayload(source, desktopThreadClient)
     expect(cached?.blob).toBe(payload.blob)
     expect(cached?.byteSize).toBe(3)
     expect(preview).not.toHaveBeenCalled()
@@ -173,12 +173,12 @@ describe('shared image presentation', () => {
       .mockRejectedValueOnce(new Error('core_temporarily_unavailable'))
     vi.stubGlobal('window', { rovai: { request } })
     const source: GalleryImage = {
-      kind: 'runtime', campId: 'camp', image: {
+      kind: 'runtime', threadId: 'camp', image: {
         id: 'runtime-image', displayName: 'runtime-image', mediaType: 'image/png', byteSize: 1
       }
     }
 
-    await expect(fetchImagePayload(source, desktopCampClient)).resolves.toBeNull()
-    await expect(fetchImagePayload(source, desktopCampClient)).rejects.toThrow('core_temporarily_unavailable')
+    await expect(fetchImagePayload(source, desktopThreadClient)).resolves.toBeNull()
+    await expect(fetchImagePayload(source, desktopThreadClient)).rejects.toThrow('core_temporarily_unavailable')
   })
 })

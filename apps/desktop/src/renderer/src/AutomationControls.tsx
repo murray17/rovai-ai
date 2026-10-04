@@ -1,4 +1,5 @@
-import { templates, scheduleLabel, type TemplateId } from './automation-workspace-model'
+import { templates, localizedAutomationTemplate, scheduleLabel, type TemplateId } from './automation-workspace-model'
+import { UiText } from './interface-language'
 
 export type AutomationIcon = 'clock' | 'play' | 'pause' | 'plus' | 'trash' | 'chat' | 'search' | 'more' | 'chevron' | 'back' | 'close' | 'check' | 'failed' | 'skip' | 'channel' | 'folder' | 'code' | 'calendar' | 'document'
 
@@ -33,10 +34,10 @@ export function AutomationTemplates({ onChoose, compact = false }: {
   return <div className={`automation-template-grid ${compact ? 'compact' : ''}`}>
     {compact && <button type="button" className="automation-template-card blank" onClick={() => onChoose()}>
       <span className="automation-template-icon"><AutomationGlyph name="plus" /></span>
-      <span className="automation-template-copy"><strong>从空白开始</strong><span>自己填写执行内容与运行时间</span></span>
+      <span className="automation-template-copy"><strong><UiText zh={"从空白开始"} /></strong><span><UiText zh={"自己填写执行内容与运行时间"} /></span></span>
     </button>}
     {(Object.keys(templates) as TemplateId[]).map((id) => {
-      const template = templates[id]
+      const template = localizedAutomationTemplate(id)
       return <button key={id} type="button" className={`automation-template-card ${id}`} onClick={() => onChoose(id)}>
         <span className="automation-template-icon"><AutomationGlyph name={template.icon} /></span>
         <span className="automation-template-copy"><strong>{template.name}</strong><span>{compact ? `${scheduleLabel(template.schedule)} · ${template.description}` : template.description}</span></span>

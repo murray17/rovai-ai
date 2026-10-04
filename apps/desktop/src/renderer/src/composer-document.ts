@@ -2,7 +2,7 @@ import type {
   ComposerAtom,
   ComposerDocument,
   ComposerSegment,
-  StructuredCampMessageContent
+  StructuredThreadMessageContent
 } from '@contracts'
 import type { ComposerSkillOption } from './composer-skill-picker'
 
@@ -25,6 +25,15 @@ export interface ComposerLocalStatus {
   hasContent: boolean
   hasExplicitRecipient: boolean
   hasUnavailableAtom: boolean
+  memberAgentIds: string[]
+}
+
+export function composerMemberMentionIds(document: ComposerDocument): string[] {
+  return [...new Set(document.segments.flatMap((segment) =>
+    segment.kind === 'atom' && segment.atom.type === 'member'
+      ? [segment.atom.agentId]
+      : []
+  ))]
 }
 
 export function emptyComposerDocument(): ComposerDocument {
@@ -266,11 +275,16 @@ export function composerDocumentStatus(
     // Skill selection records the sender's source identity. A source can
     // disappear before sending; Core preserves that intent and omits the link.
   }
-  return { hasContent, hasExplicitRecipient, hasUnavailableAtom }
+  return {
+    hasContent,
+    hasExplicitRecipient,
+    hasUnavailableAtom,
+    memberAgentIds: composerMemberMentionIds(document)
+  }
 }
 
 export function composerDocumentFromLegacyContent(
-  content: StructuredCampMessageContent
+  content: StructuredThreadMessageContent
 ): ComposerDocument {
   const segments: ComposerSegment[] = []
   for (const segment of content) {
@@ -293,7 +307,7 @@ export function composerDocumentFromLegacyContent(
 
 export function composerDocumentToStructuredContent(
   document: ComposerDocument
-): StructuredCampMessageContent {
+): StructuredThreadMessageContent {
   return normalizeComposerDocument(document).segments.map((segment) => {
     if (segment.kind === 'text') return { kind: 'text', text: segment.text }
     const atom = segment.atom

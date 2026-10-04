@@ -1,5 +1,5 @@
 import type { Session } from 'electron'
-import { isFeishuLoginUrl, openPlatformApiUrl, trustedFeishuUrl } from './feishu-domains'
+import { isFeishuLoginUrl, openPlatformApiUrl, trustedFeishuUrl, type OpenPlatformDomains } from './feishu-domains'
 
 export class FeishuSessionError extends Error {
   constructor(code: string, readonly details: {
@@ -72,6 +72,7 @@ export type FeishuRequestDiagnostic = {
 export class FeishuSessionHttp {
   constructor(
     private readonly session: Pick<Session, 'fetch'>,
+    private readonly domains: OpenPlatformDomains,
     private readonly timeoutMs = 15_000,
     private readonly diagnostic?: (event: FeishuRequestDiagnostic) => void
   ) {}
@@ -92,13 +93,13 @@ export class FeishuSessionHttp {
     const cancelBody = (): void => { void response?.body?.cancel().catch(() => undefined) }
     signal.addEventListener('abort', cancelBody, { once: true })
     try {
-      let url = trustedFeishuUrl(rawUrl)
+      let url = trustedFeishuUrl(rawUrl, undefined, this.domains)
       observedUrl = url
-      if (scope.kind === 'login' && (!isFeishuLoginUrl(url.href)
+      if (scope.kind === 'login' && (!isFeishuLoginUrl(url.href, this.domains)
         || url.origin !== scope.origin || !/^\/accounts\/qrlogin\/(init|polling)$/.test(url.pathname))) {
         throw new FeishuSessionError('feishu_login_protocol_url_rejected')
       }
-      if (scope.kind === 'api') openPlatformApiUrl(url.href, scope.origin)
+      if (scope.kind === 'api') openPlatformApiUrl(url.href, scope.origin, this.domains)
       // Navigation carries no caller-provided credentials/flow/CSRF headers or bodies.
       let method = scope.kind === 'navigation' ? 'GET' : (init.method ?? 'GET')
       let body = scope.kind === 'navigation' ? undefined : init.body
@@ -115,11 +116,11 @@ export class FeishuSessionHttp {
         if ([301, 302, 303, 307, 308].includes(response.status)) {
           const location = response.headers.get('location')
           if (!location) throw new FeishuSessionError('feishu_session_redirect_invalid')
-          const target = trustedFeishuUrl(location, url.href)
+          const target = trustedFeishuUrl(location, url.href, this.domains)
           if (scope.kind === 'login') throw new FeishuSessionError('feishu_login_protocol_redirect')
           if (scope.kind === 'api') {
             // Mutations are never replayed on a redirect. The API adapter classifies it.
-            if (target.origin !== scope.origin && !isFeishuLoginUrl(target.href)) {
+            if (target.origin !== scope.origin && !isFeishuLoginUrl(target.href, this.domains)) {
               throw new FeishuSessionError('feishu_open_platform_api_url_rejected')
             }
             cancelBody()

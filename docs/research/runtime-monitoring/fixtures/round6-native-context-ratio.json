@@ -1,0 +1,1642 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-01",
+  "branchHeadBeforeChanges": "5f526463f095c80598de56dd263f5fb2d83fa669",
+  "privacy": "Necessary numeric native fields only; Session/Run/call IDs aliased, workspace /workspace. No text, thought, tool arguments, raw journals, endpoints, credentials or content hashes. Copilot older Core-probe timestamps are explicitly aliased; final App native timestamps are retained.",
+  "entries": [
+    {
+      "runtime": "qoder-cli",
+      "version": "1.1.64",
+      "coreDigest": "b9fa037b838b4df9a89d0986b6b4164aeb30aafcaa94e6857c953526448802ec",
+      "providerModel": "qoder-custom-provider/gpt-6.1-sol",
+      "startMode": "Managed ACP root Session; isolated Core/userData/Skill Library/MCP/workspace",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 3127,
+          "lastAtMs": 248831
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 8277,
+          "lastAtMs": 8277
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 602,
+          "textScalars": 3502,
+          "firstAtMs": 17539,
+          "lastAtMs": 64687
+        },
+        "session/update/agent_message_chunk": {
+          "count": 1957,
+          "textScalars": 11780,
+          "firstAtMs": 29941,
+          "lastAtMs": 248511
+        },
+        "session/update/tool_call_update": {
+          "count": 7,
+          "textScalars": 0,
+          "firstAtMs": 32860,
+          "lastAtMs": 243818
+        }
+      },
+      "publicUnits": 195075,
+      "reasoningUnits": 74175,
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 178167,
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:50:54.552Z",
+                "message": {
+                  "id": "call-1-1",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24099,
+                    "output_tokens": 617,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.02295142857142857
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24099,
+                "outputTokens": 617,
+                "cacheReadTokens": null,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.02295142857142857
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:51:01.455Z",
+                "message": {
+                  "id": "call-1-2",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24848,
+                    "output_tokens": 65,
+                    "cache_read_input_tokens": 23936,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.023664761904761904
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24848,
+                "outputTokens": 65,
+                "cacheReadTokens": 23936,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.023664761904761904
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:51:41.924Z",
+                "message": {
+                  "id": "call-1-3",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 25572,
+                    "output_tokens": 1175,
+                    "cache_read_input_tokens": 24704,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.024354285714285714
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 25572,
+                "outputTokens": 1175,
+                "cacheReadTokens": 24704,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.024354285714285714
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:52:26.671Z",
+                "message": {
+                  "id": "call-1-4",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 26765,
+                    "output_tokens": 875,
+                    "cache_read_input_tokens": 25472,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.025490476190476192
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 26765,
+                "outputTokens": 875,
+                "cacheReadTokens": 25472,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.025490476190476192
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:53:14.502Z",
+                "message": {
+                  "id": "call-1-5",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 27658,
+                    "output_tokens": 1004,
+                    "cache_read_input_tokens": 26624,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.02634095238095238
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 27658,
+                "outputTokens": 1004,
+                "cacheReadTokens": 26624,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.02634095238095238
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:53:19.210Z",
+                "message": {
+                  "id": "call-1-6",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 28715,
+                    "output_tokens": 34,
+                    "cache_read_input_tokens": 27520,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.027347619047619048
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 28715,
+                "outputTokens": 34,
+                "cacheReadTokens": 27520,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.027347619047619048
+              }
+            }
+          ],
+          "expectedContext": {
+            "usedTokens": null,
+            "windowTokens": null,
+            "nativeRatio": 0.027347619047619048
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-1",
+                "cacheReadTokens": 128256,
+                "cacheWriteTokens": null,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T05:53:19.740481+00:00",
+                "lastObservedAt": "2026-10-01T05:53:19.210Z",
+                "outputTokens": 3770,
+                "promptInputTotalTokens": 157657
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+                "dialectId": "qoder-native-context-ratio-1.1.64",
+                "nativeRatio": 0.027347619047619048,
+                "observedAt": "2026-10-01T05:53:19.210Z",
+                "runtimeKind": "qoder-cli",
+                "sessionGeneration": 1,
+                "source": "runtime_private_extension",
+                "usedTokens": null,
+                "windowTokens": null
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 157657,
+            "outputTokens": 3770,
+            "cacheReadTokens": 128256,
+            "cacheWriteTokens": null
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 70860,
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:54:05.120Z",
+                "message": {
+                  "id": "call-2-1",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 29227,
+                    "output_tokens": 1360,
+                    "cache_read_input_tokens": 28544,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.027835238095238097
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 29227,
+                "outputTokens": 1360,
+                "cacheReadTokens": 28544,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.027835238095238097
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:54:25.413Z",
+                "message": {
+                  "id": "call-2-2",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 30605,
+                    "output_tokens": 361,
+                    "cache_read_input_tokens": 29056,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.029147619047619047
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 30605,
+                "outputTokens": 361,
+                "cacheReadTokens": 29056,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.029147619047619047
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T05:54:30.314Z",
+                "message": {
+                  "id": "call-2-3",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 31019,
+                    "output_tokens": 37,
+                    "cache_read_input_tokens": 30464,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.029541904761904762
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 31019,
+                "outputTokens": 37,
+                "cacheReadTokens": 30464,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.029541904761904762
+              }
+            }
+          ],
+          "expectedContext": {
+            "usedTokens": null,
+            "windowTokens": null,
+            "nativeRatio": 0.029541904761904762
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-2",
+                "cacheReadTokens": 88064,
+                "cacheWriteTokens": null,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T05:54:30.850601+00:00",
+                "lastObservedAt": "2026-10-01T05:54:30.314Z",
+                "outputTokens": 1758,
+                "promptInputTotalTokens": 90851
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+                "dialectId": "qoder-native-context-ratio-1.1.64",
+                "nativeRatio": 0.02954190476190476,
+                "observedAt": "2026-10-01T05:54:30.314Z",
+                "runtimeKind": "qoder-cli",
+                "sessionGeneration": 1,
+                "source": "runtime_private_extension",
+                "usedTokens": null,
+                "windowTokens": null
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 90851,
+            "outputTokens": 1758,
+            "cacheReadTokens": 88064,
+            "cacheWriteTokens": null
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.30",
+      "coreDigest": "11c631e2c5f0385835bec4a4db06fd996605d5268fa4506e701db71a7b89eb00",
+      "providerModel": "sub2api/gpt-6.1-sol",
+      "startMode": "Managed ACP root Session; isolated Core/userData/Skill Library/MCP/workspace",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 1059,
+          "lastAtMs": 138234
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1300,
+          "lastAtMs": 1300
+        },
+        "session/update/agent_message_chunk": {
+          "count": 2065,
+          "textScalars": 12540,
+          "firstAtMs": 8189,
+          "lastAtMs": 137903
+        },
+        "session/update/tool_call": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 29064,
+          "lastAtMs": 131778
+        },
+        "session/update/tool_call_update": {
+          "count": 12,
+          "textScalars": 0,
+          "firstAtMs": 29264,
+          "lastAtMs": 132203
+        }
+      },
+      "publicUnits": 210875,
+      "reasoningUnits": 0,
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 103875,
+          "sourceRecords": [
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 8437,
+                  "input": 7866,
+                  "output": 524,
+                  "reasoning": 47,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "time": {
+                  "completed": 1790833185992
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 7866,
+                "outputTokens": 571,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 7866,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 8982,
+                  "input": 722,
+                  "output": 566,
+                  "reasoning": 14,
+                  "cache": {
+                    "write": 0,
+                    "read": 7680
+                  }
+                },
+                "time": {
+                  "completed": 1790833219931
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 8402,
+                "outputTokens": 580,
+                "cacheReadTokens": 7680,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 8402,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 9556,
+                  "input": 660,
+                  "output": 562,
+                  "reasoning": 14,
+                  "cache": {
+                    "write": 0,
+                    "read": 8320
+                  }
+                },
+                "time": {
+                  "completed": 1790833245374
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 8980,
+                "outputTokens": 576,
+                "cacheReadTokens": 8320,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 8980,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 10265,
+                  "input": 1367,
+                  "output": 66,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 8832
+                  }
+                },
+                "time": {
+                  "completed": 1790833250146
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10199,
+                "outputTokens": 66,
+                "cacheReadTokens": 8832,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 10199,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 10353,
+                  "input": 207,
+                  "output": 34,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 10112
+                  }
+                },
+                "time": {
+                  "completed": 1790833253960
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10319,
+                "outputTokens": 34,
+                "cacheReadTokens": 10112,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 10319,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            }
+          ],
+          "expectedContext": {
+            "usedTokens": 10319,
+            "windowTokens": null,
+            "nativeRatio": null
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-1",
+                "cacheReadTokens": 34944,
+                "cacheWriteTokens": 0,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T05:40:54.398624+00:00",
+                "lastObservedAt": "2026-10-01T05:40:53.960+00:00",
+                "outputTokens": 1827,
+                "promptInputTotalTokens": 45766
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "sub2api/gpt-6.1-sol",
+                "dialectId": "opencode-native-call-context-1.18.30",
+                "nativeRatio": null,
+                "observedAt": "2026-10-01T05:40:53.960+00:00",
+                "runtimeKind": "opencode-cli",
+                "sessionGeneration": 1,
+                "source": "runtime_private_extension",
+                "usedTokens": 10319,
+                "windowTokens": null
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 45766,
+            "outputTokens": 1827,
+            "cacheReadTokens": 34944,
+            "cacheWriteTokens": 0
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 34702,
+          "sourceRecords": [
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 11083,
+                  "input": 502,
+                  "output": 341,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 10240
+                  }
+                },
+                "time": {
+                  "completed": 1790833273302
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10742,
+                "outputTokens": 341,
+                "cacheReadTokens": 10240,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 10742,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 11282,
+                  "input": 473,
+                  "output": 185,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 10624
+                  }
+                },
+                "time": {
+                  "completed": 1790833283028
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 11097,
+                "outputTokens": 185,
+                "cacheReadTokens": 10624,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 11097,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "providerID": "sub2api",
+                "modelID": "gpt-6.1-sol",
+                "tokens": {
+                  "total": 11374,
+                  "input": 330,
+                  "output": 36,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 11008
+                  }
+                },
+                "time": {
+                  "completed": 1790833288898
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 11338,
+                "outputTokens": 36,
+                "cacheReadTokens": 11008,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 11338,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            }
+          ],
+          "expectedContext": {
+            "usedTokens": 11338,
+            "windowTokens": null,
+            "nativeRatio": null
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-2",
+                "cacheReadTokens": 31872,
+                "cacheWriteTokens": 0,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T05:41:29.337453+00:00",
+                "lastObservedAt": "2026-10-01T05:41:28.898+00:00",
+                "outputTokens": 562,
+                "promptInputTotalTokens": 33177
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "sub2api/gpt-6.1-sol",
+                "dialectId": "opencode-native-call-context-1.18.30",
+                "nativeRatio": null,
+                "observedAt": "2026-10-01T05:41:28.898+00:00",
+                "runtimeKind": "opencode-cli",
+                "sessionGeneration": 1,
+                "source": "runtime_private_extension",
+                "usedTokens": 11338,
+                "windowTokens": null
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 33177,
+            "outputTokens": 562,
+            "cacheReadTokens": 31872,
+            "cacheWriteTokens": 0
+          }
+        }
+      ],
+      "effectiveNativeCatalog": {
+        "runtime": "opencode-cli",
+        "version": "1.18.30",
+        "command": [
+          "models",
+          "sub2api",
+          "--verbose"
+        ],
+        "workspace": "/workspace",
+        "models": [
+          {
+            "id": "gpt-6.1-sol",
+            "providerID": "sub2api",
+            "limit": {
+              "context": 0,
+              "output": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "runtime": "grok-build",
+      "version": "grok 1.0.44 (5b807183dd79)",
+      "coreDigest": "11c631e2c5f0385835bec4a4db06fd996605d5268fa4506e701db71a7b89eb00",
+      "providerModel": "gpt-6.1-sol",
+      "startMode": "Managed ACP root Session; isolated Core/userData/Skill Library/MCP/workspace",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 10,
+          "textScalars": 0,
+          "firstAtMs": 288,
+          "lastAtMs": 166595
+        },
+        "_x.ai/session/setup": {
+          "count": 22,
+          "textScalars": 0,
+          "firstAtMs": 349,
+          "lastAtMs": 681
+        },
+        "_x.ai/mcp/servers_updated": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 292,
+          "lastAtMs": 623
+        },
+        "_x.ai/mcp/init_progress": {
+          "count": 12,
+          "textScalars": 0,
+          "firstAtMs": 412,
+          "lastAtMs": 762
+        },
+        "session/update/available_commands_update": {
+          "count": 13,
+          "textScalars": 0,
+          "firstAtMs": 413,
+          "lastAtMs": 166493
+        },
+        "_x.ai/session_notification/background_tasks": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 763,
+          "lastAtMs": 763
+        },
+        "_x.ai/session_notification/model_changed": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 765,
+          "lastAtMs": 781
+        },
+        "session/update/config_option_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 781,
+          "lastAtMs": 781
+        },
+        "_x.ai/sessions/changed": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 459,
+          "lastAtMs": 166592
+        },
+        "_x.ai/queue/changed": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 466,
+          "lastAtMs": 166592
+        },
+        "_x.ai/mcp/server_status": {
+          "count": 17,
+          "textScalars": 0,
+          "firstAtMs": 484,
+          "lastAtMs": 21528
+        },
+        "_x.ai/session_notification/hook_execution": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 623,
+          "lastAtMs": 623
+        },
+        "_x.ai/mcp_initialized": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 694,
+          "lastAtMs": 694
+        },
+        "_x.ai/session_notification/session_summary_generated": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 5237,
+          "lastAtMs": 5237
+        },
+        "session/update/session_info_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 5237,
+          "lastAtMs": 5237
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 2,
+          "textScalars": 60,
+          "firstAtMs": 7042,
+          "lastAtMs": 86310
+        },
+        "session/update/agent_message_chunk": {
+          "count": 2053,
+          "textScalars": 12519,
+          "firstAtMs": 7126,
+          "lastAtMs": 165861
+        },
+        "_x.ai/session_notification/tool_call_delta_chunk": {
+          "count": 267,
+          "textScalars": 0,
+          "firstAtMs": 32777,
+          "lastAtMs": 160108
+        },
+        "_x.ai/session_notification/response_completed": {
+          "count": 8,
+          "textScalars": 0,
+          "firstAtMs": 34364,
+          "lastAtMs": 166493
+        },
+        "session/update/tool_call": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 34364,
+          "lastAtMs": 160540
+        },
+        "_x.ai/session_notification/pending_interaction": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 34364,
+          "lastAtMs": 160540
+        },
+        "_x.ai/session_notification/interaction_resolved": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 34364,
+          "lastAtMs": 160540
+        },
+        "_x.ai/session_notification/turn_completed": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 127197,
+          "lastAtMs": 166592
+        },
+        "_x.ai/session/prompt_complete": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 127197,
+          "lastAtMs": 166592
+        }
+      },
+      "publicUnits": 212725,
+      "reasoningUnits": 1400,
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 127395,
+          "sourceRecords": [
+            {
+              "raw": {
+                "method": "_x.ai/session_notification",
+                "params": {
+                  "sessionId": "session-1",
+                  "update": {
+                    "sessionUpdate": "turn_completed",
+                    "prompt_id": "prompt-1",
+                    "usage": {
+                      "inputTokens": 94028,
+                      "outputTokens": 1918,
+                      "totalTokens": 95946,
+                      "cachedReadTokens": 73344,
+                      "cacheCreationTokens": 0,
+                      "reasoningTokens": 52
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 94028,
+                "outputTokens": 1918,
+                "cacheReadTokens": 73344,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "_meta": {
+                "totalTokens": 20070
+              },
+              "update": {
+                "sessionUpdate": "agent_message_chunk"
+              }
+            },
+            "nativeModelConfiguration": {
+              "modelId": "gpt-6.1-sol",
+              "context_window": 1050000
+            }
+          },
+          "expectedContext": {
+            "usedTokens": 20070,
+            "windowTokens": 1050000,
+            "nativeRatio": null
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-1",
+                "cacheReadTokens": 73344,
+                "cacheWriteTokens": 0,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T05:41:19.895044+00:00",
+                "lastObservedAt": "2026-10-01T05:41:19.864610+00:00",
+                "outputTokens": 1918,
+                "promptInputTotalTokens": 94028
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "gpt-6.1-sol",
+                "dialectId": "grok-acp-meta-context-1.0.44",
+                "nativeRatio": null,
+                "observedAt": "2026-10-01T05:41:19.725604+00:00",
+                "runtimeKind": "grok-build",
+                "sessionGeneration": 1,
+                "source": "runtime_event",
+                "usedTokens": 20070,
+                "windowTokens": 1050000
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 94028,
+            "outputTokens": 1918,
+            "cacheReadTokens": 73344,
+            "cacheWriteTokens": 0
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 39215,
+          "sourceRecords": [
+            {
+              "raw": {
+                "method": "_x.ai/session_notification",
+                "params": {
+                  "sessionId": "session-1",
+                  "update": {
+                    "sessionUpdate": "turn_completed",
+                    "prompt_id": "prompt-2",
+                    "usage": {
+                      "inputTokens": 62646,
+                      "outputTokens": 579,
+                      "totalTokens": 63225,
+                      "cachedReadTokens": 61056,
+                      "cacheCreationTokens": 0,
+                      "reasoningTokens": 0
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 62646,
+                "outputTokens": 579,
+                "cacheReadTokens": 61056,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "_meta": {
+                "totalTokens": 21143
+              },
+              "update": {
+                "sessionUpdate": "agent_message_chunk"
+              }
+            },
+            "nativeModelConfiguration": {
+              "modelId": "gpt-6.1-sol",
+              "context_window": 1050000
+            }
+          },
+          "expectedContext": {
+            "usedTokens": 21143,
+            "windowTokens": 1050000,
+            "nativeRatio": null
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-2",
+                "cacheReadTokens": 61056,
+                "cacheWriteTokens": 0,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T05:41:59.283543+00:00",
+                "lastObservedAt": "2026-10-01T05:41:59.259210+00:00",
+                "outputTokens": 579,
+                "promptInputTotalTokens": 62646
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "gpt-6.1-sol",
+                "dialectId": "grok-acp-meta-context-1.0.44",
+                "nativeRatio": null,
+                "observedAt": "2026-10-01T05:41:58.555855+00:00",
+                "runtimeKind": "grok-build",
+                "sessionGeneration": 1,
+                "source": "runtime_event",
+                "usedTokens": 21143,
+                "windowTokens": 1050000
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 62646,
+            "outputTokens": 579,
+            "cacheReadTokens": 61056,
+            "cacheWriteTokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "copilot-cli",
+      "version": "GitHub Copilot CLI 1.0.83.",
+      "coreDigest": "43c7b8862b4ad91de73e760cbfa0fae1bae7c2af7e1d61f023c15d3d6bcbc4ce",
+      "providerModel": "claude-sonnet-5",
+      "startMode": "Managed ACP root Session; isolated Core/userData/Skill Library/MCP/workspace",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 425,
+          "lastAtMs": 106770
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 4092,
+          "lastAtMs": 4092
+        },
+        "session/update/session_info_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 4159,
+          "lastAtMs": 4159
+        },
+        "session/update/config_option_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 4163,
+          "lastAtMs": 4163
+        },
+        "session/update/usage_update": {
+          "count": 9,
+          "textScalars": 0,
+          "firstAtMs": 4541,
+          "lastAtMs": 104614
+        },
+        "github.com/copilot/sessionEvent/assistant.reasoning_delta": {
+          "count": 40,
+          "textScalars": 550,
+          "firstAtMs": 9501,
+          "lastAtMs": 79432
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 40,
+          "textScalars": 550,
+          "firstAtMs": 9501,
+          "lastAtMs": 79432
+        },
+        "session/update/agent_message_chunk": {
+          "count": 876,
+          "textScalars": 11313,
+          "firstAtMs": 9503,
+          "lastAtMs": 106763
+        },
+        "github.com/copilot/sessionEvent/assistant.usage": {
+          "count": 9,
+          "textScalars": 0,
+          "firstAtMs": 22700,
+          "lastAtMs": 106765
+        },
+        "session/update/tool_call": {
+          "count": 7,
+          "textScalars": 0,
+          "firstAtMs": 22707,
+          "lastAtMs": 104451
+        }
+      },
+      "publicUnits": 184675,
+      "reasoningUnits": 11425,
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 84241,
+          "sourceRecords": [
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:00:01Z",
+                  "data": {
+                    "inputTokens": 27234,
+                    "outputTokens": 1119,
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 27232,
+                    "reasoningTokens": 136,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 27234,
+                "outputTokens": 1119,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 27232
+              }
+            },
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:00:02Z",
+                  "data": {
+                    "inputTokens": 28376,
+                    "outputTokens": 1050,
+                    "cacheReadTokens": 27232,
+                    "cacheWriteTokens": 1142,
+                    "reasoningTokens": 17,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 28376,
+                "outputTokens": 1050,
+                "cacheReadTokens": 27232,
+                "cacheWriteTokens": 1142
+              }
+            },
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:00:03Z",
+                  "data": {
+                    "inputTokens": 29449,
+                    "outputTokens": 1213,
+                    "cacheReadTokens": 28374,
+                    "cacheWriteTokens": 1073,
+                    "reasoningTokens": 0,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 29449,
+                "outputTokens": 1213,
+                "cacheReadTokens": 28374,
+                "cacheWriteTokens": 1073
+              }
+            },
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:00:04Z",
+                  "data": {
+                    "inputTokens": 30737,
+                    "outputTokens": 149,
+                    "cacheReadTokens": 29447,
+                    "cacheWriteTokens": 1288,
+                    "reasoningTokens": 0,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 30737,
+                "outputTokens": 149,
+                "cacheReadTokens": 29447,
+                "cacheWriteTokens": 1288
+              }
+            },
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:00:05Z",
+                  "data": {
+                    "inputTokens": 31950,
+                    "outputTokens": 468,
+                    "cacheReadTokens": 30735,
+                    "cacheWriteTokens": 1213,
+                    "reasoningTokens": 39,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 31950,
+                "outputTokens": 468,
+                "cacheReadTokens": 30735,
+                "cacheWriteTokens": 1213
+              }
+            },
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:00:06Z",
+                  "data": {
+                    "inputTokens": 32511,
+                    "outputTokens": 71,
+                    "cacheReadTokens": 31948,
+                    "cacheWriteTokens": 561,
+                    "reasoningTokens": 0,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 32511,
+                "outputTokens": 71,
+                "cacheReadTokens": 31948,
+                "cacheWriteTokens": 561
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "update": {
+                "sessionUpdate": "usage_update",
+                "used": 25716,
+                "size": 200000
+              }
+            }
+          },
+          "expectedContext": {
+            "usedTokens": 25716,
+            "windowTokens": 200000,
+            "nativeRatio": null
+          },
+          "ignoredSessionCumulativeTerminal": {
+            "inputTokens": 180257,
+            "outputTokens": 4070,
+            "totalTokens": 184327,
+            "thoughtTokens": 192,
+            "cachedReadTokens": 147736,
+            "cachedWriteTokens": 32509
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-1",
+                "cacheReadTokens": 147736,
+                "cacheWriteTokens": 32509,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T06:05:18.656122+00:00",
+                "lastObservedAt": "2026-10-01T06:05:18.634Z",
+                "outputTokens": 4070,
+                "promptInputTotalTokens": 180257
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "claude-sonnet-5",
+                "dialectId": "acp-session-context-gauge-v1",
+                "nativeRatio": null,
+                "observedAt": "2026-10-01T06:05:16.207898+00:00",
+                "runtimeKind": "copilot-cli",
+                "sessionGeneration": 1,
+                "source": "runtime_event",
+                "usedTokens": 25716,
+                "windowTokens": 200000
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 180257,
+            "outputTokens": 4070,
+            "cacheReadTokens": 147736,
+            "cacheWriteTokens": 32509
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "durationMs": 22544,
+          "sourceRecords": [
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:01:01Z",
+                  "data": {
+                    "inputTokens": 33246,
+                    "outputTokens": 619,
+                    "cacheReadTokens": 32509,
+                    "cacheWriteTokens": 735,
+                    "reasoningTokens": 0,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 33246,
+                "outputTokens": 619,
+                "cacheReadTokens": 32509,
+                "cacheWriteTokens": 735
+              }
+            },
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:01:02Z",
+                  "data": {
+                    "inputTokens": 33888,
+                    "outputTokens": 539,
+                    "cacheReadTokens": 33244,
+                    "cacheWriteTokens": 642,
+                    "reasoningTokens": 0,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 33888,
+                "outputTokens": 539,
+                "cacheReadTokens": 33244,
+                "cacheWriteTokens": 642
+              }
+            },
+            {
+              "raw": {
+                "method": "github.com/copilot/sessionEvent",
+                "params": {
+                  "sessionId": "session-1",
+                  "type": "assistant.usage",
+                  "timestamp": "2026-10-01T00:01:03Z",
+                  "data": {
+                    "inputTokens": 34523,
+                    "outputTokens": 53,
+                    "cacheReadTokens": 33886,
+                    "cacheWriteTokens": 635,
+                    "reasoningTokens": 0,
+                    "model": "claude-opus-5"
+                  }
+                }
+              },
+              "timestampAliased": true,
+              "rawTimestampProvenance": "field present in native shape; original timestamp not retained by this earlier probe; valid fixture value is aliased",
+              "expectedParsed": {
+                "promptInputTotalTokens": 34523,
+                "outputTokens": 53,
+                "cacheReadTokens": 33886,
+                "cacheWriteTokens": 635
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "update": {
+                "sessionUpdate": "usage_update",
+                "used": 27586,
+                "size": 200000
+              }
+            }
+          },
+          "expectedContext": {
+            "usedTokens": 27586,
+            "windowTokens": 200000,
+            "nativeRatio": null
+          },
+          "ignoredSessionCumulativeTerminal": {
+            "inputTokens": 281914,
+            "outputTokens": 5281,
+            "totalTokens": 287195,
+            "thoughtTokens": 192,
+            "cachedReadTokens": 247375,
+            "cachedWriteTokens": 34521
+          },
+          "finalProjection": {
+            "runs": [
+              {
+                "agentRunId": "run-2",
+                "cacheReadTokens": 99639,
+                "cacheWriteTokens": 2012,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-01T06:05:41.354471+00:00",
+                "lastObservedAt": "2026-10-01T06:05:41.331Z",
+                "outputTokens": 1211,
+                "promptInputTotalTokens": 101657
+              }
+            ],
+            "sessions": [
+              {
+                "agentId": "agent-1",
+                "conversationId": "conversation-1",
+                "modelKey": "claude-sonnet-5",
+                "dialectId": "acp-session-context-gauge-v1",
+                "nativeRatio": null,
+                "observedAt": "2026-10-01T06:05:39.180892+00:00",
+                "runtimeKind": "copilot-cli",
+                "sessionGeneration": 1,
+                "source": "runtime_event",
+                "usedTokens": 27586,
+                "windowTokens": 200000
+              }
+            ],
+            "schemaVersion": 1
+          },
+          "independentSum": {
+            "promptInputTotalTokens": 101657,
+            "outputTokens": 1211,
+            "cacheReadTokens": 99639,
+            "cacheWriteTokens": 2012
+          }
+        }
+      ],
+      "modelCaveat": "This two-Run numeric probe predates the advertised-default correction: raw calls were claude-opus-5, stored model was claude-sonnet-5. The final signed App below proves the actual-model projection."
+    }
+  ]
+}

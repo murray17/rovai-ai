@@ -87,7 +87,7 @@ describe('offline report contract — synthetic fixtures only',()=>{
   })
   it('retains failed and successful analysis attempts without changing statistics',async()=>{
     const root=await temp()
-    const result=await runDaily({output:root,timezone:'UTC',date:'2026-09-09',now:new Date('2026-09-10T01:00:00Z'),scope:{campIds:[],excludeCampIds:[],excludeAutomationIds:[]},exportTrace:async params=>({schemaVersion:1,window:params,scope:params,asOf:'2026-09-10T00:00:00Z',facts:{runs:[],tools:[],deliveryEvents:[]},factsDigest:digest({runs:[],tools:[],deliveryEvents:[]}),metrics:{definitionVersion:2,runs:{terminalOutcomesInWindow:{}}}})})
+    const result=await runDaily({output:root,timezone:'UTC',date:'2026-09-09',now:new Date('2026-09-10T01:00:00Z'),scope:{threadIds:[],excludeThreadIds:[],excludeAutomationIds:[]},exportTrace:async params=>({schemaVersion:1,window:params,scope:params,asOf:'2026-09-10T00:00:00Z',facts:{runs:[],tools:[],deliveryEvents:[]},factsDigest:digest({runs:[],tools:[],deliveryEvents:[]}),metrics:{definitionVersion:2,runs:{terminalOutcomesInWindow:{}}}})})
     const stats=await readFile(join(result.directory,'report.json'),'utf8'),pack=JSON.parse(await readFile(join(result.directory,'analysis-input.json'),'utf8'))
     const input={schemaVersion:1,reportId:result.report.reportId,inputDigest:digest(pack),model:{provider:'fixture',snapshotId:'synthetic-no-model-invocation'},facts:[{text:'Synthetic fixture, not real analysis.',metricPaths:['yesterday.runs.failureRate.denominator'],evidenceIds:[]}],hypotheses:[],recommendations:[]}
     const failed=await recordDailyAnalysis(result.directory,{...input,inputDigest:'wrong'})

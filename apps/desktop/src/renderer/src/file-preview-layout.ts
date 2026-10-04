@@ -13,9 +13,9 @@ export function filePreviewCloseThreshold(_activityMode = false): number {
   return FILE_PREVIEW_CLOSE_THRESHOLD
 }
 
-export function filePreviewRatioFromStoredValue(value: string | null): number {
+export function filePreviewRatioFromStoredValue(value: string | null): number | null {
   const ratio = Number(value)
-  return Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : DEFAULT_FILE_PREVIEW_RATIO
+  return Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : null
 }
 
 export function maximumFilePreviewWidth(availableWidth: number): number {

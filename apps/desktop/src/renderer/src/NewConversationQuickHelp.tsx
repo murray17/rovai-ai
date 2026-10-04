@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { UiText } from './interface-language'
 
 export function NewConversationQuickHelp({
   onOpenChange,
@@ -111,11 +112,7 @@ export function NewConversationQuickHelp({
             onMouseLeave={leave}
           >
             {children ?? (
-              <>
-                保存所选队员和队长，下次点击「新对话」直接创建。
-                <br />
-                可在「设置 → 通用」关闭。
-              </>
+              <><UiText zh={"保存所选队员和队长，下次点击「新对话」直接创建。"} /><br /><UiText zh={"可在「设置 → 通用」关闭。"} /></>
             )}
           </span>,
           document.body

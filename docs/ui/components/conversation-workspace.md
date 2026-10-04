@@ -2,14 +2,15 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-24
+last_updated: 2026-10-03
 ---
 
 # Camp 会话工作区
 
 ## Public Camp v1.60 当前边界
 
-- 已激活 Camp 的输入内容不进入 Core Draft/Pending；Desktop 按 Camp 保存本机快照，切换、刷新、重建窗口和普通重启后恢复。
+- 已激活及普通一键 Pending Camp 的输入内容按 Camp 保存本机快照，切换、刷新、重建窗口和普通重启后恢复。
+  普通 Pending 输入保存后显示侧栏草稿行；同一项目可以保留多份，清空后隐藏。AI 创建队员仍按其窗口内草稿合同运行。
   发送失败或结果未知保留当前内容，确认发送成功才清空已发送快照。
 - 等待阶段在执行台展示由 Delivery 支撑的“排队消息”卡，但不伪装尚不存在的 AgentRun，也不提供 Run 停止入口。
   Scheduler claim 后才出现真实 Run，并由真实 Run 接管后续状态与停止语义。
@@ -24,7 +25,7 @@ last_updated: 2026-09-24
   Agent 发言不增加前缀。
 
 字段与状态见 [Message Delivery v10](../../contracts/message-delivery-v10.md)、
-[Camp Composer Draft v15](../../contracts/camp-composer-draft-v15.md)和
+[Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)和
 [Camp History v10](../../contracts/camp-history-v10.md)。本文件后续仍描述的 Core-owned public Draft/Pending、
 CampTurn Stop、Gather 或业务重试均为历史交互，不再适用于当前 public Camp；本机草稿与 recipient
 continuation 是当前 Desktop 行为。
@@ -83,13 +84,38 @@ Files Changed；时钟回拨时消息 sequence 优先，不能用非传递比较
 后保持用户当前阅读锚点，不跳到顶部或最新消息。没有 earlier history 时不显示该控件。
 
 Camp open/refresh 仅返回最多 96 个 Run 摘要与每个返回 Run 的原始 Evidence 计数；它不计算或返回全 Camp Evidence 总数。可见展开的 Run 才读取执行窗口，按详情高度估算首屏项数，
-并预取相邻更早一页。滚到边界或点击后才翻页，只挂载视口附近的内容；完整历史可继续按需访问，关闭的 Drawer、
+主线按正文或完整折叠组计数，并预取相邻更早一页。首次内容不足视口时最多自动补三页；之后滚到边界或点击续接，只挂载视口附近的内容；完整历史可继续按需访问，关闭的 Drawer、
 隐藏 Inspector、收起的 Run 与世界地图不读取历史。活动操作可补充到最新页，原始 Evidence 不被删除。
 普通 event refresh 保留较早消息、Draft、阅读位置、Inspector 选择和地图模式；在途执行刷新不覆盖历史阅读。
 
 用户主动提交消息时，时间线立即回到最底部并恢复 follow-latest；optimistic 用户消息和随后的权威回执
 渲染完成后仍须保持在最新位置。其他新增消息只有在用户原本位于底部附近时才自动跟随，用户手动上滚
 阅读较早内容时不得被后台消息抢走位置。
+
+### 用户消息锚点
+
+常规公共会话已加载至少 4 条未撤回的用户消息、且实际会话阅读区宽度达到 760px 时，左侧显示紧凑锚点；
+本机用户与通过 Owner 校验的外部 Principal 输入使用同一规则。队员、系统、Task、Run 工件与使命启动信息
+不产生锚点。只索引当前已加载的公开历史，向前加载后增量补齐；不额外读取整个 Camp 或将已加载数量冒充全 Camp 数量。
+切到地图、阅读区不可见或空间不足时隐藏锚点和预留区域，不能只检查整个窗口宽度。
+
+每条用户消息一个短横线，默认均为 6×2px、垂直间距 10px；只有鼠标悬浮的横线变为 12px。
+所有当前可见用户消息同时使用 `--ink` 加深，颜色不改变横线长度；可访问名称同步说明“当前可见”。
+可见范围包含身份、正文、引用与附件，排除正文后的透明操作／处理回执行。
+轨道垂直居中、点击列宽 44px，正文左侧预留 60px；高度不超过 360px 与阅读区高度 70% 中较小者，
+向下取整到完整行。更多锚点保留在轨道内部滚动，不抽样、不分组、不显示上下箭头。
+阅读滚动时轨道跟随可见锚点范围；鼠标、键盘或触控板正在浏览轨道时不抢走其位置。
+
+悬浮及键盘聚焦时展示同一个中性预览：标题直接使用完整用户消息正文，`--ink`、12px、单行超长省略；
+正文使用明确回复关联或 Run 输入／Turn 触发关联的首条队员回复，`--muted`、12px、最多三行省略。
+不按消息相邻位置猜测回复。尚未加载相关回复或用户未获回复时只显示标题；纯附件输入使用附件名称。
+预览不增加固定“用户消息”标题、作者、时间或空回复提示。
+
+Tab 进入一个当前可见锚点；方向键、Home/End、Page Up/Down 浏览全部锚点，Enter/Space 定位用户消息，
+Escape 收起预览。定位只滚动公共时间线并聚焦目标消息，保留草稿、历史加载、文件预览、队员与执行展开状态。
+宽度变化后隐藏焦点中的轨道时，将焦点留在时间线。动效遵守 reduced motion，键盘聚焦不会让横线变长。
+`pnpm test:message-anchors` 使用生产 CampWorkspace 的隔离 Electron fixture 验证阈值、双主题、原生悬浮、
+多条可见、首条回复、240 条用户消息、键盘、历史 prepend 和窄阅读区。
 
 ### 回到最新
 
@@ -112,7 +138,8 @@ Camp open/refresh 仅返回最多 96 个 Run 摘要与每个返回 Run 的原始
 不足 400ms 不显示加载提示，超时后由共享的不透明整窗品牌画布遮住框架，直到真实目标内容可用再淡出。Camp shell 不得
 用标题区、骨架或结构占位伪装 meaningful content，也不得在 `camps.enter` 成功前提交权威 Camp。成功 enter 的 Active Camp 保持 Active；meaningful
 未激活的 Pending Camp 外壳保持 Pending。若该 Camp 已有有效 Desktop-local Composer snapshot，则在 Camp
-权威进入后恢复，但本机草稿本身不会激活 Camp 或使其进入导航。Members 与 Memory 同样由自己的读取 owner 取得数据，
+权威进入后恢复；普通一键 Pending 的客户端 presence 允许其进入侧栏，但不会激活 Camp，
+也不使它成为 Main Window Session 的自动恢复目标。Members 与 Memory 同样由自己的读取 owner 取得数据，
 但冷启动可见等待共用品牌画布；失败切换到独立恢复面，应用已就绪后的普通切换仍留在局部 surface 重试。仅明确
 `camps.exists === false` 的已删除 Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和已读确认要等权威 route commit。
 
@@ -124,11 +151,17 @@ Camp open/refresh 仅返回最多 96 个 Run 摘要与每个返回 Run 的原始
 文案处理，不显示“重新加入”或历史离队分组。提交按权威 membership generation 顺序执行；多选出现局部失败
 时保留失败项和明确原因，已成功项立即从候选移除，不伪装为整批回滚。
 
-成员行保持头像、身份、Runtime 名称与真实“在队 / 暂离”状态；队长通过中性灰行内徽标表达。设为队长、模型信息展开与“移出当前会话”统一收进
-行尾单个水平三点菜单，避免并排按钮破坏层级。入口保留 `28×28px` 命中区，静止态无边框、无底色，
-仅在悬停、键盘聚焦或菜单打开时显示低强调度底色。菜单项必须有文本动作名、键盘焦点、Esc/外部点击关闭和
-`aria-expanded`；模型项使用“模型信息”，已配置时不重复 Runtime 副说明；未配置时保留原因。模型信息使用中性结构线，
-只控制既有详情 disclosure，不改变 Runtime 配置。“移出当前会话”不显示泛化说明，禁用原因继续显示。
+成员行保持头像、身份、Runtime 名称与真实“在队 / 暂离”状态；队长通过中性灰行内徽标表达。模型与强度直接显示在身份下方，
+点击文字展开模型、推理／思考强度两行，支持键盘操作并维护 `aria-expanded` / `aria-controls`。
+展开区与姓名对齐，无灰色底块、边框或结构线；长模型名在摘要省略、详情换行。桌面与手机均可查看，手机入口至少 44px 高。
+设为队长与“移出当前会话”继续使用行尾三点菜单；其中“模型信息”保留为同一 disclosure 的辅助入口。
+菜单静止态无边框、无底色，悬停、键盘聚焦或打开时显示低强调度底色，支持 Esc/外部点击关闭；禁用原因继续显示。
+
+消息头用“模型 · 强度”提供可点击摘要；浮层仅显示队员、智能体、模型和已记录的强度，不加“本次执行”“当前配置”或策略说明。
+历史消息使用 [Camp Open Projection v25](../../contracts/camp-open-projection-v25.md) 的 `runtimeModel`，不能由现有队员配置推断；
+缺失记录显示“模型未记录”，Agent 默认且没有原生模型观测时显示“智能体默认”。模型或强度变化会打断连续消息的身份折叠。
+输入框默认队长／继续发送的接收者提示只保留路由与姓名，不附加模型或推理强度。模型仍可从消息头、队员区与资料浮层查看。
+队员资料浮层直接列出模型与强度。弹层支持 Esc、外部点击关闭及焦点返回，复用既有主题；中文、英文与手机共享同一展示组件。
 
 Camp 只有一位 active member 时，“移出当前会话”仍可见但禁用，并直接解释“Camp 至少需要一位队员”。
 其他成员选择移除后，先打开读取
@@ -332,7 +365,7 @@ Web 与 Desktop 共用上述结构和样式；Mobile 横竖屏均取消额外左
 一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
-[Camp Composer Draft v15](../../contracts/camp-composer-draft-v15.md)，评审方向见
+[Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)，评审方向见
 [HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/message-reply-chain/README.md)。
 
 渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
@@ -370,10 +403,15 @@ reply、显式 Member Mention、多人 Mention 和 `@所有队员` 都比 contin
 标签出现后对象在空白 Draft 失效时，标签消失并持久抑制该来源；正文或附件已经存在时，保留全部 Draft，
 展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
-[Camp Composer Draft v15](../../contracts/camp-composer-draft-v15.md)，交互探索见
+[Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)，交互探索见
 [延续路由原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 内单聊
+
+Camp Header 的任务、队员和单聊入口在英文下分别使用 `Tasks / Team / DMs`；对应浮层标题使用
+`Tasks / Team / Direct messages`，手机更多菜单的单聊项也写全。中文维持“任务 / 队员 / 单聊”，全局导航
+中的队员名称不受这些局部译名影响。入口保留 28px 高度、14px 图标和 11px 文本；标签与计数使用同一字体、
+16px 行高并按基线对齐，计数使用等宽数字与次要字色，不新增徽章容器。
 
 Camp Header 的“当前会话”详情入口包含一个独立“单聊”项；打开后使用锚定在会话区右上方的非模态 panel，
 与既有成员/Task/文件详情互斥，但不改变 Camp route、公共时间线、Composer Draft 或执行台位置。入口显示 active
@@ -514,14 +552,14 @@ waiting Delivery，队员入口优先显示“排队中”；已有 non-terminal
 展开时标题和原有操作只在本卡范围内吸顶，滚过本卡后退出，不复制全局标题或脱离所属 Run 的停止按钮。
 Desktop 与宽屏 Web 的展开正文首尾、主要过程项间距及相邻 Run 间距统一使用 8px，运行中切到终态时不得改变
 这组密度；Mobile 继续由独立 mobile stylesheet 拥有其触控行高与紧凑过程间距，不继承该桌面调整。
-运行中卡片默认显示 live 耗时，窄详情同样保留；仅标题行 hover 或标题内 `:focus-visible` 时，
-在固定尾部槽内切换为折叠／展开与红色终止按钮。正文 hover 不触发，鼠标移出标题恢复耗时，不挤动标题。
+运行中卡片默认在右侧显示 live 耗时；仅卡片标题行 hover 或标题内 `:focus-visible` 时，
+在固定尾部槽内将耗时切换为折叠／展开与红色终止按钮。正文 hover 不触发，鼠标移出标题恢复耗时，不挤动标题。
 折叠／展开保留 1px 边框、抬升面底色和 5px 圆角；终止始终使用 danger/danger-soft，禁用时仍保留危险色。
 粗指针或无 hover 环境同时展示耗时与操作。非运行状态保留原有静态操作，不套用 hover 切换。
 滚动容器为键盘焦点留出标题安全区，不改变跟随最新、折叠、输入清单或 exact Run 停止语义。
 总览中的队员头像固定为 20×20px，不随 flex 收缩拉伸。左侧状态节点与卡头首行垂直居中并跟随本卡标题，
 展开与停止操作距卡片右边保留 9px。字段与验收边界见
-[Run Process Detail Surface v42](../../contracts/run-process-detail-surface-v42.md)。
+[Run Process Detail Surface v43](../../contracts/run-process-detail-surface-v43.md)。
 
 执行浮层入口、右侧标签、消息区“处理中”回执和底部标题共用同一 24×24 心跳路径与 1.65 描边；
 queued 回执的时钟及各执行状态图形不变。
@@ -567,6 +605,7 @@ Renderer 以公开消息和 Delivery ID 跟踪刚提交输入；Scheduler claim 
 Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、缓存或 disclosure；仅消费不含正文的
 `thinking | executing` phase 来切换上述等待反馈，并把 phase edge 作为匿名公开正文的分段边界。
 Camp 执行卡片的普通等待提示与正文共用字号、行高和文字起点，加载图标放在提示文字后；底部、桌面浮层和手机端切入首行正文时不改变卡片位置或单行高度。
+运行中 Run 卡片保留原有耗时；终态卡片有用量字段时仅显示 `xxk` 入口，点击的气泡显示 Input Token、Output Token、Cache Read、Cache Write 四项及分隔后的执行耗时。缺失字段显示未知，不加用量合计行、Run 编号或摘要。仅成功且 Input/Output 完整结算时计算入口值 `Input + Output`，Cache 不再叠加。完全没有用量字段的终态卡片使用时钟入口单独查看耗时；迟到用量到达后切换成 token 入口。执行台标题右侧的弱化圆环默认并排显示一位小数百分比，与气泡保持一致（未知为 `—`），读取当前队员 Camp Conversation 的原生 Session 上下文；切换同一会话的 Run 卡片不改变圆环归属。气泡只显示 `used / window` 和比例，单有窗口不显示 `0%`；只有可信原生比例时显示该比例，数量仍为 `— / —`，不反推 used 或窗口。来源、栅栏和字段语义见 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md)。
 需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出时显示“执行中”。成功后才显示“工作了 {时长}”
 并自动折叠过程；失败保留明确失败摘要及可操作错误，取消保持停止语义。正文或工具首次到达、单条工具返回、步骤组
 收口都不能触发整轮耗时总结。关闭 Run 后卸载详情；再次打开读取最新窗口。组跨页按稳定操作身份保留展开意图。
@@ -590,9 +629,10 @@ Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ comm
 和多行输入，沿用 Shell Evidence 的按条惰性读取。Core 操作身份、图标和状态保持不变；不新增入参存储。
 缺少可靠关联时回退对应 `rovai` CLI 名称和同一 operation 的 Core 公共 `canonicalInput`，省略投影辅助事实和
 由消息面拥有的 Send 正文或历史 Gather 正文；没有可显示入参时为无箭头静态行，不借用其他调用的结果。
-纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；混合命令、帮助、
+纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；单记录生命周期
+改用同 Run、同 epoch、紧邻序号和精确结果 digest 证明关联。混合命令、帮助、
 提前失败或不确定关联保留。底层 Evidence 和 Canonical 身份不变。完整规则见
-[Built-in 入参与载体展示](../../contracts/run-process-detail-surface-v34.md)。
+[Run Process Detail Surface v43](../../contracts/run-process-detail-surface-v43.md)。
 
 新 operation 的 started/progress/terminal 按稳定 Evidence ID 合并为一行；Renderer 只接受更高
 `revision/changeSequence`，不以记录数量或固定展示 `sequence` 判断内容是否变化。终态后的输入补齐、结果更新和
@@ -604,10 +644,9 @@ Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ comm
 可靠阅读／编辑文件名或多文件数量，Web 搜索使用 typed query，其他操作使用非通用 Runtime title/toolName；
 没有具体值时回退稳定 Tool 行标题，不从 raw input/output 猜测。当前 Tool 已结算但尾组尚未收口时，继续显示
 “<最近一条指令>”。真正收口后只显示 `已完成 x 个步骤`；`x` 统计成功、失败、停止、跳过和结果未知在内的
-全部已结算逻辑操作，各终态不再追加独立数量，具体结果由展开后的 Tool 行表达。分页读取沿用相同的执行结果摘要，不改成“已载入 x 项执行记录”；组摘要只统计
-当前组已读取的逻辑操作，不表示整轮总量。已载入范围只在“加载更早记录”入口呈现。
+全部已结算逻辑操作，各终态不再追加独立数量，具体结果由展开后的 Tool 行表达。分页读取沿用相同的执行结果摘要，不改成“已载入 x 项执行记录”；组摘要统计该组完整的可见逻辑操作，不表示整轮总量；未展开的子项不读取。主线和组内分别维护已载入范围。
 `x` 按去重后的可见逻辑操作计数；同一 Built-in 与已关联 Shell 载体计一步，started/result/delta 和一个 Activity 的多文件行不重复计数。
-精确计数语义见 [Run Process Detail Surface v42](../../contracts/run-process-detail-surface-v42.md)。
+精确计数语义见 [Run Process Detail Surface v43](../../contracts/run-process-detail-surface-v43.md)。
 
 Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“已完成 x 个步骤”。
 它复用普通 command 的桌面 28px 行、最右侧状态 icon、文字后展开提示与结果文本框，并保留独立压缩 SVG；同一
@@ -633,7 +672,7 @@ Terminal、File Read、File Write、Web 等图标。运行时最右端只有状�
 高亮只覆盖静止的文字，不移动文字或闪烁背景；展开组或 Compact 后停止该行高亮，子指令及结果正文保持静态。
 完成、失败、等待、停止和结果未知保持静态；减少动态效果或 forced-colors 时关闭文字高亮，状态事实仍保留。
 
-用户展开后保持展开，新 Tool 与组终态只原位更新，不自动收起或抢焦点。展开组只显示全部 Tool summary，
+用户展开后保持展开，新 Tool 与组终态只原位更新，不自动收起或抢焦点。展开组每页读取 24 项 Tool 元数据，近边界自动续接并保留手动入口，与主线共用 Run 滚动容器；
 截断后的结果仍须再展开精确 Tool；结果 region 在首次展开前不进入 DOM，Managed Blob 也不提前读取。普通输出超过
 7.5 KiB 时在结果下显示“结果过长，部分内容已省略。”，并将读取文案改为“结果”，不提供全文恢复
 暗示；结构化 diff、Files Changed、输入与附件仍使用各自入口。收起组时
@@ -728,16 +767,37 @@ Claude Code `Edit` 的 exact mutation 展开只显示 `− oldText / + newText` 
 失败/缺失 result 与 `replace_all=true` 保持普通 Tool Activity。
 
 每个 terminal `agentRunId + executionEpoch` 可以在对应 Run 的会话位置追加一张独立卡片，标题固定为
-`Files Changed`。卡片紧跟来源 Run 的最后一条公开消息；没有公开消息时才以完成时间定位。并行 Run 分别产生卡片，
+`Files Changed`。卡片位于来源 Run 最后一条公开消息后的结果区域；同 Run 有入队卡片时，顺序固定为
+“最后一条公开回复 → 入队卡片 → Files Changed”。没有公开消息时才以完成时间定位。并行 Run 分别产生卡片，
 不共享、不覆盖，也不会因相邻完成而视觉归属到其他队员。移除明确的 `runtime_diff_no_changes` 后，每个文件只要
 仍有一个或多个可靠 Diff，就按既有归约显示逐文件 `+A −D`；同文件的 path-only operation 只保留在时序和
 operation count 中，不阻止可靠 Diff 参与统计。只有所有文件都有可靠统计时，卡片显示
 `N 个文件 · +A −D`；任一文件只有 operation-only 时，整张卡片回退为 `N 个文件 · M 次修改`。
 
-Run 已成功、失败或取消但没有公开消息时，图片与文件变化按精确 `agentRunId` 组成运行产物区域，
+Run 已成功、失败或取消但没有公开消息时，图片、入队卡片与文件变化按精确 `agentRunId` 组成运行产物区域，
 直接使用该 `AgentRun.agentId` 显示队员头像和姓名。同 Run 的多个 epoch 共用一次作者头，图片排在文件卡之前；
 不同 Run 保持各自作者和归属。头像、姓名沿用公开消息的人物信息卡资格与缺失头像回退，离队或移除队员保持静态。
 该区域不创建 CampMessage、不合成正文，也不提供消息复制或回复；来源 Run 未加载时保留文件卡，不猜测作者。
+
+仅当 Run 为 `cancelled` 且 `cancelReasonCode = user_requested_agent_run_stop` 时，在该 Run 最后一条公开
+回复及全部产物之后显示一次“你已中断”。既无公开回复、也无实际产物时，不新增产物区、队员头像或中断行；
+中断状态仍可在执行台查看。标记只补充既有内容，不为取消事件合成空的输出区域。
+标记采用居中的 4px 实心方点与 11.5px 中性文字，距上方内容 8px，点击高度至少 24px；不加横线、边框、时间或箭头。
+它与结果列共用 620px 上限、42px 缩进及窄容器回流规则。点击或键盘激活打开精确来源 Run 的执行详情，并沿用
+执行台承载位置与关闭行为；后续 Run、其他队员、多个 epoch 不改变来源或重复标记。请求尚未终态、
+异常失败、整轮取消及其他取消原因不使用“你已中断”。
+
+入队卡片仅在其明确来源 Run 终态后出现，同 Run 的多张入队卡片按创建时间、创建 ID 排序，并始终排在
+Files Changed 之前。两类卡片共用宽度不超过 620px、左缩进 42px 的结果列，距回复 14px、卡片间距 12px；
+会话容器不超过 480px 时取消缩进，占满内容列，保留现有 MobileUI 外侧留白。
+静态回执、旧记录兼容及缺失 Run 的回退由 [Member Creation Flow v1](../../contracts/member-creation-flow-v1.md) 拥有。
+
+入队卡片在左侧内容区显示“新队员已入队”、姓名、角色、职责和填色性格标签，肖像位于右侧。
+姓名为 24px / 600，职责使用正文色，角色与创建信息使用次级文字色。主体使用 `--surface`，
+独立页脚使用 `--home-surface`，边框与页脚分隔线使用 `--line`；MobileUI 沿用这些 Token 的既有映射。
+桌面肖像为 132×165px；会话容器不超过 480px 时改为 90×112.5px、姓名 22px，文字允许换行。
+页脚仅保留创建者、时间和“配置智能体”入口，右侧使用 14px SVG 折线箭头，窄栏触控高度至少 44px。
+配置入口仍打开现有队员运行配置，不在卡片内读取或展示队员的当前配置状态。
 
 文件行按“目录/文件名”连续展示，目录与分隔符保持次级灰色，文件名保持主文字色。display root 根目录文件只显示文件名，
 不补“当前目录”。宽度不足时优先从目录右侧按完整目录段省略，例如 `/xxx/.../CONTEXT.md`，文件名优先保留；
@@ -773,8 +833,8 @@ Evidence 的 Run 不生成卡片；Review 也只读取同一 projection/detail�
 项目行为一致。执行台不增加共享 workspace observation，
 底部/右侧 placement、会话连接轨、Tool list 宽度和其他既有视觉结构保持不变。
 
-使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
-“模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
+使用“智能体默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
+“模型 智能体默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
 不增加本版字段；运行中后续换模不覆盖首值。长 ID 使用等宽单行省略并允许键盘聚焦取得完整 title，底部和
 Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run selection、移动焦点或创建 Toast/时间线消息。
 
@@ -875,14 +935,21 @@ Header/通知摘要只展开、定位并聚焦 Dock，不改变执行台位置�
 
 Desktop / 宽屏 Web 的 Dock 与底部执行台共用会话列全宽，不跟随正文或 Composer 的内缩轨道。单行顶栏显示当前请求摘要、
 当前队员与 Runtime、队列导航和收起入口；命令与请求 JSON 原样展示，达到内容高度上限后局部滚动。
-选项使用紧凑内容宽度按钮，严格保留 Runtime 的原始顺序、原生标签和 `optionId`，不显示 `consequence`，
+选项使用紧凑内容宽度按钮，严格保留 Runtime 的原始顺序、原生标签和 `optionId`，默认不显示内部 `consequence`，
 也不通过翻译或术语替换改写 Runtime 文案。ACP 缺少有效 `name` / `label` 时直接展示 `optionId`；
 Codex 无原生显示标签的决定由 Adapter 提供固定英文标签，响应值和作用域不变。
+Core 管理动作的“拒绝 / 允许一次”属于应用文案，按钮文字、title 和无障碍名称跟随界面语言。
+Claude stdio 不返回标签，Adapter 使用 CLI 2.1.280 已核实的原生 `No` / `Yes` / `Yes, and don’t ask again for: …`
+模板，不随界面语言翻译；历史 Claude 两个旧中文 host 标签仅展示为原生英文，不修改冻结 ID 或响应。
+Claude 的记忆选项只显示含规则范围的完整原生按钮标签，不额外显示保存 destination 或配置文件说明。
+所有选项按内容宽度尽量同行排列，空间不足时自然换行，不为记忆项强制预留整行；长标签完整换行，
+手机按钮至少为 44px 触控区域。规则与 suppression 边界见
+[Runtime Launch v46](../../contracts/runtime-launch-and-verification-v46.md)。其他 Runtime 的内部 consequence 不展示。
 
 Dock 保留橙色顶部，以中性边框界定请求，移除左侧橙线和浮层阴影。原始 JSON 的底色与执行台 command
 结果框共用 `--shell-result-canvas`，使用 11.5px 等宽文字，保留空白与局部滚动；请求区可由键盘聚焦和滚动。
 按钮保留原生标签与顺序，使用中性边框、500 字重和明确的按下／提交中状态。
-手机的上下标题、44px 控件、双列选项与可视高度适配见 [Mobile WebUI](../host-web-mobile.md#对话与执行)。
+手机的上下标题、44px 控件、选项换行与可视高度适配见 [Mobile WebUI](../host-web-mobile.md#对话与执行)。
 
 翻页保持刚触发的导航按钮焦点。边界按钮使用 `aria-disabled`，仍可保持焦点但触发无操作。
 顶栏定位以及当前审批结束后接续下一项时只聚焦请求摘要；初次显示和普通刷新不主动聚焦决策按钮。
@@ -936,7 +1003,8 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入保留输入光标，不增加局部焦点框或光晕。
 
 接收者提示始终预留一行 34px 高度及 5px 底部间距。草稿首次 loading 时显示无接收者文案、无循环动画的模糊占位；
-ready 后原位显示默认 Lead 或 continuation。显式 Mention、reply 或错误状态不显示路由时保留空白行，
+ready 后原位显示默认 Lead 或 continuation。队外 Mention 存在时在同一轨显示去重后的“发送时邀请”及姓名，
+按钮显示“邀请并发送”；删去最后一个相应 Atom 后立即恢复原路由提示。显式 Mention、reply 或错误状态不显示路由时保留空白行，
 避免路由加载或显隐挤动会话内容。占位不提前声明接收者，也不提前启用编辑或发送。
 
 新建会话成功后的首次打开，把该 Camp 的本地 snapshot 与 Open 投影并行准备，在首次绘制前一次性交给
@@ -946,7 +1014,9 @@ Draft Coordinator，因此直接呈现已恢复内容或就绪的默认接收人
 Draft 首次读取只有 loading、ready 和 error。loading 与 error 时正文、附件、Reply/Continuation 和发送不可操作；
 error 在 Composer 上方原位显示“草稿无法加载”、具体错误与“重新加载草稿”，不能渲染可编辑的 revision-zero 空
 Draft。发送和路由 mutation 在第一个异步等待前同步禁用编辑器；本地路由 mutation 改变正文时在解除禁用前回写
-Lexical。发送失败保留正文并恢复交互，成功则以空 Draft/continuation 替换。导航或卸载前的同步本地保存失败时，
+Lexical。发送前需要邀请队员时，先冻结并保存草稿，逐人沿用 Camp 成员加入命令；全部成功后沿用原发送入口。
+邀请部分成功时显示已加入与失败名单，消息不发送，草稿与每处 Mention 保留。加入成功后发送失败时提示先查会话
+再重试；成员加入不回滚。发送失败保留正文并恢复交互，成功则以空 Draft/continuation 替换。导航或卸载前的同步本地保存失败时，
 留在当前 Camp、显示保存错误并恢复交互；打开新会话 Dialog、展开或选择 Project 等未卸载 Composer 的动作不
 伪装成已离开。附件预览、打开与 reveal 由 Main 的 Camp+attachment authority 重验，不依赖 Core Draft locator。
 
@@ -1000,7 +1070,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
 [会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
 [Camp Attachment v9](../../contracts/camp-attachment-v9.md)，发送边界见
-[Camp Composer Draft v15](../../contracts/camp-composer-draft-v15.md)。
+[Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
 独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除

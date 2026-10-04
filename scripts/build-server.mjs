@@ -49,6 +49,9 @@ try {
   }
   if (!existsSync(join(webBuildDirectory, 'index.html'))) throw new Error('Server WebUI build is missing index.html')
   cpSync(webBuildDirectory, join(destination, 'web-ui'), { recursive: true })
+  // Managed Skills are runtime resources, not compile-time embeds. Keep them
+  // beside the Server executables so a release works outside this checkout.
+  cpSync(join(repository, 'skills'), join(destination, 'skills'), { recursive: true })
   copyFileSync(join(repository, 'LICENSE'), join(destination, 'LICENSE'))
   const version = JSON.parse(readFileSync(join(repository, 'package.json'), 'utf8')).version
   writeFileSync(join(destination, 'package-info'), `schema=1\nversion=${version}\ntarget=${target.key}\n`)

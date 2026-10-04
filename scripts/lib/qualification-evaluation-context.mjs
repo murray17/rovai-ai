@@ -56,7 +56,7 @@ export function buildEvaluationContext(snapshot, boundary) {
   const runIds = new Set(runs.map(run => run.id))
   const lead = runs.find(run => run.id === boundary.rootAgentRunId)?.agentId
   const messages = (snapshot.messages ?? []).filter(m => (
-    (isBatchTrialBoundary(boundary) || m.campTurnId === boundary.campTurnId)
+    (isBatchTrialBoundary(boundary) || (m.threadTurnId ?? m.campTurnId) === (boundary.threadTurnId ?? boundary.campTurnId))
     && runIds.has(m.sourceAgentRunId)
   ))
   const deliveryMessageIds = messages.filter(m => m.authorId === lead && m.authorType === 'agent' && !(m.addressedAgentIds?.length)).map(m => m.id)

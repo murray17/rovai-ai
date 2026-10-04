@@ -14,7 +14,7 @@ import electron from 'electron'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
-for (const scenario of ['basic', 'navigation', 'lifecycle']) test(scenario === 'basic' ? 'production HTML preview runs History initialization and a query-addressed nested canvas independently' : scenario === 'navigation' ? 'production HTML preview isolates document navigation state and diagnostics' : 'production HTML preview recovers diagnostic loss without replacing the page', { timeout: 90_000 }, async t => {
+for (const scenario of ['basic', 'navigation', 'lifecycle', 'policy']) test(scenario === 'basic' ? 'production HTML preview runs History initialization and a query-addressed nested canvas independently' : scenario === 'navigation' ? 'production HTML preview isolates document navigation state and diagnostics' : scenario === 'policy' ? 'production HTML preview distinguishes internal CSP denial from author errors' : 'production HTML preview recovers diagnostic loss without replacing the page', { timeout: 90_000 }, async t => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-html-site-'))
   const source = join(root, 'scripts/fixtures/html-preview')

@@ -14,14 +14,14 @@ use uuid::Uuid;
 use crate::{
     agent_run_file_change::{AgentRunFileChangesView, list_completed_run_file_changes},
     camp_content::{
-        ExternalQuoteAttachmentSummary, StructuredCampMessageContent, StructuredCampMessageSegment,
-        canonical_content_digest, mentions_current_user, normalize_content,
-        render_current_plain_text, validate_content,
+        ExternalQuoteAttachmentSummary, StructuredThreadMessageContent,
+        StructuredThreadMessageSegment, canonical_content_digest, mentions_current_user,
+        normalize_content, render_current_plain_text, validate_content,
     },
-    camp_id::CampId,
+    camp_id::ThreadId,
     collaboration::{
-        AddCampMemberCommand, CampMembershipMutationSource, CollaborationService,
-        DEFAULT_CAMP_TITLE, ExternalChannelAdmissionInput, RemoveCampMemberCommand,
+        AddThreadMemberCommand, CollaborationService, DEFAULT_CAMP_TITLE,
+        ExternalChannelAdmissionInput, RemoveThreadMemberCommand, ThreadMembershipMutationSource,
         append_domain_event,
     },
     command::{
@@ -37,9 +37,58 @@ use crate::{
     },
 };
 
-const FEISHU_PROVIDER: &str = "feishu";
+/// Identifiers are closed Core-owned constants, never request payload values.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ChannelProviderSpec {
+    pub(crate) provider: &'static str,
+    pub(crate) host_component: &'static str,
+    pub(crate) account: &'static str,
+    pub(crate) owner_identity: &'static str,
+    pub(crate) owner_app_identity: &'static str,
+    pub(crate) member_bot: &'static str,
+    pub(crate) publication_intent: &'static str,
+}
+
+pub(crate) const FEISHU_SPEC: ChannelProviderSpec = ChannelProviderSpec {
+    provider: "feishu",
+    host_component: "feishu-channel-host",
+    account: "feishu_account",
+    owner_identity: "feishu_owner_identity",
+    owner_app_identity: "feishu_owner_app_identity",
+    member_bot: "feishu_member_bot",
+    publication_intent: "feishu_member_bot_publication_intent",
+};
+
+pub(crate) const LARK_SPEC: ChannelProviderSpec = ChannelProviderSpec {
+    provider: "lark",
+    host_component: "lark-channel-host",
+    account: "lark_account",
+    owner_identity: "lark_owner_identity",
+    owner_app_identity: "lark_owner_app_identity",
+    member_bot: "lark_member_bot",
+    publication_intent: "lark_member_bot_publication_intent",
+};
+
+impl ChannelProviderSpec {
+    pub(crate) fn for_provider(provider: &str) -> Option<&'static Self> {
+        match provider {
+            "feishu" => Some(&FEISHU_SPEC),
+            "lark" => Some(&LARK_SPEC),
+            _ => None,
+        }
+    }
+
+    fn code(&self, suffix: &str) -> String {
+        format!("{}_{}", self.provider, suffix)
+    }
+}
+
+const LARK_PROVIDER: &str = "lark";
+const FEISHU_PROVIDER: &str = FEISHU_SPEC.provider;
+pub mod inbound_attachments;
 const DINGTALK_PROVIDER: &str = "dingtalk";
-const FEISHU_CHANNEL_HOST_COMPONENT: &str = "feishu-channel-host";
+#[cfg(all(test, feature = "extended-tests"))]
+const FEISHU_CHANNEL_HOST_COMPONENT: &str = FEISHU_SPEC.host_component;
 const DINGTALK_CHANNEL_HOST_COMPONENT: &str = "dingtalk-channel-host";
 const CHANNEL_MEMBERSHIP_SYNC_COMPONENT: &str = "channel-membership-sync";
 const AGGREGATION_WINDOW_SECONDS: i64 = 3;
@@ -54,7 +103,7 @@ const FEISHU_PROJECT_SELECTION_CARD_REVISION: i64 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpsertFeishuAccountCommand {
+pub struct UpsertChannelAccountCommand<const LARK: bool> {
     pub account_id: String,
     pub user_id_digest: String,
     pub tenant_id: String,
@@ -64,21 +113,28 @@ pub struct UpsertFeishuAccountCommand {
     pub brand: String,
 }
 
-impl sealed::Sealed for UpsertFeishuAccountCommand {}
-impl DomainCommand for UpsertFeishuAccountCommand {
-    const TYPE: &'static str = "feishu_account.upsert";
+pub type UpsertFeishuAccountCommand = UpsertChannelAccountCommand<false>;
+pub type UpsertLarkAccountCommand = UpsertChannelAccountCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for UpsertChannelAccountCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for UpsertChannelAccountCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.upsert"
+    } else {
+        "feishu_account.upsert"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DisconnectFeishuAccountCommand {
+pub struct DisconnectChannelAccountCommand<const LARK: bool> {
     pub account_id: String,
     pub expected_version: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExpireFeishuAccountCommand {
+pub struct ExpireChannelAccountCommand<const LARK: bool> {
     pub account_id: String,
     pub expected_version: i64,
 }
@@ -150,15 +206,22 @@ pub struct ChannelDeveloperSessionInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CommitFeishuAccountConnectionCommand {
+pub struct CommitChannelAccountConnectionCommand<const LARK: bool> {
     pub expected_previous_account_version: Option<i64>,
     pub account: FeishuConnectionAccountInput,
     pub developer_session: ChannelDeveloperSessionInput,
 }
 
-impl sealed::Sealed for CommitFeishuAccountConnectionCommand {}
-impl DomainCommand for CommitFeishuAccountConnectionCommand {
-    const TYPE: &'static str = "feishu_account.commit_connection";
+pub type CommitFeishuAccountConnectionCommand = CommitChannelAccountConnectionCommand<false>;
+pub type CommitLarkAccountConnectionCommand = CommitChannelAccountConnectionCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for CommitChannelAccountConnectionCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for CommitChannelAccountConnectionCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.commit_connection"
+    } else {
+        "feishu_account.commit_connection"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,14 +309,21 @@ impl DomainCommand for ExpireDingTalkAccountCommand {
     const TYPE: &'static str = "dingtalk_account.expire";
 }
 
-impl sealed::Sealed for ExpireFeishuAccountCommand {}
-impl DomainCommand for ExpireFeishuAccountCommand {
-    const TYPE: &'static str = "feishu_account.expire";
+pub type ExpireFeishuAccountCommand = ExpireChannelAccountCommand<false>;
+pub type ExpireLarkAccountCommand = ExpireChannelAccountCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for ExpireChannelAccountCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for ExpireChannelAccountCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.expire"
+    } else {
+        "feishu_account.expire"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateMemberBotPublicationIntentCommand {
+pub struct CreateChannelMemberBotPublicationIntentCommand<const LARK: bool> {
     pub publication_intent_id: String,
     pub account_id: String,
     pub agent_id: String,
@@ -263,14 +333,23 @@ pub struct CreateMemberBotPublicationIntentCommand {
     pub provisioning_mode: String,
 }
 
-impl sealed::Sealed for CreateMemberBotPublicationIntentCommand {}
-impl DomainCommand for CreateMemberBotPublicationIntentCommand {
-    const TYPE: &'static str = "feishu_member_bot_publication_intent.create";
+pub type CreateMemberBotPublicationIntentCommand =
+    CreateChannelMemberBotPublicationIntentCommand<false>;
+pub type CreateLarkMemberBotPublicationIntentCommand =
+    CreateChannelMemberBotPublicationIntentCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for CreateChannelMemberBotPublicationIntentCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for CreateChannelMemberBotPublicationIntentCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_member_bot_publication_intent.create"
+    } else {
+        "feishu_member_bot_publication_intent.create"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AdvanceMemberBotPublicationIntentCommand {
+pub struct AdvanceChannelMemberBotPublicationIntentCommand<const LARK: bool> {
     pub publication_intent_id: String,
     pub expected_version: i64,
     pub state: String,
@@ -319,19 +398,35 @@ impl DomainCommand for AdvanceDingTalkPublicationIntentCommand {
     const TYPE: &'static str = "dingtalk_member_bot_publication_intent.advance";
 }
 
-impl sealed::Sealed for AdvanceMemberBotPublicationIntentCommand {}
-impl DomainCommand for AdvanceMemberBotPublicationIntentCommand {
-    const TYPE: &'static str = "feishu_member_bot_publication_intent.advance";
+pub type AdvanceMemberBotPublicationIntentCommand =
+    AdvanceChannelMemberBotPublicationIntentCommand<false>;
+pub type AdvanceLarkMemberBotPublicationIntentCommand =
+    AdvanceChannelMemberBotPublicationIntentCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for AdvanceChannelMemberBotPublicationIntentCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for AdvanceChannelMemberBotPublicationIntentCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_member_bot_publication_intent.advance"
+    } else {
+        "feishu_member_bot_publication_intent.advance"
+    };
 }
 
-impl sealed::Sealed for DisconnectFeishuAccountCommand {}
-impl DomainCommand for DisconnectFeishuAccountCommand {
-    const TYPE: &'static str = "feishu_account.disconnect";
+pub type DisconnectFeishuAccountCommand = DisconnectChannelAccountCommand<false>;
+pub type DisconnectLarkAccountCommand = DisconnectChannelAccountCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for DisconnectChannelAccountCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for DisconnectChannelAccountCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_account.disconnect"
+    } else {
+        "feishu_account.disconnect"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpsertFeishuMemberBotCommand {
+pub struct UpsertChannelMemberBotCommand<const LARK: bool> {
     pub account_id: String,
     pub agent_id: String,
     pub app_id: String,
@@ -359,14 +454,21 @@ impl DomainCommand for UpsertDingTalkMemberBotCommand {
     const TYPE: &'static str = "dingtalk_member_bot.upsert";
 }
 
-impl sealed::Sealed for UpsertFeishuMemberBotCommand {}
-impl DomainCommand for UpsertFeishuMemberBotCommand {
-    const TYPE: &'static str = "feishu_member_bot.upsert";
+pub type UpsertFeishuMemberBotCommand = UpsertChannelMemberBotCommand<false>;
+pub type UpsertLarkMemberBotCommand = UpsertChannelMemberBotCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for UpsertChannelMemberBotCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for UpsertChannelMemberBotCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_member_bot.upsert"
+    } else {
+        "feishu_member_bot.upsert"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VerifyFeishuOwnerCommand {
+pub struct VerifyChannelOwnerCommand<const LARK: bool> {
     pub provider: String,
     pub app_id: String,
     pub tenant_key: String,
@@ -376,9 +478,16 @@ pub struct VerifyFeishuOwnerCommand {
     pub sender_display_name: String,
 }
 
-impl sealed::Sealed for VerifyFeishuOwnerCommand {}
-impl DomainCommand for VerifyFeishuOwnerCommand {
-    const TYPE: &'static str = "feishu_owner.verify";
+pub type VerifyFeishuOwnerCommand = VerifyChannelOwnerCommand<false>;
+pub type VerifyLarkOwnerCommand = VerifyChannelOwnerCommand<true>;
+
+impl<const LARK: bool> sealed::Sealed for VerifyChannelOwnerCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for VerifyChannelOwnerCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_owner.verify"
+    } else {
+        "feishu_owner.verify"
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -399,7 +508,7 @@ impl DomainCommand for StartNewFeishuDmCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolvePendingCampBindingCommand {
+pub struct ResolvePendingThreadBindingCommand {
     pub pending_binding_id: String,
     pub app_id: String,
     pub external_picker_message_id: String,
@@ -412,8 +521,8 @@ pub struct ResolvePendingCampBindingCommand {
     pub operator_union_id: Option<String>,
 }
 
-impl sealed::Sealed for ResolvePendingCampBindingCommand {}
-impl DomainCommand for ResolvePendingCampBindingCommand {
+impl sealed::Sealed for ResolvePendingThreadBindingCommand {}
+impl DomainCommand for ResolvePendingThreadBindingCommand {
     const TYPE: &'static str = "pending_camp_binding.resolve";
 }
 
@@ -509,6 +618,8 @@ pub struct ObserveChannelInboundCommand {
     #[serde(default)]
     pub attachment_summaries: Vec<ChannelAttachmentSummaryInput>,
     #[serde(default)]
+    pub resources: Vec<inbound_attachments::InboundResource>,
+    #[serde(default)]
     pub quote: Option<ExternalQuoteInput>,
     pub canonical_agent_ids: Vec<String>,
     pub canonical_mentions_complete: bool,
@@ -552,6 +663,8 @@ pub struct ChannelHostTickRequest {
     pub worker_id: String,
     #[serde(default = "default_delivery_claim_limit")]
     pub limit: usize,
+    #[serde(default)]
+    pub inbound_attachment_app_ids: Vec<String>,
 }
 
 fn default_delivery_claim_limit() -> usize {
@@ -566,6 +679,7 @@ pub struct ChannelHostTickResult {
     pub deliveries: Vec<ClaimedChannelDelivery>,
     pub(crate) roster_refreshes: Vec<crate::message_delivery::TopicRosterRefreshRequest>,
     pub has_outstanding_work: bool,
+    pub inbound_attachments: Vec<inbound_attachments::PendingAttachments>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -597,6 +711,7 @@ pub struct ChannelTransportConversationView {
     pub chat_id: String,
     pub topic_key: String,
     pub conversation_kind: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: Option<String>,
 }
 
@@ -847,8 +962,10 @@ pub struct ChannelExecutionConsoleRunView {
 pub struct ChannelExecutionConsoleSourceView {
     pub sequence: i64,
     pub agent_run_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
     pub channel_conversation_id: String,
     pub agent_id: String,
@@ -869,6 +986,7 @@ pub struct ChannelExecutionConsoleSourceView {
 pub struct ChannelExecutionWebScope {
     pub channel_conversation_id: String,
     pub target_app_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
     pub focus_run_id: String,
@@ -889,6 +1007,7 @@ pub struct ChannelExecutionWebTriggerView {
 pub struct ChannelExecutionWebRunView {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
     pub purpose: String,
     pub invocation_kind: String,
@@ -910,14 +1029,15 @@ pub struct ChannelExecutionWebRunView {
 pub struct ChannelExecutionWebSnapshotView {
     pub schema_version: i64,
     pub focus_run_id: String,
-    pub camp: ChannelExecutionWebCampView,
+    #[serde(rename = "thread", alias = "camp")]
+    pub camp: ChannelExecutionWebThreadView,
     pub agent: ChannelExecutionWebAgentView,
     pub runs: Vec<ChannelExecutionWebRunView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChannelExecutionWebCampView {
+pub struct ChannelExecutionWebThreadView {
     pub id: String,
     pub title: String,
 }
@@ -1023,12 +1143,29 @@ pub(crate) fn backfill_sealed_execution_console_snapshots(
     Ok(())
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ChannelService {
     gateway: DomainCommandGateway,
+    spec: &'static ChannelProviderSpec,
+}
+
+impl Default for ChannelService {
+    fn default() -> Self {
+        Self {
+            gateway: DomainCommandGateway,
+            spec: &FEISHU_SPEC,
+        }
+    }
 }
 
 impl ChannelService {
+    pub(crate) fn for_spec(spec: &'static ChannelProviderSpec) -> Self {
+        Self {
+            gateway: DomainCommandGateway,
+            spec,
+        }
+    }
+
     pub fn dingtalk_card_action_context(
         &self,
         database: &mut Database,
@@ -1241,7 +1378,10 @@ impl ChannelService {
         };
         transaction.commit()?;
         if state == "terminal_sealed"
-            && matches!(provider.as_str(), FEISHU_PROVIDER | DINGTALK_PROVIDER)
+            && matches!(
+                provider.as_str(),
+                FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
+            )
         {
             let blob_store = ManagedBlobStore::new(
                 database
@@ -1289,10 +1429,11 @@ impl ChannelService {
         database: &mut Database,
         scope: &ChannelExecutionWebScope,
     ) -> Result<Option<ChannelExecutionWebSnapshotView>> {
+        let spec = self.spec;
         for (value, field) in [
             (&scope.channel_conversation_id, "channelConversationId"),
             (&scope.target_app_id, "targetAppId"),
-            (&scope.camp_id, "campId"),
+            (&scope.camp_id, "threadId"),
             (&scope.agent_id, "agentId"),
             (&scope.focus_run_id, "focusRunId"),
             (&scope.max_run_created_at, "maxRunCreatedAt"),
@@ -1324,7 +1465,8 @@ impl ChannelService {
         let transaction = database.connection_mut().transaction()?;
         let identity = transaction
             .query_row(
-                r#"
+                &format!(
+                    r#"
                 SELECT camp.title, profile.display_name
                 FROM agent_run AS run
                 LEFT JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
@@ -1342,10 +1484,12 @@ impl ChannelService {
                   AND conversation.agent_id = ?4
                   AND console.target_app_id = ?5
                   AND console.channel_conversation_id = ?6
-                  AND channel.provider IN ('feishu', 'dingtalk')
+                  AND channel.provider IN ('{provider}', 'lark', 'dingtalk')
                   AND member.status = 'active'
                   AND member.leave_requested_at IS NULL
                 "#,
+                    provider = spec.provider
+                ),
                 params![
                     scope.focus_run_id,
                     scope.max_run_created_at,
@@ -1363,7 +1507,7 @@ impl ChannelService {
         };
 
         let facts = {
-            let mut statement = transaction.prepare(
+            let mut statement = transaction.prepare(&format!(
                 r#"
                 SELECT run.id, run.camp_turn_id, run.purpose, run.invocation_kind,
                        run.status, run.wait_reason, run.terminal_reason_code,
@@ -1380,7 +1524,8 @@ impl ChannelService {
                        ),
                        COALESCE(trigger_message.created_at, run.created_at),
                        CASE trigger_principal.provider
-                           WHEN 'feishu' THEN '飞书'
+                           WHEN '{provider}' THEN '飞书'
+                           WHEN 'lark' THEN 'Lark'
                            WHEN 'dingtalk' THEN '钉钉'
                            ELSE 'Rovai'
                        END,
@@ -1407,7 +1552,8 @@ impl ChannelService {
                   AND (run.created_at < ?3 OR run.id = ?4)
                 ORDER BY run.created_at, run.id
                 "#,
-            )?;
+                provider = spec.provider
+            ))?;
             statement
                 .query_map(
                     params![
@@ -1519,7 +1665,7 @@ impl ChannelService {
         Ok(Some(ChannelExecutionWebSnapshotView {
             schema_version: 1,
             focus_run_id: scope.focus_run_id.clone(),
-            camp: ChannelExecutionWebCampView {
+            camp: ChannelExecutionWebThreadView {
                 id: scope.camp_id.clone(),
                 title: camp_title,
             },
@@ -1542,41 +1688,49 @@ impl ChannelService {
         requested_agent_ids: &[String],
         parent_command_id: &str,
     ) -> Result<()> {
+        let spec = self.spec;
         let topic_binding = database
             .connection()
             .query_row(
-                r#"
-                SELECT binding.id, conversation.tenant_key, conversation.chat_id
+                &format!(
+                    r#"
+                SELECT binding.id, conversation.tenant_key, conversation.chat_id, conversation.provider
                 FROM channel_conversation_binding AS binding
                 JOIN channel_conversation AS conversation
                   ON conversation.id = binding.channel_conversation_id
                 WHERE binding.camp_id = ?1 AND binding.status = 'active'
-                  AND conversation.provider = 'feishu'
+                  AND conversation.provider IN ('{provider}', 'lark')
                   AND conversation.conversation_kind = 'topic'
                 "#,
+                    provider = spec.provider
+                ),
                 [camp_id],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((_binding_id, tenant_key, chat_id)) = topic_binding else {
+        let Some((_binding_id, tenant_key, chat_id, provider)) = topic_binding else {
             return Ok(());
         };
+        let spec =
+            ChannelProviderSpec::for_provider(&provider).context("unsupported topic provider")?;
         reconcile_bound_group_memberships(
             database,
-            FEISHU_PROVIDER,
+            spec.provider,
             &tenant_key,
             &chat_id,
             parent_command_id,
         )?;
         for agent_id in requested_agent_ids.iter().cloned().collect::<BTreeSet<_>>() {
             let (active, roster_present): (bool, bool) = database.connection().query_row(
-                r#"
+                &format!(
+                    r#"
                 SELECT
                     EXISTS(
                         SELECT 1 FROM camp_member
@@ -1586,15 +1740,18 @@ impl ChannelService {
                     EXISTS(
                         SELECT 1
                         FROM external_group_bot_roster AS roster
-                        JOIN feishu_member_bot AS bot
+                        JOIN {member_bot} AS bot
                           ON bot.app_id = roster.app_id
                          AND bot.agent_id = roster.agent_id
-                        WHERE roster.provider = 'feishu'
+                        WHERE roster.provider = '{provider}'
                           AND roster.tenant_key = ?3 AND roster.chat_id = ?4
                           AND roster.agent_id = ?2 AND roster.status = 'present'
                           AND bot.status = 'published'
                     )
                 "#,
+                    member_bot = spec.member_bot,
+                    provider = spec.provider
+                ),
                 params![camp_id, agent_id, tenant_key, chat_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
@@ -1613,15 +1770,17 @@ impl ChannelService {
     }
 
     pub fn snapshot(&self, database: &mut Database) -> Result<FeishuChannelSnapshot> {
+        let spec = self.spec;
         refresh_project_catalog(database)?;
         let connection = database.connection();
         let account = connection
             .query_row(
-                r#"
+                &format!(
+                    r#"
                 SELECT id, user_id_digest, tenant_id, user_name, email,
                        tenant_name, brand, status, version,
                        connected_at, last_verified_at
-                FROM feishu_account
+                FROM {account}
                 WHERE user_id_digest IS NOT NULL
                   AND tenant_id IS NOT NULL
                   AND user_name IS NOT NULL
@@ -1632,6 +1791,8 @@ impl ChannelService {
                          updated_at DESC, id
                 LIMIT 1
                 "#,
+                    account = spec.account
+                ),
                 [],
                 |row| {
                     Ok(FeishuAccountView {
@@ -1652,19 +1813,25 @@ impl ChannelService {
             .optional()?;
         let member_bots = query_rows(
             connection,
-            r#"
-            SELECT bot.agent_id, bot.account_id, COALESCE(account.brand, 'feishu'),
+            &format!(
+                r#"
+            SELECT bot.agent_id, bot.account_id, COALESCE(account.brand, '{provider}'),
                    bot.app_id, bot.bot_display_name, bot.credential_ref,
                    bot.status, bot.failure_code, bot.version,
                    EXISTS(
-                       SELECT 1 FROM feishu_owner_app_identity AS identity
+                       SELECT 1 FROM {owner_app_identity} AS identity
                        WHERE identity.account_id = bot.account_id
                          AND identity.app_id = bot.app_id
                    )
-            FROM feishu_member_bot AS bot
-            JOIN feishu_account AS account ON account.id = bot.account_id
+            FROM {member_bot} AS bot
+            JOIN {account} AS account ON account.id = bot.account_id
             ORDER BY bot.agent_id
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                member_bot = spec.member_bot,
+                account = spec.account,
+                provider = spec.provider
+            ),
             [],
             |row| {
                 Ok(FeishuMemberBotView {
@@ -1687,14 +1854,17 @@ impl ChannelService {
         )?;
         let publication_intents = query_rows(
             connection,
-            r#"
+            &format!(
+                r#"
             SELECT id, agent_id, account_id, expected_user_id_digest,
                    expected_tenant_id, requested_app_name, provisioning_mode,
                    state, remote_app_id, credential_ref, last_completed_step,
                    failure_code, version, created_at, updated_at
-            FROM feishu_member_bot_publication_intent
+            FROM {publication_intent}
             ORDER BY created_at DESC, id
             "#,
+                publication_intent = spec.publication_intent
+            ),
             [],
             |row| {
                 Ok(MemberBotPublicationIntentView {
@@ -1718,7 +1888,8 @@ impl ChannelService {
         )?;
         let transport_conversations = query_rows(
             connection,
-            r#"
+            &format!(
+                r#"
             SELECT conversation.id, binding.id, conversation.provider,
                    conversation.tenant_key, conversation.chat_id,
                    conversation.topic_key, conversation.conversation_kind,
@@ -1727,10 +1898,12 @@ impl ChannelService {
             LEFT JOIN channel_conversation_binding AS binding
               ON binding.channel_conversation_id = conversation.id
              AND binding.status = 'active'
-            WHERE conversation.provider = 'feishu'
+            WHERE conversation.provider = '{provider}'
               AND conversation.conversation_kind IN ('group', 'topic')
             ORDER BY conversation.last_seen_at DESC, conversation.id
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| {
                 Ok(ChannelTransportConversationView {
@@ -1747,7 +1920,8 @@ impl ChannelService {
         )?;
         let pending_aggregates = query_rows(
             connection,
-            r#"
+            &format!(
+                r#"
             SELECT aggregate.id, aggregate.tenant_key, aggregate.chat_id,
                    aggregate.topic_key, conversation.conversation_kind,
                    json_extract(aggregate.frozen_payload_json, '$.acknowledgementAppId')
@@ -1757,7 +1931,7 @@ impl ChannelService {
                    aggregate.frozen_payload_json, '$.conversationId'
                  )
             WHERE aggregate.status = 'collecting'
-              AND conversation.provider = 'feishu'
+              AND conversation.provider = '{provider}'
               AND (
                 aggregate.canonical_mentions_complete = 1
                 OR NOT EXISTS (
@@ -1772,6 +1946,8 @@ impl ChannelService {
               )
             ORDER BY aggregate.created_at, aggregate.id
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| {
                 Ok(PendingChannelAggregateView {
@@ -1785,29 +1961,35 @@ impl ChannelService {
             },
         )?;
         let pending_binding_count = connection.query_row(
-            r#"
+            &format!(
+                r#"
             SELECT COUNT(*)
             FROM pending_camp_binding AS pending
             JOIN channel_conversation AS conversation
               ON conversation.id = pending.channel_conversation_id
             WHERE pending.status IN ('pending', 'resolving')
-              AND conversation.provider = 'feishu'
+              AND conversation.provider = '{provider}'
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| row.get(0),
         )?;
         let binding_issue_count = connection.query_row(
-            r#"
+            &format!(
+                r#"
             SELECT COUNT(*)
             FROM channel_conversation_binding AS binding
             JOIN channel_conversation AS conversation
               ON conversation.id = binding.channel_conversation_id
             LEFT JOIN project_catalog_item AS project ON project.id = binding.project_id
             WHERE binding.status = 'active'
-              AND conversation.provider = 'feishu'
+              AND conversation.provider = '{provider}'
               AND binding.execution_scope_kind = 'project'
               AND (project.id IS NULL OR project.status <> 'active')
             "#,
+                provider = spec.provider
+            ),
             [],
             |row| row.get(0),
         )?;
@@ -2165,24 +2347,14 @@ impl ChannelService {
             r#"
             SELECT bot.agent_id, credential.credential_ref, credential.provider,
                    credential.remote_app_id, credential.payload_json, credential.revision
-            FROM feishu_member_bot AS bot
+            FROM channel_member_bot_directory AS bot
             JOIN channel_credentials AS credential
               ON credential.credential_ref = bot.credential_ref
-             AND credential.provider = 'feishu'
+             AND credential.provider = bot.provider
              AND credential.credential_kind = 'member_bot'
              AND credential.remote_app_id = bot.app_id
             WHERE bot.status = 'published'
-            UNION ALL
-            SELECT bot.agent_id, credential.credential_ref, credential.provider,
-                   credential.remote_app_id, credential.payload_json, credential.revision
-            FROM dingtalk_member_bot AS bot
-            JOIN channel_credentials AS credential
-              ON credential.credential_ref = bot.credential_ref
-             AND credential.provider = 'dingtalk'
-             AND credential.credential_kind = 'member_bot'
-             AND credential.remote_app_id = bot.app_key
-            WHERE bot.status = 'published'
-            ORDER BY provider, agent_id
+            ORDER BY credential.provider, bot.agent_id
             "#,
             [],
             |row| {
@@ -2252,14 +2424,18 @@ impl ChannelService {
             .map_err(Into::into)
     }
 
-    pub fn commit_feishu_account_connection(
+    pub fn commit_feishu_account_connection<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<CommitFeishuAccountConnectionCommand>,
+        envelope: &CommandEnvelope<CommitChannelAccountConnectionCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
         validate_feishu_connection(&envelope.payload)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, self.spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can commit a connection",
@@ -2267,28 +2443,29 @@ impl ChannelService {
             }
             if let Some(conflict) = previous_account_version_conflict(
                 transaction,
-                "feishu_account",
+                self.spec.account,
                 envelope.payload.expected_previous_account_version,
             )? {
                 return Ok(version_conflict(conflict));
             }
             let session_revision = replace_developer_session_row(
                 transaction,
-                FEISHU_PROVIDER,
+                self.spec.provider,
                 &envelope.payload.account.account_id,
                 &envelope.payload.developer_session.identity,
                 &envelope.payload.developer_session.session,
             )?;
-            let account_version = persist_feishu_account(transaction, &envelope.payload.account)?;
+            let account_version =
+                persist_feishu_account(self.spec, transaction, &envelope.payload.account)?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.connection_committed",
+                self.spec.code("account.connection_committed"),
                 json!({
                     "accountId": envelope.payload.account.account_id,
                     "version": account_version,
                     "sessionRevision": session_revision,
                 }),
                 Some(EntityReference {
-                    entity_type: "feishu_account".to_string(),
+                    entity_type: self.spec.account.to_string(),
                     entity_id: envelope.payload.account.account_id.clone(),
                 }),
             ))
@@ -2357,8 +2534,8 @@ impl ChannelService {
                     "Only this provider's trusted Channel Host can replace its session",
                 ));
             }
-            let account_table = if envelope.payload.provider == FEISHU_PROVIDER {
-                "feishu_account"
+            let account_table = if let Some(spec) = ChannelProviderSpec::for_provider(&envelope.payload.provider) {
+                spec.account
             } else {
                 "dingtalk_account"
             };
@@ -2512,30 +2689,35 @@ impl ChannelService {
                     "Only this provider's trusted Channel Host can freeze credentials",
                 ));
             }
-            if envelope.payload.provider == FEISHU_PROVIDER {
-                store_feishu_publication_credential(transaction, &envelope.payload, &payload)
+            if let Some(spec) = ChannelProviderSpec::for_provider(&envelope.payload.provider) {
+                store_feishu_publication_credential(spec, transaction, &envelope.payload, &payload)
             } else {
                 store_dingtalk_publication_credential(transaction, &envelope.payload, &payload)
             }
         })
     }
 
-    pub fn upsert_feishu_account(
+    pub fn upsert_feishu_account<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<UpsertFeishuAccountCommand>,
+        envelope: &CommandEnvelope<UpsertChannelAccountCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         validate_nonempty(&envelope.payload.account_id, "accountId")?;
         validate_digest(&envelope.payload.user_id_digest, "userIdDigest")?;
         validate_nonempty(&envelope.payload.tenant_id, "tenantId")?;
         let user_name = normalize_display_name(&envelope.payload.user_name)?;
         let email = normalize_optional_email(envelope.payload.email.as_deref())?;
         let tenant_name = normalize_display_name(&envelope.payload.tenant_name)?;
-        if !matches!(envelope.payload.brand.as_str(), "feishu" | "lark") {
-            anyhow::bail!("brand must be feishu or lark");
+        if envelope.payload.brand != self.spec.provider {
+            anyhow::bail!("brand does not match the channel provider");
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can persist account facts",
@@ -2543,7 +2725,10 @@ impl ChannelService {
             }
             let conflicting_identity = transaction
                 .query_row(
-                    "SELECT user_id_digest FROM feishu_account WHERE id = ?1",
+                    &format!(
+                        "SELECT user_id_digest FROM {account} WHERE id = ?1",
+                        account = spec.account
+                    ),
                     [&envelope.payload.account_id],
                     |row| row.get::<_, Option<String>>(0),
                 )
@@ -2552,23 +2737,27 @@ impl ChannelService {
                 .is_some_and(|digest| digest != envelope.payload.user_id_digest);
             if conflicting_identity {
                 return Ok(rejected(
-                    "feishu_account.identity_conflict",
+                    &spec.code("account.identity_conflict"),
                     "Account identity changed for the same account ID",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_account
+                &format!(
+                    r#"
+                UPDATE {account}
                 SET status = 'disconnected', disconnected_at = ?2,
                     version = version + 1, updated_at = ?2
                 WHERE status = 'connected' AND id <> ?1
                 "#,
+                    account = spec.account
+                ),
                 params![envelope.payload.account_id, now],
             )?;
             transaction.execute(
-                r#"
-                INSERT INTO feishu_account(
+                &format!(
+                    r#"
+                INSERT INTO {account}(
                     id, identity_digest, display_name, tenant_name,
                     status, version, created_at, updated_at, disconnected_at,
                     user_id_digest, tenant_id, user_name, email, brand,
@@ -2589,15 +2778,17 @@ impl ChannelService {
                     status = 'connected',
                     disconnected_at = NULL,
                     connected_at = CASE
-                        WHEN feishu_account.status = 'connected'
-                         AND feishu_account.connected_at IS NOT NULL
-                        THEN feishu_account.connected_at
+                        WHEN {account}.status = 'connected'
+                         AND {account}.connected_at IS NOT NULL
+                        THEN {account}.connected_at
                         ELSE excluded.connected_at
                     END,
                     last_verified_at = excluded.last_verified_at,
-                    version = feishu_account.version + 1,
+                    version = {account}.version + 1,
                     updated_at = excluded.updated_at
                 "#,
+                    account = spec.account
+                ),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.user_id_digest,
@@ -2610,8 +2801,9 @@ impl ChannelService {
                 ],
             )?;
             transaction.execute(
-                r#"
-                INSERT INTO feishu_owner_identity(
+                &format!(
+                    r#"
+                INSERT INTO {owner_identity}(
                     account_id, tenant_id, canonical_owner_principal_id,
                     user_id_digest, union_id_digest, verified_at,
                     version, created_at, updated_at
@@ -2620,9 +2812,11 @@ impl ChannelService {
                     tenant_id = excluded.tenant_id,
                     user_id_digest = excluded.user_id_digest,
                     verified_at = excluded.verified_at,
-                    version = feishu_owner_identity.version + 1,
+                    version = {owner_identity}.version + 1,
                     updated_at = excluded.updated_at
                 "#,
+                    owner_identity = spec.owner_identity
+                ),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.tenant_id,
@@ -2632,44 +2826,55 @@ impl ChannelService {
                 ],
             )?;
             let version: i64 = transaction.query_row(
-                "SELECT version FROM feishu_account WHERE id = ?1",
+                &format!(
+                    "SELECT version FROM {account} WHERE id = ?1",
+                    account = spec.account
+                ),
                 [&envelope.payload.account_id],
                 |row| row.get(0),
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.connected",
+                spec.code("account.connected"),
                 json!({ "accountId": envelope.payload.account_id, "version": version }),
                 Some(EntityReference {
-                    entity_type: "feishu_account".to_string(),
+                    entity_type: spec.code("account").to_string(),
                     entity_id: envelope.payload.account_id.clone(),
                 }),
             ))
         })
     }
 
-    pub fn disconnect_feishu_account(
+    pub fn disconnect_feishu_account<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<DisconnectFeishuAccountCommand>,
+        envelope: &CommandEnvelope<DisconnectChannelAccountCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_owner(&envelope.actor) {
                 return Ok(rejected(
-                    "feishu_account.owner_required",
-                    "Only the local owner can disconnect Feishu",
+                    &spec.code("account.owner_required"),
+                    "Only the local owner can disconnect the channel account",
                 ));
             }
             let version = transaction
                 .query_row(
-                    "SELECT version FROM feishu_account WHERE id = ?1 AND status = 'connected'",
+                    &format!(
+                        "SELECT version FROM {account} WHERE id = ?1 AND status = 'connected'",
+                        account = spec.account
+                    ),
                     [&envelope.payload.account_id],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
             let Some(version) = version else {
                 return Ok(rejected(
-                    "feishu_account.not_connected",
-                    "Connected Feishu account does not exist",
+                    &spec.code("account.not_connected"),
+                    "Connected channel account does not exist",
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -2677,33 +2882,44 @@ impl ChannelService {
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_account
+                &format!(
+                    r#"
+                UPDATE {account}
                 SET status = 'disconnected', disconnected_at = ?2,
                     version = version + 1, updated_at = ?2
                 WHERE id = ?1 AND version = ?3
                 "#,
+                    account = spec.account
+                ),
                 params![envelope.payload.account_id, now, version],
             )?;
             transaction.execute(
-                "DELETE FROM channel_developer_sessions WHERE provider = 'feishu'",
+                &format!(
+                    "DELETE FROM channel_developer_sessions WHERE provider = '{provider}'",
+                    provider = spec.provider
+                ),
                 [],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.disconnected",
+                spec.code("account.disconnected"),
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
                 None,
             ))
         })
     }
 
-    pub fn expire_feishu_account(
+    pub fn expire_feishu_account<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<ExpireFeishuAccountCommand>,
+        envelope: &CommandEnvelope<ExpireChannelAccountCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can expire a developer session",
@@ -2711,15 +2927,18 @@ impl ChannelService {
             }
             let version = transaction
                 .query_row(
-                    "SELECT version FROM feishu_account WHERE id = ?1 AND status = 'connected'",
+                    &format!(
+                        "SELECT version FROM {account} WHERE id = ?1 AND status = 'connected'",
+                        account = spec.account
+                    ),
                     [&envelope.payload.account_id],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
             let Some(version) = version else {
                 return Ok(rejected(
-                    "feishu_account.not_connected",
-                    "Connected Feishu account does not exist",
+                    &spec.code("account.not_connected"),
+                    "Connected channel account does not exist",
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -2727,20 +2946,26 @@ impl ChannelService {
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_account
+                &format!(
+                    r#"
+                UPDATE {account}
                 SET status = 'session_expired', disconnected_at = ?2,
                     version = version + 1, updated_at = ?2
                 WHERE id = ?1 AND version = ?3
                 "#,
+                    account = spec.account
+                ),
                 params![envelope.payload.account_id, now, version],
             )?;
             transaction.execute(
-                "DELETE FROM channel_developer_sessions WHERE provider = 'feishu'",
+                &format!(
+                    "DELETE FROM channel_developer_sessions WHERE provider = '{provider}'",
+                    provider = spec.provider
+                ),
                 [],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_account.session_expired",
+                spec.code("account.session_expired"),
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
                 None,
             ))
@@ -2971,11 +3196,16 @@ impl ChannelService {
         })
     }
 
-    pub fn create_member_bot_publication_intent(
+    pub fn create_member_bot_publication_intent<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<CreateMemberBotPublicationIntentCommand>,
+        envelope: &CommandEnvelope<CreateChannelMemberBotPublicationIntentCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         for (value, field) in [
             (
                 &envelope.payload.publication_intent_id,
@@ -2996,20 +3226,20 @@ impl ChannelService {
             anyhow::bail!("provisioningMode must be developer_session");
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can create publication intents",
                 ));
             }
             let account_matches: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_account
+                    SELECT 1 FROM {account}
                     WHERE id = ?1 AND status = 'connected'
                       AND user_id_digest = ?2 AND tenant_id = ?3
                 )
-                "#,
+                "#, account = spec.account),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.expected_user_id_digest,
@@ -3019,7 +3249,7 @@ impl ChannelService {
             )?;
             if !account_matches {
                 return Ok(rejected(
-                    "feishu_account.identity_mismatch",
+                    &spec.code("account.identity_mismatch"),
                     "Publication intent requires the exact connected developer identity",
                 ));
             }
@@ -3035,55 +3265,55 @@ impl ChannelService {
                 ));
             }
             let member_bot_bound: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM feishu_member_bot WHERE agent_id = ?1)",
+                &format!("SELECT EXISTS(SELECT 1 FROM {member_bot} WHERE agent_id = ?1)", member_bot = spec.member_bot),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             if member_bot_bound {
                 return Ok(rejected(
-                    "feishu_member_bot.already_bound",
+                    &spec.code("member_bot.already_bound"),
                     "This member already has an immutable Feishu App binding",
                 ));
             }
             let has_active: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_member_bot_publication_intent
+                    SELECT 1 FROM {publication_intent}
                     WHERE agent_id = ?1
                       AND state NOT IN (
                         'completed', 'failed_recoverable'
                       )
                 )
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             if has_active {
                 return Ok(rejected(
-                    "feishu_publication_intent.active_conflict",
+                    &spec.code("publication_intent.active_conflict"),
                     "This member already has an active publication intent",
                 ));
             }
             let app_identity_frozen: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_member_bot_publication_intent
+                    SELECT 1 FROM {publication_intent}
                     WHERE agent_id = ?1 AND remote_app_id IS NOT NULL
                 )
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             if app_identity_frozen {
                 return Ok(rejected(
-                    "feishu_publication_intent.app_identity_frozen",
+                    &spec.code("publication_intent.app_identity_frozen"),
                     "This member already has a frozen Feishu App identity",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                INSERT INTO feishu_member_bot_publication_intent(
+                &format!(r#"
+                INSERT INTO {publication_intent}(
                     id, agent_id, account_id, expected_user_id_digest,
                     expected_tenant_id, requested_app_name, provisioning_mode,
                     state, remote_app_id, credential_ref, last_completed_step,
@@ -3092,7 +3322,7 @@ impl ChannelService {
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7,
                     'created', NULL, NULL, NULL, NULL, 1, ?8, ?8
                 )
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 params![
                     envelope.payload.publication_intent_id,
                     envelope.payload.agent_id,
@@ -3105,24 +3335,29 @@ impl ChannelService {
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_member_bot_publication_intent.created",
+                spec.code("member_bot_publication_intent.created"),
                 json!({
                     "publicationIntentId": envelope.payload.publication_intent_id,
                     "version": 1,
                 }),
                 Some(EntityReference {
-                    entity_type: "feishu_member_bot_publication_intent".to_string(),
+                    entity_type: spec.code("member_bot_publication_intent").to_string(),
                     entity_id: envelope.payload.publication_intent_id.clone(),
                 }),
             ))
         })
     }
 
-    pub fn advance_member_bot_publication_intent(
+    pub fn advance_member_bot_publication_intent<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<AdvanceMemberBotPublicationIntentCommand>,
+        envelope: &CommandEnvelope<AdvanceChannelMemberBotPublicationIntentCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         validate_nonempty(
             &envelope.payload.publication_intent_id,
             "publicationIntentId",
@@ -3141,7 +3376,7 @@ impl ChannelService {
             validate_nonempty(code, "failureCode")?;
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can advance publication intents",
@@ -3149,11 +3384,11 @@ impl ChannelService {
             }
             let current = transaction
                 .query_row(
-                    r#"
+                    &format!(r#"
                     SELECT agent_id, account_id, state, remote_app_id, credential_ref, version
-                    FROM feishu_member_bot_publication_intent
+                    FROM {publication_intent}
                     WHERE id = ?1
-                    "#,
+                    "#, publication_intent = spec.publication_intent),
                     [&envelope.payload.publication_intent_id],
                     |row| {
                         Ok((
@@ -3177,7 +3412,7 @@ impl ChannelService {
             )) = current
             else {
                 return Ok(rejected(
-                    "feishu_publication_intent.not_found",
+                    &spec.code("publication_intent.not_found"),
                     "Publication intent does not exist",
                 ));
             };
@@ -3186,36 +3421,36 @@ impl ChannelService {
             }
             if !publication_intent_transition_allowed(&current_state, &envelope.payload.state) {
                 return Ok(rejected(
-                    "feishu_publication_intent.invalid_transition",
+                    &spec.code("publication_intent.invalid_transition"),
                     "Publication intent transition is not allowed",
                 ));
             }
             if current_state == "completed" && envelope.payload.state == "session_verified" {
                 let Some(frozen_app_id) = current_app_id.as_deref() else {
                     return Ok(rejected(
-                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        &spec.code("publication_intent.reactivation_binding_mismatch"),
                         "Completed publication cannot be reactivated without its frozen App",
                     ));
                 };
                 let Some(frozen_credential_ref) = current_credential_ref.as_deref() else {
                     return Ok(rejected(
-                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        &spec.code("publication_intent.reactivation_binding_mismatch"),
                         "Completed publication cannot be reactivated without its frozen credential identity",
                     ));
                 };
                 let exact_disabled_binding: bool = transaction.query_row(
-                    r#"
+                    &format!(r#"
                     SELECT EXISTS(
                         SELECT 1
-                        FROM feishu_member_bot AS bot
-                        JOIN feishu_account AS account ON account.id = bot.account_id
+                        FROM {member_bot} AS bot
+                        JOIN {account} AS account ON account.id = bot.account_id
                         WHERE bot.agent_id = ?1 AND bot.account_id = ?2
                           AND bot.app_id = ?3
                           AND bot.credential_ref = ?4
                           AND bot.status IN ('published', 'disabled')
                           AND account.status = 'connected'
                     )
-                    "#,
+                    "#, member_bot = spec.member_bot, account = spec.account),
                     params![agent_id, account_id, frozen_app_id, frozen_credential_ref],
                     |row| row.get(0),
                 )?;
@@ -3223,7 +3458,7 @@ impl ChannelService {
                     || envelope.payload.remote_app_id.as_deref() != Some(frozen_app_id)
                 {
                     return Ok(rejected(
-                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        &spec.code("publication_intent.reactivation_binding_mismatch"),
                         "Only an existing member Bot may recover its exact frozen App",
                     ));
                 }
@@ -3236,7 +3471,7 @@ impl ChannelService {
                 && current_app_id.is_none()
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.reconciliation_remote_app_required",
+                    &spec.code("publication_intent.reconciliation_remote_app_required"),
                     "Unknown publication recovery requires an already frozen remote App",
                 ));
             }
@@ -3245,7 +3480,7 @@ impl ChannelService {
                 && current_app_id != envelope.payload.remote_app_id
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.remote_app_conflict",
+                    &spec.code("publication_intent.remote_app_conflict"),
                     "Publication intent cannot change its remote App identity",
                 ));
             }
@@ -3254,7 +3489,7 @@ impl ChannelService {
                 && current_credential_ref != envelope.payload.credential_ref
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.credential_conflict",
+                    &spec.code("publication_intent.credential_conflict"),
                     "Publication intent cannot change its credential reference",
                 ));
             }
@@ -3266,7 +3501,7 @@ impl ChannelService {
                 .or(current_credential_ref);
             if publication_intent_requires_app(&envelope.payload.state) && remote_app_id.is_none() {
                 return Ok(rejected(
-                    "feishu_publication_intent.remote_app_required",
+                    &spec.code("publication_intent.remote_app_required"),
                     "This publication state requires a frozen remote App ID",
                 ));
             }
@@ -3280,7 +3515,7 @@ impl ChannelService {
             ) && credential_ref.is_none()
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.credential_required",
+                    &spec.code("publication_intent.credential_required"),
                     "This publication state requires a frozen credential reference",
                 ));
             }
@@ -3289,20 +3524,20 @@ impl ChannelService {
                 "connection_verified" | "completed"
             ) {
                 let exact_published_binding: bool = transaction.query_row(
-                    r#"
+                    &format!(r#"
                     SELECT EXISTS(
-                        SELECT 1 FROM feishu_member_bot
+                        SELECT 1 FROM {member_bot}
                         WHERE agent_id = ?1 AND account_id = ?2
                           AND app_id = ?3 AND credential_ref = ?4
                           AND status = 'published'
                     )
-                    "#,
+                    "#, member_bot = spec.member_bot),
                     params![agent_id, account_id, remote_app_id, credential_ref,],
                     |row| row.get(0),
                 )?;
                 if !exact_published_binding {
                     return Ok(rejected(
-                        "feishu_publication_intent.member_bot_binding_required",
+                        &spec.code("publication_intent.member_bot_binding_required"),
                         "Connection completion requires the exact published member Bot binding",
                     ));
                 }
@@ -3311,19 +3546,19 @@ impl ChannelService {
                 && envelope.payload.failure_code.is_none()
             {
                 return Ok(rejected(
-                    "feishu_publication_intent.failure_code_required",
+                    &spec.code("publication_intent.failure_code_required"),
                     "A failed publication intent requires a failure code",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                UPDATE feishu_member_bot_publication_intent
+                &format!(r#"
+                UPDATE {publication_intent}
                 SET state = ?2, remote_app_id = ?3, credential_ref = ?4,
                     last_completed_step = ?5, failure_code = ?6,
                     version = version + 1, updated_at = ?7
                 WHERE id = ?1 AND version = ?8
-                "#,
+                "#, publication_intent = spec.publication_intent),
                 params![
                     envelope.payload.publication_intent_id,
                     envelope.payload.state,
@@ -3336,14 +3571,14 @@ impl ChannelService {
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_member_bot_publication_intent.advanced",
+                spec.code("member_bot_publication_intent.advanced"),
                 json!({
                     "publicationIntentId": envelope.payload.publication_intent_id,
                     "state": envelope.payload.state,
                     "version": version + 1,
                 }),
                 Some(EntityReference {
-                    entity_type: "feishu_member_bot_publication_intent".to_string(),
+                    entity_type: spec.code("member_bot_publication_intent").to_string(),
                     entity_id: envelope.payload.publication_intent_id.clone(),
                 }),
             ))
@@ -3786,11 +4021,16 @@ impl ChannelService {
         })
     }
 
-    pub fn upsert_feishu_member_bot(
+    pub fn upsert_feishu_member_bot<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<UpsertFeishuMemberBotCommand>,
+        envelope: &CommandEnvelope<UpsertChannelMemberBotCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
         for (value, field) in [
             (&envelope.payload.account_id, "accountId"),
             (&envelope.payload.agent_id, "agentId"),
@@ -3805,7 +4045,7 @@ impl ChannelService {
         }
         let display_name = normalize_display_name(&envelope.payload.bot_display_name)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can persist Bot facts",
@@ -3824,11 +4064,11 @@ impl ChannelService {
             }
             let existing_binding = transaction
                 .query_row(
-                    r#"
+                    &format!(r#"
                     SELECT account_id, app_id, credential_ref, status
-                    FROM feishu_member_bot
+                    FROM {member_bot}
                     WHERE agent_id = ?1
-                    "#,
+                    "#, member_bot = spec.member_bot),
                     [&envelope.payload.agent_id],
                     |row| {
                         Ok((
@@ -3846,50 +4086,50 @@ impl ChannelService {
                     || credential_ref != &envelope.payload.credential_ref
                 {
                     return Ok(rejected(
-                        "feishu_member_bot.binding_immutable",
+                        &spec.code("member_bot.binding_immutable"),
                         "A member Bot cannot change its Feishu App, owner account, or credential identity",
                     ));
                 }
                 if status != "published"
-                    && !member_bot_publication_ready(transaction, &envelope.payload)?
+                    && !member_bot_publication_ready(self.spec, transaction, &envelope.payload)?
                 {
                     return Ok(rejected(
-                        "feishu_member_bot.publication_state_required",
+                        &spec.code("member_bot.publication_state_required"),
                         "Reactivating a member Bot requires its matching publication state machine",
                     ));
                 }
             } else {
                 let account_connected: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM feishu_account WHERE id = ?1 AND status = 'connected')",
+                    &format!("SELECT EXISTS(SELECT 1 FROM {account} WHERE id = ?1 AND status = 'connected')", account = spec.account),
                     [&envelope.payload.account_id],
                     |row| row.get(0),
                 )?;
                 if !account_connected {
                     return Ok(rejected(
-                        "feishu_account.not_connected",
+                        &spec.code("account.not_connected"),
                         "Initial Bot publication requires the connected Feishu account",
                     ));
                 }
-                if !member_bot_publication_ready(transaction, &envelope.payload)? {
+                if !member_bot_publication_ready(self.spec, transaction, &envelope.payload)? {
                     return Ok(rejected(
-                        "feishu_member_bot.publication_state_required",
+                        &spec.code("member_bot.publication_state_required"),
                         "Initial Bot binding requires the matching publication state machine",
                     ));
                 }
             }
             let owner_open_id_digest =
-                opaque_digest("feishu-open", &envelope.payload.owner_open_id);
+                opaque_digest(&format!("{}-open", spec.provider), &envelope.payload.owner_open_id);
             let owner_identity_conflict: bool = transaction.query_row(
-                r#"
+                &format!(r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_owner_app_identity
+                    SELECT 1 FROM {owner_app_identity}
                     WHERE app_id = ?1
                       AND (
                         account_id <> ?2
                         OR (open_id_digest IS NOT NULL AND open_id_digest <> ?3)
                       )
                 )
-                "#,
+                "#, owner_app_identity = spec.owner_app_identity),
                 params![
                     envelope.payload.app_id,
                     envelope.payload.account_id,
@@ -3899,14 +4139,14 @@ impl ChannelService {
             )?;
             if owner_identity_conflict {
                 return Ok(rejected(
-                    "feishu_owner_identity.conflict",
+                    &spec.code("owner_identity.conflict"),
                     "The frozen App-scoped Owner identity cannot be rebound",
                 ));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                r#"
-                INSERT INTO feishu_member_bot(
+                &format!(r#"
+                INSERT INTO {member_bot}(
                     agent_id, account_id, app_id, bot_open_id, bot_display_name,
                     credential_ref, status, failure_code, version,
                     created_at, updated_at, published_at
@@ -3916,9 +4156,9 @@ impl ChannelService {
                     bot_display_name = excluded.bot_display_name,
                     status = 'published', failure_code = NULL,
                     published_at = excluded.published_at,
-                    version = feishu_member_bot.version + 1,
+                    version = {member_bot}.version + 1,
                     updated_at = excluded.updated_at
-                "#,
+                "#, member_bot = spec.member_bot),
                 params![
                     envelope.payload.agent_id,
                     envelope.payload.account_id,
@@ -3930,8 +4170,8 @@ impl ChannelService {
                 ],
             )?;
             transaction.execute(
-                r#"
-                INSERT INTO feishu_owner_app_identity(
+                &format!(r#"
+                INSERT INTO {owner_app_identity}(
                     account_id, app_id, open_id_digest, user_id_digest,
                     union_id_digest, verified_at, version, created_at, updated_at
                 ) VALUES (?1, ?2, ?3, NULL, NULL, ?4, 1, ?4, ?4)
@@ -3939,12 +4179,12 @@ impl ChannelService {
                     open_id_digest = excluded.open_id_digest,
                     verified_at = excluded.verified_at,
                     version = CASE
-                        WHEN feishu_owner_app_identity.open_id_digest = excluded.open_id_digest
-                        THEN feishu_owner_app_identity.version
-                        ELSE feishu_owner_app_identity.version + 1
+                        WHEN {owner_app_identity}.open_id_digest = excluded.open_id_digest
+                        THEN {owner_app_identity}.version
+                        ELSE {owner_app_identity}.version + 1
                     END,
                     updated_at = excluded.updated_at
-                "#,
+                "#, owner_app_identity = spec.owner_app_identity),
                 params![
                     envelope.payload.account_id,
                     envelope.payload.app_id,
@@ -3953,15 +4193,15 @@ impl ChannelService {
                 ],
             )?;
             let version: i64 = transaction.query_row(
-                "SELECT version FROM feishu_member_bot WHERE agent_id = ?1",
+                &format!("SELECT version FROM {member_bot} WHERE agent_id = ?1", member_bot = spec.member_bot),
                 [&envelope.payload.agent_id],
                 |row| row.get(0),
             )?;
             Ok(CommandHandlerResult::applied(
-                "feishu_member_bot.published",
+                spec.code("member_bot.published"),
                 json!({ "agentId": envelope.payload.agent_id, "version": version }),
                 Some(EntityReference {
-                    entity_type: "feishu_member_bot".to_string(),
+                    entity_type: spec.code("member_bot").to_string(),
                     entity_id: envelope.payload.agent_id.clone(),
                 }),
             ))
@@ -4176,11 +4416,15 @@ impl ChannelService {
         })
     }
 
-    pub fn verify_feishu_owner(
+    pub fn verify_feishu_owner<const LARK: bool>(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<VerifyFeishuOwnerCommand>,
+        envelope: &CommandEnvelope<VerifyChannelOwnerCommand<LARK>>,
     ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
         validate_owner_identity_input(
             &envelope.payload.provider,
             &envelope.payload.app_id,
@@ -4191,7 +4435,10 @@ impl ChannelService {
         )?;
         let display_name = normalize_display_name(&envelope.payload.sender_display_name)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider)
+                || (envelope.payload.provider != self.spec.provider
+                    && (LARK || envelope.payload.provider != DINGTALK_PROVIDER))
+            {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only this provider's trusted Channel Host can verify sender identity",
@@ -4199,6 +4446,8 @@ impl ChannelService {
             }
             let now = Utc::now().to_rfc3339();
             match classify_and_record_feishu_owner(
+                ChannelProviderSpec::for_provider(&envelope.payload.provider)
+                    .unwrap_or(&FEISHU_SPEC),
                 transaction,
                 &envelope.payload.provider,
                 &envelope.payload.app_id,
@@ -4248,9 +4497,9 @@ impl ChannelService {
         validate_nonempty(&envelope.payload.target_agent_id, "targetAgentId")?;
         if !matches!(
             envelope.payload.provider.as_str(),
-            FEISHU_PROVIDER | DINGTALK_PROVIDER
+            FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
         ) {
-            anyhow::bail!("provider must be feishu or dingtalk");
+            anyhow::bail!("provider must be feishu, lark or dingtalk");
         }
         let conversation_display_name =
             normalize_display_name(&envelope.payload.conversation_display_name)?;
@@ -4263,6 +4512,7 @@ impl ChannelService {
                 ));
             }
             let owner = load_verified_owner_for_app(
+                ChannelProviderSpec::for_provider(&envelope.payload.provider).unwrap_or(&FEISHU_SPEC),
                 transaction,
                 &envelope.payload.provider,
                 &envelope.payload.app_id,
@@ -4435,8 +4685,8 @@ impl ChannelService {
                 json!({
                     "conversationId": conversation_id,
                     "bindingId": binding_id,
-                    "campId": camp_id,
-                    "campCreated": true,
+                    "threadId": camp_id,
+                    "threadCreated": true,
                     "generation": generation,
                 }),
                 Some(EntityReference {
@@ -4454,9 +4704,9 @@ impl ChannelService {
     ) -> Result<CommandExecution> {
         if !matches!(
             envelope.payload.provider.as_str(),
-            FEISHU_PROVIDER | DINGTALK_PROVIDER
+            FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
         ) {
-            anyhow::bail!("channel provider must be feishu or dingtalk");
+            anyhow::bail!("channel provider must be feishu, lark or dingtalk");
         }
         validate_nonempty(&envelope.payload.tenant_key, "tenantKey")?;
         validate_nonempty(&envelope.payload.chat_id, "chatId")?;
@@ -4658,6 +4908,8 @@ impl ChannelService {
             let now = Utc::now();
             let now_text = now.to_rfc3339();
             let owner = classify_and_record_feishu_owner(
+                ChannelProviderSpec::for_provider(&envelope.payload.provider)
+                    .unwrap_or(&FEISHU_SPEC),
                 transaction,
                 &envelope.payload.provider,
                 &envelope.payload.app_id,
@@ -4675,7 +4927,8 @@ impl ChannelService {
                 ));
             };
             let target_agent_ids = resolve_observation_targets(transaction, &envelope.payload)?;
-            let structured_content = build_external_content(&envelope.payload, &target_agent_ids)?;
+            let structured_content =
+                build_observed_external_content(transaction, &envelope.payload, &target_agent_ids)?;
             validate_content(&structured_content)?;
             let dingtalk_group_aggregate = envelope.payload.provider == DINGTALK_PROVIDER
                 && envelope.payload.conversation_kind == "group";
@@ -4716,6 +4969,19 @@ impl ChannelService {
                     "bindingIdAtObservation": observed_binding_id,
                 })
             };
+            let mut payload_identity = payload_identity;
+            if !envelope.payload.resources.is_empty() {
+                let mut resources = envelope.payload.resources.clone();
+                if dingtalk_group_aggregate {
+                    // Download grants are scoped to each receiving Bot. Compare
+                    // stable resource order/metadata and keep the first Bot's
+                    // grants frozen together with its acknowledgement App.
+                    for resource in &mut resources {
+                        resource.download_code = None;
+                    }
+                }
+                payload_identity["resources"] = serde_json::to_value(resources)?;
+            }
             let payload_digest = format!("sha256:{}", canonical_json_digest(&payload_identity)?);
             let bot_scope_app_id = if envelope.payload.conversation_kind == "p2p" {
                 envelope.payload.app_id.as_str()
@@ -4872,8 +5138,11 @@ impl ChannelService {
                             frozen.target_agent_ids.push(target_agent_id.clone());
                         }
                     }
-                    frozen.structured_content =
-                        build_external_content(&envelope.payload, &frozen.target_agent_ids)?;
+                    frozen.structured_content = build_observed_external_content(
+                        transaction,
+                        &envelope.payload,
+                        &frozen.target_agent_ids,
+                    )?;
                     frozen_payload_json = serde_json::to_string(&frozen)?;
                 }
                 transaction.execute(
@@ -4923,6 +5192,8 @@ impl ChannelService {
                 "structuredContent": structured_content,
                 "targetAgentIds": target_agent_ids,
                 "acknowledgementAppId": envelope.payload.acknowledgement_app_id,
+                "inboundAttachments": inbound_attachments::InboundAttachments::new(
+                    &envelope.payload.external_message_id, &envelope.payload.resources),
             });
             let deadline = (now + Duration::seconds(AGGREGATION_WINDOW_SECONDS)).to_rfc3339();
             transaction.execute(
@@ -5319,7 +5590,7 @@ impl ChannelService {
                 return Ok(CommandHandlerResult::rejected(
                     "channel.membership_sync_required",
                     json!({
-                        "campId": camp_id,
+                        "threadId": camp_id,
                         "bindingId": binding.binding_id,
                         "agentIds": missing_members,
                         "expectedMembershipGeneration": membership_generation,
@@ -5373,8 +5644,8 @@ impl ChannelService {
                 json!({
                     "aggregateId": aggregate.id,
                     "requestId": request_id,
-                    "campId": camp_id,
-                    "campCreated": camp_created,
+                    "threadId": camp_id,
+                    "threadCreated": camp_created,
                     "queuePosition": queue_position,
                     "status": request_status,
                 }),
@@ -5392,7 +5663,7 @@ impl ChannelService {
         &self,
         database: &mut Database,
         quick_chat_path: &Path,
-        envelope: &CommandEnvelope<ResolvePendingCampBindingCommand>,
+        envelope: &CommandEnvelope<ResolvePendingThreadBindingCommand>,
     ) -> Result<CommandExecution> {
         validate_nonempty(&envelope.payload.pending_binding_id, "pendingBindingId")?;
         validate_nonempty(&envelope.payload.app_id, "appId")?;
@@ -5455,7 +5726,7 @@ impl ChannelService {
                 ));
             }
             let quick_chat_supported = match pending.conversation.provider.as_str() {
-                FEISHU_PROVIDER => matches!(
+                FEISHU_PROVIDER | LARK_PROVIDER => matches!(
                     pending.conversation.conversation_kind.as_str(),
                     "group" | "topic"
                 ),
@@ -5858,8 +6129,8 @@ impl ChannelService {
                     "projectId": project_id,
                     "projectDisplayName": project_display_name,
                     "bindingId": binding_id,
-                    "campId": camp_id,
-                    "campCreated": true,
+                    "threadId": camp_id,
+                    "threadCreated": true,
                     "promotedMessageCount": queued.len(),
                     "version": pending.version + 2,
                 }),
@@ -5878,6 +6149,7 @@ impl ChannelService {
         database: &mut Database,
         envelope: &CommandEnvelope<AuthorizeChannelExecutionConsolePageCommand>,
     ) -> Result<CommandExecution> {
+        let spec = &FEISHU_SPEC;
         validate_nonempty(&envelope.payload.agent_run_id, "agentRunId")?;
         validate_nonempty(&envelope.payload.app_id, "appId")?;
         validate_nonempty(&envelope.payload.external_message_id, "externalMessageId")?;
@@ -5905,12 +6177,13 @@ impl ChannelService {
             }
             let projection = transaction
                 .query_row(
-                    r#"
+                    &format!(r#"
                     SELECT channel_conversation.provider,
                            console.target_app_id, console.external_message_id,
                            console.latest_sequence, console.state,
                            COALESCE(
                                feishu_owner.canonical_owner_principal_id,
+                       lark_owner.canonical_owner_principal_id,
                                dingtalk_owner.canonical_owner_principal_id
                            )
                     FROM channel_execution_console AS console
@@ -5921,14 +6194,17 @@ impl ChannelService {
                     LEFT JOIN channel_member_bot_directory AS bot
                       ON bot.provider = channel_conversation.provider
                      AND bot.app_id = console.target_app_id AND bot.status = 'published'
-                    LEFT JOIN feishu_owner_identity AS feishu_owner
-                      ON channel_conversation.provider = 'feishu'
+                    LEFT JOIN {owner_identity} AS feishu_owner
+                      ON channel_conversation.provider = '{provider}'
                      AND feishu_owner.account_id = bot.account_id
-                    LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
+                    LEFT JOIN {lark_owner_identity} AS lark_owner
+              ON channel_conversation.provider = 'lark'
+             AND lark_owner.account_id = bot.account_id
+            LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
                       ON channel_conversation.provider = 'dingtalk'
                      AND dingtalk_owner.account_id = bot.account_id
                     WHERE console.agent_run_id = ?1
-                    "#,
+                    "#, owner_identity = spec.owner_identity, lark_owner_identity = LARK_SPEC.owner_identity, provider = spec.provider),
                     [&envelope.payload.agent_run_id],
                     |row| {
                         Ok(ExecutionConsolePageProjection {
@@ -6238,9 +6514,9 @@ impl ChannelService {
                 settlement.terminal_code,
                 json!({
                     "agentRunId": envelope.payload.agent_run_id,
-                    "campId": projection.camp_id,
-                    "campTurnId": projection.camp_turn_id,
-                    "campTurnStatus": camp_turn_status,
+                    "threadId": projection.camp_id,
+                    "threadTurnId": projection.camp_turn_id,
+                    "threadTurnStatus": camp_turn_status,
                     "status": settlement.terminal_status,
                 }),
                 Some(EntityReference {
@@ -6305,6 +6581,7 @@ impl ChannelService {
             decline_unattended_channel_retries(&transaction, actor, &now_text)?;
             project_active_request_deliveries(&transaction, &now_text)?;
             reconcile_terminal_pending_execution_consoles(&transaction, &now_text)?;
+            reconcile_superseded_execution_consoles(&transaction, provider, &now_text)?;
             settle_terminal_requests(&transaction, &now_text)?;
             promote_ready_requests(&transaction, &now_text, &mut settled_run_ids)?;
             let mut claims = claim_deliveries(
@@ -6322,8 +6599,8 @@ impl ChannelService {
                 remaining,
                 &now,
             )?);
-            let roster_refreshes = if provider == FEISHU_PROVIDER {
-                crate::message_delivery::pending_topic_roster_refreshes(&transaction)?
+            let roster_refreshes = if ChannelProviderSpec::for_provider(provider).is_some() {
+                crate::message_delivery::pending_topic_roster_refreshes(&transaction, provider)?
             } else {
                 Vec::new()
             };
@@ -6349,6 +6626,11 @@ impl ChannelService {
                 || channel_host_has_outstanding_work(&transaction, provider)?
                 || crate::automation::has_notification_work(&transaction, provider)?;
             ChannelHostTickResult {
+                inbound_attachments: inbound_attachments::pending(
+                    &transaction,
+                    provider,
+                    &request.inbound_attachment_app_ids,
+                )?,
                 deliveries: claims,
                 roster_refreshes,
                 has_outstanding_work,
@@ -6592,19 +6874,22 @@ impl ChannelService {
                                 "execution console external message identity changed unexpectedly"
                             );
                         }
-                        let (agent_run_id, latest_sequence, delivered_sequence): (
+                        let (agent_run_id, latest_sequence, delivered_sequence, state): (
                             String,
                             i64,
                             i64,
+                            String,
                         ) = transaction.query_row(
                             r#"
-                            SELECT agent_run_id, latest_sequence, delivered_sequence
+                            SELECT agent_run_id, latest_sequence, delivered_sequence, state
                             FROM channel_execution_console WHERE id = ?1
                             "#,
                             [console_id],
-                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                         )?;
-                        if delivered_sequence < latest_sequence {
+                        if delivered_sequence < latest_sequence
+                            && !matches!(state.as_str(), "recall_pending" | "recalled" | "recall_failed")
+                        {
                             queue_execution_console_upsert(
                                 transaction,
                                 request_id.as_deref().context(
@@ -6709,7 +6994,7 @@ impl ChannelService {
 }
 
 #[derive(Debug)]
-struct BoundGroupCamp {
+struct BoundGroupThread {
     binding_id: String,
     camp_id: String,
     conversation_kind: String,
@@ -6739,7 +7024,7 @@ fn reconcile_bound_group_memberships(
         "#,
         params![provider, tenant_key, chat_id],
         |row| {
-            Ok(BoundGroupCamp {
+            Ok(BoundGroupThread {
                 binding_id: row.get(0)?,
                 camp_id: row.get(1)?,
                 conversation_kind: row.get(2)?,
@@ -6805,12 +7090,12 @@ fn reconcile_bound_group_memberships(
                     camp_id: Some(camp.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: AddCampMemberCommand {
+                    payload: AddThreadMemberCommand {
                         camp_id: camp.camp_id.clone(),
                         agent_id: agent_id.clone(),
                         expected_membership_generation: membership_generation,
                         capability_overrides: json!({}),
-                        source: Some(CampMembershipMutationSource {
+                        source: Some(ThreadMembershipMutationSource {
                             namespace: provider.to_string(),
                             binding_id: camp.binding_id.clone(),
                             reconciliation_generation,
@@ -6866,7 +7151,7 @@ fn reconcile_bound_group_memberships(
                     camp_id: Some(camp.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: RemoveCampMemberCommand {
+                    payload: RemoveThreadMemberCommand {
                         camp_id: camp.camp_id.clone(),
                         agent_id: agent_id.clone(),
                         expected_membership_generation: preview.membership_generation,
@@ -6875,7 +7160,7 @@ fn reconcile_bound_group_memberships(
                             .next_default_lead_agent_id
                             .clone(),
                         reason: Some(format!("removed_from_{provider}_group")),
-                        source: Some(CampMembershipMutationSource {
+                        source: Some(ThreadMembershipMutationSource {
                             namespace: provider.to_string(),
                             binding_id: camp.binding_id.clone(),
                             reconciliation_generation,
@@ -6942,9 +7227,11 @@ struct FrozenInboundPayload {
     conversation_id: String,
     principal_id: String,
     binding_id_at_observation: Option<String>,
-    structured_content: StructuredCampMessageContent,
+    structured_content: StructuredThreadMessageContent,
     target_agent_ids: Vec<String>,
     acknowledgement_app_id: String,
+    #[serde(default)]
+    inbound_attachments: inbound_attachments::InboundAttachments,
 }
 
 #[derive(Debug)]
@@ -7026,14 +7313,17 @@ fn execution_console_action_projection(
     transaction: &Transaction<'_>,
     agent_run_id: &str,
 ) -> Result<Option<ExecutionConsoleActionProjection>> {
+    let spec = &FEISHU_SPEC;
     transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT conversation.provider,
                    console.target_app_id, console.external_message_id,
                    console.latest_sequence, console.state,
                    COALESCE(
                        feishu_owner.canonical_owner_principal_id,
+                       lark_owner.canonical_owner_principal_id,
                        dingtalk_owner.canonical_owner_principal_id
                    ),
                    COALESCE(run.camp_id, turn.camp_id), console.camp_turn_id,
@@ -7047,14 +7337,21 @@ fn execution_console_action_projection(
             LEFT JOIN channel_member_bot_directory AS bot
               ON bot.provider = conversation.provider
              AND bot.app_id = console.target_app_id AND bot.status = 'published'
-            LEFT JOIN feishu_owner_identity AS feishu_owner
-              ON conversation.provider = 'feishu'
+            LEFT JOIN {owner_identity} AS feishu_owner
+              ON conversation.provider = '{provider}'
              AND feishu_owner.account_id = bot.account_id
+            LEFT JOIN {lark_owner_identity} AS lark_owner
+              ON conversation.provider = 'lark'
+             AND lark_owner.account_id = bot.account_id
             LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
               ON conversation.provider = 'dingtalk'
              AND dingtalk_owner.account_id = bot.account_id
             WHERE console.agent_run_id = ?1
             "#,
+                owner_identity = spec.owner_identity,
+                lark_owner_identity = LARK_SPEC.owner_identity,
+                provider = spec.provider
+            ),
             [agent_run_id],
             |row| {
                 Ok(ExecutionConsoleActionProjection {
@@ -7082,7 +7379,7 @@ struct PendingMessageRecord {
     aggregate_id: String,
     external_principal_id: String,
     ack_app_id: String,
-    structured_content: StructuredCampMessageContent,
+    structured_content: StructuredThreadMessageContent,
     target_agent_ids: Vec<String>,
 }
 
@@ -7244,15 +7541,22 @@ fn validate_owner_identity_input(
     user_id: Option<&str>,
     union_id: Option<&str>,
 ) -> Result<()> {
-    if !matches!(provider, FEISHU_PROVIDER | DINGTALK_PROVIDER) {
-        anyhow::bail!("provider must be feishu or dingtalk");
+    if !matches!(
+        provider,
+        FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
+    ) {
+        anyhow::bail!("provider must be feishu, lark or dingtalk");
     }
     validate_nonempty(app_id, "appId")?;
     validate_nonempty(tenant_key, "tenantKey")?;
     if provider == DINGTALK_PROVIDER && user_id.is_none() {
         anyhow::bail!("a DingTalk sender userId is required");
     }
-    if provider == FEISHU_PROVIDER && open_id.is_none() && user_id.is_none() && union_id.is_none() {
+    if ChannelProviderSpec::for_provider(provider).is_some()
+        && open_id.is_none()
+        && user_id.is_none()
+        && union_id.is_none()
+    {
         anyhow::bail!("a Feishu sender identity is required");
     }
     for (value, field) in [
@@ -7272,6 +7576,7 @@ fn validate_owner_identity_input(
 
 #[allow(clippy::too_many_arguments)]
 fn classify_and_record_feishu_owner(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     provider: &str,
     app_id: &str,
@@ -7294,19 +7599,24 @@ fn classify_and_record_feishu_owner(
     }
     let identity = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT bot.account_id, owner.canonical_owner_principal_id,
                    owner.user_id_digest, owner.union_id_digest,
                    app.open_id_digest, app.user_id_digest, app.union_id_digest,
                    principal.tenant_key
-            FROM feishu_member_bot AS bot
-            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
-            LEFT JOIN feishu_owner_app_identity AS app
+            FROM {member_bot} AS bot
+            JOIN {owner_identity} AS owner ON owner.account_id = bot.account_id
+            LEFT JOIN {owner_app_identity} AS app
               ON app.account_id = owner.account_id AND app.app_id = bot.app_id
             LEFT JOIN external_principal AS principal
               ON principal.id = owner.canonical_owner_principal_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot
+            ),
             [app_id],
             |row| {
                 Ok((
@@ -7341,9 +7651,10 @@ fn classify_and_record_feishu_owner(
     {
         return Ok(FeishuOwnerClassification::Unverified);
     }
-    let open_digest = open_id.map(|value| opaque_digest("feishu-open", value));
-    let user_digest = user_id.map(|value| opaque_digest("feishu-user", value));
-    let union_digest = union_id.map(|value| opaque_digest("feishu-union", value));
+    let open_digest = open_id.map(|value| opaque_digest(&format!("{}-open", spec.provider), value));
+    let user_digest = user_id.map(|value| opaque_digest(&format!("{}-user", spec.provider), value));
+    let union_digest =
+        union_id.map(|value| opaque_digest(&format!("{}-union", spec.provider), value));
     let matches = user_digest.as_deref() == Some(canonical_user_digest.as_str())
         || union_digest.as_deref().is_some_and(|digest| {
             canonical_union_digest.as_deref() == Some(digest)
@@ -7378,17 +7689,21 @@ fn classify_and_record_feishu_owner(
         return Ok(FeishuOwnerClassification::Unverified);
     }
     transaction.execute(
-        r#"
-        UPDATE feishu_owner_identity
+        &format!(
+            r#"
+        UPDATE {owner_identity}
         SET union_id_digest = COALESCE(union_id_digest, ?2),
             verified_at = ?3, version = version + 1, updated_at = ?3
         WHERE account_id = ?1
         "#,
+            owner_identity = spec.owner_identity
+        ),
         params![account_id, union_digest, now],
     )?;
     transaction.execute(
-        r#"
-        INSERT INTO feishu_owner_app_identity(
+        &format!(
+            r#"
+        INSERT INTO {owner_app_identity}(
             account_id, app_id, open_id_digest, user_id_digest,
             union_id_digest, verified_at, version, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?6, ?6)
@@ -7397,9 +7712,11 @@ fn classify_and_record_feishu_owner(
             user_id_digest = COALESCE(excluded.user_id_digest, user_id_digest),
             union_id_digest = COALESCE(excluded.union_id_digest, union_id_digest),
             verified_at = excluded.verified_at,
-            version = feishu_owner_app_identity.version + 1,
+            version = {owner_app_identity}.version + 1,
             updated_at = excluded.updated_at
         "#,
+            owner_app_identity = spec.owner_app_identity
+        ),
         params![
             account_id,
             app_id,
@@ -7583,6 +7900,7 @@ fn persist_external_principal_identities(
 }
 
 fn load_verified_owner_for_app(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     provider: &str,
     app_id: &str,
@@ -7610,17 +7928,22 @@ fn load_verified_owner_for_app(
     }
     transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT owner.canonical_owner_principal_id, principal.display_name
-            FROM feishu_member_bot AS bot
-            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
-            JOIN feishu_owner_app_identity AS app
+            FROM {member_bot} AS bot
+            JOIN {owner_identity} AS owner ON owner.account_id = bot.account_id
+            JOIN {owner_app_identity} AS app
               ON app.account_id = owner.account_id AND app.app_id = bot.app_id
             JOIN external_principal AS principal
               ON principal.id = owner.canonical_owner_principal_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
               AND principal.tenant_key = ?2
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot
+            ),
             params![app_id, tenant_key],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -7687,7 +8010,8 @@ fn operator_matches_channel_owner(
         )?;
         return Ok(true);
     }
-    operator_matches_feishu_owner(
+    operator_matches_feishu_owner_with_spec(
+        ChannelProviderSpec::for_provider(provider).context("unsupported owner provider")?,
         transaction,
         app_id,
         expected_principal_id,
@@ -7699,7 +8023,8 @@ fn operator_matches_channel_owner(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn operator_matches_feishu_owner(
+fn operator_matches_feishu_owner_with_spec(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     app_id: &str,
     expected_principal_id: &str,
@@ -7710,16 +8035,21 @@ fn operator_matches_feishu_owner(
 ) -> Result<bool> {
     let identity = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT owner.account_id, owner.union_id_digest,
                    app.open_id_digest, app.union_id_digest
-            FROM feishu_member_bot AS bot
-            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
-            JOIN feishu_owner_app_identity AS app
+            FROM {member_bot} AS bot
+            JOIN {owner_identity} AS owner ON owner.account_id = bot.account_id
+            JOIN {owner_app_identity} AS app
               ON app.account_id = owner.account_id AND app.app_id = bot.app_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
               AND owner.canonical_owner_principal_id = ?2
             "#,
+                owner_app_identity = spec.owner_app_identity,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot
+            ),
             params![app_id, expected_principal_id],
             |row| {
                 Ok((
@@ -7734,8 +8064,9 @@ fn operator_matches_feishu_owner(
     let Some((account_id, owner_union_digest, app_open_digest, app_union_digest)) = identity else {
         return Ok(false);
     };
-    let open_digest = open_id.map(|value| opaque_digest("feishu-open", value));
-    let union_digest = union_id.map(|value| opaque_digest("feishu-union", value));
+    let open_digest = open_id.map(|value| opaque_digest(&format!("{}-open", spec.provider), value));
+    let union_digest =
+        union_id.map(|value| opaque_digest(&format!("{}-union", spec.provider), value));
     let matches = union_digest.as_deref().is_some_and(|digest| {
         owner_union_digest.as_deref() == Some(digest) || app_union_digest.as_deref() == Some(digest)
     }) || open_digest
@@ -7760,28 +8091,34 @@ fn operator_matches_feishu_owner(
         return Ok(false);
     }
     transaction.execute(
-        r#"
-        UPDATE feishu_owner_identity
+        &format!(
+            r#"
+        UPDATE {owner_identity}
         SET union_id_digest = COALESCE(union_id_digest, ?2),
             verified_at = ?3, version = version + 1, updated_at = ?3
         WHERE account_id = ?1
         "#,
+            owner_identity = spec.owner_identity
+        ),
         params![account_id, union_digest, now],
     )?;
     transaction.execute(
-        r#"
-        UPDATE feishu_owner_app_identity
+        &format!(
+            r#"
+        UPDATE {owner_app_identity}
         SET open_id_digest = COALESCE(open_id_digest, ?3),
             union_id_digest = COALESCE(union_id_digest, ?4),
             verified_at = ?5, version = version + 1, updated_at = ?5
         WHERE account_id = ?1 AND app_id = ?2
         "#,
+            owner_app_identity = spec.owner_app_identity
+        ),
         params![account_id, app_id, open_digest, union_digest, now],
     )?;
     persist_external_principal_identities(
         transaction,
         expected_principal_id,
-        FEISHU_PROVIDER,
+        spec.provider,
         app_id,
         open_id,
         None,
@@ -8210,7 +8547,7 @@ fn insert_pending_project_delivery(
         "pendingBindingId": input.pending_binding_id,
         "conversationDisplayName": input.conversation.display_name,
         "conversationKind": input.conversation.conversation_kind,
-        "cardRevision": if input.conversation.provider == FEISHU_PROVIDER {
+        "cardRevision": if ChannelProviderSpec::for_provider(&input.conversation.provider).is_some() {
             FEISHU_PROJECT_SELECTION_CARD_REVISION
         } else {
             PROJECT_SELECTION_CARD_REVISION
@@ -8467,9 +8804,11 @@ fn reconcile_obsolete_project_picker_card_revision(
     transaction: &Transaction<'_>,
     now: &str,
 ) -> Result<()> {
+    let spec = &FEISHU_SPEC;
     let pending = query_rows(
         transaction,
-        r#"
+        &format!(
+            r#"
         SELECT pending.id, pending.acknowledgement_app_id, pending.version,
                conversation.id, conversation.provider, conversation.display_name,
                conversation.tenant_key, conversation.chat_id,
@@ -8494,7 +8833,7 @@ fn reconcile_obsolete_project_picker_card_revision(
                         '$.cardRevision'
                     ) AS INTEGER),
                     0
-                ) < CASE conversation.provider WHEN 'feishu' THEN ?2 ELSE ?3 END
+                ) < CASE WHEN conversation.provider IN ('{provider}', 'lark') THEN ?2 ELSE ?3 END
                 AND (
                     (
                         candidate.status = 'failed'
@@ -8523,6 +8862,8 @@ fn reconcile_obsolete_project_picker_card_revision(
         WHERE pending.status = 'pending' AND pending.expires_at > ?1
         ORDER BY pending.created_at, pending.id
         "#,
+            provider = spec.provider
+        ),
         params![
             now,
             FEISHU_PROJECT_SELECTION_CARD_REVISION,
@@ -8698,7 +9039,7 @@ fn insert_channel_turn_request(
     aggregate_id: &str,
     principal_id: &str,
     ack_app_id: &str,
-    structured_content: &StructuredCampMessageContent,
+    structured_content: &StructuredThreadMessageContent,
     target_agent_ids: &[String],
     now: &str,
 ) -> Result<(String, i64)> {
@@ -8895,7 +9236,7 @@ fn create_channel_camp(
         .pop_first()
         .context("channel Camp requires a Default Lead")?;
     unique_targets.insert(default_lead.clone());
-    let camp_id = CampId::new().to_string();
+    let camp_id = ThreadId::new().to_string();
     transaction.execute(
         r#"
         INSERT INTO camp(
@@ -9038,7 +9379,11 @@ fn try_admit_request(
     else {
         return Ok(AdmissionAttempt::Deferred);
     };
-    let content: StructuredCampMessageContent = serde_json::from_str(&content_json)?;
+    let attachments = inbound_attachments::for_request(transaction, request_id)?;
+    if !attachments.ready() {
+        return Ok(AdmissionAttempt::Deferred);
+    }
+    let content: StructuredThreadMessageContent = serde_json::from_str(&content_json)?;
     let targets: Vec<String> = serde_json::from_str(&targets_json)?;
     for agent_id in &targets {
         let bot_state = transaction
@@ -9092,6 +9437,7 @@ fn try_admit_request(
     let result = CollaborationService::default().admit_external_channel_message(
         transaction,
         ExternalChannelAdmissionInput {
+            source_attachments: attachments.sources,
             camp_id: camp_id.clone(),
             external_principal_id: principal_id,
             body: String::new(),
@@ -9127,11 +9473,11 @@ fn try_admit_request(
             now,
         ],
     )?;
-    update_queue_ack_on_admission(transaction, request_id, &ack_app_id, now)?;
+    close_queue_ack_for_request(transaction, request_id, &ack_app_id, now)?;
     Ok(AdmissionAttempt::Admitted)
 }
 
-fn update_queue_ack_on_admission(
+fn close_queue_ack_for_request(
     transaction: &Transaction<'_>,
     request_id: &str,
     ack_app_id: &str,
@@ -9190,6 +9536,7 @@ fn fail_queued_request(
         "#,
         params![request_id, failure_code, now],
     )?;
+    close_queue_ack_for_request(transaction, request_id, ack_app_id, now)?;
     insert_delivery(
         transaction,
         request_id,
@@ -9215,6 +9562,10 @@ fn insert_queue_ack_delivery(
     queue_position: i64,
     now: &str,
 ) -> Result<()> {
+    // Attachment downloads gate admission, but do not create a separate chat card.
+    if !inbound_attachments::for_request(transaction, request_id)?.ready() {
+        return Ok(());
+    }
     insert_delivery(
         transaction,
         request_id,
@@ -9458,6 +9809,148 @@ fn delivery_priority(delivery_kind: &str) -> i64 {
     }
 }
 
+/// Reconstruct card supersession from durable Run starts. The member lane is
+/// scoped to one external conversation, and an unfinished Run keeps its stop
+/// action even if a newer Run has already started.
+fn reconcile_superseded_execution_consoles(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    now: &str,
+) -> Result<()> {
+    let consoles = query_rows(
+        transaction,
+        r#"
+        SELECT id, request_id, target_app_id, agent_id,
+               external_message_id, successor_run_id
+        FROM (
+            SELECT console.id, console.request_id, console.target_app_id,
+                   console.agent_id, console.external_message_id,
+                   (
+                       SELECT successor.agent_run_id
+                       FROM channel_execution_console AS successor
+                       JOIN agent_run AS successor_run
+                         ON successor_run.id = successor.agent_run_id
+                       WHERE successor.channel_conversation_id = console.channel_conversation_id
+                         AND successor.agent_id = console.agent_id
+                         AND successor_run.started_at IS NOT NULL
+                         AND (
+                             successor_run.started_at >
+                               COALESCE(run.started_at, run.created_at)
+                             OR (successor_run.started_at =
+                                   COALESCE(run.started_at, run.created_at)
+                                 AND successor.agent_run_id > console.agent_run_id)
+                         )
+                       ORDER BY successor_run.started_at DESC, successor.agent_run_id DESC
+                       LIMIT 1
+                   ) AS successor_run_id
+            FROM channel_execution_console AS console
+            JOIN agent_run AS run ON run.id = console.agent_run_id
+            JOIN channel_conversation AS conversation
+              ON conversation.id = console.channel_conversation_id
+            WHERE conversation.provider = ?1
+              AND run.status IN ('succeeded', 'failed', 'cancelled')
+              AND console.state IN ('terminal_sealed', 'recall_failed')
+        ) WHERE successor_run_id IS NOT NULL
+        ORDER BY id
+        "#,
+        [provider],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        },
+    )?;
+    for (console_id, request_id, target_app_id, agent_id, external_message_id, successor_run_id) in
+        consoles
+    {
+        let dedupe_key = format!("execution_console_recall:{console_id}:{successor_run_id}");
+        let already_attempted: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM channel_delivery WHERE dedupe_key = ?1)",
+            [&dedupe_key],
+            |row| row.get(0),
+        )?;
+        if already_attempted {
+            continue;
+        }
+        let recall_open: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM channel_delivery
+                WHERE console_id = ?1 AND delivery_kind = 'execution_console_recall'
+                  AND status IN ('pending', 'attempting')
+            )
+            "#,
+            [&console_id],
+            |row| row.get(0),
+        )?;
+        if recall_open {
+            continue;
+        }
+        transaction.execute(
+            r#"
+            DELETE FROM channel_delivery
+            WHERE console_id = ?1 AND delivery_kind = 'execution_console_upsert'
+              AND status = 'pending'
+            "#,
+            [&console_id],
+        )?;
+        let update_in_flight: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM channel_delivery
+                WHERE console_id = ?1 AND delivery_kind = 'execution_console_upsert'
+                  AND status = 'attempting'
+            )
+            "#,
+            [&console_id],
+            |row| row.get(0),
+        )?;
+        // A card never sent to the provider has no message to recall. An
+        // in-flight send may still produce its identity, so it must be awaited.
+        if external_message_id.is_none() && !update_in_flight {
+            transaction.execute(
+                r#"
+                UPDATE channel_execution_console
+                SET state = 'recalled', failure_code = NULL,
+                    recalled_at = ?2, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![console_id, now],
+            )?;
+            continue;
+        }
+        transaction.execute(
+            r#"
+            UPDATE channel_execution_console
+            SET state = 'recall_pending', failure_code = NULL,
+                recalled_at = NULL, updated_at = ?2
+            WHERE id = ?1
+            "#,
+            params![console_id, now],
+        )?;
+        insert_console_delivery(
+            transaction,
+            &request_id,
+            &console_id,
+            &dedupe_key,
+            "execution_console_recall",
+            &target_app_id,
+            Some(&agent_id),
+            &json!({
+                "kind": "execution_console_recall",
+                "executionConsoleId": console_id,
+            }),
+            now,
+        )?;
+    }
+    Ok(())
+}
+
 fn decline_unattended_channel_retries(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
@@ -9669,6 +10162,26 @@ fn project_active_request_deliveries_for_turn(
         let run_states = query_rows(
             transaction,
             r#"
+            WITH RECURSIVE related_run(id) AS (
+                SELECT run.id
+                FROM agent_run AS run
+                WHERE ?1 IS NOT NULL AND run.camp_turn_id = ?1
+                UNION
+                SELECT delivery.claimed_agent_run_id
+                FROM camp_message_delivery AS delivery
+                JOIN json_each(?3) AS requested_delivery
+                  ON requested_delivery.value = delivery.id
+                WHERE delivery.claimed_agent_run_id IS NOT NULL
+                UNION
+                SELECT child.claimed_agent_run_id
+                FROM related_run AS parent
+                JOIN camp_message AS message
+                  ON message.source_agent_run_id = parent.id
+                 AND message.camp_id = ?4
+                 AND message.author_type = 'agent'
+                JOIN camp_message_delivery AS child ON child.message_id = message.id
+                WHERE child.claimed_agent_run_id IS NOT NULL
+            )
             SELECT run.id, conversation.agent_id, run.status, run.version,
                    COALESCE(MAX(evidence.sequence), 0),
                    COALESCE(MAX(output.sequence), 0), bot.app_id
@@ -9682,20 +10195,12 @@ fn project_active_request_deliveries_for_turn(
             LEFT JOIN channel_member_bot_directory AS bot
               ON bot.provider = ?2 AND bot.agent_id = conversation.agent_id
              AND bot.status = 'published'
-            WHERE (
-                    (?1 IS NOT NULL AND run.camp_turn_id = ?1)
-                    OR EXISTS (
-                        SELECT 1
-                        FROM camp_message_delivery AS delivery
-                        JOIN json_each(?3) AS requested_delivery
-                          ON requested_delivery.value = delivery.id
-                        WHERE delivery.claimed_agent_run_id = run.id
-                    )
-                  )
+            WHERE run.id IN (SELECT id FROM related_run)
+              AND run.camp_id = ?4
             GROUP BY run.id, conversation.agent_id, run.status, run.version, bot.app_id
             ORDER BY run.created_at, run.id
             "#,
-            params![camp_turn_id, provider, delivery_ids_json],
+            params![camp_turn_id, provider, delivery_ids_json, camp_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -9770,12 +10275,13 @@ fn project_active_request_deliveries_for_turn(
             },
         )?;
         for (message_id, agent_id, body, structured_content_json) in outputs {
-            let content: StructuredCampMessageContent =
+            let content: StructuredThreadMessageContent =
                 serde_json::from_str(&structured_content_json)?;
             if let Some(author_app_id) = bot_app_id(transaction, &provider, &agent_id)? {
                 if !body.trim().is_empty() {
-                    let payload = if provider == FEISHU_PROVIDER {
-                        feishu_agent_output_projection(
+                    let payload = if let Some(spec) = ChannelProviderSpec::for_provider(&provider) {
+                        feishu_agent_output_projection_with_spec(
+                            spec,
                             transaction,
                             &message_id,
                             &agent_id,
@@ -9837,12 +10343,31 @@ fn project_active_request_deliveries_for_turn(
     Ok(())
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
 fn feishu_agent_output_projection(
     transaction: &Transaction<'_>,
     message_id: &str,
     agent_id: &str,
     author_app_id: &str,
-    content: &[StructuredCampMessageSegment],
+    content: &[StructuredThreadMessageSegment],
+) -> Result<Value> {
+    feishu_agent_output_projection_with_spec(
+        &FEISHU_SPEC,
+        transaction,
+        message_id,
+        agent_id,
+        author_app_id,
+        content,
+    )
+}
+
+fn feishu_agent_output_projection_with_spec(
+    spec: &ChannelProviderSpec,
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    agent_id: &str,
+    author_app_id: &str,
+    content: &[StructuredThreadMessageSegment],
 ) -> Result<Value> {
     // This is a Feishu-only presentation, not a rewrite of the Camp message or
     // Agent context. In particular, literal "@你" text is never string-stripped.
@@ -9851,29 +10376,47 @@ fn feishu_agent_output_projection(
         .filter(|segment| {
             !matches!(
                 segment,
-                StructuredCampMessageSegment::CurrentUserMention { .. }
+                StructuredThreadMessageSegment::CurrentUserMention { .. }
             )
         })
         .cloned()
         .collect();
     let body = render_current_plain_text(transaction, &body_content)?;
+    // The CampMessage is frozen before its delivery rows are enqueued. Read its
+    // recipient snapshot here; use old MessageDelivery only for legacy rows.
     let member_recipients = query_rows(
         transaction,
-        r#"
-        SELECT delivery.recipient_agent_id,
-               COALESCE(profile.display_name, bot.bot_display_name, delivery.recipient_agent_id),
+        &format!(
+            r#"
+        SELECT recipient.recipient_agent_id,
+               COALESCE(profile.display_name, bot.bot_display_name, recipient.recipient_agent_id),
                bot.bot_open_id
-        FROM message_delivery AS delivery
-        LEFT JOIN agent_profile AS profile ON profile.id = delivery.recipient_agent_id
-        LEFT JOIN feishu_member_bot AS bot
-          ON bot.agent_id = delivery.recipient_agent_id
+        FROM (
+            SELECT value AS recipient_agent_id, CAST(key AS INTEGER) AS position
+            FROM camp_message AS message,
+                 json_each(message.effective_recipient_ids_json)
+            WHERE message.id = ?1
+            UNION ALL
+            SELECT delivery.recipient_agent_id, delivery.recipient_canonical_position
+            FROM message_delivery AS delivery
+            WHERE delivery.message_id = ?1 AND delivery.delivery_kind = 'public_a2a'
+              AND NOT EXISTS (
+                  SELECT 1 FROM camp_message AS message
+                  WHERE message.id = ?1
+                    AND json_array_length(message.effective_recipient_ids_json) > 0
+              )
+        ) AS recipient
+        LEFT JOIN agent_profile AS profile ON profile.id = recipient.recipient_agent_id
+        LEFT JOIN {member_bot} AS bot
+          ON bot.agent_id = recipient.recipient_agent_id
          AND bot.status = 'published'
          AND bot.account_id = (
-             SELECT account_id FROM feishu_member_bot WHERE app_id = ?2
+             SELECT account_id FROM {member_bot} WHERE app_id = ?2
          )
-        WHERE delivery.message_id = ?1 AND delivery.delivery_kind = 'public_a2a'
-        ORDER BY delivery.recipient_canonical_position, delivery.id
+        ORDER BY recipient.position, recipient.recipient_agent_id
         "#,
+            member_bot = spec.member_bot
+        ),
         params![message_id, author_app_id],
         |row| {
             Ok(json!({
@@ -9890,11 +10433,21 @@ fn feishu_agent_output_projection(
         "body": body,
         "mentionPrincipal": mentions_current_user(content),
         "memberRecipients": member_recipients,
-        "reply": feishu_agent_reply_projection(transaction, message_id, author_app_id)?,
+        "reply": feishu_agent_reply_projection_with_spec(spec, transaction, message_id, author_app_id)?,
     }))
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
 fn feishu_agent_reply_projection(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    author_app_id: &str,
+) -> Result<Value> {
+    feishu_agent_reply_projection_with_spec(&FEISHU_SPEC, transaction, message_id, author_app_id)
+}
+
+fn feishu_agent_reply_projection_with_spec(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     message_id: &str,
     author_app_id: &str,
@@ -9903,7 +10456,8 @@ fn feishu_agent_reply_projection(
     // Only a surviving, earlier message in this same Camp may supply an excerpt.
     let source = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT source.reply_to_camp_message_id, parent.structured_content_json,
                    CASE parent.author_type
                      WHEN 'agent' THEN COALESCE(profile.display_name, '队员')
@@ -9923,14 +10477,18 @@ fn feishu_agent_reply_projection(
               ON parent.author_type = 'agent' AND profile.id = parent.author_id
             LEFT JOIN external_principal AS principal
               ON parent.author_type = 'external_principal' AND principal.id = parent.author_id
-            LEFT JOIN feishu_member_bot AS bot ON bot.app_id = ?2
-            LEFT JOIN feishu_owner_identity AS owner
+            LEFT JOIN {member_bot} AS bot ON bot.app_id = ?2
+            LEFT JOIN {owner_identity} AS owner
               ON owner.account_id = bot.account_id
              AND parent.author_type = 'external_principal'
              AND owner.canonical_owner_principal_id = parent.author_id
-            LEFT JOIN feishu_account AS account ON account.id = owner.account_id
+            LEFT JOIN {account} AS account ON account.id = owner.account_id
             WHERE source.id = ?1
             "#,
+                owner_identity = spec.owner_identity,
+                member_bot = spec.member_bot,
+                account = spec.account
+            ),
             params![message_id, author_app_id],
             |row| {
                 Ok((
@@ -9949,7 +10507,7 @@ fn dingtalk_agent_output_projection(
     message_id: &str,
     agent_id: &str,
     body: &str,
-    content: &[StructuredCampMessageSegment],
+    content: &[StructuredThreadMessageSegment],
 ) -> Result<Value> {
     Ok(json!({
         "kind": "agent_output",
@@ -10013,7 +10571,7 @@ fn channel_agent_reply_projection(
         return Ok(Value::Null);
     };
     let Some(content) = parent_content_json
-        .and_then(|json| serde_json::from_str::<StructuredCampMessageContent>(&json).ok())
+        .and_then(|json| serde_json::from_str::<StructuredThreadMessageContent>(&json).ok())
     else {
         return Ok(json!({"status": "unavailable"}));
     };
@@ -10024,8 +10582,8 @@ fn channel_agent_reply_projection(
         .filter(|segment| {
             !matches!(
                 segment,
-                StructuredCampMessageSegment::CurrentUserMention { .. }
-                    | StructuredCampMessageSegment::ExternalQuote { .. }
+                StructuredThreadMessageSegment::CurrentUserMention { .. }
+                    | StructuredThreadMessageSegment::ExternalQuote { .. }
             )
         })
         .collect();
@@ -10063,7 +10621,7 @@ fn upgrade_legacy_feishu_output_claim(
     transaction: &Transaction<'_>,
     claim: &mut ClaimedChannelDelivery,
 ) -> Result<()> {
-    if claim.provider != FEISHU_PROVIDER
+    if ChannelProviderSpec::for_provider(&claim.provider).is_none()
         || claim.delivery_kind != "agent_output"
         || claim.payload.get("presentationVersion").is_some()
     {
@@ -10083,8 +10641,10 @@ fn upgrade_legacy_feishu_output_claim(
         [&claim.delivery_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
-    let content: StructuredCampMessageContent = serde_json::from_str(&content_json)?;
-    claim.payload = feishu_agent_output_projection(
+    let content: StructuredThreadMessageContent = serde_json::from_str(&content_json)?;
+    claim.payload = feishu_agent_output_projection_with_spec(
+        ChannelProviderSpec::for_provider(&claim.provider)
+            .context("unsupported output provider")?,
         transaction,
         &message_id,
         &agent_id,
@@ -10224,6 +10784,23 @@ fn materialize_execution_console(
         }
         None => {
             let console_id = format!("rvcec_{}", Uuid::new_v4().simple());
+            // A descendant Run may be discovered only after its parent Request
+            // settled or after a Host restart. Its terminal quiet window can
+            // already have elapsed by the first projection.
+            let terminal_quiet_elapsed = if terminal {
+                transaction
+                    .query_row(
+                        "SELECT ended_at FROM agent_run WHERE id = ?1",
+                        [agent_run_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )?
+                    .as_deref()
+                    .map(|ended_at| execution_console_terminal_quiet_window_elapsed(ended_at, now))
+                    .transpose()?
+                    .unwrap_or(false)
+            } else {
+                false
+            };
             transaction.execute(
                 r#"
                 INSERT INTO channel_execution_console(
@@ -10245,7 +10822,9 @@ fn materialize_execution_console(
                     agent_id,
                     target_app_id,
                     digest,
-                    if terminal {
+                    if terminal_quiet_elapsed {
+                        "terminal_sealed"
+                    } else if terminal {
                         "terminal_pending"
                     } else {
                         live_state
@@ -10253,7 +10832,14 @@ fn materialize_execution_console(
                     now,
                 ],
             )?;
-            (console_id, 1, !terminal)
+            if terminal_quiet_elapsed {
+                let snapshot = capture_execution_console_snapshot(transaction, agent_run_id, 1)?;
+                transaction.execute(
+                    "UPDATE channel_execution_console SET terminal_snapshot_json = ?2 WHERE id = ?1",
+                    params![console_id, serde_json::to_string(&snapshot)?],
+                )?;
+            }
+            (console_id, 1, !terminal || terminal_quiet_elapsed)
         }
     };
     if !queue_upsert {
@@ -10343,7 +10929,7 @@ pub(crate) fn enqueue_bound_camp_agent_message(
     message_id: &str,
     agent_id: &str,
     body: &str,
-    content: &StructuredCampMessageContent,
+    content: &StructuredThreadMessageContent,
     now: &str,
 ) -> Result<()> {
     let binding = transaction
@@ -10375,7 +10961,7 @@ pub(crate) fn enqueue_bound_camp_agent_message(
             message_id,
             &json!({
                 "kind": "agent_output",
-                "sourceCampMessageId": message_id,
+                "sourceThreadMessageId": message_id,
                 "sourceAgentId": agent_id,
                 "failureCode": "channel.author_bot_unpublished",
                 "text": body,
@@ -10395,8 +10981,9 @@ pub(crate) fn enqueue_bound_camp_agent_message(
     };
 
     if !body.trim().is_empty() {
-        let payload = if provider == FEISHU_PROVIDER {
-            feishu_agent_output_projection(
+        let payload = if let Some(spec) = ChannelProviderSpec::for_provider(&provider) {
+            feishu_agent_output_projection_with_spec(
+                spec,
                 transaction,
                 message_id,
                 agent_id,
@@ -10496,9 +11083,9 @@ fn materialize_agent_attachments(
         let dedupe_key = format!("agent_attachment:{message_id}:{ordinal}:{attachment_id}");
         let payload = json!({
             "kind": "agent_attachment",
-            "sourceCampMessageId": message_id,
+            "sourceThreadMessageId": message_id,
             "sourceAgentId": agent_id,
-            "campId": camp_id,
+            "threadId": camp_id,
             "attachmentId": attachment_id,
             "ordinal": ordinal,
             "attachmentKind": attachment_kind,
@@ -10549,8 +11136,8 @@ fn materialize_agent_attachments(
         }
         let dedupe_key = format!("agent_attachment:{message_id}:{ordinal}:{}", source.id);
         let payload = json!({
-            "kind": "agent_attachment", "sourceCampMessageId": message_id, "sourceAgentId": agent_id,
-            "campId": camp_id, "attachmentId": source.id, "ordinal": ordinal,
+            "kind": "agent_attachment", "sourceThreadMessageId": message_id, "sourceAgentId": agent_id,
+            "threadId": camp_id, "attachmentId": source.id, "ordinal": ordinal,
             "attachmentKind": if source.media_type.as_deref().is_some_and(|mime| mime.starts_with("image/")) { "image" } else { "file" },
             "fileName": source.display_name, "mediaType": source.media_type,
             "storage": "source_ref", "requiresBodyDelivery": requires_body_delivery,
@@ -10754,6 +11341,7 @@ fn claim_deliveries(
     limit: usize,
     now: &chrono::DateTime<Utc>,
 ) -> Result<Vec<ClaimedChannelDelivery>> {
+    let spec = &FEISHU_SPEC;
     let now_text = now.to_rfc3339();
     transaction.execute(
         r#"
@@ -10872,7 +11460,8 @@ fn claim_deliveries(
             continue;
         }
         let mut claim = transaction.query_row(
-            r#"
+            &format!(
+                r#"
             SELECT delivery.id, delivery.request_id, delivery.delivery_kind,
                    delivery.target_app_id, COALESCE(bot.credential_ref, ''),
                    COALESCE(
@@ -10910,7 +11499,7 @@ fn claim_deliveries(
                            request_conversation.provider,
                             pending_conversation.provider,
                             bound_conversation.provider
-                        ) = 'feishu'
+                        ) IN ('{provider}', 'lark')
                        THEN (
                            SELECT previous.external_delivery_message_id
                            FROM channel_delivery AS previous
@@ -10968,7 +11557,9 @@ fn claim_deliveries(
                        FROM external_principal_app_identity AS identity
                        WHERE identity.principal_id = COALESCE(
                                  request.external_principal_id,
-                                 pending.owner_principal_id
+                                 pending.owner_principal_id,
+                                 CASE WHEN bound_conversation.conversation_kind = 'p2p'
+                                      THEN bound_conversation.last_sender_principal_id END
                              )
                          AND identity.provider = COALESCE(
                              request_conversation.provider,
@@ -11015,6 +11606,8 @@ fn claim_deliveries(
               ON console.id = delivery.console_id
             WHERE delivery.id = ?1
             "#,
+                provider = spec.provider
+            ),
             [&delivery_id],
             |row| {
                 let payload_json = row.get::<_, String>(8)?;
@@ -11044,6 +11637,13 @@ fn claim_deliveries(
             },
         )?;
         upgrade_legacy_feishu_output_claim(transaction, &mut claim)?;
+        // Existing outbox bytes remain frozen; only the claimed host view uses current names.
+        crate::thread_compat::project_command_result("channel.outbox.claim", &mut claim.payload)?;
+        crate::thread_compat::alias(
+            &mut claim.payload,
+            "sourceCampMessageId",
+            "sourceThreadMessageId",
+        )?;
         claims.push(claim);
     }
     Ok(claims)
@@ -11065,6 +11665,28 @@ fn channel_host_has_outstanding_work(
                   ON conversation.id = binding.channel_conversation_id
                 WHERE conversation.provider = ?1
                   AND request.status IN ('queued', 'admitted')
+            )
+            OR EXISTS(
+                SELECT 1
+                FROM channel_turn_request AS request
+                JOIN channel_conversation_binding AS binding
+                  ON binding.id = request.binding_id
+                JOIN channel_conversation AS conversation
+                  ON conversation.id = binding.channel_conversation_id
+                JOIN json_each(request.delivery_ids_json) AS requested_delivery
+                JOIN camp_message_delivery AS camp_delivery
+                  ON camp_delivery.id = requested_delivery.value
+                LEFT JOIN agent_run AS run
+                  ON run.id = camp_delivery.claimed_agent_run_id
+                WHERE conversation.provider = ?1
+                  AND request.status = 'completed'
+                  AND (
+                      camp_delivery.status = 'waiting'
+                      OR (
+                          camp_delivery.status = 'claimed'
+                          AND run.status IN ('queued', 'running', 'waiting')
+                      )
+                  )
             )
             OR EXISTS(
                 SELECT 1
@@ -11190,17 +11812,65 @@ fn resolve_observation_targets(
 fn build_external_content(
     command: &ObserveChannelInboundCommand,
     target_agent_ids: &[String],
-) -> Result<StructuredCampMessageContent> {
+) -> Result<StructuredThreadMessageContent> {
     let content = assemble_external_content(command, target_agent_ids)?;
     validate_content(&content)?;
     let _ = canonical_content_digest(&content)?;
     Ok(content)
 }
 
+fn build_observed_external_content(
+    transaction: &Transaction<'_>,
+    command: &ObserveChannelInboundCommand,
+    target_agent_ids: &[String],
+) -> Result<StructuredThreadMessageContent> {
+    if command.provider != DINGTALK_PROVIDER || command.conversation_kind != "group" {
+        return build_external_content(command, target_agent_ids);
+    }
+    let mut bot_names = BTreeSet::new();
+    for agent_id in target_agent_ids {
+        let name = transaction
+            .query_row(
+                "SELECT bot_display_name FROM dingtalk_member_bot WHERE agent_id = ?1 AND status = 'published'",
+                [agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(name) = name {
+            bot_names.insert(name);
+        }
+    }
+    // The normalized transport body stays intact for the cross-Bot payload digest.
+    // Only the published Camp content drops textual copies of its actual
+    // target Bots; structured MemberMentions already address those targets.
+    let mut bot_names = bot_names.into_iter().collect::<Vec<_>>();
+    bot_names.sort_by_key(|name| std::cmp::Reverse(name.chars().count()));
+    let mut canonical = command.clone();
+    canonical.body = remove_dingtalk_target_mentions(&command.body, &bot_names);
+    build_external_content(&canonical, target_agent_ids)
+}
+
+fn remove_dingtalk_target_mentions(body: &str, bot_names: &[String]) -> String {
+    let mut body = body.to_string();
+    for name in bot_names {
+        let token = format!("@{name}");
+        let mention = body.match_indices(&token).find(|(start, _)| {
+            let before = body[..*start].chars().next_back();
+            let after = body[start + token.len()..].chars().next();
+            !before.is_some_and(|character| character.is_alphanumeric() || character == '_')
+                && !after.is_some_and(|character| character.is_alphanumeric() || character == '_')
+        });
+        if let Some((start, _)) = mention {
+            body.replace_range(start..start + token.len(), "");
+        }
+    }
+    body.trim().to_string()
+}
+
 fn assemble_external_content(
     command: &ObserveChannelInboundCommand,
     target_agent_ids: &[String],
-) -> Result<StructuredCampMessageContent> {
+) -> Result<StructuredThreadMessageContent> {
     let mut content = Vec::new();
     if let Some(quote) = &command.quote {
         let sender_display_name = normalize_display_name(&quote.sender_display_name)?;
@@ -11221,50 +11891,38 @@ fn assemble_external_content(
                 "attachmentSummaries": attachment_summaries,
             }))?
         );
-        content.push(StructuredCampMessageSegment::ExternalQuote {
+        content.push(StructuredThreadMessageSegment::ExternalQuote {
             sender_display_name,
             body,
             attachment_summaries,
             content_digest,
         });
-        content.push(StructuredCampMessageSegment::Text {
+        content.push(StructuredThreadMessageSegment::Text {
             text: "\n\n".to_string(),
         });
     }
     for agent_id in target_agent_ids {
-        content.push(StructuredCampMessageSegment::MemberMention {
+        content.push(StructuredThreadMessageSegment::MemberMention {
             agent_id: agent_id.clone(),
         });
-        content.push(StructuredCampMessageSegment::Text {
+        content.push(StructuredThreadMessageSegment::Text {
             text: " ".to_string(),
         });
     }
-    content.push(StructuredCampMessageSegment::Text {
+    content.push(StructuredThreadMessageSegment::Text {
         text: command.body.clone(),
     });
-    for attachment in &command.attachment_summaries {
-        content.push(StructuredCampMessageSegment::Text {
-            text: format!(
-                "\n[附件] {}{}",
-                attachment.name,
-                attachment
-                    .media_type
-                    .as_deref()
-                    .map(|media_type| format!(" ({media_type})"))
-                    .unwrap_or_default()
-            ),
-        });
-    }
     let content = normalize_content(content);
     Ok(content)
 }
 
 fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<()> {
+    inbound_attachments::validate_resources(&command.resources)?;
     if !matches!(
         command.provider.as_str(),
-        FEISHU_PROVIDER | DINGTALK_PROVIDER
+        FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
     ) {
-        anyhow::bail!("channel provider must be feishu or dingtalk");
+        anyhow::bail!("channel provider must be feishu, lark or dingtalk");
     }
     for (value, field) in [
         (&command.app_id, "appId"),
@@ -11620,7 +12278,10 @@ fn bot_app_id(
 }
 
 fn validate_provider(provider: &str) -> Result<()> {
-    if !matches!(provider, FEISHU_PROVIDER | DINGTALK_PROVIDER) {
+    if !matches!(
+        provider,
+        FEISHU_PROVIDER | LARK_PROVIDER | DINGTALK_PROVIDER
+    ) {
         anyhow::bail!("provider is not supported");
     }
     Ok(())
@@ -11628,13 +12289,9 @@ fn validate_provider(provider: &str) -> Result<()> {
 
 fn validate_credential_ref(credential_ref: &str, provider: &str) -> Result<()> {
     validate_nonempty(credential_ref, "credentialRef")?;
-    let prefix = if provider == FEISHU_PROVIDER {
-        "feishu-"
-    } else {
-        "dingtalk-"
-    };
+    let prefix = format!("{provider}-");
     if credential_ref.len() > 128
-        || !credential_ref.starts_with(prefix)
+        || !credential_ref.starts_with(&prefix)
         || !credential_ref
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
@@ -11664,7 +12321,7 @@ fn validated_credential_payload(provider: &str, value: &Value) -> Result<Value> 
         .as_object()
         .context("credential payload must be an object")?;
     let app_secret = required_json_string(object, "appSecret", 16_384)?;
-    if provider == FEISHU_PROVIDER {
+    if ChannelProviderSpec::for_provider(provider).is_some() {
         if object.len() != 1 {
             anyhow::bail!("Feishu credential payload has unsupported fields");
         }
@@ -11701,7 +12358,7 @@ fn validate_developer_session_documents(
     if serde_json::to_vec(session)?.len() > 1_048_576 {
         anyhow::bail!("developer session exceeds the storage limit");
     }
-    if provider == FEISHU_PROVIDER {
+    if ChannelProviderSpec::for_provider(provider).is_some() {
         for (key, maximum) in [
             ("brand", 16),
             ("userId", 512),
@@ -11711,10 +12368,7 @@ fn validate_developer_session_documents(
         ] {
             required_json_string(identity_object, key, maximum)?;
         }
-        if !matches!(
-            identity_object.get("brand").and_then(Value::as_str),
-            Some("feishu" | "lark")
-        ) {
+        if identity_object.get("brand").and_then(Value::as_str) != Some(provider) {
             anyhow::bail!("Feishu developer identity brand is invalid");
         }
         if let Some(email) = identity_object.get("email")
@@ -11756,14 +12410,16 @@ fn validate_developer_session_documents(
             required_json_string(cookie, "value", 16_384)?;
             let domain = required_json_string(cookie, "domain", 512)?;
             let domain = domain.trim_start_matches('.').to_ascii_lowercase();
-            if !(domain == "feishu.cn"
-                || domain.ends_with(".feishu.cn")
-                || domain == "larkoffice.com"
-                || domain.ends_with(".larkoffice.com")
-                || domain == "larksuite.com"
-                || domain.ends_with(".larksuite.com"))
-            {
-                anyhow::bail!("Feishu developer session cookie domain is invalid");
+            let allowed = if provider == LARK_PROVIDER {
+                domain == "larksuite.com" || domain.ends_with(".larksuite.com")
+            } else {
+                domain == "feishu.cn"
+                    || domain.ends_with(".feishu.cn")
+                    || domain == "larkoffice.com"
+                    || domain.ends_with(".larkoffice.com")
+            };
+            if !allowed {
+                anyhow::bail!("developer session cookie domain does not match provider");
             }
             required_json_string(cookie, "path", 4096)?;
         }
@@ -11912,7 +12568,10 @@ fn profile_key_for_dingtalk(corp_id: &str, user_id: &str) -> String {
     format!("rvdtp_{}", &encoded[..32])
 }
 
-fn validate_feishu_connection(command: &CommitFeishuAccountConnectionCommand) -> Result<()> {
+fn validate_feishu_connection<const LARK: bool>(
+    command: &CommitChannelAccountConnectionCommand<LARK>,
+) -> Result<()> {
+    let spec = if LARK { &LARK_SPEC } else { &FEISHU_SPEC };
     let account = &command.account;
     validate_nonempty(&account.account_id, "accountId")?;
     validate_digest(&account.user_id_digest, "userIdDigest")?;
@@ -11920,17 +12579,27 @@ fn validate_feishu_connection(command: &CommitFeishuAccountConnectionCommand) ->
     normalize_display_name(&account.user_name)?;
     normalize_display_name(&account.tenant_name)?;
     normalize_optional_email(account.email.as_deref())?;
-    if !matches!(account.brand.as_str(), "feishu" | "lark") {
-        anyhow::bail!("brand must be feishu or lark");
+    if account.brand
+        != if LARK {
+            LARK_SPEC.provider
+        } else {
+            FEISHU_SPEC.provider
+        }
+    {
+        anyhow::bail!("brand does not match the channel provider");
     }
     validate_developer_session_documents(
-        FEISHU_PROVIDER,
+        if LARK {
+            LARK_SPEC.provider
+        } else {
+            FEISHU_SPEC.provider
+        },
         &command.developer_session.identity,
         &command.developer_session.session,
     )?;
     let identity = command.developer_session.identity.as_object().unwrap();
     let user_id = required_json_string(identity, "userId", 512)?;
-    if opaque_digest("feishu-user", user_id) != account.user_id_digest
+    if opaque_digest(&format!("{}-user", spec.provider), user_id) != account.user_id_digest
         || required_json_string(identity, "tenantId", 512)? != account.tenant_id
         || required_json_string(identity, "userName", 512)? != account.user_name
         || required_json_string(identity, "tenantName", 512)? != account.tenant_name
@@ -12023,12 +12692,16 @@ fn replace_developer_session_row(
 }
 
 fn persist_feishu_account(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     account: &FeishuConnectionAccountInput,
 ) -> Result<i64> {
     let conflicting_identity = transaction
         .query_row(
-            "SELECT user_id_digest FROM feishu_account WHERE id = ?1",
+            &format!(
+                "SELECT user_id_digest FROM {account} WHERE id = ?1",
+                account = spec.account
+            ),
             [&account.account_id],
             |row| row.get::<_, Option<String>>(0),
         )
@@ -12040,17 +12713,21 @@ fn persist_feishu_account(
     }
     let now = Utc::now().to_rfc3339();
     transaction.execute(
-        r#"
-        UPDATE feishu_account
+        &format!(
+            r#"
+        UPDATE {account}
         SET status = 'disconnected', disconnected_at = ?2,
             version = version + 1, updated_at = ?2
         WHERE status = 'connected' AND id <> ?1
         "#,
+            account = spec.account
+        ),
         params![account.account_id, now],
     )?;
     transaction.execute(
-        r#"
-        INSERT INTO feishu_account(
+        &format!(
+            r#"
+        INSERT INTO {account}(
             id, identity_digest, display_name, tenant_name,
             status, version, created_at, updated_at, disconnected_at,
             user_id_digest, tenant_id, user_name, email, brand,
@@ -12070,13 +12747,15 @@ fn persist_feishu_account(
             brand = excluded.brand,
             status = 'connected', disconnected_at = NULL,
             connected_at = CASE
-                WHEN feishu_account.status = 'connected'
-                 AND feishu_account.connected_at IS NOT NULL
-                THEN feishu_account.connected_at ELSE excluded.connected_at END,
+                WHEN {account}.status = 'connected'
+                 AND {account}.connected_at IS NOT NULL
+                THEN {account}.connected_at ELSE excluded.connected_at END,
             last_verified_at = excluded.last_verified_at,
-            version = feishu_account.version + 1,
+            version = {account}.version + 1,
             updated_at = excluded.updated_at
         "#,
+            account = spec.account
+        ),
         params![
             account.account_id,
             account.user_id_digest,
@@ -12089,8 +12768,9 @@ fn persist_feishu_account(
         ],
     )?;
     transaction.execute(
-        r#"
-        INSERT INTO feishu_owner_identity(
+        &format!(
+            r#"
+        INSERT INTO {owner_identity}(
             account_id, tenant_id, canonical_owner_principal_id,
             user_id_digest, union_id_digest, verified_at,
             version, created_at, updated_at
@@ -12099,9 +12779,11 @@ fn persist_feishu_account(
             tenant_id = excluded.tenant_id,
             user_id_digest = excluded.user_id_digest,
             verified_at = excluded.verified_at,
-            version = feishu_owner_identity.version + 1,
+            version = {owner_identity}.version + 1,
             updated_at = excluded.updated_at
         "#,
+            owner_identity = spec.owner_identity
+        ),
         params![
             account.account_id,
             account.tenant_id,
@@ -12112,7 +12794,10 @@ fn persist_feishu_account(
     )?;
     transaction
         .query_row(
-            "SELECT version FROM feishu_account WHERE id = ?1",
+            &format!(
+                "SELECT version FROM {account} WHERE id = ?1",
+                account = spec.account
+            ),
             [&account.account_id],
             |row| row.get(0),
         )
@@ -12291,16 +12976,20 @@ fn upsert_credential_row(
 }
 
 fn store_feishu_publication_credential(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
     command: &StorePublicationCredentialCommand,
     payload: &Value,
 ) -> Result<CommandHandlerResult> {
     let current = transaction
         .query_row(
-            r#"
+            &format!(
+                r#"
             SELECT state, remote_app_id, credential_ref, version
-            FROM feishu_member_bot_publication_intent WHERE id = ?1
+            FROM {publication_intent} WHERE id = ?1
             "#,
+                publication_intent = spec.publication_intent
+            ),
             [&command.publication_intent_id],
             |row| {
                 Ok((
@@ -12314,7 +13003,7 @@ fn store_feishu_publication_credential(
         .optional()?;
     let Some((state, remote_app_id, credential_ref, version)) = current else {
         return Ok(rejected(
-            "feishu_publication_intent.not_found",
+            &spec.code("publication_intent.not_found"),
             "Publication intent does not exist",
         ));
     };
@@ -12323,13 +13012,13 @@ fn store_feishu_publication_credential(
     }
     if !publication_intent_transition_allowed(&state, "credentials_read") {
         return Ok(rejected(
-            "feishu_publication_intent.invalid_transition",
+            &spec.code("publication_intent.invalid_transition"),
             "Credential storage requires the credentials_read transition",
         ));
     }
     if remote_app_id.as_deref() != Some(command.remote_app_id.as_str()) {
         return Ok(rejected(
-            "feishu_publication_intent.remote_app_conflict",
+            &spec.code("publication_intent.remote_app_conflict"),
             "Credential does not belong to the frozen App",
         ));
     }
@@ -12338,7 +13027,7 @@ fn store_feishu_publication_credential(
         .is_some_and(|current| current != command.credential_ref)
         || credential_identity_conflict(
             transaction,
-            FEISHU_PROVIDER,
+            spec.provider,
             &command.credential_ref,
             &command.remote_app_id,
         )?
@@ -12350,20 +13039,23 @@ fn store_feishu_publication_credential(
     }
     let revision = upsert_credential_row(
         transaction,
-        FEISHU_PROVIDER,
+        spec.provider,
         &command.credential_ref,
         &command.remote_app_id,
         payload,
     )?;
     let now = Utc::now().to_rfc3339();
     transaction.execute(
-        r#"
-        UPDATE feishu_member_bot_publication_intent
+        &format!(
+            r#"
+        UPDATE {publication_intent}
         SET state = 'credentials_read', credential_ref = ?2,
             last_completed_step = 'credentials_read', failure_code = NULL,
             version = version + 1, updated_at = ?3
         WHERE id = ?1 AND version = ?4
         "#,
+            publication_intent = spec.publication_intent
+        ),
         params![
             command.publication_intent_id,
             command.credential_ref,
@@ -12372,7 +13064,7 @@ fn store_feishu_publication_credential(
         ],
     )?;
     Ok(CommandHandlerResult::applied(
-        "feishu_publication_intent.credential_stored",
+        spec.code("publication_intent.credential_stored"),
         json!({
             "publicationIntentId": command.publication_intent_id,
             "credentialRef": command.credential_ref,
@@ -12523,15 +13215,19 @@ fn is_channel_host(actor: &ActorRef) -> bool {
     matches!(
         actor,
         ActorRef::System { component_id }
-            if component_id == FEISHU_CHANNEL_HOST_COMPONENT
+            if component_id == FEISHU_SPEC.host_component
+                || component_id == LARK_SPEC.host_component
                 || component_id == DINGTALK_CHANNEL_HOST_COMPONENT
     )
 }
 
 fn channel_host_provider(actor: &ActorRef) -> Option<&'static str> {
     match actor {
-        ActorRef::System { component_id } if component_id == FEISHU_CHANNEL_HOST_COMPONENT => {
-            Some(FEISHU_PROVIDER)
+        ActorRef::System { component_id } if component_id == LARK_SPEC.host_component => {
+            Some(LARK_SPEC.provider)
+        }
+        ActorRef::System { component_id } if component_id == FEISHU_SPEC.host_component => {
+            Some(FEISHU_SPEC.provider)
         }
         ActorRef::System { component_id } if component_id == DINGTALK_CHANNEL_HOST_COMPONENT => {
             Some(DINGTALK_PROVIDER)
@@ -12555,19 +13251,23 @@ fn version_conflict(current_version: i64) -> CommandHandlerResult {
     )
 }
 
-fn member_bot_publication_ready(
+fn member_bot_publication_ready<const LARK: bool>(
+    spec: &ChannelProviderSpec,
     transaction: &Transaction<'_>,
-    command: &UpsertFeishuMemberBotCommand,
+    command: &UpsertChannelMemberBotCommand<LARK>,
 ) -> Result<bool> {
     Ok(transaction.query_row(
-        r#"
+        &format!(
+            r#"
         SELECT EXISTS(
-            SELECT 1 FROM feishu_member_bot_publication_intent
+            SELECT 1 FROM {publication_intent}
             WHERE agent_id = ?1 AND account_id = ?2
               AND remote_app_id = ?3 AND credential_ref = ?4
               AND state = 'version_published'
         )
         "#,
+            publication_intent = spec.publication_intent
+        ),
         params![
             command.agent_id,
             command.account_id,
@@ -12629,6 +13329,2614 @@ mod tests {
     };
 
     #[test]
+    fn lark_and_feishu_accounts_are_isolated_and_wrong_hosts_cannot_write() {
+        let mut database = seeded_runtime_database_owned();
+        let feishu = ChannelService::default();
+        let lark = ChannelService::for_spec(&LARK_SPEC);
+        connect_account(&feishu, &mut database);
+        let command = UpsertLarkAccountCommand {
+            account_id: "account_1".into(),
+            user_id_digest: opaque_digest("lark-user", "user_1"),
+            tenant_id: "tenant_1".into(),
+            user_name: "Lark Owner".into(),
+            email: None,
+            tenant_name: "Lark tenant".into(),
+            brand: "lark".into(),
+        };
+        let mut envelope = host_envelope("lark-account", command.clone());
+        envelope.actor = ActorRef::System {
+            component_id: LARK_SPEC.host_component.into(),
+        };
+        assert_eq!(
+            lark.upsert_feishu_account(&mut database, &envelope)
+                .unwrap()
+                .result
+                .status,
+            CommandResultStatus::Applied
+        );
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .user_name,
+            "Owner"
+        );
+        assert_eq!(
+            lark.snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .user_name,
+            "Lark Owner"
+        );
+        let facts = |database: &Database| {
+            [
+                "feishu_account",
+                "lark_account",
+                "feishu_owner_identity",
+                "lark_owner_identity",
+                "feishu_member_bot",
+                "lark_member_bot",
+                "feishu_owner_app_identity",
+                "lark_owner_app_identity",
+                "feishu_member_bot_publication_intent",
+                "lark_member_bot_publication_intent",
+                "external_principal",
+                "external_principal_app_identity",
+                "channel_credentials",
+                "channel_developer_sessions",
+                "channel_conversation",
+            ]
+            .map(|table| {
+                let mut statement = database
+                    .connection()
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                    .unwrap();
+                statement
+                    .query_map([], |row| {
+                        (0..row.as_ref().column_count())
+                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+        };
+        let before = facts(&database);
+        let event_count = |database: &Database| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM event_log WHERE event_type <> 'command.result'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let events_before = event_count(&database);
+        let wrong_lark = host_envelope("feishu-host-lark-write", command);
+        assert_eq!(
+            lark.upsert_feishu_account(&mut database, &wrong_lark)
+                .unwrap()
+                .result
+                .code,
+            "channel.host_required"
+        );
+        let mut wrong_feishu = host_envelope(
+            "lark-host-feishu-write",
+            UpsertFeishuAccountCommand {
+                account_id: "account_1".into(),
+                user_id_digest: owner_user_digest(),
+                tenant_id: "tenant_1".into(),
+                user_name: "Changed".into(),
+                email: None,
+                tenant_name: "tenant".into(),
+                brand: "feishu".into(),
+            },
+        );
+        wrong_feishu.actor = ActorRef::System {
+            component_id: LARK_SPEC.host_component.into(),
+        };
+        assert_eq!(
+            feishu
+                .upsert_feishu_account(&mut database, &wrong_feishu)
+                .unwrap()
+                .result
+                .code,
+            "channel.host_required"
+        );
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        let receipt_count = |database: &Database| {
+            database.connection().query_row(
+                "SELECT count(*) FROM event_log WHERE event_type='command.result' AND command_id IN ('feishu-host-lark-write','lark-host-feishu-write')",
+                [], |row| row.get::<_, i64>(0),
+            ).unwrap()
+        };
+        assert_eq!(receipt_count(&database), 2);
+        lark.upsert_feishu_account(&mut database, &wrong_lark)
+            .unwrap();
+        feishu
+            .upsert_feishu_account(&mut database, &wrong_feishu)
+            .unwrap();
+        assert_eq!(receipt_count(&database), 2);
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        wrong_feishu.command_id = "brand-crossing".into();
+        wrong_feishu.actor = ActorRef::System {
+            component_id: FEISHU_SPEC.host_component.into(),
+        };
+        wrong_feishu.payload.brand = "lark".into();
+        assert!(
+            feishu
+                .upsert_feishu_account(&mut database, &wrong_feishu)
+                .is_err()
+        );
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        let commit = CommitFeishuAccountConnectionCommand {
+            expected_previous_account_version: Some(1),
+            account: FeishuConnectionAccountInput {
+                account_id: "account_1".into(),
+                user_id_digest: owner_user_digest(),
+                tenant_id: "tenant_1".into(),
+                user_name: "Owner".into(),
+                email: None,
+                tenant_name: "Tenant".into(),
+                brand: "lark".into(),
+            },
+            developer_session: ChannelDeveloperSessionInput {
+                identity: json!({}),
+                session: json!({}),
+            },
+        };
+        assert!(
+            feishu
+                .commit_feishu_account_connection(
+                    &mut database,
+                    &host_envelope("commit-brand-crossing", commit)
+                )
+                .is_err()
+        );
+        assert_eq!(facts(&database), before);
+        assert_eq!(event_count(&database), events_before);
+        // Legacy rows stay in place and readable; no implicit transfer into Lark.
+        let lark_accounts = |database: &Database| facts(database)[1].clone();
+        let lark_accounts_before = lark_accounts(&database);
+        database
+            .connection()
+            .execute(
+                "UPDATE feishu_account SET brand='lark' WHERE id='account_1'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .brand,
+            "lark"
+        );
+        assert_eq!(
+            lark.snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .user_name,
+            "Lark Owner"
+        );
+        assert_eq!(lark_accounts(&database), lark_accounts_before);
+        let mut second = envelope.clone();
+        second.command_id = "lark-account-switch".into();
+        second.payload.account_id = "account_2".into();
+        lark.upsert_feishu_account(&mut database, &second).unwrap();
+        for table in ["feishu_account", "lark_account"] {
+            let count: i64 = database
+                .connection()
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE status='connected'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .account_id,
+            "account_1"
+        );
+        assert_eq!(
+            lark.snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .account_id,
+            "account_2"
+        );
+        let account = lark.snapshot(&mut database).unwrap().account.unwrap();
+        let disconnect = actor_envelope(
+            &ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            "lark-disconnect".to_string(),
+            DisconnectLarkAccountCommand {
+                account_id: account.account_id,
+                expected_version: account.version,
+            },
+        );
+        assert_eq!(
+            lark.disconnect_feishu_account(&mut database, &disconnect)
+                .unwrap()
+                .result
+                .code,
+            "lark_account.disconnected"
+        );
+        assert_eq!(
+            feishu
+                .snapshot(&mut database)
+                .unwrap()
+                .account
+                .unwrap()
+                .status,
+            "connected"
+        );
+    }
+
+    // Every provider-bound write, fed a real row of one provider but the other
+    // provider's Host, must commit only its single rejected receipt.
+    #[test]
+    fn wrong_provider_hosts_are_rejected_by_every_lark_capable_handler() {
+        let mut database = seeded_runtime_database_owned();
+        let quick_chat_path = quick_chat_path(&database);
+        let feishu = provider_world::<false>(&mut database, &quick_chat_path);
+        let lark = provider_world::<true>(&mut database, &quick_chat_path);
+        for (world, other) in [(&feishu, &lark), (&lark, &feishu)] {
+            let provider = world.spec.provider;
+            let wrong = |id: &str| format!("{provider}-row-by-{}-{id}", other.spec.provider);
+            let actor = ActorRef::System {
+                component_id: other.spec.host_component.to_string(),
+            };
+            let service = ChannelService::for_spec(world.spec);
+            let shared = ChannelService::default();
+            let host_required = "channel.host_required";
+            if provider == LARK_PROVIDER {
+                lark_only_commands_reject::<true>(&mut database, world, &actor, &wrong);
+            } else {
+                lark_only_commands_reject::<false>(&mut database, world, &actor, &wrong);
+            }
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("store-credential"),
+                host_required,
+                |database| {
+                    shared
+                        .store_publication_credential(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("store-credential"),
+                                StorePublicationCredentialCommand {
+                                    provider: provider.to_string(),
+                                    publication_intent_id: world.intent_id.clone(),
+                                    expected_intent_version: world.intent_version,
+                                    credential_ref: world.credential_ref.clone(),
+                                    remote_app_id: world.intent_app_id.clone(),
+                                    credential: json!({ "appSecret": "replaced" }),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("observe"),
+                host_required,
+                |database| {
+                    let mut command = observation_command(
+                        &world.app_id,
+                        &format!("om_{provider}_wrong_host"),
+                        &format!("oc_{provider}_dm"),
+                        "",
+                        "p2p",
+                        "错误宿主",
+                        &[("agent_1", world.app_id.as_str())],
+                        true,
+                    );
+                    command.provider = provider.to_string();
+                    shared
+                        .observe_inbound(
+                            database,
+                            &actor_envelope(&actor, wrong("observe"), command),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("finalize"),
+                host_required,
+                |database| {
+                    shared
+                        .finalize_inbound(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("finalize"),
+                                FinalizeChannelInboundCommand {
+                                    aggregate_id: world.open_aggregate_id.clone(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("settle"),
+                host_required,
+                |database| {
+                    shared
+                        .settle_delivery(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("settle"),
+                                SettleChannelDeliveryCommand {
+                                    delivery_id: world.claimed_delivery_id.clone(),
+                                    worker_id: world.worker_id.clone(),
+                                    outcome: "sent".to_string(),
+                                    external_delivery_message_id: Some("om_wrong".to_string()),
+                                    external_update_message_id: None,
+                                    failure_code: None,
+                                    retryable: false,
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("finalize-finalized"),
+                host_required,
+                |database| {
+                    shared
+                        .finalize_inbound(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("finalize-finalized"),
+                                FinalizeChannelInboundCommand {
+                                    aggregate_id: world.finalized_aggregate_id.clone(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("settle-notification"),
+                host_required,
+                |database| {
+                    shared
+                        .settle_delivery(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("settle-notification"),
+                                SettleChannelDeliveryCommand {
+                                    delivery_id: world.notification_delivery_id.clone(),
+                                    worker_id: world.worker_id.clone(),
+                                    outcome: "sent".to_string(),
+                                    external_delivery_message_id: Some("om_wrong".to_string()),
+                                    external_update_message_id: None,
+                                    failure_code: None,
+                                    retryable: false,
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("roster"),
+                host_required,
+                |database| {
+                    shared
+                        .reconcile_feishu_group_roster(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("roster"),
+                                ReconcileFeishuGroupRosterCommand {
+                                    provider: provider.to_string(),
+                                    tenant_key: "tenant_1".to_string(),
+                                    chat_id: format!("oc_{provider}_group"),
+                                    present_app_ids: Vec::new(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("resolve"),
+                host_required,
+                |database| {
+                    shared
+                        .resolve_pending_camp_binding(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("resolve"),
+                                ResolvePendingThreadBindingCommand {
+                                    pending_binding_id: world.pending_binding_id.clone(),
+                                    app_id: world.app_id.clone(),
+                                    external_picker_message_id: "om_picker".to_string(),
+                                    expected_version: 1,
+                                    nonce: "nonce".to_string(),
+                                    action: "cancel".to_string(),
+                                    project_id: None,
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("dm"),
+                host_required,
+                |database| {
+                    shared
+                        .start_new_feishu_dm(
+                            database,
+                            &quick_chat_path,
+                            &actor_envelope(
+                                &actor,
+                                wrong("dm"),
+                                StartNewFeishuDmCommand {
+                                    provider: provider.to_string(),
+                                    app_id: world.app_id.clone(),
+                                    tenant_key: "tenant_1".to_string(),
+                                    chat_id: format!("oc_{provider}_dm"),
+                                    conversation_display_name: "Owner 私聊".to_string(),
+                                    target_agent_id: "agent_1".to_string(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("console-page"),
+                host_required,
+                |database| {
+                    shared
+                        .authorize_execution_console_page(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("console-page"),
+                                AuthorizeChannelExecutionConsolePageCommand {
+                                    agent_run_id: world.agent_run_id.clone(),
+                                    app_id: world.app_id.clone(),
+                                    external_message_id: world.console_message_id.clone(),
+                                    snapshot_sequence: 1,
+                                    page_index: 0,
+                                    page_count: Some(1),
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("recent-output"),
+                host_required,
+                |database| {
+                    shared
+                        .authorize_execution_recent_output(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("recent-output"),
+                                AuthorizeChannelExecutionRecentOutputCommand {
+                                    agent_run_id: world.agent_run_id.clone(),
+                                    app_id: world.app_id.clone(),
+                                    external_message_id: world.console_message_id.clone(),
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("cancel-run"),
+                host_required,
+                |database| {
+                    shared
+                        .cancel_channel_agent_run(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("cancel-run"),
+                                ChannelAgentRunCancelCommand {
+                                    callback_event_id: wrong("cancel-event"),
+                                    app_id: world.app_id.clone(),
+                                    external_message_id: world.console_message_id.clone(),
+                                    agent_run_id: world.agent_run_id.clone(),
+                                    operator_open_id: Some("ou_user".to_string()),
+                                    operator_user_id: Some("user_1".to_string()),
+                                    operator_union_id: Some("union_user".to_string()),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("session-replace"),
+                host_required,
+                |database| {
+                    shared
+                        .replace_channel_developer_session(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("session-replace"),
+                                ReplaceChannelDeveloperSessionCommand {
+                                    provider: provider.to_string(),
+                                    account_id: world.account_id.clone(),
+                                    identity: developer_identity(provider),
+                                    session: json!({ "cookies": [] }),
+                                    expected_revision: Some(1),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("session-delete"),
+                host_required,
+                |database| {
+                    shared
+                        .delete_channel_developer_session(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("session-delete"),
+                                DeleteChannelDeveloperSessionCommand {
+                                    provider: provider.to_string(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            assert_rejected_without_side_effects(
+                &mut database,
+                &wrong("credential-delete"),
+                host_required,
+                |database| {
+                    shared
+                        .delete_channel_credential(
+                            database,
+                            &actor_envelope(
+                                &actor,
+                                wrong("credential-delete"),
+                                DeleteChannelCredentialCommand {
+                                    provider: provider.to_string(),
+                                    credential_ref: world.credential_ref.clone(),
+                                },
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            // The provider's own Host still owns every row the rejections left intact.
+            assert_eq!(
+                service
+                    .snapshot(&mut database)
+                    .unwrap()
+                    .account
+                    .unwrap()
+                    .status,
+                "connected"
+            );
+        }
+        lark_inbound_attachments_require_lark_host(&mut database, &quick_chat_path, &feishu, &lark);
+        lark_disconnect_is_owner_only_and_provider_scoped(&mut database, &feishu, &lark);
+    }
+
+    fn lark_inbound_attachments_require_lark_host(
+        database: &mut Database,
+        quick_chat_path: &std::path::Path,
+        feishu: &ProviderWorld,
+        lark: &ProviderWorld,
+    ) {
+        use inbound_attachments::{CompleteAttachmentsCommand, InboundResource};
+
+        let service = ChannelService::default();
+        let mut observation = observation_command(
+            &lark.app_id,
+            "lark-file-message",
+            "oc_lark_file_chat",
+            "",
+            "p2p",
+            "",
+            &[("agent_1", &lark.app_id)],
+            true,
+        );
+        observation.provider = LARK_PROVIDER.to_string();
+        observation.attachment_summaries = vec![ChannelAttachmentSummaryInput {
+            name: "note.txt".into(),
+            media_type: Some("file".into()),
+        }];
+        observation.resources = vec![InboundResource {
+            file_key: "lark-file-key".into(),
+            download_code: None,
+            name: "note.txt".into(),
+            kind: "file".into(),
+        }];
+        let observed = service
+            .observe_inbound(
+                database,
+                &host_envelope_for(lark.spec, "lark-file-observe", observation),
+            )
+            .unwrap();
+        assert_ne!(observed.result.status, CommandResultStatus::Rejected);
+        let aggregate_id = observed.result.payload["aggregateId"].as_str().unwrap();
+        let finalized = service
+            .finalize_inbound(
+                database,
+                quick_chat_path,
+                &host_envelope_for(
+                    lark.spec,
+                    "lark-file-finalize",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: aggregate_id.to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(finalized.result.status, CommandResultStatus::Accepted);
+
+        let pending = inbound_attachments::pending(
+            database.connection(),
+            LARK_PROVIDER,
+            std::slice::from_ref(&lark.app_id),
+        )
+        .unwrap();
+        assert_eq!(pending.len(), 1);
+        let download_cards: i64 = database.connection().query_row(
+            "SELECT count(*) FROM channel_delivery WHERE request_id = ?1 AND delivery_kind = 'queue_ack'",
+            [&pending[0].request_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(download_cards, 0);
+        let camp_id: String = database
+            .connection()
+            .query_row(
+                "SELECT camp_id FROM channel_turn_request WHERE id = ?1",
+                [&pending[0].request_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let message_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT count(*) FROM camp_message WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(message_count, 0);
+        assert!(
+            inbound_attachments::pending(
+                database.connection(),
+                FEISHU_PROVIDER,
+                std::slice::from_ref(&lark.app_id),
+            )
+            .unwrap()
+            .is_empty()
+        );
+        let source = quick_chat_path.join("lark-file-download.txt");
+        std::fs::write(&source, b"Lark file bytes").unwrap();
+        let command = CompleteAttachmentsCommand {
+            request_id: pending[0].request_id.clone(),
+            app_id: lark.app_id.clone(),
+            attempt: pending[0].attempt,
+            files: vec![source.to_string_lossy().into_owned()],
+            failure_code: None,
+        };
+        let wrong = inbound_attachments::complete(
+            database,
+            &host_envelope_for(feishu.spec, "lark-file-wrong-host", command.clone()),
+        )
+        .unwrap();
+        assert_eq!(wrong.result.code, "channel.attachments.closed");
+        let completed = inbound_attachments::complete(
+            database,
+            &host_envelope_for(lark.spec, "lark-file-complete", command),
+        )
+        .unwrap();
+        assert_eq!(completed.result.payload["ready"], true);
+        service
+            .host_tick(
+                database,
+                &ActorRef::System {
+                    component_id: lark.spec.host_component.into(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "lark-file-host".into(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let (message_id, sequence, body, encoded): (String, i64, String, String) = database
+            .connection()
+            .query_row(
+                "SELECT message.id, message.sequence, message.body, message.source_attachments_json
+                 FROM camp_message AS message
+                 JOIN channel_turn_request AS request ON request.camp_id = message.camp_id
+                 WHERE request.id = ?1",
+                [&pending[0].request_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert!(!body.contains("[附件]") && !body.contains("note.txt"));
+        let sources: Vec<crate::local_attachment_source::LocalAttachmentSourceRef> =
+            serde_json::from_str(&encoded).unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(
+            std::fs::read(&sources[0].source_path).unwrap(),
+            b"Lark file bytes"
+        );
+        assert!(
+            std::path::Path::new(&sources[0].source_path)
+                .components()
+                .any(|component| component.as_os_str() == "lark")
+        );
+        let transaction = database.connection_mut().transaction().unwrap();
+        let projection = crate::context::project_batch_run_input_for_claim(
+            &transaction,
+            &camp_id,
+            "agent_1",
+            sequence,
+            &[message_id],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            projection["messages"][0]["attachments"][0]["path"],
+            sources[0].source_path
+        );
+        transaction.rollback().unwrap();
+    }
+
+    // C3: disconnect is an Owner command for Lark as for Feishu and DingTalk.
+    fn lark_disconnect_is_owner_only_and_provider_scoped(
+        database: &mut Database,
+        feishu: &ProviderWorld,
+        lark: &ProviderWorld,
+    ) {
+        let service = ChannelService::for_spec(&LARK_SPEC);
+        let owner = ActorRef::User {
+            user_id: CURRENT_USER_ID.to_string(),
+        };
+        let disconnect = |database: &mut Database, actor: &ActorRef, id: &str, account_id: &str| {
+            service
+                .disconnect_feishu_account(
+                    database,
+                    &actor_envelope(
+                        actor,
+                        id.to_string(),
+                        DisconnectLarkAccountCommand {
+                            account_id: account_id.to_string(),
+                            expected_version: lark.account_version,
+                        },
+                    ),
+                )
+                .unwrap()
+        };
+        for host in [feishu.spec.host_component, LARK_SPEC.host_component] {
+            let actor = ActorRef::System {
+                component_id: host.to_string(),
+            };
+            let id = format!("lark-disconnect-by-{host}");
+            assert_rejected_without_side_effects(
+                database,
+                &id,
+                "lark_account.owner_required",
+                |database| disconnect(database, &actor, &id, &lark.account_id),
+            );
+        }
+        assert_rejected_without_side_effects(
+            database,
+            "lark-disconnect-feishu-account",
+            "lark_account.not_connected",
+            |database| {
+                disconnect(
+                    database,
+                    &owner,
+                    "lark-disconnect-feishu-account",
+                    &feishu.account_id,
+                )
+            },
+        );
+        let sessions = |database: &Database, provider: &str| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM channel_developer_sessions WHERE provider = ?1",
+                    [provider],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let feishu_facts = |database: &mut Database| {
+            (
+                serde_json::to_value(
+                    ChannelService::default()
+                        .snapshot(database)
+                        .unwrap()
+                        .account,
+                )
+                .unwrap(),
+                sessions(database, FEISHU_PROVIDER),
+            )
+        };
+        let feishu_before = feishu_facts(database);
+        assert_eq!(feishu_before.1, 1);
+        assert_eq!(
+            disconnect(database, &owner, "lark-owner-disconnect", &lark.account_id)
+                .result
+                .code,
+            "lark_account.disconnected"
+        );
+        assert_eq!(sessions(database, LARK_PROVIDER), 0);
+        assert_eq!(feishu_facts(database), feishu_before);
+        assert_eq!(feishu_before.0["status"], "connected");
+    }
+
+    fn lark_only_commands_reject<const LARK: bool>(
+        database: &mut Database,
+        world: &ProviderWorld,
+        actor: &ActorRef,
+        wrong: &dyn Fn(&str) -> String,
+    ) {
+        let service = ChannelService::for_spec(world.spec);
+        let provider = world.spec.provider;
+        let host_required = "channel.host_required";
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("commit"),
+            host_required,
+            |database| {
+                service
+                    .commit_feishu_account_connection(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("commit"),
+                            CommitChannelAccountConnectionCommand::<LARK> {
+                                expected_previous_account_version: Some(world.account_version),
+                                account: connection_account(provider, "account_2"),
+                                developer_session: ChannelDeveloperSessionInput {
+                                    identity: developer_identity(provider),
+                                    session: json!({ "cookies": [] }),
+                                },
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("expire"),
+            host_required,
+            |database| {
+                service
+                    .expire_feishu_account(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("expire"),
+                            ExpireChannelAccountCommand::<LARK> {
+                                account_id: world.account_id.clone(),
+                                expected_version: world.account_version,
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(database, &wrong("bot"), host_required, |database| {
+            service
+                .upsert_feishu_member_bot(
+                    database,
+                    &actor_envelope(
+                        actor,
+                        wrong("bot"),
+                        UpsertChannelMemberBotCommand::<LARK> {
+                            account_id: world.account_id.clone(),
+                            agent_id: "agent_1".to_string(),
+                            app_id: world.app_id.clone(),
+                            owner_open_id: "ou_user".to_string(),
+                            bot_open_id: Some("ou_replaced".to_string()),
+                            bot_display_name: "replaced".to_string(),
+                            credential_ref: format!("{provider}/member/agent_1"),
+                        },
+                    ),
+                )
+                .unwrap()
+        });
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("intent-create"),
+            host_required,
+            |database| {
+                service
+                    .create_member_bot_publication_intent(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("intent-create"),
+                            CreateChannelMemberBotPublicationIntentCommand::<LARK> {
+                                publication_intent_id: format!("intent-{provider}-wrong"),
+                                account_id: world.account_id.clone(),
+                                agent_id: "agent_3".to_string(),
+                                expected_user_id_digest: provider_owner_digest(provider),
+                                expected_tenant_id: "tenant_1".to_string(),
+                                requested_app_name: "agent_3".to_string(),
+                                provisioning_mode: "developer_session".to_string(),
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("intent-advance"),
+            host_required,
+            |database| {
+                service
+                    .advance_member_bot_publication_intent(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("intent-advance"),
+                            AdvanceChannelMemberBotPublicationIntentCommand::<LARK> {
+                                publication_intent_id: world.intent_id.clone(),
+                                expected_version: world.intent_version,
+                                state: "failed_recoverable".to_string(),
+                                remote_app_id: Some(world.intent_app_id.clone()),
+                                credential_ref: Some(world.credential_ref.clone()),
+                                last_completed_step: Some("credentials_read".to_string()),
+                                failure_code: Some("wrong_host".to_string()),
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        assert_rejected_without_side_effects(
+            database,
+            &wrong("owner"),
+            host_required,
+            |database| {
+                service
+                    .verify_feishu_owner(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("owner"),
+                            VerifyChannelOwnerCommand::<LARK> {
+                                provider: provider.to_string(),
+                                app_id: world.app_id.clone(),
+                                tenant_key: "tenant_1".to_string(),
+                                sender_open_id: Some("ou_user".to_string()),
+                                sender_user_id: Some("user_1".to_string()),
+                                sender_union_id: Some("union_user".to_string()),
+                                sender_display_name: "Owner".to_string(),
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+    }
+
+    fn actor_envelope<P>(actor: &ActorRef, command_id: String, payload: P) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id,
+            actor: actor.clone(),
+            camp_id: None,
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload,
+        }
+    }
+
+    fn host_envelope_for<P>(
+        spec: &ChannelProviderSpec,
+        command_id: &str,
+        payload: P,
+    ) -> CommandEnvelope<P> {
+        let actor = ActorRef::System {
+            component_id: spec.host_component.to_string(),
+        };
+        actor_envelope(&actor, format!("{}-{command_id}", spec.provider), payload)
+    }
+
+    struct ProviderWorld {
+        spec: &'static ChannelProviderSpec,
+        account_id: String,
+        app_id: String,
+        account_version: i64,
+        intent_id: String,
+        intent_version: i64,
+        intent_app_id: String,
+        credential_ref: String,
+        open_aggregate_id: String,
+        finalized_aggregate_id: String,
+        notification_delivery_id: String,
+        pending_binding_id: String,
+        claimed_delivery_id: String,
+        worker_id: String,
+        agent_run_id: String,
+        console_message_id: String,
+    }
+
+    // One connected account, one published Bot with an executing DM run, one
+    // open aggregate, one pending group binding with a claimed picker delivery,
+    // one credential and one developer session, all owned by the provider's Host.
+    fn provider_world<const LARK: bool>(
+        database: &mut Database,
+        quick_chat_path: &std::path::Path,
+    ) -> ProviderWorld {
+        let spec: &'static ChannelProviderSpec = if LARK { &LARK_SPEC } else { &FEISHU_SPEC };
+        let provider = spec.provider;
+        let service = ChannelService::for_spec(spec);
+        let shared = ChannelService::default();
+        let applied = |execution: CommandExecution, what: &str| {
+            assert_ne!(
+                execution.result.status,
+                CommandResultStatus::Rejected,
+                "{provider} {what}: {:?}",
+                execution.result
+            );
+            execution.result.payload
+        };
+        let app_id = format!("cli_{provider}_1");
+        let account_id = format!("{provider}-account");
+        applied(
+            service
+                .commit_feishu_account_connection(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "commit",
+                        CommitChannelAccountConnectionCommand::<LARK> {
+                            expected_previous_account_version: None,
+                            account: connection_account(provider, &account_id),
+                            developer_session: ChannelDeveloperSessionInput {
+                                identity: developer_identity(provider),
+                                session: json!({ "cookies": [] }),
+                            },
+                        },
+                    ),
+                )
+                .unwrap(),
+            "commit",
+        );
+        let credential_ref = format!("{provider}/member/agent_1");
+        let intent = |agent_id: &str| format!("intent-{provider}-{agent_id}");
+        let advance = |database: &mut Database,
+                       intent_id: &str,
+                       version: i64,
+                       state: &str,
+                       remote_app_id: &str,
+                       credential_ref: Option<&str>| {
+            service
+                .advance_member_bot_publication_intent(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        &format!("{intent_id}-{state}"),
+                        AdvanceChannelMemberBotPublicationIntentCommand::<LARK> {
+                            publication_intent_id: intent_id.to_string(),
+                            expected_version: version,
+                            state: state.to_string(),
+                            remote_app_id: (state != "session_verified")
+                                .then(|| remote_app_id.to_string()),
+                            credential_ref: credential_ref.map(ToString::to_string),
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap()
+        };
+        let create_intent = |database: &mut Database, agent_id: &str| {
+            service
+                .create_member_bot_publication_intent(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        &format!("create-{agent_id}"),
+                        CreateChannelMemberBotPublicationIntentCommand::<LARK> {
+                            publication_intent_id: intent(agent_id),
+                            account_id: account_id.clone(),
+                            agent_id: agent_id.to_string(),
+                            expected_user_id_digest: provider_owner_digest(provider),
+                            expected_tenant_id: "tenant_1".to_string(),
+                            requested_app_name: agent_id.to_string(),
+                            provisioning_mode: "developer_session".to_string(),
+                        },
+                    ),
+                )
+                .unwrap()
+        };
+        applied(create_intent(database, "agent_1"), "create intent");
+        for (version, state) in [
+            (1, "session_verified"),
+            (2, "app_created"),
+            (3, "credentials_read"),
+            (4, "bot_configured"),
+            (5, "version_published"),
+        ] {
+            let reference = (version >= 3).then_some(credential_ref.as_str());
+            applied(
+                advance(
+                    database,
+                    &intent("agent_1"),
+                    version,
+                    state,
+                    &app_id,
+                    reference,
+                ),
+                state,
+            );
+        }
+        applied(
+            service
+                .upsert_feishu_member_bot(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "publish",
+                        UpsertChannelMemberBotCommand::<LARK> {
+                            account_id: account_id.clone(),
+                            agent_id: "agent_1".to_string(),
+                            app_id: app_id.clone(),
+                            owner_open_id: "ou_user".to_string(),
+                            bot_open_id: Some(format!("ou_bot_{provider}")),
+                            bot_display_name: "agent_1".to_string(),
+                            credential_ref: credential_ref.clone(),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "publish",
+        );
+        for (version, state) in [(6, "connection_verified"), (7, "completed")] {
+            applied(
+                advance(
+                    database,
+                    &intent("agent_1"),
+                    version,
+                    state,
+                    &app_id,
+                    Some(&credential_ref),
+                ),
+                state,
+            );
+        }
+        // A second, unfinished publication holds the frozen credential.
+        let intent_app_id = format!("cli_{provider}_2");
+        let stored_credential_ref = format!("{provider}-member-agent-2");
+        applied(create_intent(database, "agent_2"), "create second intent");
+        for (version, state) in [(1, "session_verified"), (2, "app_created")] {
+            applied(
+                advance(
+                    database,
+                    &intent("agent_2"),
+                    version,
+                    state,
+                    &intent_app_id,
+                    None,
+                ),
+                state,
+            );
+        }
+        applied(
+            shared
+                .store_publication_credential(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "store-credential",
+                        StorePublicationCredentialCommand {
+                            provider: provider.to_string(),
+                            publication_intent_id: intent("agent_2"),
+                            expected_intent_version: 3,
+                            credential_ref: stored_credential_ref.clone(),
+                            remote_app_id: intent_app_id.clone(),
+                            credential: json!({ "appSecret": "fixture-secret" }),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "store credential",
+        );
+        applied(
+            service
+                .verify_feishu_owner(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "verify-owner",
+                        VerifyChannelOwnerCommand::<LARK> {
+                            provider: provider.to_string(),
+                            app_id: app_id.clone(),
+                            tenant_key: "tenant_1".to_string(),
+                            sender_open_id: Some("ou_user".to_string()),
+                            sender_user_id: Some("user_1".to_string()),
+                            sender_union_id: Some("union_user".to_string()),
+                            sender_display_name: "Owner".to_string(),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "verify owner",
+        );
+        let dm_chat = format!("oc_{provider}_dm");
+        applied(
+            shared
+                .start_new_feishu_dm(
+                    database,
+                    quick_chat_path,
+                    &host_envelope_for(
+                        spec,
+                        "start-dm",
+                        StartNewFeishuDmCommand {
+                            provider: provider.to_string(),
+                            app_id: app_id.clone(),
+                            tenant_key: "tenant_1".to_string(),
+                            chat_id: dm_chat.clone(),
+                            conversation_display_name: "Owner 私聊".to_string(),
+                            target_agent_id: "agent_1".to_string(),
+                        },
+                    ),
+                )
+                .unwrap(),
+            "start dm",
+        );
+        let observe = |database: &mut Database, id: &str, chat: &str, kind: &str| {
+            let mut command = observation_command(
+                &app_id,
+                &format!("om_{provider}_{id}"),
+                chat,
+                "",
+                kind,
+                "检查登录流程",
+                &[("agent_1", app_id.as_str())],
+                true,
+            );
+            command.provider = provider.to_string();
+            applied(
+                shared
+                    .observe_inbound(
+                        database,
+                        &host_envelope_for(spec, &format!("observe-{id}"), command),
+                    )
+                    .unwrap(),
+                "observe",
+            )["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let finalize = |database: &mut Database, id: &str, aggregate_id: String| {
+            applied(
+                shared
+                    .finalize_inbound(
+                        database,
+                        quick_chat_path,
+                        &host_envelope_for(
+                            spec,
+                            &format!("finalize-{id}"),
+                            FinalizeChannelInboundCommand { aggregate_id },
+                        ),
+                    )
+                    .unwrap(),
+                "finalize",
+            )
+        };
+        let finalized_aggregate_id = observe(database, "dm", &dm_chat, "p2p");
+        finalize(database, "dm", finalized_aggregate_id.clone());
+        assert_eq!(claim_waiting_runs(database).len(), 1);
+        let worker_id = format!("{provider}-worker");
+        let tick = |database: &mut Database| {
+            serde_json::to_value(
+                shared
+                    .host_tick(
+                        database,
+                        &ActorRef::System {
+                            component_id: spec.host_component.to_string(),
+                        },
+                        &ChannelHostTickRequest {
+                            worker_id: worker_id.clone(),
+                            inbound_attachment_app_ids: Vec::new(),
+                            limit: 20,
+                        },
+                    )
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let console = tick(database)["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|delivery| delivery["deliveryKind"] == "execution_console_upsert")
+            .unwrap()
+            .clone();
+        let console_message_id = format!("om_{provider}_console");
+        applied(
+            shared
+                .settle_delivery(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "settle-console",
+                        SettleChannelDeliveryCommand {
+                            delivery_id: console["deliveryId"].as_str().unwrap().to_string(),
+                            worker_id: worker_id.clone(),
+                            outcome: "sent".to_string(),
+                            external_delivery_message_id: Some(console_message_id.clone()),
+                            external_update_message_id: Some(console_message_id.clone()),
+                            failure_code: None,
+                            retryable: false,
+                        },
+                    ),
+                )
+                .unwrap(),
+            "settle console",
+        );
+        let group_chat = format!("oc_{provider}_group");
+        applied(
+            shared
+                .reconcile_feishu_group_roster(
+                    database,
+                    &host_envelope_for(
+                        spec,
+                        "roster",
+                        ReconcileFeishuGroupRosterCommand {
+                            provider: provider.to_string(),
+                            tenant_key: "tenant_1".to_string(),
+                            chat_id: group_chat.clone(),
+                            present_app_ids: vec![app_id.clone()],
+                        },
+                    ),
+                )
+                .unwrap(),
+            "roster",
+        );
+        let aggregate_id = observe(database, "group", &group_chat, "group");
+        let pending = finalize(database, "group", aggregate_id);
+        let pending_binding_id = pending["pendingBindingId"].as_str().unwrap().to_string();
+        let claimed_delivery_id = tick(database)["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|delivery| delivery["deliveryKind"] == "project_selection")
+            .unwrap()["deliveryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let open_aggregate_id = observe(database, "open", &dm_chat, "p2p");
+        let notification_delivery_id = format!("{provider}-notification");
+        database
+            .connection()
+            .execute_batch(&format!(
+                r#"
+                INSERT INTO automation_run(
+                    id, automation_id, automation_version, trigger_kind, scheduled_for,
+                    status, reason, prompt, member_id, project_ref_json,
+                    notify_channels_json, timeout_at, created_at, started_at, ended_at,
+                    updated_at
+                ) VALUES (
+                    '{provider}-run', '{provider}-automation', 1, 'manual', 'scheduled',
+                    'failed', 'timeout', 'Report', 'agent_1', '{{"kind":"quick_chat"}}',
+                    '["{provider}"]', NULL, 'created', 'started', 'ended', 'updated'
+                );
+                INSERT INTO automation_notification_delivery(
+                    id, automation_run_id, provider, member_id, payload_json, status,
+                    available_at, created_at, updated_at
+                ) VALUES (
+                    '{notification_delivery_id}', '{provider}-run', '{provider}', 'agent_1',
+                    '{{}}', 'pending', 'available', 'created', 'updated'
+                );
+                "#
+            ))
+            .unwrap();
+        ProviderWorld {
+            spec,
+            account_id,
+            account_version: service.snapshot(database).unwrap().account.unwrap().version,
+            app_id,
+            intent_id: intent("agent_2"),
+            intent_version: 4,
+            intent_app_id,
+            credential_ref: stored_credential_ref,
+            open_aggregate_id,
+            finalized_aggregate_id,
+            notification_delivery_id,
+            pending_binding_id,
+            claimed_delivery_id,
+            worker_id,
+            agent_run_id: console["payload"]["agentRunId"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            console_message_id,
+        }
+    }
+
+    #[test]
+    fn next_claimed_run_recalls_prior_same_member_card_for_feishu_and_lark() {
+        assert_provider_execution_recall::<false>();
+        assert_provider_execution_recall::<true>();
+    }
+
+    fn assert_provider_execution_recall<const LARK: bool>() {
+        let mut database = seeded_runtime_database_owned();
+        let quick_chat_path = quick_chat_path(&database);
+        let world = provider_world::<LARK>(&mut database, &quick_chat_path);
+        let service = ChannelService::default();
+        let provider = world.spec.provider;
+        let prior_at = (Utc::now() - Duration::seconds(2)).to_rfc3339();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'succeeded', started_at = ?2, ended_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![world.agent_run_id, prior_at],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE channel_execution_console SET state = 'terminal_sealed' WHERE agent_run_id = ?1",
+                [&world.agent_run_id],
+            )
+            .unwrap();
+        let mut message = observation_command(
+            &world.app_id,
+            &format!("om_{provider}_next_root"),
+            &format!("oc_{provider}_dm"),
+            "",
+            "p2p",
+            "继续检查",
+            &[("agent_1", &world.app_id)],
+            true,
+        );
+        message.provider = provider.to_string();
+        let observed = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope_for(world.spec, "observe-next-root", message),
+            )
+            .unwrap();
+        let admitted = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope_for(
+                    world.spec,
+                    "finalize-next-root",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(admitted.result.code, "channel.turn.admitted", "{provider}");
+        let worker_id = format!("{provider}-recall-worker");
+        let queued_runs = claim_waiting_runs(&mut database);
+        assert_eq!(queued_runs.len(), 1, "{provider}");
+        let queued_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: world.spec.host_component.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: format!("{provider}-queued-worker"),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            queued_tick
+                .deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_kind != "execution_console_recall")
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'running', started_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![queued_runs[0], Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: world.spec.host_component.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: worker_id.clone(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let recall = tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "execution_console_recall")
+            .expect("a later claimed Run must recall the old execution card");
+        assert_eq!(recall.target_app_id, world.app_id, "{provider}");
+        assert_eq!(
+            recall.update_message_id.as_deref(),
+            Some(world.console_message_id.as_str()),
+            "{provider}"
+        );
+        assert_eq!(recall.recall_message_id, None, "{provider}");
+        service
+            .settle_delivery(
+                &mut database,
+                &host_envelope_for(
+                    world.spec,
+                    "settle-next-root-recall",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: recall.delivery_id.clone(),
+                        worker_id,
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: None,
+                        external_update_message_id: None,
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let state: String = database
+            .connection()
+            .query_row(
+                "SELECT state FROM channel_execution_console WHERE agent_run_id = ?1",
+                [&world.agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "recalled", "{provider}");
+    }
+
+    #[test]
+    fn later_root_admission_does_not_hide_an_earlier_run_card() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        service
+            .verify_feishu_owner(
+                &mut database,
+                &host_envelope(
+                    "verify-owner-for-late-console",
+                    VerifyFeishuOwnerCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        sender_open_id: Some("ou_user".to_string()),
+                        sender_user_id: Some("user_1".to_string()),
+                        sender_union_id: Some("union_user".to_string()),
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let quick_chat_path = quick_chat_path(&database);
+        service
+            .start_new_feishu_dm(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "start-dm-for-late-console",
+                    StartNewFeishuDmCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_late_console".to_string(),
+                        conversation_display_name: "Owner 私聊".to_string(),
+                        target_agent_id: "agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let mut first_run_id = None;
+        for ordinal in 1..=2 {
+            let observed = service
+                .observe_inbound(
+                    &mut database,
+                    &host_envelope(
+                        &format!("observe-late-console-{ordinal}"),
+                        observation_command(
+                            "cli_app_1",
+                            &format!("om_late_console_{ordinal}"),
+                            "oc_late_console",
+                            "",
+                            "p2p",
+                            "继续检查",
+                            &[("agent_1", "cli_app_1")],
+                            true,
+                        ),
+                    ),
+                )
+                .unwrap();
+            let admitted = service
+                .finalize_inbound(
+                    &mut database,
+                    &quick_chat_path,
+                    &host_envelope(
+                        &format!("finalize-late-console-{ordinal}"),
+                        FinalizeChannelInboundCommand {
+                            aggregate_id: observed.result.payload["aggregateId"]
+                                .as_str()
+                                .unwrap()
+                                .to_string(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(admitted.result.code, "channel.turn.admitted");
+            if ordinal == 1 {
+                first_run_id = Some(
+                    claim_waiting_runs(&mut database)
+                        .into_iter()
+                        .next()
+                        .expect("the first root must start before the second is admitted"),
+                );
+            }
+        }
+        let first_run_id = first_run_id.unwrap();
+        let tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "late-console-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(tick.deliveries.iter().any(|delivery| {
+            delivery.delivery_kind == "execution_console_upsert"
+                && delivery.payload["agentRunId"] == first_run_id
+        }));
+        assert!(
+            tick.deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_kind != "execution_console_recall")
+        );
+        let console_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM channel_execution_console WHERE agent_run_id = ?1",
+                [&first_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(console_count, 1);
+    }
+
+    #[test]
+    fn in_flight_card_update_settles_before_recall_without_requeueing_an_old_card() {
+        let mut database = seeded_runtime_database_owned();
+        let quick_chat_path = quick_chat_path(&database);
+        let world = provider_world::<false>(&mut database, &quick_chat_path);
+        let service = ChannelService::default();
+        let (console_id, old_request_id): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT id, request_id FROM channel_execution_console WHERE agent_run_id = ?1",
+                [&world.agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        let prior_at = (Utc::now() - Duration::seconds(2)).to_rfc3339();
+        transaction
+            .execute(
+                "UPDATE agent_run SET status = 'succeeded', started_at = ?2, ended_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![world.agent_run_id, prior_at],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "UPDATE channel_execution_console SET latest_sequence = 3, state = 'terminal_sealed' WHERE id = ?1",
+                [&console_id],
+            )
+            .unwrap();
+        insert_console_delivery(
+            &transaction,
+            &old_request_id,
+            &console_id,
+            "in-flight-card-update-before-recall",
+            "execution_console_upsert",
+            &world.app_id,
+            Some("agent_1"),
+            &json!({
+                "kind": "execution_console_upsert",
+                "executionConsoleId": console_id,
+                "agentRunId": world.agent_run_id,
+                "expectedSequence": 2,
+            }),
+            &Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        let update_worker = "in-flight-card-update-worker";
+        let updating_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: update_worker.to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let update = updating_tick
+            .deliveries
+            .iter()
+            .find(|delivery| {
+                delivery.delivery_kind == "execution_console_upsert"
+                    && delivery.payload["agentRunId"] == world.agent_run_id
+            })
+            .expect("the old card update must be in flight");
+        let observed = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "observe-root-during-card-update",
+                    observation_command(
+                        &world.app_id,
+                        "om_feishu_during_card_update",
+                        "oc_feishu_dm",
+                        "",
+                        "p2p",
+                        "继续检查",
+                        &[("agent_1", &world.app_id)],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "finalize-root-during-card-update",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let successor_runs = claim_waiting_runs(&mut database);
+        assert_eq!(successor_runs.len(), 1);
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'running', started_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![successor_runs[0], Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let blocked_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "blocked-recall-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            blocked_tick
+                .deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_kind != "execution_console_recall")
+        );
+        service
+            .settle_delivery(
+                &mut database,
+                &host_envelope(
+                    "settle-in-flight-card-update",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: update.delivery_id.clone(),
+                        worker_id: update_worker.to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some(world.console_message_id.clone()),
+                        external_update_message_id: Some(world.console_message_id.clone()),
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let recall_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "after-update-recall-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(recall_tick.deliveries.iter().any(|delivery| {
+            delivery.delivery_kind == "execution_console_recall"
+                && delivery.update_message_id.as_deref() == Some(world.console_message_id.as_str())
+        }));
+        assert!(recall_tick.deliveries.iter().all(|delivery| {
+            delivery.delivery_kind != "execution_console_upsert"
+                || delivery.payload["agentRunId"] != world.agent_run_id
+        }));
+    }
+
+    fn connection_account(provider: &str, account_id: &str) -> FeishuConnectionAccountInput {
+        FeishuConnectionAccountInput {
+            account_id: account_id.to_string(),
+            user_id_digest: provider_owner_digest(provider),
+            tenant_id: "tenant_1".to_string(),
+            user_name: "Owner".to_string(),
+            email: None,
+            tenant_name: "Tenant".to_string(),
+            brand: provider.to_string(),
+        }
+    }
+
+    fn provider_owner_digest(provider: &str) -> String {
+        opaque_digest(&format!("{provider}-user"), "user_1")
+    }
+
+    fn developer_identity(provider: &str) -> Value {
+        json!({
+            "brand": provider, "userId": "user_1", "userName": "Owner",
+            "tenantId": "tenant_1", "tenantName": "Tenant"
+        })
+    }
+
+    // Every table except the event log and its sequence counter, which carry
+    // the one permitted rejection receipt.
+    fn database_facts(database: &Database) -> Vec<(String, Vec<String>)> {
+        let connection = database.connection();
+        let tables = connection
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' \
+                 AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event_log', 'event_sequence') \
+                 ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        tables
+            .into_iter()
+            .map(|table| {
+                let mut rows = connection
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
+                    .unwrap()
+                    .query_map([], |row| {
+                        (0..row.as_ref().column_count())
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                            .map(|values| format!("{values:?}"))
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                rows.sort();
+                (table, rows)
+            })
+            .collect()
+    }
+
+    fn assert_rejected_without_side_effects(
+        database: &mut Database,
+        command_id: &str,
+        expected_code: &str,
+        run: impl Fn(&mut Database) -> CommandExecution,
+    ) {
+        let non_result_events = |database: &Database| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM event_log WHERE event_type <> 'command.result'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let receipts = |database: &Database| {
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM event_log \
+                     WHERE event_type = 'command.result' AND command_id = ?1",
+                    [command_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let facts = database_facts(database);
+        let events = non_result_events(database);
+        let first = run(database);
+        assert_eq!(
+            (first.result.status, first.result.code.as_str()),
+            (CommandResultStatus::Rejected, expected_code),
+            "{command_id}"
+        );
+        let replay = run(database);
+        assert_eq!(replay.result, first.result, "{command_id}");
+        assert_eq!(receipts(database), 1, "{command_id}");
+        assert_eq!(non_result_events(database), events, "{command_id}");
+        let changed = database_facts(database)
+            .into_iter()
+            .zip(facts)
+            .filter(|(after, before)| after != before)
+            .map(|(after, before)| (after.0, before.1, after.1))
+            .collect::<Vec<_>>();
+        assert!(
+            changed.is_empty(),
+            "{command_id} changed business facts: {changed:#?}"
+        );
+    }
+
+    #[test]
+    fn inbound_attachments_gate_atomic_admission_and_survive_retry_without_duplicate_messages() {
+        use crate::local_attachment_source::LocalAttachmentSourceRef;
+        use inbound_attachments::{CompleteAttachmentsCommand, InboundResource};
+        // Owns the durable channel queue -> filesystem -> CampMessage/Delivery seam.
+        // Existing text-only admission tests cannot prove this readiness fence.
+        for (provider, scenario) in
+            [FEISHU_PROVIDER, DINGTALK_PROVIDER]
+                .into_iter()
+                .flat_map(|provider| {
+                    ["ready", "retry", "failed", "deleted", "folder"]
+                        .map(|scenario| (provider, scenario))
+                })
+        {
+            let app_id = if provider == FEISHU_PROVIDER {
+                "cli_app_1"
+            } else {
+                "ding-app-agent_1"
+            };
+            let mut database = seeded_runtime_database_owned();
+            let service = ChannelService::default();
+            if provider == FEISHU_PROVIDER {
+                connect_account(&service, &mut database);
+                publish_bot(&service, &mut database, "agent_1", app_id);
+            } else {
+                connect_dingtalk_account(&service, &mut database);
+                publish_dingtalk_bot(&service, &mut database, "agent_1");
+            }
+            let quick = quick_chat_path(&database);
+            let mut observation = observation_command(
+                app_id,
+                "image-message",
+                "image-chat",
+                "",
+                "p2p",
+                if scenario == "ready" {
+                    ""
+                } else {
+                    "Please read these attachments"
+                },
+                &[("agent_1", app_id)],
+                true,
+            );
+            if provider == DINGTALK_PROVIDER {
+                use_dingtalk_observation_identity(&mut observation);
+            }
+            observation.attachment_summaries = vec![
+                ChannelAttachmentSummaryInput {
+                    name: "参考图.png".into(),
+                    media_type: Some("image".into()),
+                },
+                ChannelAttachmentSummaryInput {
+                    name: "说明.txt".into(),
+                    media_type: Some("file".into()),
+                },
+            ];
+            observation.resources = vec![
+                InboundResource {
+                    file_key: "img_key".into(),
+                    download_code: None,
+                    name: "参考图.png".into(),
+                    kind: "image".into(),
+                },
+                InboundResource {
+                    file_key: "file_key".into(),
+                    download_code: None,
+                    name: "说明.txt".into(),
+                    kind: if scenario == "folder" {
+                        "folder"
+                    } else {
+                        "file"
+                    }
+                    .into(),
+                },
+            ];
+            let observed = service
+                .observe_inbound(
+                    &mut database,
+                    &provider_host_envelope(provider, "images-observe", observation.clone()),
+                )
+                .unwrap();
+            let aggregate_id = observed.result.payload["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let replay = service
+                .observe_inbound(
+                    &mut database,
+                    &provider_host_envelope(provider, "images-observe-again", observation),
+                )
+                .unwrap();
+            assert_eq!(replay.result.payload["aggregateId"], aggregate_id);
+            let finalized = service
+                .finalize_inbound(
+                    &mut database,
+                    &quick,
+                    &provider_host_envelope(
+                        provider,
+                        "images-finalize",
+                        FinalizeChannelInboundCommand { aggregate_id },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(finalized.result.status, CommandResultStatus::Accepted);
+            let pending =
+                inbound_attachments::pending(database.connection(), provider, &[app_id.into()])
+                    .unwrap();
+            assert_eq!(pending.len(), 1, "{scenario}: {}", finalized.result.payload);
+            let request = &pending[0];
+            let download_cards: i64 = database.connection().query_row(
+                "SELECT count(*) FROM channel_delivery WHERE request_id = ?1 AND delivery_kind = 'queue_ack'",
+                [&request.request_id],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(
+                download_cards, 0,
+                "{provider}/{scenario}: downloading must be silent"
+            );
+            let camp_id: String = database
+                .connection()
+                .query_row(
+                    "SELECT camp_id FROM channel_turn_request WHERE id=?1",
+                    [&request.request_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let count = |database: &Database| {
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM camp_message WHERE camp_id=?1",
+                        [&camp_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(count(&database), 0);
+            assert!(claim_waiting_runs(&mut database).is_empty());
+            let source = quick.join("image.download");
+            image::RgbaImage::new(1, 1)
+                .save_with_format(&source, image::ImageFormat::Png)
+                .unwrap();
+            let png = std::fs::read(&source).unwrap();
+            let text = quick.join("file.download");
+            std::fs::write(&text, b"full file contents").unwrap();
+            let mut command = CompleteAttachmentsCommand {
+                request_id: request.request_id.clone(),
+                app_id: request.app_id.clone(),
+                attempt: 0,
+                files: vec![
+                    source.to_string_lossy().into_owned(),
+                    text.to_string_lossy().into_owned(),
+                ],
+                failure_code: None,
+            };
+            let other_provider = if provider == FEISHU_PROVIDER {
+                DINGTALK_PROVIDER
+            } else {
+                FEISHU_PROVIDER
+            };
+            assert!(
+                inbound_attachments::pending(
+                    database.connection(),
+                    other_provider,
+                    &[app_id.into()]
+                )
+                .unwrap()
+                .is_empty()
+            );
+            let cross_provider = inbound_attachments::complete(
+                &mut database,
+                &provider_host_envelope(other_provider, "cross-provider-complete", command.clone()),
+            )
+            .unwrap();
+            assert_eq!(cross_provider.result.code, "channel.attachments.closed");
+            if scenario == "deleted" {
+                database
+                    .connection()
+                    .execute(
+                        "UPDATE camp SET deletion_operation_id='deleting' WHERE id=?1",
+                        [&camp_id],
+                    )
+                    .unwrap();
+                let completed = inbound_attachments::complete(
+                    &mut database,
+                    &provider_host_envelope(provider, "images-late", command),
+                )
+                .unwrap();
+                assert_eq!(completed.result.code, "channel.attachments.closed");
+                let output = crate::storage_layout::camp_attachment_output_root(
+                    database.runtime_camp_files_root(),
+                    &camp_id,
+                )
+                .unwrap();
+                assert!(!output.join(provider).exists());
+                continue;
+            }
+            if matches!(scenario, "retry" | "failed" | "folder") {
+                command.files.clear();
+                command.failure_code = Some(
+                    if scenario == "folder" {
+                        "channel.attachments.unsupported"
+                    } else {
+                        "channel.attachments.download_failed"
+                    }
+                    .into(),
+                );
+                if scenario != "retry" {
+                    // Existing installations may still have an already-sent download card.
+                    let transaction = database.connection_mut().transaction().unwrap();
+                    insert_delivery(
+                        &transaction,
+                        &request.request_id,
+                        &format!("legacy_queue_ack:{}", request.request_id),
+                        "queue_ack",
+                        &request.app_id,
+                        None,
+                        None,
+                        &json!({ "kind": "queue_ack", "text": "旧版下载卡" }),
+                        "2026-09-27T00:00:00Z",
+                    )
+                    .unwrap();
+                    transaction.commit().unwrap();
+                    let sent_ack = database.connection().execute(
+                        "UPDATE channel_delivery SET status='sent', ended_at='2026-09-27T00:00:00Z',
+                         external_delivery_message_id='carrier-id'
+                         WHERE request_id=?1 AND delivery_kind='queue_ack' AND status='pending'",
+                        [&request.request_id],
+                    ).unwrap();
+                    assert_eq!(sent_ack, 1);
+                }
+                let failures = if scenario == "failed" { 3 } else { 1 };
+                for attempt in 0..failures {
+                    command.attempt = attempt;
+                    let completed = inbound_attachments::complete(
+                        &mut database,
+                        &provider_host_envelope(
+                            provider,
+                            &format!("images-failure-{attempt}"),
+                            command.clone(),
+                        ),
+                    )
+                    .unwrap();
+                    assert_eq!(completed.result.status, CommandResultStatus::Applied);
+                    assert_eq!(count(&database), 0);
+                    let recall_count: i64 = database
+                        .connection()
+                        .query_row(
+                            "SELECT COUNT(*) FROM channel_delivery WHERE request_id=?1
+                         AND delivery_kind='queue_ack'
+                         AND json_extract(payload_json,'$.action')='recall'",
+                            [&request.request_id],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        recall_count,
+                        i64::from(scenario != "retry" && attempt + 1 == failures)
+                    );
+                    if scenario == "folder" {
+                        assert!(completed.result.payload["retryAt"].is_null());
+                    }
+                    database.connection().execute(
+                        "UPDATE channel_inbound_aggregate SET frozen_payload_json=json_set(frozen_payload_json,'$.inboundAttachments.retryAt',NULL)", []).unwrap();
+                }
+                if scenario != "retry" {
+                    let status: String = database
+                        .connection()
+                        .query_row(
+                            "SELECT status FROM channel_turn_request WHERE id=?1",
+                            [&request.request_id],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(status, "failed");
+                    assert!(
+                        inbound_attachments::pending(
+                            database.connection(),
+                            provider,
+                            &[app_id.into()]
+                        )
+                        .unwrap()
+                        .is_empty()
+                    );
+                    let attention: String = database.connection().query_row("SELECT json_extract(payload_json,'$.text') FROM channel_delivery WHERE request_id=?1 AND delivery_kind='attention'",
+                        [&request.request_id], |r| r.get(0)).unwrap();
+                    assert!(attention.contains(if scenario == "folder" {
+                        "请改为普通图片或文件重新发送"
+                    } else {
+                        "附件下载失败"
+                    }));
+                    assert!(claim_waiting_runs(&mut database).is_empty());
+                    continue;
+                }
+                // A fresh read after failure uses the durable retry generation.
+                let recovered =
+                    inbound_attachments::pending(database.connection(), provider, &[app_id.into()])
+                        .unwrap();
+                assert_eq!(recovered[0].attempt, 1);
+                let stale = inbound_attachments::complete(
+                    &mut database,
+                    &provider_host_envelope(provider, "images-stale", command.clone()),
+                )
+                .unwrap();
+                assert_eq!(stale.result.code, "channel.attachments.replayed");
+                command.attempt = 1;
+                command.files = vec![
+                    source.to_string_lossy().into_owned(),
+                    text.to_string_lossy().into_owned(),
+                ];
+                command.failure_code = None;
+            }
+            let completed = inbound_attachments::complete(
+                &mut database,
+                &provider_host_envelope(provider, "images-complete", command.clone()),
+            )
+            .unwrap();
+            assert_eq!(completed.result.payload["ready"], true);
+            // Native Host may lose a reply and replay with a new command id.
+            let replay = inbound_attachments::complete(
+                &mut database,
+                &provider_host_envelope(provider, "images-complete-again", command),
+            )
+            .unwrap();
+            assert_eq!(replay.result.code, "channel.attachments.replayed");
+            std::fs::remove_file(&source).unwrap();
+            std::fs::remove_file(&text).unwrap();
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: if provider == FEISHU_PROVIDER {
+                            FEISHU_CHANNEL_HOST_COMPONENT
+                        } else {
+                            DINGTALK_CHANNEL_HOST_COMPONENT
+                        }
+                        .into(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "images-host".into(),
+                        inbound_attachment_app_ids: Vec::new(),
+                        limit: 20,
+                    },
+                )
+                .unwrap();
+            assert_eq!(count(&database), 1);
+            let encoded: String = database
+                .connection()
+                .query_row(
+                    "SELECT source_attachments_json FROM camp_message WHERE camp_id=?1",
+                    [&camp_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let sources: Vec<LocalAttachmentSourceRef> = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(sources.len(), 2);
+            assert_eq!(std::fs::read(&sources[0].source_path).unwrap(), png);
+            assert_eq!(
+                std::fs::read(&sources[1].source_path).unwrap(),
+                b"full file contents"
+            );
+            assert_eq!(sources[0].media_type.as_deref(), Some("image/png"));
+            assert_eq!(sources[0].display_name, "参考图.png");
+            let (message_id, boundary, body): (String, i64, String) = database
+                .connection()
+                .query_row(
+                    "SELECT id, sequence, body FROM camp_message WHERE camp_id=?1",
+                    [&camp_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert!(!body.contains("[附件]") && !body.contains("参考图.png"));
+            let transaction = database.connection_mut().transaction().unwrap();
+            let projection = crate::context::project_batch_run_input_for_claim(
+                &transaction,
+                &camp_id,
+                "agent_1",
+                boundary,
+                &[message_id],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(
+                projection["messages"][0]["attachments"][0]["path"],
+                sources[0].source_path
+            );
+            assert_eq!(
+                projection["messages"][0]["attachments"][1]["path"],
+                sources[1].source_path
+            );
+            transaction.rollback().unwrap();
+            assert_eq!(claim_waiting_runs(&mut database).len(), 1);
+        }
+    }
+
+    #[test]
+    fn inbound_attachments_filter_available_bots_before_limit_and_keep_conversation_fifo() {
+        for provider in [FEISHU_PROVIDER, DINGTALK_PROVIDER] {
+            assert_attachment_provider_queue_filtering(provider);
+        }
+    }
+
+    fn assert_attachment_provider_queue_filtering(provider: &str) {
+        use inbound_attachments::{CompleteAttachmentsCommand, InboundResource};
+        // Owns the Host eligibility -> queued SQL window -> FIFO admission seam.
+        // Twenty unavailable requests must not hide the next Bot's attachments.
+        let (app_one, app_two) = if provider == FEISHU_PROVIDER {
+            ("cli_app_1", "cli_app_2")
+        } else {
+            ("ding-app-agent_1", "ding-app-agent_2")
+        };
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        if provider == FEISHU_PROVIDER {
+            connect_account(&service, &mut database);
+            publish_bot(&service, &mut database, "agent_1", app_one);
+            publish_bot(&service, &mut database, "agent_2", app_two);
+        } else {
+            connect_dingtalk_account(&service, &mut database);
+            publish_dingtalk_bot(&service, &mut database, "agent_1");
+            publish_dingtalk_bot(&service, &mut database, "agent_2");
+        }
+        let quick = quick_chat_path(&database);
+        // Bot B's second message lets us finish its download first and prove
+        // that filtering download candidates does not reorder Camp admission.
+        for index in 0..22 {
+            let (agent_id, app_id, chat_id) = if index < 20 {
+                ("agent_1", app_one, "offline-chat")
+            } else {
+                ("agent_2", app_two, "online-chat")
+            };
+            let message_id = format!("attachment-{index:02}");
+            let mut observation = observation_command(
+                app_id,
+                &message_id,
+                chat_id,
+                "",
+                "p2p",
+                &message_id,
+                &[(agent_id, app_id)],
+                true,
+            );
+            if provider == DINGTALK_PROVIDER {
+                use_dingtalk_observation_identity(&mut observation);
+            }
+            observation.resources = vec![InboundResource {
+                file_key: format!("file-{index}"),
+                download_code: None,
+                name: "note.txt".into(),
+                kind: "file".into(),
+            }];
+            let observed = service
+                .observe_inbound(
+                    &mut database,
+                    &provider_host_envelope(provider, &format!("observe-{index}"), observation),
+                )
+                .unwrap();
+            let aggregate_id = observed.result.payload["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let finalized = service
+                .finalize_inbound(
+                    &mut database,
+                    &quick,
+                    &provider_host_envelope(
+                        provider,
+                        &format!("finalize-{index}"),
+                        FinalizeChannelInboundCommand {
+                            aggregate_id: aggregate_id.clone(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(finalized.result.status, CommandResultStatus::Accepted);
+            database
+                .connection()
+                .execute(
+                    "UPDATE channel_turn_request SET created_at=?2 WHERE aggregate_id=?1",
+                    params![aggregate_id, format!("2026-09-23T00:00:{index:02}Z")],
+                )
+                .unwrap();
+        }
+        let actor = ActorRef::System {
+            component_id: if provider == FEISHU_PROVIDER {
+                FEISHU_CHANNEL_HOST_COMPONENT
+            } else {
+                DINGTALK_CHANNEL_HOST_COMPONENT
+            }
+            .into(),
+        };
+        let mut tick_request = ChannelHostTickRequest {
+            worker_id: "attachment-host".into(),
+            limit: 20,
+            inbound_attachment_app_ids: Vec::new(),
+        };
+        let idle = service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap();
+        assert!(idle.inbound_attachments.is_empty());
+        assert!(idle.has_outstanding_work);
+        tick_request.inbound_attachment_app_ids = vec![app_two.into()];
+        let pending = service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap()
+            .inbound_attachments;
+        assert_eq!(
+            pending
+                .iter()
+                .map(|item| item.message_id.as_str())
+                .collect::<Vec<_>>(),
+            ["attachment-20", "attachment-21"]
+        );
+        assert!(pending.iter().all(|item| item.app_id == app_two));
+        let source = quick.join("download.txt");
+        std::fs::write(&source, "complete bytes").unwrap();
+        let messages = |database: &Database| {
+            query_rows(
+                database.connection(),
+                "SELECT body FROM camp_message ORDER BY sequence",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+        };
+        for index in [1, 0] {
+            let request = &pending[index];
+            let completed = inbound_attachments::complete(
+                &mut database,
+                &provider_host_envelope(
+                    provider,
+                    &format!("complete-{index}"),
+                    CompleteAttachmentsCommand {
+                        request_id: request.request_id.clone(),
+                        app_id: request.app_id.clone(),
+                        attempt: 0,
+                        files: vec![source.to_string_lossy().into_owned()],
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap();
+            assert_eq!(completed.result.payload["ready"], true);
+            service
+                .host_tick(&mut database, &actor, &tick_request)
+                .unwrap();
+            if index == 1 {
+                assert!(messages(&database).is_empty());
+                assert!(claim_waiting_runs(&mut database).is_empty());
+            } else {
+                let published = messages(&database);
+                assert_eq!(published.len(), 1);
+                assert!(published[0].ends_with("attachment-20"));
+                assert_eq!(claim_waiting_runs(&mut database).len(), 1);
+            }
+        }
+        // Reconnection must expose Bot A's untouched backlog in original order.
+        tick_request.inbound_attachment_app_ids = vec![app_one.into(), app_two.into()];
+        let recovered = service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap()
+            .inbound_attachments;
+        assert_eq!(recovered.len(), 20);
+        for (index, request) in recovered.iter().enumerate() {
+            assert_eq!(request.message_id, format!("attachment-{index:02}"));
+            assert_eq!(request.attempt, 0);
+        }
+        let published = messages(&database);
+        assert_eq!(published.len(), 2);
+        assert!(published[1].ends_with("attachment-21"));
+    }
+
+    #[test]
     fn host_ticks_are_ephemeral_and_reject_untrusted_or_invalid_requests() {
         // This owner exercises the public maintenance interface against SQLite:
         // repeated polls must not grow either command receipts or domain events.
@@ -12636,6 +15944,7 @@ mod tests {
         let service = ChannelService::default();
         let request = ChannelHostTickRequest {
             worker_id: "maintenance-test-worker".to_string(),
+            inbound_attachment_app_ids: Vec::new(),
             limit: 20,
         };
         let event_count = |database: &Database| -> i64 {
@@ -12648,6 +15957,7 @@ mod tests {
         let writes_before = database.connection().total_changes();
         for component in [
             FEISHU_CHANNEL_HOST_COMPONENT,
+            LARK_SPEC.host_component,
             DINGTALK_CHANNEL_HOST_COMPONENT,
         ] {
             let actor = ActorRef::System {
@@ -12660,7 +15970,7 @@ mod tests {
                 assert_eq!(
                     serde_json::to_value(tick).unwrap(),
                     json!({
-                        "deliveries": [], "rosterRefreshes": [],
+                        "deliveries": [], "rosterRefreshes": [], "inboundAttachments": [],
                         "hasOutstandingWork": false,
                     })
                 );
@@ -12691,6 +16001,7 @@ mod tests {
                         &actor,
                         &ChannelHostTickRequest {
                             worker_id: worker_id.to_string(),
+                            inbound_attachment_app_ids: Vec::new(),
                             limit,
                         }
                     )
@@ -12761,10 +16072,10 @@ mod tests {
             )
             .unwrap();
         let content = vec![
-            StructuredCampMessageSegment::CurrentUserMention {
+            StructuredThreadMessageSegment::CurrentUserMention {
                 user_id: CURRENT_USER_ID.to_string(),
             },
-            StructuredCampMessageSegment::Text {
+            StructuredThreadMessageSegment::Text {
                 text: "文字里的 @你 和 @其他人 不能被当成寻址。".to_string(),
             },
         ];
@@ -12834,6 +16145,16 @@ mod tests {
                     tombstoned_at, camp_id, sequence],
             ).unwrap();
         }
+        connection.execute_batch(
+            r#"
+            ALTER TABLE camp_message ADD COLUMN effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]';
+            UPDATE camp_message
+            SET effective_recipient_ids_json = '["agent_2","agent_3"]'
+            WHERE id = 'message_1';
+            INSERT INTO message_delivery VALUES
+                ('legacy_delivery', 'message_parent', 'agent_4', 0, 'public_a2a');
+            "#,
+        ).unwrap();
         let transaction = connection.transaction().unwrap();
         let projected = feishu_agent_output_projection(
             &transaction,
@@ -12861,6 +16182,19 @@ mod tests {
             json!([
                 {"agentId": "agent_2", "displayName": "响子", "openId": "ou_kyoko"},
                 {"agentId": "agent_3", "displayName": "爱丽丝", "openId": null},
+            ])
+        );
+        let legacy = feishu_agent_output_projection(
+            &transaction,
+            "message_parent",
+            "agent_2",
+            "cli_sender",
+            &content,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy["memberRecipients"],
+            json!([
                 {"agentId": "agent_4", "displayName": "离线队员", "openId": null},
             ])
         );
@@ -13176,12 +16510,24 @@ mod tests {
             branded_identity["brand"] = json!(brand);
             let mut branded_session = session.clone();
             branded_session["portalOrigin"] = json!(origin);
-            validate_developer_session_documents(
-                FEISHU_PROVIDER,
-                &branded_identity,
-                &branded_session,
-            )
-            .unwrap();
+            if brand == LARK_PROVIDER {
+                branded_session["cookies"][0]["domain"] = json!(".larksuite.com");
+            }
+            validate_developer_session_documents(brand, &branded_identity, &branded_session)
+                .unwrap();
+            let other_provider = if brand == LARK_PROVIDER {
+                FEISHU_PROVIDER
+            } else {
+                LARK_PROVIDER
+            };
+            assert!(
+                validate_developer_session_documents(
+                    other_provider,
+                    &branded_identity,
+                    &branded_session,
+                )
+                .is_err()
+            );
         }
         let mut legacy_session = session.clone();
         legacy_session
@@ -13887,6 +17233,7 @@ mod tests {
             sender_union_id: Some("union_user".to_string()),
             sender_display_name: "小明".to_string(),
             body: body.to_string(),
+            resources: Vec::new(),
             attachment_summaries: Vec::new(),
             quote: None,
             canonical_agent_ids: targets
@@ -13922,13 +17269,17 @@ mod tests {
             targets,
             canonical_mentions_complete,
         );
+        use_dingtalk_observation_identity(&mut command);
+        command
+    }
+
+    fn use_dingtalk_observation_identity(command: &mut ObserveChannelInboundCommand) {
         command.provider = DINGTALK_PROVIDER.to_string();
         command.tenant_key = "ding-corp-1".to_string();
         command.sender_external_user_id = "owner-staff-1".to_string();
         command.sender_open_id = None;
         command.sender_user_id = Some("owner-staff-1".to_string());
         command.sender_union_id = None;
-        command
     }
 
     fn seed_project(database: &Database, suffix: &str) -> std::path::PathBuf {
@@ -14058,7 +17409,7 @@ mod tests {
         pending_binding_id: &str,
         command_id: &str,
         provider: &str,
-    ) -> ResolvePendingCampBindingCommand {
+    ) -> ResolvePendingThreadBindingCommand {
         let existing_picker = database
             .connection()
             .query_row(
@@ -14112,6 +17463,7 @@ mod tests {
                             },
                             &ChannelHostTickRequest {
                                 worker_id: worker_id.clone(),
+                                inbound_attachment_app_ids: Vec::new(),
                                 limit: 20,
                             },
                         )
@@ -14150,7 +17502,7 @@ mod tests {
                     .unwrap();
                 (app_id, payload, picker_message_id)
             };
-        ResolvePendingCampBindingCommand {
+        ResolvePendingThreadBindingCommand {
             pending_binding_id: pending_binding_id.to_string(),
             app_id,
             external_picker_message_id: picker_message_id,
@@ -14175,7 +17527,7 @@ mod tests {
         database: &mut Database,
         kind: &str,
         chat_id: &str,
-    ) -> ResolvePendingCampBindingCommand {
+    ) -> ResolvePendingThreadBindingCommand {
         let quick_chat_path = quick_chat_path(database);
         service
             .reconcile_feishu_group_roster(
@@ -14388,7 +17740,7 @@ mod tests {
             assert!(resolved.result.payload["projectId"].is_null());
             assert!(resolved.result.payload["projectDisplayName"].is_null());
             assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
-            let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+            let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
             let binding_id = resolved.result.payload["bindingId"].as_str().unwrap();
             let persisted: (String, String, String, Option<String>, Option<String>) = database.connection().query_row(
                 "SELECT camp.project_binding_kind, camp.project_path, binding.execution_scope_kind,
@@ -14498,7 +17850,7 @@ mod tests {
                     ),
                 )
                 .unwrap();
-            assert_eq!(next.result.payload["campId"], camp_id);
+            assert_eq!(next.result.payload["threadId"], camp_id);
             assert_eq!(
                 database
                     .connection()
@@ -14540,7 +17892,7 @@ mod tests {
     // dependents; a blank-schema fixture cannot prove that FK cascades kept them.
     #[test]
     fn pending_picker_upgrade_keeps_history_rolls_back_failure_and_reuses_the_old_card() {
-        let mut database = seeded_runtime_database_owned();
+        let mut database = crate::test_support::seeded_runtime_database_v170_owned();
         let service = ChannelService::default();
         connect_account(&service, &mut database);
         publish_bot(&service, &mut database, "agent_1", "cli_app_1");
@@ -14559,61 +17911,65 @@ mod tests {
         assert_eq!(bound.result.code, "channel.binding.resolved");
         let mut pending = pending_workspace_picker(&service, &mut database, "topic", "oc_upgrade");
         crate::db::downgrade_current_schema_to_v131_source_for_test(database.connection());
+        // Compare the same source-schema columns across upgrade and rollback.
+        // Later migrations may add fields without changing retained history.
+        let source_columns = [
+            "camp",
+            "camp_message",
+            "camp_turn",
+            "agent_run",
+            "channel_conversation_binding",
+            "pending_camp_binding",
+            "pending_camp_message",
+            "channel_delivery",
+        ]
+        .map(|table| {
+            let columns = database
+                .connection()
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .into_iter()
+                .filter(|column| {
+                    column != "retry_suppression_json"
+                        && column != "source_attachments_json"
+                        && !(table == "camp_turn" && column == "kind")
+                        && !(table == "agent_run"
+                            && matches!(
+                                column.as_str(),
+                                "response_delivery"
+                                    | "operation_policy"
+                                    | "operation_policy_version"
+                                    | "destination_conversation_id"
+                            ))
+                        && column != "workspace_preparing_at"
+                        && column != "automation_run_id"
+                        && column != "quotes_json"
+                        && column != "quote_trash_json"
+                        && !(table == "camp_message"
+                            && matches!(
+                                column.as_str(),
+                                "origin_kind" | "recall_state" | "withdrawn_by_id" | "withdrawn_at"
+                            ))
+                        && !(table == "agent_run"
+                            && matches!(
+                                column.as_str(),
+                                "camp_id"
+                                    | "anchor_message_id"
+                                    | "current_public_tail_sequence"
+                                    | "task_version_at_admission"
+                            ))
+                        && !(table == "channel_delivery" && column == "channel_binding_id")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            (table, columns)
+        });
         let snapshot = |connection: &rusqlite::Connection| {
-            [
-                "camp",
-                "camp_message",
-                "camp_turn",
-                "agent_run",
-                "channel_conversation_binding",
-                "pending_camp_binding",
-                "pending_camp_message",
-                "channel_delivery",
-            ]
-            .map(|table| {
-                let columns = connection
-                    .prepare(&format!("PRAGMA table_info({table})"))
-                    .unwrap()
-                    .query_map([], |row| row.get::<_, String>(1))
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap()
-                    .into_iter()
-                    .filter(|column| {
-                        column != "retry_suppression_json"
-                            && column != "source_attachments_json"
-                            && !(table == "camp_turn" && column == "kind")
-                            && !(table == "agent_run"
-                                && matches!(
-                                    column.as_str(),
-                                    "response_delivery"
-                                        | "operation_policy"
-                                        | "operation_policy_version"
-                                        | "destination_conversation_id"
-                                ))
-                            && column != "workspace_preparing_at"
-                            && column != "automation_run_id"
-                            && column != "quotes_json"
-                            && column != "quote_trash_json"
-                            && !(table == "camp_message"
-                                && matches!(
-                                    column.as_str(),
-                                    "origin_kind"
-                                        | "recall_state"
-                                        | "withdrawn_by_id"
-                                        | "withdrawn_at"
-                                ))
-                            && !(table == "agent_run"
-                                && matches!(
-                                    column.as_str(),
-                                    "camp_id"
-                                        | "anchor_message_id"
-                                        | "current_public_tail_sequence"
-                                ))
-                            && !(table == "channel_delivery" && column == "channel_binding_id")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            source_columns.each_ref().map(|(table, columns)| {
                 let mut statement = connection
                     .prepare(&format!("SELECT {columns} FROM {table} ORDER BY 1, 2"))
                     .unwrap();
@@ -15092,7 +18448,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(started.result.status, CommandResultStatus::Applied);
-        let camp_id = started.result.payload["campId"].as_str().unwrap();
+        let camp_id = started.result.payload["threadId"].as_str().unwrap();
         assert_channel_camp_name(
             &mut database,
             camp_id,
@@ -15231,56 +18587,32 @@ mod tests {
         }
         assert_eq!(claim_waiting_runs(&mut database).len(), 1);
 
-        let mut queued_observation = observation_command(
+        // A public `rovai send` in this bound Camp has no inbound Request. Its
+        // private DingTalk recipient must still resolve to a user ID, not chat ID.
+        let (binding_id, source_message_id): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT binding.id, message.id FROM channel_conversation_binding AS binding
+                 JOIN camp_message AS message ON message.camp_id = binding.camp_id
+                 WHERE binding.camp_id = ?1 ORDER BY message.sequence LIMIT 1",
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        insert_bound_delivery(
+            &transaction,
+            &binding_id,
+            "agent_output:direct-dm-recipient-fixture",
+            "agent_output",
             "ding-app-agent_1",
-            "ding-message-2",
-            "ding-dm-1",
-            "",
-            "p2p",
-            "继续检查会话过期逻辑",
-            &[("agent_1", "ding-app-agent_1")],
-            true,
-        );
-        queued_observation.provider = DINGTALK_PROVIDER.to_string();
-        queued_observation.tenant_key = "ding-corp-1".to_string();
-        queued_observation.sender_external_user_id = "owner-staff-1".to_string();
-        queued_observation.sender_open_id = None;
-        queued_observation.sender_user_id = Some("owner-staff-1".to_string());
-        queued_observation.sender_union_id = None;
-        let queued_observed = service
-            .observe_inbound(
-                &mut database,
-                &dingtalk_host_envelope("dingtalk-observe-queued", queued_observation),
-            )
-            .unwrap();
-        let second_admission = service
-            .finalize_inbound(
-                &mut database,
-                &quick_chat_path,
-                &dingtalk_host_envelope(
-                    "dingtalk-finalize-queued",
-                    FinalizeChannelInboundCommand {
-                        aggregate_id: queued_observed.result.payload["aggregateId"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(second_admission.result.code, "channel.turn.admitted");
-        assert_eq!(
-            database
-                .connection()
-                .query_row(
-                    "SELECT COUNT(*) FROM camp_message_delivery WHERE status = 'waiting'",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap(),
-            1,
-            "a later Channel message is received immediately and waits only in the Agent lane",
-        );
+            "agent_1",
+            &source_message_id,
+            &json!({ "kind": "agent_output", "body": "直接投递正文" }),
+            &Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        transaction.commit().unwrap();
 
         let console_tick = service
             .host_tick(
@@ -15290,10 +18622,23 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "dingtalk-console-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
             .unwrap();
+        let direct_output = console_tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "agent_output")
+            .expect("bound Camp output must be claimed independently of an inbound request");
+        assert_eq!(direct_output.request_id, None);
+        assert_eq!(direct_output.chat_id, "ding-dm-1");
+        assert_eq!(
+            direct_output.recipient_open_id.as_deref(),
+            Some("owner-staff-1")
+        );
+        assert_eq!(direct_output.payload["body"], "直接投递正文");
         let console_delivery = console_tick
             .deliveries
             .iter()
@@ -15412,11 +18757,76 @@ mod tests {
             .unwrap();
         assert_eq!(cancelled.result.status, CommandResultStatus::Applied);
         assert_eq!(cancelled.result.payload["status"], "cancelled");
-        assert_eq!(
-            claim_waiting_runs(&mut database).len(),
-            1,
-            "the ordinary batch Scheduler claims the successor after terminal settlement"
+        database
+            .connection()
+            .execute(
+                "UPDATE channel_execution_console SET state = 'terminal_sealed' WHERE agent_run_id = ?1",
+                [&console_source.agent_run_id],
+            )
+            .unwrap();
+        let mut queued_observation = observation_command(
+            "ding-app-agent_1",
+            "ding-message-2",
+            "ding-dm-1",
+            "",
+            "p2p",
+            "继续检查会话过期逻辑",
+            &[("agent_1", "ding-app-agent_1")],
+            true,
         );
+        queued_observation.provider = DINGTALK_PROVIDER.to_string();
+        queued_observation.tenant_key = "ding-corp-1".to_string();
+        queued_observation.sender_external_user_id = "owner-staff-1".to_string();
+        queued_observation.sender_open_id = None;
+        queued_observation.sender_user_id = Some("owner-staff-1".to_string());
+        queued_observation.sender_union_id = None;
+        let queued_observed = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope("dingtalk-observe-queued", queued_observation),
+            )
+            .unwrap();
+        let second_admission = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-finalize-queued",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: queued_observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(second_admission.result.code, "channel.turn.admitted");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message_delivery WHERE status = 'waiting'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "a later Channel message is received immediately and waits only in the Agent lane",
+        );
+        let successor_runs = claim_waiting_runs(&mut database);
+        assert_eq!(
+            successor_runs.len(),
+            1,
+            "the Scheduler must create one successor"
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'running', started_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![successor_runs[0], Utc::now().to_rfc3339()],
+            )
+            .unwrap();
 
         let next_tick = service
             .host_tick(
@@ -15426,10 +18836,24 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "dingtalk-promoted-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
             .unwrap();
+        let execution_recall = next_tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "execution_console_recall")
+            .expect("the next started Run must recall the previous DingTalk card");
+        assert_eq!(
+            execution_recall.update_message_id.as_deref(),
+            Some("ding-card-run-1")
+        );
+        assert_eq!(
+            execution_recall.recall_message_id.as_deref(),
+            Some("ding-carrier-run-1")
+        );
         assert!(next_tick.deliveries.iter().any(|delivery| {
             delivery.delivery_kind == "execution_console_upsert"
                 && delivery.payload["agentRunId"] != console_source.agent_run_id
@@ -15525,6 +18949,7 @@ mod tests {
         };
         let request = ChannelHostTickRequest {
             worker_id: "dingtalk-test-worker".to_string(),
+            inbound_attachment_app_ids: Vec::new(),
             limit: 10,
         };
         let collecting = service.host_tick(&mut database, &actor, &request).unwrap();
@@ -15606,6 +19031,32 @@ mod tests {
 
     #[test]
     fn dingtalk_multi_bot_callbacks_form_one_ordered_durable_request() {
+        for with_attachments in [false, true] {
+            assert_dingtalk_multi_bot_callback_admission(with_attachments);
+        }
+    }
+
+    fn assert_dingtalk_multi_bot_callback_admission(with_attachments: bool) {
+        let body = "@agent_2 @agent_1 请 @同事 一起检查多 Bot 聚合";
+        let observe = |app_id: &str,
+                       message: &str,
+                       chat: &str,
+                       kind: &str,
+                       body: &str,
+                       targets: &[(&str, &str)],
+                       complete: bool| {
+            let mut command =
+                dingtalk_observation_command(app_id, message, chat, kind, body, targets, complete);
+            if with_attachments {
+                command.resources = vec![inbound_attachments::InboundResource {
+                    file_key: "resource:0".into(),
+                    name: "参考图.png".into(),
+                    kind: "image".into(),
+                    download_code: Some(format!("grant-for-{app_id}")),
+                }];
+            }
+            command
+        };
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_dingtalk_account(&service, &mut database);
@@ -15635,12 +19086,12 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-first",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_2",
                         "ding-multi-message",
                         "ding-multi-group",
                         "group",
-                        "一起检查多 Bot 聚合",
+                        body,
                         &[("agent_2", "ding-app-agent_2")],
                         false,
                     ),
@@ -15656,12 +19107,12 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-second",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_1",
                         "ding-multi-message",
                         "ding-multi-group",
                         "group",
-                        "一起检查多 Bot 聚合",
+                        body,
                         &[("agent_1", "ding-app-agent_1")],
                         false,
                     ),
@@ -15677,12 +19128,12 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-complete",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_2",
                         "ding-multi-message",
                         "ding-multi-group",
                         "group",
-                        "一起检查多 Bot 聚合",
+                        body,
                         &[
                             ("agent_2", "ding-app-agent_2"),
                             ("agent_1", "ding-app-agent_1"),
@@ -15713,6 +19164,15 @@ mod tests {
             member_mention_ids(&frozen.structured_content),
             ["agent_2", "agent_1"]
         );
+        let plain_text = frozen
+            .structured_content
+            .iter()
+            .filter_map(|segment| match segment {
+                StructuredThreadMessageSegment::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(plain_text.trim(), "请 @同事 一起检查多 Bot 聚合");
         assert_eq!(frozen.acknowledgement_app_id, "ding-app-agent_2");
 
         let multi_quick_chat_path = quick_chat_path(&database);
@@ -15744,8 +19204,54 @@ mod tests {
             DINGTALK_PROVIDER,
         );
         assert_eq!(resolved.result.code, "channel.binding.resolved");
+        let mut early_deliveries = Vec::new();
+        if with_attachments {
+            assert!(claim_waiting_runs(&mut database).is_empty());
+            let pending = inbound_attachments::pending(
+                database.connection(),
+                DINGTALK_PROVIDER,
+                &["ding-app-agent_2".into()],
+            )
+            .unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(
+                pending[0].resources[0].download_code.as_deref(),
+                Some("grant-for-ding-app-agent_2")
+            );
+            let source = multi_quick_chat_path.join("download.png");
+            image::RgbaImage::new(1, 1).save(&source).unwrap();
+            let completion = inbound_attachments::complete(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-attachments",
+                    inbound_attachments::CompleteAttachmentsCommand {
+                        request_id: pending[0].request_id.clone(),
+                        app_id: pending[0].app_id.clone(),
+                        attempt: 0,
+                        files: vec![source.to_string_lossy().into_owned()],
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap();
+            assert_eq!(completion.result.payload["ready"], true);
+            early_deliveries = service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: DINGTALK_CHANNEL_HOST_COMPONENT.into(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "dingtalk-multi-worker".into(),
+                        inbound_attachment_app_ids: Vec::new(),
+                        limit: 10,
+                    },
+                )
+                .unwrap()
+                .deliveries;
+        }
         assert_eq!(claim_waiting_runs(&mut database).len(), 2);
-        let dispatched = service
+        let mut dispatched = service
             .host_tick(
                 &mut database,
                 &ActorRef::System {
@@ -15753,10 +19259,12 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "dingtalk-multi-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 10,
                 },
             )
             .unwrap();
+        dispatched.deliveries.extend(early_deliveries);
         assert_eq!(
             dispatched
                 .deliveries
@@ -15808,12 +19316,12 @@ mod tests {
                 &mut database,
                 &dingtalk_host_envelope(
                     "dingtalk-multi-late-replay",
-                    dingtalk_observation_command(
+                    observe(
                         "ding-app-agent_1",
                         "ding-multi-message",
                         "ding-multi-group",
                         "group",
-                        "一起检查多 Bot 聚合",
+                        body,
                         &[("agent_1", "ding-app-agent_1")],
                         false,
                     ),
@@ -16081,7 +19589,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
         assert_channel_camp_name(
             &mut database,
             camp_id,
@@ -16697,8 +20205,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(finalized.result.code, "channel.turn.admitted");
-        assert_eq!(finalized.result.payload["campCreated"], true);
-        let camp_id = finalized.result.payload["campId"].as_str().unwrap();
+        assert_eq!(finalized.result.payload["threadCreated"], true);
+        let camp_id = finalized.result.payload["threadId"].as_str().unwrap();
         let stored_path: String = database
             .connection()
             .query_row(
@@ -16765,11 +20273,15 @@ mod tests {
             .unwrap();
         assert_eq!(first_generation.result.payload["generation"], 1);
         assert_eq!(second_generation.result.payload["generation"], 2);
-        assert_eq!(first_generation.result.payload["campCreated"], true);
-        assert_eq!(second_generation.result.payload["campCreated"], true);
+        assert_eq!(first_generation.result.payload["threadCreated"], true);
+        assert_eq!(second_generation.result.payload["threadCreated"], true);
         // /new creates default names only; closed generations retain their source.
-        let first_camp_id = first_generation.result.payload["campId"].as_str().unwrap();
-        let second_camp_id = second_generation.result.payload["campId"].as_str().unwrap();
+        let first_camp_id = first_generation.result.payload["threadId"]
+            .as_str()
+            .unwrap();
+        let second_camp_id = second_generation.result.payload["threadId"]
+            .as_str()
+            .unwrap();
         assert_channel_camp_name(
             &mut database,
             first_camp_id,
@@ -16834,7 +20346,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(finalized.result.code, "channel.turn.admitted");
-        assert_eq!(finalized.result.payload["campCreated"], false);
+        assert_eq!(finalized.result.payload["threadCreated"], false);
         assert_channel_camp_name(
             &mut database,
             second_camp_id,
@@ -16887,6 +20399,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17027,7 +20540,7 @@ mod tests {
             )
             .unwrap();
         let failed_at = Utc::now().to_rfc3339();
-        let output_content = vec![StructuredCampMessageSegment::Text {
+        let output_content = vec![StructuredThreadMessageSegment::Text {
             text: "partial channel output".to_string(),
         }];
         let output_content_json = serde_json::to_string(&output_content).unwrap();
@@ -17163,6 +20676,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17213,6 +20727,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17464,6 +20979,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17534,6 +21050,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17707,6 +21224,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "exact-cancel-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -17851,6 +21369,24 @@ mod tests {
                 ),
             )
             .unwrap();
+        let waiting_delivery: String = database
+            .connection()
+            .query_row(
+                r#"
+            SELECT delivery.status
+            FROM channel_turn_request AS request
+            JOIN json_each(request.delivery_ids_json) AS requested
+            JOIN camp_message_delivery AS delivery ON delivery.id = requested.value
+            WHERE request.status = 'completed'
+            "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(waiting_delivery, "waiting");
+        let transaction = database.connection_mut().transaction().unwrap();
+        assert!(channel_host_has_outstanding_work(&transaction, FEISHU_PROVIDER).unwrap());
+        transaction.rollback().unwrap();
         let claimed = claim_waiting_runs(&mut database);
         assert_eq!(claimed.len(), 1);
         let agent_run_id = claimed[0].clone();
@@ -17866,6 +21402,21 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        // The inbound request has completed, but its Camp delivery is still
+        // claimed. A tick in this gap must keep the provider awake until the
+        // Run can be projected into a console and its reply is delivered.
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM channel_delivery", [], |row| row
+                    .get::<_, i64>(0),)
+                .unwrap(),
+            0,
+        );
+        let transaction = database.connection_mut().transaction().unwrap();
+        assert!(channel_host_has_outstanding_work(&transaction, FEISHU_PROVIDER).unwrap());
+        assert!(!channel_host_has_outstanding_work(&transaction, DINGTALK_PROVIDER).unwrap());
+        transaction.rollback().unwrap();
         let opening_tick = service
             .host_tick(
                 &mut database,
@@ -17874,6 +21425,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-opening-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -17913,6 +21465,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-live-refresh-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -17975,6 +21528,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-live-followup-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18027,6 +21581,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-pending-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18040,6 +21595,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-other-provider-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18106,6 +21662,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-digest-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18149,6 +21706,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-restart-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18200,6 +21758,7 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-repeat-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
@@ -18254,11 +21813,302 @@ mod tests {
                 },
                 &ChannelHostTickRequest {
                     worker_id: "terminal-console-quiescent-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
                     limit: 20,
                 },
             )
             .unwrap();
         assert!(!quiescent_tick.has_outstanding_work);
+
+        // The root Request is already complete and its console is sealed.
+        // A message from that Run can still start another Camp member's Run.
+        publish_bot(&service, &mut restarted, "agent_2", "cli_app_2");
+        let camp_id: String = restarted
+            .connection()
+            .query_row(
+                "SELECT camp_id FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let a2a_at = Utc::now().to_rfc3339();
+        let a2a_content = vec![StructuredThreadMessageSegment::Text {
+            text: "请继续处理".to_string(),
+        }];
+        restarted.connection().execute(
+            "INSERT OR IGNORE INTO camp_member(camp_id, agent_id, status, joined_at) VALUES (?1, 'agent_2', 'active', ?2)",
+            params![camp_id, a2a_at],
+        ).unwrap();
+        restarted
+            .connection()
+            .execute(
+                "UPDATE camp SET last_message_sequence = last_message_sequence + 1 WHERE id = ?1",
+                [&camp_id],
+            )
+            .unwrap();
+        let a2a_sequence: i64 = restarted
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        restarted
+            .connection()
+            .execute(
+                r#"
+            INSERT INTO camp_message(
+                id, camp_id, sequence, author_type, author_id,
+                source_agent_run_id, body, structured_content_json, content_digest,
+                address_mode, addressed_agent_ids_json, reply_to_camp_message_id,
+                camp_turn_id, agent_run_id, tombstoned_at, version,
+                created_at, updated_at, effective_recipient_ids_json,
+                recipient_set_digest, recipient_presentation_json, source_operation_id
+            ) VALUES (
+                'channel-a2a-message', ?1, ?2, 'agent', 'agent_1',
+                ?3, '请继续处理', ?4, ?5,
+                'explicit', '["agent_2"]', NULL,
+                NULL, ?3, NULL, 1,
+                ?6, ?6, '["agent_2"]', NULL, '{}', NULL
+            )
+            "#,
+                params![
+                    camp_id,
+                    a2a_sequence,
+                    agent_run_id,
+                    serde_json::to_string(&a2a_content).unwrap(),
+                    canonical_content_digest(&a2a_content).unwrap(),
+                    a2a_at,
+                ],
+            )
+            .unwrap();
+        {
+            let transaction = restarted.connection_mut().transaction().unwrap();
+            crate::delivery_queue::enqueue_message_deliveries(
+                &transaction,
+                &camp_id,
+                "channel-a2a-message",
+                a2a_sequence,
+                &["agent_2".to_string()],
+                &a2a_at,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        let descendants = claim_waiting_runs(&mut restarted);
+        assert_eq!(descendants.len(), 1);
+        let descendant_run_id = &descendants[0];
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM channel_delivery WHERE delivery_kind = 'execution_console_recall'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "a queued A2A descendant does not supersede the previous card"
+        );
+        restarted.connection().execute(
+            "UPDATE agent_run SET status = 'running', started_at = ?2, updated_at = ?2 WHERE id = ?1",
+            params![descendant_run_id, Utc::now().to_rfc3339()],
+        ).unwrap();
+        let descendant_tick = service
+            .host_tick(
+                &mut restarted,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "a2a-console-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let descendant_card = descendant_tick
+            .deliveries
+            .iter()
+            .find(|delivery| {
+                delivery.delivery_kind == "execution_console_upsert"
+                    && delivery.target_app_id == "cli_app_2"
+                    && delivery.payload["agentRunId"] == *descendant_run_id
+            })
+            .expect("the started A2A descendant must open a card");
+        assert!(
+            descendant_tick
+                .deliveries
+                .iter()
+                .all(|delivery| { delivery.delivery_kind != "execution_console_recall" }),
+            "another member's Run must not recall agent_1's card"
+        );
+        service
+            .settle_delivery(
+                &mut restarted,
+                &host_envelope(
+                    "settle-a2a-descendant-card",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: descendant_card.delivery_id.clone(),
+                        worker_id: "a2a-console-worker".to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some("om_a2a_descendant_card".to_string()),
+                        external_update_message_id: Some("om_a2a_descendant_card".to_string()),
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let descendant_ended_at = Utc::now().to_rfc3339();
+        restarted.connection().execute(
+            "UPDATE agent_run SET status = 'succeeded', ended_at = ?2, updated_at = ?2 WHERE id = ?1",
+            params![descendant_run_id, descendant_ended_at],
+        ).unwrap();
+        service
+            .host_tick(
+                &mut restarted,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "a2a-terminal-pending-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        restarted
+            .connection()
+            .execute(
+                "UPDATE channel_execution_console SET updated_at = ?2 WHERE agent_run_id = ?1",
+                params![
+                    descendant_run_id,
+                    (Utc::now() - Duration::seconds(2)).to_rfc3339()
+                ],
+            )
+            .unwrap();
+        service
+            .host_tick(
+                &mut restarted,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "a2a-terminal-sealed-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT request_id FROM channel_execution_console WHERE agent_run_id = ?1 AND state = 'terminal_sealed' AND terminal_snapshot_json IS NOT NULL",
+                    [descendant_run_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            request_id
+        );
+        let return_at = Utc::now().to_rfc3339();
+        restarted
+            .connection()
+            .execute(
+                "UPDATE camp SET last_message_sequence = last_message_sequence + 1 WHERE id = ?1",
+                [&camp_id],
+            )
+            .unwrap();
+        let return_sequence: i64 = restarted
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        restarted
+            .connection()
+            .execute(
+                r#"
+            INSERT INTO camp_message(
+                id, camp_id, sequence, author_type, author_id,
+                source_agent_run_id, body, structured_content_json, content_digest,
+                address_mode, addressed_agent_ids_json, reply_to_camp_message_id,
+                camp_turn_id, agent_run_id, tombstoned_at, version,
+                created_at, updated_at, effective_recipient_ids_json,
+                recipient_set_digest, recipient_presentation_json, source_operation_id
+            ) VALUES (
+                'channel-a2a-return', ?1, ?2, 'agent', 'agent_2',
+                ?3, '请继续处理', ?4, ?5,
+                'explicit', '["agent_1"]', NULL,
+                NULL, ?3, NULL, 1,
+                ?6, ?6, '["agent_1"]', NULL, '{}', NULL
+            )
+            "#,
+                params![
+                    camp_id,
+                    return_sequence,
+                    descendant_run_id,
+                    serde_json::to_string(&a2a_content).unwrap(),
+                    canonical_content_digest(&a2a_content).unwrap(),
+                    return_at,
+                ],
+            )
+            .unwrap();
+        {
+            let transaction = restarted.connection_mut().transaction().unwrap();
+            crate::delivery_queue::enqueue_message_deliveries(
+                &transaction,
+                &camp_id,
+                "channel-a2a-return",
+                return_sequence,
+                &["agent_1".to_string()],
+                &return_at,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        let return_runs = claim_waiting_runs(&mut restarted);
+        assert_eq!(return_runs.len(), 1);
+        restarted.connection().execute(
+            "UPDATE agent_run SET status = 'running', started_at = ?2, updated_at = ?2 WHERE id = ?1",
+            params![return_runs[0], Utc::now().to_rfc3339()],
+        ).unwrap();
+        let return_tick = service
+            .host_tick(
+                &mut restarted,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "a2a-return-worker".to_string(),
+                    inbound_attachment_app_ids: Vec::new(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            return_tick.deliveries.iter().any(|delivery| {
+                delivery.delivery_kind == "execution_console_recall"
+                    && delivery.update_message_id.as_deref() == Some("om_terminal_console_card")
+            }),
+            "the next started Run for agent_1 must recall agent_1's previous card"
+        );
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT state FROM channel_execution_console WHERE agent_run_id = ?1",
+                    [descendant_run_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "terminal_sealed",
+            "agent_2's card must remain visible"
+        );
     }
 
     #[test]
@@ -18486,7 +22336,7 @@ mod tests {
                 &quick_chat_path,
                 &host_envelope(
                     "resolve-stale-picker-message",
-                    ResolvePendingCampBindingCommand {
+                    ResolvePendingThreadBindingCommand {
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id.clone(),
                         external_picker_message_id: "om_not_authoritative".to_string(),
@@ -18508,7 +22358,7 @@ mod tests {
                 &quick_chat_path,
                 &host_envelope(
                     "resolve-picker-non-owner",
-                    ResolvePendingCampBindingCommand {
+                    ResolvePendingThreadBindingCommand {
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id.clone(),
                         external_picker_message_id: picker_message_id.clone(),
@@ -18550,7 +22400,7 @@ mod tests {
                 &quick_chat_path,
                 &host_envelope(
                     "resolve-picker-project-became-unavailable",
-                    ResolvePendingCampBindingCommand {
+                    ResolvePendingThreadBindingCommand {
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id.clone(),
                         external_picker_message_id: picker_message_id.clone(),
@@ -18616,7 +22466,7 @@ mod tests {
         );
         assert_eq!(resolved.result.code, "channel.binding.resolved");
         assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
-        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
         assert_channel_camp_name(
             &mut database,
             camp_id,
@@ -18680,6 +22530,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "binding-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -18716,7 +22567,7 @@ mod tests {
                 &quick_chat_path,
                 &host_envelope(
                     "resolve-picker-replay-after-commit",
-                    ResolvePendingCampBindingCommand {
+                    ResolvePendingThreadBindingCommand {
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id,
                         external_picker_message_id: picker_message_id,
@@ -18743,6 +22594,7 @@ mod tests {
         };
         let poll = ChannelHostTickRequest {
             worker_id: "replacement-worker".to_string(),
+            inbound_attachment_app_ids: Vec::new(),
             limit: 20,
         };
         let lease_state =
@@ -18836,7 +22688,7 @@ mod tests {
                     camp_id: Some(camp_id.to_string()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::RenameCampCommand {
+                    payload: crate::collaboration::RenameThreadCommand {
                         camp_id: camp_id.to_string(),
                         title: "OAuth 登录问题".to_string(),
                         expected_version: version,
@@ -19008,6 +22860,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "legacy-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19060,7 +22913,7 @@ mod tests {
                 &quick_chat_path,
                 &host_envelope(
                     "reject-legacy-private-picker",
-                    ResolvePendingCampBindingCommand {
+                    ResolvePendingThreadBindingCommand {
                         pending_binding_id: pending_binding_id.to_string(),
                         app_id: "cli_app_1".to_string(),
                         external_picker_message_id: "om_legacy_private".to_string(),
@@ -19168,6 +23021,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "obsolete-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19210,6 +23064,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "recovered-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19265,6 +23120,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "current-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19368,6 +23224,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "sent-obsolete-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19410,6 +23267,7 @@ mod tests {
                     },
                     &ChannelHostTickRequest {
                         worker_id: "updated-picker-worker".to_string(),
+                        inbound_attachment_app_ids: Vec::new(),
                         limit: 20,
                     },
                 )
@@ -19691,7 +23549,7 @@ mod tests {
         let pending_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
         let resolved = resolve_pending(&service, &mut database, pending_id, "group-resolve");
         assert_eq!(resolved.result.code, "channel.binding.resolved");
-        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
         assert_eq!(
             database
                 .connection()
@@ -19794,7 +23652,7 @@ mod tests {
         assert_eq!(pending.result.code, "channel.binding.pending");
         let pending_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
         let resolved = resolve_pending(&service, &mut database, pending_id, "topic-resolve");
-        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
         assert_channel_camp_name(
             &mut database,
             camp_id,
@@ -20081,7 +23939,11 @@ mod tests {
                 sender_union_id: None,
                 sender_display_name: "小明".to_string(),
                 body: "继续".to_string(),
-                attachment_summaries: Vec::new(),
+                resources: Vec::new(),
+                attachment_summaries: vec![ChannelAttachmentSummaryInput {
+                    name: "新图片.png".to_string(),
+                    media_type: Some("image".to_string()),
+                }],
                 quote: Some(ExternalQuoteInput {
                     sender_display_name: "小红".to_string(),
                     body: "原始问题".to_string(),
@@ -20100,21 +23962,30 @@ mod tests {
         .unwrap();
         assert!(matches!(
             content.first(),
-            Some(StructuredCampMessageSegment::ExternalQuote { body, .. }) if body == "原始问题"
+            Some(StructuredThreadMessageSegment::ExternalQuote { body, attachment_summaries, .. })
+                if body == "原始问题" && attachment_summaries.len() == 1
         ));
         assert!(matches!(
             content.get(1),
-            Some(StructuredCampMessageSegment::Text { text }) if text == "\n\n"
+            Some(StructuredThreadMessageSegment::Text { text }) if text == "\n\n"
         ));
         assert!(matches!(
             content.get(2),
-            Some(StructuredCampMessageSegment::MemberMention { agent_id }) if agent_id == "agent_1"
+            Some(StructuredThreadMessageSegment::MemberMention { agent_id }) if agent_id == "agent_1"
         ));
         let serialized = serde_json::to_value(&content).unwrap();
         assert!(!serialized.to_string().contains("externalMessageId"));
+        let current_text = content
+            .iter()
+            .filter_map(|segment| match segment {
+                StructuredThreadMessageSegment::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(current_text, "\n\n 继续");
 
         let mut tampered = content.clone();
-        let Some(StructuredCampMessageSegment::ExternalQuote { content_digest, .. }) =
+        let Some(StructuredThreadMessageSegment::ExternalQuote { content_digest, .. }) =
             tampered.first_mut()
         else {
             panic!("the first segment must remain the external quote");

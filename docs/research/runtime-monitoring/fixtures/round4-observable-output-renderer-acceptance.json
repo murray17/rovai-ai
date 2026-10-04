@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-30",
+  "algorithmVersion": "observable-output-heuristic-v3",
+  "candidate": {
+    "sourceCommit": "d2193d5dc142a25abbfce3ec31550b400dad1044",
+    "mainCommit": "df7f7abd1a43b9e1002d6974e693f79e2f0b0f0c",
+    "coreSha256": "73c21d50a85158f16459815a849fd868e9b6b254b51e113ef3b1fdd4dbc46bd2",
+    "hostSha256": "376c049ba4fe9a16d22ac765db4cf277b2383030611c6da89ac620652795a86d",
+    "asarSha256": "43349f1a625dcd2cc35942fbcd99e96bf16246494385571332d99db3cf04bf26",
+    "packageGate": "passed: macos arm64, ad-hoc, Bundle ID"
+  },
+  "isolation": {
+    "channel": "automatic_acceptance",
+    "userData": "fresh private temporary directory per attempt",
+    "skillLibrary": "explicit managed-skill-library under isolated userData",
+    "mcp": "explicit isolated mcp.json",
+    "dailyHost": "not stopped or restarted"
+  },
+  "syntheticAcp": {
+    "fixtureScope": "controlled Qwen-shaped ACP, not a real Qwen thought qualification claim",
+    "sourceQualification": {
+      "offsetFrames": 3,
+      "fencedLiveReceiptFramesWithoutMessageIdOrOffset": 4,
+      "completeSnapshot": "excluded"
+    },
+    "numericSample": {
+      "agentRunId": "2212ffc1-5c48-4a63-8f79-5d97b05b5b28",
+      "algorithmVersion": "observable-output-heuristic-v3",
+      "counterGeneration": "914b7e91-7280-409e-b1f2-2ebaa819f975",
+      "executionEpoch": 1,
+      "lastOutputAtMs": 22984,
+      "publicTextUnits": 15200,
+      "reasoningSource": "stream_text",
+      "reasoningUnits": 3780,
+      "sampledAtMs": 23326,
+      "sequence": 7,
+      "streamConfirmed": true,
+      "unicodeDataVersion": "icu4x-2.2.0"
+    },
+    "privateMarkerInEvidenceRows": 0,
+    "privateMarkerInRenderer": false,
+    "privateMarkerInIsolatedFiles": [],
+    "midstreamReentry": {
+      "speed": null,
+      "duration": "0分 04秒"
+    },
+    "historySwitch": {
+      "activeSpeed": "44.2 tok/s",
+      "activeDuration": "0分 06秒",
+      "sameLine": true,
+      "activeExpanded": false,
+      "historyExpanded": true,
+      "historyHasSpeed": false,
+      "historyVisible": true
+    },
+    "speedChanges": [
+      {
+        "at": 25774.799999952316,
+        "speed": "44.2 tok/s"
+      },
+      {
+        "at": 27273.699999928474,
+        "speed": "33.6 tok/s"
+      },
+      {
+        "at": 28273.799999952316,
+        "speed": "19.7 tok/s"
+      },
+      {
+        "at": 29273.899999976158,
+        "speed": "12.2 tok/s"
+      },
+      {
+        "at": 30274.299999952316,
+        "speed": "7.8 tok/s"
+      },
+      {
+        "at": 31773.5,
+        "speed": null
+      },
+      {
+        "at": 35274.59999990463,
+        "speed": "38.0 tok/s"
+      },
+      {
+        "at": 37754,
+        "speed": null
+      }
+    ],
+    "lateUsageRows": [
+      [
+        "Input Token",
+        "1.5k"
+      ],
+      [
+        "Output Token",
+        "0.5k"
+      ],
+      [
+        "Cache Read",
+        "0.3k"
+      ],
+      [
+        "Cache Write",
+        "0k"
+      ],
+      [
+        "执行耗时",
+        "0分 18秒"
+      ]
+    ],
+    "verified": [
+      "tool idle hides speed",
+      "resumed output rewarms",
+      "running duration remains",
+      "current header stays on one line",
+      "terminal removes speed",
+      "late Usage updates terminal card and popover"
+    ]
+  },
+  "realCodex": {
+    "version": "codex-cli 0.159.2",
+    "campId": "rvcamp_01m3s063n7emgs0r5ykk5yqp5w",
+    "runId": "3ad9d831-cf25-44c7-926d-eb50315806d8",
+    "status": "succeeded",
+    "publicUnits": 294710,
+    "reasoningUnits": 9700,
+    "rendererPublications": 46,
+    "elapsedMs": 193769,
+    "nativeBodyFrames": 2057,
+    "nativeBodyScalars": 13818,
+    "nativeSummaryFrames": 82,
+    "nativeSummaryScalars": 458,
+    "nativeSummaryShape": {
+      "atMs": 192094,
+      "method": "item/reasoning/summaryTextDelta",
+      "type": null,
+      "sessionUpdate": null,
+      "deltaType": null,
+      "keys": [
+        "emittedAtMs",
+        "method",
+        "params"
+      ],
+      "paramsKeys": [
+        "delta",
+        "itemId",
+        "summaryIndex",
+        "threadId",
+        "turnId"
+      ],
+      "updateKeys": [],
+      "contentKeys": [],
+      "eventKeys": [],
+      "itemId": "identity-16",
+      "turnId": "identity-2",
+      "summaryIndex": 0,
+      "contentIndex": null,
+      "textOffset": null,
+      "parentPresent": false,
+      "bytes": 33,
+      "scalars": 33
+    },
+    "minPublicationIntervalMs": 993.8999999761581,
+    "maxNumericPublicationsIn30s": 20,
+    "thinkingScopeSamples": 17,
+    "targetSelectionPreserved": true,
+    "terminalSpeed": null
+  },
+  "scopeEvidence": {
+    "reasoningOnly": "当前估算输出速度：83.5 tok/s — 根据当前执行收到的思考摘要增量估算",
+    "mixed": "当前估算输出速度：22.9 tok/s — 根据当前执行收到的公开正文与思考摘要增量估算"
+  },
+  "rawAbsentNegativeCase": {
+    "scenario": "healthy long public output, raw summary absent",
+    "nativeSummaryFrames": 0,
+    "nativeBodyFrames": 2989,
+    "bodyAndDisplayVerified": true,
+    "thinkingStatus": "raw_absent",
+    "strictThinkingAcceptance": "not passed: expected positive thought sample, Native did not emit it",
+    "status": "succeeded",
+    "elapsedMs": 171358,
+    "publicUnits": 362900,
+    "reasoningUnits": 0,
+    "rendererPublications": 63,
+    "minPublicationIntervalMs": 999.7999999523163,
+    "terminalSpeed": null
+  },
+  "harnessTargetCorrection": {
+    "invalidAttempt": "Native summary reached Core, but initial asynchronous selection left the inspector in overview",
+    "disposition": "not counted as Renderer success",
+    "fix": "open inspector idempotently, select a visible agent entry, wait for non-overview header, record and assert target throughout the run"
+  },
+  "evidenceLocations": {
+    "nativeMatrix": "round4-observable-output-runtime-evidence.json",
+    "localArchive": "observable-output-20260930/",
+    "synthetic": "renderer-final-synthetic/renderer-acceptance.json",
+    "realCodex": "renderer-selected-real/observable-real-codex.json",
+    "nativeShapeWitness": "renderer-selected-real/native-shapes.jsonl",
+    "rawAbsent": "renderer-final-real/field-evidence.json"
+  },
+  "remainingScope": "Other Runtime positive samples establish Native/adapter-to-Core numeric evidence, not individual packaged Renderer acceptance"
+}

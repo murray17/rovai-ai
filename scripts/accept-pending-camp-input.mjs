@@ -61,44 +61,44 @@ try {
     address: { mode: 'explicit', agentIds: ['agent_2'] }, body: bodies[0], purpose: 'Queue FIFO acceptance'
   })
   assert.equal(first.status, 'accepted')
-  const campId = first.payload.campId
-  report.campId = campId
-  const second = await send(campId, bodies[1])
-  const third = await send(campId, bodies[2])
-  const fourth = await send(campId, bodies[3])
+  const threadId = first.payload.threadId
+  report.threadId = threadId
+  const second = await send(threadId, bodies[1])
+  const third = await send(threadId, bodies[2])
+  const fourth = await send(threadId, bodies[3])
   assert.equal(second.code, 'pending_input.queued')
   assert.equal(third.code, 'pending_input.queued')
   assert.equal(fourth.code, 'pending_input.queued')
   const queuedIds = [second.payload.pendingInputId, third.payload.pendingInputId, fourth.payload.pendingInputId]
-  const initialQueue = await queue(campId)
+  const initialQueue = await queue(threadId)
   assert.deepEqual(initialQueue.items.map((item) => item.id), queuedIds)
   for (const item of initialQueue.items) {
     assert.deepEqual(item.content.filter((segment) => segment.kind === 'member_mention'), [{ kind: 'member_mention', agentId: 'agent_2' }])
   }
-  assert.equal((await snapshot(campId)).messages.filter((message) => message.authorType === 'user').length, 1)
+  assert.equal((await snapshot(threadId)).messages.filter((message) => message.authorType === 'user').length, 1)
   check('继续发给芝士的 B、C、D 依次私有入队，目标没有变成默认队长叮叮')
 
   const heldHead = initialQueue.items[0]
   const headEdit = await edit(heldHead, { type: 'begin' })
   assert.equal(headEdit.status, 'applied')
   await waitFor(async () => {
-    const value = await snapshot(campId)
+    const value = await snapshot(threadId)
     assertNoFailedRuns(value)
     return value.agentRuns[0]?.status === 'succeeded' ? value : null
   }, 'first Runtime completion while editing B')
   await new Promise((done) => setTimeout(done, 1100))
-  assert.equal((await snapshot(campId)).messages.filter((message) => message.authorType === 'user').length, 1)
-  assert.deepEqual((await queue(campId)).items.map((item) => item.id), queuedIds)
-  assert.equal((await queue(campId)).executionActive, false)
+  assert.equal((await snapshot(threadId)).messages.filter((message) => message.authorType === 'user').length, 1)
+  assert.deepEqual((await queue(threadId)).items.map((item) => item.id), queuedIds)
+  assert.equal((await queue(threadId)).executionActive, false)
   check('A 自然完成时，编辑中的 B 保持三条队列不动，没有启动下一轮')
 
   const attachmentToken = `ATTACHMENT_${crypto.randomUUID()}`
   const attachmentPath = join(fixtureRoot, '附件验收.txt')
   await writeFile(attachmentPath, `附件验收数据\n校验值：${attachmentToken}\n`, { mode: 0o600 })
   const attachmentBody = '读取本条消息附带的“附件验收.txt”，只回复文件中的校验值。不要修改文件。'
-  const attachmentDraft = await saveDraft(campId, attachmentBody)
+  const attachmentDraft = await saveDraft(threadId, attachmentBody)
   const referencedDraft = await core.request('camp.sourceAttachments.addFromPath', {
-    campId, expectedRevision: attachmentDraft.revision, sourcePath: attachmentPath, displayName: '附件验收.txt'
+    threadId, expectedRevision: attachmentDraft.revision, sourcePath: attachmentPath, displayName: '附件验收.txt'
   })
   assert.equal(referencedDraft.attachments.length, 1)
   assert.equal(referencedDraft.attachments[0].availability, 'unknown')
@@ -106,19 +106,19 @@ try {
   const queuedAttachment = await sendDraft(referencedDraft)
   assert.equal(queuedAttachment.code, 'pending_input.queued')
   queuedIds.push(queuedAttachment.payload.pendingInputId)
-  const queueWithAttachment = await queue(campId)
+  const queueWithAttachment = await queue(threadId)
   assert.deepEqual(queueWithAttachment.items.map((item) => item.id), queuedIds)
   const pendingAttachment = queueWithAttachment.items.at(-1)
   assert.equal(pendingAttachment.attachments.length, 1)
   assert.equal(pendingAttachment.attachments[0].displayName, '附件验收.txt')
   assert.equal(pendingAttachment.attachments[0].availability, 'unknown')
   assert.ok(!JSON.stringify(pendingAttachment).includes(attachmentPath))
-  assert.equal((await core.request('camp.composerDraft.get', { campId })).attachments.length, 0)
+  assert.equal((await core.request('camp.composerDraft.get', { threadId })).attachments.length, 0)
   check('队列非空时正文与 source attachment 一起进入 Pending；队列 View 不暴露绝对路径')
   assert.equal((await edit(heldHead, { type: 'cancel' }, headEdit.payload.editToken)).status, 'applied')
 
   const completed = await waitFor(async () => {
-    const value = await snapshot(campId)
+    const value = await snapshot(threadId)
     assertNoFailedRuns(value)
     return value.agentRuns.length === 5 && value.agentRuns.every((run) => run.status === 'succeeded') ? value : null
   }, 'five FIFO Runtime executions including the attachment input')
@@ -129,13 +129,13 @@ try {
   })
   assert.ok(publicInputs[4].body.includes(attachmentBody))
   publicInputs.forEach((message) => assert.deepEqual(message.addressedAgentIds, ['agent_2']))
-  const runs = publicInputs.map((message) => completed.agentRuns.find((run) => run.campTurnId === message.campTurnId))
+  const runs = publicInputs.map((message) => completed.agentRuns.find((run) => run.threadTurnId === message.threadTurnId))
   assert.ok(runs.every((run) => run.agentId === 'agent_2'))
   for (let index = 1; index < runs.length; index += 1) {
     assert.ok(runs[index - 1].endedAt && runs[index].startedAt)
     assert.ok(Date.parse(runs[index - 1].endedAt) <= Date.parse(runs[index].startedAt))
   }
-  assert.equal((await queue(campId)).items.length, 0)
+  assert.equal((await queue(threadId)).items.length, 0)
   report.fifo = runs.map(({ id, status, startedAt, endedAt, runtimeModel }) => ({ id, status, startedAt, endedAt, runtimeModel }))
   check('取消队首编辑后，芝士按 B → C → D → 附件消息各执行一次；后条等待前条结束')
 
@@ -146,9 +146,9 @@ try {
   assert.ok(!JSON.stringify(publishedAttachment).includes(attachmentPath))
   assert.deepEqual(publishedAttachment.addressedAgentIds, ['agent_2'])
   assert.ok(completed.messages.some((message) => message.authorType === 'agent'
-    && message.campTurnId === publishedAttachment.campTurnId && message.body.includes(attachmentToken)))
-  assert.equal((await core.request('camp.composerDraft.get', { campId })).attachments.length, 0)
-  report.attachment = { campMessageId: publishedAttachment.id, campTurnId: publishedAttachment.campTurnId, receivedBy: 'agent_2', contentVerified: true }
+    && message.threadTurnId === publishedAttachment.threadTurnId && message.body.includes(attachmentToken)))
+  assert.equal((await core.request('camp.composerDraft.get', { threadId })).attachments.length, 0)
+  report.attachment = { threadMessageId: publishedAttachment.id, threadTurnId: publishedAttachment.threadTurnId, receivedBy: 'agent_2', contentVerified: true }
   check('Pending 附件发布为 Message source ref；Runtime resolver 让芝士实际读到文件内的随机校验值')
 
   // One Stop lets Core advance after cancellation settles; there is no queue mode to resume.
@@ -158,7 +158,7 @@ try {
     body: '从 1 数到 300，每行一个数字，不要调用工具。', purpose: 'Queue Stop acceptance'
   })
   assert.equal(stopFirst.status, 'accepted')
-  const stopCampId = stopFirst.payload.campId
+  const stopCampId = stopFirst.payload.threadId
   report.stopCampId = stopCampId
   const afterStop = await send(stopCampId, '请只回复 QUEUE_AFTER_STOP_OK，不要使用工具。')
   assert.equal(afterStop.code, 'pending_input.queued')
@@ -169,19 +169,19 @@ try {
     assertNoFailedRuns(value)
     return value.agentRuns[0]?.status === 'running' ? value : null
   }, 'active Runtime before Stop')
-  const turn = active.turns.find((candidate) => candidate.id === stopFirst.payload.campTurnId)
+  const turn = active.turns.find((candidate) => candidate.id === stopFirst.payload.threadTurnId)
   const stopped = await core.request('campTurns.cancel', {
-    commandId: crypto.randomUUID(), command: { campId: stopCampId, campTurnId: turn.id, expectedVersion: turn.version }
+    commandId: crypto.randomUUID(), command: { threadId: stopCampId, threadTurnId: turn.id, expectedVersion: turn.version }
   })
   assert.notEqual(stopped.status, 'rejected')
   const advanced = await waitFor(async () => {
     const value = await snapshot(stopCampId)
     assertNoFailedRuns(value)
     return value.agentRuns.length === 2 && value.agentRuns.some((run) => run.status === 'running'
-      && run.campTurnId !== turn.id) ? value : null
+      && run.threadTurnId !== turn.id) ? value : null
   }, 'next input automatically starts after Stop')
-  const stoppedRun = advanced.agentRuns.find((run) => run.campTurnId === turn.id)
-  const nextRun = advanced.agentRuns.find((run) => run.campTurnId !== turn.id)
+  const stoppedRun = advanced.agentRuns.find((run) => run.threadTurnId === turn.id)
+  const nextRun = advanced.agentRuns.find((run) => run.threadTurnId !== turn.id)
   assert.equal(stoppedRun.status, 'cancelled')
   assert.ok(stoppedRun.endedAt && nextRun.startedAt)
   assert.ok(Date.parse(stoppedRun.endedAt) <= Date.parse(nextRun.startedAt))
@@ -205,7 +205,7 @@ try {
     body: '请只回复 QUEUE_EDIT_A_OK，不要使用工具。', purpose: 'Queue edit acceptance'
   })
   assert.equal(editFirst.status, 'accepted')
-  const editCampId = editFirst.payload.campId
+  const editCampId = editFirst.payload.threadId
   report.editCampId = editCampId
   assert.equal((await send(editCampId, '请只回复 QUEUE_EDIT_B_OK，不要使用工具。')).code, 'pending_input.queued')
   assert.equal((await send(editCampId, '请只回复 QUEUE_EDIT_C_OK，不要使用工具。')).code, 'pending_input.queued')
@@ -232,7 +232,7 @@ try {
   assert.equal((await queue(editCampId)).editSession.recoveryRequired, true)
   const staleSave = await edit(item, {
     type: 'save', content: [{ kind: 'text', text: '旧窗口不应覆盖这条消息' }],
-    replyToCampMessageId: null, recipientSelectionRequired: false
+    replyToThreadMessageId: null, recipientSelectionRequired: false
   }, unfinished.payload.editToken)
   assert.equal(staleSave.code, 'pending_input.edit_fenced')
   const reopened = await edit(item, { type: 'takeover' }, unfinished.payload.editToken)
@@ -243,7 +243,7 @@ try {
   const savedBody = '请只回复 QUEUE_EDIT_B_SAVED_OK，不要使用工具。'
   assert.equal((await edit(item, {
     type: 'save', content: [{ kind: 'text', text: savedBody }],
-    replyToCampMessageId: null, recipientSelectionRequired: false
+    replyToThreadMessageId: null, recipientSelectionRequired: false
   }, reopened.payload.editToken)).status, 'applied')
   const savedCompleted = await waitFor(async () => {
     const value = await snapshot(editCampId)
@@ -256,12 +256,12 @@ try {
   assert.ok(savedInputs[1].body.includes(savedBody))
   assert.ok(savedInputs[2].body.includes('QUEUE_EDIT_C_OK'))
   assert.ok(savedInputs[3].body.includes('QUEUE_EDIT_D_OK'))
-  const savedRuns = savedInputs.map((message) => savedCompleted.agentRuns.find((run) => run.campTurnId === message.campTurnId))
+  const savedRuns = savedInputs.map((message) => savedCompleted.agentRuns.find((run) => run.threadTurnId === message.threadTurnId))
   for (let index = 1; index < savedRuns.length; index += 1) {
     assert.ok(Date.parse(savedRuns[index - 1].endedAt) <= Date.parse(savedRuns[index].startedAt))
   }
   assert.equal((await queue(editCampId)).editSession, null)
-  assert.deepEqual(await core.request('camp.composerDraft.get', { campId: editCampId }), ordinary)
+  assert.deepEqual(await core.request('camp.composerDraft.get', { threadId: editCampId }), ordinary)
   check('保存队首后按修改后的 B → C → D 发送，位置不变，普通草稿不被覆盖')
   report.savedHead = savedRuns.map(({ id, status, startedAt, endedAt }) => ({ id, status, startedAt, endedAt }))
   report.status = 'passed'
@@ -276,27 +276,27 @@ try {
 }
 
 function check(message) { report.checks.push(message); console.log(`PASS ${message}`) }
-function queue(campId) { return core.request('camp.pendingInputs.get', { campId }) }
-function snapshot(campId) { return core.request('camps.snapshot', { campId }) }
-async function saveDraft(campId, body) {
-  const draft = await core.request('camp.composerDraft.get', { campId })
+function queue(threadId) { return core.request('camp.pendingInputs.get', { threadId }) }
+function snapshot(threadId) { return core.request('camps.snapshot', { threadId }) }
+async function saveDraft(threadId, body) {
+  const draft = await core.request('camp.composerDraft.get', { threadId })
   return core.request('camp.composerDraft.save', {
-    campId, expectedRevision: draft.revision, content: [{ kind: 'text', text: body }],
-    continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
+    threadId, expectedRevision: draft.revision, content: [{ kind: 'text', text: body }],
+    continuationSourceMessageId: draft.continuationIntent?.sourceThreadMessageId ?? null
   })
 }
-async function send(campId, body) {
-  return sendDraft(await saveDraft(campId, body))
+async function send(threadId, body) {
+  return sendDraft(await saveDraft(threadId, body))
 }
 async function sendDraft(saved) {
   return (await core.request('camp.messages.send', {
-    commandId: crypto.randomUUID(), campId: saved.campId, draftRevision: saved.revision,
+    commandId: crypto.randomUUID(), threadId: saved.threadId, draftRevision: saved.revision,
     execution: { taskId: null, purpose: 'Pending input acceptance', completionRole: 'required' }
   })).commandResult
 }
 function edit(item, action, editToken = null) {
   return core.request('camp.pendingInputs.edit', { commandId: crypto.randomUUID(), command: {
-    campId: item.campId, pendingInputId: item.id, expectedRevision: item.revision, editToken, action
+    threadId: item.threadId, pendingInputId: item.id, expectedRevision: item.revision, editToken, action
   } })
 }
 function assertNoFailedRuns(value) {

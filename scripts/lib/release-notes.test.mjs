@@ -4,10 +4,12 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 import {
   MAX_RELEASE_NOTES_LENGTH,
+  RELEASE_METADATA_FILE,
   RELEASE_NOTES_FILE,
   assertUpdateInfoReleaseNotes,
   configuredReleaseNotesFile,
-  validateReleaseNotesSource
+  validateReleaseNotesSource,
+  validateReleaseMetadataSource
 } from './release-notes.mjs'
 
 const VERSION = '0.0.3'
@@ -18,11 +20,24 @@ test('repository release notes are present and bound to the package version', as
   const packageMetadata = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   const releaseNotesFile = configuredReleaseNotesFile(packageMetadata)
   const releaseNotes = await readFile(resolve(root, releaseNotesFile), 'utf8')
+  const releaseMetadata = JSON.parse(await readFile(resolve(root, RELEASE_METADATA_FILE), 'utf8'))
 
   assert.equal(
     validateReleaseNotesSource(releaseNotes, packageMetadata.version),
     releaseNotes
   )
+  assert.equal(
+    validateReleaseMetadataSource(releaseMetadata, packageMetadata.version),
+    releaseMetadata
+  )
+})
+
+test('release metadata rejects stale versions and non-canonical dates', () => {
+  const metadata = { version: VERSION, releaseDate: '2026-08-25T09:30:00.000Z' }
+  assert.equal(validateReleaseMetadataSource(metadata, VERSION), metadata)
+  assert.throws(() => validateReleaseMetadataSource(metadata, '0.0.4'), /match package version/)
+  assert.throws(() => validateReleaseMetadataSource({ ...metadata, releaseDate: '2026-02-30T09:30:00.000Z' }, VERSION), /canonical UTC/)
+  assert.throws(() => validateReleaseMetadataSource({ ...metadata, releaseDate: '2026-08-25' }, VERSION), /canonical UTC/)
 })
 
 test('accepts configured release notes that exactly match the update manifest', () => {

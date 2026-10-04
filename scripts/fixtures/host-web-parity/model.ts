@@ -1,6 +1,6 @@
-import type { ActionApprovalView, CampPendingInputsView, CoreEvent, CoreMethod, CreateCampRequest, FilePreviewApi, ResolvedFilePreview } from '@contracts'
-import type { CampClient } from '../../../apps/desktop/src/renderer/src/camp-client'
-import { agents, approval, campId, fileText, initial, initialDraft, installations, message, now, run, workspacePath } from './data'
+import type { ActionApprovalView, ThreadPendingInputsView, CoreEvent, CoreMethod, CreateThreadRequest, FilePreviewApi, ResolvedFilePreview } from '@contracts'
+import type { ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
+import { agents, approval, threadId, fileText, initial, initialDraft, installations, message, now, run, workspacePath } from './data'
 
 export type Scenario = 'camp' | 'new' | 'running' | 'approval' | 'file' | 'member' | 'mobile-running'
 export type Surface = 'desktop' | 'web'
@@ -13,7 +13,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
   const change = (patch: Partial<typeof state>) => { state = { ...state, ...patch }; listeners.forEach(fn => fn()) }
   const note = (value: string) => change({ note: value })
   const unavailable = (operation: string): never => { throw new Error(`对照稿未覆盖 ${operation}；没有调用 Host，也未返回空结果冒充成功。`) }
-  const event = () => events.forEach(fn => fn({ method: 'camp.pendingInputs.changed', params: { campId: state.snapshot.camp.id, reason: 'review' } }))
+  const event = () => events.forEach(fn => fn({ method: 'camp.pendingInputs.changed', params: { threadId: state.snapshot.thread.id, reason: 'review' } }))
   const checkOnline = () => { if (state.offline) throw new Error('模拟连接中断，当前编辑保留；恢复后核对原命令结果。') }
   const delay = () => new Promise(resolve => setTimeout(resolve, 700))
   const applied = (payload: unknown = {}) => ({ status: 'applied', code: null, payload, resultEntity: null })
@@ -21,7 +21,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
   function showExecution(waiting: boolean) {
     const snapshot = structuredClone(initial)
     snapshot.agentRuns = [{ ...run, executionEvidenceCount: 4, status: waiting ? 'waiting' : 'running', waitReason: waiting ? 'action_approval' : null }]
-    snapshot.turns = [{ id: run.campTurnId, triggerType: 'camp_message', triggerId: snapshot.messages[0].id,
+    snapshot.turns = [{ id: run.threadTurnId, triggerType: 'camp_message', triggerId: snapshot.messages[0].id,
       status: waiting ? 'waiting' : 'running', cancelRequestedAt: null, aggregateReasonCode: null,
       executionBudget: { schemaVersion: 1, acceptedAt: now, deadlineAt: '2026-09-12T04:30:00Z', elapsedSeconds: 35,
         maxAgentRunResponsibilities: 50, maxAcceptedA2a: 50, allocatedAgentRunResponsibilities: 1, acceptedA2a: 0,
@@ -89,13 +89,13 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
       case 'camp.composerDraft.get': return structuredClone(state.draft)
       case 'camp.composerDraft.save':
       case 'camp.composerDraft.removeAttachment': {
-        if (p.campId !== state.draft.campId || p.expectedRevision !== state.draft.revision) throw new Error('模拟 revision 冲突，原草稿保留。')
+        if (p.threadId !== state.draft.threadId || p.expectedRevision !== state.draft.revision) throw new Error('模拟 revision 冲突，原草稿保留。')
         const next = { ...state.draft, revision: state.draft.revision + 1 }
         if (method.endsWith('.save')) { next.content = p.content; next.body = p.content.segments.filter((s: any) => s.kind === 'text').map((s: any) => s.text).join('') }
         else next.attachments = next.attachments.filter(a => a.id !== p.attachmentId)
         change({ draft: next }); return structuredClone(next)
       }
-      case 'camp.pendingInputs.get': return { campId: state.snapshot.camp.id, executionActive: state.snapshot.agentRuns.some(r => r.status === 'running' || r.status === 'waiting'), items: [], editSession: null, submissionOutcomes: [] } satisfies CampPendingInputsView
+      case 'camp.pendingInputs.get': return { threadId: state.snapshot.thread.id, executionActive: state.snapshot.agentRuns.some(r => r.status === 'running' || r.status === 'waiting'), items: [], editSession: null, submissionOutcomes: [] } satisfies ThreadPendingInputsView
       case 'skills.list': case 'skills.deliveryGroups.list': return [] // This fixed Camp has no assigned Skills.
       case 'camps.members.fast.check': return null // No subscription/Fast qualification is fabricated.
       case 'members.list': return structuredClone(state.agents)
@@ -127,7 +127,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
         const eligible = before === null ? all : all.filter(e => e.sequence < before)
         const evidence = eligible.slice(-(p.limit ?? 24))
         const hasMore = evidence.length > 0 && eligible.length > evidence.length
-        return { schemaVersion: 1, campId: state.snapshot.camp.id, agentRunId: p.agentRunId,
+        return { schemaVersion: 1, threadId: state.snapshot.thread.id, agentRunId: p.agentRunId,
           requestedBeforeSequence: before, nextBeforeSequence: hasMore ? evidence[0].sequence : null,
           throughSequence: all.at(-1)?.sequence ?? 0, hasMore, evidence: structuredClone(evidence) }
       }
@@ -138,7 +138,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
         const after = p.afterSequence ?? 0
         const evidence = all.filter(e => e.sequence > after).slice(0, p.limit ?? 96)
         const nextAfterSequence = evidence.at(-1)?.sequence ?? after
-        return { schemaVersion: 1, campId: state.snapshot.camp.id, agentRunId: p.agentRunId,
+        return { schemaVersion: 1, threadId: state.snapshot.thread.id, agentRunId: p.agentRunId,
           requestedAfterSequence: after, nextAfterSequence, throughSequence: all.at(-1)?.sequence ?? 0,
           hasMore: all.some(e => e.sequence > nextAfterSequence), evidence: structuredClone(evidence), refreshedEvidence: [] }
       }
@@ -150,7 +150,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
       }
       case 'agentRunEvidence.getContent': {
         const evidence = state.snapshot.executionEvidence.find(e => e.id === p.evidenceId)
-        if (p.campId !== state.snapshot.camp.id || !evidence) return unavailable(method)
+        if (p.threadId !== state.snapshot.thread.id || !evidence) return unavailable(method)
         return { payload: evidence.payload, canonical: evidence.canonical ?? null }
       }
       default: return unavailable(method)
@@ -158,10 +158,10 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
   }
 
   const opened = async () => { note('模拟 Desktop：交给系统打开固定示例文件。'); return { availability: 'available' as const, opened: true, error: null } }
-  const client: CampClient = {
+  const client: ThreadClient = {
     editingRecovery: { get: key => editing.get(key), set: (key, value) => { editing.set(key, value) } },
     platform: 'darwin', // Both comparison frames use the same macOS content baseline; native chrome is outside the viewport.
-    request: request as CampClient['request'], onEvent: fn => { events.add(fn); return () => events.delete(fn) },
+    request: request as ThreadClient['request'], onEvent: fn => { events.add(fn); return () => events.delete(fn) },
     exportMonitoring: async () => unavailable('monitoring export'), revealMonitoringExport: null,
     exportDiagnostics: async () => unavailable('diagnostic export'), revealDiagnosticsExport: null,
     memberAvatars: { selectSource: async () => unavailable('avatar source'), save: async () => unavailable('avatar save'), read: async () => unavailable('avatar read') },
@@ -186,7 +186,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
     composerAttachments: {
       prepare: async (requestedCamp, revision, file) => {
         checkOnline()
-        if (requestedCamp !== state.draft.campId || revision !== state.draft.revision) throw new Error('模拟草稿版本冲突')
+        if (requestedCamp !== state.draft.threadId || revision !== state.draft.revision) throw new Error('模拟草稿版本冲突')
         if (file.size > 64 * 1024) throw new Error('对照稿只接收 64 KiB 以内文本示例；尚未执行 Host 上传。')
         const id = `review-source-${crypto.randomUUID()}`; texts.set(id, await file.text())
         change({ draft: { ...state.draft, revision: revision + 1, attachments: [...state.draft.attachments,
@@ -206,7 +206,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
   const forbidden = async () => ({ ok: false as const, error: { code: 'source_not_authorized' as const,
     message: '本稿只授权固定示例文件；实际 Host 资源授权尚未验收。', retryable: false } })
   const open: FilePreviewApi['open'] = async req => {
-    if (('campId' in req && req.campId !== campId) ||
+    if (('threadId' in req && req.threadId !== threadId) ||
       ('rawReference' in req && req.rawReference !== 'docs/interaction-review.md') ||
       (req.kind === 'attachment' && req.locator.attachmentRefId !== 'review-attachment')) return forbidden()
     return { ok: true, value: { kind: 'file_preview', file } }
@@ -231,9 +231,9 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
       checkOnline(); change({ busy: true }); await delay()
       const next = message(state.snapshot.messages.length + 1, draft.body, 'user'); next.attachments = draft.attachments
       change({ snapshot: { ...state.snapshot, messages: [...state.snapshot.messages, next] },
-        draft: { ...initialDraft, campId: state.snapshot.camp.id, body: '', content: { version: 2, segments: [] }, revision: state.draft.revision + 1 }, busy: false })
+        draft: { ...initialDraft, threadId: state.snapshot.thread.id, body: '', content: { version: 2, segments: [] }, revision: state.draft.revision + 1 }, busy: false })
       note('模拟发送已追加到当前页面；未调用 Rust、Runtime 或审批服务。'); event()
-      return { campTurnId: 'review-simulated-turn', agentRunIds: [], addressedAgentIds: [agents[0].agentId] }
+      return { threadTurnId: 'review-simulated-turn', agentRunIds: [], addressedAgentIds: [agents[0].agentId] }
     },
     async resolve(item: ActionApprovalView, optionId: string) {
       checkOnline(); if (state.busy) return
@@ -246,14 +246,14 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
       note(`模拟审批已处理：${option.label}；选项来自固定 approval fixture，不证明 Host 单次决议。`)
     },
     stop() { checkOnline(); change({ snapshot: { ...state.snapshot, agentRuns: state.snapshot.agentRuns.map(r => ({ ...r, status: 'cancelled', endedAt: now })) } }); note('模拟停止；没有停止真实进程。') },
-    rename(title: string) { change({ snapshot: { ...state.snapshot, camp: { ...state.snapshot.camp, title } } }); note('模拟：当前页面的 Camp 名称已更新。') },
-    create(draft: Omit<CreateCampRequest, 'commandId' | 'activationState'>) {
+    rename(title: string) { change({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, title } } }); note('模拟：当前页面的 Camp 名称已更新。') },
+    create(draft: Omit<CreateThreadRequest, 'commandId' | 'activationState'>) {
       const id = 'rvcamp_01m0wzxbb8e1ht984tsbjmysff'
-      change({ snapshot: { ...structuredClone(initial), camp: { ...initial.camp, id, title: draft.name || '新的对话',
+      change({ snapshot: { ...structuredClone(initial), thread: { ...initial.thread, id, title: draft.name || '新的对话',
         projectBindingKind: draft.workspace ? 'directory' : 'quick_chat', projectPath: draft.workspace?.projectPath ?? '',
         defaultLeadAgentId: draft.defaultLeadAgentId }, messages: [],
         members: initial.members.filter(m => draft.memberAgentIds.includes(m.agentId)).map(m => ({ ...m, isDefaultLead: m.agentId === draft.defaultLeadAgentId })) },
-        draft: { ...initialDraft, campId: id, body: '', content: { version: 2, segments: [] }, revision: 1 } })
+        draft: { ...initialDraft, threadId: id, body: '', content: { version: 2, segments: [] }, revision: 1 } })
       note('模拟：按所选目录与队员打开新 Camp；未创建 Host 数据。')
     }
   }

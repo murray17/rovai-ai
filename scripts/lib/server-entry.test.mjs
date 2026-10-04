@@ -20,6 +20,8 @@ test('Server default root is account scoped and independent of working directory
     const paths = JSON.parse(execFileSync(binary, ['paths'], { cwd: fixture, encoding: 'utf8' }))
     assert.equal(paths.dataDir, join(process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME, '.rovai-server'))
     assert.equal(paths.database, join(paths.dataDir, 'rovai.sqlite'))
+    // `paths` retains the frozen bootstrap field across the public Thread rename.
+    assert.equal(typeof paths.runtimeCampFilesRoot, 'string')
     assert.ok(paths.runtimeCampFilesRoot.startsWith(join(paths.dataDir, 'instances') + sep))
     assert.deepEqual(await readdir(fixture), [])
     assert.throws(() => execFileSync(binary, ['--data-dir', 'relative', 'paths'], { stdio: 'pipe' }))
@@ -40,7 +42,8 @@ test('Native Server default and custom roots retain data and token, reject anoth
   if (process.env.ROVAI_SERVER_RELEASE_DIR) {
     const version = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version
     execFileSync('/bin/sh', [join(root, 'scripts/install-server.sh'), '--version', version, '--from-dir', process.env.ROVAI_SERVER_RELEASE_DIR, '--prefix', install, '--bin-dir', join(fixture, 'bin'), '--no-modify-path'], { env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, stdio: 'pipe' })
-    installedBinary = join(install, 'current', executable)
+    // Exercise the user-facing PATH symlink, not just the revision binary.
+    installedBinary = join(fixture, 'bin', executable)
   } else {
     await mkdir(join(install, 'web-ui'), { recursive: true }); await cp(binary, installedBinary)
     await writeFile(join(install, 'web-ui/index.html'), '<!doctype html><title>Matched package UI</title><h1>Shared Host</h1>')
@@ -63,7 +66,7 @@ test('Native Server default and custom roots retain data and token, reject anoth
   }
   const wait = promise => Promise.race([promise, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Server entry step timed out')), 20000); timer.unref() })])
   const call = async (host, token, operation, params = {}) => {
-    const login = await fetch(`${host.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: token }) })
+    const login = await fetch(`${host.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: token }) })
     assert.equal(login.status, 200)
     const session = await login.json()
     const deadline = Date.now() + 15_000
@@ -119,6 +122,11 @@ test('Native Server default and custom roots retain data and token, reject anoth
       const imported = await call(first, token, 'skills.import.commit', { commandId: randomUUID(), command: { stagingToken: inspected.stagingToken, candidateName: inspected.candidates[0].name, expectedDigest: inspected.candidates[0].contentDigest, expectedSkillVersion: null, confirmUpdate: false } })
       assert.equal(imported.status, 'applied', JSON.stringify(imported))
       const skills = await call(first, token, 'skills.list'); assert.ok(skills.some(skill => skill.name === `${name}-skill`))
+      if (process.env.ROVAI_SERVER_RELEASE_DIR) {
+        const toolbox = await call(first, token, 'toolbox.list')
+        assert.equal(toolbox.length, 5)
+        assert.ok(toolbox.every(skill => skill.sourceError === null), JSON.stringify(toolbox))
+      }
       assert.equal(skills.some(skill => skill.name === 'desktop-only-skill'), false)
       assert.equal(desktopHost.child.exitCode, null, 'Desktop Host remains live beside Server')
       assert.equal(await readFile(join(desktop, 'mcp.json'), 'utf8'), desktopBaseline.mcp)
@@ -126,7 +134,7 @@ test('Native Server default and custom roots retain data and token, reject anoth
       await access(join(data, 'rovai.sqlite')); await access(join(data, 'mcp.json')); await access(join(data, 'skills')); await access(join(data, 'logs/server.log'))
       const instances = await readdir(join(data, 'instances')); assert.equal(instances.length, 1)
       await access(join(data, 'instances', instances[0], 'runtime-files/.runtime-camp-files-root.json'))
-      const loginBeforeExit = await fetch(`${first.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: token }) })
+      const loginBeforeExit = await fetch(`${first.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: token }) })
       assert.equal(loginBeforeExit.status, 200)
       const durableSession = await loginBeforeExit.json()
       const before = await call(first, token, 'navigation.snapshot')

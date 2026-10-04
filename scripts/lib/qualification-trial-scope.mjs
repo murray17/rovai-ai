@@ -9,13 +9,13 @@ export function trialRuns(snapshot, boundary) {
   const runs = Array.isArray(snapshot.agentRuns) ? snapshot.agentRuns : []
   return isBatchTrialBoundary(boundary)
     ? runs
-    : runs.filter(run => run.campTurnId === boundary.campTurnId)
+    : runs.filter(run => (run.threadTurnId ?? run.campTurnId) === (boundary.threadTurnId ?? boundary.campTurnId))
 }
 
 export function trialDeliveries(snapshot, boundary) {
   if (!snapshot || !boundary || !Array.isArray(snapshot.messageDeliveries)) return []
   if (!isBatchTrialBoundary(boundary)) {
-    return snapshot.messageDeliveries.filter(delivery => delivery.campTurnId === boundary.campTurnId)
+    return snapshot.messageDeliveries.filter(delivery => (delivery.threadTurnId ?? delivery.campTurnId) === (boundary.threadTurnId ?? boundary.campTurnId))
   }
   const rootSequence = snapshot.messages?.find(message => message.id === boundary.rootCampMessageId)?.sequence
   if (!Number.isSafeInteger(rootSequence)) return []

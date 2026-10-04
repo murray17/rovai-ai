@@ -263,30 +263,30 @@ async function createFixtureCamps(cdp) {
   }
   const projectCampIds = []
   for (let index = 1; index <= 18; index += 1) {
-    projectCampIds.push(await createCamp(core, {
+    projectCampIds.push(await createThread(core, {
       ...common,
       name: `侧栏验收项目对话 ${index}`,
       workspace: { projectPath: workspace.projectPath }
     }))
   }
-  const longTitleCampId = await createCamp(core, {
+  const longTitleCampId = await createThread(core, {
     ...common,
     name: '这是一个用于验证紧凑侧栏省略号与菜单可达性的超长对话标题',
     workspace: { projectPath: workspace.projectPath }
   })
   for (let index = 1; index <= 16; index += 1) {
-    await createCamp(core, {
+    await createThread(core, {
       ...common,
       name: `快速对话分页验收 ${index}`,
       workspace: null
     })
   }
-  const compactCampId = await createCamp(core, {
+  const compactCampId = await createThread(core, {
     ...common,
     name: '保留的快速对话验收目标',
     workspace: null
   })
-  const deleteCampId = await createCamp(core, {
+  const deleteCampId = await createThread(core, {
     ...common,
     name: '待删除的快速对话验收目标',
     workspace: null
@@ -299,14 +299,14 @@ async function createFixtureCamps(cdp) {
   }
 }
 
-async function createCamp(core, input) {
+async function createThread(core, input) {
   const created = await core.request('camps.create', {
     commandId: crypto.randomUUID(),
     ...input
   })
-  assert(created.status === 'applied' && created.payload?.campId,
+  assert(created.status === 'applied' && created.payload?.threadId,
     `Could not create sidebar fixture Camp: ${JSON.stringify(created)}`)
-  return created.payload.campId
+  return created.payload.threadId
 }
 
 async function measureAcceptedDeletionLatency(cdp, sampleCount) {
@@ -320,11 +320,11 @@ async function measureAcceptedDeletionLatency(cdp, sampleCount) {
   }
   const samplesMs = []
   for (let index = 0; index < sampleCount; index += 1) {
-    const campId = await createCamp(core, {
+    const threadId = await createThread(core, {
       ...common,
       name: `异步删除受理时延样本 ${index + 1}`
     })
-    const target = `camp:${campId}`
+    const target = `camp:${threadId}`
     const targetVisible = `(() => [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === ${JSON.stringify(target)}))()`
     await waitForExpression(cdp, targetVisible, 15_000)
@@ -406,11 +406,11 @@ async function assertSidebarContract(cdp, context) {
       })(),
       navigationGeometry: (() => {
         const projectTitle = projectGroups[0]?.querySelector('.project-select-row .truncate')?.getBoundingClientRect()
-        const campTitle = projectGroups[0]?.querySelector('.camp-nav-row .truncate')?.getBoundingClientRect()
+        const threadTitle = projectGroups[0]?.querySelector('.camp-nav-row .truncate')?.getBoundingClientRect()
         const status = projectGroups[0]?.querySelector('.camp-status-slot')?.getBoundingClientRect()
-        if (!projectTitle || !campTitle || !status) return null
+        if (!projectTitle || !threadTitle || !status) return null
         return {
-          titleDelta: Math.abs(projectTitle.left - campTitle.left),
+          titleDelta: Math.abs(projectTitle.left - threadTitle.left),
           statusWidth: status.width,
           statusHeight: status.height,
           leadingMarkers: document.querySelectorAll('#global-navigation .camp-marker-slot').length
@@ -847,14 +847,14 @@ async function assertExpandedWindowFreshness(cdp) {
   const projectKey = await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.dataset.group`)
   const latest = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
   const group = latest.projects.find(project => project.projectKey === projectKey)
-  assert(group?.recentCamps.length === 15, 'Core did not return the requested authoritative prefix')
-  const target = group.recentCamps[7]
+  assert(group?.recentThreads.length === 15, 'Core did not return the requested authoritative prefix')
+  const target = group.recentThreads[7]
   const targetSelector = `[data-sidebar-menu-target="camp:${target.id}"]`
   const titleIs = title => `document.querySelector(${JSON.stringify(targetSelector)})?.closest('.camp-nav-row')?.textContent.includes(${JSON.stringify(title)})`
   const rename = async (title, version) => {
     const result = await request(cdp, 'camps.rename', {
       commandId: crypto.randomUUID(),
-      command: { campId: target.id, title, expectedVersion: version }
+      command: { threadId: target.id, title, expectedVersion: version }
     })
     assert(result.status === 'applied', `Fixture rename failed: ${JSON.stringify(result)}`)
   }
@@ -865,15 +865,15 @@ async function assertExpandedWindowFreshness(cdp) {
   await clickProjectControl(cdp, selector, '.collapse-camps')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
   const refreshed = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
-  const renamed = refreshed.projects.find(project => project.projectKey === projectKey).recentCamps.find(camp => camp.id === target.id)
+  const renamed = refreshed.projects.find(project => project.projectKey === projectKey).recentThreads.find(camp => camp.id === target.id)
   await rename('收起期间更新后重新展开', renamed.version)
   await clickProjectControl(cdp, selector, '.show-more-camps')
   await waitForExpression(cdp, titleIs('收起期间更新后重新展开'))
   const beforeDelete = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
-  const current = beforeDelete.projects.find(project => project.projectKey === projectKey).recentCamps.find(camp => camp.id === target.id)
+  const current = beforeDelete.projects.find(project => project.projectKey === projectKey).recentThreads.find(camp => camp.id === target.id)
   const deleted = await request(cdp, 'camps.delete', {
     commandId: crypto.randomUUID(),
-    command: { campId: target.id, expectedVersion: current.version, force: true }
+    command: { threadId: target.id, expectedVersion: current.version, force: true }
   })
   assert(deleted.status === 'accepted', `Fixture delete was not accepted: ${JSON.stringify(deleted)}`)
   await waitForExpression(cdp, `!document.querySelector(${JSON.stringify(targetSelector)})
@@ -920,8 +920,8 @@ async function assertProjectPaginationCount(cdp, containerSelector, expectedCoun
   })()`)
 }
 
-async function assertLongTitleIsTruncated(cdp, campId) {
-  const target = `camp:${campId}`
+async function assertLongTitleIsTruncated(cdp, threadId) {
+  const target = `camp:${threadId}`
   const state = await evaluate(cdp, `(() => {
     const target = ${JSON.stringify(target)}
     const trigger = [...document.querySelectorAll('[data-sidebar-menu-target]')]
@@ -1206,12 +1206,12 @@ async function openDeleteDialog(cdp, target) {
 
 async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
   const targetKey = projectTarget.slice('project:'.length)
-  const campId = campTarget.slice('camp:'.length)
+  const threadId = campTarget.slice('camp:'.length)
   const beforeNavigation = await request(cdp, 'navigation.snapshot')
   const beforeProject = beforeNavigation.projects.find((project) => project.projectKey === targetKey)
   assert(beforeProject, `Could not resolve the Core Project before removal: ${JSON.stringify({ projectTarget, beforeNavigation })}`)
-  const beforeCamp = await request(cdp, 'camps.snapshot', { campId })
-  assert(beforeCamp?.camp?.id === campId,
+  const beforeCamp = await request(cdp, 'camps.snapshot', { threadId })
+  assert(beforeCamp?.thread?.id === threadId,
     `Could not resolve the Core Camp before Project removal: ${JSON.stringify(beforeCamp)}`)
 
   await openMenuByKeyboard(cdp, projectTarget)
@@ -1270,15 +1270,15 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
   assert(afterPreferences.removedProjects.some((project) => project.targetKey === targetKey),
     `Project removal was not persisted: ${JSON.stringify(afterPreferences)}`)
   assert(!afterPreferences.pins.some((pin) => (
-    pin.targetKey === targetKey || pin.targetKey === campId
+    pin.targetKey === targetKey || pin.targetKey === threadId
   )), `Project removal left a Project/Camp pin behind: ${JSON.stringify(afterPreferences)}`)
 
   const afterNavigation = await request(cdp, 'navigation.snapshot')
   const afterProject = afterNavigation.projects.find((project) => project.projectKey === targetKey)
-  const afterCamp = await request(cdp, 'camps.snapshot', { campId })
+  const afterCamp = await request(cdp, 'camps.snapshot', { threadId })
   assert(afterProject
       && afterProject.totalCount === beforeProject.totalCount
-      && afterCamp?.camp?.id === campId,
+      && afterCamp?.thread?.id === threadId,
   `Project removal changed Core navigation data: ${JSON.stringify({ beforeProject, afterProject, beforeCamp, afterCamp })}`)
 
   return {

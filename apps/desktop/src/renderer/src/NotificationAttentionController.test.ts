@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import type {
+  GeneralPreferencesApi,
   NotificationActionView,
   NotificationEpisodeChange,
   NotificationEpisodeChangeBatch,
@@ -15,14 +18,40 @@ import {
   readNotificationChangePages,
   shouldPollForNotificationEvent,
   visibleAcknowledgementIntent,
-  filterVisibleNotificationHeadsUp
+  filterVisibleNotificationHeadsUp,
+  shouldShowHeadsUp,
+  NotificationHeadsUp
 } from './NotificationAttentionController'
 import { preferenceFromUnknown } from './NotificationSettings'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
+import { changeInterfaceLanguage } from './interface-language'
+
+it('localizes the identified first-run notification title while retaining the episode data', async () => {
+  const languageApi = {
+    setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
+      ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
+  } as GeneralPreferencesApi
+  const current = episode('turn_completed', { thread: { id: 'camp-1', title: '初次集结' } })
+  const entry = { episode: current, signal: headsUpSignal(current, 'turn_completed'), changeSequence: 1 }
+  const render = (firstRunThreadId: string | null) => renderToStaticMarkup(createElement(NotificationHeadsUp, {
+    entry, firstRunThreadId, busy: false, onOpen() {}, onDismiss() {}
+  }))
+  await changeInterfaceLanguage(languageApi, 'en')
+  try {
+    expect(render('camp-1')).toContain('title="First Chat"')
+    expect(render('camp-1')).not.toContain('初次集结')
+    expect(render(null)).toContain('title="初次集结"')
+    expect(current.thread.title).toBe('初次集结')
+    expect(entry.signal.action.threadId).toBe('camp-1')
+  } finally {
+    await changeInterfaceLanguage(languageApi, 'zh-CN')
+  }
+})
 
 it('does not create visible ack commands for global cursor churn, and freezes uncertain retries', () => {
   let ids = 0
   const newId = (): string => `command-${++ids}`
-  const sources = { campId: 'camp-1', snapshotSequence: 20,
+  const sources = { threadId: 'camp-1', snapshotSequence: 20,
     messageIds: ['m1'], campTurnIds: ['t1'], agentRunIds: [], approvalIds: [] }
   const first = visibleAcknowledgementIntent(sources, 10, 20, null, newId)
   const retry = visibleAcknowledgementIntent({ ...sources, snapshotSequence: 900 }, 10, 900, first, newId)
@@ -38,12 +67,12 @@ it('does not create visible ack commands for global cursor churn, and freezes un
   expect(first.request.command.visibleMessageIds).toEqual(['m1'])
 })
 
-it('keeps the acknowledgement identity independently for each Camp across A/B/A navigation', () => {
+it('keeps the acknowledgement identity independently for each Thread across A/B/A navigation', () => {
   let ids = 0
   const newId = (): string => `command-${++ids}`
   const commands = new Map<string, ReturnType<typeof visibleAcknowledgementIntent>>()
-  const source = (campId: string) => ({ campId, snapshotSequence: 20,
-    messageIds: [`message-${campId}`], campTurnIds: [], agentRunIds: [], approvalIds: [] })
+  const source = (threadId: string) => ({ threadId, snapshotSequence: 20,
+    messageIds: [`message-${threadId}`], campTurnIds: [], agentRunIds: [], approvalIds: [] })
   const a = visibleAcknowledgementIntent(source('camp-a'), 10, 20, null, newId)
   commands.set('camp-a', a)
   const b = visibleAcknowledgementIntent(source('camp-b'), 11, 20, null, newId)
@@ -64,8 +93,8 @@ function action(
     actionId: `${episodeId}:${kind}`,
     kind,
     available: true,
-    campId: 'camp-1',
-    campTurnId: kind === 'open_camp_turn' ? 'turn-1' : null,
+    threadId: 'camp-1',
+    threadTurnId: kind === 'open_camp_turn' ? 'turn-1' : null,
     agentRunId: kind === 'open_agent_run' ? 'run-1' : null,
     messageId: kind === 'open_camp_message' ? 'message-1' : null,
     approvalId: kind === 'open_approval' ? 'approval-1' : null,
@@ -85,8 +114,8 @@ function episode(
     episodeVersion: 1,
     attentionRevision: 1,
     changeSequence: 1,
-    camp: { id: 'camp-1', title: 'Current title' },
-    campTurnId: semantic === 'approval_pending' ? null : 'turn-1',
+    thread: { id: 'camp-1', title: 'Current title' },
+    threadTurnId: semantic === 'approval_pending' ? null : 'turn-1',
     agentRunId: null,
     primarySemantic: semantic,
     unread: true,
@@ -156,11 +185,11 @@ function headsUpSignal(
   return {
     semantic,
     admittedAttentionRevision: item.attentionRevision,
-    action: action(item.id, semantic === 'approval_pending'
+    action: { ...action(item.id, semantic === 'approval_pending'
       ? 'open_approval'
       : semantic === 'user_mention'
         ? 'open_camp_message'
-        : 'open_camp_turn'),
+        : 'open_camp_turn'), ...(item.primaryAction.subject ? { subject: item.primaryAction.subject } : {}) },
     mention: semantic === 'user_mention' ? item.mention : null
   }
 }
@@ -381,7 +410,7 @@ describe('Notification attention controller', () => {
     const request = async (cursor: number): Promise<NotificationEpisodeChangeBatch> => {
       requests.push(cursor)
       if (cursor === 0) return {
-        schemaVersion: 8,
+        schemaVersion: 9,
         requestedAfterChangeSequence: 0,
         nextChangeSequence: 1,
         throughChangeSequence: 2,
@@ -395,7 +424,7 @@ describe('Notification attention controller', () => {
     await expect(readNotificationChangePages(0, request)).rejects.toThrow('page two failed')
     expect(requests).toEqual([0, 1])
     const retried = await readNotificationChangePages(0, async (cursor) => ({
-      schemaVersion: 8,
+      schemaVersion: 9,
       requestedAfterChangeSequence: cursor,
       nextChangeSequence: 2,
       throughChangeSequence: 2,
@@ -414,6 +443,9 @@ describe('Notification attention controller', () => {
       userMentionHeadsUpEnabled: true,
       turnCompletedHeadsUpEnabled: true,
       turnIncompleteHeadsUpEnabled: false,
+      singleChatHeadsUpEnabled: true, missionNeedsYouHeadsUpEnabled: true,
+      missionStatusHeadsUpEnabled: true, taskStatusHeadsUpEnabled: false,
+      missionStatuses: ['completed'], taskStatuses: ['completed', 'blocked', 'cancelled'],
       version: 4,
       updatedAt: '2026-08-01T00:00:00Z'
     }
@@ -426,7 +458,7 @@ it('suppresses completion only on its exact reading surface, without changing un
   const privateChange = change(episode('turn_completed'), 1)
   privateChange.headsUpSignal!.action.singleChat = { conversationId: 'private-1', agentId: 'agent-1', agentDisplayName: '洛克', agentRunId: 'run-1' }
   const state = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [privateChange])
-  const publicSource = { campId: 'camp-1', snapshotSequence: 1, messageIds: [], campTurnIds: [], agentRunIds: [], approvalIds: [], surfaceVisible: true }
+  const publicSource = { threadId: 'camp-1', snapshotSequence: 1, messageIds: [], campTurnIds: [], agentRunIds: [], approvalIds: [], surfaceVisible: true }
   for (const conversationId of [undefined, 'private-2', 'successor-1']) {
     expect(filterVisibleNotificationHeadsUp(state, [{ ...publicSource, conversationId }], true)).toBe(state)
   }
@@ -441,7 +473,7 @@ it('suppresses completion only on its exact reading surface, without changing un
   expect(filterVisibleNotificationHeadsUp(failedState, [{ ...publicSource, campTurnIds: ['turn-1'] }], true).entries).toEqual([])
 
   const agentRun = change(episode('turn_completed', {
-    campTurnId: null,
+    threadTurnId: null,
     agentRunId: 'run-1'
   }), 3)
   agentRun.headsUpSignal!.action = action('episode-1', 'open_agent_run')
@@ -461,7 +493,7 @@ it('suppresses completion only on its exact reading surface, without changing un
   ).entries).toEqual([])
 })
 
-it('suppresses every transient reminder from the attentive current Camp without marking it read', () => {
+it('suppresses every transient reminder from the attentive current Thread without marking it read', () => {
   const semantics: NotificationSemantic[] = [
     'approval_pending',
     'turn_failed',
@@ -496,4 +528,53 @@ it('retains exact urgent occurrences when completion arrives, then advances only
   const dismissed = { ...queued, entries: [] }
   expect(applyNotificationHeadsUpChanges(dismissed, []).entries).toEqual([])
   expect(promoteNotificationHeadsUpOverflow(dismissed).entries[0].signal.action.acknowledgementId).toBe('completion-occurrence')
+})
+
+
+it('separates business filters and only renders explicit mission questions', () => {
+  const preference = preferenceFromUnknown({ headsUpEnabled: true, approvalHeadsUpEnabled: true,
+    userMentionHeadsUpEnabled: true, turnCompletedHeadsUpEnabled: false, turnIncompleteHeadsUpEnabled: true,
+    singleChatHeadsUpEnabled: true, missionNeedsYouHeadsUpEnabled: true, missionStatusHeadsUpEnabled: true,
+    taskStatusHeadsUpEnabled: false, missionStatuses: ['completed'], taskStatuses: ['blocked'], version: 1, updatedAt: '' })!
+  const signal = headsUpSignal(episode('mission_needs_you'), 'mission_needs_you')
+  signal.action.subject = { kind: 'mission', id: 'mission', title: '通知设置', status: 'needs_you',
+    sourceMessageId: null, sourceAgentRunId: 'run-1', relatedRunIds: [] }
+  expect(notificationHeadsUpPresentation(signal).message).toBe('使命「通知设置」需要你')
+  signal.mention = { messageId: 'question', authorId: 'agent', authorDisplayName: '爱丽丝', summary: '请确认是否保留提醒。', available: true }
+  signal.action.subject.sourceMessageId = 'question'
+  expect(notificationHeadsUpPresentation(signal).message).toBe('使命「通知设置」需要你：请确认是否保留提醒。')
+  signal.mention.available = false
+  expect(notificationHeadsUpPresentation(signal).message).toBe('使命「通知设置」需要你')
+  for (const [semantic, status, enabled] of [
+    ['round_completed', null, false], ['single_chat_reply', null, true], ['mission_needs_you', 'needs_you', true],
+    ['mission_status_changed', 'completed', true], ['mission_status_changed', 'in_progress', false],
+    ['task_status_changed', 'blocked', false]
+  ] as const) {
+    signal.semantic = semantic; signal.action.subject.status = status
+    expect(shouldShowHeadsUp(signal, preference)).toBe(enabled)
+  }
+  preference.taskStatusHeadsUpEnabled = true
+  expect(shouldShowHeadsUp(signal, preference)).toBe(true)
+  signal.action.subject.status = 'completed'
+  expect(shouldShowHeadsUp(signal, preference)).toBe(false)
+})
+
+it('coalesces only matching source identities in either arrival order without acknowledgement', () => {
+  const mention = episode('user_mention', { id: 'mention' })
+  const needs = episode('mission_needs_you', { id: 'needs' })
+  needs.primaryAction.subject = { kind: 'mission', id: 'm', title: '同名事项', status: 'needs_you', sourceMessageId: 'message-1', sourceAgentRunId: 'run-1', relatedRunIds: [] }
+  const completed = episode('mission_status_changed', { id: 'completed' })
+  completed.primaryAction.subject = { ...needs.primaryAction.subject, status: 'completed' }
+  const round = episode('round_completed', { id: 'round' })
+  round.primaryAction.subject = { ...needs.primaryAction.subject, kind: 'round', relatedRunIds: ['run-1'] }
+  for (const [preferred, lower] of [[needs, mention], [completed, round]]) {
+    for (const order of [[preferred, lower], [lower, preferred]]) {
+      const result = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, order.map((item, i) => change(item, i+1)))
+      expect([...result.entries, ...result.overflowEntries].map(item => item.episode.id)).toEqual([preferred.id])
+      expect(preferred.unread).toBe(true)
+    }
+  }
+  needs.primaryAction.subject.sourceMessageId = 'different'
+  const separate = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [change(mention, 1), change(needs, 2)])
+  expect(separate.entries.length + separate.overflowEntries.length).toBe(2)
 })

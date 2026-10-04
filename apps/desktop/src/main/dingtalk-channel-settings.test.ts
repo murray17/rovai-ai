@@ -1,3 +1,8 @@
+import { readFile, access, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { PendingChannelAttachments } from './channel-inbound-attachments'
 import { describe, expect, it, vi } from 'vitest'
 import type { CoreClient } from './core-client'
 import {
@@ -6,6 +11,7 @@ import {
   type DingTalkExecutionConsoleSource,
   type DingTalkChannelHostDependencies,
   dingtalkAgentOutputMarkdown,
+  dingtalkDeliveryFailure,
   dingtalkCanonicalReplayCarrier,
   dingtalkCardCallbackText,
   dingtalkCardCallbackValue,
@@ -23,7 +29,12 @@ import type {
   DingTalkDeveloperSessionService
 } from './dingtalk-developer-session'
 import type { DingTalkAppCredential } from './channel-credential-store'
-import { DingTalkOpenApiClient, encodeDingTalkCardActionId } from './dingtalk-open-api'
+import {
+  DingTalkOpenApiClient,
+  DingTalkOpenApiError,
+  MAX_DINGTALK_MEDIA_UPLOAD_BYTES,
+  encodeDingTalkCardActionId
+} from './dingtalk-open-api'
 import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
 import { DingTalkProvisioningError } from './dingtalk-member-bot-provisioner'
 
@@ -84,6 +95,38 @@ describe('DingTalk channel account connection', () => {
       inspection.resolve(null)
       await starting
       await fixture.service.stop()
+    }
+  })
+
+  it.each(['file', 'folder'])('settles a queued %s through the attachment pump with its receiving Bot', async kind => {
+    let saved: string[] = []
+    const complete = vi.fn(async (command: Record<string, unknown>) => {
+      expect(command).toMatchObject({ requestId: 'request', appId: 'ding-app-a', attempt: 0 })
+      if (kind === 'file') {
+        saved = command.files as string[]
+        expect(command.failureCode).toBeNull()
+        expect(await readFile(saved[0], 'utf8')).toBe('actual downloaded bytes')
+      } else {
+        expect(command).toMatchObject({ files: [], failureCode: 'channel.attachments.unsupported' })
+      }
+    })
+    const fixture = completedBotFixture({
+      credentialPresent: true, completeAttachments: complete,
+      attachments: [{ requestId: 'request', appId: 'ding-app-a', messageId: 'message', attempt: 0, retryAt: null,
+        resources: [{ fileKey: 'resource:0', name: 'resource', kind, downloadCode: 'receiving-grant' }] }]
+    })
+    const download = vi.spyOn(fixture.api, 'messageFileDownloadUrl').mockResolvedValue('https://storage.example/file')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('actual downloaded bytes')))
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(complete).toHaveBeenCalledOnce())
+      if (kind === 'file') {
+        expect(download).toHaveBeenCalledWith({ robotCode: 'robot-a', downloadCode: 'receiving-grant', signal: expect.any(AbortSignal) })
+        await vi.waitFor(async () => { for (const path of saved) await expect(access(path)).rejects.toThrow() })
+      } else expect(download).not.toHaveBeenCalled()
+    } finally {
+      await fixture.service.stop()
+      vi.unstubAllGlobals()
     }
   })
 
@@ -255,9 +298,11 @@ describe('DingTalk channel account connection', () => {
     committed.resolve({ status: 'applied', code: 'channels.dingtalk.account.commitConnection.applied', payload: { sessionRevision: 2 } })
     await vi.waitFor(() => expect(activate).toHaveBeenCalledExactlyOnceWith(2))
     expect((await fixture.service.get()).activeQrAttempt?.stage).toBe('saving_local_session')
+    expect((await fixture.service.get()).provider.connection.sessionStatus).toBe('unknown')
     activated.resolve()
     await connecting
     expect((await fixture.service.get()).activeQrAttempt).toBeNull()
+    expect((await fixture.service.get()).provider.connection.sessionStatus).toBe('valid')
     expect(fixture.developerSession.discardPendingLogin).not.toHaveBeenCalled()
   })
 
@@ -481,6 +526,12 @@ describe('DingTalk channel account connection', () => {
         updateMessageId: null, recallMessageId
       }, {
         ...common,
+        deliveryId: 'failure-attention', deliveryKind: 'attention',
+        payload: { failureCode: 'channel.attachments.download_failed',
+          text: '附件下载失败，本条消息未交给队员。' },
+        updateMessageId: null, recallMessageId: null
+      }, {
+        ...common,
         deliveryId: 'execution-recall', deliveryKind: 'execution_console_recall',
         payload: { agentRunId: 'run-1' },
         updateMessageId: 'rv-run-card', recallMessageId: 'carrier:rv-run-card'
@@ -494,12 +545,20 @@ describe('DingTalk channel account connection', () => {
       await vi.waitFor(() => expect(fixture.commandPayloads
         .filter(({ method }) => method === 'channels.dingtalk.deliveries.settle')
         .map(({ command }) => command.deliveryId))
-        .toEqual(expect.arrayContaining(['queue-send', 'queue-recall', 'execution-recall'])))
+        .toEqual(expect.arrayContaining(['queue-send', 'queue-recall', 'failure-attention', 'execution-recall'])))
 
       expect(fixture.welcomeCard).toHaveBeenCalledWith(expect.objectContaining({
         outTrackId,
         space: 'p2p',
         cardParamMap: expect.objectContaining({ staticMsgContent: 'Rovai 已接收，正在排队' })
+      }))
+      expect(fixture.welcomeCard).toHaveBeenCalledWith(expect.objectContaining({
+        outTrackId: dingtalkOutTrackId('status', 'failure-attention'),
+        cardParamMap: expect.objectContaining({
+          msgTitle: 'Rovai 未能处理',
+          staticMsgContent: '附件下载失败，本条消息未交给队员。',
+          flowStatus: '5'
+        })
       }))
       expect(recall).toHaveBeenNthCalledWith(1, {
         conversationKind: 'p2p',
@@ -522,6 +581,211 @@ describe('DingTalk channel account connection', () => {
           outcome: 'sent'
         })
       })
+    } finally {
+      await fixture.service.stop()
+    }
+  })
+
+  it('delivers a Core-owned agent file and settles the exact robot message identity', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rovai-dingtalk-outbound-'))
+    const path = join(dir, 'report.pdf')
+    const bytes = Buffer.from('report bytes')
+    await writeFile(path, bytes)
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      attachmentTarget: { attachmentId: 'attachment-1', kind: 'file', mediaType: 'application/pdf', path },
+      deliveries: [{
+        deliveryId: 'delivery-file-1', provider: 'dingtalk', requestId: 'request-1',
+        deliveryKind: 'agent_attachment', targetAppId: 'ding-app-a',
+        credentialRef: 'dingtalk-credential-a', chatId: 'owner-a', topicKey: '',
+        conversationKind: 'p2p', attemptCount: 1, updateMessageId: null,
+        recipientOpenId: 'owner-a',
+        payload: { threadId: 'camp-1', attachmentId: 'attachment-1', fileName: 'report.pdf',
+          attachmentKind: 'file', size: bytes.length,
+          contentDigest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` }
+      }]
+    })
+    const upload = vi.spyOn(fixture.api, 'uploadFile').mockResolvedValue('media-1')
+    const send = vi.spyOn(fixture.api, 'sendPrivateAttachment').mockResolvedValue('message-1')
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(fixture.commandPayloads).toContainEqual({
+        method: 'channels.dingtalk.deliveries.settle',
+        command: expect.objectContaining({ deliveryId: 'delivery-file-1', outcome: 'sent',
+          externalDeliveryMessageId: 'message-1', retryable: false })
+      }))
+      expect(upload).toHaveBeenCalledWith(bytes, 'report.pdf', 'application/pdf')
+      expect(send).toHaveBeenCalledWith({ robotCode: 'robot-a', userId: 'owner-a',
+        attachment: { kind: 'file', mediaId: 'media-1', fileName: 'report.pdf' } })
+    } finally {
+      await fixture.service.stop()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads an exact message Source Ref and delivers its image to the original group', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rovai-dingtalk-image-'))
+    const path = join(dir, 'image.jpg')
+    const bytes = Buffer.from('jpeg bytes')
+    await writeFile(path, bytes)
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      attachmentTarget: { attachmentId: 'source-ref-1', kind: 'file', mediaType: 'image/jpeg', path },
+      deliveries: [{
+        deliveryId: 'delivery-image-1', provider: 'dingtalk', requestId: 'request-1',
+        deliveryKind: 'agent_attachment', targetAppId: 'ding-app-a',
+        credentialRef: 'dingtalk-credential-a', chatId: 'group-1', topicKey: '',
+        conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+        recipientOpenId: null,
+        payload: { threadId: 'camp-1', sourceThreadMessageId: 'message-1',
+          attachmentId: 'source-ref-1', fileName: 'image.jpg', attachmentKind: 'image',
+          storage: 'source_ref' }
+      }]
+    })
+    const upload = vi.spyOn(fixture.api, 'uploadImage').mockResolvedValue('media-image-1')
+    const send = vi.spyOn(fixture.api, 'sendGroupAttachment').mockResolvedValue('message-image-1')
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(fixture.commandPayloads).toContainEqual({
+        method: 'channels.dingtalk.deliveries.settle',
+        command: expect.objectContaining({ deliveryId: 'delivery-image-1', outcome: 'sent',
+          externalDeliveryMessageId: 'message-image-1' })
+      }))
+      expect(fixture.attachmentLookups).toContainEqual({ owner: 'message', threadId: 'camp-1',
+        attachmentRefId: 'source-ref-1', messageId: 'message-1' })
+      expect(upload).toHaveBeenCalledWith(bytes, 'image.jpg', 'image/jpeg')
+      expect(send).toHaveBeenCalledWith({ openConversationId: 'group-1', robotCode: 'robot-a',
+        attachment: { kind: 'image', mediaId: 'media-image-1' } })
+    } finally {
+      await fixture.service.stop()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('settles an unsupported file type before reading or uploading bytes', async () => {
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      attachmentTarget: { attachmentId: 'attachment-1', kind: 'file',
+        mediaType: 'text/plain', path: '/unreadable/notes.txt' },
+      deliveries: [{
+        deliveryId: 'delivery-notes', provider: 'dingtalk', requestId: 'request-1',
+        deliveryKind: 'agent_attachment', targetAppId: 'ding-app-a',
+        credentialRef: 'dingtalk-credential-a', chatId: 'owner-a', topicKey: '',
+        conversationKind: 'p2p', attemptCount: 1, updateMessageId: null,
+        recipientOpenId: 'owner-a',
+        payload: { threadId: 'camp-1', attachmentId: 'attachment-1',
+          fileName: 'notes.txt', attachmentKind: 'file' }
+      }]
+    })
+    const upload = vi.spyOn(fixture.api, 'uploadFile')
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(fixture.commandPayloads).toContainEqual({
+        method: 'channels.dingtalk.deliveries.settle',
+        command: expect.objectContaining({ deliveryId: 'delivery-notes', outcome: 'failed',
+          failureCode: 'dingtalk_attachment_type_unsupported', retryable: false })
+      }))
+      expect(upload).not.toHaveBeenCalled()
+    } finally {
+      await fixture.service.stop()
+    }
+  })
+
+  it('settles an unsupported image format before opening the file', async () => {
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      attachmentTarget: { attachmentId: 'attachment-1', kind: 'file',
+        mediaType: 'image/webp', path: '/unreadable/image.webp' },
+      deliveries: [{
+        deliveryId: 'delivery-webp', provider: 'dingtalk', requestId: 'request-1',
+        deliveryKind: 'agent_attachment', targetAppId: 'ding-app-a',
+        credentialRef: 'dingtalk-credential-a', chatId: 'owner-a', topicKey: '',
+        conversationKind: 'p2p', attemptCount: 1, updateMessageId: null,
+        recipientOpenId: 'owner-a',
+        payload: { threadId: 'camp-1', attachmentId: 'attachment-1',
+          fileName: 'image.webp', attachmentKind: 'image' }
+      }]
+    })
+    const upload = vi.spyOn(fixture.api, 'uploadImage')
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(fixture.commandPayloads).toContainEqual({
+        method: 'channels.dingtalk.deliveries.settle',
+        command: expect.objectContaining({ deliveryId: 'delivery-webp', outcome: 'failed',
+          failureCode: 'dingtalk_attachment_type_unsupported', retryable: false })
+      }))
+      expect(upload).not.toHaveBeenCalled()
+    } finally {
+      await fixture.service.stop()
+    }
+  })
+
+  it('settles an oversized file before reading or uploading bytes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rovai-dingtalk-oversize-'))
+    const path = join(dir, 'oversize.pdf')
+    await writeFile(path, '')
+    await truncate(path, MAX_DINGTALK_MEDIA_UPLOAD_BYTES + 1)
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      attachmentTarget: { attachmentId: 'attachment-1', kind: 'file',
+        mediaType: 'application/pdf', path },
+      deliveries: [{
+        deliveryId: 'delivery-oversize', provider: 'dingtalk', requestId: 'request-1',
+        deliveryKind: 'agent_attachment', targetAppId: 'ding-app-a',
+        credentialRef: 'dingtalk-credential-a', chatId: 'owner-a', topicKey: '',
+        conversationKind: 'p2p', attemptCount: 1, updateMessageId: null,
+        recipientOpenId: 'owner-a',
+        payload: { threadId: 'camp-1', attachmentId: 'attachment-1',
+          fileName: 'oversize.pdf', attachmentKind: 'file' }
+      }]
+    })
+    const upload = vi.spyOn(fixture.api, 'uploadFile')
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(fixture.commandPayloads).toContainEqual({
+        method: 'channels.dingtalk.deliveries.settle',
+        command: expect.objectContaining({ deliveryId: 'delivery-oversize', outcome: 'failed',
+          failureCode: 'dingtalk_attachment_size_unsupported', retryable: false })
+      }))
+      expect(upload).not.toHaveBeenCalled()
+    } finally {
+      await fixture.service.stop()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    [new DingTalkOpenApiError('dingtalk_open_api_http_429', 429), true],
+    [new DingTalkOpenApiError('dingtalk_open_api_http_503', 503), true],
+    [new DingTalkOpenApiError('dingtalk_open_api_network', 0), true],
+    [new DingTalkOpenApiError('dingtalk_open_api_failed', 200, '90002'), true],
+    [new DingTalkOpenApiError('dingtalk_open_api_http_400', 400), false],
+    ['dingtalk_target_bot_not_connected', true]
+  ])('classifies a delivery failure from its typed cause: %s', (error, retryable) => {
+    expect(dingtalkDeliveryFailure(error).retryable).toBe(retryable)
+  })
+
+  it.each([429, 503])('requeues a failed Markdown send after HTTP %s', async status => {
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      deliveries: [{
+        deliveryId: `delivery-${status}`, provider: 'dingtalk', requestId: 'request-1',
+        deliveryKind: 'agent_output', targetAppId: 'ding-app-a',
+        credentialRef: 'dingtalk-credential-a', chatId: 'owner-a', topicKey: '',
+        conversationKind: 'p2p', attemptCount: 1, updateMessageId: null,
+        recipientOpenId: 'owner-a', payload: { body: 'hello' }
+      }]
+    })
+    vi.spyOn(fixture.api, 'sendPrivateMarkdown').mockRejectedValue(
+      new DingTalkOpenApiError(`dingtalk_open_api_http_${status}`, status)
+    )
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(fixture.commandPayloads).toContainEqual({
+        method: 'channels.dingtalk.deliveries.settle',
+        command: expect.objectContaining({ deliveryId: `delivery-${status}`, outcome: 'failed',
+          failureCode: `dingtalk_open_api_http_${status}`, retryable: true })
+      }))
     } finally {
       await fixture.service.stop()
     }
@@ -879,6 +1143,9 @@ function completedBotFixture(options: {
   emptyFrozenAppId?: boolean
   beforeApp?: 'created' | 'account_verified'
   deliveries?: Array<Record<string, unknown>>
+  attachments?: PendingChannelAttachments[]
+  completeAttachments?: (command: Record<string, unknown>) => Promise<void>
+  attachmentTarget?: { attachmentId: string; kind: 'file'; mediaType: string; path: string }
 } = {}) {
   const owner = identity('corp-a', 'owner-a')
   const activeOwner = options.otherAccount ? identity('corp-other', 'owner-other') : owner
@@ -909,10 +1176,17 @@ function completedBotFixture(options: {
   } : null
   let rejectedWrites = options.rejectCredentialWrites ?? 0
   const pendingDeliveries = [...(options.deliveries ?? [])]
+  const pendingAttachments = [...(options.attachments ?? [])]
+  let apiAvailable = false
   const commands: string[] = []
   const commandPayloads: Array<{ method: string; command: Record<string, unknown> }> = []
+  const attachmentLookups: unknown[] = []
   const core = {
     async request(method: string, params: { command?: Record<string, unknown> }): Promise<unknown> {
+      if (method === 'thread.attachments.desktopOpenTarget') {
+        attachmentLookups.push(params)
+        return options.attachmentTarget ?? null
+      }
       if (method === 'channels.dingtalk.snapshot') return {
         schemaVersion: 1, account, memberBots: options.beforeApp ? [] : [bot], publicationIntents: [intent],
         pendingBindingCount: 0, bindingIssueCount: 0,
@@ -925,10 +1199,12 @@ function completedBotFixture(options: {
       commands.push(method)
       commandPayloads.push({ method, command })
       if (method === 'channels.dingtalk.host.tick') {
-        expect(params).toEqual({ workerId: expect.any(String), limit: 20 })
+        expect(params).toEqual({ workerId: expect.any(String), limit: 20,
+          inboundAttachmentAppIds: !options.beforeApp && apiAvailable ? [bot.appKey] : [] })
         const delivery = pendingDeliveries.shift()
-        return { deliveries: delivery ? [delivery] : [], rosterRefreshes: [] }
+        return { deliveries: delivery ? [delivery] : [], rosterRefreshes: [], inboundAttachments: pendingAttachments.splice(0) }
       }
+      if (method === 'channels.dingtalk.inbound.attachments.complete') await options.completeAttachments?.(command)
       if (method === 'channels.dingtalk.publicationIntent.storeCredential') {
         if (rejectedWrites-- > 0) return { status: 'rejected', code: 'channel_storage_fixture_failed' }
         if (options.beforeApp) expect(command.credentialRef).toMatch(/^dingtalk-/u)
@@ -992,9 +1268,9 @@ function completedBotFixture(options: {
     provisioner: { create: provision },
     avatarSource: { resolve: async () => ({ pngBytes: new Uint8Array([1, 2, 3]) }) },
     streamRegistry: stream,
-    createApiClient: () => api
+    createApiClient: () => { apiAvailable = true; return api }
   })
-  return { service, core, commands, commandPayloads, api, provision, streamStart, verifyCard,
+  return { service, core, commands, commandPayloads, attachmentLookups, api, provision, streamStart, verifyCard,
     welcomeCard, developerSession,
     credential: () => credential, intent: () => intent }
 }
@@ -1024,8 +1300,8 @@ function executionSource(
   return {
     sequence: 1,
     agentRunId: 'run-1',
-    campId: 'camp-1',
-    campTurnId: 'turn-1',
+    threadId: 'camp-1',
+    threadTurnId: 'turn-1',
     channelConversationId: 'channel-conversation-1',
     agentId: 'agent-alice',
     agentDisplayName: '爱丽丝',

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "source": "isolated runtime.product.check and attempted one-Run probes; no native token conclusion follows from a blocked or failed call",
+  "probes": [
+    { "runtime": "copilot-cli", "version": "1.0.83", "model": "claude-sonnet-5", "stage": "run", "reason": "monthly quota exceeded" },
+    { "runtime": "codebuddy-cli", "version": "2.133.1", "model": null, "stage": "installation probe", "reason": "no available default model" },
+    { "runtime": "deepseek-harness", "version": "0.1.5-rc.3", "model": "deepseek-official default", "stage": "run", "reason": "DEEPSEEK_API_KEY required" },
+    { "runtime": "qoder-cli", "version": "1.1.28", "model": "minimax/minimax-m3-cp", "stage": "run", "reason": "custom model service insufficient balance" },
+    { "runtime": "kimi-code-cli", "version": "2.1.1", "model": "environment default", "stage": "run", "reason": "runtime ended without required final output" },
+    { "runtime": "grok-build", "version": "1.0.41", "model": "minimax-m3", "stage": "run", "reason": "runtime internal error" },
+    { "runtime": "cursor-agent", "version": "2025.09.18-7ae6800", "model": null, "stage": "product preflight", "reason": "macos-arm64 qualification evidence missing" }
+  ]
+}

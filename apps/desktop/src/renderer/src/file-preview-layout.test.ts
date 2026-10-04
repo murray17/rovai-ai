@@ -41,11 +41,12 @@ describe('File preview split geometry', () => {
     expect(filePreviewCloseThreshold(false)).toBe(320)
   })
 
-  it('recovers from invalid storage and accepts stable ratios from very wide workspaces', () => {
+  it('distinguishes an absent preference from explicit ratios including very wide workspaces', () => {
     for (const stored of [null, '', 'NaN', 'Infinity', '0', '1', '-.2', '900px']) {
-      expect(filePreviewRatioFromStoredValue(stored)).toBe(.56)
+      expect(filePreviewRatioFromStoredValue(stored)).toBeNull()
     }
     expect(filePreviewRatioFromStoredValue('.9')).toBe(.9)
+    expect(filePreviewRatioFromStoredValue('.56')).toBe(.56)
   })
 })
 
@@ -94,7 +95,7 @@ describe('File preview reading planes', () => {
     expect(styles).toContain('.file-preview-path-button:focus-visible + .file-preview-path-tooltip')
   })
 
-  it('keeps header and body tracks equal without reserving a column for Camp details', () => {
+  it('keeps header and body tracks equal without reserving a column for Thread details', () => {
     expect(gridTracks('.camp-topbar.has-file-preview')).toEqual([
       'minmax(0, 1fr) var(--file-preview-width, 56%)'
     ])

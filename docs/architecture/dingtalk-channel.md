@@ -3,12 +3,12 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-18
+last_updated: 2026-09-28
 ---
 
 # 钉钉渠道架构
 
-字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v13](../contracts/dingtalk-channel-v13.md)，当前异步入站/外发语义见
+字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v14](../contracts/dingtalk-channel-v14.md)，当前异步入站/外发语义见
 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 provider-neutral 渠道核心、
@@ -38,7 +38,7 @@ Renderer 渠道设置
              ├─ Member Bot Provisioner
              ├─ SQLite Channel Store Client：Session/credential 原子提交与批量读取
              ├─ 每 App dingtalk-stream Client
-             ├─ App-only Open API：roster、Markdown、AI 卡片与 Robot recall
+             ├─ App-only Open API：roster、Markdown、媒体上传、图片/文件、AI 卡片与 Robot recall
              ├─ inbound/card normalization
              ├─ 共享 ExecutionViewService：固定 LAN URL / 内存 Token / SSE
              └─ durable ChannelDelivery worker
@@ -180,10 +180,18 @@ AI Card 投递同时产生两种身份：稳定 `outTrackId` 只用于卡片更�
 网络失败只结算 Outbox，不回滚 Core 消息。超长正文不得在一个 delivery 内分片发送；只有每片拥有独立 durable Outbox、
 顺序和重试身份后才开放。
 
-下一条 root request admission 后，执行卡使用按 group/p2p 选择的 Robot recall API 与持久 carrier identity 真正撤回，
-成功后撤销内存 URL grant；不再更新为“此执行记录已结束”。只有真正进入 FIFO 的请求发送排队 AI Card，admission 后
-使用同样的 carrier identity 撤回，不更新为“已开始”或结束占位。运行中的停止按钮保持 Owner-only exact-run callback，
-终态继续移除；终态卡在下一条 root 入场前仍可见。
+Agent 显式附件复用同一 durable Outbox 和 Core 的 `desktopOpenTarget` 授权读取：Main 仅对 managed 文件核对大小与摘要，
+Source Ref 以精确消息归属取回本地文件；图片走 App 媒体上传和 `sampleImageMsg`，平台列出的六种普通文件格式走
+OAPI multipart 媒体上传和 `sampleFile`。群与私聊沿用当前 Bot 的 Robot OpenAPI 目标，成功后只保存平台返回的
+`processQueryKey`；失败交给 Core 已有的有界重试或附件提示。HTTP 状态与本地传输错误类型决定 retryable，
+不通过错误文案猜测。Robot send 没有已采用的客户端幂等键，响应丢失后重试可能重复投递；真实租户验证前，
+不能把 fixture 通过表述为平台文件收发验收。
+
+同一 ChannelConversation 中同一队员的后继 Run 被领取并开始后，更早且已封存的执行卡使用按 group/p2p 选择的
+Robot recall API 与持久 carrier identity 真正撤回，成功后撤销内存 URL grant；不再更新为“此执行记录已结束”。
+旧 Run 仍在执行时保留卡片与 Owner-only exact-run 停止按钮，待它封存后再撤回；其他队员的卡片互不影响。
+只有真正进入 FIFO 的请求发送排队 AI Card，admission 后使用同样的 carrier identity 撤回，不更新为“已开始”或结束占位。
+排队未领取的 Run 与新 root request admission 均不触发执行卡撤回；最新 Run 的终态卡在同队员后继 Run 开始前仍可见。
 
 ## Core 复用与入站准入
 
@@ -205,6 +213,7 @@ Stream callback fast ACK
 → group roster reconcile
 → finalize
 → PendingCampBinding or existing binding FIFO
+→ shared attachment download/import readiness (when resources exist)
 → CollaborationService atomic external-channel admission
 → CampMessage + target Delivery(ies); inbound receipt completed
 → unified Scheduler claim → AgentRun
@@ -214,7 +223,7 @@ Stream callback fast ACK
 安装的 App Bot 才属于支持的群入口；普通成员形态的钉钉普通群/外部群不会投递 Robot Stream callback，Main 不通过成员
 账号或轮询旁路读取。支持群的首次有效消息在原群发送
 一张项目卡，可选择 opaque project ID 或直接建立 Quick Chat，随后处理原消息；绑定不可换绑。Owner 仍是 ExternalPrincipal，不获得本机
-`local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，入站附件只保留名称/媒体类型摘要。
+`local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，引用附件只保留摘要；本条消息中的资源进入共享附件链路。
 
 群 callback 由 exact credential-bound App Stream、已校验的 `robotCode` 与 `isInAtList=true` 共同证明 receiving Bot。
 `chatbotUserId` 与 `atUsers[].dingtalkId` 都是 opaque provider identity，真实 callback 可能使用不同编码，二者不得再做
@@ -223,6 +232,13 @@ callback 立即合并到同一 SQLite aggregate，目标按首次持久观察顺
 Main 正常存活时在 3 秒后提交完整集合；Main 重启错过定时器时，Core 在 deadline 后以非空且相等的 expected/observed
 集合自动封口。两条路径都只能产生一个 durable inbound receipt、一个 CampMessage 与有序目标 Delivery 集；迟到 callback 不重复发布。
 私聊不依赖 `isInAtList` 或 mention identity，继续直接进入 Quick Chat。
+
+附件状态、重试、Core 文件导入与 FIFO 复用 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md#inbound-attachments)。
+钉钉适配器从 `richText` 提取用户正文，图片按原节点位置作为附件资源；Core 发布 CampMessage 时清理
+目标 Bot 的文本 `@`，保留结构化 MemberMention，多 Bot 共同摘要仍使用清理前的标准化正文。
+附件用首观察 Bot 的 `downloadCode` 和 `robotCode` 换取 HTTPS 下载地址，
+不向存储地址传递 App token。多 Bot 的 grant 不进入共同内容摘要，原接收 Bot 与资源授权保持绑定。
+同一消息全部附件就绪前不发布 CampMessage 或 Agent Delivery；终止失败由正常 attention 路径提示用户重新发送。
 
 群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
 generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
@@ -240,8 +256,8 @@ Renderer 渠道设置已开放钉钉管理入口：Snapshot 中的飞书、钉�
 | Owner 同组织内部群显式 `@` | enabled；Bot 必须由群“添加机器人”入口安装，普通成员形态的普通群/外部群不产生 Stream callback | 真实群 roster、项目卡和输出验收 |
 | 同消息直接多 Bot | enabled；多个 exact Stream callback durable 合并为一个根请求和有序多个 AgentRun，正常 3 秒封口，重启后按 SQLite deadline 恢复；Renderer 可管理对应 Bot | packaged 桌面端/手机端真实多 Bot callback 与顺序证据继续作为能力验收，不关闭整个管理入口 |
 | 话题/Thread | disabled；`openConvThreadId / openThreadId` 是普通 callback 可能携带的不透明路由元数据，不作为 Topic 证明；只有明确 `threadId / topicId / topicKey` 才拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
-| 入站附件 | summary only；私聊 file/audio/video 虽可能提供 downloadCode，但未建立 Managed Attachment ingress；群 Bot 平台不接收这些类型 | 官方下载、授权、大小/媒体校验和 Managed Attachment ingress 设计 |
-| 出站附件 | disabled，明确 unsupported；不借用 custom webhook schema | 已验证 Internal App Robot app-only 原生投递、顺序和可恢复 message identity |
+| 入站附件 | 已接入共享下载/Source Ref 准入；支持图片、富文本图文与私聊 file/audio/video；群 Bot 仍不接收普通文件/音频/视频 | 隔离自动回归覆盖；真实租户下载授权、桌面/手机消息类型矩阵仍需验收 |
+| 出站附件 | 原生上传及投递已接入：图片和 `xlsx/pdf/zip/rar/doc/docx`；其他格式明确失败；不借用 custom webhook schema | 真实 Internal App Robot 群/私聊的上传授权、消息身份、桌面/手机文件呈现与响应丢失恢复仍需验收 |
 | AI 状态卡 | enabled；平台内置通用卡片无需用户模板；项目刷新、最近输出展开/收起已在真实桌面客户端验收，停止、固定 URL、排队卡及 execution/queue Robot recall 已接入 | 手机真实投递、URL fragment、SSE、撤回与停止终态矩阵 |
 
 不得通过宽松 parser、普通群 fallback、fabricated message success，或仅因 Renderer 管理入口已开放就绕过这些能力 gate。
@@ -271,7 +287,7 @@ DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card crea
 
 ## References
 
-- [DingTalk Channel v13](../contracts/dingtalk-channel-v13.md)
+- [DingTalk Channel v14](../contracts/dingtalk-channel-v14.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)

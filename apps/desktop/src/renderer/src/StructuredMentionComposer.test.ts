@@ -1,9 +1,10 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   StructuredMentionComposer,
   StructuredMentionOptionAvatar,
+  renderSkillMenu,
   shouldHandleStructuredComposerBackspaceAtStart,
   shouldSubmitStructuredComposerOnEnter,
   structuredMentionMemberDescription,
@@ -13,6 +14,9 @@ import {
 import { composerTypeaheadEnterAction } from './ComposerTypeaheadPlugin'
 import { RovaiComposerExtension } from './RovaiComposerExtension'
 import type { ComposerSkillOption } from './composer-skill-picker'
+import type { GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
+import { changeInterfaceLanguage } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
 const members = [{
   agentId: 'agent_1',
@@ -40,6 +44,14 @@ const skills: ComposerSkillOption[] = [{
 }]
 
 describe('StructuredMentionComposer V2', () => {
+  const preferences = {
+    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
+      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
+    })
+  } as GeneralPreferencesApi
+
+  afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
+
   it('renders one native Lexical editing surface with an adjacent placeholder', () => {
     const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
       id: 'empty-composer',
@@ -78,6 +90,28 @@ describe('StructuredMentionComposer V2', () => {
     ], '沐')).toEqual([])
   })
 
+  it('keeps Thread choices first and makes available outsiders searchable and invitational', () => {
+    const outsider = {
+      agentId: 'agent_3', displayName: '爱丽丝', teamRole: '五号街卖花女',
+      mentionable: true, inThread: false
+    }
+    const catalog = [...members, outsider]
+    expect(structuredMentionOptions(catalog, '').map((option) => option.kind)).toEqual([
+      'all_members', 'member', 'member', 'invite_other'
+    ])
+    expect(structuredMentionOptions(catalog, '卖花女')).toEqual([
+      { kind: 'member', member: outsider }
+    ])
+    expect(structuredMentionOptions(catalog, '', true)).toEqual([
+      { kind: 'back_to_camp' }, { kind: 'member', member: outsider }
+    ])
+    const fullThread = Array.from({ length: 60 }, (_, index) => ({
+      ...members[0], agentId: `camp-${index}`
+    }))
+    expect(structuredMentionOptions([...fullThread, outsider], '').at(-1)).toEqual({ kind: 'invite_other' })
+    expect(structuredMentionOptions([...fullThread, outsider], '')).toHaveLength(50)
+  })
+
   it('renders the catalog-backed member avatar in the candidate UI', () => {
     const memberMarkup = renderToStaticMarkup(createElement(StructuredMentionOptionAvatar, {
       option: { kind: 'member', member: members[0] }
@@ -89,7 +123,9 @@ describe('StructuredMentionComposer V2', () => {
     expect(memberMarkup).toContain('class="member-avatar mention-avatar"')
     expect(memberMarkup).toContain('class="member-avatar-image"')
     expect(allMembersMarkup).toContain('class="mention-avatar"')
-    expect(allMembersMarkup).toContain('>@</span>')
+    expect(allMembersMarkup).toContain('data-navigation-icon="users"')
+    expect(allMembersMarkup).toContain('<circle cx="9" cy="7" r="4"')
+    expect(allMembersMarkup).not.toContain('>@</span>')
   })
 
   it('uses the catalog-backed team role as the member candidate description', () => {
@@ -101,6 +137,23 @@ describe('StructuredMentionComposer V2', () => {
     expect(structuredSkillOptions(skills, 'agent')).toEqual([skills[0]])
     expect(structuredSkillOptions(skills, '并行')).toEqual([skills[1]])
     expect(structuredSkillOptions(skills, '')).toEqual(skills)
+  })
+
+  it('uses a stable refresh failure state and English Skill menu labels', async () => {
+    await changeInterfaceLanguage(preferences, 'en')
+    const options = [{ ...skills[0], memberIds: ['agent_1'], sourceScope: 'project' as const }]
+    const render = (refreshFailed: boolean) => renderToStaticMarkup(renderSkillMenu(
+      'skill-menu', 'ready', options, members, ['provider unavailable'], refreshFailed,
+      false, undefined, 0, () => undefined, () => undefined
+    ))
+    const failed = render(true)
+    expect(failed).toContain('role="alert">Refresh failed. Current display shows previous candidates. Please retry.')
+    expect(failed).not.toContain('Some sources are temporarily unavailable')
+    expect(failed).toContain('aria-label="/analyze-agent-codebase, Project Skill, linked teammate: 新洛可"')
+    expect(failed).not.toContain('，')
+    const partial = render(false)
+    expect(partial).toContain('Some sources are temporarily unavailable')
+    expect(partial).not.toContain('Refresh failed.')
   })
 
   it('orders keyboard selection to match the Toolbox and Skills groups', () => {

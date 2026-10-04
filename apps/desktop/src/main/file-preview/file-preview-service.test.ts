@@ -50,16 +50,21 @@ async function fixture(): Promise<{
 }> {
   const root = await mkdtemp(join(tmpdir(), 'rovai-file-preview-'))
   directories.push(root)
+  // Keep the host user's home out of synthetic path-presentation assertions.
+  // Home-relative behavior is covered by tests that explicitly override this.
+  const home = await mkdtemp(join(tmpdir(), 'rovai-preview-home-'))
+  directories.push(home)
+  vi.mocked(homedir).mockReturnValue(home)
   const authority: FilePreviewSourceAuthority = {
     async resolve(request) {
       if (request.kind !== 'camp_workspace' && request.kind !== 'message_reference') return null
       return {
         kind: 'file_target',
-        campId: request.campId,
+        threadId: request.threadId,
         sourceKind: request.kind,
         sourceIdentity: request.kind === 'message_reference'
           ? `message:${request.messageId}`
-          : `${request.campId}:${request.rawReference}`,
+          : `${request.threadId}:${request.rawReference}`,
         rootPath: root,
         basePath: root,
         rawReference: request.rawReference,
@@ -82,12 +87,12 @@ async function fixture(): Promise<{
   })
   const service = new FilePreviewService(authority, native, registry)
   services.push(service)
-  await service.bindCamp(1, 'camp-1')
+  await service.bindThread(1, 'camp-1')
   return { root, authority, native, openPath, registry, service }
 }
 
 function request(rawReference: string): OpenFilePreviewRequest {
-  return { kind: 'camp_workspace', campId: 'camp-1', rawReference }
+  return { kind: 'camp_workspace', threadId: 'camp-1', rawReference }
 }
 
 describe('FilePreviewService', () => {
@@ -101,7 +106,7 @@ describe('FilePreviewService', () => {
       if (!result.ok || result.value.kind !== 'file_preview') throw new Error('expected file')
       files.push(result.value.file)
     }
-    await service.updateRetention(1, { sessions: [{ campId: 'camp-1', previewSessionId: 'session-1' }],
+    await service.updateRetention(1, { sessions: [{ threadId: 'camp-1', previewSessionId: 'session-1' }],
       handles: files.map((file, i) => ({ handleId: file.handleId, previewSessionId: 'session-1', tabId: `${i}`,
         lastUsed: i, visible: i === 0, busy: i === 1, recoverable: true })) })
     // Background I/O does not promote the user-action order.
@@ -115,7 +120,7 @@ describe('FilePreviewService', () => {
     expect((await service.readText(1, { handleId: files[1].handleId, expectedGeneration: files[1].contentGeneration })).ok).toBe(true)
   })
 
-  it('retains Markdown resource tokens across Camp switches, idle descriptor retirement and failed refresh candidates', async () => {
+  it('retains Markdown resource tokens across Thread switches, idle descriptor retirement and failed refresh candidates', async () => {
     const { root, service } = await fixture()
     await writeFile(join(root, 'notes.md'), '![image](image.svg)')
     await writeFile(join(root, 'image.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
@@ -125,7 +130,7 @@ describe('FilePreviewService', () => {
     const prepared = await service.prepareHtml(1, { handleId: file.handleId, expectedGeneration: file.contentGeneration })
     if (!prepared.ok) throw new Error('expected markdown')
     const url = `rovai-preview://asset/${prepared.value.tabToken}/image.svg`
-    await service.bindCamp(1, 'camp-2')
+    await service.bindThread(1, 'camp-2')
     expect(service.authorizeHtmlAsset(1, 'GET', url)).toBe(true)
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 60 * 60 * 1000)
@@ -171,7 +176,7 @@ describe('FilePreviewService', () => {
     expect(denied.body).not.toContain('test-only')
   })
 
-  it('binds HTTP preview sites to the existing handle, generation, window and Camp lifetime', async () => {
+  it('binds HTTP preview sites to the existing handle, generation, window and Thread lifetime', async () => {
     const { root, service } = await fixture()
     await writeFile(join(root, 'index.html'), '<h1>site</h1>')
     const opened = await service.open(1, request('index.html?tab=all#focus'))
@@ -193,7 +198,7 @@ describe('FilePreviewService', () => {
     const next = await service.prepareHtmlSite(1,{handleId:reloaded.value.handleId,expectedGeneration:reloaded.value.contentGeneration})
     if (!next.ok) throw new Error('expected fresh site')
     expect(next.value.origin).not.toBe(prepared.value.origin)
-    await service.bindCamp(1,'camp-2')
+    await service.bindThread(1,'camp-2')
     expect(service.ownsHtmlPreviewOrigin(1,next.value.entryUrl)).toBe(true)
     await service.release(1, { handleId: reloaded.value.handleId })
     expect(service.ownsHtmlPreviewOrigin(1,next.value.entryUrl)).toBe(false)
@@ -211,7 +216,7 @@ describe('FilePreviewService', () => {
     try {
       const prepared = await service.prepareHtmlSite(1, { handleId: opened.value.file.handleId, expectedGeneration: opened.value.file.contentGeneration })
       if (!prepared.ok) throw new Error('expected site')
-      await service.bindCamp(1, 'camp-2')
+      await service.bindThread(1, 'camp-2')
       await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000)
       expect(service.ownsHtmlPreviewOrigin(1, prepared.value.entryUrl)).toBe(true)
       await service.release(1, { handleId: opened.value.file.handleId })
@@ -267,14 +272,14 @@ describe('FilePreviewService', () => {
     let canShowPath = true
     const authority = new CoreFilePreviewSourceAuthority({
       async request<T>(method: string, params: unknown): Promise<T> {
-        if (method === 'camp.attachments.desktopOpenTarget') return {
+        if (method === 'thread.attachments.desktopOpenTarget') return {
           attachmentId, displayName: basename(source), kind: 'file', mediaType: 'text/plain',
           path: source, openRisk: 'normal', canShowPath
         } as T
         expect(method).toBe('filePreview.resolveSource')
         const request = params as Extract<OpenFilePreviewRequest, { kind: 'camp_workspace' }>
         return (hasWorkspace ? {
-          kind: 'file_target', campId: request.campId, sourceKind: 'camp_workspace',
+          kind: 'file_target', threadId: request.threadId, sourceKind: 'camp_workspace',
           sourceIdentity: 'workspace:camp-1', rootPath: project, basePath: project,
           rawReference: request.rawReference, allowChildren: true
         } : null) as T
@@ -282,10 +287,10 @@ describe('FilePreviewService', () => {
     })
     const service = new FilePreviewService(authority, native, registry)
     services.push(service)
-    await service.bindCamp(2, 'camp-1')
+    await service.bindThread(2, 'camp-1')
     const request: OpenFilePreviewRequest = {
-      kind: 'attachment', campId: 'camp-1',
-      locator: { owner: 'message', campId: 'camp-1', messageId: 'first-message', attachmentRefId: attachmentId }
+      kind: 'attachment', threadId: 'camp-1',
+      locator: { owner: 'message', threadId: 'camp-1', messageId: 'first-message', attachmentRefId: attachmentId }
     }
     const result = await service.open(2, request)
     expect(result).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
@@ -307,8 +312,8 @@ describe('FilePreviewService', () => {
     canShowPath = true
     expect(file.capabilities).toContain('read_child')
     expect(native.selectRoot).not.toHaveBeenCalled()
-    await service.bindCamp(2, 'camp-2')
-    await service.bindCamp(2, 'camp-1')
+    await service.bindThread(2, 'camp-2')
+    await service.bindThread(2, 'camp-1')
     expect(await service.restore(2, request)).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
       pathPresentation: presentation, displayPath
     } } })
@@ -322,7 +327,7 @@ describe('FilePreviewService', () => {
       const path = join(root, 'tests', 'test_accrual_supporting_audit_script.py')
       await writeFile(path, 'assert True')
       const originalRequest: OpenFilePreviewRequest = {
-        kind: 'message_reference', campId: 'camp-1', messageId: 'message-1',
+        kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1',
         rawReference: 'tests/test_accrual_supporting_audit_script.py:'
       }
       const resolveSource = vi.spyOn(authority, 'resolve')
@@ -417,7 +422,7 @@ describe('FilePreviewService', () => {
     const resolveSource = vi.spyOn(authority, 'resolve')
     for (const rawReference of ['~/Downloads/', downloads, pathToFileURL(downloads).href, bundle]) {
       const input: OpenFilePreviewRequest = {
-        kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference
+        kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference
       }
       expect(await service.open(1, input)).toMatchObject({ ok: true, value: { kind: 'opened_in_system' } })
       expect(resolveSource).toHaveBeenLastCalledWith(input)
@@ -450,7 +455,7 @@ describe('FilePreviewService', () => {
     await service.closeAll()
   })
 
-  it('does not reveal missing, escaped, or inactive-Camp directories', async () => {
+  it('does not reveal missing, escaped, or inactive-Thread directories', async () => {
     const { root, service, native } = await fixture()
     const outside = await mkdtemp(join(tmpdir(), 'rovai-preview-directory-outside-'))
     directories.push(outside)
@@ -459,7 +464,7 @@ describe('FilePreviewService', () => {
     for (const path of ['outside', join(root, 'outside'), join(await realpath(root), 'outside')]) {
       expect(await service.open(1, request(path))).toMatchObject({ ok: false, error: { code: 'authorization_required' } })
     }
-    await service.bindCamp(1, 'camp-2')
+    await service.bindThread(1, 'camp-2')
     expect(await service.open(1, request(root))).toMatchObject({ ok: false })
     expect(native.revealPath).not.toHaveBeenCalled()
     await service.closeAll()
@@ -468,15 +473,15 @@ describe('FilePreviewService', () => {
   it.each(['attachment', 'run_evidence', 'run_activity_file'] as const)('does not reveal a directory from %s', async (kind) => {
     const { root, service, authority, native } = await fixture()
     vi.spyOn(authority, 'resolve').mockResolvedValue({
-      kind: 'file_target', campId: 'camp-1', sourceKind: kind, sourceIdentity: 'source-1',
+      kind: 'file_target', threadId: 'camp-1', sourceKind: kind, sourceIdentity: 'source-1',
       rootPath: root, basePath: root, allowChildren: kind !== 'attachment',
       ...(kind === 'attachment' ? { candidatePath: root } : { rawReference: root })
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
-      ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
+      ? { kind, threadId: 'camp-1', locator: { owner: 'message', threadId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
       : kind === 'run_evidence'
-        ? { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
-        : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceId: 'evidence-1', rawReference: root }
+        ? { kind, threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
+        : { kind, threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceId: 'evidence-1', rawReference: root }
     expect(await service.open(1, input)).toMatchObject({ ok: false, error: { code: 'not_regular_file' } })
     expect(native.revealPath).not.toHaveBeenCalled()
   })
@@ -530,10 +535,10 @@ describe('FilePreviewService', () => {
     await writeFile(join(root, 'src', 'app.ts'), 'const value = 1')
     const resolveSource = vi.spyOn(authority, 'resolve')
     const firstRequest: OpenFilePreviewRequest = {
-      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: 'src/app.ts:1'
+      kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference: 'src/app.ts:1'
     }
     const secondRequest: OpenFilePreviewRequest = {
-      kind: 'message_reference', campId: 'camp-1', messageId: 'message-2', rawReference: './src/app.ts:20'
+      kind: 'message_reference', threadId: 'camp-1', messageId: 'message-2', rawReference: './src/app.ts:20'
     }
     try {
       const first = await service.open(1, firstRequest)
@@ -564,14 +569,14 @@ describe('FilePreviewService', () => {
     }
   })
 
-  it('keeps different files, windows and Camps distinct while preserving identity after a disk update', async () => {
+  it('keeps different files, windows and Threads distinct while preserving identity after a disk update', async () => {
     const { root, service } = await fixture()
     await mkdir(join(root, 'first'))
     await mkdir(join(root, 'second'))
     await writeFile(join(root, 'first', 'app.ts'), 'first')
     await writeFile(join(root, 'second', 'app.ts'), 'second')
-    const openKey = async (windowId: number, campId: string, rawReference: string): Promise<string> => {
-      const opened = await service.open(windowId, { kind: 'camp_workspace', campId, rawReference })
+    const openKey = async (windowId: number, threadId: string, rawReference: string): Promise<string> => {
+      const opened = await service.open(windowId, { kind: 'camp_workspace', threadId, rawReference })
       if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('Expected a preview')
       return opened.value.file.previewKey
     }
@@ -580,9 +585,9 @@ describe('FilePreviewService', () => {
       expect(await openKey(1, 'camp-1', 'second/app.ts')).not.toBe(original)
       await writeFile(join(root, 'first', 'app.ts'), 'updated first file')
       expect(await openKey(1, 'camp-1', './first/app.ts:20')).toBe(original)
-      await service.bindCamp(2, 'camp-1')
+      await service.bindThread(2, 'camp-1')
       expect(await openKey(2, 'camp-1', 'first/app.ts')).not.toBe(original)
-      await service.bindCamp(1, 'camp-2')
+      await service.bindThread(1, 'camp-2')
       expect(await openKey(1, 'camp-2', 'first/app.ts')).not.toBe(original)
     } finally {
       await service.closeAll()
@@ -704,7 +709,7 @@ describe('FilePreviewService', () => {
     expect(service.handleCount).toBe(1)
   })
 
-  it('retains an in-flight file open across Camp switches', async () => {
+  it('retains an in-flight file open across Thread switches', async () => {
     const { root, service, authority, native } = await fixture()
     await writeFile(join(root, 'notes.txt'), 'notes')
     type AuthorityResult = Awaited<ReturnType<FilePreviewSourceAuthority['resolve']>>
@@ -716,11 +721,11 @@ describe('FilePreviewService', () => {
 
     const opening = service.open(1, request('notes.txt'))
     await vi.waitFor(() => expect(resolveSource).toHaveBeenCalledOnce())
-    await service.bindCamp(1, 'camp-2')
-    await service.bindCamp(1, 'camp-1')
+    await service.bindThread(1, 'camp-2')
+    await service.bindThread(1, 'camp-1')
     completeAuthority({
       kind: 'file_target',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       sourceKind: 'camp_workspace',
       sourceIdentity: 'camp-1:notes.txt',
       rootPath: root,
@@ -735,7 +740,7 @@ describe('FilePreviewService', () => {
     expect(native.openPath).not.toHaveBeenCalled()
   })
 
-  it('rechecks the Camp generation after native confirmation before opening', async () => {
+  it('rechecks the Thread generation after native confirmation before opening', async () => {
     const { root, service, native, openPath } = await fixture()
     await writeFile(join(root, 'installer.exe'), new Uint8Array([0, 1, 2]))
     let completeConfirmation!: (confirmed: boolean) => void
@@ -745,8 +750,8 @@ describe('FilePreviewService', () => {
 
     const opening = service.open(1, request('installer.exe'))
     await vi.waitFor(() => expect(native.confirmOpen).toHaveBeenCalledOnce())
-    await service.bindCamp(1, 'camp-2')
-    await service.bindCamp(1, 'camp-1')
+    await service.bindThread(1, 'camp-2')
+    await service.bindThread(1, 'camp-1')
     completeConfirmation(true)
 
     expect(await opening).toMatchObject({ ok: false, error: { code: 'open_failed' } })
@@ -763,8 +768,8 @@ describe('FilePreviewService', () => {
     vi.mocked(homedir).mockReturnValue(outside)
     const requests: OpenFilePreviewRequest[] = [
       request(outsideFile),
-      { kind: 'message_reference', campId: 'camp-1', messageId: 'message-file-uri', rawReference: pathToFileURL(outsideFile).href },
-      { kind: 'message_reference', campId: 'camp-1', messageId: 'message-home', rawReference: '~/notes.txt' }
+      { kind: 'message_reference', threadId: 'camp-1', messageId: 'message-file-uri', rawReference: pathToFileURL(outsideFile).href },
+      { kind: 'message_reference', threadId: 'camp-1', messageId: 'message-home', rawReference: '~/notes.txt' }
     ]
 
     for (const input of requests) {
@@ -797,15 +802,15 @@ describe('FilePreviewService', () => {
     await writeFile(join(root, 'notes.txt'), 'wrong root')
     await writeFile(outsideFile, kind)
     vi.spyOn(authority, 'resolve').mockResolvedValue({
-      kind: 'file_target', campId: 'camp-1', sourceKind: kind, sourceIdentity: `${kind}-source`,
+      kind: 'file_target', threadId: 'camp-1', sourceKind: kind, sourceIdentity: `${kind}-source`,
       rootPath: root, basePath: root, allowChildren: kind !== 'attachment',
       ...(kind === 'attachment' ? { candidatePath: outsideFile } : { rawReference: outsideFile })
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
-      ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
+      ? { kind, threadId: 'camp-1', locator: { owner: 'message', threadId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
       : kind === 'run_evidence'
-        ? { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
-        : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceId: 'evidence-1', rawReference: outsideFile }
+        ? { kind, threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
+        : { kind, threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceId: 'evidence-1', rawReference: outsideFile }
 
     const opened = await service.open(1, input)
     const expectedDisplayPath = kind === 'attachment' ? 'notes.txt' : await realpath(outsideFile)
@@ -845,7 +850,7 @@ describe('FilePreviewService', () => {
       if (input.kind !== 'run_evidence') return null
       const rawReference = input.evidenceFileId === 'added' ? 'src/added.txt' : 'src/same.txt'
       return {
-        kind: 'file_target', campId: 'camp-1', sourceKind: 'run_evidence',
+        kind: 'file_target', threadId: 'camp-1', sourceKind: 'run_evidence',
         sourceIdentity: `run-evidence:run-1:1:${input.evidenceFileId}`,
         rootPath: executionRoot, basePath: executionRoot, rawReference, allowChildren: true
       }
@@ -853,7 +858,7 @@ describe('FilePreviewService', () => {
 
     for (const [evidenceFileId, expected] of [['added', 'new in mission'], ['same', 'mission worktree']] as const) {
       const opened = await service.open(1, {
-        kind: 'run_evidence', campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1,
+        kind: 'run_evidence', threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1,
         evidenceFileId, action: 'open_current'
       })
       expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
@@ -879,14 +884,14 @@ describe('FilePreviewService', () => {
     await writeFile(join(executionRoot, 'src', 'generated.txt'), 'mission worktree')
     vi.spyOn(authority, 'resolve').mockImplementation(async (input) => input.kind === 'run_activity_file'
       ? {
-          kind: 'file_target', campId: input.campId, sourceKind: input.kind,
+          kind: 'file_target', threadId: input.threadId, sourceKind: input.kind,
           sourceIdentity: `run-activity-file:${input.agentRunId}:${input.executionEpoch}:${input.evidenceId}`,
           rootPath: executionRoot, basePath: executionRoot, rawReference: input.rawReference, allowChildren: true
         }
       : null)
     const input = {
       kind: 'run_activity_file' as const,
-      campId: 'camp-1',
+      threadId: 'camp-1',
       agentRunId: 'run-1',
       executionEpoch: 1,
       evidenceId: 'evidence-1',
@@ -918,7 +923,7 @@ describe('FilePreviewService', () => {
     if (opened.ok || !opened.error.authorizationChallenge) return
 
     const granted = await service.chooseAuthorizedRoot(1, {
-      campId: 'camp-1',
+      threadId: 'camp-1',
       pendingOpenId: opened.error.authorizationChallenge.pendingOpenId
     })
     expect(granted.ok).toBe(true)
@@ -997,7 +1002,7 @@ describe('FilePreviewService', () => {
     await service.open(1, request('two.txt'))
     expect(service.handleCount).toBe(2)
     expect(registry.rootCount).toBe(1)
-    await service.bindCamp(1, 'camp-2')
+    await service.bindThread(1, 'camp-2')
     expect(service.handleCount).toBe(2)
     expect(registry.rootCount).toBe(1)
     await service.updateRetention(1, { sessions: [], handles: [] })
@@ -1005,7 +1010,7 @@ describe('FilePreviewService', () => {
     expect(registry.rootCount).toBe(0)
   })
 
-  it('shows the actual managed attachment path and releases it before Camp deletion', async () => {
+  it('shows the actual managed attachment path and releases it before Thread deletion', async () => {
     const { root, native, registry } = await fixture()
     const file = join(root, 'payload.md')
     await writeFile(file, 'attachment')
@@ -1020,10 +1025,10 @@ describe('FilePreviewService', () => {
       }
     })
     const service = new FilePreviewService(authority, native, registry)
-    await service.bindCamp(1, 'camp-1')
+    await service.bindThread(1, 'camp-1')
     const opened = await service.open(1, {
-      kind: 'attachment', campId: 'camp-1',
-      locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' }
+      kind: 'attachment', threadId: 'camp-1',
+      locator: { owner: 'message', threadId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' }
     })
     expect(opened.ok && opened.value.kind === 'file_preview').toBe(true)
     expect(opened.ok && opened.value.kind === 'file_preview'
@@ -1040,13 +1045,13 @@ describe('FilePreviewService', () => {
       expect(await service.copyPath(1, { handleId: file.handleId, format: 'display' })).toMatchObject({ ok: true })
       expect(native.copyText).toHaveBeenCalledWith(await realpath(join(root, 'payload.md')))
     }
-    await service.releaseCamp('camp-1')
+    await service.releaseThread('camp-1')
     expect(service.handleCount).toBe(0)
     expect(registry.rootCount).toBe(0)
     await service.closeAll()
   })
 
-  it('restores a project child independently after its parent is deleted and the Camp changes', async () => {
+  it('restores a project child independently after its parent is deleted and the Thread changes', async () => {
     const { root, service, authority } = await fixture()
     const docs = join(root, 'docs')
     await mkdir(docs)
@@ -1065,19 +1070,19 @@ describe('FilePreviewService', () => {
       allowSystemOpen: true
     })
     expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
-      restoreRequest: { kind: 'camp_workspace', campId: 'camp-1', rawReference: 'docs/design.md' }
+      restoreRequest: { kind: 'camp_workspace', threadId: 'camp-1', rawReference: 'docs/design.md' }
     } } })
     if (!child.ok || child.value.kind !== 'file_preview' || !child.value.file.restoreRequest) {
       throw new Error('Expected an independently restorable child')
     }
     expect(resolveSource).toHaveBeenCalledWith({
-      kind: 'camp_workspace', campId: 'camp-1', rawReference: '.'
+      kind: 'camp_workspace', threadId: 'camp-1', rawReference: '.'
     })
 
     await service.release(1, { handleId: parent.value.file.handleId })
     await rm(parentPath)
-    await service.bindCamp(1, 'camp-2')
-    await service.bindCamp(1, 'camp-1')
+    await service.bindThread(1, 'camp-2')
+    await service.bindThread(1, 'camp-1')
     const restored = await service.restore(1, child.value.file.restoreRequest)
     expect(restored).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
       displayPath: 'docs/design.md', pathPresentation: 'project_relative', fileName: 'design.md'
@@ -1089,8 +1094,8 @@ describe('FilePreviewService', () => {
     })).toMatchObject({ ok: true, value: { text: '# Design' } })
 
     await rm(join(docs, 'design.md'))
-    await service.bindCamp(1, 'camp-2')
-    await service.bindCamp(1, 'camp-1')
+    await service.bindThread(1, 'camp-2')
+    await service.bindThread(1, 'camp-1')
     expect(await service.restore(1, child.value.file.restoreRequest)).toMatchObject({
       ok: false,
       error: { code: 'file_not_found' }
@@ -1117,10 +1122,10 @@ describe('FilePreviewService', () => {
     if (!grandchild.ok || grandchild.value.kind !== 'file_preview') throw new Error('Expected C preview')
 
     expect(child.value.file.restoreRequest).toEqual({
-      kind: 'camp_workspace', campId: 'camp-1', rawReference: 'docs/B.md'
+      kind: 'camp_workspace', threadId: 'camp-1', rawReference: 'docs/B.md'
     })
     expect(grandchild.value.file.restoreRequest).toEqual({
-      kind: 'camp_workspace', campId: 'camp-1', rawReference: 'docs/C.md'
+      kind: 'camp_workspace', threadId: 'camp-1', rawReference: 'docs/C.md'
     })
   })
 
@@ -1141,18 +1146,18 @@ describe('FilePreviewService', () => {
 
     expect(child.value.file.restoreRequest).toEqual({
       kind: 'camp_workspace',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'docs/design%20%28draft%29%231.md'
     })
-    await service.bindCamp(1, 'camp-2')
-    await service.bindCamp(1, 'camp-1')
+    await service.bindThread(1, 'camp-2')
+    await service.bindThread(1, 'camp-1')
     expect(await service.restore(1, child.value.file.restoreRequest)).toMatchObject({
       ok: true,
       value: { kind: 'file_preview', file: { displayPath: 'docs/design (draft)#1.md' } }
     })
   })
 
-  it('rechecks the Camp generation after resolving a child workspace restore source', async () => {
+  it('rechecks the Thread generation after resolving a child workspace restore source', async () => {
     const { root, service, authority } = await fixture()
     await writeFile(join(root, 'README.md'), '[Notes](notes.md)')
     await writeFile(join(root, 'notes.md'), 'notes')
@@ -1170,14 +1175,14 @@ describe('FilePreviewService', () => {
       rawReference: 'notes.md', allowSystemOpen: true
     })
     await vi.waitFor(() => expect(resolveSource).toHaveBeenCalledWith({
-      kind: 'camp_workspace', campId: 'camp-1', rawReference: '.'
+      kind: 'camp_workspace', threadId: 'camp-1', rawReference: '.'
     }))
     await service.updateRetention(1, { sessions: [], handles: [] })
-    await service.bindCamp(1, 'camp-2')
-    await service.bindCamp(1, 'camp-1')
+    await service.bindThread(1, 'camp-2')
+    await service.bindThread(1, 'camp-1')
     completeAuthority({
-      kind: 'file_target', campId: 'camp-1', sourceKind: 'camp_workspace',
-      sourceIdentity: 'camp:camp-1', rootPath: root, basePath: root,
+      kind: 'file_target', threadId: 'camp-1', sourceKind: 'camp_workspace',
+      sourceIdentity: 'thread:camp-1', rootPath: root, basePath: root,
       rawReference: '.', allowChildren: true
     })
 

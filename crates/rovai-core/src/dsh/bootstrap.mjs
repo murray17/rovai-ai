@@ -70,7 +70,7 @@ export async function apply(ctx, config) {
     const turn = event.type === 'compaction/summary' ? compactionTurns.get(compactionKey) : event.data.turn
     if (event.type === 'compaction/summary' && !Number.isSafeInteger(turn)) return
     const usage = {}
-    for (const field of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens']) {
+    for (const field of ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens']) {
       const value = event.data.usage[field]
       if (Number.isSafeInteger(value) && value >= 0) usage[field] = value
     }

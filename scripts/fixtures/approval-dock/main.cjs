@@ -163,13 +163,76 @@ app.whenReady().then(async () => {
     await run('window.approvalTest.manyOptions()')
     state = await snapshot()
     assert.equal(state.labels.length, 12)
-    const wheelPoint = await run("(() => { const r=document.querySelector('.runtime-option').getBoundingClientRect(); return { x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2) } })()")
-    window.webContents.sendInputEvent({ type: 'mouseWheel', ...wheelPoint, deltaY: -10000, deltaX: 0, canScroll: true })
-    await run('new Promise(resolve => setTimeout(resolve, 250))')
-    assert.ok(await run("(() => { const button=document.querySelector('.runtime-option:last-child'); const r=button.getBoundingClientRect(); return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===button })()"), 'The last native option remains reachable by user scrolling')
+    const wheelPoint = await run("(() => { const r=document.querySelector('.approval-dock-scroll').getBoundingClientRect(); return { x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2) } })()")
+    const scrollBefore = await run(`(() => { const node=document.querySelector('.approval-dock-scroll'); return { top:node.scrollTop, height:node.clientHeight, content:node.scrollHeight, bounds:node.getBoundingClientRect().toJSON(), hit:document.elementFromPoint(${wheelPoint.x},${wheelPoint.y})?.className } })()`)
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...wheelPoint })
+    for (let wheel = 0; wheel < 2; wheel++) {
+      window.webContents.sendInputEvent({ type: 'mouseWheel', ...wheelPoint, deltaY: -10000, deltaX: 0, canScroll: true })
+      await run('new Promise(resolve => setTimeout(resolve, 250))')
+    }
+    const scrollAfter = await run("document.querySelector('.approval-dock-scroll').scrollTop")
+    assert.ok(await run("(() => { const button=document.querySelector('.runtime-option:last-child'); const r=button.getBoundingClientRect(); return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===button })()"), `The last native option remains reachable by user scrolling: ${JSON.stringify({ wheelPoint, scrollBefore, scrollAfter })}`)
     state = await click('.runtime-option:last-child')
     assert.deepEqual(state.requests[1], { approvalId: 'approval-2', optionId: 'extended-11', version: 2 })
-    console.log(JSON.stringify({ ok: true, cases: ['native labels/order/optionId', 'queue keyboard boundaries', 'summary focus', 'refresh focus', 'exact reason dedup', 'resize without rerender', 'approval identity', 'day/night', '1040×700', '420px conversation', 'complete command', '375/390/430px mobile', 'landscape/reduced viewport', '44px targets', 'scrolling long option lists'] }))
+
+    // Change language on an already mounted Dock. Only Core-owned copy is localized.
+    for (const source of ['core', 'claude', 'claude-remember', 'native']) {
+      await run(`window.approvalTest.setOptionsSource(${JSON.stringify(source)})`)
+      await run("window.approvalTest.setLanguage('zh-CN')")
+      state = await snapshot()
+      const nativeClaude = source.startsWith('claude')
+      const rememberLabels = source === 'claude-remember' ? ['Yes, and don’t ask again for: rovai send *'] : []
+      const chineseLabels = nativeClaude ? ['No', 'Yes', ...rememberLabels] : ['拒绝', '允许一次']
+      assert.deepEqual(state.labels, chineseLabels)
+      const identities = { optionIds: state.optionIds, nativeResponseDigests: state.nativeResponseDigests }
+      await run("window.approvalTest.setLanguage('en')")
+      state = await snapshot()
+      const labels = source === 'core' ? ['Reject', 'Allow once'] : chineseLabels
+      assert.deepEqual(state.labels, labels, 'Runtime choices keep their native labels in both languages')
+      assert.deepEqual({ optionIds: state.optionIds, nativeResponseDigests: state.nativeResponseDigests }, identities)
+      assert.deepEqual(state.titles, labels)
+      assert.deepEqual(state.accessibleLabels, labels)
+      assert.equal(state.summary, '允许一次', 'Request summaries remain verbatim')
+      assert.equal(state.reason, '拒绝', 'Request reasons remain verbatim')
+      assert.equal(state.codeText, state.expectedCode)
+      assert.equal(state.consequenceVisible, false)
+      assert.equal(state.configurationVisible, false, 'Approval choices do not expose configuration destinations or filenames')
+      assert.equal(state.pageOverflow, false)
+      await capture(`approval-language-${source}`)
+      await run("window.approvalTest.setLanguage('zh-CN')")
+      assert.deepEqual((await snapshot()).labels, chineseLabels)
+      await run("window.approvalTest.setLanguage('en')")
+      const optionId = source === 'core' ? 'core.deny' : source === 'claude-remember' ? 'claude.allow_remember.rule-digest' : 'claude.allow_once'
+      state = await click(`[data-option-id="${optionId}"]`)
+      assert.deepEqual(state.requests, [{ approvalId: 'approval-1', optionId, version: 1 }])
+      assert.ok(state.disabled)
+    }
+    await run("window.approvalTest.setOptionsSource('claude-remember'); document.documentElement.dataset.theme='day'")
+    for (const [width, height, mobile, rows] of [[1440, 920, false, 1], [375, 812, true, 2], [430, 932, true, 1]]) {
+      await run(`window.approvalTest.setMobile(${mobile}); window.approvalTest.setWidth(1200)`)
+      await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile })
+      state = await snapshot()
+      assert.equal(new Set(state.optionBounds.map(bounds => Math.round(bounds.y))).size, rows, 'Native choices share one row when they fit and wrap to two when needed')
+      assert.deepEqual(state.labels, ['No', 'Yes', 'Yes, and don’t ask again for: rovai send *'])
+      assert.equal(state.configurationVisible, false)
+      assert.equal(state.pageOverflow, false)
+      if (mobile) assert.ok(state.touchTargets.every(target => target.width >= 44 && target.height >= 44))
+      await capture(`approval-claude-inline-${width}`)
+    }
+    await run('window.approvalTest.longRememberRule()')
+    for (const [width, height, mobile] of [[1040, 700, false], [375, 812, true], [430, 932, true]]) {
+      await run(`window.approvalTest.setMobile(${mobile})`)
+      await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile })
+      state = await snapshot()
+      assert.equal(state.pageOverflow, false, 'Complete native rule labels wrap without page overflow')
+      assert.ok(state.labels[2].endsWith('/a-long-project-directory'.repeat(12) + '/*'))
+      assert.equal(state.accessibleLabels[2], state.labels[2])
+      assert.equal(state.configurationVisible, false)
+      assert.equal(new Set(state.optionBounds.map(bounds => Math.round(bounds.y))).size, 2)
+      if (mobile) assert.ok(state.touchTargets.every(target => target.width >= 44 && target.height >= 44))
+      await capture(`approval-remember-long-${width}`)
+    }
+    console.log(JSON.stringify({ ok: true, cases: ['native labels/order/optionId', 'queue keyboard boundaries', 'summary focus', 'refresh focus', 'exact reason dedup', 'resize without rerender', 'approval identity', 'day/night', '1040×700', '420px conversation', 'complete command', '375/390/430px mobile', 'landscape/reduced viewport', '44px targets', 'scrolling long option lists', 'live language changes', 'Core-owned approval labels', 'native Claude English in both languages', 'native text preservation', 'decision identity', 'configuration details hidden', 'one row when choices fit', 'two rows when needed', 'long remember rule accessibility/wrapping'] }))
     window.destroy(); app.quit()
   } catch (error) {
     console.error(await snapshot())

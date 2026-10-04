@@ -116,9 +116,9 @@ try {
     address: { mode: 'explicit', agentIds: ['agent_2'] },
     purpose: 'Exercise one exact Rovai-ai Action Approval and then report success',
   })
-  const campId = result.payload?.campId
+  const threadId = result.payload?.threadId
   const agentRunId = result.payload?.agentRunIds?.[0]
-  if (result.status !== 'accepted' || !campId || !agentRunId) {
+  if (result.status !== 'accepted' || !threadId || !agentRunId) {
     throw new Error(`Action smoke was not accepted: ${JSON.stringify(result)}`)
   }
 
@@ -126,7 +126,7 @@ try {
   let snapshot
   const deadline = Date.now() + 240_000
   while (Date.now() < deadline) {
-    snapshot = await request('camps.snapshot', { campId })
+    snapshot = await request('camps.snapshot', { threadId })
     for (const approval of snapshot.approvals.filter((candidate) =>
       candidate.status === 'pending'
         && !resolvedApprovals.has(candidate.id)
@@ -144,7 +144,7 @@ try {
       }
       const resolution = await request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
-        campId,
+        threadId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId: option.optionId,

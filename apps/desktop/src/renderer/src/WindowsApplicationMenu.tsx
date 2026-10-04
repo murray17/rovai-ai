@@ -3,6 +3,7 @@ import type {
   WindowsApplicationMenuPopupRequest,
   WindowsApplicationMenuSection
 } from '@contracts'
+import { uiAttribute } from './interface-language'
 
 const WINDOWS_APPLICATION_MENU_ITEMS: ReadonlyArray<{
   section: WindowsApplicationMenuSection
@@ -59,7 +60,7 @@ export function WindowsApplicationMenu(): React.JSX.Element {
   return (
     <div className="windows-application-menu">
       <div id="navigation-chrome-toggle-slot" className="navigation-windows-control" />
-      <div className="windows-application-menu-items" role="menubar" aria-label="应用菜单">
+      <div className="windows-application-menu-items" role="menubar" aria-label={uiAttribute("应用菜单")}>
         {WINDOWS_APPLICATION_MENU_ITEMS.map((item, index) => (
           <button
             className="windows-application-menu-item"

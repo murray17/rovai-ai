@@ -15,7 +15,7 @@ function snapshot(fileName: string): FilePreviewSessionSnapshot {
     tabs: [{
       kind: 'file',
       id: `tab-${fileName}`,
-      sourceRequest: { kind: 'camp_workspace', campId: 'camp', rawReference: fileName },
+      sourceRequest: { kind: 'camp_workspace', threadId: 'camp', rawReference: fileName },
       presentation: { fileName, displayPath: fileName, pathPresentation: 'file_name_only' }
     }],
     activeTabId: `tab-${fileName}`,
@@ -27,30 +27,30 @@ describe('file preview session identity', () => {
   it('deduplicates source locations without collapsing same-name files in different directories', () => {
     expect(filePreviewSourceKey({
       kind: 'message_reference',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       messageId: 'message-1',
       rawReference: 'src/index.ts:20-24'
     })).toBe(filePreviewSourceKey({
       kind: 'message_reference',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       messageId: 'message-1',
       rawReference: 'src/index.ts#L4'
     }))
     expect(filePreviewSourceKey({
       kind: 'camp_workspace',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'src/index.ts'
     })).not.toBe(filePreviewSourceKey({
       kind: 'camp_workspace',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'tests/index.ts'
     }))
     expect(filePreviewSourceKey({
       kind: 'attachment',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       locator: {
         owner: 'single_chat_message',
-        campId: 'camp-1',
+        threadId: 'camp-1',
         conversationId: 'conversation-1',
         conversationMessageId: 'conversation-message-1',
         attachmentRefId: '8b85752a-76a5-4b9d-92d8-a70b6285a0d0'
@@ -60,7 +60,7 @@ describe('file preview session identity', () => {
     )
     expect(filePreviewSourceKey({
       kind: 'run_activity_file',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       agentRunId: 'run-1',
       executionEpoch: 2,
       evidenceId: 'evidence-1',
@@ -68,15 +68,15 @@ describe('file preview session identity', () => {
     })).toBe('run-activity:camp-1:run-1:2:evidence-1:src/index.ts')
   })
 
-  it('keeps only business sources that can be revalidated after a Camp switch', () => {
+  it('keeps only business sources that can be revalidated after a Thread switch', () => {
     expect(restorableFilePreviewRequest({
       kind: 'camp_workspace',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'README.md'
     })).not.toBeNull()
     expect(restorableFilePreviewRequest({
       kind: 'run_activity_file',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       agentRunId: 'run-1',
       executionEpoch: 2,
       evidenceId: 'evidence-1',
@@ -89,7 +89,7 @@ describe('file preview session identity', () => {
     })).toBeNull()
     expect(restorableFilePreviewRequest({
       kind: 'authorized_root',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rootGrantId: 'grant-1',
       rawReference: 'child.md'
     })).toBeNull()
@@ -103,7 +103,7 @@ describe('file preview session identity', () => {
     }
     const restoreRequest = {
       kind: 'camp_workspace' as const,
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'docs/design.md'
     }
 
@@ -126,7 +126,7 @@ describe('file preview session identity', () => {
   it('keeps an existing stable source when a later temporary child request resolves to the same file', () => {
     const stableRequest = {
       kind: 'camp_workspace' as const,
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'docs/design.md'
     }
     const childRequest = {
@@ -156,13 +156,13 @@ describe('file preview session identity', () => {
     const presentation = { displayPath: 'docs/design.md', pathPresentation: 'project_relative' as const }
     const messageRequest = {
       kind: 'message_reference' as const,
-      campId: 'camp-1',
+      threadId: 'camp-1',
       messageId: 'message-1',
       rawReference: './docs/design.md'
     }
     const workspaceRequest = {
       kind: 'camp_workspace' as const,
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: './docs/design.md'
     }
 
@@ -187,7 +187,7 @@ describe('file preview session identity', () => {
   it('never turns an unverified absolute reference into a displayed physical path', () => {
     expect(filePreviewPresentationFromRequest({
       kind: 'camp_workspace',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: '/Users/example/private/report.md'
     })).toEqual({
       fileName: 'report.md',
@@ -196,7 +196,7 @@ describe('file preview session identity', () => {
     })
     expect(filePreviewPresentationFromRequest({
       kind: 'camp_workspace',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'docs/report.md:42'
     })).toEqual({
       fileName: 'report.md',
@@ -207,7 +207,7 @@ describe('file preview session identity', () => {
 })
 
 describe('FilePreviewSessionStore', () => {
-  it('restores independent Camp snapshots and returns defensive copies', () => {
+  it('restores independent Thread snapshots and returns defensive copies', () => {
     const store = new FilePreviewSessionStore(3)
     store.set('camp-a', snapshot('a.md'))
     store.set('camp-b', snapshot('b.md'))
@@ -219,7 +219,7 @@ describe('FilePreviewSessionStore', () => {
     expect(store.get('camp-b')?.tabs[0]).toMatchObject({ id: 'tab-b.md' })
   })
 
-  it('bounds long-window metadata and skips the active deleted Camp cleanup save once', () => {
+  it('bounds long-window metadata and skips the active deleted Thread cleanup save once', () => {
     const store = new FilePreviewSessionStore(2)
     store.set('camp-a', snapshot('a.md'))
     store.set('camp-b', snapshot('b.md'))
@@ -234,7 +234,7 @@ describe('FilePreviewSessionStore', () => {
     expect(store.get('camp-c')?.activeTabId).toBe('tab-c.md')
   })
 
-  it('clears an inactive deleted Camp without retaining a save blocker', () => {
+  it('clears an inactive deleted Thread without retaining a save blocker', () => {
     const store = new FilePreviewSessionStore(2)
     store.set('camp-a', snapshot('a.md'))
     store.discard('camp-a')

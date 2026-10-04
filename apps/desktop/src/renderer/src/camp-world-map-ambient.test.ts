@@ -7,28 +7,28 @@ import {
   CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY,
   CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY,
   CAMP_WORLD_MAP_AMBIENT_RELAXATION_TIERS,
-  CampWorldMapAmbientScheduler,
+  ThreadWorldMapAmbientScheduler,
   campWorldMapAuthoritativeSpeechBlocksAmbient,
   campWorldMapCaption,
   campWorldMapAmbientAttemptDelay,
   campWorldMapAmbientInitialDelay,
   campWorldMapAmbientPairKey,
-  createCampWorldMapAmbientHistory,
-  recordCampWorldMapAmbientEvent,
-  selectCampWorldMapAmbientEvent,
-  type CampWorldMapAmbientDisplayedEvent,
-  type CampWorldMapAmbientParticipant,
-  type CampWorldMapAmbientRandom,
-  type CampWorldMapAmbientSchedulerClock,
-  type CampWorldMapAmbientSelection
+  createThreadWorldMapAmbientHistory,
+  recordThreadWorldMapAmbientEvent,
+  selectThreadWorldMapAmbientEvent,
+  type ThreadWorldMapAmbientDisplayedEvent,
+  type ThreadWorldMapAmbientParticipant,
+  type ThreadWorldMapAmbientRandom,
+  type ThreadWorldMapAmbientSchedulerClock,
+  type ThreadWorldMapAmbientSelection
 } from './camp-world-map-ambient'
-import { CAMP_WORLD_MAP_NODE_IDS, type CampWorldMapAgent } from './camp-world-map-model'
+import { CAMP_WORLD_MAP_NODE_IDS, type ThreadWorldMapAgent } from './camp-world-map-model'
 
 function participant(
   agentId: string,
-  nodeId: CampWorldMapAmbientParticipant['nodeId'] = 'research',
-  overrides: Partial<CampWorldMapAmbientParticipant> = {}
-): CampWorldMapAmbientParticipant {
+  nodeId: ThreadWorldMapAmbientParticipant['nodeId'] = 'research',
+  overrides: Partial<ThreadWorldMapAmbientParticipant> = {}
+): ThreadWorldMapAmbientParticipant {
   return {
     agentId,
     nodeId,
@@ -39,22 +39,22 @@ function participant(
   }
 }
 
-function queuedRandom(values: readonly number[], fallback = 0): CampWorldMapAmbientRandom & { calls: () => number } {
+function queuedRandom(values: readonly number[], fallback = 0): ThreadWorldMapAmbientRandom & { calls: () => number } {
   let index = 0
-  const random = (() => values[index++] ?? fallback) as CampWorldMapAmbientRandom & { calls: () => number }
+  const random = (() => values[index++] ?? fallback) as ThreadWorldMapAmbientRandom & { calls: () => number }
   random.calls = () => index
   return random
 }
 
 function select(
-  participants: readonly CampWorldMapAmbientParticipant[],
-  random: CampWorldMapAmbientRandom,
-  configure?: (history: ReturnType<typeof createCampWorldMapAmbientHistory>) => void,
+  participants: readonly ThreadWorldMapAmbientParticipant[],
+  random: ThreadWorldMapAmbientRandom,
+  configure?: (history: ReturnType<typeof createThreadWorldMapAmbientHistory>) => void,
   now = 200_000
-): CampWorldMapAmbientSelection | null {
-  const history = createCampWorldMapAmbientHistory()
+): ThreadWorldMapAmbientSelection | null {
+  const history = createThreadWorldMapAmbientHistory()
   configure?.(history)
-  return selectCampWorldMapAmbientEvent({
+  return selectThreadWorldMapAmbientEvent({
     now,
     hasAuthoritativeSpeech: false,
     participants,
@@ -62,7 +62,7 @@ function select(
   }, random)
 }
 
-describe('Camp world map ambient copy', () => {
+describe('Thread world map ambient copy', () => {
   it('keeps the accepted 120 complete sentences and category counts intact', () => {
     const ids = CAMP_WORLD_MAP_AMBIENT_BEATS.map((beat) => beat.id)
     const texts = CAMP_WORLD_MAP_AMBIENT_BEATS.map((beat) => beat.text)
@@ -112,7 +112,7 @@ describe('Camp world map ambient copy', () => {
   })
 })
 
-describe('Camp world map ambient selection', () => {
+describe('Thread world map ambient selection', () => {
   it('selects node copy below the 70% boundary and generic copy at the boundary', () => {
     const node = select([participant('alice')], queuedRandom([0.699, 0]))
     const generic = select([participant('alice')], queuedRandom([0.7, 0]))
@@ -155,26 +155,26 @@ describe('Camp world map ambient selection', () => {
   })
 
   it('enforces authoritative speech, mode, rendezvous and participant cooldown as hard constraints', () => {
-    const history = createCampWorldMapAmbientHistory()
+    const history = createThreadWorldMapAmbientHistory()
     history.participantLastShownAt.set('alice', 145_001)
-    const cooling = selectCampWorldMapAmbientEvent({
+    const cooling = selectThreadWorldMapAmbientEvent({
       now: 200_000,
       hasAuthoritativeSpeech: false,
       participants: [participant('alice')],
       history
     }, queuedRandom([0]))
     history.participantLastShownAt.set('alice', 145_000)
-    const ready = selectCampWorldMapAmbientEvent({
+    const ready = selectThreadWorldMapAmbientEvent({
       now: 200_000,
       hasAuthoritativeSpeech: false,
       participants: [participant('alice')],
       history
     }, queuedRandom([0, 0]))
-    const authoritative = selectCampWorldMapAmbientEvent({
+    const authoritative = selectThreadWorldMapAmbientEvent({
       now: 200_000,
       hasAuthoritativeSpeech: true,
       participants: [participant('alice')],
-      history: createCampWorldMapAmbientHistory()
+      history: createThreadWorldMapAmbientHistory()
     }, queuedRandom([0]))
 
     expect(cooling).toBeNull()
@@ -186,7 +186,7 @@ describe('Camp world map ambient selection', () => {
 
   it('enforces the canonical pair cooldown in addition to participant cooldown', () => {
     const configure = (pairShownAt: number) => (
-      history: ReturnType<typeof createCampWorldMapAmbientHistory>
+      history: ReturnType<typeof createThreadWorldMapAmbientHistory>
     ): void => {
       history.participantLastShownAt.set('alice', 145_000)
       history.participantLastShownAt.set('bob', 145_000)
@@ -260,11 +260,11 @@ describe('Camp world map ambient selection', () => {
   })
 
   it('writes history when displayed and does not require rollback on cancellation', () => {
-    const history = createCampWorldMapAmbientHistory()
+    const history = createThreadWorldMapAmbientHistory()
     const event = select([participant('alice')], queuedRandom([0, 0]))
     expect(event).not.toBeNull()
     if (!event) return
-    recordCampWorldMapAmbientEvent(history, event, 200_000)
+    recordThreadWorldMapAmbientEvent(history, event, 200_000)
 
     expect(history.globalBeatIds).toEqual([event.beatId])
     expect(history.nodeBeatIds.get(event.nodeId)).toEqual([event.beatId])
@@ -280,7 +280,7 @@ type FakeTimer = {
   cleared: boolean
 }
 
-class FakeClock implements CampWorldMapAmbientSchedulerClock {
+class FakeClock implements ThreadWorldMapAmbientSchedulerClock {
   nowValue = 0
   nextId = 1
   timers: FakeTimer[] = []
@@ -323,7 +323,7 @@ class FakeClock implements CampWorldMapAmbientSchedulerClock {
   }
 }
 
-const FIXED_SELECTION: CampWorldMapAmbientSelection = {
+const FIXED_SELECTION: ThreadWorldMapAmbientSelection = {
   kind: 'solo',
   beatId: 'research-01',
   topic: 'wayfinding',
@@ -333,7 +333,7 @@ const FIXED_SELECTION: CampWorldMapAmbientSelection = {
   text: '树根旁露出半块旧路标，箭头被苔藓盖住了一半。'
 }
 
-describe('Camp world map ambient scheduler', () => {
+describe('Thread world map ambient scheduler', () => {
   it('uses exact delay bounds', () => {
     expect(campWorldMapAmbientInitialDelay(() => 0)).toBe(CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY.minimum)
     expect(campWorldMapAmbientInitialDelay(() => 1)).toBe(CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY.maximum)
@@ -343,8 +343,8 @@ describe('Camp world map ambient scheduler', () => {
 
   it('schedules the first event at 6 seconds, preserves its 5.6-second display and retries every 4 seconds', () => {
     const clock = new FakeClock()
-    const events: (CampWorldMapAmbientDisplayedEvent | null)[] = []
-    const scheduler = new CampWorldMapAmbientScheduler({
+    const events: (ThreadWorldMapAmbientDisplayedEvent | null)[] = []
+    const scheduler = new ThreadWorldMapAmbientScheduler({
       clock,
       random: () => 0,
       select: () => events.at(-1) ? null : FIXED_SELECTION,
@@ -369,8 +369,8 @@ describe('Camp world map ambient scheduler', () => {
   it('waits a full subsequent interval after a no-candidate attempt or resume', () => {
     const clock = new FakeClock()
     let canSelect = false
-    const events: (CampWorldMapAmbientDisplayedEvent | null)[] = []
-    const scheduler = new CampWorldMapAmbientScheduler({
+    const events: (ThreadWorldMapAmbientDisplayedEvent | null)[] = []
+    const scheduler = new ThreadWorldMapAmbientScheduler({
       clock,
       random: () => 0,
       select: () => canSelect ? FIXED_SELECTION : null,
@@ -393,8 +393,8 @@ describe('Camp world map ambient scheduler', () => {
 
   it('rejects stale schedule and expiry callbacks after suspension or a replacement event', () => {
     const clock = new FakeClock()
-    const events: (CampWorldMapAmbientDisplayedEvent | null)[] = []
-    const scheduler = new CampWorldMapAmbientScheduler({
+    const events: (ThreadWorldMapAmbientDisplayedEvent | null)[] = []
+    const scheduler = new ThreadWorldMapAmbientScheduler({
       clock,
       random: () => 0,
       select: () => FIXED_SELECTION,
@@ -420,11 +420,11 @@ describe('Camp world map ambient scheduler', () => {
   })
 })
 
-describe('Camp world map caption arbitration', () => {
+describe('Thread world map caption arbitration', () => {
   function agent(
     agentId: string,
     kind: 'real' | 'waiting' | null
-  ): CampWorldMapAgent {
+  ): ThreadWorldMapAgent {
     return {
       agentId,
       displayName: agentId,
@@ -444,7 +444,7 @@ describe('Camp world map caption arbitration', () => {
       eventId: 'ambient-1',
       startedAt: 0,
       expiresAt: 5_600
-    } satisfies CampWorldMapAmbientDisplayedEvent
+    } satisfies ThreadWorldMapAmbientDisplayedEvent
     const encounter = {
       ...ambient,
       kind: 'encounter' as const,

@@ -1,6 +1,6 @@
 import { useEditingRecovery } from './camp-client'
 import { useMobileLayout } from './MobileLayout'
-import type { CampComposerDraftView, ComposerAtom, ComposerDocument } from '@contracts'
+import type { ThreadComposerDraftView, ComposerAtom, ComposerDocument } from '@contracts'
 import { LexicalExtensionComposer } from '@lexical/react/LexicalExtensionComposer'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
@@ -11,7 +11,8 @@ import {
   $isTextNode,
   $nodesOfType,
   CLEAR_HISTORY_COMMAND,
-  HISTORY_PUSH_TAG
+  HISTORY_PUSH_TAG,
+  SKIP_DOM_SELECTION_TAG
 } from 'lexical'
 import {
   forwardRef,
@@ -34,6 +35,7 @@ import {
 } from './ComposerAtomNode'
 import { ComposerTypeaheadPlugin } from './ComposerTypeaheadPlugin'
 import { MemberAvatar } from './MemberAvatar'
+import { NavigationIcon } from './NavigationIcon'
 import {
   RovaiComposerExtension,
   setComposerExtensionRuntime,
@@ -62,6 +64,7 @@ import {
   recoverComposerClipboardDocument,
   type ComposerLocalStatus
 } from './composer-document'
+import { UiText, uiAttribute } from './interface-language'
 
 export interface StructuredMentionMember {
   agentId: string
@@ -69,14 +72,17 @@ export interface StructuredMentionMember {
   teamRole: string
   avatarRef?: string | null
   mentionable?: boolean
+  inThread?: boolean
 }
 
 export type StructuredMentionOption =
   | { kind: 'all_members'; label: '所有队员' }
   | { kind: 'member'; member: StructuredMentionMember }
+  | { kind: 'invite_other' }
+  | { kind: 'back_to_camp' }
 
 export interface StructuredMentionComposerHandle {
-  flush(): Promise<ComposerFlushResult<CampComposerDraftView>>
+  flush(): Promise<ComposerFlushResult<ThreadComposerDraftView>>
   setInteractionLocked(locked: boolean): void
   replaceDocument(
     document: ComposerDocument,
@@ -94,12 +100,14 @@ export interface StructuredMentionComposerProps {
   draftIdentity: string
   document: ComposerDocument
   ready?: boolean
-  getAuthoritativeDraft?(): CampComposerDraftView | null
+  getAuthoritativeDraft?(): ThreadComposerDraftView | null
   members: readonly StructuredMentionMember[]
   skills?: readonly ComposerSkillOption[] | null
   skillCatalogStatus?: 'loading' | 'ready' | 'error'
   skillCatalogErrors?: readonly string[]
+  skillCatalogRefreshFailed?: boolean
   skillCatalogRefreshing?: boolean
+  onNeedSkills?(): void
   onRefreshSkills?(): void
   ariaLabel: string
   placeholder?: string
@@ -112,6 +120,7 @@ export interface StructuredMentionComposerProps {
   ): Promise<void>
   waitForDraftAuthority?(): Promise<void>
   onLocalStatusChange?(status: ComposerLocalStatus): void
+  pendingInviteIds?: readonly string[]
   onDirtyChange?(dirty: boolean): void
   onPersistenceErrorChange?(error: Error | null): void
   onSubmit(): void | Promise<void>
@@ -128,21 +137,36 @@ export interface StructuredMentionComposerProps {
 
 export function structuredMentionOptions(
   members: readonly StructuredMentionMember[],
-  query: string
+  query: string,
+  inviteLayer = false
 ): StructuredMentionOption[] {
-  const normalizedQuery = query.toLocaleLowerCase()
+  const normalizedQuery = query.trim().toLocaleLowerCase()
   const options: StructuredMentionOption[] = []
-  if ('所有队员'.includes(normalizedQuery)) options.push({ kind: 'all_members', label: '所有队员' })
-  for (const member of members) {
-    if (member.mentionable === false) continue
-    if (!member.displayName.toLocaleLowerCase().includes(normalizedQuery)) continue
-    options.push({ kind: 'member', member })
+  const matches = (member: StructuredMentionMember): boolean =>
+    member.mentionable !== false
+      && `${member.displayName}\n${member.teamRole}`.toLocaleLowerCase().includes(normalizedQuery)
+  const current = members.filter((member) => member.inThread !== false && matches(member))
+  const outside = members.filter((member) => member.inThread === false && matches(member))
+  if (inviteLayer) {
+    options.push({ kind: 'back_to_camp' })
+    options.push(...outside.slice(0, 49).map((member) => ({ kind: 'member' as const, member })))
+    return options
+  }
+  if ('所有队员'.includes(normalizedQuery) || uiAttribute('所有队员').toLocaleLowerCase().includes(normalizedQuery)) options.push({ kind: 'all_members', label: '所有队员' })
+  const currentLimit = !normalizedQuery && outside.length > 0 ? 49
+    : outside.length > 0 ? 40 : 50
+  options.push(...current.slice(0, currentLimit - options.length)
+    .map((member) => ({ kind: 'member' as const, member })))
+  if (normalizedQuery) options.push(...outside.slice(0, 50 - options.length)
+    .map((member) => ({ kind: 'member' as const, member })))
+  else if (members.some((member) => member.inThread === false && member.mentionable !== false)) {
+    options.push({ kind: 'invite_other' })
   }
   return options
 }
 
 export function structuredMentionMemberDescription(member: StructuredMentionMember): string {
-  return member.teamRole.trim() || '团队角色未设置'
+  return member.teamRole.trim() || uiAttribute('团队角色未设置')
 }
 
 export function structuredSkillOptions(
@@ -166,7 +190,19 @@ export function StructuredMentionOptionAvatar({
   option: StructuredMentionOption
 }): JSX.Element {
   if (option.kind === 'all_members') {
-    return <span className="mention-avatar" aria-hidden="true">@</span>
+    return <span className="mention-avatar" aria-hidden="true">
+      <NavigationIcon name="users" />
+    </span>
+  }
+  if (option.kind === 'invite_other' || option.kind === 'back_to_camp') {
+    return <span className="mention-avatar mention-action-avatar" aria-hidden="true">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+        strokeLinecap="round" strokeLinejoin="round">
+        {option.kind === 'invite_other'
+          ? <><circle cx="6.1" cy="5.6" r="2.5" /><path d="M1.8 13.4v-.8c0-1.6 1.7-2.7 4.3-2.7 1 0 1.9.2 2.6.5M12.1 8.6v5M9.6 11.1h5" /></>
+          : <path d="M9.9 3.2 5.1 8l4.8 4.8" />}
+      </svg>
+    </span>
   }
   return <MemberAvatar agentId={option.member.agentId}
     avatarRef={option.member.avatarRef ?? null} displayName={option.member.displayName}
@@ -216,7 +252,9 @@ function ComposerBridge({
   skills = [],
   skillCatalogStatus = 'ready',
   skillCatalogErrors = [],
+  skillCatalogRefreshFailed = false,
   skillCatalogRefreshing = false,
+  onNeedSkills,
   onRefreshSkills,
   ariaLabel,
   placeholder = '',
@@ -226,6 +264,7 @@ function ComposerBridge({
   persistDocument,
   waitForDraftAuthority,
   onLocalStatusChange,
+  pendingInviteIds = [],
   onDirtyChange,
   onPersistenceErrorChange,
   onSubmit,
@@ -247,7 +286,7 @@ function ComposerBridge({
   authorityDocument.current = document
   const recoveryAttempted = useRef(false)
   const generatedId = useId()
-  const syncRef = useRef<ComposerDraftSync<CampComposerDraftView> | null>(null)
+  const syncRef = useRef<ComposerDraftSync<ThreadComposerDraftView> | null>(null)
   const initializedRef = useRef(false)
   const readyRef = useRef(ready)
   const previousReadyRef = useRef(ready)
@@ -291,16 +330,26 @@ function ComposerBridge({
   }
 
   const [triggerMatch, setTriggerMatch] = useState<ComposerTriggerMatch | null>(null)
+  const [inviteLayer, setInviteLayer] = useState(false)
+  const inviteLayerRef = useRef(false)
+  inviteLayerRef.current = inviteLayer
+  const changeInviteLayer = (next: boolean): void => {
+    inviteLayerRef.current = next
+    setInviteLayer(next)
+  }
   const closeTypeaheads = useCallback(() => {
     setTriggerMatch(null)
+    inviteLayerRef.current = false
+    setInviteLayer(false)
   }, [])
   const mentionQuery = triggerMatch?.kind === 'member' ? triggerMatch.query : null
   const skillQuery = triggerMatch?.kind === 'skill' ? triggerMatch.query : null
   const mentionOpen = triggerMatch?.kind === 'member'
   const skillOpen = triggerMatch?.kind === 'skill'
+  useEffect(() => { if (skillOpen && skillCatalogStatus === 'loading') onNeedSkills?.() }, [skillOpen, skillCatalogStatus, onNeedSkills])
   const mentionOptions = useMemo(
-    () => mentionQuery === null ? [] : structuredMentionOptions(members, mentionQuery),
-    [members, mentionQuery]
+    () => mentionQuery === null ? [] : structuredMentionOptions(members, mentionQuery, inviteLayer),
+    [inviteLayer, members, mentionQuery]
   )
   const skillOptions = useMemo(
     () => skillQuery === null ? [] : structuredSkillOptions(skills ?? [], skillQuery),
@@ -356,7 +405,7 @@ function ComposerBridge({
       $replaceEditorWithComposerDocument(initialDocument)
     }, { discrete: true, tag: ROVAI_COMPOSER_INITIALIZE_TAG })
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), bindings())
-    const runtime: ComposerExtensionRuntime<CampComposerDraftView> = {
+    const runtime: ComposerExtensionRuntime<ThreadComposerDraftView> = {
       sync,
       submit: () => { void callbacks.current.onSubmit() },
       enterInsertsLineBreak: () => mobileRef.current,
@@ -404,9 +453,10 @@ function ComposerBridge({
       editor,
       (node) => atomPresentation(node, callbacks.current)
     )
+    // Refreshing member/Skill labels must not move focus out of an open menu.
     editor.update(() => {
       for (const atom of $nodesOfType(ComposerAtomNode)) atom.markDirty()
-    }, { tag: ROVAI_ATOM_PRESENTATION_TAG })
+    }, { tag: [ROVAI_ATOM_PRESENTATION_TAG, SKIP_DOM_SELECTION_TAG] })
   }, [bindings, editor, members, skills])
 
   useLayoutEffect(() => {
@@ -425,10 +475,10 @@ function ComposerBridge({
     if (!saved) return
     const local = parseComposerClipboardDocument(JSON.stringify(saved.document))
     const base = parseComposerClipboardDocument(JSON.stringify(saved.base))
-    if (!local || !base) { onPersistenceErrorChange?.(new Error('未保存的编辑恢复材料无效。')); return }
+    if (!local || !base) { onPersistenceErrorChange?.(new Error(uiAttribute('未保存的编辑恢复材料无效。'))); return }
     if (composerDocumentsEqualDirect(document, local)) { recovery.set(draftIdentity, null); return }
     if (!composerDocumentsEqualDirect(document, base)) {
-      onPersistenceErrorChange?.(new Error('Host 草稿已变化，本标签页的未保存编辑仍保留，暂未覆盖当前草稿。'))
+      onPersistenceErrorChange?.(new Error(uiAttribute('Host 草稿已变化，本标签页的未保存编辑仍保留，暂未覆盖当前草稿。')))
       return
     }
     editor.update(() => { $replaceEditorWithComposerDocument(local) }, { discrete: true, tag: ROVAI_COMPOSER_INITIALIZE_TAG })
@@ -514,11 +564,12 @@ function ComposerBridge({
       placeholder={<span className="structured-mention-placeholder">{placeholder}</span>}
       aria-placeholder={placeholder} />
     <ComposerTypeaheadPlugin match={triggerMatch}
+      selectionScope={inviteLayer ? 'inviting' : 'camp'}
       optionCount={mentionOpen ? mentionMenuOptions.length : skillMenuOptions.length}
       getOptionState={(match) => match.kind === 'member'
         ? {
             catalogStatus: 'ready',
-            optionCount: structuredMentionOptions(callbacks.current.members, match.query)
+            optionCount: structuredMentionOptions(callbacks.current.members, match.query, inviteLayerRef.current)
               .slice(0, 50).length
           }
         : {
@@ -526,15 +577,30 @@ function ComposerBridge({
             optionCount: structuredSkillOptions(callbacks.current.skills, match.query)
               .slice(0, 50).length
           }}
-      onMatchChange={setTriggerMatch}
+      onMatchChange={(next) => {
+        if (!next || next.kind !== 'member'
+          || triggerMatch?.kind !== 'member'
+          || triggerMatch.nodeKey !== next.nodeKey
+          || triggerMatch.fromOffset !== next.fromOffset) changeInviteLayer(false)
+        setTriggerMatch(next)
+      }}
       onSelect={(index, match) => {
         if (editor.isComposing()) return false
         if (match.kind === 'member') {
           const option = structuredMentionOptions(
             callbacks.current.members,
-            match.query
+            match.query,
+            inviteLayerRef.current
           ).slice(0, 50)[index]
           if (!option) return false
+          if (option.kind === 'invite_other') {
+            changeInviteLayer(true)
+            return false
+          }
+          if (option.kind === 'back_to_camp') {
+            changeInviteLayer(false)
+            return false
+          }
           const atom: ComposerAtom = option.kind === 'all_members'
             ? { type: 'all_members' }
             : {
@@ -558,6 +624,9 @@ function ComposerBridge({
         ? renderMentionMenu(
             mentionMenuId,
             mentionMenuOptions,
+            inviteLayer,
+            pendingInviteIds,
+            mentionQuery ?? '',
             selectedIndex,
             setHighlightedIndex,
             selectIndex
@@ -568,6 +637,7 @@ function ComposerBridge({
             skillMenuOptions,
             members,
             skillCatalogErrors ?? [],
+            skillCatalogRefreshFailed,
             skillCatalogRefreshing,
             onRefreshSkills,
             selectedIndex,
@@ -580,40 +650,63 @@ function ComposerBridge({
 function renderMentionMenu(
   menuId: string,
   options: readonly StructuredMentionOption[],
+  inviteLayer: boolean,
+  pendingInviteIds: readonly string[],
+  query: string,
   selectedIndex: number,
   setHighlightedIndex: (index: number) => void,
   selectIndex: (index: number) => void
 ): JSX.Element {
   return <div id={menuId} className="mention-menu structured-mention-menu" role="listbox"
-    aria-label="选择接收队员">
-    <div className="mention-menu-heading"><strong>选择接收者</strong><span>↑↓ 选择 · Enter 确认</span></div>
+    aria-label={inviteLayer ? uiAttribute('可邀请队员') : uiAttribute('选择接收队员')}>
+    <div className="mention-menu-heading"><strong>{inviteLayer
+      ? <UiText zh={'邀请队员'} />
+      : query.trim() ? <UiText zh={'搜索队员'} /> : <UiText zh={'本会话'} />}</strong><span><UiText zh={"↑↓ 选择 · Enter 确认"} /></span></div>
     {options.length === 0
-      ? <p className="structured-mention-empty">没有匹配的队员</p>
+      ? <p className="structured-mention-empty"><UiText zh={"没有匹配的队员"} /></p>
       : options.map((option, index) => <button type="button" role="option" id={`${menuId}-option-${index}`}
-          key={option.kind === 'all_members' ? 'all-members' : `member:${option.member.agentId}`}
+          key={option.kind === 'member' ? `member:${option.member.agentId}` : option.kind}
           aria-selected={selectedIndex === index}
-          className={selectedIndex === index ? 'active' : ''}
+          aria-label={option.kind === 'member'
+            ? `${option.member.displayName}${uiAttribute('，')}${structuredMentionMemberDescription(option.member)}${option.member.inThread === false ? `${uiAttribute('，')}${pendingInviteIds.includes(option.member.agentId) ? uiAttribute('待邀请') : uiAttribute('邀请加入')}` : ''}`
+            : option.kind === 'all_members' ? uiAttribute('所有队员，仅本会话')
+              : option.kind === 'invite_other' ? uiAttribute('邀请其他队员') : uiAttribute('返回本会话')}
+          className={[selectedIndex === index ? 'active' : '',
+            option.kind === 'member' && option.member.inThread === false ? 'is-invitable' : '',
+            option.kind === 'invite_other' || option.kind === 'back_to_camp' ? 'is-mention-action' : ''
+          ].filter(Boolean).join(' ')}
           onMouseMove={() => setHighlightedIndex(index)}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => selectIndex(index)}>
           <StructuredMentionOptionAvatar option={option} />
           <span>
-            <strong>{option.kind === 'all_members' ? '所有队员' : option.member.displayName}</strong>
+            <strong>{option.kind === 'all_members' ? uiAttribute('所有队员')
+              : option.kind === 'invite_other' ? uiAttribute('邀请其他队员')
+                : option.kind === 'back_to_camp' ? uiAttribute('返回本会话')
+                  : option.member.displayName}</strong>
             <small>{option.kind === 'all_members'
-              ? '广播给当前全部队员'
-              : structuredMentionMemberDescription(option.member)}</small>
+              ? uiAttribute('广播给当前全部队员')
+              : option.kind === 'invite_other' ? uiAttribute('浏览其他可用队员')
+                : option.kind === 'back_to_camp' ? uiAttribute('查看当前会话队员')
+                  : structuredMentionMemberDescription(option.member)}</small>
           </span>
-          <i aria-hidden="true" />
+          {option.kind === 'member' && option.member.inThread === false
+            ? <span className="mention-option-state">{pendingInviteIds.includes(option.member.agentId)
+              ? <UiText zh={'待邀请'} /> : <UiText zh={'邀请'} />}</span>
+            : option.kind === 'invite_other'
+              ? <svg className="mention-action-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2.5 3.5 3.5L4 9.5" /></svg>
+              : option.kind === 'member' && <i aria-hidden="true" />}
         </button>)}
   </div>
 }
 
-function renderSkillMenu(
+export function renderSkillMenu(
   menuId: string,
   status: 'loading' | 'ready' | 'error',
   options: readonly ComposerSkillOption[],
   members: readonly StructuredMentionMember[],
   errors: readonly string[],
+  refreshFailed: boolean,
   refreshing: boolean,
   onRefresh: (() => void) | undefined,
   selectedIndex: number,
@@ -621,24 +714,24 @@ function renderSkillMenu(
   selectIndex: (index: number) => void
 ): JSX.Element {
   const sections = [
-    { label: '工具箱', entries: options.map((option, index) => ({ option, index })).filter(({ option }) => option.source === 'toolbox') },
+    { label:uiAttribute("工具箱"), entries: options.map((option, index) => ({ option, index })).filter(({ option }) => option.source === 'toolbox') },
     { label: 'Skills', entries: options.map((option, index) => ({ option, index })).filter(({ option }) => option.source !== 'toolbox') }
   ].filter(({ entries }) => entries.length > 0)
   return <div id={menuId} className="mention-menu skill-picker-menu structured-skill-menu"
-    role="listbox" aria-label="选择 Skill">
-    <div className="mention-menu-heading"><strong>选择 Skill</strong><span>↑↓ 选择 · Enter 确认</span>{onRefresh && <button type="button" aria-label="刷新 Skill 候选" disabled={refreshing} onMouseDown={(event) => event.preventDefault()} onClick={onRefresh}>刷新</button>}</div>
+    role="listbox" aria-label={uiAttribute("选择 Skill")}>
+    <div className="mention-menu-heading"><strong><UiText zh={"选择 Skill"} /></strong><span><UiText zh={"↑↓ 选择 · Enter 确认"} /></span>{onRefresh && <button type="button" aria-label={uiAttribute("刷新 Skill 候选")} disabled={refreshing} onMouseDown={(event) => event.preventDefault()} onClick={onRefresh}><UiText zh={"刷新"} /></button>}</div>
     {status === 'loading'
-      ? <p className="structured-mention-empty">正在读取可用 Skills…</p>
+      ? <p className="structured-mention-empty"><UiText zh={"正在读取可用 Skills…"} /></p>
       : status === 'error'
-        ? <p className="structured-mention-empty">Skills 暂时无法读取，请稍后重试</p>
+        ? <p className="structured-mention-empty"><UiText zh={"Skills 暂时无法读取，请稍后重试"} /></p>
         : options.length === 0
-          ? <p className="structured-mention-empty">没有匹配的 Skill</p>
+          ? <p className="structured-mention-empty"><UiText zh={"没有匹配的 Skill"} /></p>
           : sections.map((section) => <div className="skill-picker-section" role="group" aria-label={section.label} key={section.label}>
             <div className="skill-picker-group" aria-hidden="true">{section.label}</div>
             {section.entries.map(({ option, index }) => <button type="button" role="option" id={`${menuId}-option-${index}`}
               key={`skill:${option.id}`} data-skill-name={option.name}
               aria-selected={selectedIndex === index}
-              aria-label={`/${option.name}，${option.source === 'toolbox' ? '工具箱' : option.sourceScope === 'project' ? '项目 Skill' : '用户 Skill'}${option.memberIds?.length ? `，关联队员：${members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join('、')}` : ''}`}
+              aria-label={`/${option.name}${uiAttribute('，')}${option.source === 'toolbox' ? uiAttribute("工具箱") : option.sourceScope === 'project' ? uiAttribute("项目 Skill") : uiAttribute("用户 Skill")}${option.memberIds?.length ? uiAttribute("，关联队员：{0}", members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join(uiAttribute('、'))) : ''}`}
               className={selectedIndex === index ? 'active' : ''}
               onMouseMove={() => setHighlightedIndex(index)}
               onMouseDown={(event) => event.preventDefault()}
@@ -648,52 +741,57 @@ function renderSkillMenu(
                 <strong>/{option.name}</strong>
                 <small>{option.description}</small>
               </span>
-              {option.memberIds && <span className="skill-picker-member-count" title={`${option.source === 'toolbox' ? '已配置此 Skill 的队员' : '在以下队员的环境中发现'}：${members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join('、')}`}>{option.memberIds.slice(0, 3).map((id) => {
+              {option.memberIds && <span className="skill-picker-member-count" title={`${option.source === 'toolbox' ? uiAttribute("已配置此 Skill 的队员") : uiAttribute("在以下队员的环境中发现")}${uiAttribute('：')}${members.filter((member) => option.memberIds?.includes(member.agentId)).map((member) => member.displayName).join(uiAttribute('、'))}`}>{option.memberIds.slice(0, 3).map((id) => {
                 const member = members.find((candidate) => candidate.agentId === id)
                 return member ? <MemberAvatar key={id} agentId={id} avatarRef={member.avatarRef ?? null} displayName={member.displayName} size="execution" decorative /> : null
               })}{option.memberIds.length > 3 && <small>+{option.memberIds.length - 3}</small>}</span>}
               <span className="skill-picker-enter" aria-hidden="true">↵</span>
             </button>)}
           </div>)}
-    {refreshing && <p className="structured-mention-empty" role="status">正在刷新 Skill 候选…</p>}
-    {errors.includes('刷新失败')
-      ? <p className="structured-mention-empty" role="alert">刷新失败，当前显示上次读取的候选。请重试。</p>
-      : errors.length > 0 && <p className="structured-mention-empty" role="status">部分来源暂不可读，仍可选择已发现的 Skill。</p>}
+    {refreshing && <p className="structured-mention-empty" role="status"><UiText zh={"正在刷新 Skill 候选…"} /></p>}
+    {refreshFailed
+      ? <p className="structured-mention-empty" role="alert"><UiText zh={"刷新失败，当前显示上次读取的候选。请重试。"} /></p>
+      : errors.length > 0 && <p className="structured-mention-empty" role="status"><UiText zh={"部分来源暂不可读，仍可选择已发现的 Skill。"} /></p>}
   </div>
 }
 
 function atomPresentation(
   node: ComposerAtomNode,
   input: Pick<StructuredMentionComposerProps,
-    'members' | 'skills' | 'onActivateMemberMention'
+    'members' | 'skills' | 'skillCatalogStatus' | 'onActivateMemberMention'
     | 'onActivateAllMembersMention' | 'onActivateSkillMention'>
 ): ComposerAtomPresentation {
   const atom = node.getAtom()
   if (atom.type === 'member') {
     const member = input.members.find((candidate) => candidate.agentId === atom.agentId)
     const available = Boolean(member && member.mentionable !== false)
-    const label = member?.displayName ?? atom.labelFallback ?? '不可用队员'
+    const label = member?.displayName ?? atom.labelFallback ?? uiAttribute('不可用队员')
+    const pendingInvite = available && member?.inThread === false
     return {
       label: label.startsWith('@') ? label : `@${label}`,
       availability: available ? 'available' : 'unavailable',
-      interactive: Boolean(available && input.onActivateMemberMention),
-      ariaLabel: available ? `成员 ${label}` : `成员 ${label} 当前不可用`
+      interactive: Boolean(available && member?.inThread !== false && input.onActivateMemberMention),
+      ariaLabel: pendingInvite ? uiAttribute('成员 {0} 待邀请，发送时加入', String(label))
+        : available ? uiAttribute("成员 {0}", String(label)) : uiAttribute("成员 {0} 当前不可用", String(label))
     }
   }
   if (atom.type === 'all_members') {
     return {
-      label: '@所有队员',
+      label:uiAttribute("@所有队员"),
       availability: 'available',
       interactive: Boolean(input.onActivateAllMembersMention),
-      ariaLabel: '所有队员'
+      ariaLabel: uiAttribute('所有队员')
     }
   }
   const skill = (input.skills ?? []).find((candidate) => candidate.id === atom.skillId)
+  // An unopened catalog has not declared a stored reference unavailable. Keep its
+  // saved label; the Core validates the actual reference when the user sends it.
+  const unavailable = (input.skillCatalogStatus ?? 'ready') === 'ready' && !skill
   return {
     label: `/${skill?.name ?? atom.nameAtSend}`,
-    availability: skill ? 'available' : 'unavailable',
+    availability: unavailable ? 'unavailable' : 'available',
     interactive: Boolean(input.onActivateSkillMention),
-    ariaLabel: skill ? `Skill ${skill.name}` : `Skill ${atom.nameAtSend} 当前不可用`
+    ariaLabel: unavailable ? uiAttribute("Skill {0} 当前不可用", String(atom.nameAtSend)) : `Skill ${skill?.name ?? atom.nameAtSend}`
   }
 }
 

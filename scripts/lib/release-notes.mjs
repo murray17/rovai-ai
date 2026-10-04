@@ -1,4 +1,5 @@
 export const RELEASE_NOTES_FILE = 'build/release-notes.md'
+export const RELEASE_METADATA_FILE = 'build/release-metadata.json'
 export const MAX_RELEASE_NOTES_LENGTH = 100_000
 
 export function configuredReleaseNotesFile(packageMetadata) {
@@ -30,6 +31,21 @@ export function validateReleaseNotesSource(releaseNotes, version) {
     throw new Error('release notes must include content after the version heading')
   }
   return releaseNotes
+}
+
+export function validateReleaseMetadataSource(metadata, version) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error(`${RELEASE_METADATA_FILE} must contain a JSON object`)
+  }
+  if (metadata.version !== version) {
+    throw new Error(`${RELEASE_METADATA_FILE} must match package version ${version}`)
+  }
+  const date = metadata.releaseDate
+  if (typeof date !== 'string' || !Number.isFinite(Date.parse(date))
+    || new Date(date).toISOString() !== date) {
+    throw new Error(`${RELEASE_METADATA_FILE} must contain a canonical UTC releaseDate`)
+  }
+  return metadata
 }
 
 export function assertUpdateInfoReleaseNotes({

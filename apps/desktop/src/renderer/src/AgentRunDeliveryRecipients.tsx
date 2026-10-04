@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { CampSnapshot, MessageDeliveryView } from '@contracts'
+import type { ThreadSnapshot, MessageDeliveryView } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { executionDeliveryRecipientIds, executionRecipientLayout } from './execution-delivery-recipients'
+import { UiText, uiAttribute } from './interface-language'
 
-type Member = CampSnapshot['members'][number]
+type Member = ThreadSnapshot['members'][number]
 
 export function AgentRunDeliveryRecipients({
   sourceAgentRunId,
@@ -96,8 +97,8 @@ export function AgentRunDeliveryRecipients({
   }
 
   if (!hasRecipients) return null
-  return <div className="execution-run-recipients" aria-label="本次执行的协作投递对象">
-    <small>协作投递</small>
+  return <div className="execution-run-recipients" aria-label={uiAttribute("本次执行的协作投递对象")}>
+    <small><UiText zh={"协作投递"} /></small>
     <div className="execution-recipient-track" ref={trackRef}>
       {visible.map(recipient => <span
         key={recipient.agentId}
@@ -130,7 +131,7 @@ export function AgentRunDeliveryRecipients({
             type="button"
             className="execution-recipient-overflow"
             style={{ width: layout.overflowWidth }}
-            aria-label={`还有 ${hidden.length} 位协作投递对象，查看其余队员`}
+            aria-label={uiAttribute("还有 {0} 位协作投递对象，查看其余队员", String(hidden.length))}
           >+{hidden.length}</button>
         </Dialog.Trigger>
         <Dialog.Portal>
@@ -149,12 +150,12 @@ export function AgentRunDeliveryRecipients({
             }}
           >
             <header>
-              <Dialog.Title>其他 {hidden.length} 位投递对象</Dialog.Title>
-              <Dialog.Close aria-label="关闭其余投递对象" className="execution-recipient-close">
+              <Dialog.Title><UiText zh={"其他 "} />{hidden.length}<UiText zh={" 位投递对象"} /></Dialog.Title>
+              <Dialog.Close aria-label={uiAttribute("关闭其余投递对象")} className="execution-recipient-close">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
               </Dialog.Close>
             </header>
-            <ul className="execution-recipient-list" tabIndex={0} aria-label="其余协作投递对象">
+            <ul className="execution-recipient-list" tabIndex={0} aria-label={uiAttribute("其余协作投递对象")}>
               {hidden.map(recipient => <li key={recipient.agentId}>
                 <MemberAvatar {...recipient} size="mention" decorative />
                 <span>{recipient.displayName}</span>

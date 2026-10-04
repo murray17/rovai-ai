@@ -8,7 +8,7 @@ const bodyOf = message => typeof message.body === 'string' ? message.body
   : (message.content ?? []).filter(part => part.kind === 'text').map(part => part.text).join('')
 
 function eligible(snapshot, boundary, message) {
-  if (!snapshot.camp?.id || snapshot.camp.id !== boundary.campId) fail('camp_mismatch')
+  if (!(snapshot.thread ?? snapshot.camp)?.id || (snapshot.thread ?? snapshot.camp).id !== (boundary.threadId ?? boundary.campId)) fail('camp_mismatch')
   return message.authorType === 'user' && (message.id === boundary.rootCampMessageId
     || Number.isSafeInteger(message.timelineGlobalSequence) && Number.isSafeInteger(boundary.preDispatchThroughGlobalSequence)
       && message.timelineGlobalSequence <= boundary.preDispatchThroughGlobalSequence)

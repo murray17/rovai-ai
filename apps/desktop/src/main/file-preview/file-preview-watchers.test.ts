@@ -18,11 +18,11 @@ describe('RootWatchRegistry', () => {
       }
     })
     registry.subscribe('/project', {
-      handleId: 'one', webContentsId: 1, campId: 'camp', bindingGeneration: 1,
+      handleId: 'one', webContentsId: 1, threadId: 'camp', bindingGeneration: 1,
       previewKey: 'a', canonicalFilePath: '/project/a.ts'
     })
     registry.subscribe('/project', {
-      handleId: 'two', webContentsId: 1, campId: 'camp', bindingGeneration: 1,
+      handleId: 'two', webContentsId: 1, threadId: 'camp', bindingGeneration: 1,
       previewKey: 'b', canonicalFilePath: '/project/src/b.ts'
     })
     expect(watchers).toHaveLength(1)
@@ -46,11 +46,11 @@ describe('RootWatchRegistry', () => {
       }
     })
     registry.subscribe('/project', {
-      handleId: 'one', webContentsId: 2, campId: 'camp', bindingGeneration: 1,
+      handleId: 'one', webContentsId: 2, threadId: 'camp', bindingGeneration: 1,
       previewKey: 'a', canonicalFilePath: '/project/a.ts'
     })
     registry.subscribe('/project', {
-      handleId: 'two', webContentsId: 2, campId: 'camp', bindingGeneration: 1,
+      handleId: 'two', webContentsId: 2, threadId: 'camp', bindingGeneration: 1,
       previewKey: 'b', canonicalFilePath: '/project/src/b.ts'
     })
     expect(listener).not.toBeNull()
@@ -58,12 +58,12 @@ describe('RootWatchRegistry', () => {
     emit('change', 'src')
     await vi.advanceTimersByTimeAsync(60)
     expect(notify).toHaveBeenCalledWith({
-      webContentsId: 2, campId: 'camp', bindingGeneration: 1, previewKeys: ['b']
+      webContentsId: 2, threadId: 'camp', bindingGeneration: 1, previewKeys: ['b']
     })
     emit('rename', null)
     await vi.advanceTimersByTimeAsync(60)
     expect(notify).toHaveBeenLastCalledWith({
-      webContentsId: 2, campId: 'camp', bindingGeneration: 1, previewKeys: ['a', 'b']
+      webContentsId: 2, threadId: 'camp', bindingGeneration: 1, previewKeys: ['a', 'b']
     })
     registry.closeAll()
     vi.useRealTimers()
@@ -82,18 +82,18 @@ describe('RootWatchRegistry', () => {
         }
       })
       registry.subscribe('/project', {
-        handleId: 'keeper', webContentsId: 9, campId: 'other', bindingGeneration: 1,
+        handleId: 'keeper', webContentsId: 9, threadId: 'other', bindingGeneration: 1,
         previewKey: 'keep', canonicalFilePath: '/project/keep.ts'
       })
       registry.subscribe('/project', {
-        handleId: 'old', webContentsId: 2, campId: 'camp', bindingGeneration: 1,
+        handleId: 'old', webContentsId: 2, threadId: 'camp', bindingGeneration: 1,
         previewKey: 'same', canonicalFilePath: '/project/a.ts'
       })
       const emit = listener as unknown as (eventType: string, filename: string | Buffer | null) => void
       emit('change', 'a.ts')
       registry.releaseBinding(2, 'camp', 1)
       registry.subscribe('/project', {
-        handleId: 'current', webContentsId: 2, campId: 'camp', bindingGeneration: 3,
+        handleId: 'current', webContentsId: 2, threadId: 'camp', bindingGeneration: 3,
         previewKey: 'same', canonicalFilePath: '/project/a.ts'
       })
       emit('change', 'a.ts')
@@ -102,7 +102,7 @@ describe('RootWatchRegistry', () => {
 
       expect(notify).toHaveBeenCalledOnce()
       expect(notify).toHaveBeenCalledWith({
-        webContentsId: 2, campId: 'camp', bindingGeneration: 3, previewKeys: ['same']
+        webContentsId: 2, threadId: 'camp', bindingGeneration: 3, previewKeys: ['same']
       })
       registry.closeAll()
     } finally {

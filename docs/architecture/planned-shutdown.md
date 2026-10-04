@@ -127,7 +127,7 @@ Renderer 只复用匹配 active Camp 的本地 preparation，等待已经开始�
 macOS 独立关闭主窗口（红色关闭 / Cmd+W）也在 Renderer 销毁前等待同一 preparation，成功后只恢复该窗口的原生
 close，不进入服务 drain、Core shutdown 或 App exit；关闭窗口不取消 AgentRun/Runtime。失败保留窗口并允许重试。
 关窗与 Cmd+Q 重叠时共享该窗口正在进行的 preparation，只有 quit caller 执行 Planned Shutdown。具体关窗语义见
-[Camp Composer Draft v15](../contracts/camp-composer-draft-v15.md)。
+[Camp Composer Draft v16](../contracts/camp-composer-draft-v16.md)。
 
 Renderer 准备失败或响应通道失败时，本次退出终止：不停止服务、不调用 `core.shutdown()`、不执行 `app.exit()`；当前
 Camp、Lexical 内容和交互仍留在本窗口，下一次 quit 可重新尝试。没有存活且已加载的 Renderer 时 preparation 为

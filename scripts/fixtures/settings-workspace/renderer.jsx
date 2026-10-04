@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { CampNavigation } from '@renderer/CampNavigation'
-import { WindowDragStrip } from '@renderer/App'
+import { ThreadNavigation } from '@renderer/ThreadNavigation'
+import { WindowDragStrip } from '@renderer/BusinessApp'
 import { HostWebSettings } from '@renderer/HostWebSettings'
 import { GeneralSettings } from '@renderer/GeneralSettings'
 import { AppearanceSettings } from '@renderer/AppearanceSettings'
@@ -174,13 +174,13 @@ function Fixture() {
   })
   return <div className="app-shell">
     <WindowDragStrip page="settings" />
-    <CampNavigation navigation={fixture.navigation} view="settings" state="ready" activeCampId={null} pendingMemoryCount={0}
+    <ThreadNavigation navigation={fixture.navigation} view="settings" state="ready" activeThreadId={null} pendingMemoryCount={0}
       settingsSection={page} onSettingsSectionChange={setPage} onSettingsBack={() => {}} onNewConversation={() => {}}
-      onMembers={() => {}} onMemory={() => {}} onSettings={() => {}} onOpenProject={() => {}} onCamp={() => {}}
+      onMembers={() => {}} onMemory={() => {}} onSettings={() => {}} onOpenProject={() => {}} onThread={() => {}}
       onRemoveProject={async () => {}} onRename={async () => {}} onDelete={async () => {}} onError={error => { throw error }} />
     <main className="content settings-content">
       <div className="settings-workbench"><div className={`settings-panel settings-panel-${page}`} key={`${page}-${generation}`}>
-        {page === 'general' && <GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} agents={roster} initialPreferences={state.preferences} currentProjectLabel="rovai-ai" onPreferencesChange={ignore} />}
+        {page === 'general' && <GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} agents={roster} initialPreferences={state.preferences} onPreferencesChange={ignore} />}
         {page === 'remote' && <HostWebSettings portDraft={remotePort} onPortDraftChange={setRemotePort} api={window.rovai.hostWeb} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}

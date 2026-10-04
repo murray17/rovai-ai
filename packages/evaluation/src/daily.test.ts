@@ -7,7 +7,7 @@ import { dailyWindow, digest, renderTrends, runDaily, type DailyScope } from './
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
-const scope: DailyScope = { campIds: [], excludeCampIds: [], excludeAutomationIds: ['analysis'] }
+const scope: DailyScope = { threadIds: [], excludeThreadIds: [], excludeAutomationIds: ['analysis'] }
 const now = new Date('2026-09-10T02:00:00Z')
 describe('daily calendar and evidence contract', () => {
   it('prepared CLI rejects modified analysis input before it reaches an analysis model', async () => {
@@ -60,12 +60,12 @@ describe('daily calendar and evidence contract', () => {
     expect(reused.directory).toBe(successful.directory)
     await runDaily({ ...options, date: '2026-09-08', exportTrace: async () => { throw new Error('Historical data unavailable') } })
     expect(JSON.parse(await readFile(join(output, 'latest.json'), 'utf8')).date).toBe('2026-09-09')
-    await expect(runDaily({ ...options, scope: { ...scope, campIds: ['new-camp'] }, exportTrace: async () => null })).rejects.toThrow('scope changed')
+    await expect(runDaily({ ...options, scope: { ...scope, threadIds: ['new-camp'] }, exportTrace: async () => null })).rejects.toThrow('scope changed')
   })
   it('rejects exported window fields or scalar filters before collecting a daily report', async () => {
     const output = await mkdtemp(join(tmpdir(), 'rovai-daily-test-')); roots.push(output)
     let exported = false
-    for (const invalid of [{ ...scope, since: '2026-09-08T16:00:00Z' }, { ...scope, campIds: 'camp-1' }]) {
+    for (const invalid of [{ ...scope, since: '2026-09-08T16:00:00Z' }, { ...scope, threadIds: 'camp-1' }]) {
       await expect(runDaily({ output, timezone: 'Asia/Shanghai', now, scope: invalid as unknown as DailyScope,
         exportTrace: async () => { exported = true; return null } })).rejects.toThrow('Daily scope requires only')
     }

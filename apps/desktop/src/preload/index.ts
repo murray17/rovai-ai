@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { createCloseTabShortcutHandler } from '../shared/close-tab-shortcut'
+import { createWindowCloseApi } from './window-close-api'
 import {
   APP_PREPARE_QUIT_CHANNEL,
   type AppQuitPreparationResponse
@@ -14,6 +15,7 @@ import type {
   CoreMethod,
   ExecutionWebSettingsSnapshot,
   ExecutionConsolePlacement,
+  InterfaceLanguage,
   RestorableLocation,
   SettingsSection,
   StartupLocationMode,
@@ -52,6 +54,7 @@ ipcRenderer.on(APP_PREPARE_QUIT_CHANNEL, (event) => {
 })
 
 const api: RovaiApi = {
+  windowClose: createWindowCloseApi(ipcRenderer, process.platform),
   hostWeb: {
     loginTicket: () => ipcRenderer.invoke('rovai:host-web', 'loginTicket'),
     token: () => ipcRenderer.invoke('rovai:host-web', 'token'),
@@ -103,10 +106,10 @@ const api: RovaiApi = {
     }
   },
   userAutomation: {
-    onOpenCamp(listener) {
+    onOpenThread(listener) {
       const handler = (
         _event: Electron.IpcRendererEvent,
-        request: { campId: string }
+        request: { threadId: string }
       ): void => listener(request)
       ipcRenderer.on('rovai:user-automation-open-camp', handler)
       return () => ipcRenderer.removeListener('rovai:user-automation-open-camp', handler)
@@ -160,6 +163,9 @@ const api: RovaiApi = {
     getStartupSnapshot() {
       return ipcRenderer.invoke('rovai:desktop-session-get-startup')
     },
+    getInterfaceLanguage() {
+      return ipcRenderer.invoke('rovai:desktop-session-get-interface-language')
+    },
     commitRestorableLocation(location: RestorableLocation) {
       return ipcRenderer.invoke('rovai:desktop-session-commit-location', location)
     }
@@ -171,6 +177,9 @@ const api: RovaiApi = {
   generalPreferences: {
     get() {
       return ipcRenderer.invoke('rovai:general-preferences-get')
+    },
+    setInterfaceLanguage(language: InterfaceLanguage) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-language', language)
     },
     setStartupLocationMode(mode: StartupLocationMode) {
       return ipcRenderer.invoke('rovai:general-preferences-set-startup', mode)
@@ -288,8 +297,8 @@ const api: RovaiApi = {
     recordProvisionedRuntime(version) {
       return ipcRenderer.invoke('rovai:onboarding-record-runtime', version)
     },
-    recordProvisionedCamp(campId) {
-      return ipcRenderer.invoke('rovai:onboarding-record-camp', campId)
+    recordProvisionedThread(threadId) {
+      return ipcRenderer.invoke('rovai:onboarding-record-camp', threadId)
     },
     complete() {
       return ipcRenderer.invoke('rovai:onboarding-complete')
@@ -322,6 +331,14 @@ const api: RovaiApi = {
     }
   },
   navigationPreferences: {
+    setThreadReadState(threadId, state) {
+      return ipcRenderer.invoke('rovai:navigation-preferences-set-thread-read-state', threadId, state)
+    },
+    onChanged(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: NavigationPreferencesSnapshot): void => listener(snapshot)
+      ipcRenderer.on('rovai:navigation-preferences-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:navigation-preferences-changed', handler)
+    },
     get() {
       return ipcRenderer.invoke('rovai:navigation-preferences-get') as Promise<NavigationPreferencesSnapshot>
     },
@@ -341,11 +358,11 @@ const api: RovaiApi = {
         name
       ) as Promise<NavigationPreferencesSnapshot>
     },
-    removeProject(targetKey: string, relatedCampIds: string[]) {
+    removeProject(targetKey: string, relatedThreadIds: string[]) {
       return ipcRenderer.invoke(
         'rovai:navigation-preferences-remove-project',
         targetKey,
-        relatedCampIds
+        relatedThreadIds
       ) as Promise<NavigationPreferencesSnapshot>
     },
     restoreProject(targetKey: string) {
@@ -367,12 +384,12 @@ const api: RovaiApi = {
     }
   },
   composerAttachments: {
-    async prepare(campId, expectedRevision, file) {
+    async prepare(threadId, expectedRevision, file) {
       const sourcePath = webUtils.getPathForFile(file)
       if (sourcePath) {
         return ipcRenderer.invoke(
           'rovai:composer-attachment-prepare-path',
-          campId,
+          threadId,
           expectedRevision,
           sourcePath,
           file.name,
@@ -382,7 +399,7 @@ const api: RovaiApi = {
       const bytes = new Uint8Array(await file.arrayBuffer())
       return ipcRenderer.invoke(
         'rovai:composer-attachment-prepare-bytes',
-        campId,
+        threadId,
         expectedRevision,
         file.name,
         file.type || null,
@@ -392,13 +409,13 @@ const api: RovaiApi = {
     preview(locator) {
       return ipcRenderer.invoke('rovai:composer-attachment-preview', locator)
     },
-    restore(campId, attachments) {
-      return ipcRenderer.invoke('rovai:composer-attachment-restore', campId, attachments)
+    restore(threadId, attachments) {
+      return ipcRenderer.invoke('rovai:composer-attachment-restore', threadId, attachments)
     },
-    discard(campId, attachmentRefIds) {
+    discard(threadId, attachmentRefIds) {
       return ipcRenderer.invoke(
         'rovai:composer-attachment-discard',
-        campId,
+        threadId,
         attachmentRefIds
       )
     },
@@ -502,8 +519,8 @@ const api: RovaiApi = {
       ipcRenderer.on('rovai:file-preview-resources-released', handler)
       return () => ipcRenderer.removeListener('rovai:file-preview-resources-released', handler)
     },
-    bindCamp(campId) {
-      return ipcRenderer.invoke('rovai:file-preview-bind-camp', campId)
+    bindThread(threadId) {
+      return ipcRenderer.invoke('rovai:file-preview-bind-camp', threadId)
     },
     open(request) {
       return ipcRenderer.invoke('rovai:file-preview-open', request)
@@ -575,6 +592,9 @@ const api: RovaiApi = {
   },
   selectSkillImportDirectory() {
     return ipcRenderer.invoke('rovai:select-skill-import-directory')
+  },
+  revealProjectDirectory(projectPath) {
+    return ipcRenderer.invoke('rovai:reveal-project-directory', projectPath)
   },
   revealSkill(skillId: string) {
     return ipcRenderer.invoke('rovai:reveal-skill', skillId)

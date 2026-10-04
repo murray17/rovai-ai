@@ -22,6 +22,7 @@ import {
   nudgeAvatarCrop,
   resizeAvatarCrop
 } from './member-avatar-crop'
+import { UiText, uiAttribute } from './interface-language'
 
 export type MemberAvatarCropperProps = {
   sourceUrl: string
@@ -158,12 +159,12 @@ export function MemberAvatarCropper({
   }
 
   return (
-    <section className="avatar-crop-editor" aria-label="设置小头像取景">
+    <section className="avatar-crop-editor" aria-label={uiAttribute("设置小头像取景")}>
       <div
         ref={stageRef}
         className="avatar-crop-stage"
         tabIndex={disabled ? -1 : 0}
-        aria-label="小头像取景。拖动图片调整位置，使用方向键微调；按住 Shift 可加速。"
+        aria-label={uiAttribute("小头像取景。拖动图片调整位置，使用方向键微调；按住 Shift 可加速。")}
         aria-describedby={instructionsId}
         aria-disabled={disabled}
         onPointerDown={beginDrag}
@@ -190,21 +191,19 @@ export function MemberAvatarCropper({
         <span className="avatar-crop-safe-area" aria-hidden="true" />
         <span className="avatar-crop-frame" aria-hidden="true" />
       </div>
-      <p id={instructionsId} className="avatar-crop-instructions">
-        拖动图片定位；方向键微调 1%，Shift + 方向键微调 4%。
-      </p>
+      <p id={instructionsId} className="avatar-crop-instructions"><UiText zh={"拖动图片定位；方向键微调 1%，Shift + 方向键微调 4%。"} /></p>
 
       <div className="avatar-crop-controls">
         <label className="avatar-crop-zoom">
-          <span>缩放</span>
+          <span><UiText zh={"缩放"} /></span>
           <input
             type="range"
             min="0"
             max="100"
             value={zoomPercent}
             disabled={disabled}
-            aria-label="小头像放大倍率"
-            aria-valuetext={`${zoomPercent}% 放大`}
+            aria-label={uiAttribute("小头像放大倍率")}
+            aria-valuetext={uiAttribute("{0}% 放大", String(zoomPercent))}
             onChange={(event) => changeZoom(Number(event.target.value))}
           />
           <output>{zoomPercent}%</output>
@@ -214,12 +213,10 @@ export function MemberAvatarCropper({
           type="button"
           disabled={disabled}
           onClick={() => onChange(defaultAvatarCrop(sourceWidth, sourceHeight))}
-        >
-          重置取景
-        </button>
+        ><UiText zh={"重置取景"} /></button>
       </div>
 
-      <div className="avatar-crop-previews" aria-label="小头像实际尺寸预览">
+      <div className="avatar-crop-previews" aria-label={uiAttribute("小头像实际尺寸预览")}>
         {PREVIEW_SIZES.map((size) => (
           <AvatarCropPreview
             key={size}
@@ -234,11 +231,10 @@ export function MemberAvatarCropper({
 
       <p
         className={lowResolution ? 'avatar-crop-quality attention' : 'avatar-crop-quality'}
-      >
-        取景源分辨率约 {cropResolution}×{cropResolution}px。
+      ><UiText zh={"取景源分辨率约 "} />{cropResolution}×{cropResolution}px。
         {lowResolution
-          ? ' 小尺寸头像可能模糊，建议降低放大倍率或换用更清晰的图片。'
-          : ' 适合生成紧凑头像。'}
+          ? uiAttribute(" 小尺寸头像可能模糊，建议降低放大倍率或换用更清晰的图片。")
+          : uiAttribute(" 适合生成紧凑头像。")}
       </p>
     </section>
   )

@@ -32,7 +32,7 @@ use rovai_core::{
         RuntimeCompactionDisplayEvent, RuntimeCompactionDisplayPhase,
     },
     runtime_search_operation,
-    storage_layout::CampOutputDirectory,
+    storage_layout::ThreadOutputDirectory,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -1466,6 +1466,13 @@ impl CodexCliRuntimeAdapter {
         let spawn_cwd = cwd.to_path_buf();
         let spawn_incoming = self.incoming.clone();
         let spawn_builtin_tools = builtin_tools.clone();
+        let compatibility =
+            RuntimeCompatibilityKey::member(camp_id, agent_id, runtime_compatibility_digest);
+        // A different Codex Host can keep the same thread's native writer lock
+        // even while idle. Reap it before a replacement attempts thread/resume.
+        self.fleet
+            .retire_incompatible_hosts(AdapterKind::CodexCli, &compatibility)
+            .await?;
         let fleet_lease = self
             .fleet
             .acquire(
@@ -1473,11 +1480,7 @@ impl CodexCliRuntimeAdapter {
                     agent_run_id: agent_run_id.to_string(),
                     execution_epoch,
                     adapter_kind: AdapterKind::CodexCli,
-                    compatibility: RuntimeCompatibilityKey::member(
-                        camp_id,
-                        agent_id,
-                        runtime_compatibility_digest,
-                    ),
+                    compatibility,
                 },
                 move || async move {
                     let host = CodexHost::spawn_with_executable(
@@ -1621,15 +1624,16 @@ impl CodexCliRuntimeAdapter {
 pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
-    attachment_authorization: &CampOutputDirectory,
+    attachment_authorization: &ThreadOutputDirectory,
 ) -> Result<String> {
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
     canonical_json_digest(&json!({
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "adapterKind": frozen_runtime.adapter_kind,
-        "runtimeConfigDigest": frozen_runtime.config_digest,
+        // The full Run digest includes model, reasoning and Fast audit data.
+        // Codex receives those on thread/turn requests, not Host startup.
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "executionRoot": cwd,
         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
@@ -2126,6 +2130,9 @@ pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
     match method {
         "item/agentMessage/delta" => ("agent.text.delta", params.clone()),
         "item/reasoning/summaryTextDelta" => ("agent.reasoning.summary.delta", params.clone()),
+        // Classify raw reasoning as private so an unfamiliar notification cannot
+        // escape via the generic public runtime.native branch.
+        "item/reasoning/textDelta" => ("agent.thought.delta", params.clone()),
         "turn/plan/updated" => ("runtime.plan", params.clone()),
         "item/plan/delta" => ("runtime.plan.delta", params.clone()),
         "item/commandExecution/outputDelta" | "command/exec/outputDelta" => {
@@ -2298,6 +2305,136 @@ mod tests {
             runtime_workspace_roots: None,
             ephemeral: false,
         }
+    }
+
+    fn process_compatibility_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
+        FrozenAgentRuntimeConfig {
+            camp_fast: None,
+            adapter_kind: AdapterKind::CodexCli,
+            installation_id: "codex-test".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "local_user".to_string(),
+            reported_version: Some("test".to_string()),
+            executable_fingerprint: "sha256:codex-test".to_string(),
+            capabilities: vec!["codex.app_server_v2".to_string()],
+            protocol_version: "codex-app-server-v2".to_string(),
+            model: rovai_core::agent_profile::ResolvedModelSelection {
+                source: "explicit".to_string(),
+                model_id: "gpt-test".to_string(),
+                options: json!({"reasoning_effort": "medium"}),
+            },
+            permissions: rovai_core::agent_profile::AdapterPermissionConfig {
+                adapter_kind: AdapterKind::CodexCli,
+                schema_version: 1,
+                values: json!({}),
+            },
+            native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
+            binding_compatibility_digest: "sha256:binding".to_string(),
+            host_config_digest: "sha256:host-v1".to_string(),
+            config_digest: "sha256:run-v1".to_string(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_local_changes_reuse_codex_host_and_host_change_reaps_old_writer() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-codex-process-compatibility-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("codex");
+        make_test_executable(
+            &executable,
+            "#!/bin/sh\nIFS= read -r initialize || exit 1\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nIFS= read -r initialized || exit 1\nwhile IFS= read -r ignored; do :; done\n",
+        );
+        let attachment_authorization = ThreadOutputDirectory {
+            camp_id: "camp-process-compatibility".to_string(),
+            output_root: root.join("attachments"),
+        };
+        std::fs::create_dir_all(&attachment_authorization.output_root).unwrap();
+        let frozen = process_compatibility_runtime(&executable);
+        let first_digest =
+            runtime_compatibility_digest(&frozen, &root, &attachment_authorization).unwrap();
+        let mut next = frozen.clone();
+        next.model.model_id = "gpt-next".to_string();
+        next.model.options = json!({"reasoning_effort": "high", "serviceTier": "default"});
+        next.config_digest = "sha256:run-v2".to_string();
+        next.installation_generation += 1;
+        next.search_environment_generation += 1;
+        next.capabilities.push("turn.fast".to_string());
+        next.native_session_compatibility_key = Some("codex-cli:next-session".to_string());
+        next.binding_compatibility_digest = "sha256:next-binding".to_string();
+        let next_digest =
+            runtime_compatibility_digest(&next, &root, &attachment_authorization).unwrap();
+        assert_eq!(first_digest, next_digest);
+
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(Default::default()));
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let adapter = CodexCliRuntimeAdapter::new(incoming, fleet.clone());
+        let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+            path: root.join("builtin.sock").to_string_lossy().into_owned(),
+        };
+        let builtin_tools =
+            BuiltinToolProcessConfig::create(&executable, &endpoint, &root).unwrap();
+        let first = adapter
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: "run-1",
+                execution_epoch: 1,
+                camp_id: "camp-process-compatibility",
+                agent_id: "agent-1",
+                cwd: &root,
+                frozen_runtime: &frozen,
+                runtime_compatibility_digest: &first_digest,
+                builtin_tools: &builtin_tools,
+            })
+            .await
+            .unwrap();
+        let first_host_id = first.host_instance_id().to_string();
+        adapter.complete_agent_run("run-1", 1).await;
+        let second = adapter
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: "run-2",
+                execution_epoch: 1,
+                camp_id: "camp-process-compatibility",
+                agent_id: "agent-1",
+                cwd: &root,
+                frozen_runtime: &next,
+                runtime_compatibility_digest: &next_digest,
+                builtin_tools: &builtin_tools,
+            })
+            .await
+            .unwrap();
+        assert_eq!(second.host_instance_id(), first_host_id);
+        adapter.complete_agent_run("run-2", 1).await;
+
+        next.host_config_digest = "sha256:host-v2".to_string();
+        let replacement_digest =
+            runtime_compatibility_digest(&next, &root, &attachment_authorization).unwrap();
+        assert_ne!(replacement_digest, first_digest);
+        let replacement = adapter
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: "run-3",
+                execution_epoch: 1,
+                camp_id: "camp-process-compatibility",
+                agent_id: "agent-1",
+                cwd: &root,
+                frozen_runtime: &next,
+                runtime_compatibility_digest: &replacement_digest,
+                builtin_tools: &builtin_tools,
+            })
+            .await
+            .unwrap();
+        assert_ne!(replacement.host_instance_id(), first_host_id);
+        assert!(
+            !first.host.is_alive(),
+            "old writer must be reaped before replacement"
+        );
+        adapter.complete_agent_run("run-3", 1).await;
+        fleet.shutdown_all().await;
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2878,6 +3015,20 @@ while IFS= read -r ignored; do :; done
         };
         assert_eq!(message["id"], 91);
 
+        let summary = json!({"method":"item/reasoning/summaryTextDelta", "params":{
+            "threadId":"thread-current", "turnId":"turn-current", "itemId":"reasoning-1",
+            "summaryIndex":0, "delta":"PRIVATE_SUMMARY"
+        }});
+        route_codex_stdout_ingress("host-current", &routes, &incoming, summary.clone()).await;
+        let CodexIncoming::Message { message, .. } = receiver.try_recv().unwrap() else {
+            panic!("current-turn summary must reach the private event boundary");
+        };
+        assert_eq!(message, summary);
+        let mut old_summary = summary.clone();
+        old_summary["params"]["turnId"] = json!("turn-old");
+        route_codex_stdout_ingress("host-current", &routes, &incoming, old_summary).await;
+        assert!(receiver.try_recv().is_err());
+
         routes
             .deactivate_turn("thread-current", &owner, Some("turn-current"))
             .await;
@@ -3309,6 +3460,11 @@ while IFS= read -r ignored; do :; done
         assert_eq!(
             normalize_event("turn/plan/updated", &plan),
             ("runtime.plan", plan)
+        );
+        let raw = json!({"delta":"PRIVATE_RAW_REASONING","itemId":"reasoning-1"});
+        assert_eq!(
+            normalize_event("item/reasoning/textDelta", &raw),
+            ("agent.thought.delta", raw)
         );
     }
 }

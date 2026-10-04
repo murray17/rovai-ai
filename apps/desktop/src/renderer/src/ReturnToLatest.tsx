@@ -1,3 +1,4 @@
+import { uiAttribute } from './interface-language'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 /** One local overlay per reading viewport. Its state never rerenders the transcript. */
@@ -75,8 +76,8 @@ export function ReturnToLatest({
 
   if (!enabled || !visibleViewport || (!away && !hasNewer)) return null
   const label = hasNewContent
-    ? scope === 'execution' ? '有新输出，回到最新' : '有新回复，回到最新'
-    : '回到最新'
+    ? scope === 'execution' ? uiAttribute('有新输出，回到最新') : uiAttribute('有新回复，回到最新')
+    : uiAttribute('回到最新')
   return (
     <div className="return-to-latest-layer">
       <button

@@ -1,41 +1,16 @@
 ---
 name: memory-stewardship
-description: 当用户明确要求记住、更正或停止沿用某项长期信息，或当前内容包含会影响未来协作的稳定偏好、约定或经验时使用。先检查相关 Memory，再决定新增、修订、转交用户治理或不写入。临时状态、当前任务进度、项目事实、敏感信息和无依据推测不使用。
+description: Maintain durable collaboration preferences, agreements and lessons when the user asks to remember, correct or stop using them, or current evidence warrants capture. Excludes temporary work, project facts, sensitive data and speculation.
 ---
 
-# 共同记忆维护
+# Memory stewardship
 
-只保留会影响未来协作的稳定信息。当前事实、用户最新指令和项目权威来源始终高于 Memory。
+Preserve only information that will change future collaboration. Current instructions, facts and project authority outrank Memory. Use the user's language for Memory content and reports.
 
-## 判断标准
+1. Read [Authority and safety](references/authority-and-safety.md) to assess eligibility.
+2. Reduce the candidate to one durable understanding; select its smallest valid [Scope and Kind](references/scopes.md).
+3. Follow [Read and write](references/read-write-workflow.md): inspect the complete applicable Scope, then stop, revise or add once.
+4. Before writing, apply [Body and retrieval keys](references/content-and-keys.md).
+5. Report the actual outcome: effective, pending user review, or not written.
 
-候选内容应当同时满足：
-
-- 当前任务结束后仍有价值；
-- 来自用户明确表达或真实经历支持的经验；
-- 会改变未来协作行为，而不只是复述发生过的事情；
-- 能写成一条独立、原子的偏好、约定或经验；
-- 不应由 Task、项目文档、代码、历史记录或权限系统承担；
-- 不包含敏感信息或无依据的人格判断。
-
-不满足这些条件时不写入。
-
-## 流程
-
-1. 读取 [Authority 与安全](references/authority-and-safety.md)，确认候选内容适合长期保留。
-2. 把候选压缩成一条原子的未来协作路标。
-3. 读取 [Scopes、Kind 与方向](references/scopes.md)，选择最小适用范围。
-4. 读取 [View、广泛回忆与最小写入](references/read-write-workflow.md)，检查相关现有 Memory。
-5. 只选择一个结果：已有等价内容则停止；已有内容需要纠正则修订；确有新价值则新增；无法确定则停止。
-6. 写入前读取 [正文与 Retrieval Keys](references/content-and-keys.md)，完成一次最小更新。
-7. 根据实际结果准确说明已经生效、等待用户决定或未写入。
-
-用户要求删除、停用、恢复或修改不属于当前队员权限的 Memory 时，不用相反正文模拟操作；说明需要由用户在记忆管理中完成。
-
-## 边界
-
-- 一次只处理一条原子信息，不连续写多条“以防万一”。
-- 不在会话结束时进行全面记忆扫描。
-- 不把临时日期、路径、分支、进度和一次性阻塞写成长期记忆。
-- 不把搜索摘要、缓存或旧版本当作当前权威正文。
-- 写入失败或结果不确定时，不声称已经保存。
+Do not run an end-of-conversation Memory sweep or write several speculative candidates. Deletion, deactivation, restoration and changes outside the Agent's authority require the user's Memory management controls; an opposite statement cannot simulate those actions.

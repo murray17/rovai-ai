@@ -10,7 +10,7 @@ import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 
-// Production CampWorkspace owns the state replacement and bottom-follow behavior.
+// Production ThreadWorkspace owns the state replacement and bottom-follow behavior.
 // A standalone status row cannot detect the resulting card/viewport displacement.
 test('execution cards keep their live line anchored and expanded tool groups retain a downward cue', { timeout: 120_000 }, async t => {
   const chrome = process.env.ROVAI_TEST_CHROME ?? (process.platform === 'darwin'

@@ -1,3 +1,4 @@
+import { uiAttribute } from './interface-language'
 import { useState, type CSSProperties } from 'react'
 import { parseControlledMemberAvatarRef } from '@contracts'
 import { builtinMemberAvatarAssets } from './member-avatar-registry'
@@ -55,7 +56,7 @@ export function MemberAvatar({
   } as CSSProperties
   const semanticProps = decorative
     ? { 'aria-hidden': true }
-    : { role: 'img', 'aria-label': `${displayName}的头像` }
+    : { role: 'img', 'aria-label': uiAttribute("{0}的头像", String(displayName)) }
 
   return (
     <span

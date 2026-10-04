@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Domain } from '@larksuiteoapi/node-sdk'
+import { FEISHU_DOMAINS } from './feishu-domains'
 import type {
   FeishuDeveloperPortalSession,
   FeishuOpenPlatformSession
@@ -19,16 +21,17 @@ afterEach(() => {
 
 function provisioner(
   portal: FeishuDeveloperPortalSession,
-  options: ConstructorParameters<typeof FeishuWebSessionMemberBotProvisioner>[1]
+  options: Partial<ConstructorParameters<typeof FeishuWebSessionMemberBotProvisioner>[1]>
 ): FeishuWebSessionMemberBotProvisioner {
   return new FeishuWebSessionMemberBotProvisioner(portal, {
+    sdkDomain: Domain.Feishu,
     resolveOwnerOpenId: async () => 'ou_owner_for_app',
     ...options
   })
 }
 
 describe('Feishu Web Session member Bot provisioner', () => {
-  it('publishes through the console and resolves Owner from the App creator', async () => {
+  it.each([Domain.Feishu, Domain.Lark])('publishes through the console and resolves Owner from the App creator on SDK domain %s', async (sdkDomain) => {
     const progress: string[] = []
     const operations: string[] = []
     const portal = fakePortal()
@@ -62,6 +65,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     vi.stubGlobal('fetch', globalFetch)
 
     const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
+      sdkDomain,
       createClient: () => client,
       readDefaultAvatar,
       createOwnerIdentityClient
@@ -153,7 +157,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       expect.any(Function)
     )
     expect(createOwnerIdentityClient).toHaveBeenCalledWith({
-      brand: 'feishu',
+      domain: sdkDomain,
       appId: 'cli_dingding',
       appSecret: 'secret-dingding'
     })
@@ -624,6 +628,7 @@ function fakePortal(overrides: Partial<FeishuDeveloperPortalSession> = {}): Feis
 function openPlatformSession(): FeishuOpenPlatformSession {
   return {
     brand: 'feishu',
+    domains: FEISHU_DOMAINS,
     apiOrigin: 'https://open.feishu.cn',
     csrfToken: 'csrf-fixture',
     fetch: vi.fn()

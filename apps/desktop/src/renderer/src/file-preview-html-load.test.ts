@@ -29,6 +29,24 @@ it('keeps document and page communication independent from recoverable server di
   state.close()
 })
 
+it('keeps a policy limitation neutral and scoped to the current document', () => {
+  const { state, snapshot } = fixture()
+  state.connected('A'); state.state('A', 'loaded')
+  state.serverDiagnostics('A', 'unavailable', 'policy')
+  expect(snapshot()).toMatchObject({ document: 'loaded', channel: 'connected', serverDiagnosticsReason: 'policy', notice: null })
+  state.connecting(); state.connected('A')
+  expect(snapshot().serverDiagnosticsReason).toBe('policy')
+  state.connected('B'); state.state('B', 'loaded')
+  state.serverDiagnostics('A', 'unavailable', 'policy')
+  expect(snapshot()).toMatchObject({ serverDiagnostics: 'waiting', serverDiagnosticsReason: null })
+  state.serverDiagnostics('B', 'unavailable', 'unknown')
+  expect(snapshot().serverDiagnosticsReason).toBeNull()
+  state.serverDiagnostics('B', 'unavailable', 'policy')
+  state.serverDiagnostics('B', 'connected')
+  expect(snapshot()).toMatchObject({ document: 'loaded', channel: 'connected', serverDiagnostics: 'connected', serverDiagnosticsReason: null })
+  state.close()
+})
+
 it('gives the next root document its own deadline without extending it for repeated handshakes', () => {
   const { state, snapshot } = fixture()
   state.connected('A'); state.state('A', 'loaded')

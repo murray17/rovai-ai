@@ -6,9 +6,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    camp_attachment_view::{CampAttachmentViewStore, PreparedCampAttachmentCleanup},
+    camp_attachment_view::{PreparedThreadAttachmentCleanup, ThreadAttachmentViewStore},
     collaboration::{
-        DeleteCampCommand, MissionWorkspaceDisposition, append_domain_event, delete_camp_aggregate,
+        DeleteThreadCommand, MissionWorkspaceDisposition, append_domain_event,
+        delete_camp_aggregate,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -21,47 +22,47 @@ use crate::{
 const AUTOMATIC_RETRY_LIMIT: i64 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CampDeletionCandidate {
+pub(crate) struct ThreadDeletionCandidate {
     pub camp_id: String,
     pub operation_id: String,
     pub requested_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CampDeletionCleanupCandidate {
-    pub cleanup: PreparedCampAttachmentCleanup,
+pub(crate) struct ThreadDeletionCleanupCandidate {
+    pub cleanup: PreparedThreadAttachmentCleanup,
     pub queued_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CampDeletionIssue {
+pub(crate) struct ThreadDeletionIssue {
     pub operation_id: String,
     pub attention_revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct RetryCampDeletionCommand {
+pub(crate) struct RetryThreadDeletionCommand {
     pub operation_id: String,
 }
 
-impl sealed::Sealed for RetryCampDeletionCommand {}
-impl DomainCommand for RetryCampDeletionCommand {
+impl sealed::Sealed for RetryThreadDeletionCommand {}
+impl DomainCommand for RetryThreadDeletionCommand {
     const TYPE: &'static str = "camp.deletion.retry";
     const ALLOWED_WHILE_CAMP_DELETING: bool = true;
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct CampDeletionService {
+pub(crate) struct ThreadDeletionService {
     gateway: DomainCommandGateway,
 }
 
-impl CampDeletionService {
+impl ThreadDeletionService {
     pub(crate) fn accept(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<DeleteCampCommand>,
+        envelope: &CommandEnvelope<DeleteThreadCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
@@ -162,7 +163,7 @@ impl CampDeletionService {
     pub(crate) fn retry(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<RetryCampDeletionCommand>,
+        envelope: &CommandEnvelope<RetryThreadDeletionCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
@@ -250,7 +251,7 @@ impl CampDeletionService {
         &self,
         database: &Database,
         limit: i64,
-    ) -> Result<Vec<CampDeletionCandidate>> {
+    ) -> Result<Vec<ThreadDeletionCandidate>> {
         ensure!(
             (1..=32).contains(&limit),
             "Camp deletion batch limit is invalid"
@@ -269,7 +270,7 @@ impl CampDeletionService {
         )?;
         Ok(statement
             .query_map(params![now, limit], |row| {
-                Ok(CampDeletionCandidate {
+                Ok(ThreadDeletionCandidate {
                     camp_id: row.get(0)?,
                     operation_id: row.get(1)?,
                     requested_at: row.get(2)?,
@@ -282,7 +283,7 @@ impl CampDeletionService {
         &self,
         database: &Database,
         limit: i64,
-    ) -> Result<Vec<CampDeletionCleanupCandidate>> {
+    ) -> Result<Vec<ThreadDeletionCleanupCandidate>> {
         ensure!(
             (1..=32).contains(&limit),
             "Camp cleanup batch limit is invalid"
@@ -302,8 +303,8 @@ impl CampDeletionService {
         )?;
         Ok(statement
             .query_map(params![now, limit], |row| {
-                Ok(CampDeletionCleanupCandidate {
-                    cleanup: PreparedCampAttachmentCleanup {
+                Ok(ThreadDeletionCleanupCandidate {
+                    cleanup: PreparedThreadAttachmentCleanup {
                         operation_id: row.get(0)?,
                         camp_id: row.get(1)?,
                         command_id: row.get(2)?,
@@ -317,7 +318,7 @@ impl CampDeletionService {
     pub(crate) fn record_camp_failure(
         &self,
         database: &Database,
-        candidate: &CampDeletionCandidate,
+        candidate: &ThreadDeletionCandidate,
         error_code: &str,
     ) -> Result<bool> {
         let attempts: i64 = database.connection().query_row(
@@ -357,7 +358,7 @@ impl CampDeletionService {
     pub(crate) fn record_cleanup_failure(
         &self,
         database: &mut Database,
-        cleanup: &PreparedCampAttachmentCleanup,
+        cleanup: &PreparedThreadAttachmentCleanup,
         error_code: &str,
     ) -> Result<bool> {
         let transaction = database
@@ -415,9 +416,9 @@ impl CampDeletionService {
     pub(crate) fn commit_business_delete(
         &self,
         database: &mut Database,
-        attachment_views: &CampAttachmentViewStore,
-        candidate: &CampDeletionCandidate,
-        cleanup: &PreparedCampAttachmentCleanup,
+        attachment_views: &ThreadAttachmentViewStore,
+        candidate: &ThreadDeletionCandidate,
+        cleanup: &PreparedThreadAttachmentCleanup,
     ) -> Result<()> {
         let transaction = database
             .connection_mut()
@@ -471,7 +472,7 @@ impl CampDeletionService {
         Ok(())
     }
 
-    pub(crate) fn issues(&self, database: &Database) -> Result<Vec<CampDeletionIssue>> {
+    pub(crate) fn issues(&self, database: &Database) -> Result<Vec<ThreadDeletionIssue>> {
         let mut statement = database.connection().prepare(
             r#"
             SELECT operation_id, MAX(attention_revision)
@@ -495,7 +496,7 @@ impl CampDeletionService {
         )?;
         Ok(statement
             .query_map([], |row| {
-                Ok(CampDeletionIssue {
+                Ok(ThreadDeletionIssue {
                     operation_id: row.get(0)?,
                     attention_revision: row.get(1)?,
                 })
@@ -658,7 +659,7 @@ mod tests {
         command_id: String,
         camp_id: &str,
         expected_version: i64,
-    ) -> CommandEnvelope<DeleteCampCommand> {
+    ) -> CommandEnvelope<DeleteThreadCommand> {
         CommandEnvelope {
             command_id,
             actor: ActorRef::User {
@@ -667,7 +668,7 @@ mod tests {
             camp_id: Some(camp_id.to_string()),
             expected_versions: Vec::new(),
             execution_epoch: None,
-            payload: DeleteCampCommand {
+            payload: DeleteThreadCommand {
                 camp_id: camp_id.to_string(),
                 expected_version,
                 force: true,
@@ -689,12 +690,12 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-camp-deletion-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = crate::camp_id::CampId::new().to_string();
+        let camp_id = crate::camp_id::ThreadId::new().to_string();
         insert_test_camp(&database, &camp_id);
         let operation_id = Uuid::new_v4().to_string();
         let envelope = deletion_envelope(operation_id.clone(), &camp_id, 1);
 
-        let accepted = CampDeletionService::default()
+        let accepted = ThreadDeletionService::default()
             .accept(&mut database, &envelope)
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
@@ -715,14 +716,14 @@ mod tests {
         delete_camp_aggregate(&transaction, &camp_id).unwrap();
         transaction.commit().unwrap();
 
-        let replay = CampDeletionService::default()
+        let replay = ThreadDeletionService::default()
             .accept(&mut database, &envelope)
             .unwrap();
         assert!(replay.replayed);
         assert_eq!(replay.result.status, CommandResultStatus::Accepted);
         assert_eq!(replay.result.payload["operationId"], operation_id);
 
-        let duplicate = CampDeletionService::default()
+        let duplicate = ThreadDeletionService::default()
             .accept(
                 &mut database,
                 &deletion_envelope(Uuid::new_v4().to_string(), &camp_id, 999),
@@ -740,7 +741,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-camp-deletion-mission-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = crate::camp_id::CampId::new().to_string();
+        let camp_id = crate::camp_id::ThreadId::new().to_string();
         insert_test_camp(&database, &camp_id);
         let host_id: String = database
             .connection()
@@ -768,7 +769,7 @@ mod tests {
         let mut envelope = deletion_envelope(operation_id.clone(), &camp_id, 1);
         envelope.payload.workspace_disposition = MissionWorkspaceDisposition::Cleanup;
 
-        let accepted = CampDeletionService::default()
+        let accepted = ThreadDeletionService::default()
             .accept(&mut database, &envelope)
             .unwrap();
 

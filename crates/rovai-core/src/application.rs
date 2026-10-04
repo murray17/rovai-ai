@@ -1,3 +1,4 @@
+use rusqlite::OptionalExtension;
 mod config;
 mod conversation_preferences;
 mod mission;
@@ -103,20 +104,22 @@ use rovai_core::{
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_operation_error,
     },
     camp_attachment::{
-        CampAttachmentStore, desktop_target_for_source_attachment,
+        ThreadAttachmentStore, desktop_target_for_source_attachment,
         legacy_attachment_belongs_to_owner, preview_source_attachment,
     },
     camp_attachment_publication::unresolved_publication_camp_ids,
-    camp_attachment_view::{CampAttachmentViewStore, PreparedCampAttachmentCleanup},
+    camp_attachment_view::{PreparedThreadAttachmentCleanup, ThreadAttachmentViewStore},
     camp_content::ComposerDocument,
-    camp_deletion::{CampDeletionService, RetryCampDeletionCommand, workspace_cleanup_scheduled},
-    camp_history::{
-        CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
-        CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
-        HistorySearchInput, invalid_input_error,
+    camp_deletion::{
+        RetryThreadDeletionCommand, ThreadDeletionService, workspace_cleanup_scheduled,
     },
-    camp_id::CampId,
-    camp_open::CampOpenService,
+    camp_history::{
+        CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
+        HistorySearchInput, ThreadHistoryService, ThreadListInput, ThreadReadInput,
+        ThreadSearchInput, invalid_input_error,
+    },
+    camp_id::ThreadId,
+    camp_open::ThreadOpenService,
     channel::{
         AdvanceDingTalkPublicationIntentCommand, AdvanceMemberBotPublicationIntentCommand,
         AuthorizeChannelExecutionConsolePageCommand, AuthorizeChannelExecutionRecentOutputCommand,
@@ -129,19 +132,19 @@ use rovai_core::{
         FinalizeChannelInboundCommand, GetChannelCredentialParams,
         GetChannelDeveloperSessionParams, ObserveChannelInboundCommand,
         ReconcileFeishuGroupRosterCommand, ReplaceChannelDeveloperSessionCommand,
-        ResolvePendingCampBindingCommand, SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
+        ResolvePendingThreadBindingCommand, SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
         StorePublicationCredentialCommand, UpsertDingTalkAccountCommand,
         UpsertDingTalkMemberBotCommand, UpsertFeishuAccountCommand, UpsertFeishuMemberBotCommand,
         VerifyFeishuOwnerCommand,
     },
+    claude_permission::{self, CLAUDE_PERMISSION_NATIVE_METHOD},
     collaboration::{
-        AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
-        CollaborationService, CreateCampCommand, CreateTaskCommand, DeleteCampCommand,
-        DiscardPendingCampCommand, ExecutionRequest, ProjectBindingKind,
-        ReconcileDefaultLeadCommand, RemoveCampMemberCommand, RenameCampCommand,
-        SendUserAutomationCampMessageCommand, SendUserCampMessageCommand, TaskAssigneeFilter,
-        TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
-        WithdrawCampMessageCommand,
+        AddThreadMemberCommand, ChangeDefaultLeadCommand, CollaborationService, CreateTaskCommand,
+        CreateThreadCommand, DeleteThreadCommand, DiscardPendingThreadCommand, ExecutionRequest,
+        ProjectBindingKind, ReconcileDefaultLeadCommand, RemoveThreadMemberCommand,
+        RenameThreadCommand, SendUserAutomationThreadMessageCommand, SendUserThreadMessageCommand,
+        TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus, ThreadActivationState,
+        ThreadCollaborationMode, UpdateTaskCommand, WithdrawThreadMessageCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandHandlerResult,
@@ -214,10 +217,11 @@ use rovai_core::{
         runtime_waiting_camps, runtime_waiting_recipients,
     },
     monitoring::{
-        MonitoringFilter, MonitoringService, ParsedRuntimeUsage, RuntimeUsageBuffer,
-        RuntimeUsageFlushTarget, acp_usage_source_identity, codex_usage_source_identity,
-        parse_acp_usage_message, parse_claude_result_usage, parse_codex_usage_message,
-        parse_pi_usage_message, pi_usage_source_identity,
+        MonitoringExecutionParams, MonitoringFilter, MonitoringService, ParsedRuntimeUsage,
+        RuntimeUsageBuffer, RuntimeUsageCounterMode, RuntimeUsageFields, RuntimeUsageFlushTarget,
+        acp_usage_source_identity, codex_context_source_identity, codex_usage_source_identity,
+        parse_acp_usage_message, parse_claude_observed_usage, parse_claude_result_usage,
+        parse_codex_usage_message, parse_pi_usage_message, pi_usage_source_identity,
     },
     network_recovery::{
         NetworkFailureCategory, NetworkRecoveryAttempt, NetworkRecoveryQueue,
@@ -238,18 +242,17 @@ use rovai_core::{
         local_ipc::{LocalIpcListener, LocalIpcStream},
         prepare_windows_data_root,
     },
-    read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
+    read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService, ThreadOpenProjection},
     runtime::{
         AgentRunCancellationCandidate, AgentRunExecution, AgentRunWorkspace,
-        ArmAgentRunNetworkRecoveryCommand, BindNativeSessionCommand, CampRuntimeCleanupTarget,
-        CancelAgentRunCommand, ClaimAgentRunCommand, CompleteAgentRunNetworkRecoveryCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, MarkAgentRunForNetworkRecoveryCommand,
-        MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, NativeSessionResumeDisposition,
-        NativeSessionResumeFailure, PermissionSemantics, PlannedShutdownAbortiveTerminal,
-        RebindAgentRunRuntimeCommand, RecordCancelledAgentRunEndingGitObservationCommand,
-        RecordObservedRuntimeModelCommand, RejectAgentRunDispatchCommand,
-        RestartNativeSessionCommand, SucceedAgentRunCommand, maintain_execution_text,
-        recover_legacy_pending_cancellations,
+        ArmAgentRunNetworkRecoveryCommand, BindNativeSessionCommand, CancelAgentRunCommand,
+        ClaimAgentRunCommand, CompleteAgentRunNetworkRecoveryCommand, ExecutionRuntimeService,
+        FailAgentRunCommand, MarkAgentRunForNetworkRecoveryCommand, MissingSendRecoveryBoundary,
+        MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
+        PermissionSemantics, PlannedShutdownAbortiveTerminal, RebindAgentRunRuntimeCommand,
+        RecordCancelledAgentRunEndingGitObservationCommand, RecordObservedRuntimeModelCommand,
+        RejectAgentRunDispatchCommand, RestartNativeSessionCommand, SucceedAgentRunCommand,
+        ThreadRuntimeCleanupTarget, maintain_execution_text, recover_legacy_pending_cancellations,
     },
     runtime_compaction_display::{
         RUNTIME_COMPACTION_DISPLAY_EVENT, RuntimeCompactionCompletionEvidence,
@@ -281,13 +284,13 @@ use rovai_core::{
         CleanupLegacySkillEntriesCommand, PreparedSkillExposure, ReconcileSkillProjectionsCommand,
         SkillProjectionGateBusy, SkillProjectionReconciler,
     },
-    storage_layout::CampOutputDirectory,
+    storage_layout::ThreadOutputDirectory,
     team_tool::{
-        AuthenticatedTeamToolRun, BuiltinToolBindingCredential, CampMessageSendInput,
-        CampMessageSendInvocation, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
-        TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput,
-        TeamGetTaskInput, TeamListTasksInput, TeamTaskToolInvocation, TeamToolInvocationError,
-        TeamToolService, TeamUpdateTaskInput,
+        AuthenticatedTeamToolRun, BuiltinToolBindingCredential, TEAM_CREATE_TASK_TOOL_NAME,
+        TEAM_GET_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME,
+        TeamCreateTaskInput, TeamGetTaskInput, TeamListTasksInput, TeamTaskToolInvocation,
+        TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput, ThreadMessageSendInput,
+        ThreadMessageSendInvocation,
     },
     team_tool_catalog::validate_builtin_tool_input,
 };
@@ -321,6 +324,8 @@ const DELIVERY_BATCH_SCHEDULER_PAGE_LIMIT: i64 = 16;
 const DELIVERY_BATCH_FALLBACK_INTERVAL: Duration = Duration::from_secs(30);
 const NON_BATCH_AGENT_RUN_DISPATCH_LIMIT: i64 = 16;
 const ORDERED_REQUEST_QUEUE_CAPACITY: usize = 128;
+const INDEPENDENT_READ_QUEUE_CAPACITY: usize = 16;
+const INDEPENDENT_READ_WORKERS: usize = 2;
 const MISSION_GIT_READ_CONCURRENCY_LIMIT: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,11 +335,11 @@ enum RuntimeCancellationIngressFence {
     Unproven,
 }
 
-struct CampAttachmentReadAdmission {
+struct ThreadAttachmentReadAdmission {
     camp_id: String,
 }
 
-impl CampAttachmentReadAdmission {
+impl ThreadAttachmentReadAdmission {
     fn for_camp(camp_id: &str) -> Self {
         Self {
             camp_id: camp_id.to_string(),
@@ -350,7 +355,7 @@ impl CampAttachmentReadAdmission {
 }
 
 fn release_agent_run_attachment_admission(
-    admission: CampAttachmentReadAdmission,
+    admission: ThreadAttachmentReadAdmission,
     projection_requests: &mpsc::UnboundedSender<String>,
 ) -> bool {
     let camp_id = admission.camp_id.clone();
@@ -442,6 +447,7 @@ struct Request {
     #[serde(skip)]
     client: rovai_core::draft_client::DraftClient,
     id: Value,
+    #[serde(deserialize_with = "rovai_core::thread_compat::deserialize_host_method")]
     method: String,
     #[serde(default)]
     params: Value,
@@ -714,6 +720,82 @@ fn write_database_migration_refusal(
     )
 }
 
+// Request routing owns Host identity; payloads cannot change this mapping.
+fn validate_lark_request_actor(method: &str, params: &Value) -> Result<()> {
+    if method.starts_with("channels.lark.")
+        && (params.get("actor").is_some()
+            || params
+                .get("command")
+                .is_some_and(|command| command.get("actor").is_some()))
+    {
+        anyhow::bail!("channel request actor is owned by Core");
+    }
+    Ok(())
+}
+
+fn channel_request_host_component(method: &str) -> Result<&'static str> {
+    match method {
+        "channels.feishu.account.upsert"
+        | "channels.feishu.account.commitConnection"
+        | "channels.feishu.account.expire"
+        | "channels.feishu.publicationIntent.create"
+        | "channels.feishu.publicationIntent.advance"
+        | "channels.feishu.publicationIntent.storeCredential"
+        | "channels.feishu.memberBot.upsert"
+        | "channels.feishu.owner.verify"
+        | "channels.feishu.dm.startNew"
+        | "channels.feishu.pendingBinding.resolve"
+        | "channels.inbound.observe"
+        | "channels.inbound.attachments.complete"
+        | "channels.roster.reconcile"
+        | "channels.inbound.finalize"
+        | "channels.host.tick"
+        | "channels.executionConsole.recentOutput.authorize"
+        | "channels.executionConsole.agentRun.cancel"
+        | "channels.executionConsole.page.authorize"
+        | "channels.deliveries.settle" => Ok(crate::channel::FEISHU_SPEC.host_component),
+        "channels.dingtalk.account.upsert"
+        | "channels.dingtalk.account.commitConnection"
+        | "channels.dingtalk.account.expire"
+        | "channels.dingtalk.publicationIntent.create"
+        | "channels.dingtalk.publicationIntent.advance"
+        | "channels.dingtalk.publicationIntent.storeCredential"
+        | "channels.dingtalk.memberBot.upsert"
+        | "channels.dingtalk.owner.verify"
+        | "channels.dingtalk.dm.startNew"
+        | "channels.dingtalk.pendingBinding.resolve"
+        | "channels.dingtalk.inbound.observe"
+        | "channels.dingtalk.inbound.attachments.complete"
+        | "channels.dingtalk.roster.reconcile"
+        | "channels.dingtalk.inbound.finalize"
+        | "channels.dingtalk.host.tick"
+        | "channels.dingtalk.executionConsole.recentOutput.authorize"
+        | "channels.dingtalk.executionConsole.agentRun.cancel"
+        | "channels.dingtalk.executionConsole.page.authorize"
+        | "channels.dingtalk.deliveries.settle" => Ok("dingtalk-channel-host"),
+        "channels.lark.account.upsert"
+        | "channels.lark.account.commitConnection"
+        | "channels.lark.account.expire"
+        | "channels.lark.publicationIntent.create"
+        | "channels.lark.publicationIntent.advance"
+        | "channels.lark.publicationIntent.storeCredential"
+        | "channels.lark.memberBot.upsert"
+        | "channels.lark.owner.verify"
+        | "channels.lark.dm.startNew"
+        | "channels.lark.pendingBinding.resolve"
+        | "channels.lark.inbound.observe"
+        | "channels.lark.inbound.attachments.complete"
+        | "channels.lark.roster.reconcile"
+        | "channels.lark.inbound.finalize"
+        | "channels.lark.host.tick"
+        | "channels.lark.executionConsole.recentOutput.authorize"
+        | "channels.lark.executionConsole.agentRun.cancel"
+        | "channels.lark.executionConsole.page.authorize"
+        | "channels.lark.deliveries.settle" => Ok(rovai_core::channel::LARK_SPEC.host_component),
+        _ => anyhow::bail!("request does not identify a channel Host"),
+    }
+}
+
 fn request_runs_outside_main_queue(method: &str) -> bool {
     matches!(
         method,
@@ -721,6 +803,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "diagnostics.check"
             | "diagnostics.export"
             | "monitoring.snapshot"
+            | "monitoring.execution"
             | "runtime.installations.refresh"
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
@@ -759,6 +842,18 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
     )
 }
 
+fn request_uses_independent_read_queue(method: &str) -> bool {
+    matches!(
+        method,
+        "camps.open"
+            | "camps.enter"
+            | "navigation.snapshot"
+            | "navigation.camps"
+            | "navigation.groupCamps"
+            | "navigation.findCamp"
+    )
+}
+
 fn is_execution_window_request(method: &str) -> bool {
     matches!(
         method,
@@ -780,7 +875,7 @@ fn log_execution_window_request_stage(
     }
     let camp_id = request
         .params
-        .get("campId")
+        .get("threadId")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     let agent_run_id = request
@@ -822,6 +917,20 @@ fn log_mission_git_read_request_stage(
 fn log_read_request_stage(request: &Request, stage: &str, elapsed: Option<std::time::Duration>) {
     log_execution_window_request_stage(request, stage, elapsed);
     log_mission_git_read_request_stage(request, stage, elapsed);
+    if matches!(request.method.as_str(), "camps.enter" | "camps.open")
+        && matches!(stage, "handling_start" | "read_dispatch_start")
+    {
+        eprintln!(
+            "[camp-open] trace={} method={} stage={stage} queue_ms={}",
+            request
+                .params
+                .get("traceId")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown"),
+            request.method,
+            elapsed.map(|duration| duration.as_millis()).unwrap_or(0),
+        );
+    }
 }
 
 async fn response_for_request(
@@ -937,6 +1046,60 @@ async fn process_ordered_requests(
     Ok(())
 }
 
+async fn process_independent_read_requests(
+    core: Arc<Core>,
+    requests: Arc<Mutex<mpsc::Receiver<ReceivedRequest>>>,
+    ordered_requests: mpsc::Sender<ReceivedRequest>,
+    output: mpsc::UnboundedSender<String>,
+) -> Result<()> {
+    loop {
+        let Some(received) = requests.lock().await.recv().await else {
+            return Ok(());
+        };
+        if received.request.method != "camps.enter" {
+            let response =
+                response_for_request(&core, &received.request, received.received_at).await;
+            enqueue_response(&output, &response)?;
+            continue;
+        }
+
+        let queue_wait = received.received_at.elapsed();
+        log_read_request_stage(&received.request, "read_dispatch_start", Some(queue_wait));
+        match core
+            .try_handle_camp_enter_read_only(&received.request)
+            .await
+        {
+            Ok(Some(result)) => {
+                enqueue_response(
+                    &output,
+                    &Response {
+                        id: received.request.id,
+                        result: Some(result),
+                        error: None,
+                    },
+                )?;
+            }
+            Ok(None) => {
+                // A receipt, invalid Lead, or uncertain classification belongs to the
+                // original command path. It repeats the check after joining the FIFO.
+                ordered_requests.send(received).await.map_err(|_| {
+                    anyhow::anyhow!("ordered Core request worker stopped unexpectedly")
+                })?;
+            }
+            Err(error) => {
+                enqueue_response(
+                    &output,
+                    &Response {
+                        id: received.request.id,
+                        result: None,
+                        error: Some(request_error_body(&error)),
+                    },
+                )?;
+            }
+        }
+    }
+}
+
 fn request_invalidates_navigation(method: &str) -> bool {
     matches!(
         method,
@@ -950,7 +1113,6 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "camps.members.remove"
             | "camps.changeDefaultLead"
             | "camps.reconcileDefaultLead"
-            | "camps.enter"
             | "messageQuotes.mutateDraft"
             | "camp.messages.send"
             | "camp.messages.withdraw"
@@ -964,7 +1126,13 @@ fn request_invalidates_navigation(method: &str) -> bool {
 fn navigation_invalidation_emitted_at_commit_boundary(method: &str) -> bool {
     matches!(
         method,
-        "camps.create" | "camps.discardPending" | "camp.messages.send" | "camp.messages.withdraw"
+        "camps.create"
+            | "camps.discardPending"
+            | "camp.messages.send"
+            | "camp.messages.withdraw"
+            | "agentRuns.cancel"
+            | "channels.executionConsole.agentRun.cancel"
+            | "channels.dingtalk.executionConsole.agentRun.cancel"
     )
 }
 
@@ -978,6 +1146,9 @@ async fn request_did_invalidate_navigation(core: &Core, request: &Request, resul
         || navigation_mutation_was_rejected(result)
     {
         return false;
+    }
+    if request.method == "navigation.campViewed" {
+        return result.get("changed").and_then(Value::as_bool) == Some(true);
     }
     if !navigation_invalidation_requires_pending_camp(&request.method) {
         return true;
@@ -1007,12 +1178,16 @@ fn navigation_mutation_was_rejected(result: &Value) -> bool {
 }
 
 fn navigation_request_camp_id(params: &Value) -> Option<&str> {
-    params.get("campId").and_then(Value::as_str).or_else(|| {
-        params
-            .get("command")
-            .and_then(|command| command.get("campId"))
-            .and_then(Value::as_str)
-    })
+    params
+        .get("threadId")
+        .or_else(|| params.get("campId"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            params
+                .get("command")
+                .and_then(|command| command.get("threadId").or_else(|| command.get("campId")))
+                .and_then(Value::as_str)
+        })
 }
 
 fn enqueue_response(output: &mpsc::UnboundedSender<String>, response: &Response) -> Result<()> {
@@ -1124,20 +1299,20 @@ struct SelectedWorkspaceParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreateCampParams {
+struct CreateThreadParams {
     command_id: String,
     name: Option<String>,
     workspace: Option<SelectedWorkspaceParams>,
     member_agent_ids: Vec<String>,
     default_lead_agent_id: String,
-    collaboration_mode: CampCollaborationMode,
+    collaboration_mode: ThreadCollaborationMode,
     #[serde(default)]
-    activation_state: CampActivationState,
+    activation_state: ThreadActivationState,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CampCreationMember {
+struct ThreadCreationMember {
     agent_id: String,
     display_name: String,
     member_order: i64,
@@ -1147,8 +1322,9 @@ struct CampCreationMember {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CampIdParams {
-    camp_id: CampId,
+struct ThreadIdParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1178,7 +1354,8 @@ struct RemoveSingleChatSourceAttachmentParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AgentRunFileChangesParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     agent_run_id: String,
     execution_epoch: i64,
 }
@@ -1186,20 +1363,22 @@ struct AgentRunFileChangesParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AgentRunImageParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     image_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CampMemberRemovalPreviewParams {
-    camp_id: CampId,
+struct ThreadMemberRemovalPreviewParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     agent_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CampEnterParams {
+struct ThreadEnterParams {
     trace_id: String,
     command_id: String,
     command: ReconcileDefaultLeadCommand,
@@ -1207,15 +1386,17 @@ struct CampEnterParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CampOpenParams {
+struct ThreadOpenParams {
     trace_id: String,
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CampMessagePageParams {
-    camp_id: CampId,
+struct ThreadMessagePageParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     before_sequence: i64,
     through_global_sequence: i64,
     #[serde(default = "default_camp_message_page_limit")]
@@ -1232,8 +1413,8 @@ fn normalized_camp_open_trace_id(trace_id: &str) -> Result<String> {
         .context("Camp open traceId must be a UUID")
 }
 
-struct CampOpenLogMetrics {
-    lock_ms: u128,
+struct ThreadOpenLogMetrics {
+    db_lock_ms: u128,
     database_ms: u128,
     reconcile_ms: u128,
     projection_ms: u128,
@@ -1244,11 +1425,11 @@ struct CampOpenLogMetrics {
 fn log_camp_open_projection(
     trace_id: &str,
     method: &str,
-    metrics: &CampOpenLogMetrics,
-    projection: &CampOpenProjection,
+    metrics: &ThreadOpenLogMetrics,
+    projection: &ThreadOpenProjection,
 ) {
-    let CampOpenLogMetrics {
-        lock_ms,
+    let ThreadOpenLogMetrics {
+        db_lock_ms,
         database_ms,
         reconcile_ms,
         projection_ms,
@@ -1256,7 +1437,7 @@ fn log_camp_open_projection(
         payload_bytes,
     } = metrics;
     eprintln!(
-        "[camp-open] trace={trace_id} method={method} lock_ms={lock_ms} database_ms={database_ms} \
+        "[camp-open] trace={trace_id} method={method} db_lock_ms={db_lock_ms} database_ms={database_ms} \
          reconcile_ms={reconcile_ms} projection_ms={projection_ms} \
          serialization_ms={serialization_ms} payload_bytes={payload_bytes} \
          schema={} high_water={} messages={} runs={} evidence={}",
@@ -1270,15 +1451,17 @@ fn log_camp_open_projection(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CampMessageAroundParams {
-    camp_id: CampId,
+struct ThreadMessageAroundParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     message_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CampMessageFindParams {
-    camp_id: CampId,
+struct ThreadMessageFindParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     query: String,
     selected_match_index: Option<i64>,
     anchor_message_id: Option<String>,
@@ -1287,14 +1470,16 @@ struct CampMessageFindParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceContentParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     evidence_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceListParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     agent_run_id: String,
     #[serde(default)]
     after_sequence: i64,
@@ -1305,22 +1490,36 @@ struct ExecutionEvidenceListParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionWindowParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     agent_run_id: String,
     before_sequence: Option<i64>,
     limit: Option<i64>,
     after_sequence: Option<i64>,
+    projection: Option<ExecutionWindowProjection>,
+    group_sequence: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ExecutionWindowProjection {
+    Blocks,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionChangesParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     agent_run_id: String,
     after_change_sequence: i64,
     #[serde(default)]
     refresh_evidence_ids: Vec<String>,
     limit: Option<i64>,
+    projection: Option<ExecutionWindowProjection>,
+    group_sequence: Option<i64>,
+    from_sequence: Option<i64>,
+    to_sequence: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1364,7 +1563,8 @@ struct NativeSkillsListParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CampSkillCandidatesParams {
+struct ThreadSkillCandidatesParams {
+    #[serde(rename = "threadId", alias = "campId")]
     camp_id: String,
     #[serde(default)]
     refresh: bool,
@@ -1415,7 +1615,8 @@ struct InspectGithubSkillImportParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateTaskParams {
     command_id: String,
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     title: String,
     #[serde(default)]
     description: String,
@@ -1426,7 +1627,8 @@ struct CreateTaskParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateTaskParams {
     command_id: String,
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     task_id: String,
     title: Option<String>,
     description: Option<String>,
@@ -1441,7 +1643,8 @@ struct UpdateTaskParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListTasksParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     statuses: Option<Vec<TaskStatus>>,
     #[serde(default)]
     assignee: TaskAssigneeFilter,
@@ -1453,13 +1656,14 @@ struct ListTasksParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GetTaskParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     task_id: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct NavigationGroupCampsParams {
+struct NavigationGroupThreadsParams {
     project_path: Option<String>,
     offset: Option<usize>,
     limit: Option<usize>,
@@ -1470,31 +1674,42 @@ struct NavigationGroupCampsParams {
 struct NavigationSnapshotParams {
     #[serde(default)]
     group_limits: BTreeMap<String, usize>,
+    group_keys: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NavigationThreadsParams {
+    #[serde(rename = "threadIds", alias = "campIds")]
+    camp_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AcknowledgeCampViewedParams {
-    camp_id: CampId,
+struct AcknowledgeThreadViewedParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     through_global_sequence: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SendCampMessageParams {
+struct SendThreadMessageParams {
     command_id: String,
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     content: ComposerDocument,
     #[serde(default)]
     source_attachments: Vec<rovai_core::local_attachment_source::LocalAttachmentSourceRef>,
     #[serde(default)]
     quotes: Vec<rovai_core::message_quote::MessageQuoteSnapshot>,
+    #[serde(rename = "replyToThreadMessageId", alias = "replyToCampMessageId")]
     reply_to_camp_message_id: Option<String>,
     execution: Option<ExecutionRequest>,
 }
 
-impl SendCampMessageParams {
-    fn envelope(&self) -> CommandEnvelope<SendUserCampMessageCommand> {
+impl SendThreadMessageParams {
+    fn envelope(&self) -> CommandEnvelope<SendUserThreadMessageCommand> {
         let params = self;
         CommandEnvelope {
             command_id: params.command_id.clone(),
@@ -1504,7 +1719,7 @@ impl SendCampMessageParams {
             camp_id: Some(params.camp_id.to_string()),
             expected_versions: Vec::new(),
             execution_epoch: None,
-            payload: SendUserCampMessageCommand {
+            payload: SendUserThreadMessageCommand {
                 camp_id: params.camp_id.to_string(),
                 content: params.content.clone(),
                 source_attachments: params.source_attachments.clone(),
@@ -1518,9 +1733,10 @@ impl SendCampMessageParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SendUserAutomationCampMessageParams {
+struct SendUserAutomationThreadMessageParams {
     command_id: String,
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     agent_id: String,
     body: String,
     execution: Option<ExecutionRequest>,
@@ -1564,15 +1780,17 @@ struct AutomationMutationParams<T> {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CaptureCampMessageQuoteParams {
-    camp_id: CampId,
+struct CaptureThreadMessageQuoteParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     selection: rovai_core::message_quote::QuoteSelection,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AddSingleChatPendingSourceAttachmentFromPathParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     conversation_id: String,
     pending_input_id: String,
     expected_revision: i64,
@@ -1612,7 +1830,7 @@ async fn add_single_chat_source_attachment_from_path(
         output,
         "single_chat.changed",
         json!({
-            "campId": snapshot.conversation.camp_id.clone(),
+            "threadId": snapshot.conversation.camp_id.clone(),
             "conversationId": params.conversation_id,
         }),
     );
@@ -1652,7 +1870,7 @@ async fn add_single_chat_pending_source_attachment_from_path(
         output,
         "single_chat.changed",
         json!({
-            "campId": params.camp_id,
+            "threadId": params.camp_id,
             "conversationId": params.conversation_id,
         }),
     );
@@ -1662,7 +1880,8 @@ async fn add_single_chat_pending_source_attachment_from_path(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct LegacyDesktopAttachmentTargetParams {
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     attachment_id: String,
 }
 
@@ -1682,7 +1901,8 @@ struct CancelPendingExecutionParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubscribeEventsParams {
-    camp_id: Option<CampId>,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: Option<ThreadId>,
     after_global_sequence: i64,
     limit: Option<i64>,
 }
@@ -1713,7 +1933,8 @@ struct NotificationChangesSinceParams {
 #[serde(rename_all = "camelCase")]
 struct ResolveActionApprovalParams {
     command_id: String,
-    camp_id: CampId,
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
     approval_id: String,
     expected_version: i64,
     option_id: String,
@@ -1954,7 +2175,7 @@ struct RuntimeCheckActivity {
 struct RuntimeCheckRequest {
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
-    fast_target: Option<rovai_core::camp_fast::CampMemberFastTarget>,
+    fast_target: Option<rovai_core::camp_fast::ThreadMemberFastTarget>,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
     trigger: RuntimeCheckTrigger,
@@ -1965,7 +2186,7 @@ struct RuntimeCheckRequest {
 struct RuntimeCheckAttempt {
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
-    fast_target: Option<rovai_core::camp_fast::CampMemberFastTarget>,
+    fast_target: Option<rovai_core::camp_fast::ThreadMemberFastTarget>,
     attempt_id: String,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
@@ -2172,7 +2393,7 @@ struct Core {
     antigravity_app: AntigravityAppRuntimeAdapter,
     planned_shutdown: Arc<PlannedShutdownCoordinator>,
     agent_run_tasks: Mutex<tokio::task::JoinSet<()>>,
-    attachment_views: CampAttachmentViewStore,
+    attachment_views: ThreadAttachmentViewStore,
     attachment_view_gates: Mutex<HashMap<String, Arc<RwLock<()>>>>,
     data_dir: PathBuf,
 }
@@ -2182,8 +2403,8 @@ struct PreparedRuntimeLaunch<'a> {
     resume_disposition: NativeSessionResumeDisposition,
     skill_exposure: &'a PreparedSkillExposure,
     mcp_projection: &'a PreparedMcpProjection,
-    attachment_admission: &'a CampAttachmentReadAdmission,
-    attachment_authorization: &'a CampOutputDirectory,
+    attachment_admission: &'a ThreadAttachmentReadAdmission,
+    attachment_authorization: &'a ThreadOutputDirectory,
     output: &'a mpsc::UnboundedSender<String>,
     launch_permit: &'a mut ExecutionLaunchPermit,
 }
@@ -2192,16 +2413,16 @@ struct PreparedPiRuntimeLaunch<'a> {
     execution: &'a AgentRunExecution,
     resume_disposition: NativeSessionResumeDisposition,
     skill_exposure: &'a PreparedSkillExposure,
-    attachment_admission: &'a CampAttachmentReadAdmission,
-    attachment_authorization: &'a CampOutputDirectory,
+    attachment_admission: &'a ThreadAttachmentReadAdmission,
+    attachment_authorization: &'a ThreadOutputDirectory,
     output: &'a mpsc::UnboundedSender<String>,
     launch_permit: &'a mut ExecutionLaunchPermit,
 }
 
 #[derive(Clone, Copy)]
-struct CampAttachmentRunAccess<'a> {
-    admission: &'a CampAttachmentReadAdmission,
-    authorization: &'a CampOutputDirectory,
+struct ThreadAttachmentRunAccess<'a> {
+    admission: &'a ThreadAttachmentReadAdmission,
+    authorization: &'a ThreadOutputDirectory,
 }
 
 struct RuntimeInputPreparationRequest<'a> {
@@ -2209,7 +2430,7 @@ struct RuntimeInputPreparationRequest<'a> {
     proposed_delivery_id: Option<&'a str>,
 }
 
-impl CampAttachmentRunAccess<'_> {
+impl ThreadAttachmentRunAccess<'_> {
     fn prove(&self, execution: &AgentRunExecution) -> Result<()> {
         self.admission.prove(&execution.camp_id)?;
         if self.authorization.camp_id != execution.camp_id {
@@ -2223,6 +2444,12 @@ enum AgentRunRuntime {
     Codex(Arc<CodexRuntime>),
     Pi(Arc<PiRuntime>),
     Acp(Arc<AcpRuntime>),
+    Claude {
+        protocol: Arc<crate::claude_control::ClaudeControl>,
+        adapter: ClaudeCodeCliRuntimeAdapter,
+        run_id: String,
+        epoch: i64,
+    },
 }
 
 fn data_directory_check(data_dir: &Path, observed_at: &str) -> DiagnosticCheck {
@@ -2523,6 +2750,7 @@ impl AgentRunRuntime {
             Self::Codex(_) => rovai_core::agent_profile::AdapterKind::CodexCli,
             Self::Pi(_) => rovai_core::agent_profile::AdapterKind::Pi,
             Self::Acp(runtime) => runtime.adapter_kind(),
+            Self::Claude { .. } => AdapterKind::ClaudeCodeCli,
         }
     }
 
@@ -2535,6 +2763,7 @@ impl AgentRunRuntime {
             Self::Codex(runtime) => runtime.respond(id, result).await,
             Self::Pi(runtime) => runtime.respond(id, result).await,
             Self::Acp(runtime) => runtime.respond(id, result).await,
+            Self::Claude { protocol, .. } => protocol.respond(id, result).await,
         }
     }
 
@@ -2543,6 +2772,15 @@ impl AgentRunRuntime {
             Self::Codex(runtime) => runtime.interrupt().await,
             Self::Pi(runtime) => runtime.cancel().await,
             Self::Acp(runtime) => runtime.cancel().await,
+            Self::Claude {
+                adapter,
+                run_id,
+                epoch,
+                ..
+            } => {
+                adapter.interrupt(run_id, *epoch).await;
+                Ok(())
+            }
         }
     }
 
@@ -2551,6 +2789,7 @@ impl AgentRunRuntime {
             Self::Codex(runtime) => runtime.detach_and_flush_ingress().await,
             Self::Pi(runtime) => runtime.detach_and_flush_ingress().await,
             Self::Acp(runtime) => runtime.detach_and_flush_ingress().await,
+            Self::Claude { .. } => true,
         }
     }
 }
@@ -2571,14 +2810,14 @@ impl Core {
     ) -> Result<()> {
         if execution.replayed
             || execution.result.status == CommandResultStatus::Rejected
-            || execution.result.payload["campCreated"].as_bool() != Some(true)
+            || execution.result.payload["threadCreated"].as_bool() != Some(true)
         {
             return Ok(());
         }
-        let camp_id = execution.result.payload["campId"]
+        let camp_id = execution.result.payload["threadId"]
             .as_str()
             .context("new Channel Camp result omitted campId")?;
-        CampOutputDirectory::prepare(database, camp_id).map(|_| ())
+        ThreadOutputDirectory::prepare(database, camp_id).map(|_| ())
     }
 
     fn notify_delivery_batch_scheduler_if_pending(&self, database: &Database) {
@@ -2610,12 +2849,12 @@ impl Core {
         &self,
         camp_id: &str,
         workspace: &Path,
-    ) -> Result<(CampAttachmentReadAdmission, CampOutputDirectory)> {
+    ) -> Result<(ThreadAttachmentReadAdmission, ThreadOutputDirectory)> {
         let authorization = self
             .verified_camp_runtime_authorization(camp_id, workspace)
             .await?;
         Ok((
-            CampAttachmentReadAdmission::for_camp(camp_id),
+            ThreadAttachmentReadAdmission::for_camp(camp_id),
             authorization,
         ))
     }
@@ -2649,7 +2888,7 @@ impl Core {
 
     async fn finish_camp_attachment_cleanup(
         &self,
-        cleanup: Option<&PreparedCampAttachmentCleanup>,
+        cleanup: Option<&PreparedThreadAttachmentCleanup>,
     ) -> Result<()> {
         let Some(cleanup) = cleanup else {
             return Ok(());
@@ -2659,14 +2898,14 @@ impl Core {
             .commit_camp_delete_cleanup(&mut database, cleanup)?;
         self.attachment_views.complete_camp_delete_cleanup(
             &mut database,
-            &CampAttachmentStore::new(&self.data_dir),
+            &ThreadAttachmentStore::new(&self.data_dir),
             cleanup,
         )
     }
 
     async fn finish_background_camp_deletion_cleanup(
         &self,
-        cleanup: &PreparedCampAttachmentCleanup,
+        cleanup: &PreparedThreadAttachmentCleanup,
     ) -> Result<bool> {
         let completion = {
             let database = self.database.lock().await;
@@ -2676,11 +2915,11 @@ impl Core {
         let Some(completion) = completion else {
             return Ok(true);
         };
-        let attachment_store = CampAttachmentStore::new(&self.data_dir);
+        let attachment_store = ThreadAttachmentStore::new(&self.data_dir);
         let view_root = self.attachment_views.root().to_path_buf();
         let cleanup_files = completion.clone();
         tokio::task::spawn_blocking(move || {
-            CampAttachmentViewStore::apply_camp_delete_cleanup_files_at_root(
+            ThreadAttachmentViewStore::apply_camp_delete_cleanup_files_at_root(
                 &view_root,
                 &attachment_store,
                 &cleanup_files,
@@ -2792,7 +3031,7 @@ impl Core {
 
     async fn stop_deleted_camp_runtimes(
         self: &Arc<Self>,
-        targets: &[CampRuntimeCleanupTarget],
+        targets: &[ThreadRuntimeCleanupTarget],
     ) -> Result<()> {
         let mut confirmed = true;
         // Bound fan-out so deleting a large historical Camp cannot saturate
@@ -2850,7 +3089,7 @@ impl Core {
     }
 
     async fn process_camp_deletions_locked(self: &Arc<Self>) -> Result<()> {
-        let service = CampDeletionService::default();
+        let service = ThreadDeletionService::default();
         let candidates = {
             let database = self.database.lock().await;
             service.due_camps(&database, 4)?
@@ -2900,8 +3139,9 @@ impl Core {
                         )?
                         .context("Camp deletion cleanup handoff was not prepared")?
                 };
-                {
+                let group_key = {
                     let mut database = self.database.lock().await;
+                    let group_key = navigation_group_key(&database, &candidate.camp_id)?;
                     service.commit_business_delete(
                         &mut database,
                         &self.attachment_views,
@@ -2909,11 +3149,12 @@ impl Core {
                         &cleanup,
                     )?;
                     self.mark_skill_projections_dirty_best_effort(&mut database, true);
-                }
-                Ok::<_, anyhow::Error>(cleanup)
+                    group_key
+                };
+                Ok::<_, anyhow::Error>((cleanup, group_key))
             }
             .await;
-            let cleanup = match database_result {
+            let (cleanup, group_key) = match database_result {
                 Ok(cleanup) => cleanup,
                 Err(error) => {
                     self.record_camp_deletion_failure(&candidate, "database_delete_failed", &error)
@@ -2924,7 +3165,12 @@ impl Core {
             let database_ms = database_started_at.elapsed().as_millis();
             self.forget_deleted_camp_runtimes(&candidate.camp_id).await;
             self.mission_workspace_cleanup_notify.notify_one();
-            emit_navigation_invalidated(&self.output, "camp.deleted", Some(&candidate.camp_id));
+            emit_navigation_group_invalidated(
+                &self.output,
+                "camp.deleted",
+                Some(&candidate.camp_id),
+                group_key.as_deref(),
+            );
             eprintln!(
                 "[camp-deletion] operation={} camp={} stage=business_deleted queue_delay_ms={} runtime_stop_ms={} database_ms={}",
                 candidate.operation_id,
@@ -2992,13 +3238,13 @@ impl Core {
 
     async fn record_camp_deletion_failure(
         &self,
-        candidate: &rovai_core::camp_deletion::CampDeletionCandidate,
+        candidate: &rovai_core::camp_deletion::ThreadDeletionCandidate,
         error_code: &str,
         error: &anyhow::Error,
     ) {
         let attention = {
             let database = self.database.lock().await;
-            CampDeletionService::default().record_camp_failure(&database, candidate, error_code)
+            ThreadDeletionService::default().record_camp_failure(&database, candidate, error_code)
         };
         match attention {
             Ok(attention) => {
@@ -3023,12 +3269,12 @@ impl Core {
 
     async fn record_camp_cleanup_failure(
         &self,
-        cleanup: &PreparedCampAttachmentCleanup,
+        cleanup: &PreparedThreadAttachmentCleanup,
         error: &anyhow::Error,
     ) {
         let attention = {
             let mut database = self.database.lock().await;
-            CampDeletionService::default().record_cleanup_failure(
+            ThreadDeletionService::default().record_cleanup_failure(
                 &mut database,
                 cleanup,
                 "resource_cleanup_failed",
@@ -3724,7 +3970,7 @@ impl Core {
         kind: AdapterKind,
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
-        fast_target: Option<rovai_core::camp_fast::CampMemberFastTarget>,
+        fast_target: Option<rovai_core::camp_fast::ThreadMemberFastTarget>,
     ) -> Result<RuntimeCheckOutcome> {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
@@ -4869,7 +5115,7 @@ impl Core {
         for intent in intents {
             let result: Result<Value> = match intent.request_method.as_str() {
                 "camp.messages.send" => {
-                    match serde_json::from_str::<SendCampMessageParams>(&intent.payload_json) {
+                    match serde_json::from_str::<SendThreadMessageParams>(&intent.payload_json) {
                         Ok(params) => self.send_test_camp_message_request(params).await,
                         Err(error) => {
                             Err(error).context("persisted pending send request is invalid")
@@ -4922,6 +5168,17 @@ impl Core {
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Option<AgentRunRuntime> {
+        if let Some(runtime) = self
+            .claude_code_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+        {
+            return Some(AgentRunRuntime::Claude {
+                protocol: runtime,
+                adapter: self.claude_code_cli.clone(),
+                run_id: agent_run_id.to_string(),
+                epoch: execution_epoch,
+            });
+        }
         if let Some(runtime) = self
             .codex_cli
             .get_agent_run(agent_run_id, execution_epoch)
@@ -5210,6 +5467,20 @@ impl Core {
                 operation,
                 input,
             } => {
+                let operation =
+                    rovai_core::thread_compat::canonical_operation(&operation).to_string();
+                let input =
+                    match rovai_core::thread_compat::normalize_builtin_input(&operation, input) {
+                        Ok(input) => input,
+                        Err(_) => {
+                            return builtin_tool_rejection(
+                                &operation,
+                                &request_id,
+                                "builtin_tool.invalid_input",
+                                "Command input does not match the accepted arguments.",
+                            );
+                        }
+                    };
                 if uuid::Uuid::parse_str(&request_id).is_err() {
                     return BuiltinToolIpcResponse::ipc_error(
                         "builtin_tool.invalid_request_id",
@@ -5288,7 +5559,7 @@ impl Core {
                 }
                 let mut source_files = Vec::new();
                 if operation == CAMP_MESSAGE_SEND_TOOL_NAME {
-                    let send_input: CampMessageSendInput =
+                    let send_input: ThreadMessageSendInput =
                         serde_json::from_value(input.clone()).expect("validated send input");
                     let scoped_tool_call_id = scoped_runtime_tool_call_id(
                         &authorized.agent_run_id,
@@ -5445,6 +5716,138 @@ impl Core {
         }
     }
 
+    async fn prepare_claude_permission_action(
+        &self,
+        source: &AgentRunExecution,
+        payload: &Value,
+    ) -> Result<()> {
+        let execution = {
+            let database = self.database.lock().await;
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                &source.agent_run_id,
+                source.execution_epoch,
+            )?
+        }
+        .context("Claude permission AgentRun is unavailable or fenced")?;
+        if execution.runtime.adapter_kind != AdapterKind::ClaudeCodeCli
+            || (execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && execution.workspace.access == "read_only")
+        {
+            anyhow::bail!("Claude permission is not allowed for this AgentRun");
+        }
+        let session_id = execution
+            .native_session_id
+            .as_deref()
+            .context("Claude permission Native Session is unavailable")?;
+        if payload.get("nativeSessionId").and_then(Value::as_str) != Some(session_id) {
+            anyhow::bail!("Claude control channel is outside the active Native Session");
+        }
+        let action = claude_permission::intercepted_action_request(
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            session_id,
+            Path::new(&execution.workspace.execution_root),
+            &payload["controlRequest"],
+        )?;
+        let reason = action.reason.clone();
+        let preparation = {
+            let mut database = self.database.lock().await;
+            ActionSafetyService::default().prepare_action(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: format!("runtime-action-prepare:{}", action.action_id),
+                    actor: ActorRef::Agent {
+                        agent_id: execution.agent_id.clone(),
+                        source_agent_run_id: execution.agent_run_id.clone(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: Some(execution.execution_epoch),
+                    payload: PrepareActionCommand {
+                        action_id: action.action_id,
+                        input: action.input,
+                        control_mode: ActionControlMode::Intercepted,
+                        native_action_id: Some(action.native_action_id),
+                        runtime_request: Some(action.runtime_request),
+                        reason: reason.clone(),
+                        execute_before: None,
+                        requested_for_user_id: CURRENT_USER_ID.to_string(),
+                    },
+                },
+            )
+        }?;
+        if preparation.result.status == CommandResultStatus::Rejected {
+            anyhow::bail!(
+                "Claude permission Action admission rejected: {}",
+                preparation.result.code
+            );
+        }
+        emit(
+            &self.output,
+            "action.prepared",
+            json!({
+                "agentRunId": execution.agent_run_id,
+                "executionEpoch": execution.execution_epoch,
+                "nativeMethod": CLAUDE_PERMISSION_NATIVE_METHOD,
+                "reason": reason,
+                "result": preparation.result,
+                "replayed": preparation.replayed,
+            }),
+        );
+        Ok(())
+    }
+
+    async fn cancel_claude_permission_action(
+        &self,
+        execution: &AgentRunExecution,
+        payload: &Value,
+    ) -> Result<()> {
+        let request_id = payload
+            .get("requestId")
+            .filter(|id| id.is_string())
+            .context("Claude cancellation has no native request ID")?;
+        let session_id = payload
+            .get("nativeSessionId")
+            .and_then(Value::as_str)
+            .context("Claude cancellation has no native session ID")?;
+        let confirmation = {
+            let mut database = self.database.lock().await;
+            ActionSafetyService::default().confirm_runtime_request_resolved(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: format!(
+                        "claude-request-cancelled:{}:{}:{}",
+                        execution.agent_run_id,
+                        execution.execution_epoch,
+                        canonical_json_digest(request_id)?
+                    ),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:claude-code-cli".into(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ConfirmRuntimeRequestResolvedCommand {
+                        agent_run_id: execution.agent_run_id.clone(),
+                        execution_epoch: execution.execution_epoch,
+                        native_thread_id: session_id.to_string(),
+                        native_request_id: request_id.clone(),
+                    },
+                },
+            )?
+        };
+        if confirmation.result.status != CommandResultStatus::Rejected {
+            emit(
+                &self.output,
+                "runtime_request.resolved",
+                json!({"agentRunId":execution.agent_run_id,
+                "executionEpoch":execution.execution_epoch,"result":confirmation.result,"replayed":confirmation.replayed}),
+            );
+        }
+        Ok(())
+    }
+
     async fn handle_compaction_hook_ipc(
         &self,
         request: CompactionHookIpcRequest,
@@ -5570,6 +5973,9 @@ impl Core {
         let mut delivery_batch_state_changed = false;
         let mut member_roster_changed = false;
         let result: Result<Value> = async {
+            request.tool_name = rovai_core::thread_compat::canonical_operation(&request.tool_name).to_string();
+            request.input = rovai_core::thread_compat::normalize_builtin_input(&request.tool_name, request.input)
+                .map_err(|_| invalid_input_error("Command input does not match the accepted arguments."))?;
             let mut database = self.database.lock().await;
             let service = TeamToolService::default();
             let authenticated_run = if request.tool_name == CAMP_MESSAGE_SEND_TOOL_NAME {
@@ -5666,9 +6072,9 @@ impl Core {
                 .context("Built-in Tool start evidence was not durably admitted")?;
             let operation_result = match request.tool_name.as_str() {
                 CAMP_MESSAGE_SEND_TOOL_NAME => {
-                    let input = serde_json::from_value::<CampMessageSendInput>(request.input)
+                    let input = serde_json::from_value::<ThreadMessageSendInput>(request.input)
                         .context("camp.message.send input is invalid")?;
-                    let invocation = CampMessageSendInvocation {
+                    let invocation = ThreadMessageSendInvocation {
                         native_binding_id: request.native_binding_id,
                         binding_credential: request.binding_credential,
                         runtime_tool_call_id: request.runtime_tool_call_id,
@@ -6150,7 +6556,7 @@ impl Core {
                     delivery_batch_state_changed |= execution
                         .result
                         .payload
-                        .get("campId")
+                        .get("threadId")
                         .and_then(Value::as_str)
                         .is_some();
                     evidence_replayed = execution.replayed;
@@ -6163,9 +6569,9 @@ impl Core {
                         execution
                             .result
                             .payload
-                            .get("campId")
+                            .get("threadId")
                             .and_then(Value::as_str),
-                    ) && let Err(error) = CampOutputDirectory::prepare(&database, camp_id)
+                    ) && let Err(error) = ThreadOutputDirectory::prepare(&database, camp_id)
                     {
                         automation_service
                             .interrupt_before_runtime(&mut database, run_id)
@@ -6316,24 +6722,28 @@ impl Core {
                     command_execution_payload(execution)
                 }
                 CAMP_LIST_TOOL_NAME => {
-                    let input = serde_json::from_value::<CampListInput>(request.input)
+                    let input = serde_json::from_value::<ThreadListInput>(request.input)
                         .map_err(|_| invalid_input_error("camp.list input is invalid"))?;
-                    CampHistoryService.list_camps(&mut database, &authenticated_run, &input)
+                    ThreadHistoryService.list_camps(&mut database, &authenticated_run, &input)
                 }
                 CAMP_SEARCH_TOOL_NAME => {
-                    let input = serde_json::from_value::<CampSearchInput>(request.input)
+                    let input = serde_json::from_value::<ThreadSearchInput>(request.input)
                         .map_err(|_| invalid_input_error("camp.search input is invalid"))?;
-                    CampHistoryService.search_camp(&mut database, &authenticated_run, &input)
+                    ThreadHistoryService.search_camp(&mut database, &authenticated_run, &input)
                 }
                 HISTORY_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<HistorySearchInput>(request.input)
                         .map_err(|_| invalid_input_error("history.search input is invalid"))?;
-                    CampHistoryService.search_history(&mut database, &authenticated_run, &input)
+                    ThreadHistoryService.search_history(&mut database, &authenticated_run, &input)
+                }
+                crate::thread_runs::THREAD_RUNS_TOOL_NAME => {
+                    let input = serde_json::from_value::<crate::thread_runs::ThreadRunsInput>(request.input)?;
+                    crate::thread_runs::read(&mut database, &authenticated_run, &input)
                 }
                 CAMP_READ_TOOL_NAME => {
-                    let input = serde_json::from_value::<CampReadInput>(request.input)
+                    let input = serde_json::from_value::<ThreadReadInput>(request.input)
                         .map_err(|_| invalid_input_error("camp.read input is invalid"))?;
-                    CampHistoryService.read(&mut database, &authenticated_run, &input)
+                    ThreadHistoryService.read(&mut database, &authenticated_run, &input)
                 }
                 SINGLE_CHAT_HISTORY_TOOL_NAME => {
                     let input = serde_json::from_value::<SingleChatHistoryInput>(request.input)
@@ -6374,6 +6784,13 @@ impl Core {
         .await;
         if result.is_ok() && member_roster_changed {
             emit_member_roster_invalidated(&self.output, MEMBER_CREATE_TOOL_NAME);
+            if let Some(authenticated_run) = evidence_run.as_ref() {
+                emit(
+                    &self.output,
+                    "camp.memberCreated",
+                    json!({ "threadId": authenticated_run.camp_id }),
+                );
+            }
         }
         if delivery_batch_state_changed {
             self.delivery_batch_scheduler_notify.notify_one();
@@ -6484,7 +6901,47 @@ impl Core {
         }
     }
 
+    async fn try_handle_camp_enter_read_only(&self, request: &Request) -> Result<Option<Value>> {
+        let params: ThreadEnterParams = serde_json::from_value(request.params.clone())?;
+        let trace_id = normalized_camp_open_trace_id(&params.trace_id)?;
+        let camp_id = params.command.camp_id.clone();
+        let lock_started_at = Instant::now();
+        let mut database = self.database.lock().await;
+        let db_lock_ms = lock_started_at.elapsed().as_millis();
+        let database_started_at = Instant::now();
+        let outcome = ThreadOpenService.try_enter_read_only(
+            &mut database,
+            &user_camp_command_envelope(params.command_id, camp_id, params.command),
+        )?;
+        let database_ms = database_started_at.elapsed().as_millis();
+        drop(database);
+        let Some(outcome) = outcome else {
+            return Ok(None);
+        };
+        let projection = outcome.projection;
+        let projection_ms = outcome.projection_duration.as_millis();
+        let serialization_started_at = Instant::now();
+        let value = serde_json::to_value(&projection)?;
+        let payload_bytes = serde_json::to_vec(&value)?.len();
+        let serialization_ms = serialization_started_at.elapsed().as_millis();
+        log_camp_open_projection(
+            &trace_id,
+            "camps.enter",
+            &ThreadOpenLogMetrics {
+                db_lock_ms,
+                database_ms,
+                reconcile_ms: 0,
+                projection_ms,
+                serialization_ms,
+                payload_bytes,
+            },
+            &projection,
+        );
+        Ok(Some(value))
+    }
+
     async fn handle(self: &Arc<Self>, request: &Request) -> Result<Value> {
+        validate_lark_request_actor(&request.method, &request.params)?;
         if request.method.starts_with("skills.") {
             self.subsystems.require("skills")?;
         }
@@ -6718,9 +7175,9 @@ impl Core {
                     execution
                         .result
                         .payload
-                        .get("campId")
+                        .get("threadId")
                         .and_then(Value::as_str),
-                ) && let Err(error) = CampOutputDirectory::prepare(&database, camp_id)
+                ) && let Err(error) = ThreadOutputDirectory::prepare(&database, camp_id)
                 {
                     automation_service
                         .interrupt_before_runtime(&mut database, run_id)
@@ -6738,7 +7195,7 @@ impl Core {
                 if execution
                     .result
                     .payload
-                    .get("campId")
+                    .get("threadId")
                     .and_then(Value::as_str)
                     .is_some()
                 {
@@ -6765,6 +7222,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let component = match params.command.provider.as_str() {
                     "feishu" => "feishu-channel-host",
+                    "lark" => "lark-channel-host",
                     "dingtalk" => "dingtalk-channel-host",
                     _ => anyhow::bail!("unsupported channel provider"),
                 };
@@ -6788,6 +7246,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let component = match params.command.provider.as_str() {
                     "feishu" => "feishu-channel-host",
+                    "lark" => "lark-channel-host",
                     "dingtalk" => "dingtalk-channel-host",
                     _ => anyhow::bail!("unsupported channel provider"),
                 };
@@ -6803,6 +7262,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let component = match params.command.provider.as_str() {
                     "feishu" => "feishu-channel-host",
+                    "lark" => "lark-channel-host",
                     "dingtalk" => "dingtalk-channel-host",
                     _ => anyhow::bail!("unsupported channel provider"),
                 };
@@ -6819,6 +7279,13 @@ impl Core {
                     ChannelService::default().snapshot(&mut database)?,
                 )?)
             }
+            "channels.lark.snapshot" => {
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                        .snapshot(&mut database)?,
+                )?)
+            }
             "channels.dingtalk.snapshot" => {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -6833,7 +7300,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6848,7 +7315,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6873,7 +7340,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6888,7 +7355,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6903,7 +7370,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6918,7 +7385,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6933,7 +7400,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6948,7 +7415,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6971,7 +7438,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -6981,7 +7448,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.pendingBinding.resolve" => {
-                let params: UserCommandParams<ResolvePendingCampBindingCommand> =
+                let params: UserCommandParams<ResolvePendingThreadBindingCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let quick_chat_path = self.data_dir.join("quick-chat");
                 std::fs::create_dir_all(&quick_chat_path).with_context(|| {
@@ -6996,7 +7463,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7013,11 +7480,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.account.upsert" => {
+                let params: UserCommandParams<rovai_core::channel::UpsertLarkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .upsert_feishu_account(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.account.commitConnection" => {
@@ -7028,11 +7511,28 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.account.commitConnection" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::CommitLarkAccountConnectionCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .commit_feishu_account_connection(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.account.disconnect" => {
@@ -7045,6 +7545,18 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.lark.account.disconnect" => {
+                let params: UserCommandParams<rovai_core::channel::DisconnectLarkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                // Disconnect is an Owner action for every provider, never a Host one.
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .disconnect_feishu_account(
+                        &mut database,
+                        &user_command_envelope(params.command_id, params.command),
+                    )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.feishu.account.expire" => {
                 let params: UserCommandParams<ExpireFeishuAccountCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -7053,11 +7565,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.account.expire" => {
+                let params: UserCommandParams<rovai_core::channel::ExpireLarkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .expire_feishu_account(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.publicationIntent.create" => {
@@ -7068,11 +7596,28 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.publicationIntent.create" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::CreateLarkMemberBotPublicationIntentCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .create_member_bot_publication_intent(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.publicationIntent.advance" => {
@@ -7083,11 +7628,28 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.publicationIntent.advance" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::AdvanceLarkMemberBotPublicationIntentCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .advance_member_bot_publication_intent(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.publicationIntent.storeCredential" => {
@@ -7098,11 +7660,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.publicationIntent.storeCredential" => {
+                let params: UserCommandParams<StorePublicationCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .store_publication_credential(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.memberBot.upsert" => {
@@ -7113,11 +7691,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.memberBot.upsert" => {
+                let params: UserCommandParams<rovai_core::channel::UpsertLarkMemberBotCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .upsert_feishu_member_bot(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.owner.verify" => {
@@ -7128,11 +7722,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.owner.verify" => {
+                let params: UserCommandParams<rovai_core::channel::VerifyLarkOwnerCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .verify_feishu_owner(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.dm.startNew" => {
@@ -7151,7 +7761,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7160,8 +7770,34 @@ impl Core {
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.lark.dm.startNew" => {
+                let params: UserCommandParams<StartNewFeishuDmCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .start_new_feishu_dm(
+                        &mut database,
+                        &quick_chat_path,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.feishu.pendingBinding.resolve" => {
-                let params: UserCommandParams<ResolvePendingCampBindingCommand> =
+                let params: UserCommandParams<ResolvePendingThreadBindingCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let quick_chat_path = self.data_dir.join("quick-chat");
                 if params.command.action == "quick_chat" {
@@ -7174,7 +7810,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7183,8 +7819,32 @@ impl Core {
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.lark.pendingBinding.resolve" => {
+                let params: UserCommandParams<ResolvePendingThreadBindingCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                if params.command.action == "quick_chat" {
+                    std::fs::create_dir_all(&quick_chat_path)
+                        .context("failed to prepare the managed Quick Chat directory")?;
+                }
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .resolve_pending_camp_binding(
+                        &mut database,
+                        &quick_chat_path,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.membership.add" => {
-                let params: UserCommandParams<AddCampMemberCommand> =
+                let params: UserCommandParams<AddThreadMemberCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
@@ -7200,7 +7860,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.membership.remove" => {
-                let params: UserCommandParams<RemoveCampMemberCommand> =
+                let params: UserCommandParams<RemoveThreadMemberCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
@@ -7223,7 +7883,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7238,7 +7898,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7261,7 +7921,7 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7277,7 +7937,7 @@ impl Core {
                 let tick = ChannelService::default().host_tick(
                     &mut database,
                     &ActorRef::System {
-                        component_id: "dingtalk-channel-host".to_string(),
+                        component_id: channel_request_host_component(&request.method)?.to_string(),
                     },
                     &params,
                 )?;
@@ -7292,11 +7952,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.inbound.observe" => {
+                let params: UserCommandParams<ObserveChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .observe_inbound(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.roster.reconcile" => {
@@ -7307,7 +7983,41 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.roster.reconcile" => {
+                let params: UserCommandParams<ReconcileFeishuGroupRosterCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .reconcile_feishu_group_roster(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.inbound.attachments.complete"
+            | "channels.dingtalk.inbound.attachments.complete"
+            | "channels.lark.inbound.attachments.complete" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::inbound_attachments::CompleteAttachmentsCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::channel::inbound_attachments::complete(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7330,11 +8040,37 @@ impl Core {
                     &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.inbound.finalize" => {
+                let params: UserCommandParams<FinalizeChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .finalize_inbound(
+                        &mut database,
+                        &quick_chat_path,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
@@ -7346,7 +8082,21 @@ impl Core {
                 let tick = ChannelService::default().host_tick(
                     &mut database,
                     &ActorRef::System {
-                        component_id: "feishu-channel-host".to_string(),
+                        component_id: channel_request_host_component(&request.method)?.to_string(),
+                    },
+                    &params,
+                )?;
+                self.notify_delivery_batch_scheduler_if_pending(&database);
+                Ok(serde_json::to_value(tick)?)
+            }
+            "channels.lark.host.tick" => {
+                let params: ChannelHostTickRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let tick = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC).host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: channel_request_host_component(&request.method)?.to_string(),
                     },
                     &params,
                 )?;
@@ -7390,11 +8140,7 @@ impl Core {
             | "channels.dingtalk.executionConsole.recentOutput.authorize" => {
                 let params: UserCommandParams<AuthorizeChannelExecutionRecentOutputCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let component_id = if request.method.starts_with("channels.dingtalk.") {
-                    "dingtalk-channel-host"
-                } else {
-                    "feishu-channel-host"
-                };
+                let component_id = channel_request_host_component(&request.method)?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().authorize_execution_recent_output(
                     &mut database,
@@ -7402,15 +8148,28 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.lark.executionConsole.recentOutput.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionRecentOutputCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component_id = channel_request_host_component(&request.method)?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .authorize_execution_recent_output(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            component_id,
+                            None,
+                            params.command,
+                        ),
+                    )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel" => {
                 let params: UserCommandParams<ChannelAgentRunCancelCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let component_id = if request.method.starts_with("channels.dingtalk.") {
-                    "dingtalk-channel-host"
-                } else {
-                    "feishu-channel-host"
-                };
+                let component_id = channel_request_host_component(&request.method)?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().cancel_channel_agent_run(
                     &mut database,
@@ -7420,7 +8179,7 @@ impl Core {
                 let camp_id = execution
                     .result
                     .payload
-                    .get("campId")
+                    .get("threadId")
                     .and_then(Value::as_str)
                     .map(str::to_string);
                 drop(database);
@@ -7429,7 +8188,41 @@ impl Core {
                     emit_agent_run_terminal(
                         &self.output,
                         camp_id.as_deref(),
-                        json!({ "campId": camp_id, "result": execution.result }),
+                        json!({ "threadId": camp_id, "result": execution.result }),
+                    );
+                    self.delivery_batch_scheduler_notify.notify_one();
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.executionConsole.agentRun.cancel" => {
+                let params: UserCommandParams<ChannelAgentRunCancelCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component_id = channel_request_host_component(&request.method)?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .cancel_channel_agent_run(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            component_id,
+                            None,
+                            params.command,
+                        ),
+                    )?;
+                let should_notify = execution.result.status == CommandResultStatus::Applied;
+                let camp_id = execution
+                    .result
+                    .payload
+                    .get("threadId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                drop(database);
+                if should_notify {
+                    self.agent_run_cancellation_notify.notify_one();
+                    emit_agent_run_terminal(
+                        &self.output,
+                        camp_id.as_deref(),
+                        json!({ "threadId": camp_id, "result": execution.result }),
                     );
                     self.delivery_batch_scheduler_notify.notify_one();
                 }
@@ -7443,11 +8236,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.executionConsole.page.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionConsolePageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .authorize_execution_console_page(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.executionConsole.page.authorize" => {
@@ -7458,7 +8267,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -7473,11 +8282,27 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "feishu-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.deliveries.settle" => {
+                let params: UserCommandParams<SettleChannelDeliveryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .settle_delivery(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.deliveries.settle" => {
@@ -7488,7 +8313,7 @@ impl Core {
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
-                        "dingtalk-channel-host",
+                        channel_request_host_component(&request.method)?,
                         None,
                         params.command,
                     ),
@@ -8019,7 +8844,7 @@ impl Core {
                 Ok(serde_json::to_value(content)?)
             }
             "skills.candidates" => {
-                let params: CampSkillCandidatesParams =
+                let params: ThreadSkillCandidatesParams =
                     serde_json::from_value(request.params.clone())?;
                 let (project_path, roster, toolbox_rows, old_projection_paths) = {
                     let database = self.database.lock().await;
@@ -8076,29 +8901,34 @@ impl Core {
                 }
                 let runtime_search = self.runtime_search_environment.read().await.clone();
                 let mut references = Vec::new();
-                for (member_id, kind) in roster {
-                    let Some(kind) = kind else {
-                        continue;
-                    };
-                    let Ok(kind) = kind.parse::<rovai_core::agent_profile::AdapterKind>() else {
-                        errors.push(format!("{member_id}: unknown Runtime {kind}"));
-                        continue;
-                    };
-                    let project_for_member = project.clone();
-                    let refresh = params.refresh;
-                    let configuration = runtime_search.startup_configuration(kind);
-                    let discovery = self.native_skill_discovery.clone();
-                    match tokio::task::spawn_blocking(move || {
-                        discovery.discover(
-                            kind,
-                            project_for_member.as_deref(),
-                            false,
-                            refresh,
-                            &configuration,
-                        )
-                    })
-                    .await?
-                    {
+                let discovery = self.native_skill_discovery.clone();
+                let refresh = params.refresh;
+                let scans = tokio::task::spawn_blocking(move || {
+                    let mut request = discovery.request(refresh);
+                    roster
+                        .into_iter()
+                        .filter_map(|(member_id, kind)| {
+                            let kind = kind?;
+                            let scan = kind
+                                .parse::<rovai_core::agent_profile::AdapterKind>()
+                                .map_err(|_| format!("unknown Runtime {kind}"))
+                                .and_then(|kind| {
+                                    request
+                                        .discover(
+                                            kind,
+                                            project.as_deref(),
+                                            false,
+                                            &runtime_search.startup_configuration(kind),
+                                        )
+                                        .map_err(|error| format!("{error:#}"))
+                                });
+                            Some((member_id, scan))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await?;
+                for (member_id, scan) in scans {
+                    match scan {
                         Ok(scan) => {
                             errors.extend(scan.errors);
                             for skill in scan.skills {
@@ -8120,7 +8950,7 @@ impl Core {
                                 references.push(skill);
                             }
                         }
-                        Err(error) => errors.push(format!("{member_id}: {error:#}")),
+                        Err(error) => errors.push(format!("{member_id}: {error}")),
                     }
                 }
                 let mut database = self.database.lock().await;
@@ -8446,7 +9276,7 @@ impl Core {
                 let present_members = profiles
                     .into_iter()
                     .filter(|profile| profile.presence == "present")
-                    .map(|profile| CampCreationMember {
+                    .map(|profile| ThreadCreationMember {
                         agent_id: profile.agent_id,
                         display_name: profile.display_name,
                         member_order: profile.member_order,
@@ -8480,6 +9310,7 @@ impl Core {
                     "admissible": blockers.is_empty(),
                     "presentMembers": present_members,
                     "initialLeadAgentId": initial_lead_agent_id,
+                    "lastMemberCreationHelperAgentId": crate::member_studio::last_creation_helper(database.connection())?,
                     "blockers": blockers,
                 }))
             }
@@ -8509,15 +9340,26 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.navigation_snapshot_with_group_limits(
+                    ReadModelService.navigation_snapshot_for_groups(
                         &mut database,
                         &params.group_limits,
+                        params.group_keys.as_deref(),
                         &request.client,
                     )?,
                 )?)
             }
+            "navigation.camps" => {
+                let params: NavigationThreadsParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(ReadModelService.navigation_camps(
+                    &mut database,
+                    &params.camp_ids,
+                    &request.client,
+                )?)?)
+            }
             "navigation.groupCamps" => {
-                let params: NavigationGroupCampsParams =
+                let params: NavigationGroupThreadsParams =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -8531,21 +9373,22 @@ impl Core {
                 )?)
             }
             "navigation.findCamp" => {
-                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     ReadModelService.find_navigation_camp(&database, &params.camp_id)?,
                 )?)
             }
             "navigation.campViewed" => {
-                let params: AcknowledgeCampViewedParams =
+                let params: AcknowledgeThreadViewedParams =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.acknowledge_camp_viewed(
+                    ReadModelService.acknowledge_camp_viewed_for_client(
                         &mut database,
                         params.camp_id.as_str(),
                         params.through_global_sequence,
+                        &request.client,
                     )?,
                 )?)
             }
@@ -8567,7 +9410,7 @@ impl Core {
             | "missions.start"
             | "missions.linkPr" => self.handle_mission(request).await,
             "camps.create" => {
-                let params: CreateCampParams = serde_json::from_value(request.params.clone())?;
+                let params: CreateThreadParams = serde_json::from_value(request.params.clone())?;
                 let (project_binding_kind, requested_path) = match &params.workspace {
                     Some(workspace) => (
                         ProjectBindingKind::Directory,
@@ -8601,7 +9444,7 @@ impl Core {
                         "Authorized workspace changed before Camp creation"
                     );
                 }
-                let command = CreateCampCommand {
+                let command = CreateThreadCommand {
                     name: params.name,
                     project_binding_kind,
                     project_path: selection.project_path,
@@ -8616,15 +9459,15 @@ impl Core {
                     &user_command_envelope(params.command_id, command),
                 )?;
                 if execution.result.status == CommandResultStatus::Applied
-                    && let Some(camp_id) = execution.result.payload["campId"].as_str()
+                    && let Some(camp_id) = execution.result.payload["threadId"].as_str()
                 {
                     emit_navigation_invalidated(&self.output, "camps.create", Some(camp_id));
-                    CampOutputDirectory::prepare(&database, camp_id)?;
+                    ThreadOutputDirectory::prepare(&database, camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.rename" => {
-                let params: UserCommandParams<RenameCampCommand> =
+                let params: UserCommandParams<RenameThreadCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
@@ -8635,7 +9478,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.members.fast.check" => {
-                let params: CampMemberRemovalPreviewParams =
+                let params: ThreadMemberRemovalPreviewParams =
                     serde_json::from_value(request.params.clone())?;
                 let target = {
                     let database = self.database.lock().await;
@@ -8663,7 +9506,7 @@ impl Core {
                 )?)?)
             }
             "camps.members.fast.set" => {
-                let params: UserCommandParams<rovai_core::camp_fast::SetCampMemberFastCommand> =
+                let params: UserCommandParams<rovai_core::camp_fast::SetThreadMemberFastCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
@@ -8674,12 +9517,12 @@ impl Core {
                 emit(
                     &self.output,
                     "camp.member.fast.updated",
-                    json!({"campId": camp_id}),
+                    json!({"threadId": camp_id}),
                 );
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.members.add" => {
-                let params: UserCommandParams<AddCampMemberCommand> =
+                let params: UserCommandParams<AddThreadMemberCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
@@ -8690,7 +9533,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.members.removalPreview" => {
-                let params: CampMemberRemovalPreviewParams =
+                let params: ThreadMemberRemovalPreviewParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -8702,7 +9545,7 @@ impl Core {
                 )?)
             }
             "camps.members.remove" => {
-                let params: UserCommandParams<RemoveCampMemberCommand> =
+                let params: UserCommandParams<RemoveThreadMemberCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
@@ -8747,14 +9590,14 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.exists" => {
-                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     ReadModelService.camp_exists(&database, params.camp_id.as_str())?,
                 )?)
             }
             "singleChat.list" => {
-                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     SingleChatService::for_client(request.client.clone())
@@ -8792,7 +9635,7 @@ impl Core {
                     &self.output,
                     "single_chat.changed",
                     json!({
-                        "campId": snapshot.conversation.camp_id.clone(),
+                        "threadId": snapshot.conversation.camp_id.clone(),
                         "conversationId": params.conversation_id,
                     }),
                 );
@@ -8830,7 +9673,7 @@ impl Core {
                         &self.output,
                         "single_chat.changed",
                         json!({
-                            "campId": camp_id,
+                            "threadId": camp_id,
                             "conversationId": conversation_id,
                             "result": execution.result,
                         }),
@@ -8854,7 +9697,7 @@ impl Core {
                     emit(
                         &self.output,
                         "single_chat.changed",
-                        json!({ "campId": camp_id, "result": execution.result }),
+                        json!({ "threadId": camp_id, "result": execution.result }),
                     );
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -8875,7 +9718,7 @@ impl Core {
                     emit(
                         &self.output,
                         "single_chat.changed",
-                        json!({ "campId": camp_id, "result": execution.result }),
+                        json!({ "threadId": camp_id, "result": execution.result }),
                     );
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -8903,26 +9746,33 @@ impl Core {
                     emit(
                         &self.output,
                         "single_chat.changed",
-                        json!({ "campId": camp_id, "result": execution.result }),
+                        json!({ "threadId": camp_id, "result": execution.result }),
                     );
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.enter" => {
-                let params: CampEnterParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadEnterParams = serde_json::from_value(request.params.clone())?;
                 let trace_id = normalized_camp_open_trace_id(&params.trace_id)?;
                 let camp_id = params.command.camp_id.clone();
                 let lock_started_at = std::time::Instant::now();
                 let mut database = self.database.lock().await;
-                let lock_ms = lock_started_at.elapsed().as_millis();
+                let db_lock_ms = lock_started_at.elapsed().as_millis();
                 let database_started_at = std::time::Instant::now();
-                let outcome = CampOpenService.enter(
+                let outcome = ThreadOpenService.enter(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
                 let projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
+                if outcome.navigation_changed {
+                    emit_navigation_invalidated(
+                        &self.output,
+                        "camps.reconcileDefaultLead",
+                        Some(projection.camp.id.as_str()),
+                    );
+                }
                 let reconcile_ms = outcome
                     .reconcile_duration
                     .map(|duration| duration.as_millis())
@@ -8935,8 +9785,8 @@ impl Core {
                 log_camp_open_projection(
                     &trace_id,
                     "camps.enter",
-                    &CampOpenLogMetrics {
-                        lock_ms,
+                    &ThreadOpenLogMetrics {
+                        db_lock_ms,
                         database_ms,
                         reconcile_ms,
                         projection_ms,
@@ -8948,13 +9798,13 @@ impl Core {
                 Ok(value)
             }
             "camps.open" => {
-                let params: CampOpenParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadOpenParams = serde_json::from_value(request.params.clone())?;
                 let trace_id = normalized_camp_open_trace_id(&params.trace_id)?;
                 let lock_started_at = std::time::Instant::now();
                 let mut database = self.database.lock().await;
-                let lock_ms = lock_started_at.elapsed().as_millis();
+                let db_lock_ms = lock_started_at.elapsed().as_millis();
                 let database_started_at = std::time::Instant::now();
-                let outcome = CampOpenService.open(&mut database, params.camp_id.as_str())?;
+                let outcome = ThreadOpenService.open(&mut database, params.camp_id.as_str())?;
                 let projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
@@ -8966,8 +9816,8 @@ impl Core {
                 log_camp_open_projection(
                     &trace_id,
                     "camps.open",
-                    &CampOpenLogMetrics {
-                        lock_ms,
+                    &ThreadOpenLogMetrics {
+                        db_lock_ms,
                         database_ms,
                         reconcile_ms: 0,
                         projection_ms,
@@ -8980,17 +9830,18 @@ impl Core {
             }
             "camps.delete" => {
                 let started_at = Instant::now();
-                let params: UserCommandParams<DeleteCampCommand> =
+                let params: UserCommandParams<DeleteThreadCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let envelope =
                     user_camp_command_envelope(params.command_id, camp_id.clone(), params.command);
                 let mut database = self.database.lock().await;
+                let group_key = navigation_group_key(&database, &camp_id)?;
                 let execution = self
                     .runtime_fleet
                     .install_camp_deletion_cutover(&camp_id, || {
                         let execution =
-                            CampDeletionService::default().accept(&mut database, &envelope)?;
+                            ThreadDeletionService::default().accept(&mut database, &envelope)?;
                         let accepted = execution.result.status == CommandResultStatus::Accepted;
                         Ok((execution, accepted))
                     })
@@ -9001,10 +9852,11 @@ impl Core {
                     // in-process fence before returning, but never wait for a
                     // Runtime or filesystem operation on the request path.
                     self.camp_deletion_notify.notify_one();
-                    emit_navigation_invalidated(
+                    emit_navigation_group_invalidated(
                         &self.output,
                         "camps.delete_accepted",
                         Some(&camp_id),
+                        group_key.as_deref(),
                     );
                     eprintln!(
                         "[camp-deletion] operation={} camp={} stage=accepted accept_ms={} replayed={}",
@@ -9024,16 +9876,16 @@ impl Core {
             "camps.deletionIssues" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampDeletionService::default().issues(&database)?,
+                    ThreadDeletionService::default().issues(&database)?,
                 )?)
             }
             "camps.retryDeletion" => {
-                let params: UserCommandParams<RetryCampDeletionCommand> =
+                let params: UserCommandParams<RetryThreadDeletionCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let operation_id = params.command.operation_id.clone();
                 let execution = {
                     let mut database = self.database.lock().await;
-                    CampDeletionService::default().retry(
+                    ThreadDeletionService::default().retry(
                         &mut database,
                         &user_command_envelope(params.command_id, params.command),
                     )?
@@ -9048,8 +9900,29 @@ impl Core {
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "camps.pendingDraft.setPresence" => {
+                let params: rovai_core::pending_thread_draft::SetPendingDraftPresence =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let changed = rovai_core::pending_thread_draft::set_presence(
+                    &mut database,
+                    &request.client,
+                    &params,
+                )?;
+                let group_key = navigation_group_key(&database, params.thread_id.as_str())?;
+                drop(database);
+                if changed {
+                    emit_navigation_group_invalidated(
+                        &self.output,
+                        "camps.pendingDraft.setPresence",
+                        Some(params.thread_id.as_str()),
+                        group_key.as_deref(),
+                    );
+                }
+                Ok(json!({ "changed": changed }))
+            }
             "camps.discardPending" => {
-                let params: UserCommandParams<DiscardPendingCampCommand> =
+                let params: UserCommandParams<DiscardPendingThreadCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let command_id = params.command_id.clone();
@@ -9074,6 +9947,7 @@ impl Core {
                     return Err(error);
                 }
                 let mut database = self.database.lock().await;
+                let group_key = navigation_group_key(&database, &camp_id)?;
                 let execution = match CollaborationService::default().discard_pending_camp(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
@@ -9102,7 +9976,7 @@ impl Core {
                 let discarded_camp_id = execution
                     .result
                     .payload
-                    .get("campId")
+                    .get("threadId")
                     .and_then(Value::as_str)
                     .map(str::to_string);
                 if !discarded && let Some(cleanup) = cleanup.as_ref() {
@@ -9111,16 +9985,17 @@ impl Core {
                 }
                 drop(database);
                 if discarded {
-                    emit_navigation_invalidated(
+                    emit_navigation_group_invalidated(
                         &self.output,
                         "camps.discardPending",
                         discarded_camp_id.as_deref(),
+                        group_key.as_deref(),
                     );
                 }
                 if discarded && let Some(camp_id) = discarded_camp_id {
                     self.finish_camp_attachment_cleanup(cleanup.as_ref())
                         .await?;
-                    CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                    ThreadAttachmentStore::for_client(&self.data_dir, request.client.clone())
                         .remove_camp(&camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -9141,14 +10016,14 @@ impl Core {
                     emit_agent_run_terminal(
                         &self.output,
                         Some(&camp_id),
-                        json!({ "campId": camp_id, "result": execution.result }),
+                        json!({ "threadId": camp_id, "result": execution.result }),
                     );
                     self.delivery_batch_scheduler_notify.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.snapshot" => {
-                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
@@ -9205,7 +10080,8 @@ impl Core {
                 )?)
             }
             "camp.messages.page" => {
-                let params: CampMessagePageParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadMessagePageParams =
+                    serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.camp_messages_page(
                     &mut database,
@@ -9216,7 +10092,7 @@ impl Core {
                 )?)?)
             }
             "camp.messages.around" => {
-                let params: CampMessageAroundParams =
+                let params: ThreadMessageAroundParams =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -9228,7 +10104,8 @@ impl Core {
                 )?)
             }
             "camp.messages.find" => {
-                let params: CampMessageFindParams = serde_json::from_value(request.params.clone())?;
+                let params: ThreadMessageFindParams =
+                    serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.camp_messages_find(
                     &mut database,
@@ -9295,18 +10172,51 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let lock_ms = lock_started_at.elapsed().as_millis();
                 let read_started_at = Instant::now();
-                let changes = rovai_core::execution_window::read_changes(
-                    &mut database,
-                    params.camp_id.as_str(),
-                    &params.agent_run_id,
-                    params.after_change_sequence,
-                    &params.refresh_evidence_ids,
-                    params.limit.unwrap_or(96),
-                )?;
+                anyhow::ensure!(
+                    params.group_sequence.is_some()
+                        || (params.from_sequence.is_none() && params.to_sequence.is_none()),
+                    "Execution group range requires a group"
+                );
+                anyhow::ensure!(
+                    params.group_sequence.is_none() || params.projection.is_none(),
+                    "Execution blocks and group cursors cannot be combined"
+                );
+                let changes = if let Some(group) = params.group_sequence {
+                    serde_json::to_value(rovai_core::execution_window::read_group_changes(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        group,
+                        params.after_change_sequence,
+                        params
+                            .from_sequence
+                            .context("Execution group range is required")?,
+                        params.to_sequence,
+                        params.limit.unwrap_or(96),
+                    )?)?
+                } else if params.projection.is_some() {
+                    serde_json::to_value(rovai_core::execution_window::read_block_changes(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        params.after_change_sequence,
+                        &params.refresh_evidence_ids,
+                        params.limit.unwrap_or(96),
+                    )?)?
+                } else {
+                    serde_json::to_value(rovai_core::execution_window::read_changes(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        params.after_change_sequence,
+                        &params.refresh_evidence_ids,
+                        params.limit.unwrap_or(96),
+                    )?)?
+                };
                 let read_ms = read_started_at.elapsed().as_millis();
                 drop(database);
                 let serialization_started_at = Instant::now();
-                let mut value = serde_json::to_value(changes)?;
+                let mut value = changes;
                 if let Some((_, phase)) = self
                     .runtime_phases
                     .lock()
@@ -9335,20 +10245,45 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let lock_ms = lock_started_at.elapsed().as_millis();
                 let read_started_at = Instant::now();
-                let page = rovai_core::execution_window::read_range(
-                    &mut database,
-                    params.camp_id.as_str(),
-                    &params.agent_run_id,
-                    params.before_sequence,
-                    params.after_sequence,
-                    params
-                        .limit
-                        .unwrap_or(rovai_core::execution_window::DEFAULT_WINDOW_LIMIT),
-                )?;
+                anyhow::ensure!(
+                    params.projection.is_none() || params.group_sequence.is_none(),
+                    "Execution blocks and group cursors cannot be combined"
+                );
+                let page = if let Some(group) = params.group_sequence {
+                    serde_json::to_value(rovai_core::execution_window::read_group_page(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        group,
+                        params.before_sequence,
+                        params.after_sequence,
+                        params.limit.unwrap_or(24),
+                    )?)?
+                } else if params.projection.is_some() {
+                    serde_json::to_value(rovai_core::execution_window::read_block_page(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        params.before_sequence,
+                        params.after_sequence,
+                        params.limit.unwrap_or(12),
+                    )?)?
+                } else {
+                    serde_json::to_value(rovai_core::execution_window::read_range(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        params.before_sequence,
+                        params.after_sequence,
+                        params
+                            .limit
+                            .unwrap_or(rovai_core::execution_window::DEFAULT_WINDOW_LIMIT),
+                    )?)?
+                };
                 let read_ms = read_started_at.elapsed().as_millis();
                 drop(database);
                 let serialization_started_at = Instant::now();
-                let mut value = serde_json::to_value(page)?;
+                let mut value = page;
                 if let Some((_, phase)) = self
                     .runtime_phases
                     .lock()
@@ -9481,18 +10416,18 @@ impl Core {
                     emit(
                         &self.output,
                         "single_chat.changed",
-                        json!({"campId":camp_id,"conversationId":conversation_id}),
+                        json!({"threadId":camp_id,"conversationId":conversation_id}),
                     );
                     Ok(serde_json::to_value(snapshot)?)
                 } else {
                     Ok(serde_json::to_value(
-                        CampAttachmentStore::for_client(&self.data_dir, request.client.clone())
+                        ThreadAttachmentStore::for_client(&self.data_dir, request.client.clone())
                             .load_draft(&database, &camp_id)?,
                     )?)
                 }
             }
             "messageQuotes.capture" => {
-                let params: CaptureCampMessageQuoteParams =
+                let params: CaptureThreadMessageQuoteParams =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let transaction = database.connection_mut().transaction()?;
@@ -9508,7 +10443,8 @@ impl Core {
             "camp.attachments.previewSource" => {
                 let locator: LocalAttachmentOwnerLocator =
                     serde_json::from_value(request.params.clone())?;
-                let store = CampAttachmentStore::for_client(&self.data_dir, request.client.clone());
+                let store =
+                    ThreadAttachmentStore::for_client(&self.data_dir, request.client.clone());
                 let (source_ref, legacy_allowed) = {
                     let database = self.database.lock().await;
                     (
@@ -9556,7 +10492,8 @@ impl Core {
                 let locator: LocalAttachmentOwnerLocator =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let store = CampAttachmentStore::for_client(&self.data_dir, request.client.clone());
+                let store =
+                    ThreadAttachmentStore::for_client(&self.data_dir, request.client.clone());
                 Ok(json!(rovai_core::camp_attachment::attachment_location(
                     &database,
                     &store,
@@ -9572,7 +10509,8 @@ impl Core {
                         || matches!(params, DesktopAttachmentTargetParams::Owner(_)),
                     "Web file access requires an exact owner locator"
                 );
-                let store = CampAttachmentStore::for_client(&self.data_dir, request.client.clone());
+                let store =
+                    ThreadAttachmentStore::for_client(&self.data_dir, request.client.clone());
                 if let DesktopAttachmentTargetParams::Owner(locator) = &params {
                     let (source_ref, legacy_allowed) = {
                         let database = self.database.lock().await;
@@ -9640,11 +10578,12 @@ impl Core {
                 Ok(serde_json::to_value(resolved)?)
             }
             "camp.messages.send" => {
-                let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
+                let params: SendThreadMessageParams =
+                    serde_json::from_value(request.params.clone())?;
                 self.send_test_camp_message_request(params).await
             }
             "camp.messages.withdraw" => {
-                let params: UserCommandParams<WithdrawCampMessageCommand> =
+                let params: UserCommandParams<WithdrawThreadMessageCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
@@ -9655,7 +10594,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "userAutomation.camp.send" => {
-                let params: SendUserAutomationCampMessageParams =
+                let params: SendUserAutomationThreadMessageParams =
                     serde_json::from_value(request.params.clone())?;
                 self.send_user_automation_camp_message_request(params).await
             }
@@ -9785,7 +10724,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.events_since(
                     &mut database,
-                    params.camp_id.as_ref().map(CampId::as_str),
+                    params.camp_id.as_ref().map(ThreadId::as_str),
                     params.after_global_sequence,
                     params.limit.unwrap_or(500),
                 )?)?)
@@ -9823,6 +10762,12 @@ impl Core {
                     if result.is_ok() { "ok" } else { "error" },
                 );
                 result
+            }
+            "monitoring.execution" => {
+                let params: MonitoringExecutionParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                MonitoringService::execution_snapshot(&database, &params)
             }
             "diagnostics.export" => {
                 let report = self.diagnostics_report().await;
@@ -9941,7 +10886,10 @@ impl Core {
         }
     }
 
-    async fn send_test_camp_message_request(&self, params: SendCampMessageParams) -> Result<Value> {
+    async fn send_test_camp_message_request(
+        &self,
+        params: SendThreadMessageParams,
+    ) -> Result<Value> {
         let envelope = params.envelope();
         if let Some(replay) = {
             let database = self.database.lock().await;
@@ -9981,7 +10929,7 @@ impl Core {
 
     async fn send_user_automation_camp_message_request(
         &self,
-        params: SendUserAutomationCampMessageParams,
+        params: SendUserAutomationThreadMessageParams,
     ) -> Result<Value> {
         let camp_id = params.camp_id.to_string();
         let envelope = CommandEnvelope {
@@ -9992,7 +10940,7 @@ impl Core {
             camp_id: Some(camp_id.clone()),
             expected_versions: Vec::new(),
             execution_epoch: None,
-            payload: SendUserAutomationCampMessageCommand {
+            payload: SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: params.agent_id,
                 body: params.body,
@@ -10041,9 +10989,9 @@ impl Core {
                 return Ok(());
             };
             let operation_id = plan.operation_id().to_string();
-            let attachment_store = CampAttachmentStore::new(&self.data_dir);
+            let attachment_store = ThreadAttachmentStore::new(&self.data_dir);
             let copied = match tokio::task::spawn_blocking(move || {
-                CampAttachmentViewStore::copy_publication(&attachment_store, plan)
+                ThreadAttachmentViewStore::copy_publication(&attachment_store, plan)
             })
             .await
             {
@@ -10141,7 +11089,7 @@ impl Core {
 
     async fn run_camp_member_fast_check(
         &self,
-        target: rovai_core::camp_fast::CampMemberFastTarget,
+        target: rovai_core::camp_fast::ThreadMemberFastTarget,
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
         use rovai_core::camp_fast;
@@ -10497,8 +11445,8 @@ impl Core {
                     &self.output,
                     "agent_run.network_recovery_waiting",
                     json!({
-                        "campId": execution.camp_id,
-                        "campTurnId": execution.camp_turn_id,
+                        "threadId": execution.camp_id,
+                        "threadTurnId": execution.camp_turn_id,
                         "agentRunId": execution.agent_run_id,
                         "executionEpoch": execution.execution_epoch,
                         "adapterKind": execution.runtime.adapter_kind,
@@ -10745,8 +11693,8 @@ impl Core {
                     output,
                     "agent_run.recovering",
                     json!({
-                        "campId": registration.camp_id,
-                        "campTurnId": registration.camp_turn_id,
+                        "threadId": registration.camp_id,
+                        "threadTurnId": registration.camp_turn_id,
                         "agentRunId": registration.agent_run_id,
                         "executionEpoch": registration.execution_epoch,
                         "adapterKind": registration.adapter_kind,
@@ -10820,27 +11768,37 @@ impl Core {
     async fn collect_delivery_batch_dispatch_candidates(
         &self,
     ) -> Result<Vec<rovai_core::runtime::QueuedAgentRunCandidate>> {
-        let mut claimed_any = false;
+        let mut changed_camps = std::collections::BTreeSet::new();
         loop {
             let claimed = {
                 let mut database = self.database.lock().await;
                 if !has_waiting_delivery_batch_work(&database)? {
                     Vec::new()
                 } else {
-                    claim_waiting_delivery_batches(
+                    let runs = claim_waiting_delivery_batches(
                         &mut database,
                         DELIVERY_BATCH_SCHEDULER_PAGE_LIMIT,
-                    )?
+                    )?;
+                    let mut statement = database.connection().prepare(
+                        "SELECT DISTINCT camp_id FROM agent_run WHERE id IN (SELECT value FROM json_each(?1)) AND camp_id IS NOT NULL"
+                    )?;
+                    changed_camps.extend(
+                        statement
+                            .query_map([serde_json::to_string(&runs)?], |row| {
+                                row.get::<_, String>(0)
+                            })?
+                            .collect::<rusqlite::Result<Vec<_>>>()?,
+                    );
+                    runs
                 }
             };
             if claimed.is_empty() {
                 break;
             }
-            claimed_any = true;
             tokio::task::yield_now().await;
         }
-        if claimed_any {
-            emit_navigation_invalidated(&self.output, "delivery_batch.claimed", None);
+        for camp_id in changed_camps {
+            emit_navigation_invalidated(&self.output, "delivery_batch.claimed", Some(&camp_id));
         }
 
         let candidates = {
@@ -10970,7 +11928,7 @@ impl Core {
                 let claimed = !dispatches.is_empty();
                 let mut ready = Vec::with_capacity(dispatches.len());
                 for dispatch in dispatches {
-                    match CampOutputDirectory::prepare(&database, &dispatch.camp_id).map(|_| ()) {
+                    match ThreadOutputDirectory::prepare(&database, &dispatch.camp_id).map(|_| ()) {
                         Ok(()) => ready.push(dispatch),
                         Err(error) => {
                             eprintln!(
@@ -11493,8 +12451,8 @@ impl Core {
                                     &output,
                                     Some(&execution.camp_id),
                                     json!({
-                                        "campId": execution.camp_id,
-                                        "campTurnId": execution.camp_turn_id,
+                                        "threadId": execution.camp_id,
+                                        "threadTurnId": execution.camp_turn_id,
                                         "agentRunId": execution.agent_run_id,
                                         "executionEpoch": execution.execution_epoch,
                                         "adapterKind": execution.runtime.adapter_kind,
@@ -11598,8 +12556,8 @@ impl Core {
                     output,
                     Some(&candidate.camp_id),
                     json!({
-                        "campId": candidate.camp_id,
-                        "campTurnId": candidate.camp_turn_id,
+                        "threadId": candidate.camp_id,
+                        "threadTurnId": candidate.camp_turn_id,
                         "agentRunId": candidate.agent_run_id,
                         "reasonCode": error_code,
                         "result": execution.result,
@@ -11722,7 +12680,7 @@ impl Core {
             output,
             "agent_run.runtime_cleanup_completed",
             json!({
-                "campId": candidate.camp_id, "agentRunId": candidate.agent_run_id,
+                "threadId": candidate.camp_id, "agentRunId": candidate.agent_run_id,
                 "executionEpoch": candidate.execution_epoch,
             }),
         );
@@ -12156,6 +13114,12 @@ impl Core {
 
             let response = if let Some(response) = frozen_runtime_response {
                 Ok(response)
+            } else if candidate.native_method == CLAUDE_PERMISSION_NATIVE_METHOD {
+                Ok(if approved {
+                    json!({"behavior": "allow", "updatedInput": candidate.response_context["request"]["input"]})
+                } else {
+                    claude_permission::deny_decision("Rovai 用户拒绝了这次 Claude Code 操作")
+                })
             } else if candidate.native_method == "session/request_permission" {
                 acp::legacy_approval_result(&candidate.response_context, approved)
             } else {
@@ -12301,7 +13265,7 @@ impl Core {
     async fn materialize_agent_run_context(
         &self,
         execution: &AgentRunExecution,
-        attachment_access: CampAttachmentRunAccess<'_>,
+        attachment_access: ThreadAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
         request: RuntimeInputPreparationRequest<'_>,
@@ -12334,8 +13298,8 @@ impl Core {
                     output,
                     "agent_run.context_waiting",
                     json!({
-                        "campId": execution.camp_id,
-                        "campTurnId": execution.camp_turn_id,
+                        "threadId": execution.camp_id,
+                        "threadTurnId": execution.camp_turn_id,
                         "agentRunId": execution.agent_run_id,
                         "executionEpoch": execution.execution_epoch,
                         "reason": wait.reason,
@@ -12349,7 +13313,7 @@ impl Core {
     async fn materialize_and_prepare_agent_run_input(
         &self,
         execution: &AgentRunExecution,
-        attachment_access: CampAttachmentRunAccess<'_>,
+        attachment_access: ThreadAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: Option<&PreparedMcpProjection>,
         request: RuntimeInputPreparationRequest<'_>,
@@ -12418,8 +13382,8 @@ impl Core {
                     output,
                     "agent_run.context_waiting",
                     json!({
-                        "campId": execution.camp_id,
-                        "campTurnId": execution.camp_turn_id,
+                        "threadId": execution.camp_id,
+                        "threadTurnId": execution.camp_turn_id,
                         "agentRunId": execution.agent_run_id,
                         "executionEpoch": execution.execution_epoch,
                         "reason": wait.reason,
@@ -13394,16 +14358,16 @@ impl Core {
         &self,
         camp_id: &str,
         _workspace: &Path,
-    ) -> Result<CampOutputDirectory> {
+    ) -> Result<ThreadOutputDirectory> {
         let database = self.database.lock().await;
-        CampOutputDirectory::prepare(&database, camp_id)
+        ThreadOutputDirectory::prepare(&database, camp_id)
     }
 
     async fn launch_agent_run(
         self: &Arc<Self>,
         execution: &AgentRunExecution,
-        attachment_admission: &CampAttachmentReadAdmission,
-        attachment_authorization: &CampOutputDirectory,
+        attachment_admission: &ThreadAttachmentReadAdmission,
+        attachment_authorization: &ThreadOutputDirectory,
         output: &mpsc::UnboundedSender<String>,
         launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
@@ -13452,7 +14416,7 @@ impl Core {
             .prepare_agent_run_mcp_projection(execution)
             .await
             .context("failed to prepare AgentRun MCP projection")?;
-        let attachment_access = CampAttachmentRunAccess {
+        let attachment_access = ThreadAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
         };
@@ -13751,7 +14715,7 @@ impl Core {
         emit(
             output,
             "camp.member.fast.updated",
-            json!({"campId": execution.camp_id, "agentId": execution.agent_id}),
+            json!({"threadId": execution.camp_id, "agentId": execution.agent_id}),
         );
         let reasoning_effort = execution.runtime.model.options["reasoning_effort"].as_str();
         let delivery = {
@@ -13809,8 +14773,8 @@ impl Core {
             output,
             "agent_run.started",
             json!({
-                "campId": execution.camp_id,
-                "campTurnId": execution.camp_turn_id,
+                "threadId": execution.camp_id,
+                "threadTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
                 "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
@@ -13849,7 +14813,7 @@ impl Core {
             output,
             launch_permit,
         } = launch;
-        CampAttachmentRunAccess {
+        ThreadAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
         }
@@ -14001,7 +14965,7 @@ impl Core {
         let prepared = self
             .materialize_and_prepare_agent_run_input(
                 execution,
-                CampAttachmentRunAccess {
+                ThreadAttachmentRunAccess {
                     admission: attachment_admission,
                     authorization: attachment_authorization,
                 },
@@ -14124,7 +15088,7 @@ impl Core {
             output,
             launch_permit,
         } = launch;
-        let attachment_access = CampAttachmentRunAccess {
+        let attachment_access = ThreadAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
         };
@@ -14233,8 +15197,8 @@ impl Core {
             output,
             "agent_run.started",
             json!({
-                "campId": execution.camp_id,
-                "campTurnId": execution.camp_turn_id,
+                "threadId": execution.camp_id,
+                "threadTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
                 "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
@@ -14339,18 +15303,8 @@ impl Core {
                             runtime_event_channel_open = false;
                             continue;
                         };
-                        if let Err(error) = process_runtime_event(
-                            self,
-                            output,
-                            RuntimeEventScope {
-                                adapter_kind: AdapterKind::ClaudeCodeCli,
-                                camp_id: &execution.camp_id,
-                                agent_run_id: &execution.agent_run_id,
-                                execution_epoch: execution.execution_epoch,
-                                managed_output_root: Some(builtin_tools.run_tmp()),
-                            },
-                            runtime_event.event_type,
-                            &runtime_event.payload,
+                        if let Err(error) = self.process_claude_runtime_event(
+                            execution, output, builtin_tools.run_tmp(), &runtime_event,
                         ).await {
                             eprintln!(
                                 "failed to persist Claude Code Runtime Evidence for AgentRun {}: {error:#}",
@@ -14362,21 +15316,9 @@ impl Core {
                 }
             };
             while let Ok(runtime_event) = runtime_event_receiver.try_recv() {
-                if let Err(error) = process_runtime_event(
-                    self,
-                    output,
-                    RuntimeEventScope {
-                        adapter_kind: AdapterKind::ClaudeCodeCli,
-                        camp_id: &execution.camp_id,
-                        agent_run_id: &execution.agent_run_id,
-                        execution_epoch: execution.execution_epoch,
-                        managed_output_root: Some(builtin_tools.run_tmp()),
-                    },
-                    runtime_event.event_type,
-                    &runtime_event.payload,
-                )
-                .await
-                {
+                if let Err(error) = self.process_claude_runtime_event(
+                    execution, output, builtin_tools.run_tmp(), &runtime_event,
+                ).await {
                     eprintln!(
                         "failed to persist queued Claude Code Runtime Evidence for AgentRun {}: {error:#}",
                         execution.agent_run_id
@@ -14534,6 +15476,164 @@ impl Core {
             output,
         )
         .await
+    }
+
+    async fn process_claude_runtime_event(
+        &self,
+        execution: &AgentRunExecution,
+        output: &mpsc::UnboundedSender<String>,
+        managed_output_root: &Path,
+        event: &claude::ClaudeCodeRuntimeEvent,
+    ) -> Result<()> {
+        if matches!(
+            event.event_type,
+            "runtime.usage.observed" | "runtime.context.observed"
+        ) {
+            let observations = parse_claude_observed_usage(event.event_type, &event.payload);
+            let identity = canonical_json_digest(&event.payload)?;
+            buffer_runtime_usage(
+                self,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &identity,
+                &observations,
+            )
+            .await?;
+            return Ok(());
+        }
+        if event.event_type == "claude.permission_request" {
+            if let Err(error) = self
+                .prepare_claude_permission_action(execution, &event.payload)
+                .await
+            {
+                if let Some(runtime) = self
+                    .claude_code_cli
+                    .get_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                {
+                    let _ = runtime
+                        .respond(
+                            event.payload["controlRequest"]["request_id"].clone(),
+                            claude_permission::deny_decision("Rovai 审批请求不可用，操作已拒绝"),
+                        )
+                        .await;
+                }
+                return Err(error);
+            }
+            return Ok(());
+        }
+        if event.event_type == "claude.permission_cancelled" {
+            return self
+                .cancel_claude_permission_action(execution, &event.payload)
+                .await;
+        }
+        if event.event_type == "runtime.action" {
+            self.record_claude_action_completion(execution, output, &event.payload)
+                .await?;
+        }
+        process_runtime_event(
+            self,
+            output,
+            RuntimeEventScope {
+                adapter_kind: AdapterKind::ClaudeCodeCli,
+                camp_id: &execution.camp_id,
+                agent_run_id: &execution.agent_run_id,
+                execution_epoch: execution.execution_epoch,
+                managed_output_root: Some(managed_output_root),
+            },
+            event.event_type,
+            &event.payload,
+        )
+        .await
+    }
+
+    async fn record_claude_action_completion(
+        &self,
+        execution: &AgentRunExecution,
+        output: &mpsc::UnboundedSender<String>,
+        payload: &Value,
+    ) -> Result<()> {
+        let Some(status @ ("completed" | "failed")) = payload.get("status").and_then(Value::as_str)
+        else {
+            return Ok(());
+        };
+        let Some(native_item_id) = payload.get("toolCallId").and_then(Value::as_str) else {
+            return Ok(());
+        };
+        let attempts = {
+            let database = self.database.lock().await;
+            ActionSafetyService::default().load_intercepted_action_attempts(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                native_item_id,
+            )?
+        };
+        for attempt in attempts {
+            let succeeded = status == "completed";
+            let recorded = {
+                let mut database = self.database.lock().await;
+                ActionSafetyService::default().record_result(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: format!(
+                            "runtime-action-result:{}:{}:{}",
+                            attempt.action_id, attempt.attempt_id, attempt.action_execution_epoch,
+                        ),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:claude-code-cli".into(),
+                        },
+                        camp_id: Some(attempt.camp_id),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: RecordActionResultCommand {
+                            action_id: attempt.action_id.clone(),
+                            attempt_id: attempt.attempt_id,
+                            action_execution_epoch: attempt.action_execution_epoch,
+                            outcome: if succeeded {
+                                ActionResultOutcome::Succeeded
+                            } else {
+                                ActionResultOutcome::Failed
+                            },
+                            result_code: if succeeded {
+                                "claude_tool_completed"
+                            } else {
+                                "claude_tool_failed"
+                            }
+                            .into(),
+                            result_summary: if succeeded {
+                                "Claude Code tool completed"
+                            } else {
+                                "Claude Code tool failed"
+                            }
+                            .into(),
+                            result_data: json!({"nativeItemId": native_item_id}),
+                            effect_disposition: if succeeded { "complete" } else { "unknown" }
+                                .into(),
+                        },
+                    },
+                )
+            }?;
+            if recorded.result.status == CommandResultStatus::Rejected {
+                anyhow::bail!(
+                    "Claude Action result was rejected: {}",
+                    recorded.result.code
+                );
+            }
+            emit(
+                output,
+                "action.result_recorded",
+                json!({
+                    "agentRunId": execution.agent_run_id,
+                    "executionEpoch": execution.execution_epoch,
+                    "actionId": attempt.action_id,
+                    "actionKind": attempt.action_kind,
+                    "nativeItemId": native_item_id,
+                    "result": recorded.result,
+                    "replayed": recorded.replayed,
+                }),
+            );
+        }
+        Ok(())
     }
 
     async fn complete_one_shot_agent_run(
@@ -14712,7 +15812,7 @@ impl Core {
             output,
             launch_permit,
         } = launch;
-        let attachment_access = CampAttachmentRunAccess {
+        let attachment_access = ThreadAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
         };
@@ -14808,8 +15908,8 @@ impl Core {
             output,
             "agent_run.started",
             json!({
-                "campId": execution.camp_id,
-                "campTurnId": execution.camp_turn_id,
+                "threadId": execution.camp_id,
+                "threadTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
                 "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
@@ -15124,7 +16224,7 @@ impl Core {
             output,
             launch_permit,
         } = launch;
-        let attachment_access = CampAttachmentRunAccess {
+        let attachment_access = ThreadAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
         };
@@ -15149,7 +16249,6 @@ impl Core {
             &execution.workspace,
             execution.permission_semantics,
             &mcp_projection.servers,
-            &mcp_projection.projection_digest,
             attachment_authorization,
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
@@ -15286,7 +16385,6 @@ impl Core {
                     &execution.workspace,
                     execution.permission_semantics,
                     &mcp_projection.servers,
-                    &mcp_projection.projection_digest,
                     attachment_authorization,
                 )?;
                 self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
@@ -15338,20 +16436,23 @@ impl Core {
             }
             Err(error) => return Err(error),
         };
+        // Freeze Bootstrap against the prepared Binding before recording the
+        // native Session ID. Once bound, a missing evidence row is a continuity
+        // violation and ContextService must reject materialization.
+        let bootstrap = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_session_bootstrap(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                charter_delivery_mode,
+            )?
+        };
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await
             .context("failed to bind ACP Native Session")?;
         if execution.runtime.adapter_kind == AdapterKind::DeepseekHarness {
-            let bootstrap = {
-                let mut database = self.database.lock().await;
-                ContextService.prepare_session_bootstrap(
-                    &mut database,
-                    &ManagedBlobStore::new(&self.data_dir),
-                    &execution.agent_run_id,
-                    execution.execution_epoch,
-                    CharterDeliveryMode::ManagedSystemPrompt,
-                )?
-            };
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
                     != binding_credential.native_binding_generation
@@ -15426,8 +16527,8 @@ impl Core {
             output,
             "agent_run.started",
             json!({
-                "campId": execution.camp_id,
-                "campTurnId": execution.camp_turn_id,
+                "threadId": execution.camp_id,
+                "threadTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
                 "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
@@ -15524,8 +16625,8 @@ impl Core {
                 output,
                 Some(&execution.camp_id),
                 json!({
-                    "campId": execution.camp_id,
-                    "campTurnId": execution.camp_turn_id,
+                    "threadId": execution.camp_id,
+                    "threadTurnId": execution.camp_turn_id,
                     "agentRunId": execution.agent_run_id,
                     "executionEpoch": execution.execution_epoch,
                     "adapterKind": execution.runtime.adapter_kind,
@@ -15719,8 +16820,8 @@ impl Core {
                 output,
                 Some(&candidate.camp_id),
                 json!({
-                    "campId": candidate.camp_id,
-                    "campTurnId": candidate.camp_turn_id,
+                    "threadId": candidate.camp_id,
+                    "threadTurnId": candidate.camp_turn_id,
                     "agentRunId": candidate.agent_run_id,
                     "executionEpoch": execution_epoch,
                     "reasonCode": "runtime_configuration_invalid",
@@ -16339,7 +17440,7 @@ async fn run_core(
         None,
         None,
     )?;
-    let attachment_views = match CampAttachmentViewStore::admit(
+    let attachment_views = match ThreadAttachmentViewStore::admit(
         &runtime_camp_files_root,
         &data_dir,
         std::slice::from_ref(&skill_library_root),
@@ -16725,7 +17826,7 @@ async fn run_core(
     // itself remains asynchronous and does not delay the ready frame.
     let deleting_camp_ids = {
         let database = core.database.lock().await;
-        CampDeletionService::default().deleting_camp_ids(&database)?
+        ThreadDeletionService::default().deleting_camp_ids(&database)?
     };
     for camp_id in deleting_camp_ids {
         core.runtime_fleet.mark_camp_deleting(&camp_id).await;
@@ -16843,6 +17944,17 @@ async fn run_core(
         output_tx.clone(),
         host_control.clone(),
     ));
+    let (independent_read_tx, independent_read_rx) = mpsc::channel(INDEPENDENT_READ_QUEUE_CAPACITY);
+    let independent_read_rx = Arc::new(Mutex::new(independent_read_rx));
+    let mut independent_read_workers = Vec::with_capacity(INDEPENDENT_READ_WORKERS);
+    for _ in 0..INDEPENDENT_READ_WORKERS {
+        independent_read_workers.push(tokio::spawn(process_independent_read_requests(
+            core.clone(),
+            independent_read_rx.clone(),
+            ordered_request_tx.clone(),
+            output_tx.clone(),
+        )));
+    }
     let mut planned_shutdown_request = None;
 
     while let Some(request) = input.next_request().await? {
@@ -16880,6 +17992,19 @@ async fn run_core(
             }
         }
 
+        if request_uses_independent_read_queue(&request.method) {
+            independent_read_tx
+                .send(ReceivedRequest {
+                    request,
+                    received_at,
+                })
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("independent read request workers stopped unexpectedly")
+                })?;
+            continue;
+        }
+
         if request_runs_outside_main_queue(&request.method) {
             let request_core = core.clone();
             let request_output = output_tx.clone();
@@ -16901,6 +18026,12 @@ async fn run_core(
             .map_err(|_| anyhow::anyhow!("ordered Core request worker stopped unexpectedly"))?;
     }
 
+    drop(independent_read_tx);
+    for worker in independent_read_workers {
+        worker
+            .await
+            .context("independent read request worker failed")??;
+    }
     drop(ordered_request_tx);
     ordered_request_worker
         .await
@@ -17923,7 +19054,14 @@ async fn process_agent_run_pi_message(
         .to_string();
     let usage = parse_pi_usage_message(&message, native_session_id, native_prompt_id);
     if !usage.is_empty() {
-        match pi_usage_source_identity(&message, native_session_id, native_prompt_id) {
+        let source = if message_type == "rovai.context_usage" {
+            Ok(Some(format!(
+                "pi-context:{host_instance_id}:{native_prompt_id}:{sequence}"
+            )))
+        } else {
+            pi_usage_source_identity(&message, native_session_id, native_prompt_id)
+        };
+        match source {
             Ok(Some(source_identity)) => {
                 if let Err(error) = buffer_runtime_usage(
                     core,
@@ -17942,6 +19080,9 @@ async fn process_agent_run_pi_message(
                 "dropped Pi Usage without a stable source identity for AgentRun {agent_run_id}: {error:#}"
             ),
         }
+    }
+    if message_type == "rovai.context_usage" {
+        return Ok(());
     }
     let (message, completed_action) = runtime.observe(message).await?;
     if message_type == "extension_ui_request" {
@@ -17989,8 +19130,8 @@ async fn process_agent_run_pi_message(
             output,
             "agent_run.started",
             json!({
-                "campId": execution.camp_id,
-                "campTurnId": execution.camp_turn_id,
+                "threadId": execution.camp_id,
+                "threadTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
                 "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
@@ -18014,7 +19155,7 @@ async fn process_agent_run_pi_message(
             &execution.agent_run_id,
             execution.execution_epoch,
             &execution.runtime.model.source,
-            Some(execution.runtime.model.model_id.clone()),
+            runtime.observed_model_id().await,
         )
         .await;
     }
@@ -18677,6 +19818,60 @@ async fn process_acp_events(
                 )
                 .await;
             }
+            AcpIncoming::LateSessionContext {
+                adapter_kind,
+                agent_run_id,
+                execution_epoch,
+                native_session_id,
+                message,
+            } => {
+                let params = &message["params"];
+                if params["sessionId"].as_str() != Some(native_session_id.as_str()) {
+                    continue;
+                }
+                let method = message["method"].as_str().unwrap_or("");
+                for mut usage in parse_acp_usage_message(adapter_kind, None, method, params) {
+                    if usage.scope != "session"
+                        || usage.native_session_id.as_deref() != Some(native_session_id.as_str())
+                    {
+                        continue;
+                    }
+                    // Only qualified numeric metadata contributes to identity;
+                    // unrelated private native fields never enter this digest.
+                    let Ok(identity) = canonical_json_digest(&json!({
+                        "sessionId": native_session_id,
+                        "dialect": usage.dialect_id,
+                        "used": usage.fields.context_used_tokens,
+                        "window": usage.fields.context_size_tokens,
+                        "ratio": usage.fields.native_context_ratio,
+                    })) else {
+                        continue;
+                    };
+                    usage.occurred_at = Some(chrono::Utc::now().to_rfc3339());
+                    let result = {
+                        let mut database = core.database.lock().await;
+                        MonitoringService::record_late_session_context(
+                            &mut database,
+                            &agent_run_id,
+                            execution_epoch,
+                            adapter_kind,
+                            &identity,
+                            &usage,
+                        )
+                    };
+                    match result {
+                        Ok(true) => emit(
+                            &output,
+                            "monitoring.changed",
+                            json!({"reason": "late_session_context"}),
+                        ),
+                        Ok(false) => {}
+                        Err(error) => eprintln!(
+                            "failed to persist late ACP Context for AgentRun {agent_run_id}: {error:#}"
+                        ),
+                    }
+                }
+            }
             AcpIncoming::ZcodeBackground {
                 agent_run_id,
                 execution_epoch,
@@ -19291,33 +20486,119 @@ async fn process_agent_run_acp_message(
         return;
     }
 
-    let usage = parse_acp_usage_message(adapter_kind, runtime.reported_version(), &method, &params);
-    if !usage.is_empty()
-        && let Err(error) = buffer_runtime_usage(
+    let mut usage =
+        parse_acp_usage_message(adapter_kind, runtime.reported_version(), &method, &params);
+    if usage.iter().any(|item| {
+        matches!(
+            item.dialect_id.as_str(),
+            "grok-acp-meta-context-v1" | "kiro-acp-context-percentage-v1"
+        )
+    }) {
+        let window = runtime.observed_context_window().await;
+        for item in &mut usage {
+            if matches!(
+                item.dialect_id.as_str(),
+                "grok-acp-meta-context-v1" | "kiro-acp-context-percentage-v1"
+            ) {
+                item.fields.context_size_tokens = window;
+            }
+        }
+    }
+    if runtime.native_usage_selected().await {
+        // A prompt selects one billing source before dispatch. Restated ACP
+        // totals cannot also claim the native journal's model calls.
+        usage.retain_mut(|item| {
+            if item.counter_mode == RuntimeUsageCounterMode::Gauge {
+                return true;
+            }
+            if item.cost.is_some() {
+                item.fields = RuntimeUsageFields::default();
+                return true;
+            }
+            false
+        });
+    }
+    let usage_identity = acp_usage_source_identity(adapter_kind, &method, &params)
+        .ok()
+        .flatten();
+    let observed_model = if usage
+        .iter()
+        .any(|item| item.counter_mode == RuntimeUsageCounterMode::Gauge)
+    {
+        runtime.observed_model_id().await
+    } else {
+        None
+    };
+    for item in &mut usage {
+        let identity = if item.counter_mode == RuntimeUsageCounterMode::Gauge {
+            if item.context_model_id.is_none() {
+                item.context_model_id = observed_model.clone();
+            }
+            // Immutable transport receipt, independent of consumption identity
+            // and numeric value. Repeated values can refresh after compaction.
+            format!("native-context:{host_instance_id}:{native_prompt_id}:{sequence}")
+        } else {
+            usage_identity.clone().unwrap_or_else(|| {
+                canonical_json_digest(&message)
+                    .unwrap_or_else(|_| format!("acp:{method}:{agent_run_id}:{execution_epoch}"))
+            })
+        };
+        if let Err(error) = buffer_runtime_usage(
             core,
             agent_run_id,
             execution_epoch,
-            &acp_usage_source_identity(adapter_kind, &method, &params)
-                .unwrap_or_else(|error| {
-                    eprintln!(
-                        "failed to derive {} Usage identity for AgentRun {agent_run_id}: {error:#}",
-                        adapter_kind.as_str()
-                    );
-                    None
-                })
-                .unwrap_or_else(|| {
-                    canonical_json_digest(&message).unwrap_or_else(|_| {
-                        format!("acp:{method}:{agent_run_id}:{execution_epoch}")
-                    })
-                }),
-            &usage,
+            &identity,
+            std::slice::from_ref(item),
         )
         .await
-    {
-        eprintln!(
-            "failed to persist {} Usage for AgentRun {agent_run_id}: {error:#}",
-            adapter_kind.as_str()
-        );
+        {
+            eprintln!(
+                "failed to persist {} Usage for AgentRun {agent_run_id}: {error:#}",
+                adapter_kind.as_str()
+            );
+        }
+    }
+    if adapter_kind == AdapterKind::KiroCli && method == "_kiro.dev/metadata" {
+        return;
+    }
+    if acp::is_session_catalog_update(&message) {
+        // A Grok catalog notification may carry native Context. Its numeric
+        // observation has been collected; catalog contents stay out of Evidence
+        // and Renderer IPC just as they did before this observation was routed.
+        return;
+    }
+    if adapter_kind == AdapterKind::CopilotCli && method == "github.com/copilot/sessionEvent" {
+        // Drop private events before Evidence or Renderer IPC.
+        if usage
+            .iter()
+            .any(|item| item.dialect_id == "copilot-native-call-usage-v1")
+            && let Some(model) = params.pointer("/data/model").and_then(Value::as_str)
+        {
+            // ACP's advertised default can differ from the model that actually
+            // served the root call. Use the validated native Usage observation.
+            let execution = {
+                let database = core.database.lock().await;
+                ExecutionRuntimeService::default().load_agent_run_execution(
+                    &database,
+                    agent_run_id,
+                    execution_epoch,
+                )
+            };
+            if let Ok(Some(execution)) = execution {
+                record_available_runtime_model(
+                    core,
+                    output,
+                    adapter_kind,
+                    &execution.camp_id,
+                    agent_run_id,
+                    execution_epoch,
+                    &execution.runtime.model.source,
+                    Some(model.to_string()),
+                )
+                .await;
+            }
+        }
+        return;
     }
     if let Some(images) = runtime.observe_images(native_prompt_id, &message).await {
         persist_runtime_images(
@@ -19719,7 +21000,7 @@ async fn record_runtime_model_observation(
             output,
             "agent_run.runtime_model_observed",
             json!({
-                "campId": camp_id,
+                "threadId": camp_id,
                 "agentRunId": agent_run_id,
                 "executionEpoch": execution_epoch,
                 "adapterKind": adapter_kind,
@@ -19787,6 +21068,26 @@ async fn process_runtime_event(
     let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
         return Ok(());
     };
+    if scope.adapter_kind == AdapterKind::AntigravityApp
+        && event_type == "runtime.antigravity.usage"
+    {
+        let usage: rovai_core::monitoring::ParsedRuntimeUsage =
+            serde_json::from_value(payload.clone())?;
+        let identity = format!(
+            "antigravity:{}:{}",
+            usage.native_session_id.as_deref().unwrap_or(""),
+            usage.identity_suffix
+        );
+        buffer_runtime_usage(
+            core,
+            scope.agent_run_id,
+            scope.execution_epoch,
+            &identity,
+            &[usage],
+        )
+        .await?;
+        return Ok(());
+    }
     if event_type == agent_run_image::IMAGE_EVENT {
         if let Ok(images) = serde_json::from_value::<RuntimeImageObservation>(payload.clone()) {
             persist_runtime_images(
@@ -19833,7 +21134,7 @@ async fn process_runtime_event(
                 emit(
                     output,
                     "camp.member.fast.updated",
-                    json!({"campId": execution.camp_id, "agentId": execution.agent_id}),
+                    json!({"threadId": execution.camp_id, "agentId": execution.agent_id}),
                 );
             }
             return Ok(());
@@ -19929,7 +21230,7 @@ async fn persist_runtime_images(
                     output,
                     "agent_run.images.updated",
                     json!({
-                        "campId": execution.camp_id,
+                        "threadId": execution.camp_id,
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
                     }),
@@ -21115,11 +22416,45 @@ async fn flush_runtime_usage(
     core: &Core,
     target: RuntimeUsageFlushTarget,
     reason: &'static str,
-    notify_monitoring: bool,
 ) -> Result<usize> {
     // A terminal flush must observe the result of any periodic flush that
     // already drained this Run before deciding that its bookkeeping is idle.
     let _flush_guard = core.runtime_usage_flush.lock().await;
+    // Poll under the same serialization as drain/persist. A terminal cannot
+    // finish this Run between advancing the native cursor and buffering it.
+    for kind in [
+        AdapterKind::CodebuddyCli,
+        AdapterKind::KimiCodeCli,
+        AdapterKind::OpencodeCli,
+        AdapterKind::QoderCli,
+        AdapterKind::TraeCnCli,
+    ] {
+        let Some(adapter) = core.acp_adapter(kind) else {
+            continue;
+        };
+        for (agent_run_id, execution_epoch, runtime) in adapter.native_usage_runs().await {
+            if let RuntimeUsageFlushTarget::Run {
+                agent_run_id: target_id,
+                execution_epoch: target_epoch,
+            } = &target
+                && (&agent_run_id != target_id || execution_epoch != *target_epoch)
+            {
+                continue;
+            }
+            let prompt_end =
+                reason == "terminal_flush" && matches!(target, RuntimeUsageFlushTarget::Run { .. });
+            for item in runtime.poll_native_usage(prompt_end).await {
+                buffer_runtime_usage(
+                    core,
+                    &agent_run_id,
+                    execution_epoch,
+                    &item.source_identity,
+                    &[item.usage],
+                )
+                .await?;
+            }
+        }
+    }
     let batches = {
         let mut usage = core.runtime_usage.lock().await;
         let batches = usage.drain(target.clone());
@@ -21137,10 +22472,13 @@ async fn flush_runtime_usage(
     };
     match persistence {
         Ok(inserted) => {
-            let mut usage = core.runtime_usage.lock().await;
-            usage.finish_idle_target_after_flush(&target);
-            drop(usage);
-            if inserted > 0 && notify_monitoring {
+            core.runtime_usage
+                .lock()
+                .await
+                .finish_idle_target_after_flush(&target);
+            // The existing four-second flush invalidates visible readers after
+            // commit, including Context received before prompt acknowledgement.
+            if inserted > 0 {
                 emit(
                     &core.output,
                     "monitoring.changed",
@@ -21169,7 +22507,6 @@ async fn flush_runtime_monitoring_run(
             execution_epoch,
         },
         reason,
-        true,
     )
     .await
 }
@@ -21192,7 +22529,6 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     &core,
                     RuntimeUsageFlushTarget::Periodic,
                     "usage_flush",
-                    false,
                 ).await {
                     eprintln!("periodic Runtime Usage flush failed: {error:#}");
                 }
@@ -21211,7 +22547,6 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     &core,
                     RuntimeUsageFlushTarget::All,
                     "shutdown_flush",
-                    false,
                 ).await {
                     eprintln!("terminal Runtime Usage shutdown flush failed: {error:#}");
                 }
@@ -21479,19 +22814,25 @@ async fn process_agent_run_codex_message(
         }
     }
     let usage = parse_codex_usage_message(&method, &params);
-    if !usage.is_empty()
-        && let Err(error) = buffer_runtime_usage(
+    for observation in &usage {
+        let source_identity = if observation.scope == "session" {
+            codex_context_source_identity(&params)
+        } else {
+            codex_usage_source_identity(&params)
+        }
+        .or_else(|_| canonical_json_digest(&message))
+        .unwrap_or_else(|_| format!("codex:{method}:{agent_run_id}:{execution_epoch}"));
+        if let Err(error) = buffer_runtime_usage(
             core,
             agent_run_id,
             execution_epoch,
-            &codex_usage_source_identity(&params)
-                .or_else(|_| canonical_json_digest(&message))
-                .unwrap_or_else(|_| format!("codex:{method}:{agent_run_id}:{execution_epoch}")),
-            &usage,
+            &source_identity,
+            std::slice::from_ref(observation),
         )
         .await
-    {
-        eprintln!("failed to persist Codex Usage for AgentRun {agent_run_id}: {error:#}");
+        {
+            eprintln!("failed to persist Codex Usage for AgentRun {agent_run_id}: {error:#}");
+        }
     }
     if method == "thread/tokenUsage/updated" {
         return;
@@ -22393,7 +23734,7 @@ async fn dispatch_pending_single_chat_inputs(core: &Core) {
                 &core.output,
                 "single_chat.changed",
                 json!({
-                    "campId": camp_id,
+                    "threadId": camp_id,
                     "conversationId": conversation_id,
                     "reason": "pending_input_published",
                 }),
@@ -22402,7 +23743,7 @@ async fn dispatch_pending_single_chat_inputs(core: &Core) {
                 &core.output,
                 "single_chat.changed",
                 json!({
-                    "campId": camp_id,
+                    "threadId": camp_id,
                     "conversationId": conversation_id,
                     "reason": "pending_input_publication_deferred",
                 }),
@@ -22427,7 +23768,7 @@ async fn dispatch_pending_single_chat_inputs(core: &Core) {
                     &core.output,
                     "single_chat.changed",
                     json!({
-                        "campId": camp_id,
+                        "threadId": camp_id,
                         "conversationId": conversation_id,
                         "reason": "pending_input_needs_repair",
                     }),
@@ -23065,7 +24406,7 @@ async fn finalize_runtime_check(
         emit(
             &core.output,
             "camp.member.fast.updated",
-            json!({"campId": target.camp_id, "agentId": target.agent_id}),
+            json!({"threadId": target.camp_id, "agentId": target.agent_id}),
         );
         for waiter in attempt.waiters {
             let _ = waiter.send(result.clone());
@@ -23298,9 +24639,45 @@ fn runtime_check_writes_diagnostic(finalization: RuntimeCheckFinalization) -> bo
 }
 
 fn emit(output: &mpsc::UnboundedSender<String>, method: &str, params: Value) {
-    let message = json!({"method": method, "params": params});
+    let message =
+        json!({"method": rovai_core::thread_compat::public_host_method(method), "params": params});
     if let Ok(serialized) = serde_json::to_string(&message) {
         let _ = output.send(serialized);
+    }
+}
+
+fn emit_missions_invalidated(
+    output: &mpsc::UnboundedSender<String>,
+    reason: &str,
+    camp_id: Option<&str>,
+) {
+    emit(
+        output,
+        "missions.invalidated",
+        json!({ "reason": reason, "threadId": camp_id }),
+    );
+}
+
+fn navigation_group_key(database: &Database, camp_id: &str) -> Result<Option<String>> {
+    Ok(database.connection().query_row(
+        "SELECT CASE WHEN project_binding_kind='directory' THEN 'directory:' || project_path ELSE 'quick-chat' END FROM camp WHERE id=?1",
+        [camp_id], |row| row.get(0)).optional()?)
+}
+
+fn emit_navigation_group_invalidated(
+    output: &mpsc::UnboundedSender<String>,
+    reason: &str,
+    camp_id: Option<&str>,
+    group_key: Option<&str>,
+) {
+    if let Some(key) = group_key {
+        emit(
+            output,
+            "navigation.invalidated",
+            json!({ "reason": reason, "threadId": camp_id, "scope": "group", "groupKeys": [key] }),
+        );
+    } else {
+        emit_navigation_invalidated(output, reason, camp_id);
     }
 }
 
@@ -23309,12 +24686,21 @@ fn emit_navigation_invalidated(
     reason: &str,
     camp_id: Option<&str>,
 ) {
+    if reason.starts_with("missions.") || reason.starts_with("mission.") {
+        emit_missions_invalidated(output, reason, camp_id);
+        return;
+    }
     emit(
         output,
         "navigation.invalidated",
         match camp_id {
-            Some(camp_id) => json!({ "reason": reason, "campId": camp_id }),
-            None => json!({ "reason": reason }),
+            Some(camp_id) => json!({
+                "reason": reason, "threadId": camp_id,
+                "scope": if reason.starts_with("agent_run.") || matches!(reason,
+                    "navigation.campViewed" | "delivery_batch.claimed" | "camps.rename" | "camps.members.add" | "camps.members.remove"
+                    | "camps.changeDefaultLead" | "camps.reconcileDefaultLead" | "agentRuns.cancel") { "camp" } else { "group" }
+            }),
+            None => json!({ "reason": reason, "scope": "all" }),
         },
     );
 }
@@ -23920,6 +25306,25 @@ mod tests {
     use std::fs;
 
     #[cfg(feature = "slow-tests")]
+    fn test_git_binary() -> PathBuf {
+        // Parallel Runtime tests replace the process-wide active command path.
+        // These Git fixtures need a stable host utility independent of that state.
+        #[cfg(unix)]
+        for path in [
+            "/usr/bin/git",
+            "/opt/homebrew/bin/git",
+            "/usr/local/bin/git",
+        ] {
+            let candidate = PathBuf::from(path);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        crate::runtime_discovery::resolve_active_command_path("git")
+            .expect("Git is required for Mission fixture tests")
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     fn text_composer_document(text: &str) -> ComposerDocument {
         ComposerDocument {
             version: rovai_core::camp_content::COMPOSER_DOCUMENT_VERSION,
@@ -23927,6 +25332,61 @@ mod tests {
                 text: text.to_string(),
             }],
         }
+    }
+
+    #[test]
+    fn lark_actor_routes_are_closed_and_payload_cannot_supply_authority() {
+        for (method, host_component) in [
+            (
+                "channels.inbound.attachments.complete",
+                "feishu-channel-host",
+            ),
+            (
+                "channels.dingtalk.inbound.attachments.complete",
+                "dingtalk-channel-host",
+            ),
+        ] {
+            assert_eq!(
+                channel_request_host_component(method).unwrap(),
+                host_component
+            );
+        }
+        for suffix in [
+            "inbound.observe",
+            "inbound.attachments.complete",
+            "inbound.finalize",
+            "roster.reconcile",
+            "deliveries.settle",
+            "host.tick",
+            "executionConsole.page.authorize",
+            "executionConsole.recentOutput.authorize",
+            "executionConsole.agentRun.cancel",
+        ] {
+            let method = format!("channels.lark.{suffix}");
+            assert_eq!(
+                channel_request_host_component(&method).unwrap(),
+                rovai_core::channel::LARK_SPEC.host_component
+            );
+            assert!(validate_lark_request_actor(&method, &json!({"command": {}})).is_ok());
+            for payload in [
+                json!({"actor": {"kind":"system","componentId":"feishu-channel-host"}}),
+                json!({"command": {"actor": {"kind":"system","componentId":"feishu-channel-host"}}}),
+            ] {
+                assert!(validate_lark_request_actor(&method, &payload).is_err());
+            }
+        }
+        // Disconnect is an Owner command: no Host identity, and a payload still cannot claim one.
+        let disconnect = "channels.lark.account.disconnect";
+        assert!(channel_request_host_component(disconnect).is_err());
+        assert!(validate_lark_request_actor(disconnect, &json!({"command": {}})).is_ok());
+        for payload in [
+            json!({"actor": {"kind":"user","userId":"local-user"}}),
+            json!({"command": {"actor": {"kind":"system","componentId":"lark-channel-host"}}}),
+        ] {
+            assert!(validate_lark_request_actor(disconnect, &payload).is_err());
+        }
+        assert!(channel_request_host_component("channels.lark.futureMutation").is_err());
+        assert!(channel_request_host_component("channels.lark.inbound.observe.extra").is_err());
     }
 
     #[test]
@@ -24172,7 +25632,7 @@ mod tests {
         assert!(!data_dir.join("camp-attachments").exists());
         drop(locked);
 
-        CampAttachmentStore::new(&data_dir)
+        ThreadAttachmentStore::new(&data_dir)
             .remove_camp(camp_id)
             .unwrap();
         drop(database);
@@ -24294,7 +25754,7 @@ mod tests {
         std::fs::create_dir_all(&data_dir)?;
         rovai_core::platform::prepare_private_directory(&skill_library_root)?;
         let attachment_views =
-            CampAttachmentViewStore::for_isolated_test_root(&runtime_camp_files_root)?;
+            ThreadAttachmentViewStore::for_isolated_test_root(&runtime_camp_files_root)?;
         let database = Database::open_with_runtime_camp_files_root(
             &data_dir,
             attachment_views.root(),
@@ -25345,20 +26805,20 @@ done
                         camp_id: None,
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: CreateCampCommand {
+                        payload: CreateThreadCommand {
                             name: Some("Feishu DM".to_string()),
                             project_binding_kind: ProjectBindingKind::QuickChat,
                             project_path: workspace.display().to_string(),
                             member_agent_ids: vec![agent_id.clone()],
                             default_lead_agent_id: agent_id,
-                            collaboration_mode: CampCollaborationMode::Peer,
-                            activation_state: CampActivationState::Active,
+                            collaboration_mode: ThreadCollaborationMode::Peer,
+                            activation_state: ThreadActivationState::Active,
                         },
                     },
                 )
                 .unwrap();
-            execution.result.payload["campCreated"] = Value::Bool(true);
-            let camp_id = execution.result.payload["campId"]
+            execution.result.payload["threadCreated"] = Value::Bool(true);
+            let camp_id = execution.result.payload["threadId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -25427,19 +26887,19 @@ done
                         camp_id: None,
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: CreateCampCommand {
+                        payload: CreateThreadCommand {
                             name: None,
                             project_binding_kind: ProjectBindingKind::Directory,
                             project_path: workspace.display().to_string(),
                             member_agent_ids: vec![agent_id.clone()],
                             default_lead_agent_id: agent_id,
-                            collaboration_mode: CampCollaborationMode::Peer,
-                            activation_state: CampActivationState::Active,
+                            collaboration_mode: ThreadCollaborationMode::Peer,
+                            activation_state: ThreadActivationState::Active,
                         },
                     },
                 )
                 .unwrap();
-            let camp_id = created.result.payload["campId"]
+            let camp_id = created.result.payload["threadId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -25452,9 +26912,9 @@ done
             observe_source_attachment(&source, "published.txt", Some("text/plain")).unwrap();
         let attachment_id = source_attachment.id.clone();
         let sent = core
-            .send_test_camp_message_request(SendCampMessageParams {
+            .send_test_camp_message_request(SendThreadMessageParams {
                 command_id: uuid::Uuid::new_v4().to_string(),
-                camp_id: CampId::parse(&camp_id).unwrap(),
+                camp_id: ThreadId::parse(&camp_id).unwrap(),
                 content: text_composer_document("Use the published attachment"),
                 source_attachments: vec![source_attachment],
                 quotes: Vec::new(),
@@ -25463,7 +26923,7 @@ done
             })
             .await
             .unwrap();
-        let message_id = sent["commandResult"]["payload"]["campMessageId"]
+        let message_id = sent["commandResult"]["payload"]["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -25522,7 +26982,7 @@ done
             .join("camps")
             .join(&camp_id)
             .join("attachments");
-        CampAttachmentStore::new(&core.data_dir)
+        ThreadAttachmentStore::new(&core.data_dir)
             .remove_camp(&camp_id)
             .unwrap();
         drop(core);
@@ -25577,19 +27037,19 @@ done
                         camp_id: None,
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: CreateCampCommand {
+                        payload: CreateThreadCommand {
                             name: None,
                             project_binding_kind: ProjectBindingKind::Directory,
                             project_path: workspace.display().to_string(),
                             member_agent_ids: vec![agent_id.clone()],
                             default_lead_agent_id: agent_id,
-                            collaboration_mode: CampCollaborationMode::Peer,
-                            activation_state: CampActivationState::Active,
+                            collaboration_mode: ThreadCollaborationMode::Peer,
+                            activation_state: ThreadActivationState::Active,
                         },
                     },
                 )
                 .unwrap();
-            let camp_id = created.result.payload["campId"]
+            let camp_id = created.result.payload["threadId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -25600,9 +27060,9 @@ done
         };
         let source_attachment =
             observe_source_attachment(&source, "published.txt", Some("text/plain")).unwrap();
-        core.send_test_camp_message_request(SendCampMessageParams {
+        core.send_test_camp_message_request(SendThreadMessageParams {
             command_id: uuid::Uuid::new_v4().to_string(),
-            camp_id: CampId::parse(&camp_id).unwrap(),
+            camp_id: ThreadId::parse(&camp_id).unwrap(),
             content: text_composer_document("Use the published attachment"),
             source_attachments: vec![source_attachment],
             quotes: Vec::new(),
@@ -25647,7 +27107,7 @@ done
             .join(&camp_id)
             .join("attachments");
         drop(admission);
-        CampAttachmentStore::new(&core.data_dir)
+        ThreadAttachmentStore::new(&core.data_dir)
             .remove_camp(&camp_id)
             .unwrap();
         drop(core);
@@ -25667,7 +27127,7 @@ done
 
     #[test]
     fn agent_run_attachment_admission_is_camp_scoped_without_a_generation_gate() {
-        let admission = CampAttachmentReadAdmission::for_camp("rvcamp_test");
+        let admission = ThreadAttachmentReadAdmission::for_camp("rvcamp_test");
         admission.prove("rvcamp_test").unwrap();
         assert!(admission.prove("rvcamp_other").is_err());
         let (projection_tx, mut projection_rx) = mpsc::unbounded_channel();
@@ -26863,7 +28323,7 @@ done
     }
 
     #[test]
-    fn pi_qualified_platform_enters_discovery_and_dispatch_with_bound_evidence() {
+    fn pi_platform_enters_discovery_and_dispatch_with_platform_appropriate_evidence() {
         let enabled = current_platform_enabled_runtime_kinds();
         assert!(enabled.contains(&AdapterKind::Pi));
         assert!(!enabled.contains(&AdapterKind::CursorAgent));
@@ -26871,8 +28331,9 @@ done
 
         let admission = current_runtime_platform_admission(AdapterKind::Pi).unwrap();
         assert!(admission.allows_runtime_use());
-        assert!(admission.is_qualified());
-        assert!(admission.evidence_revision().is_some());
+        let qualified = HostPlatformKey::current() != Some(HostPlatformKey::LinuxX64);
+        assert_eq!(admission.is_qualified(), qualified);
+        assert_eq!(admission.evidence_revision().is_some(), qualified);
     }
 
     #[test]
@@ -26969,6 +28430,18 @@ done
         assert!(!request_runs_outside_main_queue("camps.snapshot"));
         assert!(!request_runs_outside_main_queue("camps.enter"));
         assert!(!request_runs_outside_main_queue("camps.open"));
+        assert!(request_uses_independent_read_queue("camps.enter"));
+        assert!(request_uses_independent_read_queue("camps.open"));
+        assert!(request_uses_independent_read_queue("navigation.snapshot"));
+        assert!(request_uses_independent_read_queue("navigation.camps"));
+        assert!(request_uses_independent_read_queue("navigation.groupCamps"));
+        assert!(request_uses_independent_read_queue("navigation.findCamp"));
+        assert!(!request_uses_independent_read_queue(
+            "navigation.campViewed"
+        ));
+        assert!(!request_uses_independent_read_queue(
+            "camps.reconcileDefaultLead"
+        ));
         assert!(!request_runs_outside_main_queue("camp.messages.page"));
         assert!(request_runs_outside_main_queue("agentRunExecution.page"));
         assert!(request_runs_outside_main_queue("agentRunExecution.changes"));
@@ -27026,12 +28499,58 @@ done
         let data_dir = root.join("data");
         let workspace_dir = root.join("workspace");
         fs::create_dir_all(&workspace_dir).unwrap();
+        fs::create_dir_all(&data_dir).unwrap();
         let runtime_camp_files_root =
             rovai_core::storage_layout::server_runtime_root(&data_dir).unwrap();
+        let (camp_ids, repair_camp_id) = {
+            let attachment_views =
+                ThreadAttachmentViewStore::admit(&runtime_camp_files_root, &data_dir, &[]).unwrap();
+            let mut database = Database::open_with_runtime_camp_files_root(
+                &data_dir,
+                attachment_views.root(),
+                attachment_views.root_identity_digest(),
+            )
+            .unwrap();
+            let mut create = |index: usize, members: &[&str], lead: &str| {
+                let mut command = CreateThreadCommand::for_test_with_members(
+                    workspace_dir.to_string_lossy().into_owned(),
+                    members,
+                    lead,
+                );
+                command.project_binding_kind = ProjectBindingKind::Directory;
+                let created = CollaborationService::default()
+                    .create_camp(
+                        &mut database,
+                        &user_command_envelope(format!("dispatch-create-{index}"), command),
+                    )
+                    .unwrap();
+                let camp_id = created.result.payload["threadId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                ThreadOutputDirectory::prepare(&database, &camp_id).unwrap();
+                attachment_views
+                    .ensure_empty_camp_ready(&mut database, &camp_id)
+                    .unwrap();
+                camp_id
+            };
+            let camp_ids = (0..3)
+                .map(|index| create(index, &["agent_1", "agent_2"], "agent_1"))
+                .collect::<Vec<_>>();
+            let repair_camp_id = create(3, &["agent_3", "agent_4"], "agent_3");
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_profile SET profile_status='away' WHERE id='agent_3'",
+                    [],
+                )
+                .unwrap();
+            (camp_ids, repair_camp_id)
+        };
         let (service, runner) = embedded(
             CoreConfig {
                 runtime_camp_files_root: runtime_camp_files_root.clone(),
-                data_dir,
+                data_dir: data_dir.clone(),
                 skill_library_root: root.join("skills"),
                 mcp_config_path: Some(root.join("mcp.json")),
                 require_existing_authority: false,
@@ -27063,7 +28582,7 @@ done
                 .request(
                     "agentRunExecution.page",
                     json!({
-                        "campId": "rvcamp_dispatch_test",
+                        "threadId": "rvcamp_dispatch_test",
                         "agentRunId": "run-dispatch-test",
                         "beforeSequence": null,
                         "limit": 24
@@ -27071,12 +28590,70 @@ done
                 )
                 .await
         });
+        let navigation_group_key = format!("directory:{}", workspace_dir.to_string_lossy());
         let inspection_service = service.clone();
         let mut inspection_request = tokio::spawn(async move {
             inspection_service
                 .request(
                     "workspaces.inspect",
                     json!({ "path": workspace_dir.to_str().unwrap() }),
+                )
+                .await
+        });
+        let read_started_at = Instant::now();
+        let mut camp_requests = camp_ids
+            .iter()
+            .enumerate()
+            .map(|(index, camp_id)| {
+                let service = service.clone();
+                let camp_id = camp_id.clone();
+                tokio::spawn(async move {
+                    service
+                        .request(
+                            "camps.enter",
+                            json!({
+                                "traceId": uuid::Uuid::new_v4().to_string(),
+                                "commandId": format!("dispatch-enter-{index}"),
+                                "command": { "threadId": camp_id }
+                            }),
+                        )
+                        .await
+                })
+            })
+            .collect::<Vec<_>>();
+        let open_service = service.clone();
+        let open_camp_id = camp_ids[2].clone();
+        let mut open_request = tokio::spawn(async move {
+            open_service
+                .request(
+                    "camps.open",
+                    json!({
+                        "traceId": uuid::Uuid::new_v4().to_string(),
+                        "threadId": open_camp_id
+                    }),
+                )
+                .await
+        });
+        let navigation_service = service.clone();
+        let mut navigation_request = tokio::spawn(async move {
+            navigation_service
+                .request(
+                    "navigation.snapshot",
+                    json!({ "groupKeys": [navigation_group_key] }),
+                )
+                .await
+        });
+        let repair_service = service.clone();
+        let repair_target = repair_camp_id.clone();
+        let mut repair_request = tokio::spawn(async move {
+            repair_service
+                .request(
+                    "camps.enter",
+                    json!({
+                        "traceId": uuid::Uuid::new_v4().to_string(),
+                        "commandId": "dispatch-repair-enter",
+                        "command": { "threadId": repair_target }
+                    }),
                 )
                 .await
         });
@@ -27087,6 +28664,35 @@ done
         let inspection_before_release =
             tokio::time::timeout_at(barrier_release_at, &mut inspection_request).await;
         let inspection_finished_while_blocked = inspection_before_release.is_ok();
+        let mut camp_before_release = Vec::new();
+        let mut last_camp_completion_ms = None;
+        for request in &mut camp_requests {
+            let completion = tokio::time::timeout_at(barrier_release_at, request).await;
+            if completion.is_ok() {
+                last_camp_completion_ms = Some(read_started_at.elapsed().as_millis());
+            }
+            camp_before_release.push(completion);
+        }
+        let open_before_release =
+            tokio::time::timeout_at(barrier_release_at, &mut open_request).await;
+        let navigation_before_release =
+            tokio::time::timeout_at(barrier_release_at, &mut navigation_request).await;
+        let repair_before_release =
+            tokio::time::timeout_at(barrier_release_at, &mut repair_request).await;
+        let repair_waited_for_ordered_queue = repair_before_release.is_err();
+        let camp_before_release_count = camp_before_release
+            .iter()
+            .filter(|result| result.is_ok())
+            .count();
+        let open_finished_while_blocked = open_before_release.is_ok();
+        let navigation_finished_while_blocked = navigation_before_release.is_ok();
+        eprintln!(
+            "[camp-open-dispatch-fixture] rapid_clicks=3 completed_before_release={} latest_response_ms={}",
+            camp_before_release_count,
+            last_camp_completion_ms
+                .map(|ms| ms.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        );
 
         tokio::time::sleep_until(barrier_release_at).await;
         barrier.release.notify_waiters();
@@ -27099,6 +28705,52 @@ done
             Ok(completed) => completed.unwrap().unwrap(),
             Err(_) => inspection_request.await.unwrap().unwrap(),
         };
+        let mut camp_replies = Vec::new();
+        for (before_release, request) in camp_before_release.into_iter().zip(camp_requests) {
+            camp_replies.push(match before_release {
+                Ok(completed) => completed.unwrap().unwrap(),
+                Err(_) => request.await.unwrap().unwrap(),
+            });
+        }
+        let open_reply = match open_before_release {
+            Ok(completed) => completed.unwrap().unwrap(),
+            Err(_) => open_request.await.unwrap().unwrap(),
+        };
+        let navigation_reply = match navigation_before_release {
+            Ok(completed) => completed.unwrap().unwrap(),
+            Err(_) => navigation_request.await.unwrap().unwrap(),
+        };
+        let repair_reply = match repair_before_release {
+            Ok(completed) => completed.unwrap().unwrap(),
+            Err(_) => repair_request.await.unwrap().unwrap(),
+        };
+        let first_camp_version = camp_replies[0].result.as_ref().unwrap()["thread"]["version"]
+            .as_i64()
+            .unwrap();
+        let renamed = service
+            .request(
+                "camps.rename",
+                json!({
+                    "commandId": "dispatch-rename-after-enter",
+                    "command": {
+                        "threadId": camp_ids[0],
+                        "title": "Renamed after enter",
+                        "expectedVersion": first_camp_version
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+        let opened_after_write = service
+            .request(
+                "camps.open",
+                json!({
+                    "traceId": uuid::Uuid::new_v4().to_string(),
+                    "threadId": camp_ids[0]
+                }),
+            )
+            .await
+            .unwrap();
         drop(service);
         if tokio::time::timeout(Duration::from_secs(10), &mut runner_task)
             .await
@@ -27108,9 +28760,24 @@ done
             let _ = runner_task.await;
         }
         drop(installed_barrier);
+        for camp_id in camp_ids.iter().chain(std::iter::once(&repair_camp_id)) {
+            ThreadAttachmentStore::new(&data_dir)
+                .remove_camp(camp_id)
+                .unwrap();
+        }
         #[cfg(unix)]
         if runtime_camp_files_root.join("camps").exists() {
             use std::os::unix::fs::PermissionsExt;
+            for camp_id in camp_ids.iter().chain(std::iter::once(&repair_camp_id)) {
+                let camp_root = runtime_camp_files_root.join("camps").join(camp_id);
+                let attachments = camp_root.join("attachments");
+                if attachments.exists() {
+                    fs::set_permissions(&attachments, fs::Permissions::from_mode(0o700)).unwrap();
+                }
+                if camp_root.exists() {
+                    fs::set_permissions(&camp_root, fs::Permissions::from_mode(0o700)).unwrap();
+                }
+            }
             fs::set_permissions(
                 runtime_camp_files_root.join("camps"),
                 fs::Permissions::from_mode(0o700),
@@ -27141,6 +28808,59 @@ done
             inspection_reply.error.is_none(),
             "the independent workspace inspection should succeed: {:?}",
             inspection_reply.error
+        );
+        assert!(
+            camp_replies.iter().all(|reply| reply.error.is_none()),
+            "Camp enter failed"
+        );
+        assert!(
+            open_reply.error.is_none(),
+            "Camp open failed: {:?}",
+            open_reply.error
+        );
+        assert!(camp_replies.iter().all(|reply| reply.result.is_some()));
+        assert!(
+            camp_before_release_count == 3,
+            "pure Camp enter waited for unrelated FIFO work"
+        );
+        assert!(
+            open_finished_while_blocked,
+            "Camp open waited for unrelated FIFO work"
+        );
+        assert!(
+            navigation_finished_while_blocked,
+            "navigation snapshot waited for unrelated FIFO work"
+        );
+        assert!(
+            navigation_reply.error.is_none(),
+            "navigation snapshot failed: {:?}",
+            navigation_reply.error
+        );
+        assert_eq!(
+            navigation_reply.result.unwrap()["projects"][0]["totalCount"],
+            4
+        );
+        assert!(
+            repair_waited_for_ordered_queue,
+            "Lead repair bypassed the ordered command path"
+        );
+        assert!(
+            repair_reply.error.is_none(),
+            "Lead repair failed: {:?}",
+            repair_reply.error
+        );
+        assert_eq!(
+            repair_reply.result.unwrap()["thread"]["defaultLeadAgentId"],
+            "agent_4"
+        );
+        assert!(
+            renamed.error.is_none(),
+            "rename failed: {:?}",
+            renamed.error
+        );
+        assert_eq!(
+            opened_after_write.result.unwrap()["thread"]["title"],
+            "Renamed after enter"
         );
     }
 
@@ -27225,7 +28945,7 @@ done
             camp_id: &str,
             agent_run_id: &str,
             evidence_id: &str,
-            expected_output: &str,
+            expected_explanation: &str,
         ) {
             let open_service = service.clone();
             let event_service = service.clone();
@@ -27244,13 +28964,13 @@ done
                             "camps.open",
                             json!({
                                 "traceId": uuid::Uuid::new_v4().to_string(),
-                                "campId": camp_id_for_open,
+                                "threadId": camp_id_for_open,
                             }),
                         ),
                         event_service.request(
                             "events.subscribe",
                             json!({
-                                "campId": camp_id_for_events,
+                                "threadId": camp_id_for_events,
                                 "afterGlobalSequence": 0,
                                 "limit": 50,
                             }),
@@ -27258,7 +28978,7 @@ done
                         page_service.request(
                             "agentRunExecution.page",
                             json!({
-                                "campId": camp_id_for_page,
+                                "threadId": camp_id_for_page,
                                 "agentRunId": run_id,
                                 "beforeSequence": null,
                                 "afterSequence": null,
@@ -27268,7 +28988,7 @@ done
                         content_service.request(
                             "agentRunEvidence.getContent",
                             json!({
-                                "campId": camp_id_for_content,
+                                "threadId": camp_id_for_content,
                                 "evidenceId": evidence_id,
                             }),
                         ),
@@ -27290,8 +29010,8 @@ done
                 );
             }
             assert_eq!(
-                replies[3].result.as_ref().unwrap()["payload"]["item"]["aggregatedOutput"],
-                expected_output,
+                replies[3].result.as_ref().unwrap()["payload"]["explanation"],
+                expected_explanation,
                 "getContent must return the full managed Blob while Mission Git is blocked"
             );
         }
@@ -27316,8 +29036,7 @@ done
         let root = fs::canonicalize(&root).unwrap();
         let source = root.join("source");
         fs::create_dir_all(&source).unwrap();
-        let git_path = crate::runtime_discovery::resolve_active_command_path("git")
-            .expect("Git is required for the real Mission dispatch test");
+        let git_path = test_git_binary();
         let git = |arguments: &[&str]| {
             let output = std::process::Command::new(&git_path)
                 .arg("-C")
@@ -27343,7 +29062,7 @@ done
         let runtime_camp_files_root =
             rovai_core::storage_layout::server_runtime_root(&data_dir).unwrap();
         let attachment_views =
-            CampAttachmentViewStore::admit(&runtime_camp_files_root, &data_dir, &[]).unwrap();
+            ThreadAttachmentViewStore::admit(&runtime_camp_files_root, &data_dir, &[]).unwrap();
         let mut database = Database::open_with_runtime_camp_files_root(
             &data_dir,
             attachment_views.root(),
@@ -27386,7 +29105,7 @@ done
             .as_str()
             .unwrap()
             .to_string();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -27412,12 +29131,12 @@ done
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: rovai_core::collaboration::TestCampMessageCommand {
+                    payload: rovai_core::collaboration::TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "Create a real execution window".into(),
                         prepared_attachment_ids: Vec::new(),
-                        address: rovai_core::collaboration::TestCampMessageAddress::Default,
+                        address: rovai_core::collaboration::TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -27440,41 +29159,19 @@ done
                 [&agent_run_id],
             )
             .unwrap();
-        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(573_647));
-        ExecutionEvidenceService
-            .record_runtime_event(
-                &mut database,
-                &ManagedBlobStore::new(&data_dir),
-                &agent_run_id,
-                1,
-                "activity.started",
-                &json!({
-                    "item": {
-                        "id": "command-1",
-                        "type": "commandExecution",
-                        "command": "git status",
-                        "status": "inProgress",
-                    }
-                }),
-            )
-            .unwrap()
-            .unwrap();
+        // Tool output is bounded before persistence. A plan explanation uses
+        // the ordinary managed-Blob path that this concurrency test reads.
+        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
         let evidence = ExecutionEvidenceService
             .record_runtime_event(
                 &mut database,
                 &ManagedBlobStore::new(&data_dir),
                 &agent_run_id,
                 1,
-                "activity.completed",
+                "runtime.plan",
                 &json!({
-                    "item": {
-                        "id": "command-1",
-                        "type": "commandExecution",
-                        "command": "git status",
-                        "status": "completed",
-                        "exitCode": 0,
-                        "aggregatedOutput": secret.clone(),
-                    }
+                    "explanation": secret,
+                    "plan": [],
                 }),
             )
             .unwrap()
@@ -27798,7 +29495,7 @@ done
             runner_task.abort();
             let _ = runner_task.await;
         }
-        CampAttachmentStore::new(&data_dir)
+        ThreadAttachmentStore::new(&data_dir)
             .remove_camp(&camp_id)
             .unwrap();
         #[cfg(unix)]
@@ -27829,8 +29526,6 @@ done
             "navigation.campViewed",
             "camps.create",
             "camps.rename",
-            "camps.enter",
-            "camps.delete",
             "camp.messages.send",
             "camp.messages.withdraw",
             "userAutomation.camp.send",
@@ -27840,6 +29535,9 @@ done
         }
         for method in [
             "navigation.snapshot",
+            "navigation.camps",
+            "camps.enter",
+            "camps.delete", // Notification belongs to the acceptance transaction boundary.
             "navigation.groupCamps",
             "navigation.findCamp",
             "camps.open",
@@ -27875,12 +29573,14 @@ done
         assert!(!navigation_mutation_was_rejected(
             &json!({ "status": "applied" })
         ));
-        assert_eq!(
-            navigation_request_camp_id(&json!({
-                "command": { "campId": "rvcamp_test" }
-            })),
-            Some("rvcamp_test")
-        );
+        for params in [
+            json!({ "threadId": "rvcamp_test" }),
+            json!({ "campId": "rvcamp_test" }),
+            json!({ "command": { "threadId": "rvcamp_test" } }),
+            json!({ "command": { "campId": "rvcamp_test" } }),
+        ] {
+            assert_eq!(navigation_request_camp_id(&params), Some("rvcamp_test"));
+        }
 
         let (output, mut receiver) = mpsc::unbounded_channel();
         emit_agent_run_terminal(
@@ -27894,7 +29594,21 @@ done
         let invalidation: Value = serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
         assert_eq!(invalidation["method"], "navigation.invalidated");
         assert_eq!(invalidation["params"]["reason"], "agent_run.terminal");
-        assert_eq!(invalidation["params"]["campId"], "rvcamp_test");
+        assert_eq!(invalidation["params"]["threadId"], "rvcamp_test");
+        assert_eq!(invalidation["params"]["scope"], "camp");
+        emit_navigation_group_invalidated(
+            &output,
+            "camp.deleted",
+            Some("rvcamp_test"),
+            Some("directory:/repo"),
+        );
+        let deleted: Value = serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
+        assert_eq!(deleted["params"]["scope"], "group");
+        assert_eq!(deleted["params"]["groupKeys"], json!(["directory:/repo"]));
+        emit_missions_invalidated(&output, "missions.update", Some("mission-camp"));
+        let mission: Value = serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
+        assert_eq!(mission["method"], "missions.invalidated");
+        assert!(receiver.try_recv().is_err());
     }
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
@@ -27908,8 +29622,7 @@ done
         fs::create_dir_all(&source).unwrap();
         let root = fs::canonicalize(&root).unwrap();
         let source = fs::canonicalize(&source).unwrap();
-        let git_path = crate::runtime_discovery::resolve_active_command_path("git")
-            .expect("Git is required for the Mission deletion race regression");
+        let git_path = test_git_binary();
         let git = |arguments: &[&str]| {
             let output = std::process::Command::new(&git_path)
                 .arg("-C")
@@ -27978,7 +29691,7 @@ done
                 .as_str()
                 .unwrap()
                 .to_string();
-            let camp_id = created.result.payload["campId"]
+            let camp_id = created.result.payload["threadId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -28064,7 +29777,7 @@ done
                     row.get::<_, i64>(0)
                 })
                 .unwrap();
-            let accepted = CampDeletionService::default()
+            let accepted = ThreadDeletionService::default()
                 .accept(
                     &mut database,
                     &CommandEnvelope {
@@ -28075,7 +29788,7 @@ done
                         camp_id: Some(camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: DeleteCampCommand {
+                        payload: DeleteThreadCommand {
                             camp_id: camp_id.clone(),
                             expected_version: version,
                             force: true,
@@ -28092,13 +29805,13 @@ done
                 .prepare_camp_delete_cleanup(&mut database, &camp_id, &operation_id)
                 .unwrap()
                 .expect("Camp deletion should prepare its resource handoff");
-            let deletion = CampDeletionService::default()
+            let deletion = ThreadDeletionService::default()
                 .due_camps(&database, 1)
                 .unwrap()
                 .into_iter()
                 .next()
                 .expect("accepted Camp deletion should be due");
-            CampDeletionService::default()
+            ThreadDeletionService::default()
                 .commit_business_delete(&mut database, &core.attachment_views, &deletion, &cleanup)
                 .unwrap();
             cleanup
@@ -28245,19 +29958,19 @@ done
                         camp_id: None,
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: CreateCampCommand {
+                        payload: CreateThreadCommand {
                             name: Some("Runtime cleanup dispatch".to_string()),
                             project_binding_kind: ProjectBindingKind::Directory,
                             project_path: workspace.display().to_string(),
                             member_agent_ids: vec![agent_id.clone()],
                             default_lead_agent_id: agent_id,
-                            collaboration_mode: CampCollaborationMode::Peer,
-                            activation_state: CampActivationState::Active,
+                            collaboration_mode: ThreadCollaborationMode::Peer,
+                            activation_state: ThreadActivationState::Active,
                         },
                     },
                 )
                 .unwrap();
-            let camp_id = created.result.payload["campId"]
+            let camp_id = created.result.payload["threadId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -28267,9 +29980,9 @@ done
             camp_id
         };
         let sent = core
-            .send_test_camp_message_request(SendCampMessageParams {
+            .send_test_camp_message_request(SendThreadMessageParams {
                 command_id: uuid::Uuid::new_v4().to_string(),
-                camp_id: CampId::parse(&camp_id).unwrap(),
+                camp_id: ThreadId::parse(&camp_id).unwrap(),
                 content: text_composer_document("Keep cleanup busy"),
                 source_attachments: Vec::new(),
                 quotes: Vec::new(),
@@ -28423,7 +30136,7 @@ done
         .expect("background cleanup should acknowledge and release its de-duplication key");
 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        CampAttachmentStore::new(&core.data_dir)
+        ThreadAttachmentStore::new(&core.data_dir)
             .remove_camp(&camp_id)
             .unwrap();
         let view_attachment_root = core.attachment_views.root().join("camps").join(&camp_id);
@@ -28891,6 +30604,34 @@ done
 
     #[test]
     fn acp_agent_message_events_preserve_only_safe_message_identity_metadata() {
+        let thought = json!({"sessionUpdate":"agent_thought_chunk",
+            "content":{"type":"text","text":"PRIVATE_THOUGHT"}});
+        assert!(rovai_core::runtime::is_root_output(&thought));
+        for field in ["subagentId", "parent_tool_use_id", "replay", "snapshot"] {
+            for path in ["", "/_meta", "/content", "/content/_meta"] {
+                let mut excluded = thought.clone();
+                if path == "/_meta" {
+                    excluded["_meta"] = json!({});
+                }
+                if path == "/content/_meta" {
+                    excluded["content"]["_meta"] = json!({});
+                }
+                let container = if path.is_empty() {
+                    &mut excluded
+                } else {
+                    excluded.pointer_mut(path).unwrap()
+                };
+                container[field] = json!(true);
+                assert!(!rovai_core::runtime::is_root_output(&excluded));
+                let container = if path.is_empty() {
+                    &mut excluded
+                } else {
+                    excluded.pointer_mut(path).unwrap()
+                };
+                container[field] = Value::Null;
+                assert!(rovai_core::runtime::is_root_output(&excluded));
+            }
+        }
         let (_, update_identity) = normalize_acp_event(
             AdapterKind::OpencodeCli,
             "session/update",

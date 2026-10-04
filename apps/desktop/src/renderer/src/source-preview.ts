@@ -13,6 +13,7 @@ import { oneDarkHighlightStyle } from '@uiw/react-codemirror'
 import { StyleModule } from 'style-mod'
 import type { FileLocationTarget, ResolvedTheme } from '@contracts'
 import { fileFindDecorations } from './file-find-code'
+import { uiAttribute } from './interface-language'
 
 const SOURCE_FONT_FAMILY = [
   'ui-monospace',
@@ -32,16 +33,16 @@ const languageLoads = new WeakMap<LanguageDescription, Promise<LanguageSupport |
 // Keep its identity stable across theme, language and target reconfiguration so
 // reading positions and live search state stay attached to the existing editor.
 const sourceReaderPhrases = EditorState.phrases.of({
-  Find: '查找',
-  next: '下一个',
-  previous: '上一个',
-  all: '全部',
-  'match case': '区分大小写',
-  regexp: '正则表达式',
-  'by word': '全字匹配',
-  close: '关闭',
-  'current match': '当前匹配',
-  'on line': '位于行'
+  get Find() { return uiAttribute('查找') },
+  get next() { return uiAttribute('下一个') },
+  get previous() { return uiAttribute('上一个') },
+  get all() { return uiAttribute('全部') },
+  get 'match case'() { return uiAttribute('区分大小写') },
+  get regexp() { return uiAttribute('正则表达式') },
+  get 'by word'() { return uiAttribute('全字匹配') },
+  get close() { return uiAttribute('关闭') },
+  get 'current match'() { return uiAttribute('当前匹配') },
+  get 'on line'() { return uiAttribute('位于行') }
 })
 
 const sourceReaderInterface = {

@@ -31,11 +31,48 @@ describe('AdaptiveChannelHostPump', () => {
     await vi.advanceTimersByTimeAsync(CHANNEL_HOST_WATCHDOG_MS * 2)
     expect(run).toHaveBeenCalledOnce()
 
-    pump.handleCoreEvent({ method: 'agent_run.started', params: { agentRunId: 'run-1' } })
-    pump.handleCoreEvent({ method: 'agent_run.terminal', params: { agentRunId: 'run-1' } })
     pump.handleCoreEvent({ method: 'runtime.action', params: { agentRunId: 'run-1' } })
     await vi.advanceTimersByTimeAsync(CHANNEL_TERMINAL_QUIET_WAKE_MS)
     expect(run).toHaveBeenCalledOnce()
+    pump.stop()
+  })
+
+  it('discovers channel work after the provider became dormant', async () => {
+    vi.useFakeTimers()
+    const run = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+    const pump = new AdaptiveChannelHostPump({ run, onError: vi.fn() })
+
+    pump.start()
+    await vi.advanceTimersByTimeAsync(0)
+    pump.handleCoreEvent({ method: 'agent_run.started', params: { agentRunId: 'a2a-run' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledTimes(2)
+
+    pump.handleCoreEvent({ method: 'agent_run.terminal', params: { agentRunId: 'a2a-run' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(CHANNEL_TERMINAL_QUIET_WAKE_MS)
+    expect(run).toHaveBeenCalledTimes(4)
+    pump.stop()
+  })
+
+  it('opens a queued A2A execution card before its Run starts', async () => {
+    vi.useFakeTimers()
+    const run = vi.fn().mockResolvedValue(false)
+    const pump = new AdaptiveChannelHostPump({ run, onError: vi.fn() })
+
+    pump.start()
+    await vi.advanceTimersByTimeAsync(0)
+    pump.handleCoreEvent({
+      method: 'navigation.invalidated',
+      params: { reason: 'delivery_batch.claimed', threadId: 'bound-camp' }
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledTimes(2)
     pump.stop()
   })
 

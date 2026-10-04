@@ -22,13 +22,13 @@ export function runFileOperationEvidencePath(
 
 export async function openAgentRunCurrentFilePreview({
   filePreview,
-  campId,
+  threadId,
   changes,
   evidenceFileId,
   onError
 }: {
   filePreview: Pick<FilePreviewContextValue, 'open'> | null
-  campId: string
+  threadId: string
   changes: AgentRunFileChangesView
   evidenceFileId: string
   onError(message: string): void
@@ -41,7 +41,7 @@ export async function openAgentRunCurrentFilePreview({
   try {
     const outcome = await filePreview.open({
       kind: 'run_evidence',
-      campId,
+      threadId,
       agentRunId: changes.agentRunId,
       executionEpoch: changes.executionEpoch,
       evidenceFileId,
@@ -57,14 +57,14 @@ export async function openAgentRunCurrentFilePreview({
 
 export async function openAgentRunActivityFilePreview({
   filePreview,
-  campId,
+  threadId,
   evidence,
   path,
   allowLegacyWorkspaceFallback = false,
   onError
 }: {
   filePreview: Pick<FilePreviewContextValue, 'open'> | null
-  campId: string
+  threadId: string
   evidence?: Pick<AgentRunExecutionEvidenceView, 'agentRunId' | 'executionEpoch'> & Partial<
     Pick<AgentRunExecutionEvidenceView, 'id' | 'phase' | 'payload'>
   > & {
@@ -98,14 +98,14 @@ export async function openAgentRunActivityFilePreview({
     const request = evidence && evidenceId
       ? {
           kind: 'run_activity_file' as const,
-          campId,
+          threadId,
           agentRunId: evidence.agentRunId,
           executionEpoch: evidence.executionEpoch,
           evidenceId,
           rawReference: path
         }
       : allowLegacyWorkspaceFallback
-        ? { kind: 'camp_workspace' as const, campId, rawReference: path }
+        ? { kind: 'camp_workspace' as const, threadId, rawReference: path }
         : null
     if (!request) {
       onError(CURRENT_FILE_OPEN_ERROR)

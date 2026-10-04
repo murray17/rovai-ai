@@ -1,3 +1,4 @@
+import { uiAttribute } from './interface-language'
 import { memo, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { FilePreviewApi, ResolvedTheme } from '@contracts'
@@ -22,18 +23,18 @@ function sessionValue(session: FilePreviewSession, resolvedTheme: ResolvedTheme)
 const RetainedPane = memo(FilePreviewPaneContent)
 function RetainedPreview({ session, resolvedTheme, current, bounds, resizing, missionActivity, registerExecutionHost }: {
   session: FilePreviewSession; resolvedTheme: ResolvedTheme; current: boolean; bounds: CSSProperties | null; resizing: boolean; missionActivity?: ReactNode
-  registerExecutionHost(campId: string, element: HTMLDivElement | null): void
+  registerExecutionHost(threadId: string, element: HTMLDivElement | null): void
 }): React.JSX.Element {
   const state = session.getSnapshot()
-  const value = useMemo(() => ({ ...sessionValue(session, resolvedTheme), isCurrentCamp: current }), [session, state, resolvedTheme, current])
+  const value = useMemo(() => ({ ...sessionValue(session, resolvedTheme), isCurrentThread: current }), [session, state, resolvedTheme, current])
   const visible = current && value.paneVisible && !!bounds
   const executionHostRef = useCallback(
-    (element: HTMLDivElement | null) => registerExecutionHost(session.campId, element),
-    [registerExecutionHost, session.campId]
+    (element: HTMLDivElement | null) => registerExecutionHost(session.threadId, element),
+    [registerExecutionHost, session.threadId]
   )
   return <FilePreviewContext.Provider value={value}>
     <div className={`file-preview-retained-host${resizing ? ' is-resizing' : ''}`} hidden={!visible} inert={!visible}
-      style={bounds ?? undefined} data-preview-camp={session.campId}>
+      style={bounds ?? undefined} data-preview-camp={session.threadId}>
       <RetainedPane
         visible={visible}
         missionActivity={missionActivity}
@@ -45,7 +46,7 @@ function RetainedPreview({ session, resolvedTheme, current, bounds, resizing, mi
 
 function PreviewDeck({ resources, anchor, resolvedTheme, missionActivity, registerExecutionHost }: {
   resources: FilePreviewResources; anchor: HTMLDivElement | null; resolvedTheme: ResolvedTheme; missionActivity?: ReactNode
-  registerExecutionHost(campId: string, element: HTMLDivElement | null): void
+  registerExecutionHost(threadId: string, element: HTMLDivElement | null): void
 }): React.JSX.Element {
   const layout = useOptionalFilePreviewLayout()
   const [bounds, setBounds] = useState<CSSProperties | null>(null)
@@ -75,17 +76,17 @@ function PreviewDeck({ resources, anchor, resolvedTheme, missionActivity, regist
       ? bounds.left + bounds.width - width : bounds.left
   }
   return <>{[...resources.sessions.values()].map(session => <RetainedPreview key={session.id} session={session}
-    resolvedTheme={resolvedTheme} current={resources.isCurrent(session.campId)} bounds={positioned} resizing={!!layout?.resizing}
-    missionActivity={resources.isCurrent(session.campId) ? missionActivity : null}
+    resolvedTheme={resolvedTheme} current={resources.isCurrent(session.threadId)} bounds={positioned} resizing={!!layout?.resizing}
+    missionActivity={resources.isCurrent(session.threadId) ? missionActivity : null}
     registerExecutionHost={registerExecutionHost} />)}</>
 
 }
 
-export function FilePreviewProvider({ campId, resolvedTheme, api: providedApi, children, missionActivity }: {
-  campId: string | null; resolvedTheme: ResolvedTheme; api?: FilePreviewApi; children: ReactNode; missionActivity?: ReactNode
+export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi, children, missionActivity }: {
+  threadId: string | null; resolvedTheme: ResolvedTheme; api?: FilePreviewApi; children: ReactNode; missionActivity?: ReactNode
 }): React.JSX.Element {
   const api = providedApi ?? (typeof window === 'undefined' || window.rovai ? desktopFilePreviewApi : null)
-  if (!api) throw new Error('共享文件页面缺少显式资源适配。')
+  if (!api) throw new Error(uiAttribute('共享文件页面缺少显式资源适配。'))
   const resources = useMemo(() => new FilePreviewResources(api), [api])
   useSyncExternalStore(resources.subscribe, resources.getSnapshot, resources.getSnapshot)
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null)
@@ -95,19 +96,19 @@ export function FilePreviewProvider({ campId, resolvedTheme, api: providedApi, c
     setAnchor(element)
     if (element) setDeckHost(element.closest<HTMLElement>('.app-shell') ?? document.body)
   }, [])
-  const registerExecutionHost = useCallback((targetCampId: string, element: HTMLDivElement | null): void => {
+  const registerExecutionHost = useCallback((targetThreadId: string, element: HTMLDivElement | null): void => {
     setExecutionHosts((current) => {
-      if (current.get(targetCampId) === element || (!element && !current.has(targetCampId))) return current
+      if (current.get(targetThreadId) === element || (!element && !current.has(targetThreadId))) return current
       const next = new Map(current)
-      if (element) next.set(targetCampId, element)
-      else next.delete(targetCampId)
+      if (element) next.set(targetThreadId, element)
+      else next.delete(targetThreadId)
       return next
     })
   }, [])
-  const session = resources.session(campId ?? '')
+  const session = resources.session(threadId ?? '')
   const state = session.getSnapshot()
   const value = useMemo(() => sessionValue(session, resolvedTheme), [session, state, resolvedTheme])
-  useLayoutEffect(() => { resources.activate(campId) }, [resources, campId])
+  useLayoutEffect(() => { resources.activate(threadId) }, [resources, threadId])
   useEffect(() => {
     const release = resources.retainOwner()
     const dispose = (): void => resources.dispose()
@@ -115,8 +116,8 @@ export function FilePreviewProvider({ campId, resolvedTheme, api: providedApi, c
     return () => { window.removeEventListener('beforeunload', dispose); release() }
   }, [resources])
   return <FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
-    <FilePreviewLayoutProvider campId={campId} visible={!!campId && value.paneVisible} activityMode={value.activeTab?.kind === 'mission_activity'}>
-      <FileFindProvider activeTabId={value.activeTabId} visible={!!campId && value.paneVisible}>
+    <FilePreviewLayoutProvider threadId={threadId} visible={!!threadId && value.paneVisible} activityMode={value.activeTab?.kind === 'mission_activity'}>
+      <FileFindProvider activeTabId={value.activeTabId} visible={!!threadId && value.paneVisible}>
         <ExecutionPreviewHostContext.Provider value={executionHosts}>
           <PreviewHostContext.Provider value={registerAnchor}>{children}</PreviewHostContext.Provider>
           {createPortal(<PreviewDeck resources={resources} anchor={anchor} resolvedTheme={resolvedTheme} missionActivity={missionActivity}
@@ -143,6 +144,6 @@ export function usePreviewHost(): (element: HTMLDivElement | null) => void {
   if (!value) throw new Error('FilePreviewProvider is unavailable')
   return value
 }
-export function useExecutionPreviewHost(campId: string): HTMLDivElement | null {
-  return useContext(ExecutionPreviewHostContext).get(campId) ?? null
+export function useExecutionPreviewHost(threadId: string): HTMLDivElement | null {
+  return useContext(ExecutionPreviewHostContext).get(threadId) ?? null
 }

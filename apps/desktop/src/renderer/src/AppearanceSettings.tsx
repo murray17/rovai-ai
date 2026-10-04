@@ -8,6 +8,7 @@ import systemThumbnail from './assets/appearance/system.svg'
 import dayThumbnail from './assets/appearance/day.svg'
 import nightThumbnail from './assets/appearance/night.svg'
 import './AppearanceSettings.css'
+import { UiText, uiAttribute } from './interface-language'
 
 const thumbnails = { system: systemThumbnail, day: dayThumbnail, night: nightThumbnail }
 const previews = ['chat', 'document', 'code'] as const
@@ -47,14 +48,14 @@ function SizeSetting({ kind, value, disabled, onChange }: {
       ? Math.max(MIN_READING_FONT_SIZE, Math.min(MAX_READING_FONT_SIZE, Math.round(number))) : value)
   }
   return <div className="setting-row">
-    <div className="setting-copy"><label htmlFor={`appearance-${kind}-size`}>{sizeLabels[kind]}</label><p id={`appearance-${kind}-hint`}>{sizeHints[kind]}</p></div>
+    <div className="setting-copy"><label htmlFor={`appearance-${kind}-size`}>{uiAttribute(sizeLabels[kind])}</label><p id={`appearance-${kind}-hint`}>{uiAttribute(sizeHints[kind])}</p></div>
     {mobile ? <div className="mobile-font-slider">
-      <button type="button" aria-label={`减小${sizeLabels[kind]}`} disabled={disabled || value <= MIN_READING_FONT_SIZE} onClick={() => accept(value - 1)}>A</button>
+      <button type="button" aria-label={uiAttribute("减小{0}", uiAttribute(sizeLabels[kind]))} disabled={disabled || value <= MIN_READING_FONT_SIZE} onClick={() => accept(value - 1)}>A</button>
       <input id={`appearance-${kind}-size`} aria-describedby={`appearance-${kind}-hint`} type="range" min={MIN_READING_FONT_SIZE} max={MAX_READING_FONT_SIZE} step={1} value={value} disabled={disabled} onChange={(event) => accept(Number(event.target.value))} />
-      <button type="button" aria-label={`增大${sizeLabels[kind]}`} disabled={disabled || value >= MAX_READING_FONT_SIZE} onClick={() => accept(value + 1)}>A</button>
+      <button type="button" aria-label={uiAttribute("增大{0}", uiAttribute(sizeLabels[kind]))} disabled={disabled || value >= MAX_READING_FONT_SIZE} onClick={() => accept(value + 1)}>A</button>
       <output aria-live="polite">{value}</output>
     </div> : <div className="size-stepper">
-      <button type="button" aria-label={`减小${sizeLabels[kind]}`} disabled={disabled || value <= MIN_READING_FONT_SIZE} onClick={() => accept(value - 1)}><Icon name="minus" /></button>
+      <button type="button" aria-label={uiAttribute("减小{0}", uiAttribute(sizeLabels[kind]))} disabled={disabled || value <= MIN_READING_FONT_SIZE} onClick={() => accept(value - 1)}><Icon name="minus" /></button>
       <input id={`appearance-${kind}-size`} aria-describedby={`appearance-${kind}-hint`} type="number" min={MIN_READING_FONT_SIZE} max={MAX_READING_FONT_SIZE} step="1" value={text} disabled={disabled}
         onChange={(event) => {
           const next = event.target.value
@@ -63,7 +64,7 @@ function SizeSetting({ kind, value, disabled, onChange }: {
           if (next !== '' && Number.isInteger(number) && number >= MIN_READING_FONT_SIZE && number <= MAX_READING_FONT_SIZE && number !== value) onChange(number)
         }} onBlur={commitText} onKeyDown={(event) => { if (event.key === 'Enter') commitText() }} />
       <span className="unit" aria-hidden="true">px</span>
-      <button type="button" aria-label={`增大${sizeLabels[kind]}`} disabled={disabled || value >= MAX_READING_FONT_SIZE} onClick={() => accept(value + 1)}><Icon name="plus" /></button>
+      <button type="button" aria-label={uiAttribute("增大{0}", uiAttribute(sizeLabels[kind]))} disabled={disabled || value >= MAX_READING_FONT_SIZE} onClick={() => accept(value + 1)}><Icon name="plus" /></button>
     </div>}
   </div>
 }
@@ -139,20 +140,20 @@ export function AppearanceSettings({ appearance, disabled, platform = 'darwin', 
     '--message-gap': draft.readingDensity === 'relaxed' ? '25px' : '19px'
   } as CSSProperties
   const zoomOptions = APPEARANCE_ZOOM_OPTIONS.includes(draft.zoomPercentage) ? APPEARANCE_ZOOM_OPTIONS : [...APPEARANCE_ZOOM_OPTIONS, draft.zoomPercentage].sort((a, b) => a - b)
-  const themeLabel = appearance.resolvedTheme === 'night' ? '夜间' : '日间'
+  const themeLabel = appearance.resolvedTheme === 'night' ? uiAttribute('夜间') : uiAttribute('日间')
   const sourceDegraded = Boolean(appearance.degradation)
   const shortcut = platform === 'darwin' ? '⌘' : 'Ctrl'
 
   return <div className="appearance-settings-page" style={style}>
-    <SettingsPageHeader eyebrow="Settings / Appearance" title="外观" description="调整 Rovai AI 的界面主题、文字大小与阅读体验。" aside={<div className="heading-actions">
-      <span className="save-state" role="status" aria-live="polite">{!saving && !saveError && !sourceDegraded && <Icon name="check" />}{saving ? '保存中…' : saveError || sourceDegraded ? '未保存' : '已保存'}</span>
-      <button className="quiet-button" type="button" disabled={disabled || (!saveError && !sourceDegraded && appearancePreferencesEqual(draft, DEFAULT_APPEARANCE))} onClick={() => void change(DEFAULT_APPEARANCE)}><Icon name="reset"/>恢复默认</button>
+    <SettingsPageHeader eyebrow="Settings / Appearance" title={uiAttribute("外观")} description={uiAttribute("调整 Rovai AI 的界面主题、文字大小与阅读体验。")} aside={<div className="heading-actions">
+      <span className="save-state" role="status" aria-live="polite">{!saving && !saveError && !sourceDegraded && <Icon name="check" />}{saving ? uiAttribute("保存中…") : saveError || sourceDegraded ? uiAttribute("未保存") : uiAttribute("已保存")}</span>
+      <button className="quiet-button" type="button" disabled={disabled || (!saveError && !sourceDegraded && appearancePreferencesEqual(draft, DEFAULT_APPEARANCE))} onClick={() => void change(DEFAULT_APPEARANCE)}><Icon name="reset"/><UiText zh={"恢复默认"} /></button>
     </div>} />
-    {sourceDegraded && !saveError && <div className="appearance-save-error" role="alert"><span>无法读取已保存的外观设置，当前使用默认值。</span><button type="button" className="quiet-button" disabled={saving} onClick={() => void change(desired.current)}>保存当前设置</button></div>}
-    {saveError && <div className="appearance-save-error" role="alert"><span>未能保存设置，已保留当前调整。</span><button type="button" className="quiet-button" onClick={() => void change(desired.current)}>重试保存</button></div>}
+    {sourceDegraded && !saveError && <div className="appearance-save-error" role="alert"><span><UiText zh={"无法读取已保存的外观设置，当前使用默认值。"} /></span><button type="button" className="quiet-button" disabled={saving} onClick={() => void change(desired.current)}><UiText zh={"保存当前设置"} /></button></div>}
+    {saveError && <div className="appearance-save-error" role="alert"><span><UiText zh={"未能保存设置，已保留当前调整。"} /></span><button type="button" className="quiet-button" onClick={() => void change(desired.current)}><UiText zh={"重试保存"} /></button></div>}
     <section className="settings-section" aria-labelledby="appearance-theme-heading">
-      <div className="section-heading"><h2 id="appearance-theme-heading">界面主题</h2><span>{appearance.preference === 'system' ? `当前跟随系统 · ${themeLabel}` : `当前为${themeLabel}`}</span></div>
-      <fieldset className="appearance-options" disabled={disabled}><legend>界面主题</legend>
+      <div className="section-heading"><h2 id="appearance-theme-heading"><UiText zh={"界面主题"} /></h2><span>{appearance.preference === 'system' ? uiAttribute("当前跟随系统 · {0}", String(themeLabel)) : uiAttribute("当前为{0}", String(themeLabel))}</span></div>
+      <fieldset className="appearance-options" disabled={disabled}><legend><UiText zh={"界面主题"} /></legend>
         {THEME_OPTIONS.map((option) => <label key={option.value} className="appearance-option">
           <input type="radio" name="theme-preference" value={option.value} checked={draft.preference === option.value} onChange={() => void change({ preference: option.value })}/>
           <span className="theme-thumbnail" aria-hidden="true"><img src={thumbnails[option.value]} width="640" height="360" alt="" draggable={false}/></span>
@@ -161,28 +162,28 @@ export function AppearanceSettings({ appearance, disabled, platform = 'darwin', 
       </fieldset>
     </section>
     <section className="settings-section" aria-labelledby="appearance-reading-heading">
-      <div className="section-heading"><h2 id="appearance-reading-heading">文字与阅读</h2><span>调整时即时预览</span></div>
+      <div className="section-heading"><h2 id="appearance-reading-heading"><UiText zh={"文字与阅读"} /></h2><span><UiText zh={"调整时即时预览"} /></span></div>
       <div className="reading-grid"><div className="reading-controls">
         {previews.map((kind) => <SizeSetting key={kind} kind={kind} value={draft[sizeKeys[kind]]} disabled={disabled} onChange={(value) => { setPreview(kind); void change({ [sizeKeys[kind]]: value }) }}/>) }
-        <div className="setting-row"><div className="setting-copy"><span className="setting-label" id="appearance-density-label">阅读疏密</span><p>调整正文行距与段落间距</p></div><fieldset className="segments" aria-labelledby="appearance-density-label" disabled={disabled}><legend>阅读疏密</legend>{(['standard', 'relaxed'] as const).map((density) => <label key={density}><input type="radio" name="appearance-density" value={density} checked={draft.readingDensity === density} onChange={() => void change({ readingDensity: density })}/>{density === 'standard' ? '标准' : '宽松'}</label>)}</fieldset></div>
-        <p className="reading-note">默认字号：会话 13 · 文档 15 · 代码 14 px</p>
-      </div><div className="preview" aria-label="文字阅读预览">
-        <div className="preview-heading"><span>阅读预览</span><div className="preview-tabs" role="tablist" aria-label="预览内容">{previews.map((kind, index) => <button key={kind} ref={(node) => { tabs.current[index] = node }} type="button" role="tab" id={`appearance-tab-${kind}`} aria-controls={`appearance-preview-${kind}`} aria-selected={preview === kind} tabIndex={preview === kind ? 0 : -1} onClick={() => setPreview(kind)} onKeyDown={(event) => switchPreview(event, index)}>{previewLabels[kind]}</button>)}</div></div>
+        <div className="setting-row"><div className="setting-copy"><span className="setting-label" id="appearance-density-label"><UiText zh={"阅读疏密"} /></span><p><UiText zh={"调整正文行距与段落间距"} /></p></div><fieldset className="segments" aria-labelledby="appearance-density-label" disabled={disabled}><legend><UiText zh={"阅读疏密"} /></legend>{(['standard', 'relaxed'] as const).map((density) => <label key={density}><input type="radio" name="appearance-density" value={density} checked={draft.readingDensity === density} onChange={() => void change({ readingDensity: density })}/>{density === 'standard' ? uiAttribute("标准") : uiAttribute("宽松")}</label>)}</fieldset></div>
+        <p className="reading-note"><UiText zh={"默认字号：会话 13 · 文档 15 · 代码 14 px"} /></p>
+      </div><div className="preview" aria-label={uiAttribute("文字阅读预览")}>
+        <div className="preview-heading"><span><UiText zh={"阅读预览"} /></span><div className="preview-tabs" role="tablist" aria-label={uiAttribute("预览内容")}>{previews.map((kind, index) => <button key={kind} ref={(node) => { tabs.current[index] = node }} type="button" role="tab" id={`appearance-tab-${kind}`} aria-controls={`appearance-preview-${kind}`} aria-selected={preview === kind} tabIndex={preview === kind ? 0 : -1} onClick={() => setPreview(kind)} onKeyDown={(event) => switchPreview(event, index)}>{uiAttribute(previewLabels[kind])}</button>)}</div></div>
         <div className="preview-panel preview-conversation" role="tabpanel" id="appearance-preview-chat" aria-labelledby="appearance-tab-chat" tabIndex={0} hidden={preview !== 'chat'}>
-          <div className="sample-messages"><div className="sample-user"><div className="sample-meta"><span>你</span><span>09:41</span></div><p>帮我梳理一下这个项目。</p></div><div className="sample-agent"><div className="sample-meta"><BrandMark/><strong>队员</strong><span>09:42</span></div><p>我会先查看目录结构，再整理关键模块。</p><p>从 <code className="inline-code">README.md</code> 开始，确认项目的入口与运行方式。</p></div></div>
-          <div className="sample-composer" aria-label="输入框字号示例"><span>继续聊聊这个项目…</span><Icon name="arrow"/></div>
+          <div className="sample-messages"><div className="sample-user"><div className="sample-meta"><span><UiText zh={"你"} /></span><span>09:41</span></div><p><UiText zh={"帮我梳理一下这个项目。"} /></p></div><div className="sample-agent"><div className="sample-meta"><BrandMark/><strong><UiText zh={"队员"} /></strong><span>09:42</span></div><p><UiText zh={"我会先查看目录结构，再整理关键模块。"} /></p><p><UiText zh={"从 "} /><code className="inline-code">README.md</code><UiText zh={" 开始，确认项目的入口与运行方式。"} /></p></div></div>
+          <div className="sample-composer" aria-label={uiAttribute("输入框字号示例")}><span><UiText zh={"继续聊聊这个项目…"} /></span><Icon name="arrow"/></div>
         </div>
-        <div className="preview-panel" role="tabpanel" id="appearance-preview-document" aria-labelledby="appearance-tab-document" tabIndex={0} hidden={preview !== 'document'}><article className="document-sample"><h3>开始协作</h3><p>在 Camp 中与队员一起完成任务。阅读过程，查看结果，随时补充新的想法。</p><h4>查看项目结构</h4><p>先阅读 <code className="inline-code">README.md</code>，再确认目录与入口。</p><pre><code>{'pnpm install\npnpm dev'}</code></pre><table className="sample-table"><caption className="sr-only">示例目录说明</caption><tbody><tr><td>apps/desktop</td><td>桌面应用</td></tr><tr><td>packages</td><td>共享模块</td></tr></tbody></table></article></div>
-        <div className="preview-panel" role="tabpanel" id="appearance-preview-code" aria-labelledby="appearance-tab-code" tabIndex={0} hidden={preview !== 'code'}><div className="file-label"><Icon name="code"/>workspace.ts</div><div className="code-lines" aria-label="TypeScript 代码示例">{[
-          <span className="token-comment">// 为新任务准备工作区</span>, <><span className="token-keyword">const</span>{' workspace = {'}</>, <>  name: <span className="token-string">'Rovai AI'</span>,</>, <>  members: [<span className="token-string">'设计'</span>, <span className="token-string">'开发'</span>],</>, <>  ready: <span className="token-keyword">true</span></>, '}', ' ', <><span className="token-keyword">await</span> openCamp(workspace)</>
+        <div className="preview-panel" role="tabpanel" id="appearance-preview-document" aria-labelledby="appearance-tab-document" tabIndex={0} hidden={preview !== 'document'}><article className="document-sample"><h3><UiText zh={"开始协作"} /></h3><p><UiText zh={"在 Thread 中与队员一起完成任务。阅读过程，查看结果，随时补充新的想法。"} /></p><h4><UiText zh={"查看项目结构"} /></h4><p><UiText zh={"先阅读 "} /><code className="inline-code">README.md</code><UiText zh={"，再确认目录与入口。"} /></p><pre><code>{'pnpm install\npnpm dev'}</code></pre><table className="sample-table"><caption className="sr-only"><UiText zh={"示例目录说明"} /></caption><tbody><tr><td>apps/desktop</td><td><UiText zh={"桌面应用"} /></td></tr><tr><td>packages</td><td><UiText zh={"共享模块"} /></td></tr></tbody></table></article></div>
+        <div className="preview-panel" role="tabpanel" id="appearance-preview-code" aria-labelledby="appearance-tab-code" tabIndex={0} hidden={preview !== 'code'}><div className="file-label"><Icon name="code"/>workspace.ts</div><div className="code-lines" aria-label={uiAttribute("TypeScript 代码示例")}>{[
+          <span className="token-comment"><UiText zh={"// 为新任务准备工作区"} /></span>, <><span className="token-keyword">const</span>{' workspace = {'}</>, <>  name: <span className="token-string">'Rovai AI'</span>,</>, <>  members: [<span className="token-string"><UiText zh={"'设计'"} /></span>, <span className="token-string"><UiText zh={"'开发'"} /></span>],</>, <>  ready: <span className="token-keyword">true</span></>, '}', ' ', <><span className="token-keyword">await</span> openThread(workspace)</>
         ].map((line, index) => <div className="code-line" key={index}><span className="line-number" aria-hidden="true">{index + 1}</span><code>{line}</code></div>)}</div></div>
-        <div className="preview-caption"><span>{previewScopes[preview]}</span><output>{draft[sizeKeys[preview]]} px · {draft.readingDensity === 'standard' ? '标准' : '宽松'}</output></div>
+        <div className="preview-caption"><span>{uiAttribute(previewScopes[preview])}</span><output>{draft[sizeKeys[preview]]} px · {draft.readingDensity === 'standard' ? uiAttribute("标准") : uiAttribute("宽松")}</output></div>
       </div></div>
     </section>
     <section className="settings-section display-section" aria-labelledby="appearance-display-heading">
-      <div className="section-heading"><h2 id="appearance-display-heading">显示与动效</h2></div>
-      <div className="setting-row"><div className="setting-copy"><label htmlFor={zoomManagedBy === 'desktop' ? 'appearance-zoom' : undefined}>界面缩放</label><p id="appearance-zoom-hint">{zoomManagedBy === 'browser' ? '使用浏览器菜单或快捷键调整缩放，由当前浏览器保存。恢复外观默认值不会重置浏览器缩放。' : '按比例调整整个应用，包括导航、按钮与文字。'}</p></div><div className="setting-action"><span className="shortcut" aria-label="缩小、放大、恢复默认缩放"><kbd>{shortcut} −</kbd><kbd>{shortcut} +</kbd><kbd>{shortcut} 0</kbd></span>{zoomManagedBy === 'desktop' && <select className="setting-select" id="appearance-zoom" aria-describedby="appearance-zoom-hint" value={draft.zoomPercentage} disabled={disabled} onChange={(event) => void change({ zoomPercentage: Number(event.target.value) })}>{zoomOptions.map((zoom) => <option key={zoom} value={zoom}>{zoom === 100 ? '100%（默认）' : `${zoom}%`}</option>)}</select>}</div></div>
-      <div className="setting-row"><div className="setting-copy motion-copy"><label htmlFor="appearance-motion">减少动态效果</label><p id="appearance-motion-hint">减少弹窗位移、标签动画和平滑滚动，保留状态与进度提示。</p></div><select className="setting-select" id="appearance-motion" aria-describedby="appearance-motion-hint" disabled={disabled} value={draft.motionPreference} onChange={(event) => void change({ motionPreference: event.target.value as AppearancePreferences['motionPreference'] })}><option value="system">跟随系统</option><option value="reduce">始终减少</option></select></div>
+      <div className="section-heading"><h2 id="appearance-display-heading"><UiText zh={"显示与动效"} /></h2></div>
+      <div className="setting-row"><div className="setting-copy"><label htmlFor={zoomManagedBy === 'desktop' ? 'appearance-zoom' : undefined}><UiText zh={"界面缩放"} /></label><p id="appearance-zoom-hint">{zoomManagedBy === 'browser' ? uiAttribute("使用浏览器菜单或快捷键调整缩放，由当前浏览器保存。恢复外观默认值不会重置浏览器缩放。") : uiAttribute("按比例调整整个应用，包括导航、按钮与文字。")}</p></div><div className="setting-action"><span className="shortcut" aria-label={uiAttribute("缩小、放大、恢复默认缩放")}><kbd>{shortcut} −</kbd><kbd>{shortcut} +</kbd><kbd>{shortcut} 0</kbd></span>{zoomManagedBy === 'desktop' && <select className="setting-select" id="appearance-zoom" aria-describedby="appearance-zoom-hint" value={draft.zoomPercentage} disabled={disabled} onChange={(event) => void change({ zoomPercentage: Number(event.target.value) })}>{zoomOptions.map((zoom) => <option key={zoom} value={zoom}>{zoom === 100 ? uiAttribute("100%（默认）") : `${zoom}%`}</option>)}</select>}</div></div>
+      <div className="setting-row"><div className="setting-copy motion-copy"><label htmlFor="appearance-motion"><UiText zh={"减少动态效果"} /></label><p id="appearance-motion-hint"><UiText zh={"减少弹窗位移、标签动画和平滑滚动，保留状态与进度提示。"} /></p></div><select className="setting-select" id="appearance-motion" aria-describedby="appearance-motion-hint" disabled={disabled} value={draft.motionPreference} onChange={(event) => void change({ motionPreference: event.target.value as AppearancePreferences['motionPreference'] })}><option value="system"><UiText zh={"跟随系统"} /></option><option value="reduce"><UiText zh={"始终减少"} /></option></select></div>
     </section>
   </div>
 }

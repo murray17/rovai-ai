@@ -25,7 +25,7 @@ async function temporaryDirectory(): Promise<string> {
 describe('restorable location', () => {
   it.each<RestorableLocation>([
     { kind: 'quick_chat' },
-    { kind: 'camp', campId: CAMP_ID },
+    { kind: 'camp', threadId: CAMP_ID },
     { kind: 'members', agentId: 'agent-1', tab: 'identity' },
     { kind: 'members', agentId: null, tab: 'runtime' },
     { kind: 'memory' }
@@ -34,10 +34,12 @@ describe('restorable location', () => {
   })
 
   it('rejects settings, transient surfaces, unknown fields, invalid tabs, and unbounded IDs', () => {
+    expect(parseRestorableLocation({ kind: 'camp', campId: CAMP_ID })).toEqual({ kind: 'camp', threadId: CAMP_ID })
+    expect(parseRestorableLocation({ kind: 'camp', campId: CAMP_ID, threadId: CAMP_ID })).toBeNull()
     expect(parseRestorableLocation({ kind: 'settings' })).toBeNull()
     expect(parseRestorableLocation({ kind: 'notifications' })).toBeNull()
-    expect(parseRestorableLocation({ kind: 'camp', campId: '' })).toBeNull()
-    expect(parseRestorableLocation({ kind: 'camp', campId: 'a'.repeat(257) })).toBeNull()
+    expect(parseRestorableLocation({ kind: 'camp', threadId: '' })).toBeNull()
+    expect(parseRestorableLocation({ kind: 'camp', threadId: 'a'.repeat(257) })).toBeNull()
     expect(parseRestorableLocation({ kind: 'memory', dialog: true })).toBeNull()
     expect(parseRestorableLocation({ kind: 'members', agentId: null, tab: 'activity' })).toBeNull()
   })
@@ -61,7 +63,7 @@ describe('restorable location', () => {
     const store = await RestorableLocationStore.load(filePath)
 
     await Promise.all([
-      store.commit({ kind: 'camp', campId: CAMP_ID }),
+      store.commit({ kind: 'camp', threadId: CAMP_ID }),
       store.commit({ kind: 'members', agentId: 'agent-1', tab: 'runtime' }),
       store.commit({ kind: 'memory' })
     ])

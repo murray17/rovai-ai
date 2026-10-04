@@ -6,6 +6,7 @@ import type {
   AppearanceSnapshot,
   HealthStatus,
   HostPlatformKey,
+  InterfaceLanguage,
   OnboardingRuntimeSelection,
   OnboardingSnapshot,
   ProductRuntimeAvailability,
@@ -19,7 +20,8 @@ import {
   runtimeModelSelectionAvailable
 } from './MemberRuntimeParameters'
 import { MemberPortrait } from './MemberPortrait'
-import { BUILTIN_MEMBER_PRESETS, type BuiltinMemberPreset } from './member-presets'
+import { builtinMemberPresetsForLanguage, type BuiltinMemberPreset } from './member-presets'
+import { useInterfaceLanguage, useUiText , uiAttribute } from './interface-language'
 import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 import {
   runtimeAvailabilityPresentation,
@@ -122,6 +124,7 @@ export function OnboardingFlow({
   runtimePhase,
   busy,
   error,
+  onLanguageChange,
   onThemeChange,
   onShowWelcome,
   onCompleteWelcome,
@@ -141,6 +144,7 @@ export function OnboardingFlow({
   runtimePhase: OnboardingRuntimePhase
   busy: boolean
   error: string | null
+  onLanguageChange(language: InterfaceLanguage): void
   onThemeChange(preference: ThemePreference): void
   onShowWelcome(): void
   onCompleteWelcome(): void
@@ -153,9 +157,12 @@ export function OnboardingFlow({
   onDeferRuntime(): void
   onComplete(): void
 }): React.JSX.Element {
-  const selectedMember = BUILTIN_MEMBER_PRESETS.find(
+  const language = useInterfaceLanguage()
+  const t = useUiText()
+  const presets = builtinMemberPresetsForLanguage(language)
+  const selectedMember = presets.find(
     (preset) => preset.role === snapshot.selectedMemberRole
-  ) ?? BUILTIN_MEMBER_PRESETS[0]
+  ) ?? presets[0]
   const backAction = snapshot.step === 'member'
     ? onShowWelcome
     : snapshot.step === 'runtime' && !snapshot.provisioning
@@ -174,18 +181,30 @@ export function OnboardingFlow({
           {backAction && (
             <button className="onboarding-back" type="button" disabled={busy} onClick={backAction}>
               <BackIcon />
-              返回
+              {t('返回')}
             </button>
           )}
-          <span className="onboarding-progress" aria-label={`第 ${stepNumber} 步，共 3 步`}>
+          {snapshot.step === 'welcome' && (
+            <div className="onboarding-language" role="radiogroup" aria-label={t('界面语言')}>
+              {(['zh-CN', 'en'] as const).map((option) => (
+                <label key={option} className={language === option ? 'selected' : ''}>
+                  <input type="radio" name="onboarding-language" value={option}
+                    checked={language === option} disabled={busy || snapshot.provisioning !== null}
+                    onChange={() => onLanguageChange(option)} />
+                  <span>{option === 'zh-CN' ? uiAttribute("简体中文") : 'English'}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <span className="onboarding-progress" aria-label={t('第 {0} 步，共 3 步', stepNumber)}>
             {stepNumber} / 3
           </span>
           <button
             className="onboarding-theme-toggle"
             type="button"
             disabled={busy}
-            aria-label={appearance.resolvedTheme === 'night' ? '切换到日间主题' : '切换到夜间主题'}
-            title={appearance.resolvedTheme === 'night' ? '切换到日间主题' : '切换到夜间主题'}
+            aria-label={t(appearance.resolvedTheme === 'night' ? uiAttribute("切换到日间主题") : uiAttribute("切换到夜间主题"))}
+            title={t(appearance.resolvedTheme === 'night' ? uiAttribute("切换到日间主题") : uiAttribute("切换到夜间主题"))}
             onClick={() => onThemeChange(appearance.resolvedTheme === 'night' ? 'day' : 'night')}
           >
             <ThemeIcon mode={appearance.resolvedTheme} />
@@ -194,11 +213,12 @@ export function OnboardingFlow({
       </header>
       <main className="onboarding-main">
         {snapshot.step === 'welcome' && (
-          <WelcomeStep busy={busy} onContinue={onCompleteWelcome} />
+          <WelcomeStep busy={busy} error={error} onContinue={onCompleteWelcome} />
         )}
         {snapshot.step === 'member' && (
           <MemberStep
             selected={selectedMember}
+            presets={presets}
             busy={busy}
             onSelect={onSelectMember}
             onContinue={onCompleteMemberSelection}
@@ -228,40 +248,47 @@ export function OnboardingFlow({
 
 function WelcomeStep({
   busy,
+  error,
   onContinue
 }: {
   busy: boolean
+  error: string | null
   onContinue(): void
 }): React.JSX.Element {
+  const t = useUiText()
   return (
     <section className="onboarding-welcome" aria-labelledby="onboarding-welcome-title">
       <div className="onboarding-welcome-mark"><OnboardingBrandMark /></div>
-      <h1 id="onboarding-welcome-title">欢迎来到 Rovai</h1>
-      <p>选一位队员，开始你的第一次协作。</p>
+      <h1 id="onboarding-welcome-title">{t('欢迎来到 Rovai')}</h1>
+      <p>{t('选一位队员，开始你的第一次协作。')}</p>
       <button className="primary-button conversation-primary-button onboarding-primary" type="button" disabled={busy} onClick={onContinue}>
-        选择队员
+        {t('选择队员')}
         <ForwardIcon />
       </button>
+      {error && <p className="onboarding-language-error" role="alert">{t(error)}</p>}
     </section>
   )
 }
 
 function MemberStep({
   selected,
+  presets,
   busy,
   onSelect,
   onContinue
 }: {
   selected: BuiltinMemberPreset
+  presets: ReadonlyArray<BuiltinMemberPreset>
   busy: boolean
   onSelect(role: BuiltinMemberPreset['role']): void
   onContinue(): void
 }): React.JSX.Element {
+  const t = useUiText()
   return (
     <section className="onboarding-track" aria-labelledby="onboarding-member-title">
       <header className="onboarding-page-heading">
-        <h1 id="onboarding-member-title">选择第一位队员</h1>
-        <p>之后可以继续邀请其他队员。</p>
+        <h1 id="onboarding-member-title">{t('选择第一位队员')}</h1>
+        <p>{t('之后可以继续邀请其他队员。')}</p>
       </header>
       <div className="onboarding-member-layout">
         <aside className="onboarding-selected-member" data-member-role={selected.role}>
@@ -279,14 +306,14 @@ function MemberStep({
               {selected.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}
             </div>
             <details key={selected.role} className="onboarding-member-details">
-              <summary>了解工作方式</summary>
+              <summary>{t('了解工作方式')}</summary>
               <p>{selected.professionalResponsibilities}</p>
             </details>
           </div>
         </aside>
         <div className="onboarding-member-chooser">
-          <div className="onboarding-member-list" role="radiogroup" aria-label="选择第一位队员" onKeyDown={moveRadioSelection}>
-            {BUILTIN_MEMBER_PRESETS.map((preset) => {
+          <div className="onboarding-member-list" role="radiogroup" aria-label={t('选择第一位队员')} onKeyDown={moveRadioSelection}>
+            {presets.map((preset) => {
               const checked = selected.role === preset.role
               return (
                 <button
@@ -305,7 +332,7 @@ function MemberStep({
                     <small>{preset.teamRole}</small>
                   </span>
                   <span className="onboarding-member-row-copy">
-                    <small>{MEMBER_SUMMARIES[preset.role]}</small>
+                    <small>{t(MEMBER_SUMMARIES[preset.role])}</small>
                   </span>
                   <span className="onboarding-radio-check" aria-hidden="true" />
                 </button>
@@ -313,9 +340,9 @@ function MemberStep({
             })}
           </div>
           <footer className="onboarding-member-footer">
-            <span>接下来：选择运行时</span>
+            <span>{t('接下来：选择智能体')}</span>
             <button className="primary-button conversation-primary-button onboarding-primary" type="button" disabled={busy} onClick={onContinue}>
-              下一步
+              {t('下一步')}
               <ForwardIcon />
             </button>
           </footer>
@@ -354,6 +381,7 @@ function RuntimeStep({
   onDefer(): void
   onComplete(): void
 }): React.JSX.Element {
+  const t = useUiText()
   const availability = health?.runtimeAvailability ?? []
   const selectedAvailability = availability.find(
     (candidate) => candidate.runtimeKind === selection?.adapterKind
@@ -419,8 +447,8 @@ function RuntimeStep({
     <section className="onboarding-track onboarding-runtime-track" aria-labelledby="onboarding-runtime-title">
       <header className="onboarding-page-heading onboarding-runtime-heading">
         <div>
-          <h1 id="onboarding-runtime-title">选择运行时</h1>
-          <p>使用这台电脑上已安装的运行时，为{member.displayName}提供模型与工具。</p>
+          <h1 id="onboarding-runtime-title">{t('选择智能体')}</h1>
+          <p>{t('使用这台电脑上已安装的智能体，为{0}提供模型与工具。', member.displayName)}</p>
         </div>
       </header>
       <div className="onboarding-runtime-layout">
@@ -453,10 +481,10 @@ function RuntimeStep({
                 <>
           <section className="onboarding-runtime-panel">
             <header>
-              <span><strong>本机运行时</strong><small>{scanning ? '正在读取本机环境' : hasEnabledRuntime ? '选择一个可用的运行时' : '当前平台的 Runtime 资格状态'}</small></span>
-              {scanning && <span className="onboarding-scan-status"><i />正在检查</span>}
+              <span><strong>{t('本机智能体')}</strong><small>{t(scanning ? uiAttribute("正在读取本机环境") : hasEnabledRuntime ? uiAttribute("选择一个可用的智能体") : uiAttribute("当前平台的智能体资格状态"))}</small></span>
+              {scanning && <span className="onboarding-scan-status"><i />{t('正在检查')}</span>}
               {!scanning && hasEnabledRuntime && (
-                <button className="onboarding-refresh" type="button" disabled={busy} onClick={onRefresh} aria-label="重新扫描" title="重新扫描">
+                <button className="onboarding-refresh" type="button" disabled={busy} onClick={onRefresh} aria-label={t('重新扫描')} title={t('重新扫描')}>
                   <RefreshIcon />
                 </button>
               )}
@@ -464,11 +492,11 @@ function RuntimeStep({
             {scanning
               ? <RuntimeScanProgress phase={phase} />
               : (
-                  <div role="radiogroup" aria-label="选择运行时" onKeyDown={moveRadioSelection}>
+                  <div role="radiogroup" aria-label={t('选择智能体')} onKeyDown={moveRadioSelection}>
                     <div className="onboarding-runtime-list">{primaryChoices.map(renderRuntimeChoice)}</div>
                     {otherChoices.length > 0 && (
                       <details className="onboarding-other-runtimes">
-                        <summary>其他运行时 · {otherChoices.length}</summary>
+                        <summary>{t('其他智能体 · {0}', otherChoices.length)}</summary>
                         <div className="onboarding-runtime-list">{otherChoices.map(renderRuntimeChoice)}</div>
                       </details>
                     )}
@@ -481,7 +509,7 @@ function RuntimeStep({
               <header>
                 <span>
                   <strong id="onboarding-model-title">
-                    模型
+                    {t('模型')}
                   </strong>
                 </span>
               </header>
@@ -497,22 +525,22 @@ function RuntimeStep({
                         onChange={(model) => onSelectionChange({ ...selection, model })}
                       />
                     )
-                  : <p className="onboarding-model-empty">从上方选择一个可用的运行时。</p>}
+                  : <p className="onboarding-model-empty">{t('从上方选择一个可用的智能体。')}</p>}
               </div>
             </section>
           )}
 
           {error && (
             <div className="onboarding-runtime-error" role="alert">
-              <strong>还没能完成首次配置</strong>
-              <span>{error}</span>
+              <strong>{t('还没能完成首次配置')}</strong>
+              <span>{t(error)}</span>
             </div>
           )}
 
-          <p className="onboarding-runtime-footnote">登录与模型能力将在首次执行时确认。</p>
+          <p className="onboarding-runtime-footnote">{t('登录与模型能力将在首次执行时确认。')}</p>
           <footer className="onboarding-runtime-footer">
             <span>
-              {busy ? '正在准备“初次集结”…' : provisioning ? '可以从已保存的进度继续。' : '准备好后，进入「初次集结」。'}
+              {t(busy ? uiAttribute("正在准备“初次集结”…") : provisioning ? uiAttribute("可以从已保存的进度继续。") : uiAttribute("准备好后，进入「初次集结」。"))}
             </span>
             <button
               className="primary-button conversation-primary-button onboarding-primary"
@@ -520,7 +548,7 @@ function RuntimeStep({
               disabled={!canContinue || busy}
               onClick={onComplete}
             >
-              {busy ? '正在准备…' : provisioning ? '继续准备' : '开始对话'}
+              {t(busy ? uiAttribute("正在准备…") : provisioning ? uiAttribute("继续准备") : uiAttribute("开始对话"))}
               {!busy && <ForwardIcon />}
             </button>
           </footer>
@@ -548,6 +576,7 @@ function RuntimeEmptyState({
   onDefer(): void
 }): React.JSX.Element {
   const [guideOpen, setGuideOpen] = useState(false)
+  const t = useUiText()
   return (
     <>
       <section
@@ -555,8 +584,8 @@ function RuntimeEmptyState({
         aria-labelledby="onboarding-runtime-empty-title"
       >
         <header>
-          <strong>本机运行时</strong>
-          <span className="onboarding-runtime-state">{scanFailed ? '扫描未完成' : '无可用入口'}</span>
+          <strong>{t('本机智能体')}</strong>
+          <span className="onboarding-runtime-state">{t(scanFailed ? uiAttribute("扫描未完成") : uiAttribute("无可用入口"))}</span>
         </header>
         <div className="onboarding-runtime-empty">
           <div className="onboarding-runtime-empty-visual" aria-hidden="true">
@@ -568,19 +597,19 @@ function RuntimeEmptyState({
             )}
           </div>
           <div className="onboarding-runtime-empty-copy">
-            <h2 id="onboarding-runtime-empty-title">{scanFailed ? '这次扫描未完成' : '暂未找到可用的运行时'}</h2>
-            <p>{scanFailed ? '请重新扫描，确认这台电脑上的可用运行时。' : '安装或完成运行配置后，回到这里重新扫描。'}</p>
+            <h2 id="onboarding-runtime-empty-title">{t(scanFailed ? uiAttribute("这次扫描未完成") : uiAttribute("暂未找到可用的智能体"))}</h2>
+            <p>{t(scanFailed ? uiAttribute("请重新扫描，确认这台电脑上的可用智能体。") : uiAttribute("安装或完成运行配置后，回到这里重新扫描。"))}</p>
             <div className="onboarding-runtime-empty-actions">
               {scanFailed && (
                 <button className="primary-button conversation-primary-button" type="button" disabled={busy} onClick={onRefresh}>
-                  <RefreshIcon />重新扫描
+                  <RefreshIcon />{t('重新扫描')}
                 </button>
               )}
               <button className={scanFailed ? 'quiet-button' : 'primary-button conversation-primary-button'} type="button"
                 disabled={busy} aria-expanded={guideOpen} aria-controls="onboarding-install-links" onClick={() => setGuideOpen(!guideOpen)}>
-                查看安装引导
+                {t('查看安装引导')}
               </button>
-              {!scanFailed && <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>重新扫描</button>}
+              {!scanFailed && <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>{t('重新扫描')}</button>}
             </div>
             <div id="onboarding-install-links" className="onboarding-install-links" hidden={!guideOpen}>
               {ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
@@ -588,14 +617,14 @@ function RuntimeEmptyState({
                 return guide && <a key={kind} href={guide.docs} target="_blank" rel="noopener noreferrer">{RUNTIME_LABELS[kind]} <span aria-hidden="true">↗</span></a>
               })}
             </div>
-            {error && <details className="onboarding-member-details"><summary>查看详情</summary><p>{error}</p></details>}
+            {error && <details className="onboarding-member-details"><summary>{t('查看详情')}</summary><p>{t(error)}</p></details>}
           </div>
         </div>
       </section>
       <footer className="onboarding-runtime-footer onboarding-runtime-empty-footer">
-        <span>稍后可在设置中继续配置。</span>
+        <span>{t('稍后可在设置中继续配置。')}</span>
         <button className="quiet-button onboarding-defer" type="button" disabled={busy} onClick={onDefer}>
-          {busy ? '正在进入…' : '稍后配置'}
+          {t(busy ? uiAttribute("正在进入…") : uiAttribute("稍后配置"))}
         </button>
       </footer>
     </>
@@ -603,21 +632,22 @@ function RuntimeEmptyState({
 }
 
 function RuntimeScanProgress({ phase }: { phase: OnboardingRuntimePhase }): React.JSX.Element {
+  const t = useUiText()
   const current = ({ idle: 0, discovering: 0, checking: 1, models: 2, ready: 3, error: 0 })[phase]
   return (
     <div className="onboarding-scan-progress" role="status" aria-live="polite">
       {[
-        ['查找安装入口', '查找这台电脑上已安装的运行时'],
-        ['确认运行时身份', '读取本机运行时的轻度检查结果'],
+        ['查找安装入口', '查找这台电脑上已安装的智能体'],
+        ['确认智能体身份', '读取本机智能体的轻度检查结果'],
         ['读取运行配置', '准备当前安装的默认配置']
       ].map(([title, detail], index) => {
         const done = index < current
         const active = index === current
         return (
           <div key={title}>
-            <span><strong>{title}</strong><small>{detail}</small></span>
+            <span><strong>{t(title)}</strong><small>{t(detail)}</small></span>
             <em className={done ? 'done' : active ? 'active' : ''}>
-              {done ? <><CheckIcon />已完成</> : active ? <><i />正在检查…</> : '等待'}
+              {done ? <><CheckIcon />{t('已完成')}</> : active ? <><i />{t('正在检查…')}</> : t('等待')}
             </em>
           </div>
         )
@@ -645,6 +675,7 @@ function RuntimeRow({
   busy: boolean
   onSelect(): void
 }): React.JSX.Element {
+  const t = useUiText()
   return (
     <button
       className="onboarding-runtime-row"
@@ -652,7 +683,7 @@ function RuntimeRow({
       role="radio"
       aria-checked={checked}
       tabIndex={tabIndex}
-      title={runtimeRowDetail(presentation)}
+      title={t(runtimeRowDetail(presentation))}
       disabled={disabled}
       aria-disabled={disabled || busy}
       onClick={() => { if (!busy) onSelect() }}
@@ -660,7 +691,7 @@ function RuntimeRow({
       <span className="onboarding-radio-check" aria-hidden="true" />
       <span className="onboarding-runtime-logo"><img src={RUNTIME_LOGOS[kind]} alt="" /></span>
       <span className="onboarding-runtime-copy"><strong>{RUNTIME_LABELS[kind]}</strong>
-        {(experimental || (presentation.status !== 'available' && presentation.status !== 'not_installed')) && <small>{runtimeRowDetail(presentation)}</small>}
+        {(experimental || (presentation.status !== 'available' && presentation.status !== 'not_installed')) && <small>{t(runtimeRowDetail(presentation))}</small>}
       </span>
       <RuntimeState presentation={presentation} />
     </button>
@@ -668,9 +699,10 @@ function RuntimeRow({
 }
 
 function RuntimeState({ presentation }: { presentation: RuntimeStatusPresentation }): React.JSX.Element {
+  const t = useUiText()
   return (
     <span className={`onboarding-runtime-state status-${presentation.status}`}>
-      {presentation.label}
+      {t(presentation.label)}
     </span>
   )
 }

@@ -1,0 +1,7 @@
+node_modules/
+site/.vitepress/cache/
+site/.vitepress/dist/
+site/index.md
+site/download/
+site/docs/
+site/zh/

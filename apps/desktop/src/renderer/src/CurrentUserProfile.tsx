@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile, type CurrentUserProfileApi } from '@contracts'
 import './current-user-profile.css'
 import { readErrorMessage } from './error-message'
+import { uiAttribute } from './interface-language'
 
 type ProfileState = {
   profile: CurrentUserProfile
@@ -16,12 +17,12 @@ export const CurrentUserProfileContext = createContext<ProfileState>({
   ready: false,
   error: null,
   reload: () => undefined,
-  save: async () => { throw new Error('个人资料尚未加载。') }
+  save: async () => { throw new Error(uiAttribute('个人资料尚未加载。')) }
 })
 
 export function CurrentUserProfileProvider({ children, api: providedApi }: { children: ReactNode; api?: CurrentUserProfileApi }): React.JSX.Element {
   const api = providedApi ?? (typeof window !== 'undefined' ? window.rovai?.currentUserProfile : undefined)
-  if (!api) throw new Error('共享个人资料缺少显式适配。')
+  if (!api) throw new Error(uiAttribute('共享个人资料缺少显式适配。'))
   const [profile, setProfile] = useState(DEFAULT_CURRENT_USER_PROFILE)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,7 +32,7 @@ export function CurrentUserProfileProvider({ children, api: providedApi }: { chi
     setReady(false)
     setError(null)
     if (!api) {
-      setError('当前版本的个人资料服务不可用。')
+      setError(uiAttribute('当前版本的个人资料服务不可用。'))
       return
     }
     void api.get().then((next) => {
@@ -64,6 +65,6 @@ export function CurrentUserAvatar({
     aria-hidden="true">
     {profile.avatarDataUrl && failedSource !== profile.avatarDataUrl
       ? <img src={profile.avatarDataUrl} alt="" onError={() => setFailedSource(profile.avatarDataUrl)} />
-      : '你'}
+      : uiAttribute("你")}
   </span>
 }

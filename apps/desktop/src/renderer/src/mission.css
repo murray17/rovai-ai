@@ -453,7 +453,7 @@ button.mission-tag { cursor: pointer; }
 .mission-session-header.has-file-preview { --file-preview-tabs-end-padding: 72px; }
 .mission-session-header > .file-preview-tabs { height: 40px; padding-block: 6px; }
 .mission-session-header:not(.has-file-preview) .topbar-conversation-context { padding-right: 48px; }
-.mission-session-header .camp-detail-entry > small { display: none; }
+.mission-session-header .camp-detail-entry small { display: none; }
 .mission-session-header .context-breadcrumb[hidden] { display: none; }
 .mission-session-header :is(.context-project,.context-sep) { display: inline; }
 .mission-session-leading { display: flex; align-items: center; flex: 0 0 auto; gap: 4px; margin-right: 2px; -webkit-app-region: no-drag; }
@@ -496,7 +496,7 @@ html:not([data-rovai-platform="win32"]) .navigation-collapsed .mission-full .top
 @media(max-width:1190px) { .mission-board-page { padding-inline: 20px; }.mission-board-scroll > .mission-board { gap: 9px; }.mission-column { padding-inline: 7px; }.mission-board-card { padding-inline: 10px; }.mission-filter { padding-inline: 6px; }.mission-filter .mission-filter-value { max-width: 70px; }.mission-search { width: 112px; } }
 @media(prefers-reduced-motion:reduce) { .mission-drawer { animation: none; } }
 @container mission-header (max-width: 700px) {
-  .camp-detail-entry > small, .camp-execution-members, .camp-execution-overflow { display: none; }
+  .camp-detail-entry small, .camp-execution-members, .camp-execution-overflow { display: none; }
 }
 @container mission-header (max-width: 560px) {
   .camp-topbar.mission-session-header .topbar-conversation-context { gap: 2px; padding-inline: 6px; }

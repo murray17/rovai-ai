@@ -3,6 +3,7 @@ import { useCallback, useId, useLayoutEffect, useRef, useState, type KeyboardEve
 import { MemberAvatar, type MemberAvatarProps } from './MemberAvatar'
 import { ExecutionStatusGlyph, type ExecutionStatusShape } from './ExecutionStatusGlyph'
 import { ExecutionOverviewMark } from './ExecutionIcons'
+import { uiAttribute } from './interface-language'
 
 export interface ExecutionAvatarRailItem extends Pick<MemberAvatarProps, 'agentId' | 'avatarRef' | 'displayName'> {
   overview?: boolean
@@ -184,19 +185,19 @@ export function ExecutionAvatarRail({
       ref={leftButtonRef}
       className="run-pulse-avatar-scroll is-left"
       type="button"
-      aria-label="向左查看更多队员"
+      aria-label={uiAttribute("向左查看更多队员")}
       aria-controls={listId}
       aria-hidden={!edges.left}
       disabled={!edges.left}
       onClick={() => scrollByFour(-1)}
     ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3.5-4.5 4.5 4.5 4.5" /></svg></button>
-    <ul ref={railRef} id={listId} className="run-pulse-list" aria-label="队员执行过程入口" onKeyDown={onKeyDown}>
+    <ul ref={railRef} id={listId} className="run-pulse-list" aria-label={uiAttribute("队员执行过程入口")} onKeyDown={onKeyDown}>
       {items.map(item => <li key={item.agentId}>
         <button
           ref={button => { if (button) buttons.current.set(item.agentId, button); else buttons.current.delete(item.agentId) }}
           type="button"
           className={`run-pulse-chip${selectedAgentId === item.agentId ? ' is-selected' : ''}`}
-          aria-label={item.overview ? '打开全部队员执行总览' : `打开${item.displayName}的执行过程，${item.statusLabel}`}
+          aria-label={item.overview ? uiAttribute("打开全部队员执行总览") : uiAttribute("打开{0}的执行过程，{1}", String(item.displayName), String(item.statusLabel))}
           aria-pressed={selectedAgentId === item.agentId}
           aria-expanded={selectedAgentId === item.agentId}
           aria-controls="agent-execution-drawer"
@@ -227,14 +228,14 @@ export function ExecutionAvatarRail({
       ref={rightButtonRef}
       className="run-pulse-avatar-scroll is-right"
       type="button"
-      aria-label="向右查看更多队员"
+      aria-label={uiAttribute("向右查看更多队员")}
       aria-controls={listId}
       aria-hidden={!edges.right}
       disabled={!edges.right}
       onClick={() => scrollByFour(1)}
     ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></button>
     {tooltipItem && <span ref={tooltipRef} id={tooltipId} className="run-pulse-avatar-tooltip" role="tooltip">
-      {tooltipItem.overview ? '总览 · 全部队员' : `${tooltipItem.displayName} · ${tooltipItem.statusLabel}`}
+      {tooltipItem.overview ? uiAttribute("总览 · 全部队员") : `${tooltipItem.displayName} · ${tooltipItem.statusLabel}`}
     </span>}
   </div>
 }

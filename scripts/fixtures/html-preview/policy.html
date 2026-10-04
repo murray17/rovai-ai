@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">
+<title>Restricted diagnostics</title></head>
+<body style="min-height:2000px">
+<h1>页面策略保持不变</h1>
+<input id="retained-input" value="保留输入">
+<button id="increment">切换</button><output id="count">0</output>
+<script>
+window.policyEvents = [];
+document.addEventListener('securitypolicyviolation', event => {
+  window.policyEvents.push({ blockedURI: event.blockedURI, sourceFile: event.sourceFile, directive: event.effectiveDirective, trusted: event.isTrusted });
+});
+document.getElementById('increment').onclick = () => {
+  const count = document.getElementById('count');
+  count.textContent = String(Number(count.textContent) + 1);
+};
+if (new URLSearchParams(location.search).has('errors')) {
+  const image = document.createElement('img');
+  image.src = './missing-policy.png'; document.body.append(image);
+  fetch('./business.json').catch(() => {});
+  // The author's own request to the same endpoint must remain a page issue.
+  const bridge = document.querySelector('script[data-rovai-preview-diagnostic]');
+  const documentId = new URL(bridge.src).pathname.split('/').pop().replace(/\.js$/, '');
+  fetch('/__rovai-preview/events?documentId=' + documentId).catch(() => {});
+  setTimeout(() => { throw new Error('author csp fixture'); }, 0);
+}
+</script></body></html>

@@ -1,5 +1,5 @@
 ---
-version: 14
+version: 17
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -33,18 +33,18 @@ All split boundaries, including the roster, highlight their full 1px line with `
 The roster shares the detail's workspace
 surface (white in Day), with a 1px divider separating the two reading planes. Its default width is 256px;
 expanded widths range from 192px to 360px and protect 400px for the detail when space permits.
-Dragging below 176px snaps to the same 76px avatar rail as the explicit collapse button; dragging a
+Dragging below 176px snaps to the 76px avatar rail; dragging a
 collapsed rail past 208px expands it. The different thresholds prevent jitter around the boundary.
 The 9px pointer target stays mounted through collapse so the gesture can reverse without losing capture.
-Expanding with the button restores the useful width before the collapse gesture. Remember width and
+Expanding restores the useful width before the collapse gesture. Remember width and
 collapse locally, accepting the previous collapse-only preference; viewport clamping does not overwrite
 the chosen width. Double-click or Home restores 256px, arrows resize and collapse/expand at the boundary,
-and Enter toggles collapse. The options menu provides click-based width presets. Reordering disables
-the splitter and collapse button. The detail scrolls internally instead of shrinking identity or actions below usability.
+and Enter toggles collapse. The separate collapse button and roster options menu are absent. A reorder gesture temporarily disables
+the splitter. The detail scrolls internally instead of shrinking identity or actions below usability.
 
 The header uses the controlled portrait plus a separate circular icon. Presence and Runtime are two
 distinct inline facts: “在队” is static; “{Runtime} →” uses arrow, hover, focus and an accessible name
-to show it opens existing Runtime configuration. An unconfigured teammate says “未配置运行时 →” once.
+to show it opens existing Runtime configuration. An unconfigured teammate says “未配置智能体 →” once.
 Keep full configured Runtime status in the accessible name and in the configuration section. Do not put
 the Runtime fact in a grey card or merge the two meanings.
 
@@ -58,8 +58,13 @@ Roster rows keep a 40px circular image, 13px name and 11px role in a 60px row wi
 Use a subtle selected surface, 2px selection rail and aligned Runtime column. The header shows the total
 once; omit the redundant “在队” group when every teammate is present. If any teammate is away, show
 the meaningful presence groups and their counts. Above eight members, offer compact name/role search;
-the title reports matching / total counts while filtering. Keep creation and collapse immediately available,
-with ordering and width presets in the restrained “名册选项” menu.
+the title reports matching / total counts while filtering. Keep one compact “+ Add” action with a separate dropdown arrow,
+without an enclosing border or divider; each button has neutral hover/focus feedback and a 44px mobile touch height.
+AI conversation remains the default, manual creation stays in its dropdown. New AI conversations prefill the localized,
+editable request defined by Member Creation Flow v1 without sending; language changes and return navigation preserve edits.
+Reorder rows directly
+(on mobile, drag the avatar); preserve the portrait without an overlay handle. Alt+Up/Down and row context-menu
+actions provide keyboard movement within the same presence group. The resize divider remains available.
 Runtime shortcuts show the existing product logo in a 22px carrier; an unconfigured teammate uses a neutral
 minus glyph. Attention, unsupported and unqualified states add a small `!` marker. Loading retains the
 product identity with a checking label. Each shortcut has a full accessible label/status tooltip and scrolls
@@ -94,6 +99,7 @@ admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the ex
 `trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.
 Every boolean Runtime permission switch on this page uses the neutral action family for its on state across
 Desktop, Web and Mobile; it does not fall back to the Steel brand family.
+Use the accepted understated permission guidance from the [member configuration UI contract](../../../../docs/ui/components/member-identity.md#队员配置页): ordinary recommendation text appears only inside an open menu, with one short line below switches. The inline permission switch face and its minimum height are both 36px. Guidance never changes a saved value or draft, and language changes preserve both.
 
 Model rows keep Runtime display names separate from opaque selection IDs and show the Runtime description when
 provided, with the full text available on hover. Claude's initialize catalog uses this same Picker; no family-specific
@@ -176,7 +182,7 @@ Creation includes the selected image in the existing create command. Existing id
 successive existing commands with receipt versions; partial success explicitly distinguishes committed text
 from an unsaved image, retains the remaining draft and never claims an atomic transaction.
 
-Keep Runtime/model/permission dropdown geometry, colors, borders, menu, selection, options and behavior unchanged; only remove extra focus outlines/halos. The Runtime picker shows the existing product icons in its trigger and keyboard-accessible menu. The model
+Keep Runtime/model/permission dropdown geometry, colors, borders, menu and selection unchanged; only remove extra focus outlines/halos. Model changes preserve compatible explicit overrides as specified in the [member configuration UI contract](../../../../docs/ui/components/member-identity.md#队员配置页). The Runtime picker shows the existing product icons in its trigger and keyboard-accessible menu. The model
 field is labeled “模型” and its Runtime-default caption is “默认”; the underlying `runtime_default` mode and Runtime-native fields,
 raw choices, defaults, platform admission, model discovery and recovery remain unchanged. Do not introduce
 an additional Runtime parameters heading in this continuous form.
@@ -189,5 +195,17 @@ The production-component regression is `node --test scripts/lib/member-editor.te
 Electron fixture, covers both saves, cross-member drafts, conflicts, inline creation, keyboard focus and
 1440×920 / 1040×700 / 2560×1440 / 200% layouts, and can retain screenshots with
 `ROVAI_KEEP_MEMBER_EDITOR_FIXTURE=1`. This fixture contains explicit test data; production always reads Core.
+
+The Runtime save row also offers “应用到其他队员 →” as an unboxed secondary text action with underline on hover/focus.
+On mobile it occupies a left-aligned row with a 44px touch height. Use the already saved configuration as the immutable source;
+disable the entry for pending Runtime edits, conflicts, active saving or a frozen configuration. The neutral dialog
+shows the source snapshot and a selectable roster, preselecting only unconfigured targets. Existing configurations
+require selection and an inline replacement preview. Runtime drafts, busy targets and frozen configurations cannot
+be overwritten; independent identity drafts survive. Per-target receipt, retry and unknown-outcome behavior belongs
+to the [member configuration UI contract](../../../../docs/ui/components/member-identity.md#应用运行配置到其他队员).
+Mobile presents the same content in a bottom sheet with fixed actions and 44px touch controls. Keep both themes,
+language switching and native Runtime values on this same component tree. `pnpm test:member-runtime-apply` verifies
+the production component with explicit transport fixtures, including unknown responses, version conflicts, phone
+portrait/landscape and zoom; no real Runtime or daily profile participates.
 
 Selected roster rows use a neutral surface and text without a left selection rail. Keep the roster background and identity assets unchanged.

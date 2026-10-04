@@ -2261,6 +2261,60 @@ mod tests {
             );
         }
 
+        #[cfg(feature = "slow-tests")]
+        #[test]
+        fn explicit_legacy_cleanup_finds_unobserved_official_copies_in_known_groups() {
+            let paths = TestPaths::new("rovai-windows-unobserved-dsh-cleanup");
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&paths.data);
+            let library = SkillLibraryService::new(paths.library.clone()).unwrap();
+            SkillProjectionReconciler
+                .reconcile_root(&mut database, &library, &paths.root, &[])
+                .unwrap();
+
+            let dsh_skills = paths.root.join(".dsh/skills");
+            for name in [
+                "cli-operations",
+                "memory-stewardship",
+                "project-owned-skill",
+            ] {
+                let entry = dsh_skills.join(name);
+                fs::create_dir_all(&entry).unwrap();
+                fs::write(entry.join("SKILL.md"), name).unwrap();
+            }
+            let zcode_entry = paths.root.join(".zcode/skills/review-duo");
+            fs::create_dir_all(&zcode_entry).unwrap();
+            fs::write(zcode_entry.join("SKILL.md"), "review-duo").unwrap();
+            let unregistered_entry = paths.source.join(".dsh/skills/cli-operations");
+            fs::create_dir_all(&unregistered_entry).unwrap();
+            fs::write(unregistered_entry.join("SKILL.md"), "unregistered").unwrap();
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM skill_projection_observation",
+                        [],
+                        |row| { row.get::<_, i64>(0) }
+                    )
+                    .unwrap(),
+                0
+            );
+
+            let count_before = SkillProjectionReconciler
+                .legacy_entry_count(&database)
+                .unwrap();
+            let report = SkillProjectionReconciler
+                .cleanup_legacy_entries(&mut database, &library)
+                .unwrap();
+            assert_eq!(count_before, 3);
+            assert_eq!(report.removed, 3);
+            assert_eq!(report.remaining, 0);
+            assert!(!dsh_skills.join("cli-operations").exists());
+            assert!(!dsh_skills.join("memory-stewardship").exists());
+            assert!(!zcode_entry.exists());
+            assert!(dsh_skills.join("project-owned-skill/SKILL.md").exists());
+            assert!(unregistered_entry.join("SKILL.md").exists());
+        }
+
         #[test]
         fn shadowed_claude_projection_falls_back_to_direct_opencode_copy() {
             let paths = TestPaths::new("rovai-windows-projection-opencode-fallback");

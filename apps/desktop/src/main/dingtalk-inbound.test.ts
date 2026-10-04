@@ -69,7 +69,7 @@ describe('DingTalk inbound normalization', () => {
     expect(hasCanonicalSingleDingTalkBotTarget(message)).toBe(true)
   })
 
-  it('accepts the legacy senderStaff field and summarizes a private file', () => {
+  it('accepts the legacy senderStaff field and keeps a private file out of the body', () => {
     const message = normalizeDingTalkRobotMessage({
       msgId: 'msg-2',
       senderCorpId: 'ding-corp',
@@ -83,12 +83,72 @@ describe('DingTalk inbound normalization', () => {
     }, binding)
 
     expect(message.conversationKind).toBe('p2p')
-    expect(message.body).toBe('[附件：report.pdf]')
+    expect(message.body).toBe('')
     expect(message.attachmentSummaries).toEqual([{
       name: 'report.pdf',
       mediaType: 'application/pdf'
     }])
     expect(message.explicitlyAtBot).toBe(true)
+    expect(message.resources).toEqual([{ fileKey: 'resource:0', name: 'report.pdf', kind: 'file' }])
+  })
+
+  it.each(['picture', 'file', 'audio', 'video'])('retains an actual %s resource separately from its summary', msgtype => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'attachment', senderCorpId: 'corp', senderStaffId: 'owner',
+      conversationType: '1', msgtype,
+      content: { fileName: 'original-name', downloadCode: 'private-grant' }
+    }, binding)
+    expect(message.resources).toEqual([{
+      fileKey: 'resource:0', name: 'original-name',
+      kind: msgtype === 'picture' ? 'image' : msgtype, downloadCode: 'private-grant'
+    }])
+    expect(JSON.stringify({ body: message.body, summaries: message.attachmentSummaries })).not.toContain('private-grant')
+  })
+
+  it('keeps rich text as user text and images as resources, including legacy grants', () => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'rich-message', senderCorpId: 'corp', senderStaffId: 'owner',
+      conversationType: '2', conversationId: 'group', isInAtList: true,
+      msgtype: 'richText', content: { richText: [
+        { text: '前文' }, { type: 'picture', pictureDownloadCode: 'legacy-grant' },
+        { text: '后文' }, { type: 'picture', downloadCode: 'new-grant' }
+      ] },
+      quote: { msgtype: 'picture', content: { downloadCode: 'quoted-grant' } }
+    }, binding)
+    expect(message.body).toBe('前文\n后文')
+    expect(message.resources).toEqual([
+      { fileKey: 'resource:1', name: '图片', kind: 'image', downloadCode: 'legacy-grant' },
+      { fileKey: 'resource:3', name: '图片', kind: 'image', downloadCode: 'new-grant' }
+    ])
+    expect(message.quote?.attachmentSummaries).toHaveLength(1)
+    expect(message.quote?.body).toBe('[附件：图片]')
+    expect(JSON.stringify(message)).not.toContain('quoted-grant')
+  })
+
+  it('uses rich-text nodes over a provider image summary and accepts image-only messages', () => {
+    const raw = {
+      msgId: 'reported-message', senderCorpId: 'corp', senderStaffId: 'owner',
+      conversationType: '2', conversationId: 'group', isInAtList: true,
+      msgtype: 'richText', text: { content: '[图片]\n@爱丽丝\n看得见吗' },
+      content: { richText: [
+        { type: 'picture', pictureDownloadCode: 'grant', text: '[图片]' },
+        { text: '@爱丽丝\n看得见吗' }
+      ] }
+    }
+    const message = normalizeDingTalkRobotMessage(raw, binding)
+    expect(message.body).toBe('@爱丽丝\n看得见吗')
+    expect(message.resources).toEqual([
+      { fileKey: 'resource:0', name: '图片', kind: 'image', downloadCode: 'grant' }
+    ])
+    const imageOnly = normalizeDingTalkRobotMessage({
+      ...raw, msgId: 'image-only', content: { richText: [raw.content.richText[0]] }
+    }, binding)
+    expect(imageOnly.body).toBe('')
+    expect(imageOnly.resources).toHaveLength(1)
+    const unreadable = normalizeDingTalkRobotMessage({
+      ...raw, msgId: 'unreadable', content: { richText: [{ type: 'unknown' }] }
+    }, binding)
+    expect(unreadable.body).toBe('[钉钉消息：richtext]')
   })
 
   it('does not mistake private callback routing metadata for a group topic', () => {

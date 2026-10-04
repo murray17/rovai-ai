@@ -1,15 +1,15 @@
-export type CampTimelineReadingPosition = {
+export type ThreadTimelineReadingPosition = {
   scrollTop: number
   followingLatest: boolean
 }
 
-export type CampTimelineViewportGeometry = {
+export type ThreadTimelineViewportGeometry = {
   scrollTop: number
   scrollHeight: number
   clientHeight: number
 }
 
-export type CampTimelineContentMarker = {
+export type ThreadTimelineContentMarker = {
   itemId: string | null
   itemCount: number
 }
@@ -26,9 +26,9 @@ export function campTimelineIsNearBottom(
 }
 
 export function campTimelineFollowingLatestAfterScroll(
-  previousPosition: CampTimelineReadingPosition | null,
-  previousGeometry: CampTimelineViewportGeometry | null,
-  currentGeometry: CampTimelineViewportGeometry
+  previousPosition: ThreadTimelineReadingPosition | null,
+  previousGeometry: ThreadTimelineViewportGeometry | null,
+  currentGeometry: ThreadTimelineViewportGeometry
 ): boolean {
   if (campTimelineIsNearBottom(
     currentGeometry.scrollTop,
@@ -41,23 +41,23 @@ export function campTimelineFollowingLatestAfterScroll(
     || previousGeometry.clientHeight !== currentGeometry.clientHeight
 }
 
-export function followLatestCampTimeline(
+export function followLatestThreadTimeline(
   scroll: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>
-): CampTimelineReadingPosition {
+): ThreadTimelineReadingPosition {
   const scrollTop = Math.max(0, scroll.scrollHeight - scroll.clientHeight)
   scroll.scrollTop = scrollTop
   return { scrollTop, followingLatest: true }
 }
 
 export function campTimelineContentChanged(
-  previous: CampTimelineContentMarker,
-  next: CampTimelineContentMarker
+  previous: ThreadTimelineContentMarker,
+  next: ThreadTimelineContentMarker
 ): boolean {
   return previous.itemId !== next.itemId || previous.itemCount !== next.itemCount
 }
 
-export function restoredCampTimelineScrollTop(
-  position: CampTimelineReadingPosition | null,
+export function restoredThreadTimelineScrollTop(
+  position: ThreadTimelineReadingPosition | null,
   scrollHeight: number,
   clientHeight: number
 ): number {

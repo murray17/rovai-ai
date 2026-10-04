@@ -22,7 +22,7 @@ await mkdir(workspaceDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
 await writeFile(join(workspaceDir, 'README.md'), '# Notification Episode UI acceptance\n')
 
-const campId = await createFixtureCamp()
+const threadId = await createFixtureCamp()
 await insertApprovalEpisode('episode-approval-initial', '-3 minutes')
 await insertTerminalTurn('turn-completed-initial', 'completed', '-2 minutes')
 await insertTerminalTurn('turn-incomplete-initial', 'cancelled', '-1 minute')
@@ -212,7 +212,7 @@ try {
     limit: 50
   })
   const liveMentionEpisodes = aggregateInbox.items.filter(
-    (item) => item.campTurnId === 'turn-mention-live'
+    (item) => item.threadTurnId === 'turn-mention-live'
   )
   assert(liveMentionEpisodes.length === 1
       && liveMentionEpisodes[0].mentionCount === 2
@@ -295,9 +295,9 @@ async function createFixtureCamp() {
       defaultLeadAgentId: preflight.initialLeadAgentId,
       collaborationMode: 'peer'
     })
-    assert(created.status === 'applied' && created.payload?.campId,
+    assert(created.status === 'applied' && created.payload?.threadId,
       `Could not create the Notification Episode fixture Camp: ${JSON.stringify(created)}`)
-    return created.payload.campId
+    return created.payload.threadId
   } finally {
     await core.stop()
   }
@@ -318,8 +318,8 @@ async function insertApprovalEpisode(episodeId, modifier = 'now') {
       last_change_sequence, sort_at, created_at, updated_at
     ) VALUES (
       ${sqlLiteral(episodeId)},
-      ${sqlLiteral(`approval:local_user:${campId}:1`)},
-      'local_user', 'approval', ${sqlLiteral(campId)},
+      ${sqlLiteral(`approval:local_user:${threadId}:1`)},
+      'local_user', 'approval', ${sqlLiteral(threadId)},
       NULL, NULL, 1, 0, 0,
       (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
       (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
@@ -333,7 +333,7 @@ async function insertApprovalEpisode(episodeId, modifier = 'now') {
     ) VALUES (
       'occurrence-approval-initial', ${sqlLiteral(episodeId)}, 'local_user',
       'approval_pending', 'approval', 'approval-fixture', 1,
-      ${sqlLiteral(campId)}, NULL, NULL, 'approval-fixture', 1, 1,
+      ${sqlLiteral(threadId)}, NULL, NULL, 'approval-fixture', 1, 1,
       (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
       ${timestamp}
     );
@@ -361,7 +361,7 @@ async function insertTerminalTurn(turnId, status, modifier = 'now') {
       execution_budget_root_agent_run_responsibilities,
       version, created_at, updated_at, ended_at
     ) VALUES (
-      ${sqlLiteral(turnId)}, ${sqlLiteral(campId)}, 'system_event',
+      ${sqlLiteral(turnId)}, ${sqlLiteral(threadId)}, 'system_event',
       ${sqlLiteral(`notification-accept:${turnId}`)}, ${sqlLiteral(status)},
       1, ${timestamp}, datetime(${timestamp}, '+1 day'), 86400, 32, 16, 1,
       1, ${timestamp}, ${timestamp}, ${timestamp}
@@ -373,7 +373,7 @@ async function insertTerminalTurn(turnId, status, modifier = 'now') {
       ${sqlLiteral(`notification-marker:${turnId}`)},
       ${sqlLiteral(markerEventType)},
       ${sqlLiteral(JSON.stringify({ status }))},
-      ${sqlLiteral(campId)}, 'camp_turn', ${sqlLiteral(turnId)}, ${timestamp}
+      ${sqlLiteral(threadId)}, 'camp_turn', ${sqlLiteral(turnId)}, ${timestamp}
     );
   `])
 }
@@ -390,7 +390,7 @@ async function insertRunningTurn(turnId) {
       execution_budget_root_agent_run_responsibilities,
       version, created_at, updated_at, ended_at
     ) VALUES (
-      ${sqlLiteral(turnId)}, ${sqlLiteral(campId)}, 'system_event',
+      ${sqlLiteral(turnId)}, ${sqlLiteral(threadId)}, 'system_event',
       ${sqlLiteral(`notification-accept:${turnId}`)}, 'running',
       1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
       datetime('now', '+1 day'), 86400, 32, 16, 1,
@@ -400,7 +400,7 @@ async function insertRunningTurn(turnId) {
   `])
 }
 
-async function insertMessageMention(messageId, body, campTurnId = null, modifier = 'now') {
+async function insertMessageMention(messageId, body, threadTurnId = null, modifier = 'now') {
   const timestamp = sqliteTimestamp(modifier)
   const structuredContent = JSON.stringify([
     { kind: 'current_user_mention', userId: 'local_user' },
@@ -413,7 +413,7 @@ async function insertMessageMention(messageId, body, campTurnId = null, modifier
     SET last_message_sequence = last_message_sequence + 1,
         version = version + 1,
         updated_at = ${timestamp}
-    WHERE id = ${sqlLiteral(campId)};
+    WHERE id = ${sqlLiteral(threadId)};
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, source_agent_run_id,
       body, address_mode, addressed_agent_ids_json, reply_to_camp_message_id,
@@ -423,10 +423,10 @@ async function insertMessageMention(messageId, body, campTurnId = null, modifier
       ${sqlLiteral(messageId)}, id, last_message_sequence, 'agent',
       COALESCE(default_lead_agent_id, 'agent-muwa'), NULL,
       ${sqlLiteral(`@你 ${body}`)}, 'default', '[]', NULL,
-      ${campTurnId ? sqlLiteral(campTurnId) : 'NULL'}, NULL, NULL, 1,
+      ${threadTurnId ? sqlLiteral(threadTurnId) : 'NULL'}, NULL, NULL, 1,
       ${timestamp}, ${timestamp}, ${sqlLiteral(structuredContent)},
       ${sqlLiteral(`sha256:notification-accept:${messageId}`)}
-    FROM camp WHERE id = ${sqlLiteral(campId)};
+    FROM camp WHERE id = ${sqlLiteral(threadId)};
     COMMIT;
   `])
 }

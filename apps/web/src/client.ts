@@ -3,7 +3,7 @@ import { browserEditingRecovery } from './editing-recovery'
 import { RECOVERY_KEY, type RecoveryStorage } from './tab-recovery'
 import { fileDigest } from './file-digest'
 import { newCommandId } from '../../desktop/src/shared/command-id'
-import type { ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
+import type { ChannelKind, ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
 
 const HOST_WEB_PROTOCOL_VERSION = 4
 
@@ -22,13 +22,13 @@ export class SessionRequired extends Error {
 export type WorkspaceListing = { name: string; projectPath: string; parentPath: string | null; roots: string[]; directories: { name: string; projectPath: string }[]; nextOffset: number | null }
 
 export const WEB_OPERATIONS = [
-  'camps.rename',
-  'camps.delete',
-  'camps.deletionIssues',
-  'camps.retryDeletion',
-  'camps.discardPending',
-  'camps.members.fast.check',
-  'camps.members.fast.set',
+  'threads.rename',
+  'threads.delete',
+  'threads.deletionIssues',
+  'threads.retryDeletion',
+  'threads.discardPending',
+  'threads.members.fast.check',
+  'threads.members.fast.set',
   'members.removalPreview',
   'members.remove',
   'members.reorder',
@@ -69,7 +69,7 @@ export const WEB_OPERATIONS = [
   'runtime.startup.save',
   'runtime.startup.inspect',
   'runtime.startup.check',
-  'navigation.findCamp',
+  'navigation.findThread',
   'agentRunExecution.page',
   'agentRunExecution.changes',
   'tasks.create',
@@ -106,14 +106,15 @@ export const WEB_OPERATIONS = [
   'automations.run',
   'app.info',
   'navigation.snapshot',
-  'navigation.groupCamps',
+  'navigation.threads',
+  'navigation.groupThreads',
   'navigation.campViewed',
-  'camps.exists',
-  'camps.open',
-  'camps.enter',
-  'camp.messages.page',
-  'camp.messages.around',
-  'camp.messages.find',
+  'threads.exists',
+  'threads.open',
+  'threads.enter',
+  'thread.messages.page',
+  'thread.messages.around',
+  'thread.messages.find',
   'members.list',
   'members.get',
   'tasks.list',
@@ -127,6 +128,7 @@ export const WEB_OPERATIONS = [
   'runtime.installations.list',
   'runtime.subsystems.get',
   'monitoring.snapshot',
+  'monitoring.execution',
   'health.check',
   'skills.list',
   'skills.get',
@@ -142,17 +144,17 @@ export const WEB_OPERATIONS = [
   'agentRunEvidence.getContent',
   'messageQuotes.mutateDraft',
   'messageQuotes.capture',
-  'camp.messages.send',
-  'camp.messages.withdraw',
+  'thread.messages.send',
+  'thread.messages.withdraw',
   'action.approvals.resolve',
   'agentRuns.cancel',
   'commands.reconcile',
-  'camps.create',
-  'camps.creationPreflight',
-  'camps.members.add',
-  'camps.members.remove',
-  'camps.members.removalPreview',
-  'camps.changeDefaultLead',
+  'threads.create',
+  'threads.creationPreflight',
+  'threads.members.add',
+  'threads.members.remove',
+  'threads.members.removalPreview',
+  'threads.changeDefaultLead',
   'members.create',
   'preferences.newConversation.get',
   'preferences.newConversation.setDefaults',
@@ -175,11 +177,11 @@ export const WEB_OPERATIONS = [
 export type WebOperation = typeof WEB_OPERATIONS[number]
 
 const RECONCILABLE_COMMANDS = new Set<WebOperation>([
-  'camps.rename',
-  'camps.delete',
-  'camps.retryDeletion',
-  'camps.discardPending',
-  'camps.members.fast.set',
+  'threads.rename',
+  'threads.delete',
+  'threads.retryDeletion',
+  'threads.discardPending',
+  'threads.members.fast.set',
   'members.remove',
   'members.reorder',
   'notifications.preference.update',
@@ -215,8 +217,8 @@ const RECONCILABLE_COMMANDS = new Set<WebOperation>([
   'automations.delete',
   'automations.run',
 
-  'camp.messages.send', 'camp.messages.withdraw', 'action.approvals.resolve', 'agentRuns.cancel',
-  'camps.create', 'camps.changeDefaultLead', 'camps.members.add', 'camps.members.remove',
+  'thread.messages.send', 'thread.messages.withdraw', 'action.approvals.resolve', 'agentRuns.cancel',
+  'threads.create', 'threads.changeDefaultLead', 'threads.members.add', 'threads.members.remove',
   'members.create', 'members.update', 'members.avatar.set', 'members.runtime.set', 'members.runtime.clear',
   'messageQuotes.mutateDraft'
 ])
@@ -372,12 +374,12 @@ export class ConsoleClient {
 
   #settleRecovered(operation: WebOperation, params: unknown, result: unknown): void {
     if (operation === 'singleChat.send' && this.#storage && this.editingScope && (result as { status?: string })?.status !== 'rejected') {
-      const command = (params as { command?: { campId?: string; conversationId?: string; body?: string } })?.command
-      if (command?.campId && command.conversationId && typeof command.body === 'string') {
+      const command = (params as { command?: { threadId?: string; conversationId?: string; body?: string } })?.command
+      if (command?.threadId && command.conversationId && typeof command.body === 'string') {
         const recovery = browserEditingRecovery(this.editingScope, this.#storage)
-        const key = `single-chat:${command.campId}`
+        const key = `single-chat:${command.threadId}`
         const drafts = recovery.get(key) as Record<string, string> | null
-        const draftKey = `${command.campId}:${command.conversationId}`
+        const draftKey = `${command.threadId}:${command.conversationId}`
         if (drafts?.[draftKey]?.trim() === command.body) { delete drafts[draftKey]; recovery.set(key, drafts) }
       }
     }
@@ -571,11 +573,11 @@ export class ConsoleClient {
     } catch { /* Still unknown if reconciliation itself could not complete. */ }
   }
 
-  async uploadFile(campId: string, expectedRevision: number, file: File): Promise<LocalAttachmentSourceView> {
-    return this.uploadTo<LocalAttachmentSourceView>(campId, expectedRevision, file)
+  async uploadFile(threadId: string, expectedRevision: number, file: File): Promise<LocalAttachmentSourceView> {
+    return this.uploadTo<LocalAttachmentSourceView>(threadId, expectedRevision, file)
   }
 
-  async uploadTo<T>(campId: string, expectedRevision: number, file: File, target?:
+  async uploadTo<T>(threadId: string, expectedRevision: number, file: File, target?:
     | { kind: 'single_chat'; conversationId: string }
     | { kind: 'single_chat_pending'; conversationId: string; pendingInputId: string; editToken: string }
   ): Promise<T> {
@@ -584,14 +586,14 @@ export class ConsoleClient {
     const scope = this.editingScope
     const digest = await fileDigest(file, this.#lifetime.signal)
     const commandId = newCommandId()
-    const intent = { commandId, campId, expectedRevision, ...(target ? { target } : {}), displayName: file.name, byteSize: file.size,
+    const intent = { commandId, threadId, expectedRevision, ...(target ? { target } : {}), displayName: file.name, byteSize: file.size,
       sha256: digest }
     const data = new FormData(); data.append('intent', JSON.stringify(intent)); data.append('file', file)
     return new Promise((resolve, reject) => {
       const entry: PendingUpload = { intent, data, resolve: value => {
         // A successful binding or its canonical reconciliation is required before
         // retaining a payload for previews. Never persist local bytes or credentials.
-        if (scope === this.editingScope && this.authenticated) this.#retainUpload(campId, digest, file)
+        if (scope === this.editingScope && this.authenticated) this.#retainUpload(threadId, digest, file)
         resolve(value as T)
       }, reject }
       this.#pendingUploads.set(commandId, entry); this.#notifyPending()
@@ -599,8 +601,8 @@ export class ConsoleClient {
     })
   }
 
-  #retainUpload(campId: string, digest: string, file: File): void {
-    const key = `${campId}:${digest}`
+  #retainUpload(threadId: string, digest: string, file: File): void {
+    const key = `${threadId}:${digest}`
     this.#localUploads.delete(key); this.#localUploads.set(key, file)
     let bytes = [...this.#localUploads.values()].reduce((size, item) => size + item.size, 0)
     // This is a bounded, disposable optimization; eviction restores Host reads.
@@ -610,8 +612,8 @@ export class ConsoleClient {
     }
   }
 
-  confirmedUpload(campId: string, generation: string, size: number): File | null {
-    const key = `${campId}:${generation}`
+  confirmedUpload(threadId: string, generation: string, size: number): File | null {
+    const key = `${threadId}:${generation}`
     const file = this.#localUploads.get(key)
     if (!file || file.size !== size) return null
     this.#localUploads.delete(key); this.#localUploads.set(key, file)
@@ -712,7 +714,7 @@ export class ConsoleClient {
     return body.result
   }
 
-  async channel(request: { operation: 'get' | 'publish' | 'retry' | 'selectApprover'; kind?: 'feishu' | 'dingtalk'; agentId?: string; userId?: string }): Promise<ChannelSettingsSnapshot> {
+  async channel(request: { operation: 'get' | 'publish' | 'retry' | 'selectApprover'; kind?: ChannelKind; agentId?: string; userId?: string }): Promise<ChannelSettingsSnapshot> {
     try {
       const reply = await this.#json<{ result: ChannelSettingsSnapshot }>('channels', { method: 'POST', body: JSON.stringify(request) })
       return reply.result

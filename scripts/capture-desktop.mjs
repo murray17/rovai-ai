@@ -118,7 +118,7 @@ try {
       returnByValue: true
     })
     const navigation = navigationState.result?.result?.value
-    if (navigation?.camps !== 0 || navigation?.projects !== 0 || navigation?.quickChatEmpty !== true) {
+    if (navigation?.threads !== 0 || navigation?.projects !== 0 || navigation?.quickChatEmpty !== true) {
       throw new Error(`Packaged App restart restored a deleted Camp or Project group: ${JSON.stringify(navigation)}`)
     }
   }
@@ -704,7 +704,7 @@ try {
             returnByValue: true
           })
           const empty = emptyNavigation.result?.result?.value
-          if (empty?.camps !== 0 || empty?.projects !== 0) {
+          if (empty?.threads !== 0 || empty?.projects !== 0) {
             throw new Error(`Deleting the last Camp left navigation state behind: ${JSON.stringify(empty)}`)
           }
           await capture(cdp, `${outputPrefix}-deleted.png`)

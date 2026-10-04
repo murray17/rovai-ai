@@ -26,7 +26,7 @@ export async function feedbackAcceptance(window: BrowserWindow, userData: string
   cases.push({ name: 'healthy workspace HTML has only the existing path and source action', ok: quiet.path && !quiet.extraRow && !quiet.summary && !quiet.detailsVisible && !quiet.text.includes('页面已加载') && !quiet.text.includes('查看详情'), evidence: quiet })
   await writeFile(join(userData, 'feedback-healthy.png'), (await window.webContents.capturePage()).toPNG())
 
-  await run(`window.previewAcceptance.open({kind:'attachment',campId:'preview-test',locator:{owner:'message',campId:'preview-test',messageId:'fixture-message',attachmentRefId:'history'}})`)
+  await run(`window.previewAcceptance.open({kind:'attachment',threadId:'preview-test',locator:{owner:'message',threadId:'preview-test',messageId:'fixture-message',attachmentRefId:'history'}})`)
   await wait(() => run(`${stage}?.dataset.documentState==='loaded' && ${stage}?.dataset.channelState==='connected'`))
   const attachment = await snapshot()
   await run(`window.previewBookmarkedFrame=${stage}.querySelector('iframe');undefined`)

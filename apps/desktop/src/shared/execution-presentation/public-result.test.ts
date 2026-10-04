@@ -48,7 +48,7 @@ describe('ExecutionStep publicResult boundary', () => {
     { coreEnvelope: { error: { code: 'failure', message: 'bounded error message', input: 'private-error-input' } }, expected: 'bounded error message' },
     { operationProjection: { canonicalResult: { content: [{ type: 'text', text: 'canonical result' }] } }, expected: 'canonical result' }
   ])('accepts Core result/error and canonicalResult fields without serializing envelopes: $expected', ({ expected, ...payload }) => {
-    const projected = step([event({ kind: 'tool', status: 'completed', sourceAuthority: 'core', canonicalTool: 'camp.read', ...payload })])
+    const projected = step([event({ kind: 'tool', status: 'completed', sourceAuthority: 'core', canonicalTool: 'thread.read', ...payload })])
     expect(projected.publicResult).toBe(expected)
     expect(projected.publicResult).not.toContain('private-error-input')
   })

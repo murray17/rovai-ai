@@ -5,24 +5,25 @@ import { createRoot } from 'react-dom/client'
 import type {
   AgentProfile,
   AgentRunView,
+  AgentRunExecutionBlock,
   AgentRunExecutionEvidenceView,
-  CampComposerDraftView,
-  CampOpenMessageCoverage,
-  CampOpenProjection,
+  ThreadComposerDraftView,
+  ThreadOpenMessageCoverage,
+  ThreadOpenProjection,
   LocalAttachmentOwnerLocator,
-  NavigationCampItem,
+  NavigationThreadItem,
   NavigationSnapshot
 } from '@contracts'
 import { AppHeader, campOpenProjectionAsSnapshot } from '../../../apps/desktop/src/renderer/src/App'
-import { CampWorkspace, RunExecutionDisclosure, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
-import { CampNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
-import { loadLocalCampComposerDraft } from '../../../apps/desktop/src/renderer/src/camp-composer-local-store'
+import { ThreadWorkspace, RunExecutionDisclosure, type ThreadInspectorTab } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
+import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
+import { loadLocalThreadComposerDraft } from '../../../apps/desktop/src/renderer/src/camp-composer-local-store'
 import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const now = '2026-08-31T00:00:00Z'
-const campId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
+const threadId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
 const fullNarration = `BODY_A ${'完整正文🙂 '.repeat(5000)} LONG_BODY_A_END`
 let textReadFailures = 1
 const textEvidence: AgentRunExecutionEvidenceView[] = [
@@ -38,7 +39,7 @@ const textEvidence: AgentRunExecutionEvidenceView[] = [
   contentBlobId: id === 'A' ? 'text-blob' : null, contentByteCount: id === 'A' ? 80_000 : 80,
   isTruncated: id === 'A', occurredAt: now }))
 const textRun: AgentRunView = {
-  id: 'text-run', campTurnId: 'turn-text', conversationId: 'conversation-text', agentId: 'agent_1',
+  id: 'text-run', threadTurnId: 'turn-text', conversationId: 'conversation-text', agentId: 'agent_1',
   taskId: null, responsibilityKey: 'direct:agent_1', responsibilityGeneration: 0, purpose: 'Text acceptance',
   completionRole: 'required', status: 'cancelled', waitReason: null, cancelRequestedAt: now,
   cancelReasonCode: 'user_cancelled', cancelAcknowledgedAt: now, executionEpoch: 1,
@@ -50,6 +51,7 @@ const textRun: AgentRunView = {
 }
 const attachmentReviewMode = new URLSearchParams(window.location.search).get('review') === 'attachments'
 const executionRequests: { beforeSequence: number | null; limit: number }[] = []
+const executionGroupRequests: { groupSequence: number; beforeSequence: number | null; afterSequence?: number }[] = []
 const executionContentReads: string[] = []
 const executionChanges: number[] = []
 let executionThrough = 1000
@@ -57,25 +59,26 @@ const executionTails = new Map<string, number>()
 let executionReadFailure = false
 let runningExecutionScenario = false
 let commandInteraction = false
+let blockScenario: 'regular' | 'short' | 'long' | 'sparse' = 'regular'
 const pendingCommandResults = new Map<string, { resolve(): void; reject(error: Error): void }>()
 const executionRun = { ...textRun, id: 'window-run', executionEvidenceCount: 1000 }
 function windowEvidence(sequence: number): AgentRunExecutionEvidenceView {
   const id = `window-${sequence}`
   if (commandInteraction && sequence === 81) return {
-    id, agentRunId: executionRun.id, executionEpoch: 1, sequence,
+    id, agentRunId: executionRun.id, executionEpoch: 1, sequence, revision: 1, changeSequence: sequence,
     eventType: 'runtime.compaction.display', kind: 'step', phase: 'started',
     payload: { schemaVersion: 1, compactionId: 'fixture-compact', adapterKind: 'codex-cli',
       phase: 'started', tokens: { before: 12345 }, summaryText: '压缩摘要预览' },
     contentBlobId: 'fixture-compact-body', contentByteCount: 2000, isTruncated: true, occurredAt: now
   }
-  const narration = !commandInteraction && sequence % 8 === 0
+  const narration = !commandInteraction && !['long', 'sparse'].includes(blockScenario) && sequence % (blockScenario === 'short' ? 2 : 8) === 0
   const file = sequence === 999
   return {
-    id, agentRunId: executionRun.id, executionEpoch: 1, sequence,
+    id, agentRunId: executionRun.id, executionEpoch: 1, sequence, revision: 1, changeSequence: sequence,
     eventType: narration ? 'agent.text.block' : 'activity.completed',
     kind: narration ? 'narration' : 'command', phase: 'completed',
-    payload: narration ? { blockId: id, itemId: id, text: `记录 ${sequence}：${'这一页的执行说明。'.repeat(30)}`, status: 'completed' }
-      : { item: { id, type: file ? 'fileChange' : 'commandExecution', status: 'completed', command: file ? undefined : commandInteraction && sequence === 79 ? "sed -n '1,10p' src/a.ts; sed -n '1,10p' src/b.ts" : `TOKEN=fixture-value echo ${sequence}` } },
+    payload: narration ? { blockId: id, itemId: id, text: blockScenario === 'short' ? `记录 ${sequence}` : `记录 ${sequence}：${'这一页的执行说明。'.repeat(30)}`, status: 'completed' }
+      : { item: { id, type: file ? 'fileChange' : blockScenario === 'sparse' && sequence <= 200 ? 'agentMessage' : 'commandExecution', status: 'completed', command: file ? undefined : commandInteraction && sequence === 79 ? "sed -n '1,10p' src/a.ts; sed -n '1,10p' src/b.ts" : `TOKEN=fixture-value echo ${sequence}` } },
     canonical: narration ? null : {
       operationId: id, classifierVersion: 'activity-v4', activityDomain: file ? 'file' : 'shell',
       semanticKind: file ? 'file.write' : 'shell.execute', toolName: null,
@@ -86,6 +89,26 @@ function windowEvidence(sequence: number): AgentRunExecutionEvidenceView {
         status: 'available', semanticKind: 'unified_diff_snapshot', entries: [{ path: 'fixture.ts', changeKind: 'update', additions: 1, deletions: 1, diff: '' }] } : null
     }, contentBlobId: null, contentByteCount: 100, isTruncated: !narration, occurredAt: now
   }
+}
+function windowBlocks(): AgentRunExecutionBlock[] {
+  const blocks: AgentRunExecutionBlock[] = []
+  for (let sequence = 1; sequence <= executionThrough; sequence++) {
+    let item = windowEvidence(sequence)
+    const tool = item.eventType === 'activity.completed'
+    if (runningExecutionScenario && item.kind === 'narration') item = {
+      ...item, isTruncated: true, contentBlobId: `body-${item.id}`, payload: { ...item.payload, text: '正文预览' }
+    }
+    let block = tool ? blocks.at(-1) : undefined
+    if (!block || block.kind !== 'toolGroup') {
+      block = { key: `${tool ? 'tools' : 'item'}:${sequence}`, kind: tool ? 'toolGroup' : 'item',
+        sequence, lastSequence: sequence, changeSequence: sequence, toolCount: 0,
+        counts: { completed: 0, failed: 0, stopped: 0, recorded: 0, running: 0, waiting: 0 }, evidence: [] }
+      blocks.push(block)
+    }
+    block.lastSequence = sequence; block.changeSequence = sequence; block.evidence = [item]
+    if (tool && !(blockScenario === 'sparse' && sequence <= 200)) { block.toolCount++; block.counts[item.canonical?.phase === 'started' ? 'running' : 'completed']++ }
+  }
+  return blocks
 }
 const createAgent = (
   agentId: string,
@@ -109,19 +132,19 @@ const agents = [
   createAgent('agent-4', '药师寺惠', '机兵驾驶员 · 咲良高校学生', 3, '#9a6a32')
 ]
 const agent = agents[0]
-const messages: CampOpenProjection['messages'] = Array.from({ length: 61 }, (_, index) => ({
+const messages: ThreadOpenProjection['messages'] = Array.from({ length: 61 }, (_, index) => ({
   id: `message-${index + 1}`, sequence: index + 1, timelineGlobalSequence: null,
   authorType: index % 2 === 0 ? 'user' : 'agent', authorId: index % 2 === 0 ? 'local_user' : agent.agentId,
   sourceAgentRunId: null, body: `第 ${index + 1} 条消息：保留较早历史和当前阅读位置。`,
   content: [{ kind: 'text', text: `第 ${index + 1} 条消息：保留较早历史和当前阅读位置。` }],
   attachments: [], addressMode: 'default', addressedAgentIds: [agent.agentId],
-  replyToCampMessageId: null, campTurnId: null, presentation: null,
+  replyToThreadMessageId: null, threadTurnId: null, presentation: null,
   createdAt: new Date(Date.parse(now) + index * 60_000).toISOString()
 }))
 const coverage = (count: number) => ({ loadedCount: count, totalCount: count, omittedCount: 0, complete: true })
-const projection = (count: number): CampOpenProjection => ({
+const projection = (count: number): ThreadOpenProjection => ({
   schemaVersion: 7, throughGlobalSequence: count,
-  camp: { id: campId, title: '仅业务投影的会话刷新', activationState: 'active', projectBindingKind: 'directory',
+  thread: { id: threadId, title: '仅业务投影的会话刷新', activationState: 'active', projectBindingKind: 'directory',
     projectPath: '/fixture/workspace', defaultLeadAgentId: agent.agentId, membershipGeneration: 1, version: 1,
     createdAt: now, updatedAt: now },
   members: agents.map((member) => ({
@@ -131,7 +154,7 @@ const projection = (count: number): CampOpenProjection => ({
     isDefaultLead: member.agentId === agent.agentId, version: 1
   })),
   membershipReconciliations: [],
-  tasks: [{ taskId: 'task-1', campId, title: '检查业务投影', description: '任务仍然直接来自业务数据，不读取审计事件。',
+  tasks: [{ taskId: 'task-1', threadId, title: '检查业务投影', description: '任务仍然直接来自业务数据，不读取审计事件。',
     status: 'blocked', assigneeAgentId: agent.agentId,
     blockedReason: '业务状态原因', completionSummary: null, cancelReason: null,
     createdByType: 'user', createdById: 'local_user', sourceAgentRunId: null,
@@ -160,7 +183,7 @@ const earlier = { ...campOpenProjectionAsSnapshot(projection(60)),
 let current = campOpenProjectionAsSnapshot(projection(60), earlier)
 let updateSnapshot: (snapshot: typeof current) => void
 let updateCurrentUserProfile: (profile: CurrentUserProfile) => void
-let updateMessageHistory: (coverage: CampOpenMessageCoverage | null) => void
+let updateMessageHistory: (coverage: ThreadOpenMessageCoverage | null) => void
 let completeEntrySnapshot: () => void
 let closeTask: () => void
 type FixtureImageResult = { displayName: string; mediaType: string; data: string }
@@ -192,7 +215,7 @@ const reviewImages = [
 ]
 let imageResult: FixtureImageResult = reviewImages[0]
 let imageResultsById = new Map<string, FixtureImageResult>()
-let draft: CampComposerDraftView = { campId, body: '', content: { version: 2, segments: [] }, revision: 1, attachments: [], quotes: [],
+let draft: ThreadComposerDraftView = { threadId, body: '', content: { version: 2, segments: [] }, revision: 1, attachments: [], quotes: [],
   replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 
 const attachmentFile = (id: string, displayName: string, mediaType: string, options: {
@@ -270,7 +293,7 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
   }
   current = {
     ...current,
-    camp: { ...current.camp, title: '附件呈现验收 · 全量 Mock Camp' },
+    thread: { ...current.thread, title: '附件呈现验收 · 全量 Mock Camp' },
     tasks: [], turns: [], agentRuns: [], agentRunFileChanges: [], messageDeliveries: [],
     messages: [{
       ...messages[0], id: 'attachment-surface-user', sequence: 101, authorType: 'user', authorId: 'local_user',
@@ -305,39 +328,68 @@ Object.assign(window, { rovai: {
     agentRunId?: string
     afterChangeSequence?: number
     refreshEvidenceIds?: string[]
+    projection?: string
+    groupSequence?: number
+    fromSequence?: number
+    toSequence?: number
+    afterSequence?: number
     beforeSequence?: number | null
     limit?: number
   }): Promise<unknown> => {
     if (method === 'agentRunExecution.page') {
-      if (params?.agentRunId?.startsWith('empty-failed-')) return {
-        schemaVersion: 2, campId, agentRunId: params.agentRunId,
-        requestedBeforeSequence: params.beforeSequence ?? null, nextBeforeSequence: null,
-        throughSequence: 0, throughChangeSequence: 0, hasMore: false, evidence: []
-      }
-      const beforeSequence = params?.beforeSequence ?? null
+      const beforeSequence = params?.beforeSequence ?? null, afterSequence = params?.afterSequence ?? null
       const limit = params?.limit ?? 24
-      executionRequests.push({ beforeSequence, limit })
+      const empty = params?.agentRunId?.startsWith('empty-failed-')
+      const through = executionThrough
+      const blocks = empty ? [] : windowBlocks()
+      if (params?.groupSequence !== undefined) {
+        const group = blocks.find(block => block.sequence === params.groupSequence && block.kind === 'toolGroup')
+        if (!group) throw new Error('Missing fixture group')
+        executionGroupRequests.push({ groupSequence: group.sequence, beforeSequence, ...(afterSequence === null ? {} : { afterSequence }) })
+        if (executionReadFailure) throw new Error('Fixture group offline')
+        const rows = Array.from({ length: group.lastSequence - group.sequence + 1 }, (_, i) => windowEvidence(group.sequence + i))
+          .filter(item => (beforeSequence === null || item.sequence < beforeSequence) && (afterSequence === null || item.sequence > afterSequence))
+        const evidence = afterSequence === null ? rows.slice(-limit) : rows.slice(0, limit)
+        const hasMore = rows.length > limit
+        return { schemaVersion: 3, threadId, agentRunId: executionRun.id, groupSequence: group.sequence,
+          requestedBeforeSequence: beforeSequence, requestedAfterSequence: afterSequence,
+          nextBeforeSequence: hasMore && afterSequence === null ? evidence[0].sequence : null,
+          nextAfterSequence: hasMore && afterSequence !== null ? evidence.at(-1)!.sequence : null,
+          throughChangeSequence: executionThrough, hasMore, evidence }
+      }
+      if (!empty) executionRequests.push({ beforeSequence, limit })
       if (runningExecutionScenario) await new Promise(resolve => setTimeout(resolve, 120))
       if (executionReadFailure && beforeSequence !== null) throw new Error('Fixture page offline')
-      const end = (beforeSequence ?? executionThrough + 1) - 1
-      const start = Math.max(1, end - limit + 1)
-      return { schemaVersion: 2, campId, agentRunId: executionRun.id, requestedBeforeSequence: beforeSequence,
-        nextBeforeSequence: start > 1 ? start : null, throughSequence: executionThrough,
-        throughChangeSequence: executionThrough, runtimePhase: 'executing', hasMore: start > 1,
-        evidence: Array.from({ length: end - start + 1 }, (_, offset) => {
-          const item = windowEvidence(start + offset)
-          return runningExecutionScenario && item.kind === 'narration'
-            ? { ...item, isTruncated: true, contentBlobId: `body-${item.id}`, payload: { ...item.payload, text: '正文预览' } } : item
-        }) }
+      const rows = blocks.filter(block => (beforeSequence === null || block.sequence < beforeSequence)
+        && (afterSequence === null || block.sequence > afterSequence))
+      const selected = afterSequence === null ? rows.slice(-limit) : rows.slice(0, limit)
+      const hasMore = rows.length > limit
+      return { schemaVersion: 3, threadId, agentRunId: params?.agentRunId ?? executionRun.id,
+        requestedBeforeSequence: beforeSequence, requestedAfterSequence: afterSequence,
+        nextBeforeSequence: hasMore && afterSequence === null ? selected[0].sequence : null,
+        nextAfterSequence: hasMore && afterSequence !== null ? selected.at(-1)!.sequence : null,
+        throughSequence: empty ? 0 : through, throughChangeSequence: empty ? 0 : through,
+        runtimePhase: 'executing', hasMore, blocks: selected, activeBlocks: [] }
     }
     if (method === 'agentRunExecution.changes') {
-      const after = params?.afterChangeSequence ?? 0
-      const end = Math.min(executionThrough, after + (params?.limit ?? 96))
+      const after = params?.afterChangeSequence ?? 0, limit = params?.limit ?? 96
+      if (params?.groupSequence !== undefined) {
+        const group = windowBlocks().find(block => block.sequence === params.groupSequence)!
+        const evidence = Array.from({ length: group.lastSequence - group.sequence + 1 }, (_, i) => windowEvidence(group.sequence + i))
+          .filter(item => item.sequence > after && item.sequence >= (params?.fromSequence ?? 0) && item.sequence <= (params?.toSequence ?? Infinity))
+        const hasMore = evidence.length > limit
+        evidence.length = Math.min(evidence.length, limit)
+        return { schemaVersion: 2, threadId, agentRunId: executionRun.id, requestedAfterChangeSequence: after,
+          nextAfterChangeSequence: hasMore ? evidence.at(-1)!.changeSequence : executionThrough,
+          throughSequence: executionThrough, throughChangeSequence: executionThrough, hasMore, evidence, refreshedEvidence: [] }
+      }
+      const changed = windowBlocks().filter(block => block.changeSequence > after)
+      const blocks = changed.slice(0, limit), hasMore = changed.length > limit
       executionChanges.push(after)
-      return { schemaVersion: 2, campId, agentRunId: executionRun.id, requestedAfterChangeSequence: after,
-        nextAfterChangeSequence: end, throughSequence: executionThrough,
-        throughChangeSequence: executionThrough, runtimePhase: 'executing', hasMore: end < executionThrough,
-        evidence: Array.from({ length: Math.max(0, end - after) }, (_, i) => windowEvidence(after + i + 1)), refreshedEvidence: [] }
+      return { schemaVersion: 3, threadId, agentRunId: executionRun.id, requestedAfterChangeSequence: after,
+        nextAfterChangeSequence: hasMore ? blocks.at(-1)!.changeSequence : executionThrough,
+        throughSequence: executionThrough, throughChangeSequence: executionThrough,
+        runtimePhase: 'executing', hasMore, blocks }
     }
     if (method === 'agentRunEvidence.list') return { schemaVersion: 1, agentRunId: 'text-run',
       requestedAfterSequence: 0, nextAfterSequence: 60, throughSequence: 60, hasMore: false, evidence: textEvidence }
@@ -378,15 +430,15 @@ const navigationCamp = (
   title: string,
   projectBindingKind: 'quick_chat' | 'directory',
   projectPath: string,
-  marker: NavigationCampItem['marker'] = 'none'
-): NavigationCampItem => ({
+  marker: NavigationThreadItem['marker'] = 'none'
+): NavigationThreadItem => ({
   id, title, activationState: 'active', projectBindingKind, projectPath,
   defaultLead: { agentId: agent.agentId, displayName: agent.displayName }, marker,
   lastActivityAt: now, lastActivityGlobalSequence: 102,
   latestCompletionGlobalSequence: marker === 'unread_completed' ? 102 : 0, version: 1
 })
 const activeNavigationCamp = navigationCamp(
-  campId,
+  threadId,
   attachmentReviewMode ? '附件呈现验收 · 全量 Mock Camp' : '仅业务投影的会话刷新',
   'directory',
   '/fixture/workspace'
@@ -396,7 +448,7 @@ const navigation: NavigationSnapshot = {
   throughGlobalSequence: 102,
   quickChat: {
     totalCount: 2,
-    recentCamps: [
+    recentThreads: [
       navigationCamp('mock-quick-1', '设计讨论与视觉对照', 'quick_chat', '/fixture/quick-chat'),
       navigationCamp('mock-quick-2', '交互细节复核', 'quick_chat', '/fixture/quick-chat', 'unread_completed')
     ]
@@ -404,7 +456,7 @@ const navigation: NavigationSnapshot = {
   projects: [{
     projectKey: 'directory:/fixture/workspace', projectPath: '/fixture/workspace', name: 'rovai-ai',
     lastActivityAt: now, lastActivityGlobalSequence: 102, totalCount: 3,
-    recentCamps: [
+    recentThreads: [
       activeNavigationCamp,
       navigationCamp('mock-project-2', 'Runtime 图片解码验证', 'directory', '/fixture/workspace'),
       navigationCamp('mock-project-3', 'Composer 附件键盘导航', 'directory', '/fixture/workspace')
@@ -417,10 +469,10 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
 }): React.JSX.Element {
   const [snapshot, setSnapshot] = useState(current)
   const [profile, setProfile] = useState(DEFAULT_CURRENT_USER_PROFILE)
-  const [messageHistory, setMessageHistory] = useState<CampOpenMessageCoverage | null>(null)
+  const [messageHistory, setMessageHistory] = useState<ThreadOpenMessageCoverage | null>(null)
   const [activePlacement, setActivePlacement] = useState(executionPlacement)
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<CampInspectorTab>(attachmentReviewMode ? 'members' : 'tasks')
+  const [tab, setTab] = useState<ThreadInspectorTab>(attachmentReviewMode ? 'members' : 'tasks')
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   const [entrySnapshotReady, setEntrySnapshotReady] = useState(!entryPreview)
   updateSnapshot = setSnapshot
@@ -432,16 +484,16 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
     profile, ready: true, error: null, reload: () => {},
     save: async (next) => { setProfile(next); return next }
   }}><div className="app-shell app-shell-camp">
-    <CampNavigation view="camp" state="ready" navigation={navigation} activeCampId={campId}
+    <ThreadNavigation view="camp" state="ready" navigation={navigation} activeThreadId={threadId}
       currentProjectKey="directory:/fixture/workspace" pendingMemoryCount={2}
       onNewConversation={() => {}} onMembers={() => {}} onMemory={() => {}} onSettings={() => {}}
       onOpenProject={() => {}} onCamp={() => {}} onRemoveProject={async () => {}}
       onRename={async () => {}} onDelete={async () => {}} onError={error => { throw error }} />
-    <AppHeader campTitle={snapshot.camp.title}
-      contextLabel={attachmentReviewMode ? 'Mock Camp · 无 Core / LLM' : '隔离验收'} camp={snapshot}
+    <AppHeader threadTitle={snapshot.thread.title}
+      contextLabel={attachmentReviewMode ? 'Mock Camp · 无 Core / LLM' : '隔离验收'} thread={snapshot}
       detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
-      <CampWorkspace snapshot={snapshot} projectName="rovai-ai" agents={agents} busy={false} stopping={false}
+      <ThreadWorkspace snapshot={snapshot} projectName="rovai-ai" agents={agents} busy={false} stopping={false}
         initialComposerDraft={draft.attachments.length > 0 ? draft : null}
         messageHistory={messageHistory}
         onLoadEarlierMessages={async () => {
@@ -472,7 +524,7 @@ function StaticExecutionWindow({ placement }: { placement: string }) {
     <div ref={viewportRef} className="execution-drawer-body" data-following-latest="false" style={{ height: 380, overflow: 'auto' }}>
       <div data-window-spacer style={{ height: 600 }} />
       <ExecutionLatestContext.Provider value={{ runId: executionRun.id, request, setHasNewer }}>
-        <RunExecutionDisclosure run={executionRun} campId={campId} windowedEvidence />
+        <RunExecutionDisclosure run={executionRun} threadId={threadId} windowedEvidence />
       </ExecutionLatestContext.Provider>
     </div>
     <ReturnToLatest viewportRef={viewportRef} ownerKey={executionRun.id} contentRevision={executionThrough}
@@ -527,7 +579,7 @@ Object.assign(window, { campOpenTest: {
   updateReturnWindow: (revision: number, hasNewer: boolean) => updateReturnWindow({ revision, hasNewer }),
   appendCollapsedRunningExecution: () => {
     current = { ...current, agentRuns: [...current.agentRuns, { ...executionRun,
-      id: 'empty-failed-latest-running', agentId: agent.agentId, campTurnId: 'stopped-turn',
+      id: 'empty-failed-latest-running', agentId: agent.agentId, threadTurnId: 'stopped-turn',
       status: 'running', failure: null, executionEvidenceCount: 0, cancelRequestedAt: null,
       cancelAcknowledgedAt: null, cancelReasonCode: null, endedAt: null,
       createdAt: new Date(Date.parse(now) + 5000).toISOString() }] }
@@ -536,7 +588,7 @@ Object.assign(window, { campOpenTest: {
   showFailedExecutions: (placement: 'bottom' | 'inspector') => {
     current = { ...campOpenProjectionAsSnapshot(projection(60)), tasks: [], messages: [], agentRunFileChanges: [],
       agentRuns: Array.from({ length: 4 }, (_, index) => ({ ...executionRun,
-        id: `empty-failed-${placement}-${index}`, agentId: agent.agentId, campTurnId: 'stopped-turn',
+        id: `empty-failed-${placement}-${index}`, agentId: agent.agentId, threadTurnId: 'stopped-turn',
         status: 'failed' as const, executionEvidenceCount: 0,
         createdAt: new Date(Date.parse(now) + index * 1000).toISOString(),
         failure: { runtimeKind: 'opencode-cli' as const, origin: 'runtime' as const, phase: 'terminal' as const,
@@ -547,7 +599,7 @@ Object.assign(window, { campOpenTest: {
   showCurrentUserProfile: () => {
     current = { ...current, tasks: [], turns: [], agentRuns: [], messageDeliveries: [], timeline: [],
       agentRunImages: [], agentRunFileChanges: [],
-      camp: { ...current.camp, title: '当前用户资料卡' },
+      thread: { ...current.thread, title: '当前用户资料卡' },
       messages: [
         { ...messages[0], id: 'profile-user', body: '请确认这版设计。',
           content: [{ kind: 'text', text: '请确认这版设计。' }] },
@@ -563,15 +615,15 @@ Object.assign(window, { campOpenTest: {
   updateCurrentUserProfile: (profile: CurrentUserProfile) => updateCurrentUserProfile(profile),
   currentUserMessages: () => JSON.stringify(current.messages),
   showMessageGroups: (scenario: 'short' | 'image' | 'files' | 'long' | 'diff' = 'short') => {
-    const message = (index: number, body: string): CampOpenProjection['messages'][number] => ({
+    const message = (index: number, body: string): ThreadOpenProjection['messages'][number] => ({
       ...messages[0], id: `group-${index}`, sequence: index, authorType: 'agent', authorId: agent.agentId,
-      sourceAgentRunId: 'group-run', campTurnId: 'group-turn', body,
+      sourceAgentRunId: 'group-run', threadTurnId: 'group-turn', body,
       content: body ? [{ kind: 'text', text: body }] : [],
       createdAt: new Date(Date.parse(now) + index * 10_000).toISOString()
     })
     const groupMessages = [message(1, '我把消息区的层次收紧了一些。'), message(2, '连续发来的短消息共用身份信息。'),
       message(3, ''), message(4, '这里补充交付说明，复制和回复仍对应这一条消息。'),
-      { ...message(5, '新一轮任务重新显示身份。'), campTurnId: 'next-turn', sourceAgentRunId: null },
+      { ...message(5, '新一轮任务重新显示身份。'), threadTurnId: 'next-turn', sourceAgentRunId: null },
       { ...message(6, '我来检查这些文件。'), authorId: agents[1].agentId, sourceAgentRunId: null }]
     groupMessages[2].attachments = Array.from({ length: scenario === 'files' ? 6 : 2 }, (_, index) =>
       attachmentFile(`group-file-${index}`, `设计说明-${index + 1}.md`, 'text/markdown'))
@@ -589,7 +641,7 @@ Object.assign(window, { campOpenTest: {
       groupMessages[2].sourceAgentRunId = 'group-image-run'
     }
     current = { ...current, tasks: [], turns: [], agentRuns: [], messageDeliveries: [], timeline: [],
-      camp: { ...current.camp, title: '连续发言与附件归属' }, messages: groupMessages,
+      thread: { ...current.thread, title: '连续发言与附件归属' }, messages: groupMessages,
       agentRunImages: scenario === 'image' ? [{ agentRunId: 'group-image-run', executionEpoch: 1,
         createdAt: groupMessages[2].createdAt,
         images: [{ id: 'group-image', displayName: imageResult.displayName,
@@ -605,7 +657,7 @@ Object.assign(window, { campOpenTest: {
   },
   messageGroupState: () => ({
     copiedPublicText,
-    repliedPublicMessageId: loadLocalCampComposerDraft(campId)?.replyIntent?.replyToCampMessageId ?? null,
+    repliedPublicMessageId: loadLocalThreadComposerDraft(threadId)?.replyIntent?.replyToThreadMessageId ?? null,
     overflow: document.documentElement.scrollWidth > innerWidth,
     messages: [...document.querySelectorAll<HTMLElement>('.public-agent-message')].map(node => {
       const content = node.querySelector<HTMLElement>('.message-surface')!
@@ -632,7 +684,7 @@ Object.assign(window, { campOpenTest: {
       cancelReasonCode: index === 0 ? null : 'user_requested_agent_run_stop'
     }))
     current = { ...current, tasks: [], turns: [], messageDeliveries: [], executionEvidence: [],
-      camp: { ...current.camp, title: '终态运行产物归属' }, agentRuns: runs,
+      thread: { ...current.thread, title: '终态运行产物归属' }, agentRuns: runs,
       messages: withMessage ? [{ ...messages[1], id: 'artifact-message', sourceAgentRunId: runs[0].id }] : [],
       agentRunImages: [{ agentRunId: runs[0].id, executionEpoch: 1, createdAt: now,
         images: [{ id: 'artifact-image', displayName: imageResult.displayName,
@@ -644,23 +696,40 @@ Object.assign(window, { campOpenTest: {
     updateMessageHistory(null)
     updateSnapshot(current)
   },
-  showTextEvidence: () => reactRoot.render(<RunExecutionDisclosure run={textRun} campId={campId} />),
+  showTextEvidence: () => reactRoot.render(<RunExecutionDisclosure run={textRun} threadId={threadId} />),
+  showBlockPagination: (scene: 'short' | 'long' | 'sparse' | 'failure', placement: 'bottom' | 'inspector') => {
+    blockScenario = scene === 'failure' ? 'short' : scene
+    commandInteraction = false
+    executionReadFailure = scene === 'failure'
+    executionRun.id = `blocks-${scene}-${placement}`
+    executionThrough = scene === 'sparse' ? 220 : scene === 'long' ? 120 : scene === 'failure' ? 40 : 14
+    runningExecutionScenario = false
+    executionRequests.length = 0; executionGroupRequests.length = 0; executionContentReads.length = 0
+    const run = { ...executionRun, agentId: agent.agentId, executionEvidenceCount: executionThrough, threadTurnId: 'stopped-turn' }
+    current = { ...campOpenProjectionAsSnapshot(projection(60)), tasks: [], messages: [],
+      agentRunFileChanges: [], agentRuns: [run], executionEvidence: [] }
+    reactRoot.render(<Fixture key={`blocks-${scene}-${placement}`} executionPlacement={placement} windowed />)
+  },
   showExecutionWindow: (placement: 'bottom' | 'inspector' = 'bottom') => {
+    blockScenario = 'regular'
     executionRun.id = `window-static-${placement}`
     executionThrough = 1000
     runningExecutionScenario = false
     executionRequests.length = 0
+    executionGroupRequests.length = 0
     executionContentReads.length = 0
     reactRoot.render(<StaticExecutionWindow key={placement} placement={placement} />)
   },
   showRunningExecution: (placement: 'bottom' | 'inspector', sample: number, initialCount = 1000) => {
+    blockScenario = 'regular'
     executionRun.id = `window-live-${placement}-${sample}`
     executionThrough = executionTails.get(executionRun.id) ?? initialCount
     runningExecutionScenario = true
     executionChanges.length = 0
     executionRequests.length = 0
+    executionGroupRequests.length = 0
     executionContentReads.length = 0
-    const run = { ...executionRun, executionEvidenceCount: executionThrough, agentId: agent.agentId, campTurnId: 'stopped-turn', status: 'running' as const,
+    const run = { ...executionRun, executionEvidenceCount: executionThrough, agentId: agent.agentId, threadTurnId: 'stopped-turn', status: 'running' as const,
       cancelRequestedAt: null, cancelAcknowledgedAt: null, cancelReasonCode: null, endedAt: null }
     current = { ...campOpenProjectionAsSnapshot(projection(60)), tasks: [], messages: [],
       agentRunFileChanges: [], agentRuns: [run], executionEvidence: [],
@@ -676,7 +745,7 @@ Object.assign(window, { campOpenTest: {
   },
   executionWindowState: () => ({
     changes: executionChanges, through: executionThrough,
-    requests: executionRequests, contentReads: executionContentReads,
+    requests: executionRequests, groupRequests: executionGroupRequests, blockCount: windowBlocks().length, contentReads: executionContentReads,
     dom: document.querySelectorAll('*').length,
     toolRows: document.querySelectorAll('.tool-group-items .tool-call-disclosure, .tool-group-items .modified-file-row').length,
     diffLines: document.querySelectorAll('.modified-file-diff-line').length,
@@ -687,7 +756,7 @@ Object.assign(window, { campOpenTest: {
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   remount: () => reactRoot.render(<Fixture key="local-draft-remount" />),
   localDraftState: () => ({
-    body: loadLocalCampComposerDraft(campId)?.body ?? null,
+    body: loadLocalThreadComposerDraft(threadId)?.body ?? null,
     text: element('#camp-message')?.textContent ?? null,
     editable: element('#camp-message')?.getAttribute('contenteditable') ?? null,
     pendingRows: document.querySelectorAll('.pending-input-row').length

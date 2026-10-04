@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-application-update-component-boundary
 status: accepted
-last_updated: 2026-09-25
+last_updated: 2026-10-03
 ---
 
 # Desktop App Updates
@@ -11,10 +11,10 @@ last_updated: 2026-09-25
 
 | Component | Responsibility |
 | --- | --- |
-| Release packaging pipeline | Owns one version-bound Markdown source, embeds it into the Desktop Main bundle and every platform update manifest, and fails release verification when source and manifest differ. |
+| Release packaging pipeline | Owns version-bound Markdown notes and release-date metadata, embeds both into the Desktop Main bundle, writes notes to every platform update manifest, and rejects stale sources or mismatched notes. |
 | Electron Main update service | Owns the single snapshot, installed-release version binding, check source coalescing, timers, candidate normalization, prompt generations, download/install mutexes and updater degradation. |
 | `electron-updater` adapter | Reads packaged channel configuration, performs provider checks/downloads and synchronously stages the platform installer; it never decides Renderer presentation. |
-| Preload bridge | Exposes the closed App Update v5 API to the current Main Window, forwards typed snapshots and carries the private quit-preparation request; no provider object, installer path or credential crosses the bridge. |
+| Preload bridge | Exposes the closed App Update v7 API (unchanged from v6) to the current Main Window, forwards typed snapshots and carries the private quit-preparation request; no provider object, installer path or credential crosses the bridge. |
 | Renderer update controller | Hydrates with `get`, subscribes once, shares the same snapshot across Shell and About, and reports action-call failures without replacing Main facts. |
 | App Shell prompt/badges | Projects Main-owned prompt generation and actionable release states without reusing Notification Episode authority. |
 | About & Updates | Projects all operation/result states, explicit actions, safe release notes and the narrowly admitted fallback links. |
@@ -29,7 +29,11 @@ build/release-notes.md
      -> latest.yml / latest-mac.yml releaseNotes
      -> electron-updater UpdateInfo.releaseNotes
      -> Main bounded candidate normalization -> availableRelease
-  -> Renderer exact-title display cleanup -> SafeMarkdown
+  -> Renderer interface-language selection -> exact-title display cleanup -> SafeMarkdown
+
+build/release-metadata.json
+  -> Desktop Main and Desktop-hosted Web bundles
+  -> version and date validation against running App -> currentRelease.releaseDate
 ```
 
 [`build/release-notes.md`](../../build/release-notes.md) is the only repository-owned release-note source. Its first
@@ -44,15 +48,43 @@ an installed release with null notes. This keeps current-version notes available
 `releaseInfo.releaseNotesFile` setting alone writes manifests and does not guarantee that the source is in the App, so
 the Main import explicitly places it in the bundle.
 
+The version-bound metadata holds the installed release date independently of the notes. Main uses it only when its
+version matches the running App and its UTC timestamp is canonical. The build gate rejects stale metadata when the
+package version changes; the publisher checks its date against the official GitHub Release before distribution. An
+invalid or missing bundled date remains an explicit unknown, never a build or update-check timestamp.
+
 The GitHub provider may still use the Releases Atom feed to discover a tag. Manifest `releaseNotes` takes precedence over
 the provider's Atom-content fallback, so Rovai does not add a second GitHub REST request or a Renderer network path for
 release notes. Provider output remains remote untrusted input after publication; Main and Renderer keep their existing
 normalization and safe-rendering boundaries.
 
+The provider's YAML parser may return an unquoted `releaseDate` timestamp as a JavaScript `Date`. Main accepts both
+valid date objects and date strings, normalizes them to UTC ISO strings, and keeps invalid values null before crossing
+the bridge. The macOS manifest merge emits YAML 1.1-compatible strings so older clients also retain the date; its
+regression test parses the merged YAML with the actual `electron-updater` provider parser.
+
 About displays the installed release when no candidate exists. With a candidate, it defaults to the candidate and
 offers a local version switch; neither switch performs a request or changes updater actions. A missing candidate note
 stays an empty state. A matching first Markdown H1 is removed only from the displayed copy to avoid repeating the
 release header; the source and update manifest remain intact.
+
+## 多语言发布与展示
+
+[App Update v7](../contracts/app-update-v7.md)拥有双语发布、精确分段、空段准入、回退和文档级定义规则；
+[Interface Language v1](../contracts/interface-language-v1.md)继续拥有未改变的界面语言偏好 API。
+发布源保留公共版本首标题，通过顶层独立 `<!-- lang:en -->` 与 `<!-- lang:zh-CN -->` 注释提供正文。
+发布检查与 Server draft 组装共用 Renderer 的 CommonMark/GFM 解析和非空判断；新发布要求双语，
+读取历史或单语说明则不增加此要求。
+
+GitHub Release、Desktop 更新清单和内嵌日志使用完整原文。Server draft 直接复制同一源为
+`RELEASE-NOTES.md`；draft job 安装锁定依赖以使用相同解析规则。Main 保留版本绑定和既有候选归一化，
+Preload 仅运输快照；这两层不按语言过滤，不引入第二份翻译或额外 GitHub 请求。
+
+Desktop、Desktop 托管 Web 与独立 Server 共用的正文组件订阅 `useInterfaceLanguage()`，
+只在展示副本选择语言，再做首 H1 去重与 `SafeMarkdown` 渲染。无标记、全空、重复、歧义或解析失败时
+保留全文；隐藏节点及递归空容器不阻挡回退。定义按原文顺序 first-wins，完整脚注和链接依赖进入显示副本，
+只有定义节点可序列化，公共前言与正文使用原文切片。语言变化不请求、不重置当前/新版本 tab、不改快照或
+更新资格；缺少翻译不自动翻译。精确规则只在 v7 合同维护。
 
 ## Check and prompt flow
 
@@ -142,7 +174,7 @@ updater-unavailable or download-failed states.
 
 ## References
 
-- [App Update v5](../contracts/app-update-v5.md)
+- [App Update v7](../contracts/app-update-v7.md)
 - [Planned Shutdown](planned-shutdown.md)
 - [App Shell navigation](../ui/components/app-shell-navigation.md)
 - [macOS packaging](../development/packaging.md)

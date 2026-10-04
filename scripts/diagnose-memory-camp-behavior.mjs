@@ -247,14 +247,14 @@ async function runNaturalPhase(request, baseline) {
     body,
     purpose: 'Create a reusable release-delivery template from a durable user preference.'
   })
-  const campId = requireAccepted(created, 'Natural Camp creation')
-  const execution = await waitForRuns(request, campId, created.payload.agentRunIds)
+  const threadId = requireAccepted(created, 'Natural Camp creation')
+  const execution = await waitForRuns(request, threadId, created.payload.agentRunIds)
   const after = await snapshotMemory(request)
   const delta = memoryDelta(baseline, after)
 
   return {
     name: 'natural_discovery',
-    campId,
+    threadId,
     runIds: execution.runIds,
     resolvedApprovalCount: execution.resolvedApprovalCount,
     outputs: execution.outputs,
@@ -293,9 +293,9 @@ async function runStewardedPhase(request, baseline) {
     body: firstBody,
     purpose: 'Create a release-review checklist while applying the Camp memory policy.'
   })
-  const campId = requireAccepted(created, 'Stewarded Camp creation')
+  const threadId = requireAccepted(created, 'Stewarded Camp creation')
   const executions = []
-  executions.push(await waitForRuns(request, campId, created.payload.agentRunIds))
+  executions.push(await waitForRuns(request, threadId, created.payload.agentRunIds))
 
   const scenarios = suite === 'capture'
     ? []
@@ -370,21 +370,21 @@ async function runStewardedPhase(request, baseline) {
 
   for (const scenario of scenarios) {
     process.stderr.write(`[memory-camp] ${adapterKind}: stewarded ${scenario.id}\n`)
-    const sent = await sendCampMessage(request, {
-      campId,
+    const sent = await sendThreadMessage(request, {
+      threadId,
       agentIds: [scenario.agentId],
       body: scenario.body,
       purpose: scenario.purpose
     })
-    requireAccepted(sent, `Scenario ${scenario.id}`, campId)
-    executions.push(await waitForRuns(request, campId, sent.payload.agentRunIds))
+    requireAccepted(sent, `Scenario ${scenario.id}`, threadId)
+    executions.push(await waitForRuns(request, threadId, sent.payload.agentRunIds))
   }
 
   const after = await snapshotMemory(request)
   const delta = memoryDelta(baseline, after)
   return {
     name: 'stewarded_batch',
-    campId,
+    threadId,
     runIds: executions.flatMap((execution) => execution.runIds),
     resolvedApprovalCount: executions.reduce((sum, execution) =>
       sum + execution.resolvedApprovalCount, 0),
@@ -421,13 +421,13 @@ async function runRecallPhase(request, baseline) {
     body,
     purpose: 'Apply a durable preference in a fresh Camp without restating it.'
   })
-  const campId = requireAccepted(created, 'Recall Camp creation')
-  const execution = await waitForRuns(request, campId, created.payload.agentRunIds)
+  const threadId = requireAccepted(created, 'Recall Camp creation')
+  const execution = await waitForRuns(request, threadId, created.payload.agentRunIds)
   const after = await snapshotMemory(request)
 
   return {
     name: 'cross_camp_recall',
-    campId,
+    threadId,
     runIds: execution.runIds,
     resolvedApprovalCount: execution.resolvedApprovalCount,
     outputs: execution.outputs,
@@ -438,8 +438,8 @@ async function runRecallPhase(request, baseline) {
   }
 }
 
-async function sendCampMessage(request, input) {
-  const currentDraft = await request('camp.composerDraft.get', { campId: input.campId })
+async function sendThreadMessage(request, input) {
+  const currentDraft = await request('camp.composerDraft.get', { threadId: input.threadId })
   const content = [
     ...input.agentIds.flatMap((agentId) => [
       { kind: 'member_mention', agentId },
@@ -448,13 +448,13 @@ async function sendCampMessage(request, input) {
     { kind: 'text', text: input.body }
   ]
   const savedDraft = await request('camp.composerDraft.save', {
-    campId: input.campId,
+    threadId: input.threadId,
     expectedRevision: currentDraft.revision,
     content
   })
   const sent = await request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId: input.campId,
+    threadId: input.threadId,
     draftRevision: savedDraft.revision,
     execution: {
       taskId: null,
@@ -465,13 +465,13 @@ async function sendCampMessage(request, input) {
   return sent.commandResult ?? sent
 }
 
-async function waitForRuns(request, campId, runIds) {
+async function waitForRuns(request, threadId, runIds) {
   let lastState = null
   const resolvedApprovals = new Set()
   const selectedRunIds = new Set(runIds)
   const deliveryUnknownSince = new Map()
   const snapshot = await waitFor(async () => {
-    const current = await request('camps.snapshot', { campId })
+    const current = await request('camps.snapshot', { threadId })
     const runs = current.agentRuns.filter((run) => runIds.includes(run.id))
     const runActionIds = new Set(current.actions
       .filter((action) => selectedRunIds.has(action.agentRunId))
@@ -487,7 +487,7 @@ async function waitForRuns(request, campId, runIds) {
       }
       const resolution = await request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
-        campId,
+        threadId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId: option.optionId,
@@ -759,12 +759,12 @@ function collectStrings(value, output = []) {
 }
 
 function requireAccepted(result, label, expectedCampId = null) {
-  const campId = result.payload?.campId ?? expectedCampId
-  if (result.status !== 'accepted' || !campId || !Array.isArray(result.payload?.agentRunIds)
+  const threadId = result.payload?.threadId ?? expectedCampId
+  if (result.status !== 'accepted' || !threadId || !Array.isArray(result.payload?.agentRunIds)
       || result.payload.agentRunIds.length === 0) {
     throw new Error(`${label} was not accepted: ${JSON.stringify(result)}`)
   }
-  return campId
+  return threadId
 }
 
 function runSummary(run) {

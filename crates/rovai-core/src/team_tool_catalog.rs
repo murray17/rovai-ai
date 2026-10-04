@@ -11,9 +11,9 @@ use crate::{
     },
     builtin_tool_cli_output::validate_schema,
     camp_history::{
-        CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
-        CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
-        HistorySearchInput,
+        CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
+        HistorySearchInput, ThreadHistoryService, ThreadListInput, ThreadReadInput,
+        ThreadSearchInput,
     },
     camp_message_send_teaching::CAMP_MESSAGE_SEND_SUMMARY,
     member_studio::{MEMBER_CREATE_TOOL_NAME, MemberCreateInput, member_create_input_schema},
@@ -25,22 +25,28 @@ use crate::{
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     single_chat::{SINGLE_CHAT_HISTORY_TOOL_NAME, SingleChatHistoryInput, SingleChatService},
     team_tool::{
-        CampMessageSendInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
-        TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput,
-        TeamGetTaskInput, TeamListTasksInput, TeamToolService, TeamUpdateTaskInput,
+        TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
+        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamGetTaskInput, TeamListTasksInput,
+        TeamToolService, TeamUpdateTaskInput, ThreadMessageSendInput,
     },
 };
 
 pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Result<()> {
+    let canonical_name = crate::thread_compat::canonical_operation(canonical_name);
+    let input = &crate::thread_compat::normalize_builtin_input(canonical_name, input.clone())?;
     let definition = builtin_tool_definitions()
         .into_iter()
         .find(|definition| definition["name"].as_str() == Some(canonical_name))
         .ok_or_else(|| anyhow::anyhow!("unknown built-in operation: {canonical_name}"))?;
     validate_schema(input, &definition["inputSchema"])
         .map_err(|_| anyhow::anyhow!("{canonical_name} input does not match its schema"))?;
+    if canonical_name == crate::thread_runs::THREAD_RUNS_TOOL_NAME {
+        return serde_json::from_value::<crate::thread_runs::ThreadRunsInput>(input.clone())?
+            .validate();
+    }
     let valid = match canonical_name {
         CAMP_MESSAGE_SEND_TOOL_NAME => {
-            serde_json::from_value::<CampMessageSendInput>(input.clone()).map(|_| ())
+            serde_json::from_value::<ThreadMessageSendInput>(input.clone()).map(|_| ())
         }
         MEMBER_CREATE_TOOL_NAME => {
             serde_json::from_value::<MemberCreateInput>(input.clone()).map(|_| ())
@@ -57,14 +63,14 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         TEAM_LIST_TASKS_TOOL_NAME => {
             serde_json::from_value::<TeamListTasksInput>(input.clone()).map(|_| ())
         }
-        CAMP_LIST_TOOL_NAME => serde_json::from_value::<CampListInput>(input.clone()).map(|_| ()),
+        CAMP_LIST_TOOL_NAME => serde_json::from_value::<ThreadListInput>(input.clone()).map(|_| ()),
         CAMP_SEARCH_TOOL_NAME => {
-            serde_json::from_value::<CampSearchInput>(input.clone()).map(|_| ())
+            serde_json::from_value::<ThreadSearchInput>(input.clone()).map(|_| ())
         }
         HISTORY_SEARCH_TOOL_NAME => {
             serde_json::from_value::<HistorySearchInput>(input.clone()).map(|_| ())
         }
-        CAMP_READ_TOOL_NAME => serde_json::from_value::<CampReadInput>(input.clone()).map(|_| ()),
+        CAMP_READ_TOOL_NAME => serde_json::from_value::<ThreadReadInput>(input.clone()).map(|_| ()),
         SINGLE_CHAT_HISTORY_TOOL_NAME => {
             serde_json::from_value::<SingleChatHistoryInput>(input.clone()).map(|_| ())
         }
@@ -119,16 +125,16 @@ fn camp_list_success_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["camps", "truncated"],
+        "required": ["threads", "truncated"],
         "properties": {
-            "camps": {
+            "threads": {
                 "type": "array", "maxItems": 50,
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["campId", "title", "lastVisibleActivityAt"],
+                    "required": ["threadId", "title", "lastVisibleActivityAt"],
                     "properties": {
-                        "campId": {"type": "string"},
+                        "threadId": {"type": "string"},
                         "title": {"type": "string"},
                         "lastVisibleActivityAt": {"type": "string", "format": "date-time"}
                     }
@@ -142,7 +148,7 @@ fn camp_list_success_schema() -> Value {
 fn camp_search_success_schema(include_camp_title: bool) -> Value {
     let max_items = if include_camp_title { 30 } else { 20 };
     let mut result_properties = json!({
-        "campId": {"type": "string"},
+        "threadId": {"type": "string"},
         "messageId": {"type": "string"},
         "sequence": {"type": "integer", "minimum": 1},
         "authorType": {"type": "string"},
@@ -150,10 +156,10 @@ fn camp_search_success_schema(include_camp_title: bool) -> Value {
         "anchorMessageId": {"type": ["string", "null"]},
         "createdAt": {"type": "string", "format": "date-time"},
         "snippet": {"type": "string", "maxLength": 200},
-        "quotes": crate::message_quote::model_quotes_schema("camp_messages")
+        "quotes": crate::message_quote::model_quotes_schema("thread_messages")
     });
     let mut required = vec![
-        "campId",
+        "threadId",
         "messageId",
         "sequence",
         "authorType",
@@ -163,8 +169,8 @@ fn camp_search_success_schema(include_camp_title: bool) -> Value {
         "snippet",
     ];
     if include_camp_title {
-        result_properties["campTitle"] = json!({"type": "string"});
-        required.push("campTitle");
+        result_properties["threadTitle"] = json!({"type": "string"});
+        required.push("threadTitle");
     }
     json!({
         "type": "object",
@@ -192,7 +198,7 @@ fn collection_message_schema() -> Value {
         "additionalProperties": false,
         "required": [
             "messageId", "sequence", "authorType", "authorId", "anchorMessageId",
-            "createdAt", "body", "attachmentCount"
+            "createdAt", "body", "attachmentCount", "addressing"
         ],
         "properties": {
             "messageId": {"type": "string"},
@@ -202,8 +208,9 @@ fn collection_message_schema() -> Value {
             "anchorMessageId": {"type": ["string", "null"]},
             "createdAt": {"type": "string", "format": "date-time"},
             "body": {"type": "string"},
-            "quotes": crate::message_quote::model_quotes_schema("camp_messages"),
-            "attachmentCount": {"type": "integer", "minimum": 0}
+            "quotes": crate::message_quote::model_quotes_schema("thread_messages"),
+            "attachmentCount": {"type": "integer", "minimum": 0},
+            "addressing": item_message_schema()["properties"]["addressing"].clone()
         }
     })
 }
@@ -258,7 +265,7 @@ fn item_message_schema() -> Value {
             "anchorMessageId": {"type": ["string", "null"]},
             "createdAt": {"type": "string", "format": "date-time"},
             "body": {"type": "string"},
-            "quotes": crate::message_quote::model_quotes_schema("camp_messages"),
+            "quotes": crate::message_quote::model_quotes_schema("thread_messages"),
             "attachmentCount": {"type": "integer", "minimum": 0},
             "attachments": {
                 "type": "array", "maxItems": 10,
@@ -285,9 +292,9 @@ fn item_message_schema() -> Value {
 fn camp_read_item_schema() -> Value {
     json!({
         "additionalProperties": false,
-        "required": ["campId", "mode", "items"],
+        "required": ["threadId", "mode", "items"],
         "properties": {
-            "campId": {"type": "string"},
+            "threadId": {"type": "string"},
             "mode": {"const": "item"},
             "items": {
                 "type": "array", "minItems": 1, "maxItems": 1,
@@ -301,15 +308,15 @@ fn camp_read_thread_schema() -> Value {
     json!({
         "additionalProperties": false,
         "required": [
-            "campId", "mode",
-            "anchorMessageId", "threadRootMessageId", "direction", "items",
+            "threadId", "mode",
+            "anchorMessageId", "replyChainRootMessageId", "direction", "items",
             "nextCursor", "hasMore"
         ],
         "properties": {
-            "campId": {"type": "string"},
-            "mode": {"const": "thread"},
+            "threadId": {"type": "string"},
+            "mode": {"const": "reply_chain"},
             "anchorMessageId": {"type": "string"},
-            "threadRootMessageId": {"type": "string"},
+            "replyChainRootMessageId": {"type": "string"},
             "direction": {"type": "string", "enum": ["before", "after"]},
             "items": {"type": "array", "maxItems": 100,
                 "items": {"oneOf": [collection_message_schema(), withdrawn_message_schema()]}},
@@ -323,11 +330,11 @@ fn camp_read_timeline_schema() -> Value {
     json!({
         "additionalProperties": false,
         "required": [
-            "campId", "mode", "direction",
+            "threadId", "mode", "direction",
             "items", "nextCursor", "hasMore"
         ],
         "properties": {
-            "campId": {"type": "string"},
+            "threadId": {"type": "string"},
             "mode": {"const": "timeline"},
             "direction": {"type": "string", "enum": ["before", "after"]},
             "items": {"type": "array", "maxItems": 100,
@@ -402,7 +409,7 @@ fn member_create_success_schema() -> Value {
 fn task_detail_success_schema(include_changed: bool) -> Value {
     let mut required = vec![
         "taskId",
-        "campId",
+        "threadId",
         "title",
         "description",
         "status",
@@ -426,7 +433,7 @@ fn task_detail_success_schema(include_changed: bool) -> Value {
     }
     let mut properties = json!({
         "taskId": {"type": "string"},
-        "campId": {"type": "string"},
+        "threadId": {"type": "string"},
         "title": {"type": "string"},
         "description": {"type": "string", "maxLength": 16000},
         "status": {"type": "string", "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]},
@@ -615,7 +622,7 @@ fn automation_identifier_schema() -> Value {
 fn automation_notify_schema() -> Value {
     json!({
         "type": "array", "maxItems": 2, "uniqueItems": true,
-        "items": {"type": "string", "enum": ["feishu", "dingtalk"]}
+        "items": {"type": "string", "enum": ["feishu", "lark", "dingtalk"]}
     })
 }
 
@@ -693,13 +700,13 @@ fn automation_stored_schedule_schema() -> Value {
 fn automation_run_summary_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false,
-        "required": ["runId", "status", "reason", "scheduledFor", "campId", "resultMessageId", "notificationStatus", "createdAt", "endedAt"],
+        "required": ["runId", "status", "reason", "scheduledFor", "threadId", "resultMessageId", "notificationStatus", "createdAt", "endedAt"],
         "properties": {
             "runId": {"type": "string", "minLength": 1},
             "status": {"type": "string", "enum": ["running", "cancelling", "completed", "failed", "skipped"]},
             "reason": {"type": ["string", "null"]},
             "scheduledFor": {"type": "string"},
-            "campId": {"type": ["string", "null"]},
+            "threadId": {"type": ["string", "null"]},
             "resultMessageId": {"type": ["string", "null"]},
             "notificationStatus": {"type": "string", "enum": ["none", "pending", "sent", "failed", "partial"]},
             "createdAt": {"type": "string"},
@@ -907,10 +914,10 @@ fn mission_list_success_schema() -> Value {
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["missionId", "campId", "title", "status", "updatedAt"],
+                    "required": ["missionId", "threadId", "title", "status", "updatedAt"],
                     "properties": {
                         "missionId": {"type": "string"},
-                        "campId": {"type": "string"},
+                        "threadId": {"type": "string"},
                         "title": {"type": "string"},
                         "status": mission_status_schema(),
                         "updatedAt": {"type": "string", "format": "date-time"}
@@ -943,7 +950,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": "mission.get",
             "title": "Read a Mission",
-            "description": "Read any Mission in this Rovai instance. Omit --mission-id for the current Camp's Mission. Reading does not switch context.\n\nAttachments include saved metadata and source paths, not live file checks.",
+            "description": "Read any Mission in this Rovai instance. Omit --mission-id for the current Thread's Mission. Reading does not switch context.\n\nAttachments include saved metadata and source paths, not live file checks.",
             "inputSchema": {
                 "type": "object", "additionalProperties": false,
                 "properties": {
@@ -964,7 +971,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
             }
         }),
         json!({"name":"mission.update","title":"Update the current Mission","description":"Update the current Mission's title or description without starting work.","inputSchema":{"type":"object","additionalProperties":false,"anyOf":[{"required":["title"]},{"required":["description"]}],"properties":{"title":{"type":"string","minLength":1,"maxLength":200},"description":{"type":"string","maxLength":12000}}},"outputSchema":mission_mutation_schema()}),
-        json!({"name":"mission.status","title":"Set the current Mission status","description":"Set the current Mission's status without starting or stopping work.","inputSchema":{"type":"object","additionalProperties":false,"required":["status"],"properties":{"status":{"type":"string","enum":["needs_you","not_started","in_progress","completed"],"description":"One of: needs_you, not_started, in_progress, completed."},"sourceMessageId":{"type":"string","minLength":1,"description":"Optional reference to an existing public message in this Camp."}}},"outputSchema":mission_mutation_schema()}),
+        json!({"name":"mission.status","title":"Set the current Mission status","description":"Set the current Mission's status without starting or stopping work.","inputSchema":{"type":"object","additionalProperties":false,"required":["status"],"properties":{"status":{"type":"string","enum":["needs_you","not_started","in_progress","completed"],"description":"One of: needs_you, not_started, in_progress, completed."},"sourceMessageId":{"type":"string","minLength":1,"description":"Optional reference to an existing public message in this Thread."}}},"outputSchema":mission_mutation_schema()}),
         json!({
             "name": AUTOMATION_LIST_TOOL_NAME,
             "title": "List scheduled Automations",
@@ -992,7 +999,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": AUTOMATION_GET_TOOL_NAME,
             "title": "Get one scheduled Automation",
-            "description": "Read one Automation by stable ID. Use automationId=current only from a conversation created by that Automation.",
+            "description": "Read one Automation by stable ID. Use automationId=current only from a Thread created by that Automation.",
             "inputSchema": {
                 "type": "object", "additionalProperties": false, "required": ["automationId"],
                 "properties": {"automationId": automation_identifier_schema()}
@@ -1002,26 +1009,25 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": AUTOMATION_CREATE_TOOL_NAME,
             "title": "Create a scheduled Automation",
-            "description": "Create and enable one durable Automation only when the user explicitly asks. member defaults to the current Agent; project defaults to the current Camp project or Quick Chat. Times use the device timezone; notify may include feishu and dingtalk.",
+            "description": "Create and enable one durable Automation only when the user explicitly asks. member defaults to the current Agent; project defaults to the current Thread project or Quick Chat. Times use the device timezone; notify may include feishu and dingtalk.",
             "inputSchema": automation_schedule_schema(),
             "outputSchema": automation_view_schema()
         }),
         json!({
             "name": AUTOMATION_RUN_TOOL_NAME,
             "title": "Run an Automation now",
-            "description": "Run one enabled Automation immediately only when the user explicitly asks. A successful start creates a new ordinary conversation; an overlapping run is skipped.",
+            "description": "Run one enabled Automation immediately only when the user explicitly asks. A successful start creates a new ordinary Thread; an overlapping run is skipped.",
             "inputSchema": {
                 "type": "object", "additionalProperties": false, "required": ["automationId"],
                 "properties": {"automationId": automation_identifier_schema()}
             },
             "outputSchema": {
                 "type": "object", "additionalProperties": false,
-                "required": ["status", "runId", "campId", "conversationId", "reason"],
+                "required": ["status", "runId", "threadId", "reason"],
                 "properties": {
                     "status": {"type": "string", "enum": ["started", "skipped", "failed"]},
                     "runId": {"type": "string"},
-                    "campId": {"type": ["string", "null"]},
-                    "conversationId": {"type": ["string", "null"]},
+                    "threadId": {"type": ["string", "null"]},
                     "reason": {"type": ["string", "null"]}
                 }
             }
@@ -1046,7 +1052,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": AUTOMATION_DELETE_TOOL_NAME,
             "title": "Delete a scheduled Automation",
-            "description": "Permanently delete one Automation definition only when the user explicitly asks, using its current version. Existing run conversations and immutable run history remain available.",
+            "description": "Permanently delete one Automation definition only when the user explicitly asks, using its current version. Existing run Threads and immutable run history remain available.",
             "inputSchema": {
                 "type": "object", "additionalProperties": false, "required": ["automationId", "expectedVersion"],
                 "properties": {"automationId": automation_identifier_schema(), "expectedVersion": {"type": "integer", "minimum": 1}}
@@ -1059,7 +1065,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": CAMP_MESSAGE_SEND_TOOL_NAME,
-            "title": "Send a public Camp message",
+            "title": "Send a public Thread message",
             "description": CAMP_MESSAGE_SEND_SUMMARY,
             "inputSchema": TeamToolService::camp_message_send_input_schema(),
             "outputSchema": {
@@ -1121,7 +1127,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": TEAM_GET_TASK_TOOL_NAME,
             "title": "Get a durable Task",
-            "description": "Read a task's current content, status and owner in this Camp.",
+            "description": "Read a task's current content, status and owner in this Thread.",
             "inputSchema": TeamToolService::get_task_input_schema(),
             "outputSchema": task_detail_success_schema(false)
         }),
@@ -1134,43 +1140,50 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": TEAM_LIST_TASKS_TOOL_NAME,
-            "title": "List Camp Tasks",
-            "description": "List task summaries in this Camp. Use task get for details. Do not poll.",
+            "title": "List Thread Tasks",
+            "description": "List task summaries in this Thread. Use task get for details. Do not poll.",
             "inputSchema": TeamToolService::list_tasks_input_schema(),
             "outputSchema": task_list_success_schema()
         }),
         json!({
             "name": CAMP_LIST_TOOL_NAME,
-            "title": "Discover other Camps",
-            "description": "Return a bounded Top-K of other public Camps frozen into this AgentRun. Target-Camp membership is not a read permission. Search only frozen Camp names; omit query for recent Camps. This tool never searches messages and never paginates.",
-            "inputSchema": CampHistoryService::camp_list_input_schema(),
+            "title": "Discover other Threads",
+            "description": "Return a bounded Top-K of other public Threads frozen into this AgentRun. Target-Thread membership is not a read permission. Search only frozen Thread names; omit query for recent Threads. This tool never searches messages and never paginates.",
+            "inputSchema": ThreadHistoryService::camp_list_input_schema(),
             "outputSchema": camp_list_success_schema()
         }),
         json!({
             "name": CAMP_SEARCH_TOOL_NAME,
-            "title": "Search one public Camp timeline",
-            "description": "Search one public Camp timeline. Omit campId to search the current Camp, or pass any extant public Camp ID; target-Camp membership is not a read permission. Search is discovery, not traversal: use a stable messageId with camp.read. Summaries and attachments are not searched.",
-            "inputSchema": CampHistoryService::camp_search_input_schema(),
+            "title": "Search one public Thread timeline",
+            "description": "Search one public Thread timeline. Omit threadId to search the current Thread, or pass any extant public Thread ID; target-Thread membership is not a read permission. Search is discovery, not traversal: use a stable messageId with thread.read. Summaries and attachments are not searched.",
+            "inputSchema": ThreadHistoryService::camp_search_input_schema(),
             "outputSchema": camp_search_success_schema(false)
         }),
         json!({
             "name": HISTORY_SEARCH_TOOL_NAME,
-            "title": "Search public Camp history",
-            "description": "Discover messages across public historical Camps when the target Camp is unknown. Target-Camp membership is not a read permission. Camp titles are metadata, not hits. Once a Camp is known, prefer camp.search and camp.read with stable IDs. Summaries and attachments are not searched.",
-            "inputSchema": CampHistoryService::history_search_input_schema(),
+            "title": "Search public Thread history",
+            "description": "Discover messages across public historical Threads when the target Thread is unknown. Target-Thread membership is not a read permission. Thread titles are metadata, not hits. Once a Thread is known, prefer thread.search and thread.read with stable IDs. Summaries and attachments are not searched.",
+            "inputSchema": ThreadHistoryService::history_search_input_schema(),
             "outputSchema": camp_search_success_schema(true)
         }),
         json!({
             "name": CAMP_READ_TOOL_NAME,
-            "title": "Read public Camp messages",
-            "description": "Read messages from exactly one public Camp. Target-Camp membership is not a read permission. With no message selector, return the newest published messages from the current or explicitly selected Camp; use before as the exclusive sequence cursor. The default limit is 20; an explicit limit must be an integer from 1 to 100. Recallable messages remain readable until withdrawn; a withdrawn message returns a Message withdrawn marker without its original content. Use messageId for one exact message, or thread for a thread page ending before the optional cursor. Reuse nextCursor as before. IDs and cursors never bypass the publication boundary.",
-            "inputSchema": CampHistoryService::camp_read_input_schema(),
+            "title": "Read public Thread messages",
+            "description": "Read published messages from one public Thread using its live state, including an explicit historical Thread. Target membership is not a read permission. With no selector, return the newest page; use before/nextCursor for older messages. Default limit: 20; range: 1-100. Use messageId for one message or replyChain for a reply chain. messageId cannot combine with replyChain, before or limit. Normal items include addressing; withdrawn items contain only a withdrawal marker. IDs and cursors never bypass visibility.",
+            "inputSchema": ThreadHistoryService::camp_read_input_schema(),
             "outputSchema": camp_read_success_schema()
+        }),
+        json!({
+            "name": crate::thread_runs::THREAD_RUNS_TOOL_NAME,
+            "title": "Read Thread execution state",
+            "description": "Read public executions and queued work in one Thread. Omit threadId for the current Thread; explicit Threads are read live. Private Single Chat executions are excluded, and Single Chat callers cannot use this command. Business calls return JSON only.\n\nEach item identifies an Agent and its status. A non-null agentRunId identifies a real Run. A null ID is allowed only for queued work; those messages may be split across future Runs. Item counts are not Run counts. waitReason is always null: this interface does not provide reasons.\n\nmessageCount is the input count, or null when unknown. messagePreview shows the first message as readable now, up to 200 Unicode code points plus an ellipsis if truncated; unavailable previews are null.\n\nExecution and queues can change between pages; pagination does not guarantee a complete traversal of queued work. Start again without cursor when checking current state.",
+            "inputSchema": crate::thread_runs::input_schema(),
+            "outputSchema": crate::thread_runs::output_schema()
         }),
         json!({
             "name": SINGLE_CHAT_HISTORY_TOOL_NAME,
             "title": "Read current Single Chat history",
-            "description": "Read a bounded page of user and assistant messages before CURRENT_INPUT in the active Single Chat. Core derives the conversation from the authenticated current Run and caps every requested boundary at the current input sequence. This operation does not read execution evidence or mutate any Conversation state.",
+            "description": "Read a bounded page of user and assistant messages before CURRENT_INPUT in the active Single Chat. Core selects the active Single Chat from the authenticated current Run and caps every requested boundary at the current input sequence. This operation does not read execution evidence or mutate Single Chat state.",
             "inputSchema": SingleChatService::history_input_schema(),
             "outputSchema": SingleChatService::history_output_schema()
         }),
@@ -1191,7 +1204,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": MEMORY_READ_TOOL_NAME,
             "title": "Read current Memory",
-            "description": "Resolve stable Memory IDs against current Revision, lifecycle, Camp access, and Presence. Authorized current results include one copyable target; stale/deleted results never return old bodies or target identity.",
+            "description": "Resolve stable Memory IDs against current Revision, lifecycle, Thread access, and Presence. Authorized current results include one copyable target; stale/deleted results never return old bodies or target identity.",
             "inputSchema": MemoryRetrievalService::read_input_schema(),
             "outputSchema": memory_read_success_schema()
         }),
@@ -1265,11 +1278,11 @@ mod tests {
         assert_eq!(update["description"], update["inputSchema"]["description"]);
         assert_eq!(
             definition(TEAM_GET_TASK_TOOL_NAME)["description"],
-            "Read a task's current content, status and owner in this Camp."
+            "Read a task's current content, status and owner in this Thread."
         );
         assert_eq!(
             definition(TEAM_LIST_TASKS_TOOL_NAME)["description"],
-            "List task summaries in this Camp. Use task get for details. Do not poll."
+            "List task summaries in this Thread. Use task get for details. Do not poll."
         );
         for current in [create, update] {
             assert_eq!(
@@ -1294,7 +1307,7 @@ mod tests {
             validate_builtin_tool_input(
                 "context.read",
                 &json!({
-                    "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                    "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
                     "messageId": "message-1"
                 })
             )
@@ -1314,7 +1327,7 @@ mod tests {
         }
         for invalid in [
             json!({"conversationId": "conversation-1"}),
-            json!({"campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}),
+            json!({"threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}),
             json!({"agentId": "agent_1"}),
             json!({"beforeSequence": 0}),
             json!({"limit": 51}),
@@ -1335,23 +1348,23 @@ mod tests {
             send["inputSchema"]["properties"]["files"]["default"],
             json!([])
         );
-        assert!(send["inputSchema"]["properties"].get("campId").is_none());
+        assert!(send["inputSchema"]["properties"].get("threadId").is_none());
         assert!(
             send["inputSchema"]["properties"]
-                .get("replyToCampMessageId")
+                .get("replyToThreadMessageId")
                 .is_none()
         );
         assert!(
             validate_builtin_tool_input(
                 CAMP_MESSAGE_SEND_TOOL_NAME,
-                &json!({"campId": "camp-legacy", "body": "hello"})
+                &json!({"threadId": "camp-legacy", "body": "hello"})
             )
             .is_err()
         );
         assert!(
             validate_builtin_tool_input(
                 CAMP_MESSAGE_SEND_TOOL_NAME,
-                &json!({"body": "hello", "replyToCampMessageId": "message-legacy"})
+                &json!({"body": "hello", "replyToThreadMessageId": "message-legacy"})
             )
             .is_err()
         );
@@ -1473,11 +1486,36 @@ mod tests {
 
     #[test]
     fn camp_search_and_read_accept_an_omitted_or_explicit_single_camp_target() {
+        for operation in ["camp.read", "thread.read"] {
+            validate_builtin_tool_input(
+                operation,
+                &json!({"campId":"rvcamp_01h47kvsy5fk1shh6w1g60eecf", "thread":"message_123"}),
+            )
+            .unwrap();
+            validate_builtin_tool_input(operation, &json!({"threadId":"rvcamp_01h47kvsy5fk1shh6w1g60eecf", "replyChain":"message_123"})).unwrap();
+            for mixed in [
+                json!({"campId":"a", "threadId":"a"}),
+                json!({"thread":"a", "replyChain":"a"}),
+            ] {
+                assert!(validate_builtin_tool_input(operation, &mixed).is_err());
+            }
+        }
+        for operation in ["camp.message.send", "thread.message.send"] {
+            for field in ["campId", "threadId", "conversationId"] {
+                assert!(
+                    validate_builtin_tool_input(
+                        operation,
+                        &json!({"body":"hello",field:"forbidden"})
+                    )
+                    .is_err()
+                );
+            }
+        }
         validate_builtin_tool_input(CAMP_SEARCH_TOOL_NAME, &json!({"query": "amount"})).unwrap();
         validate_builtin_tool_input(
             CAMP_SEARCH_TOOL_NAME,
             &json!({
-                "campId": "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                "threadId": "7b5db24c-4a43-4cab-9217-d982b08f7691",
                 "query": "amount"
             }),
         )
@@ -1487,7 +1525,7 @@ mod tests {
         validate_builtin_tool_input(
             CAMP_READ_TOOL_NAME,
             &json!({
-                "campId": "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                "threadId": "7b5db24c-4a43-4cab-9217-d982b08f7691",
                 "before": 42,
                 "limit": 20
             }),
@@ -1495,7 +1533,7 @@ mod tests {
         .unwrap();
         validate_builtin_tool_input(
             CAMP_READ_TOOL_NAME,
-            &json!({"thread": "message_123", "limit": 100}),
+            &json!({"replyChain": "message_123", "limit": 100}),
         )
         .unwrap();
         validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &json!({"limit": 100})).unwrap();
@@ -1519,7 +1557,7 @@ mod tests {
     fn camp_read_output_contract_distinguishes_original_and_withdrawn_items() {
         let schema = camp_read_success_schema();
         let mut item = json!({
-            "campId": "camp_123",
+            "threadId": "camp_123",
             "mode": "item",
             "items": [{
                 "messageId": "message_123",
@@ -1547,6 +1585,25 @@ mod tests {
             }]
         });
         crate::builtin_tool_cli_output::validate_schema(&item, &schema).unwrap();
+        let mut collection = item["items"][0].clone();
+        for field in [
+            "attachments",
+            "attachmentsTruncated",
+            "attachmentOmittedCount",
+        ] {
+            collection.as_object_mut().unwrap().remove(field);
+        }
+        crate::builtin_tool_cli_output::validate_schema(&collection, &collection_message_schema())
+            .unwrap();
+        collection.as_object_mut().unwrap().remove("addressing");
+        assert!(
+            crate::builtin_tool_cli_output::validate_schema(
+                &collection,
+                &collection_message_schema()
+            )
+            .is_err()
+        );
+
         item["items"][0]["attachments"][0]
             .as_object_mut()
             .unwrap()
@@ -1554,7 +1611,7 @@ mod tests {
         assert!(crate::builtin_tool_cli_output::validate_schema(&item, &schema).is_err());
 
         let mut withdrawn = json!({
-            "campId": "camp_123",
+            "threadId": "camp_123",
             "mode": "item",
             "items": [{
                 "messageId": "message_123",

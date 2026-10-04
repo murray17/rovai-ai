@@ -1,8 +1,8 @@
 export const MACOS_SIGNING_POLICY = Object.freeze({
   appId: 'ai.rovai.desktop',
-  authority: 'Rovai Release Signing',
-  certificateRoot: '465802da7386e9676668078e7d44704cbbeadd1e',
-  certificateSha256: '875C6F486E223AB1889A2AD63860FBE48F7E8C0E4D94832656896BA5DA4EF82E'
+  authorityPrefix: 'Developer ID Application:',
+  intermediateAuthority: 'Developer ID Certification Authority',
+  rootAuthorityPrefix: 'Apple Root CA'
 })
 
 export function assertAdhocMacosSignature(label, {
@@ -23,24 +23,46 @@ export function assertAdhocMacosSignature(label, {
 export function assertStableMacosSignature(label, {
   details,
   designatedRequirement,
-  expectedIdentifier = null
+  expectedIdentifier = null,
+  expectedTeamId
 }) {
+  if (!/^[A-Z0-9]{10}$/.test(expectedTeamId ?? '')) {
+    throw new Error('MAC_RELEASE_TEAM_ID must be a 10-character Apple Developer Team ID')
+  }
   if (/^Signature=adhoc$/m.test(details)) {
     throw new Error(`${label} uses an ad-hoc signature`)
   }
   const authorities = [...details.matchAll(/^Authority=(.+)$/gm)]
     .map((match) => match[1].trim())
-  if (!authorities.includes(MACOS_SIGNING_POLICY.authority)) {
-    throw new Error(`${label} is missing Authority=${MACOS_SIGNING_POLICY.authority}`)
+  if (!authorities[0]?.startsWith(`${MACOS_SIGNING_POLICY.authorityPrefix} `)
+      || !authorities[0].endsWith(`(${expectedTeamId})`)
+      || !authorities.includes(MACOS_SIGNING_POLICY.intermediateAuthority)
+      || !authorities.some((authority) => authority.startsWith(MACOS_SIGNING_POLICY.rootAuthorityPrefix))) {
+    throw new Error(`${label} does not have the expected Apple Developer ID authority chain`)
+  }
+  if (!details.split('\n').includes(`TeamIdentifier=${expectedTeamId}`)) {
+    throw new Error(`${label} has the wrong Apple Developer Team ID`)
+  }
+  if (!/^CodeDirectory\b.*\([^)]*\bruntime\b/m.test(details)) {
+    throw new Error(`${label} is missing Hardened Runtime`)
+  }
+  if (!/^Timestamp=.+$/m.test(details)) {
+    throw new Error(`${label} is missing a secure signing timestamp`)
   }
   if (/designated\s*=>\s*cdhash\b/i.test(designatedRequirement)) {
     throw new Error(`${label} uses a CDHash-only designated requirement`)
   }
 
   const normalized = designatedRequirement.toLowerCase()
-  const expectedRoot = `certificate root = h"${MACOS_SIGNING_POLICY.certificateRoot}"`
-  if (!normalized.includes(expectedRoot)) {
-    throw new Error(`${label} designated requirement has the wrong certificate root`)
+    .replaceAll('/* exists */', 'exists')
+  if (!normalized.includes('anchor apple generic')
+      || !normalized.includes('certificate 1[field.1.2.840.113635.100.6.2.6] exists')
+      || !normalized.includes('certificate leaf[field.1.2.840.113635.100.6.1.13] exists')) {
+    throw new Error(`${label} designated requirement does not require an Apple Developer ID certificate`)
+  }
+  const teamRequirement = new RegExp(`certificate\\s+leaf\\[subject\\.ou\\]\\s*=\\s*"?${expectedTeamId.toLowerCase()}"?(?:\\s|$)`)
+  if (!teamRequirement.test(normalized)) {
+    throw new Error(`${label} designated requirement has the wrong Apple Developer Team ID`)
   }
   if (
     expectedIdentifier

@@ -11,6 +11,7 @@ function localPreferences(initial: GeneralPreferencesSnapshot) {
   }
   return {
     get: async () => structuredClone(snapshot),
+    setInterfaceLanguage: (interfaceLanguage: GeneralPreferencesSnapshot['interfaceLanguage']) => commit({ interfaceLanguage }),
     setStartupLocationMode: (startupLocationMode: GeneralPreferencesSnapshot['startupLocationMode']) => commit({ startupLocationMode }),
     setLastSettingsSection: (lastSettingsSection: GeneralPreferencesSnapshot['lastSettingsSection']) => commit({ lastSettingsSection }),
     setExecutionConsolePlacement: (executionConsolePlacement: GeneralPreferencesSnapshot['executionConsolePlacement']) => commit({ executionConsolePlacement }),

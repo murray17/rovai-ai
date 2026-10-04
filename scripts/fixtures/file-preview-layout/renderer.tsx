@@ -7,7 +7,7 @@ import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, ResolvedTheme, TaskView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
-import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard, ThreadWorkspace } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from '../../../apps/desktop/src/renderer/src/FilePreviewLayout'
 import { FilePreviewPane } from '../../../apps/desktop/src/renderer/src/FilePreviewPane'
@@ -19,6 +19,7 @@ import { FILE_PREVIEW_RATIO_STORAGE_KEY } from '../../../apps/desktop/src/render
 import { openAgentRunCurrentFilePreview } from '../../../apps/desktop/src/renderer/src/agent-run-file-preview'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
 import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
+import { agents, initial, initialDraft, installations, run as fixtureRun } from '../host-web-parity/data'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const file: ResolvedFilePreview = {
@@ -104,7 +105,7 @@ const fileRestores: OpenFilePreviewRequest[] = []
 const campBindings: Array<string | null> = []
 const releases: string[] = []
 const revealCalls: string[] = []
-const reviewRequests: Array<{ campId: string; agentRunId: string; executionEpoch: number }> = []
+const reviewRequests: Array<{ threadId: string; agentRunId: string; executionEpoch: number }> = []
 let failNextReview = false
 let failNextRead = false
 let deferNextRead = false
@@ -153,7 +154,7 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId } } }
 }
 const api: FilePreviewApi = {
-  bindCamp: async (campId) => { campBindings.push(campId) },
+  bindThread: async (threadId) => { campBindings.push(threadId) },
   open: async (request) => {
     fileOpens.push(request)
     return resolvePreview(request)
@@ -206,7 +207,7 @@ const api: FilePreviewApi = {
 }
 
 const task: TaskView = {
-  taskId: 'task-1', campId: 'camp-1', title: '检查文件预览的拖拽边界，并保留窄会话中的完整任务信息',
+  taskId: 'task-1', threadId: 'camp-1', title: '检查文件预览的拖拽边界，并保留窄会话中的完整任务信息',
   description: '验证会话与文件预览可以独立调整，保留草稿，并允许重新打开文件。',
   status: 'pending', assigneeAgentId: null, blockedReason: null, completionSummary: null, cancelReason: null,
   createdByType: 'user', createdById: 'local_user', sourceAgentRunId: null,
@@ -245,11 +246,15 @@ const pickerChanges: AgentRunFileChangesView = {
   }))
 }
 Object.assign(window, { rovai: {
+  platform: 'darwin',
+  onEvent: () => () => {},
+  composerAttachments: { discard: async () => {} },
   windowControls: (window as unknown as { previewWindowControls: unknown }).previewWindowControls,
   filePreview: api,
-  request: async (method: string, request: { campId: string; agentRunId: string; executionEpoch: number }): Promise<AgentRunFileChangesDetailView> => {
+  request: async (method: string, request: { threadId: string; agentRunId: string; executionEpoch: number }): Promise<unknown> => {
+    if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     const source = [changes, pickerChanges].find(card => card.agentRunId === request.agentRunId)
-    if (method !== 'agentRunFileChanges.get' || request.campId !== 'camp-1' || !source) return unsupported()
+    if (method !== 'agentRunFileChanges.get' || request.threadId !== 'camp-1' || !source) return unsupported()
     reviewRequests.push(request)
     if (failNextReview) { failNextReview = false; throw new Error('Fixture detail unavailable') }
     return {
@@ -286,7 +291,7 @@ function Workspace(): React.JSX.Element {
   const openCurrent = (targetChanges: AgentRunFileChangesView, evidenceFileId: string): void => {
     void openAgentRunCurrentFilePreview({
       filePreview: preview,
-      campId: 'camp-1',
+      threadId: 'camp-1',
       changes: targetChanges,
       evidenceFileId,
       onError: (message) => toolNotices.push(message)
@@ -329,16 +334,16 @@ function Workspace(): React.JSX.Element {
               <button aria-pressed="true">会话</button><button aria-pressed="false">地图</button>
             </div>
           </div>
-          <div className="camp-timeline timeline-scroll" tabIndex={-1}>
+          <div className="thread-timeline camp-timeline timeline-scroll" tabIndex={-1}>
             <div className="timeline-track">
               <h2>文件预览比例与拖拽</h2>
               <p>从会话内的文件引用打开预览。文字自然换行，不影响任务、文件变化与输入区域。</p>
               <FileReferenceLink className="message-file-reference" rawReference="src/preview-layout.ts"
-                onActivate={(rawReference) => void preview.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })}>
+                onActivate={(rawReference) => void preview.open({ kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference })}>
                 preview-layout.ts
               </FileReferenceLink>
               <FileReferenceLink className="message-file-reference missing-file-reference" rawReference={missingReference}
-                onActivate={(rawReference) => void preview.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })}>
+                onActivate={(rawReference) => void preview.open({ kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference })}>
                 missing-report.ts
               </FileReferenceLink>
               <TaskTimelineCard task={task} assigneeName="未分配" onOpen={() => {}} />
@@ -366,7 +371,7 @@ function Workspace(): React.JSX.Element {
         {(docks === 'approval' || docks === 'both') && <ApprovalDock approvals={[approval]} profileById={new Map()} busy={false}
           onResolve={() => {}} containerRef={approvalRef} focusRequest={null} focusApprovalId={null} />}
         {(docks === 'recovery' || docks === 'both') && <RuntimeRecoveryDock
-          recovery={{ campId: 'camp-1', targets: [{ agentId: 'agent-1', blockerCode: 'runtime_not_configured' }] }}
+          recovery={{ threadId: 'camp-1', targets: [{ agentId: 'agent-1', blockerCode: 'runtime_not_configured' }] }}
           memberById={new Map()} profileById={new Map()} onConfigure={() => {}} onDismiss={() => setDocks('none')} />}
         <form className="composer" onSubmit={(event) => event.preventDefault()}>
           <div className="composer-route-rail"><span className="mention-target-summary">新消息交给当前队长</span></div>
@@ -402,20 +407,45 @@ function ToolRows(): React.JSX.Element {
   return <section id="tool-rows" style={{ position: 'fixed', zIndex: 100, inset: 60, padding: 20, background: 'var(--conversation-surface)' }}>
     <div id="tool-row-content" style={{ width: 420 }}>
       {readSteps.map((step, index) => <div data-tool-case={`read-${index}`} key={step.id}>
-        <ToolCallRow campId="camp-1" runId="tool-run" runStatus="succeeded" step={step} onFileOpenError={message => toolNotices.push(message)} />
+        <ToolCallRow threadId="camp-1" runId="tool-run" runStatus="succeeded" step={step} onFileOpenError={message => toolNotices.push(message)} />
       </div>)}
       <div data-tool-case="edit">
-        <ModifiedFileRow campId="camp-1" semanticKind="unified_diff_snapshot" onFileOpenError={message => toolNotices.push(message)}
+        <ModifiedFileRow threadId="camp-1" semanticKind="unified_diff_snapshot" onFileOpenError={message => toolNotices.push(message)}
           change={{ path: toolPreviewReference, changeKind: 'update', additions: 1, deletions: 1,
             diff: '@@ -1 +1 @@\n-old content\n+new content' }} />
       </div>
       <div data-tool-case="path-only">
-        <FileOperationRow campId="camp-1" runStatus="succeeded" onFileOpenError={message => toolNotices.push(message)}
+        <FileOperationRow threadId="camp-1" runStatus="succeeded" onFileOpenError={message => toolNotices.push(message)}
           step={{ ...readSteps[0], shellReadSummary: undefined, fileOperation: { operationKind: 'write', path: toolPreviewReference } }} />
       </div>
     </div>
   </section>
 }
+const initialExecutionCase = new URLSearchParams(location.search).get('initial-execution')
+let claimFirstRun: () => void
+let executionPhase = ''
+function InitialExecutionWorkspace(): React.JSX.Element {
+  previewController = useFilePreview()
+  const [phase, setPhase] = useState('pending')
+  executionPhase = phase
+  claimFirstRun = () => setPhase('running')
+  const snapshot = {
+    ...initial,
+    thread: { ...initial.thread, id: 'camp-1', title: '首次 Run 宽度验收',
+      activationState: phase === 'pending' && initialExecutionCase !== 'existing' ? 'pending' as const : 'active' as const,
+      missionId: initialExecutionCase === 'mission' ? 'mission-1' : undefined },
+    messages: phase === 'pending' ? [] : [initial.messages[0]],
+    agentRuns: phase === 'running' ? [{ ...fixtureRun, inputMessageIds: [initial.messages[0].id] }] : []
+  }
+  return <ThreadWorkspace snapshot={snapshot} projectName="Fixture" agents={agents} installations={installations}
+    initialComposerDraft={{ ...initialDraft, threadId: 'camp-1' }} busy={false} executionPlacement="right"
+    onSend={async () => {
+      setPhase('submitted')
+      return { threadMessageId: initial.messages[0].id, deliveryIds: ['delivery-1'], agentRunIds: [], addressedAgentIds: [agents[0].agentId] }
+    }} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
+    onStop={() => {}} onNotifyError={message => console.error('Initial execution fixture:', message)} worldMapEnabled={false} />
+}
+
 function Fixture(): React.JSX.Element {
   const [camp, setCamp] = useState('camp-1')
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>('day')
@@ -427,11 +457,11 @@ function Fixture(): React.JSX.Element {
     document.documentElement.style.colorScheme = theme === 'night' ? 'dark' : 'light'
     setResolvedTheme(theme)
   }
-  return <FilePreviewProvider campId={camp} resolvedTheme={resolvedTheme}>
+  return <FilePreviewProvider threadId={camp} resolvedTheme={resolvedTheme}>
     <div className="app-shell app-shell-camp">
       <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
-      <AppHeader campTitle="文件预览验收" contextLabel="Rovai AI" camp={null} onFocusApprovals={() => {}} />
-      <main className="content task-content"><Workspace /></main>
+      <AppHeader threadTitle="文件预览验收" contextLabel="Rovai AI" thread={null} onFocusApprovals={() => {}} />
+      <main className="content task-content">{initialExecutionCase ? <InitialExecutionWorkspace /> : <Workspace />}</main>
     </div>
     {toolRowsVisible && <ToolRows />}
   </FilePreviewProvider>
@@ -466,6 +496,14 @@ async function settle(): Promise<void> {
 
 Object.assign(window, { previewTest: {
   settle,
+  claimFirstRun: () => claimFirstRun(),
+  executionPhase: () => executionPhase,
+  activeTabKind: () => previewController.activeTab?.kind,
+  openExecution: () => previewController.openExecution(),
+  openActivity: () => previewController.openMissionActivity('mission-1'),
+  selectExecution: () => previewController.activate(previewController.tabs.find(tab => tab.kind === 'execution')!.id),
+  hidePane: () => previewController.hidePane(),
+  showPane: () => previewController.showPane(),
   pointerEvents,
   showToolRows: () => showToolRows(),
   toolState: () => ({ requests: [...fileRestores], notices: [...toolNotices], tabs: previewController.tabs.length, activeTabId: previewController.activeTabId }),
@@ -478,16 +516,16 @@ Object.assign(window, { previewTest: {
   async openTab(index: number) {
     const rawReference = tabFiles[index]
     if (!rawReference) throw new Error('Unknown fixture tab')
-    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
+    await previewController.open({ kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference })
     await settle()
   },
   async openAttachment() {
     await previewController.open({
       kind: 'attachment',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       locator: {
         owner: 'message',
-        campId: 'camp-1',
+        threadId: 'camp-1',
         messageId: 'message-1',
         attachmentRefId: 'attachment-1'
       }
@@ -496,7 +534,7 @@ Object.assign(window, { previewTest: {
   },
   async openExternal() {
     await previewController.open({
-      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: externalReference
+      kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference: externalReference
     })
     await settle()
   },
@@ -504,19 +542,19 @@ Object.assign(window, { previewTest: {
   async openPath(index: number) {
     const rawReference = pathReferences[index]
     if (!rawReference) throw new Error('Unknown fixture path')
-    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
+    await previewController.open({ kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference })
     await settle()
   },
   async openMarkdown() {
     await previewController.open({
-      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: markdownReference
+      kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference: markdownReference
     })
     await settle()
   },
   async openToolPreview(failRead = false) {
     failNextRead = failRead
     const outcome = await previewController.open(
-      { kind: 'camp_workspace', campId: 'camp-1', rawReference: toolPreviewReference },
+      { kind: 'camp_workspace', threadId: 'camp-1', rawReference: toolPreviewReference },
       undefined,
       undefined,
       { commitOnSuccess: true, previewOnly: true }
@@ -528,7 +566,7 @@ Object.assign(window, { previewTest: {
     deferNextRead = true
     const started = new Promise<void>((resolve) => { deferredReadStarted = resolve })
     pendingToolOpen = previewController.open(
-      { kind: 'camp_workspace', campId: 'camp-1', rawReference: toolPreviewReference },
+      { kind: 'camp_workspace', threadId: 'camp-1', rawReference: toolPreviewReference },
       undefined,
       undefined,
       { commitOnSuccess: true, previewOnly: true }
@@ -548,7 +586,7 @@ Object.assign(window, { previewTest: {
   },
   async openMissing() {
     await previewController.open({
-      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: missingReference
+      kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference: missingReference
     })
     await settle()
   },
@@ -741,7 +779,7 @@ Object.assign(window, { previewTest: {
     }
   },
   async openFindFixture(rawReference: string) {
-    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
+    await previewController.open({ kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference })
     await settle()
   },
   async workerSafety() {
@@ -754,7 +792,7 @@ Object.assign(window, { previewTest: {
     return { cancelled: await cancelled, timeout: timedOut.error }
   },
   async openHtml() {
-    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: 'find.html' })
+    await previewController.open({ kind: 'message_reference', threadId: 'camp-1', messageId: 'message-1', rawReference: 'find.html' })
     await settle()
     const deadline = performance.now() + 4_000
     while (document.querySelector<HTMLButtonElement>('.file-preview-find-trigger')?.disabled) {

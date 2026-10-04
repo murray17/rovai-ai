@@ -1,6 +1,5 @@
 use crate::message_quote::{MessageQuoteSnapshot, QuoteStorage, load_quotes};
 use std::{
-    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
@@ -14,11 +13,9 @@ use crate::{
     agent_run_file_change::{AgentRunFileChangesView, list_completed_run_file_changes},
     agent_run_image::{AgentRunImagesView, list_camp_images},
     camp_attachment::DIRECTORY_MEDIA_TYPE,
-    camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
-    camp_id::CampId,
-    camp_message_publication::{
-        public_camp_message_event_predicate, public_camp_message_publication_cte,
-    },
+    camp_content::{StructuredThreadMessageContent, normalize_content, render_current_plain_text},
+    camp_id::ThreadId,
+    camp_message_publication::public_camp_message_publication_cte,
     canonical_activity::CanonicalRuntimeActivity,
     command::{canonical_json_digest, project_persisted_command_result_event_payload},
     current_input_skill::CurrentInputSkillResolution,
@@ -32,7 +29,12 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 34;
+mod navigation;
+use navigation::*;
+mod message_model;
+pub use message_model::ThreadMessageRuntimeModelView;
+
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 35;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -62,17 +64,18 @@ const FIND_NAVIGATION_CAMP_SQL: &str = r#"
     WHERE camp.id = ?1
       AND camp.deletion_operation_id IS NULL
       AND (camp.activation_state = 'active'
+        OR EXISTS(SELECT 1 FROM pending_camp_draft_presence d WHERE d.camp_id = camp.id AND d.client_id = 'desktop')
         OR length(trim(COALESCE(camp_composer_draft.body, ''))) > 0
         OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id))
 "#;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NavigationCampTarget {
+pub struct NavigationThreadTarget {
     pub id: String,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel_source: Option<CampChannelSource>,
+    pub channel_source: Option<ThreadChannelSource>,
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -87,11 +90,11 @@ pub struct NavigationLeadSummary {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NavigationCampItem {
+pub struct NavigationThreadItem {
     pub id: String,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel_source: Option<CampChannelSource>,
+    pub channel_source: Option<ThreadChannelSource>,
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -100,14 +103,16 @@ pub struct NavigationCampItem {
     pub last_activity_at: String,
     pub last_activity_global_sequence: i64,
     pub latest_completion_global_sequence: i64,
+    pub last_seen_global_sequence: i64,
     pub version: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NavigationCampGroup {
+pub struct NavigationThreadGroup {
     pub total_count: usize,
-    pub recent_camps: Vec<NavigationCampItem>,
+    #[serde(rename = "recentThreads", alias = "recentCamps")]
+    pub recent_camps: Vec<NavigationThreadItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,7 +124,8 @@ pub struct ProjectNavigationGroup {
     pub last_activity_at: String,
     pub last_activity_global_sequence: i64,
     pub total_count: usize,
-    pub recent_camps: Vec<NavigationCampItem>,
+    #[serde(rename = "recentThreads", alias = "recentCamps")]
+    pub recent_camps: Vec<NavigationThreadItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,31 +133,44 @@ pub struct ProjectNavigationGroup {
 pub struct NavigationSnapshot {
     pub schema_version: i64,
     pub through_global_sequence: i64,
-    pub quick_chat: NavigationCampGroup,
+    pub quick_chat: NavigationThreadGroup,
     pub projects: Vec<ProjectNavigationGroup>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NavigationCampPage {
+pub struct NavigationThreadPage {
     pub schema_version: i64,
     pub through_global_sequence: i64,
     pub project_path: Option<String>,
     pub total_count: usize,
     pub next_offset: Option<usize>,
-    pub camps: Vec<NavigationCampItem>,
+    #[serde(rename = "threads", alias = "camps")]
+    pub camps: Vec<NavigationThreadItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampViewedAcknowledgement {
+pub struct ThreadViewedAcknowledgement {
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub last_seen_global_sequence: i64,
+    pub changed: bool,
+    pub navigation: NavigationThreadRows,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampListItem {
+pub struct NavigationThreadRows {
+    pub group_keys: Vec<String>,
+    pub through_global_sequence: i64,
+    #[serde(rename = "threads", alias = "camps")]
+    pub camps: Vec<NavigationThreadItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadListItem {
     pub id: String,
     pub title: String,
     pub project_path: String,
@@ -163,13 +182,13 @@ pub struct CampListItem {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampView {
+pub struct ThreadView {
     pub id: String,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mission_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel_source: Option<CampChannelSource>,
+    pub channel_source: Option<ThreadChannelSource>,
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -182,7 +201,7 @@ pub struct CampView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampChannelSource {
+pub struct ThreadChannelSource {
     pub provider: String,
     pub conversation_kind: String,
 }
@@ -190,7 +209,7 @@ pub struct CampChannelSource {
 pub(crate) fn camp_channel_source_from_row(
     row: &rusqlite::Row<'_>,
     column: usize,
-) -> rusqlite::Result<Option<CampChannelSource>> {
+) -> rusqlite::Result<Option<ThreadChannelSource>> {
     let provider = row.get::<_, Option<String>>(column)?;
     let conversation_kind = row.get::<_, Option<String>>(column + 1)?;
     Ok(provider
@@ -198,9 +217,9 @@ pub(crate) fn camp_channel_source_from_row(
         .and_then(|(provider, conversation_kind)| {
             matches!(
                 (provider.as_str(), conversation_kind.as_str()),
-                ("feishu", "p2p" | "group" | "topic") | ("dingtalk", "p2p" | "group")
+                ("feishu" | "lark", "p2p" | "group" | "topic") | ("dingtalk", "p2p" | "group")
             )
-            .then_some(CampChannelSource {
+            .then_some(ThreadChannelSource {
                 provider,
                 conversation_kind,
             })
@@ -209,9 +228,9 @@ pub(crate) fn camp_channel_source_from_row(
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMemberView {
+pub struct ThreadMemberView {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fast: Option<crate::camp_fast::CampMemberFastView>,
+    pub fast: Option<crate::camp_fast::ThreadMemberFastView>,
     pub agent_id: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
@@ -227,7 +246,7 @@ pub struct CampMemberView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMembershipReconciliationView {
+pub struct ThreadMembershipReconciliationView {
     pub id: String,
     pub agent_id: String,
     pub membership_version: i64,
@@ -243,6 +262,7 @@ pub struct CampMembershipReconciliationView {
 #[serde(rename_all = "camelCase")]
 pub struct TaskView {
     pub task_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub title: String,
     pub description: String,
@@ -265,7 +285,7 @@ pub struct TaskView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMessageView {
+pub struct ThreadMessageView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mission_start: Option<Value>,
     pub quotes: Vec<MessageQuoteSnapshot>,
@@ -276,12 +296,15 @@ pub struct CampMessageView {
     pub author_id: String,
     pub author_display_name: Option<String>,
     pub source_agent_run_id: Option<String>,
+    pub runtime_model: Option<ThreadMessageRuntimeModelView>,
     pub body: String,
-    pub content: StructuredCampMessageContent,
-    pub attachments: Vec<CampMessageAttachmentView>,
+    pub content: StructuredThreadMessageContent,
+    pub attachments: Vec<ThreadMessageAttachmentView>,
     pub address_mode: String,
     pub addressed_agent_ids: Value,
+    #[serde(rename = "replyToThreadMessageId", alias = "replyToCampMessageId")]
     pub reply_to_camp_message_id: Option<String>,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
     pub presentation: Option<Value>,
     pub created_at: String,
@@ -290,18 +313,18 @@ pub struct CampMessageView {
     pub version: i64,
 }
 
-pub type CampMessageAttachmentView = LocalAttachmentSourceView;
+pub type ThreadMessageAttachmentView = LocalAttachmentSourceView;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampTurnView {
+pub struct ThreadTurnView {
     pub id: String,
     pub trigger_type: String,
     pub trigger_id: String,
     pub status: String,
     pub cancel_requested_at: Option<String>,
     pub aggregate_reason_code: Option<String>,
-    pub execution_budget: CampTurnExecutionBudgetView,
+    pub execution_budget: ThreadTurnExecutionBudgetView,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -310,7 +333,7 @@ pub struct CampTurnView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampTurnExecutionBudgetView {
+pub struct ThreadTurnExecutionBudgetView {
     pub schema_version: i64,
     pub accepted_at: String,
     pub deadline_at: Option<String>,
@@ -340,6 +363,7 @@ pub struct AgentRunRuntimeModelView {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunView {
     pub id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
     pub input_message_ids: Vec<String>,
     pub anchor_message_id: Option<String>,
@@ -395,6 +419,7 @@ pub struct AgentRunDiagnosticRuntimeView {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunDiagnosticOutputView {
     pub final_output_digest: Option<String>,
+    #[serde(rename = "finalThreadMessageId", alias = "finalCampMessageId")]
     pub final_camp_message_id: Option<String>,
     pub public_output: Option<String>,
     pub unavailable_reason: Option<String>,
@@ -437,6 +462,10 @@ pub struct AgentRunDiagnosticContextManifestView {
     pub manifest_id: Option<String>,
     pub rendered_payload_digest: Option<String>,
     pub charter_delivery_mode: Option<String>,
+    #[serde(
+        rename = "threadMessageBoundarySequence",
+        alias = "campMessageBoundarySequence"
+    )]
     pub camp_message_boundary_sequence: Option<i64>,
     pub skill_exposure_digest: Option<String>,
     pub mcp_exposure_digest: Option<String>,
@@ -464,7 +493,9 @@ pub struct AgentRunDiagnosticView {
     pub schema_version: i64,
     pub agent_run_id: String,
     pub execution_epoch: i64,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
     pub conversation_id: String,
     pub agent_id: String,
@@ -536,6 +567,10 @@ pub struct RuntimeInputDeliveryView {
     pub execution_epoch: i64,
     pub status: String,
     pub native_input_id: Option<String>,
+    #[serde(
+        rename = "boundaryThreadMessageSequence",
+        alias = "boundaryCampMessageSequence"
+    )]
     pub boundary_camp_message_sequence: i64,
     pub prepared_at: String,
     pub accepted_at: Option<String>,
@@ -556,11 +591,16 @@ pub struct ContextManifestView {
     pub agent_run_id: String,
     pub bootstrap: NativeSessionBootstrapEvidenceView,
     pub native_binding_generation: i64,
+    #[serde(
+        rename = "threadMessageBoundarySequence",
+        alias = "campMessageBoundarySequence"
+    )]
     pub camp_message_boundary_sequence: i64,
     pub conversation_message_boundary_sequence: i64,
     pub history_fence_version: i64,
     pub global_public_message_boundary: i64,
-    pub history_camps: Vec<ContextManifestHistoryCampView>,
+    #[serde(rename = "historyThreads", alias = "historyCamps")]
+    pub history_camps: Vec<ContextManifestHistoryThreadView>,
     pub raw_message_count: usize,
     pub previous_accepted_public_boundary_sequence: i64,
     pub context_delivery_profile_version: i64,
@@ -583,7 +623,7 @@ pub struct ContextManifestView {
     pub workspace_fact_digest: Option<String>,
     pub workspace_fact_included: bool,
     pub current_input_source: Value,
-    pub attachment_refs: Vec<CampAttachmentRefView>,
+    pub attachment_refs: Vec<ThreadAttachmentRefView>,
     pub attachment_digest: String,
     pub skill_exposure: SkillExposureSnapshot,
     pub skill_exposure_digest: String,
@@ -615,8 +655,10 @@ pub struct RunFactRefView {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ContextManifestHistoryCampView {
+pub struct ContextManifestHistoryThreadView {
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
+    #[serde(rename = "threadTitle", alias = "campTitle")]
     pub camp_title: String,
     pub last_visible_activity_at: String,
 }
@@ -640,7 +682,7 @@ pub struct NativeSessionBootstrapEvidenceView {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampAttachmentRefView {
+pub struct ThreadAttachmentRefView {
     pub attachment_id: String,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -707,6 +749,7 @@ pub struct DomainEventView {
     pub global_sequence: i64,
     pub event_id: Option<String>,
     pub event_type: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: Option<String>,
     pub entity_type: Option<String>,
     pub entity_id: Option<String>,
@@ -720,16 +763,18 @@ pub struct DomainEventView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampSnapshot {
+pub struct ThreadSnapshot {
     pub schema_version: i64,
     pub through_global_sequence: i64,
-    pub camp: CampView,
-    pub members: Vec<CampMemberView>,
-    pub membership_reconciliations: Vec<CampMembershipReconciliationView>,
+    #[serde(rename = "thread", alias = "camp")]
+    pub camp: ThreadView,
+    pub members: Vec<ThreadMemberView>,
+    pub membership_reconciliations: Vec<ThreadMembershipReconciliationView>,
     pub tasks: Vec<TaskView>,
-    pub messages: Vec<CampMessageView>,
+    pub member_creations: Vec<crate::member_studio::MemberCreationView>,
+    pub messages: Vec<ThreadMessageView>,
     pub message_deliveries: Vec<MessageDeliveryView>,
-    pub turns: Vec<CampTurnView>,
+    pub turns: Vec<ThreadTurnView>,
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
@@ -742,7 +787,7 @@ pub struct CampSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampOpenCollectionCoverage {
+pub struct ThreadOpenCollectionCoverage {
     pub loaded_count: i64,
     pub total_count: i64,
     pub omitted_count: i64,
@@ -751,7 +796,7 @@ pub struct CampOpenCollectionCoverage {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampOpenMessageCoverage {
+pub struct ThreadOpenMessageCoverage {
     pub loaded_count: i64,
     pub total_count: i64,
     pub omitted_count: i64,
@@ -763,61 +808,65 @@ pub struct CampOpenMessageCoverage {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampOpenCoverage {
-    pub tasks: CampOpenCollectionCoverage,
-    pub messages: CampOpenMessageCoverage,
-    pub message_deliveries: CampOpenCollectionCoverage,
-    pub turns: CampOpenCollectionCoverage,
-    pub agent_runs: CampOpenCollectionCoverage,
-    pub approvals: CampOpenCollectionCoverage,
+pub struct ThreadOpenCoverage {
+    pub tasks: ThreadOpenCollectionCoverage,
+    pub messages: ThreadOpenMessageCoverage,
+    pub message_deliveries: ThreadOpenCollectionCoverage,
+    pub turns: ThreadOpenCollectionCoverage,
+    pub agent_runs: ThreadOpenCollectionCoverage,
+    pub approvals: ThreadOpenCollectionCoverage,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampOpenProjection {
+pub struct ThreadOpenProjection {
     pub schema_version: i64,
     pub through_global_sequence: i64,
-    pub camp: CampView,
-    pub members: Vec<CampMemberView>,
-    pub membership_reconciliations: Vec<CampMembershipReconciliationView>,
+    #[serde(rename = "thread", alias = "camp")]
+    pub camp: ThreadView,
+    pub members: Vec<ThreadMemberView>,
+    pub membership_reconciliations: Vec<ThreadMembershipReconciliationView>,
     pub tasks: Vec<TaskView>,
-    pub messages: Vec<CampMessageView>,
+    pub member_creations: Vec<crate::member_studio::MemberCreationView>,
+    pub messages: Vec<ThreadMessageView>,
     pub message_deliveries: Vec<MessageDeliveryView>,
-    pub turns: Vec<CampTurnView>,
+    pub turns: Vec<ThreadTurnView>,
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
     pub agent_run_images: Vec<AgentRunImagesView>,
     pub approvals: Vec<ApprovalView>,
-    pub coverage: CampOpenCoverage,
+    pub coverage: ThreadOpenCoverage,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMessagePage {
+pub struct ThreadMessagePage {
     pub schema_version: i64,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub through_global_sequence: i64,
     pub requested_before_sequence: i64,
     pub next_before_sequence: Option<i64>,
     pub has_more: bool,
-    pub messages: Vec<CampMessageView>,
+    pub messages: Vec<ThreadMessageView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMessageAroundSnapshot {
+pub struct ThreadMessageAroundSnapshot {
     pub schema_version: i64,
     pub through_global_sequence: i64,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub anchor_message_id: String,
     pub source_available: bool,
-    pub messages: Vec<CampMessageView>,
+    pub messages: Vec<ThreadMessageView>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMessageFindMatch {
+pub struct ThreadMessageFindMatch {
     pub message_id: String,
     pub message_sequence: i64,
     pub occurrence_index: i64,
@@ -827,14 +876,15 @@ pub struct CampMessageFindMatch {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMessageFindSnapshot {
+pub struct ThreadMessageFindSnapshot {
     pub schema_version: i64,
     pub through_global_sequence: i64,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub query: String,
     pub total_match_count: i64,
     pub selected_match_index: Option<i64>,
-    pub r#match: Option<CampMessageFindMatch>,
+    pub r#match: Option<ThreadMessageFindMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -842,6 +892,7 @@ pub struct CampMessageFindSnapshot {
 pub struct MessageDeliveryView {
     pub id: String,
     pub message_id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
     pub task_id: Option<String>,
     pub recipient_agent_id: String,
@@ -930,7 +981,7 @@ impl ReadModelService {
             .context("failed to check Camp activation state")
     }
 
-    pub fn list_camps(&self, database: &Database) -> Result<Vec<CampListItem>> {
+    pub fn list_camps(&self, database: &Database) -> Result<Vec<ThreadListItem>> {
         let mut statement = database.connection().prepare(
             r#"
             SELECT camp.id, camp.title, camp.project_path,
@@ -953,7 +1004,7 @@ impl ReadModelService {
         )?;
         statement
             .query_map([], |row| {
-                Ok(CampListItem {
+                Ok(ThreadListItem {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     project_path: row.get(2)?,
@@ -981,10 +1032,20 @@ impl ReadModelService {
         group_limits: &BTreeMap<String, usize>,
         client: &crate::draft_client::DraftClient,
     ) -> Result<NavigationSnapshot> {
+        self.navigation_snapshot_for_groups(database, group_limits, None, client)
+    }
+
+    pub fn navigation_snapshot_for_groups(
+        &self,
+        database: &mut Database,
+        group_limits: &BTreeMap<String, usize>,
+        group_keys: Option<&[String]>,
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<NavigationSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let camps = load_navigation_camps(&transaction, client)?;
-        let (quick_chat, projects) = group_navigation_camps(camps, group_limits);
+        let (quick_chat, projects) =
+            load_navigation_groups(&transaction, client, group_limits, group_keys)?;
         transaction.commit()?;
         Ok(NavigationSnapshot {
             schema_version: NAVIGATION_SCHEMA_VERSION,
@@ -1000,7 +1061,7 @@ impl ReadModelService {
         project_path: Option<&str>,
         offset: usize,
         limit: usize,
-    ) -> Result<NavigationCampPage> {
+    ) -> Result<NavigationThreadPage> {
         self.navigation_group_camps_for_client(
             database,
             project_path,
@@ -1017,24 +1078,20 @@ impl ReadModelService {
         offset: usize,
         limit: usize,
         client: &crate::draft_client::DraftClient,
-    ) -> Result<NavigationCampPage> {
+    ) -> Result<NavigationThreadPage> {
         let limit = limit.clamp(1, 200);
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let camps = load_navigation_camps(&transaction, client)?
-            .into_iter()
-            .filter(|camp| match project_path {
-                Some(path) => camp.project_binding_kind == "directory" && camp.project_path == path,
-                None => camp.project_binding_kind == "quick_chat",
-            })
-            .collect::<Vec<_>>();
-        let total_count = camps.len();
+        let key = project_path
+            .map(|path| format!("directory:{path}"))
+            .unwrap_or_else(|| "quick-chat".into());
+        let total_count = navigation_group_count(&transaction, client, &key)?;
         let start = offset.min(total_count);
         let end = start.saturating_add(limit).min(total_count);
         let next_offset = (end < total_count).then_some(end);
-        let camps = camps[start..end].to_vec();
+        let camps = load_navigation_group(&transaction, client, &key, start, limit)?;
         transaction.commit()?;
-        Ok(NavigationCampPage {
+        Ok(NavigationThreadPage {
             schema_version: NAVIGATION_SCHEMA_VERSION,
             through_global_sequence,
             project_path: project_path.map(str::to_string),
@@ -1044,15 +1101,31 @@ impl ReadModelService {
         })
     }
 
+    pub fn navigation_camps(
+        &self,
+        database: &mut Database,
+        camp_ids: &[String],
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<NavigationThreadRows> {
+        let tx = database.connection_mut().transaction()?;
+        let result = NavigationThreadRows {
+            group_keys: navigation_camp_group_keys(&tx, camp_ids)?,
+            through_global_sequence: current_global_sequence(&tx)?,
+            camps: load_navigation_rows(&tx, client, camp_ids)?,
+        };
+        tx.commit()?;
+        Ok(result)
+    }
+
     pub fn find_navigation_camp(
         &self,
         database: &Database,
-        camp_id: &CampId,
-    ) -> Result<Option<NavigationCampTarget>> {
+        camp_id: &ThreadId,
+    ) -> Result<Option<NavigationThreadTarget>> {
         database
             .connection()
             .query_row(FIND_NAVIGATION_CAMP_SQL, [camp_id], |row| {
-                Ok(NavigationCampTarget {
+                Ok(NavigationThreadTarget {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     channel_source: camp_channel_source_from_row(row, 5)?,
@@ -1070,7 +1143,22 @@ impl ReadModelService {
         database: &mut Database,
         camp_id: &str,
         through_global_sequence: i64,
-    ) -> Result<CampViewedAcknowledgement> {
+    ) -> Result<ThreadViewedAcknowledgement> {
+        self.acknowledge_camp_viewed_for_client(
+            database,
+            camp_id,
+            through_global_sequence,
+            &crate::draft_client::DraftClient::default(),
+        )
+    }
+
+    pub fn acknowledge_camp_viewed_for_client(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        through_global_sequence: i64,
+        client: &crate::draft_client::DraftClient,
+    ) -> Result<ThreadViewedAcknowledgement> {
         if through_global_sequence < 0 {
             anyhow::bail!("Viewed sequence must not be negative");
         }
@@ -1088,10 +1176,11 @@ impl ReadModelService {
             anyhow::bail!("Camp does not exist");
         }
         let now = chrono::Utc::now().to_rfc3339();
-        transaction.execute(
+        let changed = transaction.execute(
             r#"
             INSERT INTO camp_view_state(camp_id, last_seen_global_sequence, updated_at)
-            VALUES (?1, ?2, ?3)
+            SELECT ?1, ?2, ?3
+            WHERE ?2 > COALESCE((SELECT last_seen_global_sequence FROM camp_view_state WHERE camp_id=?1), 0)
             ON CONFLICT(camp_id) DO UPDATE SET
                 last_seen_global_sequence = MAX(
                     camp_view_state.last_seen_global_sequence,
@@ -1103,28 +1192,37 @@ impl ReadModelService {
                     THEN excluded.updated_at
                     ELSE camp_view_state.updated_at
                 END
+            WHERE excluded.last_seen_global_sequence > camp_view_state.last_seen_global_sequence
             "#,
             params![camp_id, through_global_sequence, now],
         )?;
         let last_seen_global_sequence = transaction.query_row(
-            "SELECT last_seen_global_sequence FROM camp_view_state WHERE camp_id = ?1",
+            "SELECT COALESCE((SELECT last_seen_global_sequence FROM camp_view_state WHERE camp_id = ?1), 0)",
             [camp_id],
             |row| row.get(0),
         )?;
+        let navigation = NavigationThreadRows {
+            group_keys: navigation_camp_group_keys(&transaction, &[camp_id.to_string()])?,
+            through_global_sequence: current,
+            camps: load_navigation_rows(&transaction, client, &[camp_id.to_string()])?,
+        };
         transaction.commit()?;
-        Ok(CampViewedAcknowledgement {
+        Ok(ThreadViewedAcknowledgement {
             camp_id: camp_id.to_string(),
             last_seen_global_sequence,
+            changed: changed > 0,
+            navigation,
         })
     }
 
-    pub fn camp_snapshot(&self, database: &mut Database, camp_id: &str) -> Result<CampSnapshot> {
+    pub fn camp_snapshot(&self, database: &mut Database, camp_id: &str) -> Result<ThreadSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
         let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
         let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, None)?;
+        let member_creations = crate::member_studio::list_member_creations(&transaction, camp_id)?;
         let messages = load_messages(&transaction, camp_id, 1_000)?;
         let message_deliveries = load_message_deliveries(&transaction, camp_id, None)?;
         let turns = load_turns(&transaction, camp_id, None)?;
@@ -1151,13 +1249,14 @@ impl ReadModelService {
         )?;
         transaction.commit()?;
         crate::execution_text::overlay(database, &mut execution_evidence)?;
-        Ok(CampSnapshot {
+        Ok(ThreadSnapshot {
             schema_version: READ_MODEL_SCHEMA_VERSION,
             through_global_sequence,
             camp,
             members,
             membership_reconciliations,
             tasks,
+            member_creations,
             messages,
             message_deliveries,
             turns,
@@ -1176,7 +1275,7 @@ impl ReadModelService {
         &self,
         database: &mut Database,
         camp_id: &str,
-    ) -> Result<CampOpenProjection> {
+    ) -> Result<ThreadOpenProjection> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
@@ -1184,6 +1283,7 @@ impl ReadModelService {
         let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let counts = load_camp_open_counts(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, Some(CAMP_OPEN_TASK_LIMIT))?;
+        let member_creations = crate::member_studio::list_member_creations(&transaction, camp_id)?;
         let messages = load_open_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
         let message_deliveries =
             load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
@@ -1195,7 +1295,7 @@ impl ReadModelService {
         let agent_run_images = list_camp_images(&transaction, camp_id)?;
         let approvals =
             load_approvals(&transaction, camp_id, true, Some(CAMP_OPEN_APPROVAL_LIMIT))?;
-        let coverage = CampOpenCoverage {
+        let coverage = ThreadOpenCoverage {
             tasks: collection_coverage(tasks.len(), counts.tasks),
             messages: message_coverage(&messages, counts.messages),
             message_deliveries: collection_coverage(
@@ -1207,13 +1307,14 @@ impl ReadModelService {
             approvals: collection_coverage(approvals.len(), counts.pending_approvals),
         };
         transaction.commit()?;
-        Ok(CampOpenProjection {
+        Ok(ThreadOpenProjection {
             schema_version: CAMP_OPEN_SCHEMA_VERSION,
             through_global_sequence,
             camp,
             members,
             membership_reconciliations,
             tasks,
+            member_creations,
             messages,
             message_deliveries,
             turns,
@@ -1233,7 +1334,7 @@ impl ReadModelService {
         before_sequence: i64,
         through_global_sequence: i64,
         limit: i64,
-    ) -> Result<CampMessagePage> {
+    ) -> Result<ThreadMessagePage> {
         if before_sequence <= 0 {
             anyhow::bail!("Camp Message cursor must be positive");
         }
@@ -1256,7 +1357,7 @@ impl ReadModelService {
             .then(|| messages.first().map(|message| message.sequence))
             .flatten();
         transaction.commit()?;
-        Ok(CampMessagePage {
+        Ok(ThreadMessagePage {
             schema_version: CAMP_MESSAGE_PAGE_SCHEMA_VERSION,
             camp_id: camp_id.to_string(),
             through_global_sequence,
@@ -1272,7 +1373,7 @@ impl ReadModelService {
         database: &mut Database,
         camp_id: &str,
         message_id: &str,
-    ) -> Result<CampMessageAroundSnapshot> {
+    ) -> Result<ThreadMessageAroundSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
         let anchor_sequence = transaction
@@ -1299,7 +1400,7 @@ impl ReadModelService {
             None => Vec::new(),
         };
         transaction.commit()?;
-        Ok(CampMessageAroundSnapshot {
+        Ok(ThreadMessageAroundSnapshot {
             schema_version: CAMP_MESSAGE_AROUND_SCHEMA_VERSION,
             through_global_sequence,
             camp_id: camp_id.to_string(),
@@ -1316,7 +1417,7 @@ impl ReadModelService {
         query: &str,
         selected_match_index: Option<i64>,
         anchor_message_id: Option<&str>,
-    ) -> Result<CampMessageFindSnapshot> {
+    ) -> Result<ThreadMessageFindSnapshot> {
         validate_camp_message_find_query(query)?;
 
         let transaction = database.connection_mut().transaction()?;
@@ -1359,14 +1460,14 @@ impl ReadModelService {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(statement);
 
-        let mut candidates = Vec::<CampMessageFindCandidate>::new();
+        let mut candidates = Vec::<ThreadMessageFindCandidate>::new();
         for (message_id, message_sequence, structured_content_json) in rows {
             let content =
-                serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
+                serde_json::from_str::<StructuredThreadMessageContent>(&structured_content_json)
                     .map(normalize_content)
                     .context("CampMessage Structured Content is invalid")?;
             let body = render_structured_message_content(&transaction, &content)?;
-            candidates.push(CampMessageFindCandidate {
+            candidates.push(ThreadMessageFindCandidate {
                 message_id,
                 message_sequence,
                 body,
@@ -1379,7 +1480,7 @@ impl ReadModelService {
             select_camp_message_find_match(&matches, selected_match_index, anchor_sequence);
         transaction.commit()?;
 
-        Ok(CampMessageFindSnapshot {
+        Ok(ThreadMessageFindSnapshot {
             schema_version: CAMP_MESSAGE_FIND_SCHEMA_VERSION,
             through_global_sequence,
             camp_id: camp_id.to_string(),
@@ -1743,197 +1844,6 @@ impl ReadModelService {
     }
 }
 
-fn load_navigation_camps(
-    transaction: &Transaction<'_>,
-    client: &crate::draft_client::DraftClient,
-) -> Result<Vec<NavigationCampItem>> {
-    let publication_predicate = public_camp_message_event_predicate("event_log.event_type");
-    let sql = format!(
-        r#"
-        WITH navigation_activity AS (
-            SELECT
-                event_log.camp_id,
-                MAX(CASE
-                    WHEN {publication_predicate}
-                        AND camp_message.author_type IN ('user', 'external_principal')
-                    THEN event_log.global_sequence
-                END) AS last_activity_sequence,
-                MAX(CASE
-                    WHEN event_log.event_type IN (
-                        'agent_run.succeeded',
-                        'agent_run.failed',
-                        'agent_run.cancelled'
-                    ) OR (
-                        event_log.event_type = 'camp_turn.status_changed'
-                        AND json_extract(event_log.payload_json, '$.status') = 'cancelled'
-                    )
-                    THEN event_log.global_sequence
-                END) AS latest_completion_sequence
-            FROM event_log
-            LEFT JOIN camp_message
-              ON event_log.entity_type = 'camp_message'
-             AND camp_message.id = event_log.entity_id
-            WHERE event_log.camp_id IS NOT NULL
-              AND event_log.global_sequence IS NOT NULL
-              AND ({publication_predicate} OR event_log.event_type IN (
-                  'agent_run.succeeded', 'agent_run.failed', 'agent_run.cancelled',
-                  'camp_turn.status_changed'
-              ))
-            GROUP BY event_log.camp_id
-        )
-        SELECT
-            camp.id,
-            camp.title,
-            camp.project_binding_kind,
-            camp.project_path,
-            lead.id,
-            lead.display_name,
-            COALESCE(navigation_activity.last_activity_sequence, 0),
-            COALESCE(activity_event.created_at, camp.created_at),
-            COALESCE(navigation_activity.latest_completion_sequence, 0),
-            COALESCE(camp_view_state.last_seen_global_sequence, 0),
-            EXISTS(
-                SELECT 1
-                FROM agent_run
-                LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = camp.id
-                  AND agent_run.status IN ('queued', 'running', 'waiting')
-            ),
-            camp.version,
-            camp.activation_state,
-            channel_conversation.provider,
-            channel_conversation.conversation_kind
-        FROM camp
-        LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
-        LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
-        LEFT JOIN agent_profile AS lead ON lead.id = camp.default_lead_agent_id
-        LEFT JOIN navigation_activity ON navigation_activity.camp_id = camp.id
-        LEFT JOIN event_log AS activity_event
-          ON activity_event.global_sequence = navigation_activity.last_activity_sequence
-        LEFT JOIN camp_view_state ON camp_view_state.camp_id = camp.id
-        LEFT JOIN camp_composer_draft ON camp_composer_draft.camp_id = camp.id AND camp_composer_draft.client_id = ?1
-        WHERE camp.deletion_operation_id IS NULL
-          AND NOT EXISTS(SELECT 1 FROM mission WHERE mission.camp_id=camp.id)
-          AND (camp.activation_state = 'active'
-           OR length(trim(COALESCE(camp_composer_draft.body, ''))) > 0
-           OR (camp_composer_draft.source_attachments_json IS NOT NULL AND camp_composer_draft.source_attachments_json <> '[]')
-           OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id AND client_id = ?1))
-        "#
-    );
-    let mut statement = transaction.prepare(&sql)?;
-    let rows = statement.query_map([client.id()], |row| {
-        let default_lead_agent_id = row.get::<_, Option<String>>(4)?;
-        let default_lead_display_name = row.get::<_, Option<String>>(5)?;
-        let latest_completion_global_sequence = row.get::<_, i64>(8)?;
-        let last_seen_global_sequence = row.get::<_, i64>(9)?;
-        let loading = row.get::<_, bool>(10)?;
-        let marker = if loading {
-            "loading"
-        } else if latest_completion_global_sequence > last_seen_global_sequence {
-            "unread_completed"
-        } else {
-            "none"
-        };
-        Ok(NavigationCampItem {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            channel_source: camp_channel_source_from_row(row, 13)?,
-            activation_state: row.get(12)?,
-            project_binding_kind: row.get(2)?,
-            project_path: row.get(3)?,
-            default_lead: default_lead_agent_id.map(|agent_id| NavigationLeadSummary {
-                agent_id,
-                display_name: default_lead_display_name.unwrap_or_default(),
-            }),
-            marker: marker.to_string(),
-            last_activity_at: row.get(7)?,
-            last_activity_global_sequence: row.get(6)?,
-            latest_completion_global_sequence,
-            version: row.get(11)?,
-        })
-    })?;
-    let mut camps = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    camps.sort_by(compare_navigation_camps);
-    Ok(camps)
-}
-
-fn compare_navigation_camps(left: &NavigationCampItem, right: &NavigationCampItem) -> Ordering {
-    right
-        .last_activity_at
-        .cmp(&left.last_activity_at)
-        .then_with(|| {
-            right
-                .last_activity_global_sequence
-                .cmp(&left.last_activity_global_sequence)
-        })
-        .then_with(|| left.id.cmp(&right.id))
-}
-
-fn group_navigation_camps(
-    camps: Vec<NavigationCampItem>,
-    group_limits: &BTreeMap<String, usize>,
-) -> (NavigationCampGroup, Vec<ProjectNavigationGroup>) {
-    // A request only selects a prefix of existing rows; it never determines an allocation size.
-    let limit = |key: &str| {
-        group_limits
-            .get(key)
-            .copied()
-            .unwrap_or(NAVIGATION_RECENT_CAMP_LIMIT)
-            .max(NAVIGATION_RECENT_CAMP_LIMIT)
-    };
-    let mut quick_chat_camps = Vec::new();
-    let mut project_camps = BTreeMap::<String, Vec<NavigationCampItem>>::new();
-    for camp in camps {
-        if camp.project_binding_kind == "directory" {
-            project_camps
-                .entry(camp.project_path.clone())
-                .or_default()
-                .push(camp);
-        } else {
-            quick_chat_camps.push(camp);
-        }
-    }
-    quick_chat_camps.sort_by(compare_navigation_camps);
-    let quick_chat = NavigationCampGroup {
-        total_count: quick_chat_camps.len(),
-        recent_camps: quick_chat_camps
-            .into_iter()
-            .take(limit("quick-chat"))
-            .collect(),
-    };
-
-    let mut projects = project_camps
-        .into_iter()
-        .filter_map(|(project_path, mut camps)| {
-            camps.sort_by(compare_navigation_camps);
-            let representative = camps.first()?.clone();
-            let project_key = format!("directory:{project_path}");
-            let recent_limit = limit(&project_key);
-            Some(ProjectNavigationGroup {
-                project_key,
-                name: project_display_name(&project_path),
-                project_path,
-                last_activity_at: representative.last_activity_at.clone(),
-                last_activity_global_sequence: representative.last_activity_global_sequence,
-                total_count: camps.len(),
-                recent_camps: camps.into_iter().take(recent_limit).collect(),
-            })
-        })
-        .collect::<Vec<_>>();
-    projects.sort_by(|left, right| {
-        right
-            .last_activity_at
-            .cmp(&left.last_activity_at)
-            .then_with(|| {
-                right
-                    .last_activity_global_sequence
-                    .cmp(&left.last_activity_global_sequence)
-            })
-            .then_with(|| left.project_key.cmp(&right.project_key))
-    });
-    (quick_chat, projects)
-}
-
 fn project_display_name(project_path: &str) -> String {
     Path::new(project_path)
         .file_name()
@@ -1952,7 +1862,7 @@ fn current_global_sequence(transaction: &Transaction<'_>) -> Result<i64> {
         .context("failed to capture global event sequence")
 }
 
-struct CampOpenCounts {
+struct ThreadOpenCounts {
     tasks: i64,
     messages: i64,
     message_deliveries: i64,
@@ -1961,7 +1871,7 @@ struct CampOpenCounts {
     pending_approvals: i64,
 }
 
-fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result<CampOpenCounts> {
+fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result<ThreadOpenCounts> {
     transaction
         .query_row(
             r#"
@@ -2003,7 +1913,7 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
             "#,
             [camp_id],
             |row| {
-                Ok(CampOpenCounts {
+                Ok(ThreadOpenCounts {
                     tasks: row.get(0)?,
                     messages: row.get(1)?,
                     message_deliveries: row.get(2)?,
@@ -2016,10 +1926,10 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
         .context("failed to count Camp open projection coverage")
 }
 
-fn collection_coverage(loaded_count: usize, total_count: i64) -> CampOpenCollectionCoverage {
+fn collection_coverage(loaded_count: usize, total_count: i64) -> ThreadOpenCollectionCoverage {
     let loaded_count = i64::try_from(loaded_count).unwrap_or(i64::MAX);
     let omitted_count = total_count.saturating_sub(loaded_count);
-    CampOpenCollectionCoverage {
+    ThreadOpenCollectionCoverage {
         loaded_count,
         total_count,
         omitted_count,
@@ -2027,9 +1937,9 @@ fn collection_coverage(loaded_count: usize, total_count: i64) -> CampOpenCollect
     }
 }
 
-fn message_coverage(messages: &[CampMessageView], total_count: i64) -> CampOpenMessageCoverage {
+fn message_coverage(messages: &[ThreadMessageView], total_count: i64) -> ThreadOpenMessageCoverage {
     let base = collection_coverage(messages.len(), total_count);
-    CampOpenMessageCoverage {
+    ThreadOpenMessageCoverage {
         loaded_count: base.loaded_count,
         total_count: base.total_count,
         omitted_count: base.omitted_count,
@@ -2040,7 +1950,7 @@ fn message_coverage(messages: &[CampMessageView], total_count: i64) -> CampOpenM
     }
 }
 
-fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<CampView>> {
+fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<ThreadView>> {
     transaction
         .query_row(
             r#"
@@ -2057,7 +1967,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
             "#,
             [camp_id],
             |row| {
-                Ok(CampView {
+                Ok(ThreadView {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     channel_source: camp_channel_source_from_row(row, 10)?,
@@ -2081,7 +1991,7 @@ fn load_members(
     transaction: &Transaction<'_>,
     camp_id: &str,
     default_lead: Option<&str>,
-) -> Result<Vec<CampMemberView>> {
+) -> Result<Vec<ThreadMemberView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT camp_member.agent_id, agent_profile.display_name,
@@ -2098,7 +2008,7 @@ fn load_members(
     let mut members = statement
         .query_map([camp_id], |row| {
             let agent_id: String = row.get(0)?;
-            Ok(CampMemberView {
+            Ok(ThreadMemberView {
                 fast: None,
                 is_default_lead: default_lead == Some(agent_id.as_str()),
                 agent_id,
@@ -2124,7 +2034,7 @@ fn load_members(
 fn load_membership_reconciliations(
     transaction: &Transaction<'_>,
     camp_id: &str,
-) -> Result<Vec<CampMembershipReconciliationView>> {
+) -> Result<Vec<ThreadMembershipReconciliationView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT id, agent_id, membership_version, status, reason_code,
@@ -2136,7 +2046,7 @@ fn load_membership_reconciliations(
     )?;
     statement
         .query_map([camp_id], |row| {
-            Ok(CampMembershipReconciliationView {
+            Ok(ThreadMembershipReconciliationView {
                 id: row.get(0)?,
                 agent_id: row.get(1)?,
                 membership_version: row.get(2)?,
@@ -2258,7 +2168,7 @@ fn load_tasks(
     Ok(result)
 }
 
-struct CampMessageRow {
+struct ThreadMessageRow {
     id: String,
     sequence: i64,
     timeline_global_sequence: Option<i64>,
@@ -2278,8 +2188,8 @@ struct CampMessageRow {
     version: i64,
 }
 
-fn camp_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CampMessageRow> {
-    Ok(CampMessageRow {
+fn camp_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ThreadMessageRow> {
+    Ok(ThreadMessageRow {
         id: row.get(0)?,
         sequence: row.get(1)?,
         timeline_global_sequence: row.get(2)?,
@@ -2306,7 +2216,7 @@ fn load_open_messages(
     transaction: &Transaction<'_>,
     camp_id: &str,
     limit: i64,
-) -> Result<Vec<CampMessageView>> {
+) -> Result<Vec<ThreadMessageView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT id, sequence, NULL AS timeline_global_sequence,
@@ -2336,7 +2246,7 @@ fn load_messages(
     transaction: &Transaction<'_>,
     camp_id: &str,
     limit: i64,
-) -> Result<Vec<CampMessageView>> {
+) -> Result<Vec<ThreadMessageView>> {
     let publication_cte = public_camp_message_publication_cte();
     let sql = format!(
         r#"
@@ -2374,7 +2284,7 @@ fn load_messages_before(
     camp_id: &str,
     before_sequence: i64,
     limit: i64,
-) -> Result<Vec<CampMessageView>> {
+) -> Result<Vec<ThreadMessageView>> {
     let publication_cte = public_camp_message_publication_cte();
     let sql = format!(
         r#"
@@ -2416,7 +2326,7 @@ fn load_messages_around(
     message_id: &str,
     anchor_sequence: i64,
     radius: i64,
-) -> Result<Vec<CampMessageView>> {
+) -> Result<Vec<ThreadMessageView>> {
     let publication_cte = public_camp_message_publication_cte();
     let sql = format!(
         r#"
@@ -2481,11 +2391,13 @@ fn load_messages_around(
 
 fn hydrate_message_views(
     transaction: &Transaction<'_>,
-    rows: Vec<CampMessageRow>,
-) -> Result<Vec<CampMessageView>> {
+    rows: Vec<ThreadMessageRow>,
+) -> Result<Vec<ThreadMessageView>> {
     let requested_message_ids = rows.iter().map(|row| &row.id).collect::<Vec<_>>();
     let requested_message_ids_json = serde_json::to_string(&requested_message_ids)?;
-    let mut attachments_by_message_id = BTreeMap::<String, Vec<CampMessageAttachmentView>>::new();
+    let mut models_by_message_id =
+        message_model::load_message_models(transaction, &requested_message_ids_json)?;
+    let mut attachments_by_message_id = BTreeMap::<String, Vec<ThreadMessageAttachmentView>>::new();
     for row in &rows {
         let source_attachments = parse_source_attachments(&row.source_attachments_json)?;
         if !source_attachments.is_empty() {
@@ -2571,7 +2483,7 @@ fn hydrate_message_views(
         } else {
             ("file".to_string(), 1)
         };
-        let attachment = CampMessageAttachmentView {
+        let attachment = ThreadMessageAttachmentView {
             id,
             display_name,
             kind,
@@ -2590,7 +2502,7 @@ fn hydrate_message_views(
     rows.into_iter()
         .map(|row| {
             let content =
-                serde_json::from_str::<StructuredCampMessageContent>(&row.structured_content_json)
+                serde_json::from_str::<StructuredThreadMessageContent>(&row.structured_content_json)
                     .map(normalize_content)
                     .context("CampMessage Structured Content is invalid")?;
             let body = render_structured_message_content(transaction, &content)?;
@@ -2609,8 +2521,9 @@ fn hydrate_message_views(
                 None
             };
             let mission_start=transaction.query_row("SELECT s.mission_id,m.title,m.description FROM mission_start s JOIN mission m ON m.id=s.mission_id WHERE s.message_id=?1",[&row.id],|r|Ok(serde_json::json!({"missionId":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"description":r.get::<_,String>(2)?}))).optional()?;
-            Ok(CampMessageView {
+            Ok(ThreadMessageView {
                 mission_start,
+                runtime_model: models_by_message_id.remove(&row.id),
                 quotes: load_quotes(transaction, QuoteStorage::CampMessage, &row.id)?,
                 id: row.id,
                 sequence: row.sequence,
@@ -2642,7 +2555,7 @@ fn hydrate_message_views(
 
 fn render_structured_message_content(
     transaction: &Transaction<'_>,
-    content: &[crate::camp_content::StructuredCampMessageSegment],
+    content: &[crate::camp_content::StructuredThreadMessageSegment],
 ) -> Result<String> {
     render_current_plain_text(transaction, content)
 }
@@ -2699,16 +2612,16 @@ fn case_insensitive_scalar_match_ranges(value: &str, query: &str) -> Vec<(usize,
     ranges
 }
 
-struct CampMessageFindCandidate {
+struct ThreadMessageFindCandidate {
     message_id: String,
     message_sequence: i64,
     body: String,
 }
 
 fn flatten_camp_message_find_matches(
-    mut candidates: Vec<CampMessageFindCandidate>,
+    mut candidates: Vec<ThreadMessageFindCandidate>,
     query: &str,
-) -> Vec<CampMessageFindMatch> {
+) -> Vec<ThreadMessageFindMatch> {
     candidates.sort_by(|left, right| {
         left.message_sequence
             .cmp(&right.message_sequence)
@@ -2721,7 +2634,7 @@ fn flatten_camp_message_find_matches(
                 .into_iter()
                 .enumerate()
                 .map(
-                    move |(occurrence_index, (start_offset, end_offset))| CampMessageFindMatch {
+                    move |(occurrence_index, (start_offset, end_offset))| ThreadMessageFindMatch {
                         message_id: candidate.message_id.clone(),
                         message_sequence: candidate.message_sequence,
                         occurrence_index: occurrence_index as i64,
@@ -2734,10 +2647,10 @@ fn flatten_camp_message_find_matches(
 }
 
 fn select_camp_message_find_match(
-    matches: &[CampMessageFindMatch],
+    matches: &[ThreadMessageFindMatch],
     requested_index: Option<i64>,
     anchor_sequence: Option<i64>,
-) -> (Option<i64>, Option<CampMessageFindMatch>) {
+) -> (Option<i64>, Option<ThreadMessageFindMatch>) {
     let total_match_count = matches.len() as i64;
     let selected_index = if total_match_count == 0 {
         None
@@ -2764,7 +2677,7 @@ fn load_turns(
     transaction: &Transaction<'_>,
     camp_id: &str,
     limit: Option<i64>,
-) -> Result<Vec<CampTurnView>> {
+) -> Result<Vec<ThreadTurnView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT id, trigger_type, trigger_id, status,
@@ -2795,14 +2708,14 @@ fn load_turns(
     )?;
     statement
         .query_map(params![camp_id, limit], |row| {
-            Ok(CampTurnView {
+            Ok(ThreadTurnView {
                 id: row.get(0)?,
                 trigger_type: row.get(1)?,
                 trigger_id: row.get(2)?,
                 status: row.get(3)?,
                 cancel_requested_at: row.get(4)?,
                 aggregate_reason_code: row.get(5)?,
-                execution_budget: CampTurnExecutionBudgetView {
+                execution_budget: ThreadTurnExecutionBudgetView {
                     schema_version: row.get(6)?,
                     accepted_at: row.get(7)?,
                     deadline_at: row.get(8)?,
@@ -3588,6 +3501,14 @@ pub(crate) fn attach_canonical_activity(
     connection: &Connection,
     evidence: &mut [AgentRunExecutionEvidenceView],
 ) -> Result<()> {
+    attach_canonical_activity_projection(connection, evidence, false)
+}
+
+pub(crate) fn attach_canonical_activity_projection(
+    connection: &Connection,
+    evidence: &mut [AgentRunExecutionEvidenceView],
+    metadata_only: bool,
+) -> Result<()> {
     if evidence.is_empty() {
         return Ok(());
     }
@@ -3617,7 +3538,9 @@ pub(crate) fn attach_canonical_activity(
                activity.operation_id, activity.classifier_version,
                activity.activity_domain,
                activity.semantic_kind, activity.tool_name,
-               activity.presentation_hint, activity.diff_projection_json,
+               activity.presentation_hint,
+               CASE WHEN ?6 THEN json_set(activity.diff_projection_json, '$.entries', json('[]'))
+                    ELSE activity.diff_projection_json END,
                activity.phase, activity.outcome,
                activity.credibility, activity.coverage_level,
                activity.source_authority, activity.source_evidence_ids_json,
@@ -3644,6 +3567,7 @@ pub(crate) fn attach_canonical_activity(
             crate::canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
             crate::canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
             crate::canonical_activity::LEGACY_CLASSIFIER_VERSION,
+            metadata_only,
         ],
         |row| {
             let diff_projection: Option<String> = row.get(7)?;
@@ -3876,7 +3800,7 @@ fn load_context_manifests(
                 .context("ContextManifest A2A Guidance evidence is invalid")?;
             let current_input_source = serde_json::from_str::<Value>(&row.9)
                 .context("ContextManifest Current Input source is invalid")?;
-            let attachment_refs = serde_json::from_str::<Vec<CampAttachmentRefView>>(&row.10)
+            let attachment_refs = serde_json::from_str::<Vec<ThreadAttachmentRefView>>(&row.10)
                 .context("ContextManifest attachment references are invalid")?;
             let skill_exposure = serde_json::from_str::<SkillExposureSnapshot>(&row.12)
                 .context("ContextManifest Skill exposure is invalid")?;
@@ -3989,7 +3913,7 @@ fn load_context_manifests(
 fn load_context_manifest_history_camps(
     transaction: &Transaction<'_>,
     context_manifest_id: &str,
-) -> Result<Vec<ContextManifestHistoryCampView>> {
+) -> Result<Vec<ContextManifestHistoryThreadView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT camp_id, camp_title, last_visible_activity_at
@@ -4000,7 +3924,7 @@ fn load_context_manifest_history_camps(
     )?;
     statement
         .query_map([context_manifest_id], |row| {
-            Ok(ContextManifestHistoryCampView {
+            Ok(ContextManifestHistoryThreadView {
                 camp_id: row.get(0)?,
                 camp_title: row.get(1)?,
                 last_visible_activity_at: row.get(2)?,
@@ -4254,7 +4178,7 @@ fn load_events(
                 Ok(DomainEventView {
                     global_sequence,
                     event_id,
-                    event_type,
+                    event_type: crate::thread_compat::public_host_method(&event_type),
                     camp_id,
                     entity_type,
                     entity_id,
@@ -4277,7 +4201,7 @@ fn load_events(
 #[cfg(test)]
 mod tests {
     use super::{
-        CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS, CampMessageFindCandidate,
+        CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS, ThreadMessageFindCandidate,
         case_insensitive_scalar_match_ranges, flatten_camp_message_find_matches,
         select_camp_message_find_match, validate_camp_message_find_query,
     };
@@ -4302,12 +4226,12 @@ mod tests {
     fn conversation_find_flattens_orders_selects_and_wraps_without_a_database() {
         let matches = flatten_camp_message_find_matches(
             vec![
-                CampMessageFindCandidate {
+                ThreadMessageFindCandidate {
                     message_id: "later".to_string(),
                     message_sequence: 2,
                     body: "NEEDLE late".to_string(),
                 },
-                CampMessageFindCandidate {
+                ThreadMessageFindCandidate {
                     message_id: "first".to_string(),
                     message_sequence: 1,
                     body: "Needle 中 needle".to_string(),
@@ -4434,7 +4358,7 @@ mod tests {
                     "current" => {
                         assert_eq!(value["sourceAgentRunId"], "current-sender");
                         assert_eq!(value["targetAgentRunId"], "current-target");
-                        assert!(value["campTurnId"].is_null());
+                        assert!(value["threadTurnId"].is_null());
                     }
                     "user-current" => {
                         assert!(value.get("sourceAgentRunId").is_none());
@@ -4458,12 +4382,12 @@ mod slow_tests {
     use super::*;
     use crate::{
         agent_profile::configure_test_runtime,
-        camp_attachment::CampAttachmentStore,
-        camp_content::StructuredCampMessageSegment as Segment,
+        camp_attachment::ThreadAttachmentStore,
+        camp_content::StructuredThreadMessageSegment as Segment,
         collaboration::{
-            AddCampMemberCommand, CollaborationService, CreateCampCommand, ProjectBindingKind,
-            RenameCampCommand, TestCampConversationCommand, TestCampMessageAddress,
-            TestCampMessageCommand,
+            AddThreadMemberCommand, CollaborationService, CreateThreadCommand, ProjectBindingKind,
+            RenameThreadCommand, TestThreadConversationCommand, TestThreadMessageAddress,
+            TestThreadMessageCommand,
         },
         command::{ActorRef, COMMAND_RESULT_STORAGE_MARKER_JSON, CommandEnvelope},
     };
@@ -4497,7 +4421,7 @@ mod slow_tests {
                 &user_envelope(
                     "create-structured-read-camp",
                     None,
-                    CreateCampCommand::for_test_with_members(
+                    CreateThreadCommand::for_test_with_members(
                         directory.join("workspace").to_string_lossy().to_string(),
                         &["agent_2"],
                         "agent_2",
@@ -4505,7 +4429,7 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -4526,7 +4450,7 @@ mod slow_tests {
                 text: " 处理".to_string(),
             },
         ];
-        let draft = CampAttachmentStore::new(&directory)
+        let draft = ThreadAttachmentStore::new(&directory)
             .save_content(
                 &mut database,
                 &camp_id,
@@ -4540,12 +4464,12 @@ mod slow_tests {
                 &user_envelope(
                     "send-structured-read-message",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(draft.revision),
                         body: String::new(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -4558,12 +4482,12 @@ mod slow_tests {
                 &user_envelope(
                     "send-legacy-read-message",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "旧消息仍是 @muwa".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -4591,7 +4515,7 @@ mod slow_tests {
         for retired_field in ["inboxMessages", "conversationInputs"] {
             assert!(
                 serialized_snapshot.get(retired_field).is_none(),
-                "public CampSnapshot must not expose retired {retired_field}"
+                "public ThreadSnapshot must not expose retired {retired_field}"
             );
         }
         assert!(serialized_snapshot.get("messageDeliveries").is_some());
@@ -4637,17 +4561,17 @@ mod slow_tests {
                 &user_envelope(
                     "null-unsettled-effect-create",
                     None,
-                    TestCampConversationCommand {
+                    TestThreadConversationCommand {
                         project_path: workspace.to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "验证空错误码投影".to_string(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         purpose: "验证外部效果布尔值非空".to_string(),
                     },
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         database
@@ -4723,13 +4647,13 @@ mod slow_tests {
                 &user_envelope(
                     "create-message-around-camp",
                     None,
-                    CreateCampCommand::for_test(
+                    CreateThreadCommand::for_test(
                         directory.join("workspace").to_string_lossy().to_string(),
                     ),
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -4739,7 +4663,7 @@ mod slow_tests {
                 &user_envelope(
                     "create-other-message-around-camp",
                     None,
-                    CreateCampCommand::for_test(
+                    CreateThreadCommand::for_test(
                         directory
                             .join("other-workspace")
                             .to_string_lossy()
@@ -4748,7 +4672,10 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        let other_camp_id = other.result.payload["campId"].as_str().unwrap().to_string();
+        let other_camp_id = other.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let transaction = database.connection_mut().transaction().unwrap();
         {
             let mut statement = transaction
@@ -4987,13 +4914,13 @@ mod slow_tests {
                 &user_envelope(
                     "create-conversation-find-camp",
                     None,
-                    CreateCampCommand::for_test(
+                    CreateThreadCommand::for_test(
                         directory.join("workspace").to_string_lossy().to_string(),
                     ),
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -5003,7 +4930,7 @@ mod slow_tests {
                 &user_envelope(
                     "create-other-conversation-find-camp",
                     None,
-                    CreateCampCommand::for_test(
+                    CreateThreadCommand::for_test(
                         directory
                             .join("other-workspace")
                             .to_string_lossy()
@@ -5012,7 +4939,7 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        let other_camp_id = other.result.payload["campId"].as_str().unwrap();
+        let other_camp_id = other.result.payload["threadId"].as_str().unwrap();
         let transaction = database.connection_mut().transaction().unwrap();
         {
             let mut statement = transaction
@@ -5150,7 +5077,7 @@ mod slow_tests {
         assert_eq!(anchored.selected_match_index, Some(2));
         assert_eq!(
             anchored.r#match,
-            Some(CampMessageFindMatch {
+            Some(ThreadMessageFindMatch {
                 message_id: "find-message-3".to_string(),
                 message_sequence: 3,
                 occurrence_index: 0,
@@ -5194,13 +5121,13 @@ mod slow_tests {
                 &user_envelope(
                     "create-find-snapshot-camp",
                     None,
-                    CreateCampCommand::for_test(
+                    CreateThreadCommand::for_test(
                         directory.join("workspace").to_string_lossy().to_string(),
                     ),
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let expected_high_water: i64 = database
             .connection()
             .query_row(
@@ -5251,7 +5178,7 @@ mod slow_tests {
         assert_eq!(snapshot.selected_match_index, Some(2));
         assert_eq!(
             snapshot.r#match,
-            Some(CampMessageFindMatch {
+            Some(ThreadMessageFindMatch {
                 message_id: "find-snapshot-2".to_string(),
                 message_sequence: 2,
                 occurrence_index: 0,
@@ -5272,7 +5199,7 @@ mod slow_tests {
         project_binding_kind: ProjectBindingKind,
         title: &str,
     ) -> String {
-        let mut command = CreateCampCommand::for_test(project_path.to_string_lossy().to_string());
+        let mut command = CreateThreadCommand::for_test(project_path.to_string_lossy().to_string());
         command.project_binding_kind = project_binding_kind;
         let created = collaboration
             .create_camp(
@@ -5284,7 +5211,7 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -5294,7 +5221,7 @@ mod slow_tests {
                 &user_envelope(
                     &format!("navigation-member-{command_suffix}"),
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
                         expected_membership_generation: 1,
@@ -5318,7 +5245,7 @@ mod slow_tests {
                 &user_envelope(
                     &format!("navigation-title-{command_suffix}"),
                     Some(&camp_id),
-                    RenameCampCommand {
+                    RenameThreadCommand {
                         camp_id: camp_id.clone(),
                         title: title.to_string(),
                         expected_version: version,
@@ -5332,12 +5259,12 @@ mod slow_tests {
                 &user_envelope(
                     &format!("navigation-message-{command_suffix}"),
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: format!("用户消息 {command_suffix}"),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -5430,7 +5357,7 @@ mod slow_tests {
         );
         for camp in [older, &snapshot.projects[0].recent_camps[0]] {
             let found = read_model
-                .find_navigation_camp(&database, &CampId::parse(&camp.id).unwrap())
+                .find_navigation_camp(&database, &ThreadId::parse(&camp.id).unwrap())
                 .unwrap()
                 .unwrap();
             assert_eq!(found.id, camp.id);
@@ -5441,7 +5368,7 @@ mod slow_tests {
         }
         assert!(
             read_model
-                .find_navigation_camp(&database, &CampId::new())
+                .find_navigation_camp(&database, &ThreadId::new())
                 .unwrap()
                 .is_none()
         );
@@ -5500,22 +5427,23 @@ mod slow_tests {
 
         // Empty pending Camps remain outside navigation; a saved draft makes one discoverable.
         let mut pending_command =
-            CreateCampCommand::for_test(project_root.to_string_lossy().to_string());
-        pending_command.activation_state = crate::collaboration::CampActivationState::Pending;
+            CreateThreadCommand::for_test(project_root.to_string_lossy().to_string());
+        pending_command.activation_state = crate::collaboration::ThreadActivationState::Pending;
         let pending = collaboration
             .create_camp(
                 &mut database,
                 &user_envelope("navigation-pending", None, pending_command),
             )
             .unwrap();
-        let pending_id = CampId::parse(pending.result.payload["campId"].as_str().unwrap()).unwrap();
+        let pending_id =
+            ThreadId::parse(pending.result.payload["threadId"].as_str().unwrap()).unwrap();
         assert!(
             read_model
                 .find_navigation_camp(&database, &pending_id)
                 .unwrap()
                 .is_none()
         );
-        CampAttachmentStore::new(&directory)
+        ThreadAttachmentStore::new(&directory)
             .save_body(&mut database, pending_id.as_str(), "saved draft")
             .unwrap();
         assert_eq!(
@@ -5638,7 +5566,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn navigation_completion_marker_is_persistent_and_view_ack_is_monotonic() {
+    fn navigation_reply_marker_requires_publication_and_view_ack_is_monotonic() {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-marker-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_at(&directory);
@@ -5650,17 +5578,17 @@ mod slow_tests {
                 &user_envelope(
                     "navigation-running-camp",
                     None,
-                    TestCampConversationCommand {
+                    TestThreadConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "请开始工作".to_string(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         purpose: "执行测试".to_string(),
                     },
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -5710,6 +5638,14 @@ mod slow_tests {
             )
             .unwrap();
 
+        let terminal_only = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(
+            terminal_only.projects[0].recent_camps[0].marker, "none",
+            "Run failure is not a new reply"
+        );
+        database.connection().execute("INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,structured_content_json,content_digest,address_mode,addressed_agent_ids_json,version,created_at,updated_at)
+          VALUES('published-reply',?1,2,'agent','agent_1','reply','[{\"kind\":\"text\",\"text\":\"reply\"}]','reply','default','[]',1,?2,?2)",params![camp_id,now]).unwrap();
+        database.connection().execute("INSERT INTO event_log(event_id,event_type,payload_json,camp_id,entity_type,entity_id,actor_type,actor_id,created_at) VALUES('reply-publication','camp_message.sent','{}',?1,'camp_message','published-reply','system','test-runtime',?2)",params![camp_id,now]).unwrap();
         let completed = read_model.navigation_snapshot(&mut database).unwrap();
         let item = &completed.projects[0].recent_camps[0];
         assert_eq!(item.marker, "unread_completed");
@@ -5733,6 +5669,9 @@ mod slow_tests {
         let older_ack = read_model
             .acknowledge_camp_viewed(&mut database, &camp_id, 1)
             .unwrap();
+        assert!(acknowledged.changed);
+        assert!(!older_ack.changed);
+        assert_eq!(acknowledged.navigation.camps[0].marker, "none");
         assert_eq!(
             older_ack.last_seen_global_sequence,
             completed.through_global_sequence
@@ -5754,7 +5693,7 @@ mod slow_tests {
                 &user_envelope(
                     "navigation-rename-after-completion",
                     Some(&camp_id),
-                    RenameCampCommand {
+                    RenameThreadCommand {
                         camp_id: camp_id.clone(),
                         title: "重命名不改变活动".to_string(),
                         expected_version: version,
@@ -5770,6 +5709,29 @@ mod slow_tests {
         assert_eq!(
             renamed.projects[0].recent_camps[0].title,
             "重命名不改变活动"
+        );
+
+        let published_reply_sequence =
+            renamed.projects[0].recent_camps[0].latest_completion_global_sequence;
+        database.connection().execute("INSERT INTO event_log(event_id,event_type,payload_json,camp_id,entity_type,entity_id,actor_type,actor_id,created_at)
+            VALUES('reply-duplicate','camp_message.public_a2a_sent','{}',?1,'camp_message','published-reply','system','test-runtime',?2)",params![camp_id,now]).unwrap();
+        let duplicate = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(
+            duplicate.projects[0].recent_camps[0].latest_completion_global_sequence,
+            published_reply_sequence,
+            "a second publication event does not create a newer reply"
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = ?1 WHERE id = 'published-reply'",
+                params![now],
+            )
+            .unwrap();
+        let withdrawn = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(
+            withdrawn.projects[0].recent_camps[0].latest_completion_global_sequence,
+            0
         );
 
         drop(database);
@@ -5790,18 +5752,21 @@ mod slow_tests {
                 &user_envelope(
                     "read-create-camp",
                     None,
-                    CreateCampCommand::for_test(workspace.to_string_lossy().to_string()),
+                    CreateThreadCommand::for_test(workspace.to_string_lossy().to_string()),
                 ),
             )
             .unwrap();
-        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let camp_id = camp.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         collaboration
             .add_camp_member(
                 &mut database,
                 &user_envelope(
                     "read-add-member",
                     Some(&camp_id),
-                    AddCampMemberCommand {
+                    AddThreadMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
                         expected_membership_generation: 1,
@@ -5817,12 +5782,12 @@ mod slow_tests {
                 &user_envelope(
                     "read-first-message",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "快照内消息".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -5847,12 +5812,12 @@ mod slow_tests {
                 &user_envelope(
                     "read-after-snapshot",
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    TestThreadMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "快照后消息".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -5916,17 +5881,17 @@ mod slow_tests {
                 &user_envelope(
                     "evidence-page-create",
                     None,
-                    TestCampConversationCommand {
+                    TestThreadConversationCommand {
                         project_path: workspace.to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "记录执行过程".to_string(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         purpose: "验证执行过程分页".to_string(),
                     },
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         for sequence in 1..=3 {
@@ -6412,6 +6377,150 @@ mod slow_tests {
                 .is_none()
         );
 
+        // New lifecycle storage assigns one sequence to each operation. The
+        // completed Shell row follows its Core invocation rather than enclosing
+        // it, and a page containing only the Shell still carries the association.
+        for (id, sequence, event_type, kind, payload) in [
+            (
+                "single-core",
+                95,
+                "runtime.action",
+                "tool_result",
+                json!({"canonicalTool": "team.get_task", "sourceAuthority": "core", "agentOutputDigest": response_digest, "coreEnvelope": {"ok": true, "operation": "team.get_task"}}),
+            ),
+            (
+                "single-shell",
+                96,
+                "activity.completed",
+                "command",
+                json!({"resultDigest": response_digest, "item": {"id": "single-carrier", "type": "commandExecution", "command": "rovai task get --task-id fixture-task", "status": "completed"}}),
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, ?4, ?5, 'completed', ?6, 100, 0, ?7)",
+                params![id, agent_run_id, sequence, event_type, kind, payload.to_string(), now],
+            ).unwrap();
+        }
+        for (id, domain, authority, credibility, sequence) in [
+            ("single-core", "tool", "core", "core_verified", 95),
+            ("single-shell", "shell", "runtime", "runtime_structured", 96),
+        ] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?7, 1, ?8, ?8)",
+                params![agent_run_id, id, domain, credibility, authority, format!("[\"{id}\"]"), sequence, now],
+            ).unwrap();
+        }
+        let single =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(97), 1)
+                .unwrap();
+        assert_eq!(single.evidence[0].sequence, 96);
+        assert_eq!(
+            single.evidence[0].payload["executionWindowBuiltinOperation"],
+            "team.get_task"
+        );
+        database.connection().execute(
+            "UPDATE agent_run_execution_evidence SET payload_preview_json = json_set(payload_preview_json, '$.resultDigest', 'different') WHERE id = 'single-shell'", [],
+        ).unwrap();
+        let distinct_single =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(97), 1)
+                .unwrap();
+        assert!(
+            distinct_single.evidence[0]
+                .payload
+                .get("executionWindowBuiltinOperation")
+                .is_none()
+        );
+
+        // Some Runtimes persist the Shell started event first and update that
+        // same row at completion. Its one sequence then precedes the Core row.
+        for (id, sequence, event_type, kind, payload) in [
+            (
+                "early-shell",
+                97,
+                "activity.completed",
+                "command",
+                json!({"resultDigest": response_digest, "item": {"id": "early-carrier", "type": "commandExecution", "command": "rovai task get --task-id fixture-task", "status": "completed"}}),
+            ),
+            (
+                "late-core",
+                98,
+                "runtime.action",
+                "tool_result",
+                json!({"canonicalTool": "team.get_task", "sourceAuthority": "core", "agentOutputDigest": response_digest, "coreEnvelope": {"ok": true, "operation": "team.get_task"}}),
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, ?4, ?5, 'completed', ?6, 100, 0, ?7)",
+                params![id, agent_run_id, sequence, event_type, kind, payload.to_string(), now],
+            ).unwrap();
+        }
+        for (id, domain, authority, credibility, sequence) in [
+            ("early-shell", "shell", "runtime", "runtime_structured", 97),
+            ("late-core", "tool", "core", "core_verified", 98),
+        ] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?7, 1, ?8, ?8)",
+                params![agent_run_id, id, domain, credibility, authority, format!("[\"{id}\"]"), sequence, now],
+            ).unwrap();
+        }
+        let early =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(98), 1)
+                .unwrap();
+        assert_eq!(early.evidence[0].sequence, 97);
+        assert_eq!(
+            early.evidence[0].payload["executionWindowBuiltinOperation"],
+            "team.get_task"
+        );
+
+        // TRAE CLI reports the Shell command in runtime.action input, while
+        // the window omits the Core envelope from its public summary.
+        let trae_digest =
+            crate::command::canonical_json_digest(&json!({"taskId": "trae-task"})).unwrap();
+        for (id, sequence, kind, payload) in [
+            (
+                "trae-shell",
+                99,
+                "tool_result",
+                json!({"kind": "execute", "input": "rovai task get --task-id trae-task", "resultDigest": trae_digest, "status": "completed"}),
+            ),
+            (
+                "trae-core",
+                100,
+                "tool_result",
+                json!({"canonicalTool": "team.get_task", "sourceAuthority": "core", "agentOutputDigest": trae_digest, "coreEnvelope": {"ok": true, "operation": "team.get_task"}}),
+            ),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, 'runtime.action', ?4, 'completed', ?5, 100, 0, ?6)",
+                params![id, agent_run_id, sequence, kind, payload.to_string(), now],
+            ).unwrap();
+        }
+        for (id, domain, authority, credibility, sequence) in [
+            ("trae-shell", "shell", "runtime", "runtime_structured", 99),
+            ("trae-core", "tool", "core", "core_verified", 100),
+        ] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?7, 1, ?8, ?8)",
+                params![agent_run_id, id, domain, credibility, authority, format!("[\"{id}\"]"), sequence, now],
+            ).unwrap();
+        }
+        let trae =
+            crate::execution_window::read_page(&mut database, camp_id, agent_run_id, Some(100), 1)
+                .unwrap();
+        assert_eq!(trae.evidence[0].sequence, 99);
+        assert_eq!(
+            trae.evidence[0].payload["executionWindowBuiltinOperation"],
+            "team.get_task"
+        );
+
+        assert_execution_block_and_group_cursors(&mut database, camp_id, agent_run_id, &now);
+
         // Historical Runs still resolve their Camp through CampTurn after the
         // delivery-first batch model moved new Runs to agent_run.camp_id.
         database
@@ -6461,6 +6570,219 @@ mod slow_tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    // This extends the existing SQLite pagination owner: a large collapsed group must
+    // stay one block, and an old child can change without the group's tail moving.
+    fn assert_execution_block_and_group_cursors(
+        database: &mut Database,
+        camp: &str,
+        run: &str,
+        now: &str,
+    ) {
+        use crate::execution_window::{
+            read_block_changes, read_block_page, read_group_changes, read_group_page,
+        };
+        let old = read_block_page(database, camp, run, None, None, 1).unwrap();
+        let old_count = old.blocks[0].tool_count;
+        database.connection().execute(
+            "UPDATE agent_run_execution_evidence SET payload_preview_json = json_set(payload_preview_json, '$.input', 'rovai task get --task-id trae-task && echo extra') WHERE id = 'trae-shell'", [],
+        ).unwrap();
+        let mixed = read_block_page(database, camp, run, None, None, 1).unwrap();
+        assert_eq!(
+            mixed.blocks[0].tool_count,
+            old_count + 1,
+            "mixed Shell work is a separate step"
+        );
+        let end = 10_101;
+        let tx = database.connection_mut().transaction().unwrap();
+        {
+            let mut insert = tx.prepare(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase,
+                 payload_preview_json, content_byte_count, is_truncated, occurred_at, revision, change_sequence, updated_at)
+                 VALUES(?1, ?2, 0, ?3, ?4, ?5, 'completed', ?6, 100, 0, ?7, 1, ?3, ?7)"
+            ).unwrap();
+            for sequence in 101..=end + 1 {
+                let root = sequence == 101 || sequence == end + 1;
+                let payload = if root {
+                    json!({"text": format!("boundary {sequence}")})
+                } else {
+                    json!({"item": {"type": "commandExecution", "command": format!("echo {sequence}"),
+                        "status": "completed", "aggregatedOutput": "saved result must not enter the folded page"}})
+                };
+                insert
+                    .execute(params![
+                        format!("block-fixture-{sequence}"),
+                        run,
+                        sequence,
+                        if root {
+                            "agent.text.block"
+                        } else {
+                            "activity.completed"
+                        },
+                        if root { "narration" } else { "command" },
+                        payload.to_string(),
+                        now
+                    ])
+                    .unwrap();
+            }
+        }
+        tx.execute(
+            "UPDATE agent_run SET execution_evidence_change_sequence = ?1 WHERE id = ?2",
+            params![end + 1, run],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let started = std::time::Instant::now();
+        let page = read_block_page(database, camp, run, None, None, 2).unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(page.schema_version, 3);
+        assert_eq!(page.blocks.len(), 2);
+        let group = &page.blocks[0];
+        assert_eq!(
+            (group.sequence, group.last_sequence, group.tool_count),
+            (102, end, 10_000)
+        );
+        assert_eq!(group.evidence.len(), 1);
+        assert_eq!(group.evidence[0].sequence, end);
+        assert_eq!(page.next_before_sequence, Some(102));
+        let bytes = serde_json::to_vec(&page).unwrap().len();
+        assert!(
+            bytes < 16_384,
+            "10,000 closed commands have a bounded transport: {bytes}"
+        );
+        eprintln!(
+            "execution block probe: commands=10000 response_bytes={bytes} read_ms={}",
+            elapsed.as_millis()
+        );
+        assert!(
+            !serde_json::to_string(&page)
+                .unwrap()
+                .contains("saved result must not")
+        );
+        let prior = read_block_page(database, camp, run, Some(102), None, 1).unwrap();
+        assert_eq!(prior.blocks[0].sequence, 101);
+        let first = read_group_page(database, camp, run, 102, None, Some(101), 24).unwrap();
+        assert_eq!(first.evidence.len(), 24);
+        assert_eq!(first.evidence.first().unwrap().sequence, 102);
+        assert_eq!(first.next_after_sequence, Some(125));
+        let next = read_group_page(
+            database,
+            camp,
+            run,
+            102,
+            None,
+            first.next_after_sequence,
+            24,
+        )
+        .unwrap();
+        assert_eq!(next.evidence.first().unwrap().sequence, 126);
+        let tail = read_group_page(database, camp, run, 102, None, None, 24).unwrap();
+        assert_eq!(tail.evidence.last().unwrap().sequence, end);
+        assert_eq!(tail.next_before_sequence, Some(end - 23));
+        assert!(read_group_page(database, "other-thread", run, 102, None, None, 24).is_err());
+        assert!(read_group_page(database, camp, run, 101, None, None, 24).is_err());
+        assert!(read_group_page(database, camp, run, 102, Some(110), Some(120), 24).is_err());
+        assert!(read_block_page(database, "other-thread", run, None, None, 2).is_err());
+        database.connection().execute(
+            "UPDATE agent_run_execution_evidence SET phase = 'failed', revision = 2, change_sequence = ?1 WHERE id = 'block-fixture-110'",
+            [end + 2],
+        ).unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET execution_evidence_change_sequence = ?1 WHERE id = ?2",
+                params![end + 2, run],
+            )
+            .unwrap();
+        let changed = read_block_changes(database, camp, run, end + 1, &[], 1).unwrap();
+        assert_eq!(changed.blocks.len(), 1);
+        assert_eq!(changed.blocks[0].key, group.key);
+        assert_eq!(changed.blocks[0].counts.failed, 1);
+        assert_eq!(changed.blocks[0].evidence[0].sequence, end);
+        let children =
+            read_group_changes(database, camp, run, 102, end + 1, 102, Some(125), 24).unwrap();
+        assert_eq!(children.evidence.len(), 1);
+        assert_eq!(children.evidence[0].sequence, 110);
+        assert_eq!(children.evidence[0].phase, "failed");
+        let outside =
+            read_group_changes(database, camp, run, 102, end + 1, 126, Some(149), 24).unwrap();
+        assert!(outside.evidence.is_empty());
+        assert_eq!(outside.next_after_change_sequence, end + 2);
+        let last_id = format!("block-fixture-{end}");
+        database.connection().execute(
+            "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+             VALUES(?1, 0, ?2, 'activity-v1', 'shell', 'started', 'unknown', 'runtime_structured', 'fine_grained', 'runtime', ?3, ?4, ?4, 1, ?5, ?5)",
+            params![run, last_id, json!([last_id]).to_string(), end, now],
+        ).unwrap();
+        database.connection().execute("UPDATE agent_run_execution_evidence SET payload_preview_json = '{\"item\":{\"type\":\"commandExecution\"}}', phase = 'started' WHERE id = ?1", [&last_id]).unwrap();
+        let visibility: Value = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/execution-shell-visibility.json"
+        ))
+        .unwrap();
+        for case in visibility.as_array().unwrap() {
+            database.connection().execute("UPDATE canonical_runtime_activity SET presentation_hint = ?1, tool_name = ?2 WHERE agent_run_id = ?3 AND operation_id = ?4", params![case["title"].as_str(), case["toolName"].as_str(), run, last_id]).unwrap();
+            let page = read_block_page(database, camp, run, None, None, 2).unwrap();
+            let visible = case["visible"] == true;
+            assert_eq!(
+                page.blocks[0].tool_count,
+                if visible { 10000 } else { 9999 },
+                "{case}"
+            );
+            assert_eq!(
+                page.blocks[0].evidence[0].sequence,
+                if visible { end } else { end - 1 },
+                "hidden tail must not hide earlier work: {case}"
+            );
+        }
+        // Exercise the real catalog/digest path, including repeated response digests.
+        // Modern carriers are adjacent candidates in one in-memory index, not N SQL scans.
+        let tx = database.connection_mut().transaction().unwrap();
+        for sequence in 102..=end {
+            let shell = sequence % 2 == 0;
+            let id = format!("block-fixture-{sequence}");
+            let payload = if shell {
+                json!({"resultDigest":"same-result", "item":{"type":"commandExecution","command":"rovai task get --task-id fixture"}})
+            } else {
+                json!({"sourceAuthority":"core", "canonicalTool":"team.get_task", "agentOutputDigest":"same-result", "coreEnvelope":{"ok":true,"operation":"team.get_task"}})
+            };
+            tx.execute("UPDATE agent_run_execution_evidence SET event_type = ?1, phase = 'completed', payload_preview_json = ?2 WHERE id = ?3", params![if shell { "activity.completed" } else { "runtime.action" }, payload.to_string(), id]).unwrap();
+            tx.execute(
+                "INSERT OR REPLACE INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+                 VALUES(?1, 0, ?2, 'activity-v1', ?3, 'terminal', 'succeeded', ?4, 'fine_grained', ?5, ?6, ?7, ?7, 1, ?8, ?8)",
+                params![run, id, if shell { "shell" } else { "tool" }, if shell { "runtime_structured" } else { "core_verified" }, if shell { "runtime" } else { "core" }, json!([id]).to_string(), sequence, now],
+            ).unwrap();
+        }
+        tx.commit().unwrap();
+        let started = std::time::Instant::now();
+        let page = read_block_page(database, camp, run, None, None, 2).unwrap();
+        // Repeated adjacent equal responses are ambiguous for every middle Shell, and remain separate.
+        assert_eq!(page.blocks[0].tool_count, 9999);
+        assert!(serde_json::to_vec(&page).unwrap().len() < 16384);
+        eprintln!(
+            "execution carrier probe: canonical_rows=10000 read_ms={}",
+            started.elapsed().as_millis()
+        );
+        // A historical started/ended lifetime can have no sequence strictly inside it.
+        // Core callbacks elsewhere do not turn that empty interval into an invalid range.
+        for (id, sequence, event) in [
+            ("adjacent-start", end + 2, "activity.started"),
+            ("adjacent-end", end + 3, "activity.completed"),
+        ] {
+            database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                 VALUES(?1, ?2, 0, ?3, ?4, 'command', 'completed', ?5, 100, 0, ?6)",
+                params![id, run, sequence, event, json!({"item":{"type":"commandExecution","command":"rovai task get --task-id fixture"}}).to_string(), now],
+            ).unwrap();
+        }
+        database.connection().execute(
+            "INSERT INTO canonical_runtime_activity(agent_run_id, execution_epoch, operation_id, classifier_version, activity_domain, phase, outcome, credibility, coverage_level, source_authority, source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence, revision, created_at, updated_at)
+             VALUES(?1, 0, 'adjacent-shell', 'activity-v1', 'shell', 'terminal', 'succeeded', 'runtime_structured', 'fine_grained', 'runtime', '[\"adjacent-start\",\"adjacent-end\"]', ?2, ?3, 1, ?4, ?4)",
+            params![run, end + 2, end + 3, now],
+        ).unwrap();
+        let adjacent = read_block_page(database, camp, run, None, None, 1).unwrap();
+        assert_eq!(adjacent.blocks[0].tool_count, 1);
+        assert_eq!(adjacent.blocks[0].evidence[0].sequence, end + 2);
+    }
+
     #[test]
     fn agent_run_diagnostic_projects_only_safe_frozen_and_public_facts() {
         let directory = std::env::temp_dir().join(format!(
@@ -6477,11 +6799,11 @@ mod slow_tests {
                 &user_envelope(
                     "diagnostic-create",
                     None,
-                    TestCampConversationCommand {
+                    TestThreadConversationCommand {
                         project_path: workspace.to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "诊断任务".to_string(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         purpose: "验证安全诊断投影".to_string(),
                     },
                 ),
@@ -6531,17 +6853,17 @@ mod slow_tests {
                 &user_envelope(
                     "evidence-batch-create",
                     None,
-                    TestCampConversationCommand {
+                    TestThreadConversationCommand {
                         project_path: workspace.to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "验证完整 Evidence 窗口批量投影".to_string(),
-                        address: TestCampMessageAddress::Default,
+                        address: TestThreadMessageAddress::Default,
                         purpose: "验证 Snapshot 批量 Canonical Activity".to_string(),
                     },
                 ),
             )
             .unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction().unwrap();

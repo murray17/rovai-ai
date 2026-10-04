@@ -4,7 +4,7 @@ import type { FilePreviewApi } from '@contracts'
 export const desktopFilePreviewApi: FilePreviewApi = {
   updateRetention: input => window.rovai.filePreview.updateRetention?.(input) ?? Promise.resolve(),
   onResourcesReleased: listener => window.rovai.filePreview.onResourcesReleased?.(listener) ?? (() => undefined),
-  bindCamp: id => window.rovai.filePreview.bindCamp(id),
+  bindThread: id => window.rovai.filePreview.bindThread(id),
   open: input => window.rovai.filePreview.open(input),
   restore: input => window.rovai.filePreview.restore(input),
   reopen: input => window.rovai.filePreview.reopen(input),

@@ -7,7 +7,7 @@ import { dailyEvidence, DAILY_ANALYSIS_INSTRUCTIONS, DAILY_ANALYSIS_POLICY } fro
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 type ObjectValue = { [key: string]: Json }
-export type DailyScope = { campIds: string[]; excludeCampIds: string[]; excludeAutomationIds: string[] }
+export type DailyScope = { threadIds: string[]; excludeThreadIds: string[]; excludeAutomationIds: string[] }
 export type DailyOptions = {
   output: string
   timezone: string
@@ -138,11 +138,11 @@ async function readJson(path: string): Promise<unknown> { return JSON.parse(awai
 async function privateJson(path: string, value: unknown): Promise<void> { await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' }) }
 export async function runDaily(options: DailyOptions): Promise<{ directory: string; report: ObjectValue; reused: boolean }> {
   const window = dailyWindow(options.timezone, options.now, options.date)
-  const scopeKeys = ['campIds', 'excludeCampIds', 'excludeAutomationIds']
+  const scopeKeys = ['threadIds', 'excludeThreadIds', 'excludeAutomationIds']
   if (!options.scope || Object.keys(options.scope).some(key => !scopeKeys.includes(key))
       || scopeKeys.some(key => !Array.isArray(options.scope[key as keyof DailyScope])
         || options.scope[key as keyof DailyScope].some(id => typeof id !== 'string' || !id.trim()))) {
-    throw new Error('Daily scope requires only campIds, excludeCampIds and excludeAutomationIds string arrays; configure the date separately')
+    throw new Error('Daily scope requires only threadIds, excludeThreadIds and excludeAutomationIds string arrays; configure the date separately')
   }
   const scope = Object.fromEntries(Object.entries(options.scope).map(([key, values]) => [key, [...new Set(values)].sort()])) as DailyScope
   const scopeKey = digest({ timezone: window.timezone, scope })

@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentRunExecutionEvidenceView,
-  CampMemberView,
+  ThreadMemberView,
   CoreEvent,
   SingleChatRunView,
   SingleChatSnapshot
@@ -31,7 +31,7 @@ const source = readFileSync(new URL('./SingleChatPanel.tsx', import.meta.url), '
 function run(overrides: Partial<SingleChatRunView> = {}): SingleChatRunView {
   return {
     id: 'run-1',
-    campTurnId: 'turn-1',
+    threadTurnId: 'turn-1',
     triggerConversationMessageId: 'message-1',
     status: 'succeeded',
     version: 2,
@@ -66,7 +66,7 @@ function evidence(id: string, agentRunId: string, executionEpoch: number, sequen
   }
 }
 
-const member: CampMemberView = {
+const member: ThreadMemberView = {
   agentId: 'agent-1',
   displayName: '雾切响子',
   avatarRef: null,
@@ -90,7 +90,7 @@ function snapshot({
   return {
     conversation: {
       id: 'conversation-1',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       agentId: 'agent-1',
       version: 1,
       status: 'active',
@@ -151,7 +151,7 @@ describe('Single Chat presentation', () => {
   it('removes the initial status as soon as narration arrives, before the run completes', () => {
     const currentRun = run({ status: 'running', endedAt: null, finalConversationMessageId: null })
     const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
-      campId: 'camp-1', conversationId: 'conversation-1', run: currentRun,
+      threadId: 'camp-1', conversationId: 'conversation-1', run: currentRun,
       evidence: [evidence('正在输出的第一段正文', currentRun.id, currentRun.executionEpoch, 1)],
       finalMessage: null, now: '2026-09-03T11:00:00.000Z'
     }))
@@ -165,7 +165,7 @@ describe('Single Chat presentation', () => {
       const currentRun = run({ status, endedAt: null, finalConversationMessageId: null })
       for (const items of [[], [evidence('继续核对结果', currentRun.id, currentRun.executionEpoch, 1)]]) {
         const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
-          campId: 'camp-1', conversationId: 'conversation-1', run: currentRun, evidence: items, finalMessage: null,
+          threadId: 'camp-1', conversationId: 'conversation-1', run: currentRun, evidence: items, finalMessage: null,
           now: '2026-09-03T11:00:00.000Z'
         }))
         expect(markup).toContain('single-chat-run-history is-live" open=""')
@@ -185,7 +185,7 @@ describe('Single Chat presentation', () => {
     const currentRun = run({ status: 'running', endedAt: null })
     const body = '已经到达的最终正文'
     const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
-      campId: 'camp-1', conversationId: 'conversation-1', run: currentRun,
+      threadId: 'camp-1', conversationId: 'conversation-1', run: currentRun,
       evidence: [evidence(body, currentRun.id, currentRun.executionEpoch, 1)],
       finalMessage: {
         id: 'final-1', sequence: 2, authorType: 'agent', authorId: member.agentId,
@@ -201,7 +201,7 @@ describe('Single Chat presentation', () => {
   it('preserves waiting, stopping and terminal outcomes', () => {
     const markupFor = (status: SingleChatRunView['status'], cancelling = false): string =>
       renderToStaticMarkup(createElement(SingleChatRunHistory, {
-        campId: 'camp-1', conversationId: 'conversation-1', run: run({ status }), evidence: [], finalMessage: null,
+        threadId: 'camp-1', conversationId: 'conversation-1', run: run({ status }), evidence: [], finalMessage: null,
         now: '2026-09-03T11:00:00.000Z', cancelling
       }))
     expect(markupFor('waiting')).toContain('等待继续')
@@ -226,7 +226,7 @@ describe('Single Chat presentation', () => {
 
   it('puts avatars in the selector trigger while keeping the transcript avatar-free', () => {
     const markup = renderToStaticMarkup(createElement(SingleChatPanel, {
-      campId: 'rvcamp_01m1jkkpkzfvgraw1p4r9zfb7v',
+      threadId: 'rvcamp_01m1jkkpkzfvgraw1p4r9zfb7v',
       members: [member],
       visible: true,
       onOpen: () => undefined,
@@ -308,19 +308,19 @@ describe('Single Chat presentation', () => {
 
     expect(laterSnapshot.conversation.id).toBe('conversation-2')
     expect(target).toEqual({
-      campId: 'camp-1',
+      threadId: 'camp-1',
       conversationId: 'conversation-1',
       displayName: '雾切响子'
     })
     expect(singleChatEndCommand(target)).toEqual({
-      campId: 'camp-1',
+      threadId: 'camp-1',
       conversationId: 'conversation-1'
     })
     expect(source).toContain('endConversation(endTarget)')
     expect(source).toContain('singleChatEndCommand(target)')
   })
 
-  it('uses the Camp composer contract and keeps agent output unboxed', () => {
+  it('uses the Thread composer contract and keeps agent output unboxed', () => {
     expect(source).toContain('className="composer single-chat-composer"')
     expect(source).toContain('composer-box single-chat-composer-box')
     expect(source).toContain('className="composer-attachment-button"')
@@ -407,42 +407,42 @@ describe('Single Chat presentation', () => {
 
   it('routes Single Chat changes to the narrowest visible-panel read', () => {
     expect(singleChatChangeRefreshTarget(
-      changed({ campId: 'camp-1', conversationId: 'conversation-1' }),
+      changed({ threadId: 'camp-1', conversationId: 'conversation-1' }),
       'camp-1',
       'conversation-1'
     )).toBe('current-conversation')
     expect(singleChatChangeRefreshTarget(
-      changed({ campId: 'camp-1', conversationId: 'conversation-2' }),
+      changed({ threadId: 'camp-1', conversationId: 'conversation-2' }),
       'camp-1',
       'conversation-1'
     )).toBe('none')
-    expect(singleChatChangeRefreshTarget(changed({ campId: 'other' }), 'camp-1', 'conversation-1'))
+    expect(singleChatChangeRefreshTarget(changed({ threadId: 'other' }), 'camp-1', 'conversation-1'))
       .toBe('none')
-    expect(singleChatChangeRefreshTarget({ method: 'agent.text.delta', params: { campId: 'camp-1' } }, 'camp-1', 'conversation-1'))
+    expect(singleChatChangeRefreshTarget({ method: 'agent.text.delta', params: { threadId: 'camp-1' } }, 'camp-1', 'conversation-1'))
       .toBe('none')
 
     for (const code of ['single_chat.opened', 'single_chat.ended']) {
       expect(singleChatChangeRefreshTarget(changed({
-        campId: 'camp-1',
+        threadId: 'camp-1',
         result: { code, payload: { conversationId: 'conversation-1' } }
       }), 'camp-1', 'conversation-1')).toBe('conversation-list')
     }
     expect(singleChatChangeRefreshTarget(changed({
-      campId: 'camp-1',
+      threadId: 'camp-1',
       result: {
         code: 'single_chat.reply_queued',
         payload: { conversationId: 'conversation-1' }
       }
     }), 'camp-1', 'conversation-1')).toBe('current-conversation')
     expect(singleChatChangeRefreshTarget(changed({
-      campId: 'camp-1',
+      threadId: 'camp-1',
       result: {
         code: 'single_chat.reply_queued',
         payload: { conversationId: 'conversation-2' }
       }
     }), 'camp-1', 'conversation-1')).toBe('conversation-list')
     expect(singleChatChangeRefreshTarget(changed({
-      campId: 'camp-1',
+      threadId: 'camp-1',
       conversationId: 'conversation-2',
       reason: 'pending_input_published'
     }), 'camp-1', 'conversation-1')).toBe('conversation-list')

@@ -199,7 +199,22 @@ describe('ComposerDocument V2', () => {
     }, members, skills)).toEqual({
       hasContent: true,
       hasExplicitRecipient: true,
-      hasUnavailableAtom: false
+      hasUnavailableAtom: false,
+      memberAgentIds: []
     })
+  })
+
+  it('keeps every member atom while deriving each invitation identity once', () => {
+    const document = {
+      version: 2 as const,
+      segments: [
+        { kind: 'atom' as const, atom: { type: 'member' as const, agentId: 'agent_1', labelFallback: 'Alice' } },
+        { kind: 'text' as const, text: ' 请看这一段 ' },
+        { kind: 'atom' as const, atom: { type: 'member' as const, agentId: 'agent_1', labelFallback: 'Alice' } },
+        { kind: 'atom' as const, atom: { type: 'member' as const, agentId: 'agent_2', labelFallback: 'Bob' } }
+      ]
+    }
+    expect(composerDocumentStatus(document, members, skills).memberAgentIds).toEqual(['agent_1', 'agent_2'])
+    expect(document.segments.filter((segment) => segment.kind === 'atom')).toHaveLength(3)
   })
 })

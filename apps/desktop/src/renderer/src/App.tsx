@@ -1,10 +1,12 @@
+import { WindowCloseDialog } from './WindowCloseSettings'
 import { useEffect, useRef, useState } from 'react'
 import type { CoreEvent, DesktopStartupSnapshot, SupervisorSnapshot, AppearanceSnapshot } from '@contracts'
 import { CurrentUserProfileProvider } from './CurrentUserProfile'
 import { CoreSubsystemNotice } from './CoreSubsystemNotice'
-import { CampClientProvider } from './camp-client'
-import { desktopCampClient } from './desktop-camp-client'
+import { ThreadClientProvider } from './camp-client'
+import { desktopThreadClient } from './desktop-camp-client'
 import { desktopBusinessEnvironment } from './desktop-business-environment'
+import { initializeInterfaceLanguage, useInterfaceLanguage } from './interface-language'
 import { applyAppearanceSnapshot } from './theme'
 import {
   BusinessApp, BootstrapShell, StartupWorkspace, ControlledShutdownOverlay,
@@ -14,6 +16,7 @@ import {
 export * from './BusinessApp'
 
 export function App(): React.JSX.Element {
+  useInterfaceLanguage()
   const [supervisorState, setSupervisorState] = useState<{
     latest: SupervisorSnapshot | null
     lastNonShutdown: SupervisorSnapshot | null
@@ -44,6 +47,16 @@ export function App(): React.JSX.Element {
     }).catch((error) => {
       if (!disposed) setStartupError(errorMessage(error))
     })
+    return () => { disposed = true }
+  }, [startupReadAttempt])
+
+  useEffect(() => {
+    let disposed = false
+    // Main owns this local preference, so the language is available even when
+    // Core is blocked and BusinessApp never mounts.
+    void window.rovai.desktopSession.getInterfaceLanguage().then((language) => {
+      if (!disposed) initializeInterfaceLanguage({ interfaceLanguage: language })
+    }).catch(() => undefined)
     return () => { disposed = true }
   }, [startupReadAttempt])
 
@@ -134,13 +147,13 @@ export function App(): React.JSX.Element {
   } else {
     workspace = (
       <div className="authoritative-workspace">
-        <CampClientProvider client={desktopCampClient}><CurrentUserProfileProvider api={window.rovai.currentUserProfile}>
+        <ThreadClientProvider client={desktopThreadClient}><CurrentUserProfileProvider api={window.rovai.currentUserProfile}>
           <BusinessApp environment={desktopBusinessEnvironment}
             initialStartupSnapshot={startupSnapshot}
             startupStartedAtMs={startupStartedAt.current}
             startupFeedbackDelayElapsed={startupFeedbackDelayElapsed}
           />
-        </CurrentUserProfileProvider></CampClientProvider>
+        </CurrentUserProfileProvider></ThreadClientProvider>
         <CoreSubsystemNotice subsystems={presentationSupervisor?.coreSubsystems ?? []} />
       </div>
     )
@@ -149,6 +162,7 @@ export function App(): React.JSX.Element {
   return (
     <>
       {workspace}
+      {window.rovai.windowClose && <WindowCloseDialog api={window.rovai.windowClose} />}
       {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
     </>
   )

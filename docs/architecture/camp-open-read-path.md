@@ -3,12 +3,12 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-09-24
+last_updated: 2026-10-02
 ---
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v24](../contracts/camp-open-projection-v24.md)与
+字段与窗口见 [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -19,10 +19,10 @@ last_updated: 2026-09-24
 | --- | --- |
 | Main Window Session | 只冻结并返回本地恢复目标与设置位置；不等待 Core，也不保证目标领域数据已经加载 |
 | Renderer startup controller | 快照返回后立即显示候选目标的一级页面框架；候选 Camp 与 committed Camp 分离，只有 enter 成功才提交权威 Camp 内容 |
-| Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
+| Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再确认可见来源并仅更新目标导航行 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
-| Core request ingress | 持续接收请求；有顺序要求的命令与混合操作交给单一 FIFO worker，执行窗口 page/changes 复用既有独立派发任务，不建立优先级调度器或第二套 RPC |
-| Core Camp enter module | 在一次有序 request 中先读 activation state；Pending 直接读取投影，Active 先按原 Envelope 查 receipt 并校验 Lead，有效新 User enter 只读，需要修复时 reconcile 后再读；缺失或 rejected 时 fail closed；不执行取消或文本维护 |
+| Core request ingress | 持续接收请求；`camps.open` 与可能纯读的 `camps.enter` 进入有界双 worker 读取队列，有顺序要求的命令与需修复的 enter 交给原 FIFO worker；执行窗口 page/changes 继续复用既有独立派发任务，不建立优先级调度器或第二套 RPC |
+| Core Camp enter module | 在共享 Database mutex 内判断 activation state、原 Envelope receipt 和 Lead；Pending 与有效新 User enter 直接读取投影，旧回执、冲突、非 User 或需修复状态回到原命令路径并重新判断，必要时 reconcile 后再读；缺失或 rejected 时 fail closed；不执行取消或文本维护 |
 | Core Camp open read model | 在单一 SQLite transaction 中组装业务首屏投影、空 Execution Evidence、有界业务 coverage 与 high-water；保留已返回 Run 的定向原始 Evidence 计数和独立 change watermark，不计算 Camp-wide Evidence 总数；不读取 event_log 或 Context Manifest/Action history，不执行业务 SQL 或 Blob/文件写入 |
 | Camp message history read | 以 stable sequence cursor 读取 earlier page；不回放 event 构造第二真源 |
 | Camp conversation find read | 扫描当前 Camp 公开 user/agent 正文投影，返回 exact total 与一个选中命中；不改变 Agent-facing discovery search，也不返回完整结果集 |
@@ -41,6 +41,9 @@ Open 仅读取当前 Camp 的业务表。它及其嵌套 loader、CTE、view 不
 `load_open_messages()` 复用正文、附件和 presentation hydration，但不查询 publication event sequence。
 附件 hydration 对 source refs、Managed v2 和 legacy rows 统一返回无路径 View 与
 `availability = unknown`；Open、earlier、around、thread 和 timeline 不为可用性访问文件系统。
+消息模型信息按当前返回窗口的消息 ID 一次性关联已有 source Run 冻结配置，检查 Thread 与作者身份；
+只投影 adapter、model、effort，不复制持久数据，也不依赖独立的 96 Run 窗口。分页与 around 使用相同 hydration，
+缺失记录不回退到当前 AgentProfile，且不扩大消息窗口或访问事件／证据历史。
 `throughGlobalSequence` 仍从 `event_sequence` singleton 读取，不通过事件表求最大值。移除 timeline 与其
 exact count 后，打开成本不随其他 Camp 的事件历史增长；执行详情改由独立窗口读取，完整历史仍可按需访问。
 
@@ -60,6 +63,11 @@ Run 标题由 ReadModel 按所返回 Run 的首条输入或历史触发关系定
 `camp_snapshot()`、显式 History/Find、Navigation 或 `events.subscribe` 的审计与 invalidation 语义。
 Migration 168 只增加新水位字段并保留历史默认值；无需清理旧数据、回填历史 Evidence 或给旧 event 查询补索引。
 
+普通 enter 和后台 open 不再等待无关的有序请求完成。两个读取 worker 共用一条有界队列；enter 的纯读判定和投影
+在同一次 Database mutex 持有期间完成，无法确认纯读时把原请求送回 FIFO，由既有命令处理重新校验回执和
+Lead。明确依赖某次写入的读取仍在该写入回执后发起。当前没有新增只读 SQLite 连接池；分流只消除不占数据库
+锁的 FIFO 等待，若实测数据库锁成为主瓶颈再单独评估。
+
 取消、成功与失败的普通终态继续由 Domain Command Gateway 在业务事务提交后收尾文本；受控关闭和
 planned-shutdown 的直提交流程在自己的提交后调用同一入口，不在 Adapter 回调重复实现。若业务与回执已提交、
 文本定稿失败，原 block 保留单调到期时间，由既有 `process_agent_run_maintenance` tick 到期尝试一次；无失败或
@@ -77,7 +85,7 @@ app click / notification target
   -> Main parses typed response
   -> Renderer atomically commits target Camp ID + project + recent Camp surface
   -> next meaningful paint
-  -> background project restore / campViewed / navigation refresh
+  -> background target row read / observed campViewed / authoritative row update
 
 cold startup
   -> Main Window Session returns a frozen local target
@@ -108,15 +116,15 @@ Camp 和更换 Default Lead 后的纯视图刷新也进入这个 coordinator，�
 未知命令结果所需的定向确认读取不在该合并规则内。
 
 当前 Camp 的 `camps.open` coordinator 与全局 Navigation coordinator 是两个用途不同的 seam：前者维护已打开
-会话的完整内容和 high-water，后者只在 Core post-commit invalidation 后重读侧栏 Snapshot。终态事件可以同时
+会话的完整内容和 high-water，后者按 Core post-commit invalidation 的范围重读目标行或分组。终态事件可以同时
 使二者失效，但不得让当前 Camp refresh 代替后台 Camp marker 收敛，也不得为每个 Camp 建立 Navigation timer。
 全局合并、失败退避、可见性与 20 秒安全刷新见
 [Desktop Navigation Refresh](desktop-navigation-refresh.md)。
 
-Navigation 仍按真实 publication/terminal event 求活动与完成游标；进入聚合前过滤其他事件，避免对维护
-receipt 执行无效 join/group。它和 Camp Open 共用 Core 数据库锁，但不因此把 event_log 变为 Open 的
-业务依赖。可见来源 acknowledge 的去重也不使用全局 cursor 或 Snapshot watermark 作为来源变化，见
-[Notification Episode v8](../contracts/notification-episode-v8.md)。
+Navigation 从 camp 的活动/完成摘要读取，正常刷新不再聚合历史事件。活动摘要在发布/终态事务中更新，
+仅升级时一次回填。普通 enter/open 不全局失效、不触发侧栏完整读取或使命/技能目录查询；初次启动、未知
+范围和完整性恢复仍可读取摘要完整快照。已读只确认已正式展示水位以内的新完成内容，回执返回目标行；
+重复确认不写入。可见通知来源确认仍遵守 [Notification Episode v8](../contracts/notification-episode-v8.md)。
 
 缓存只保存最近的 Camp 业务投影；collection 保持有界，执行详情将实测高度虚拟列表与跨 Camp 保留的有界数据缓存分开。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
@@ -185,6 +193,25 @@ Memory 仍分别拥有读取与错误状态，但冷启动可见反馈共用不�
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v24](../contracts/camp-open-projection-v24.md)
+- [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)
+
+## 队员创建回执
+
+Snapshot/Open 在同一读事务内按当前 Thread 索引读取 `member_creation` 的静态身份快照。它不读取当前队员状态、
+不回放工具 Evidence 或 `event_log`，不扩大消息/Run 窗口。`thread.memberCreated` 只提示重读当前会话；
+重开以表为准。卡片链接交给现有队员页处理实时状态。字段与原子边界见
+[Member Creation Flow v1](../contracts/member-creation-flow-v1.md)。
+
+## Run 主线与展开组读取
+
+执行详情沿用已有 page/changes 派发与 Thread/Run 归属验证。Core 的 execution_window blocks 模块从既有
+Evidence/Canonical operation index 在读取事务中计算块边界、完整组计数与代表项；无新增表或后台投影维护。
+Renderer 的 ExecutionWindow 拥有主线块游标，ExecutionGroupWindow 拥有单组子窗口，公开输出仍由既有
+content cache 与精确详情请求拥有。两个窗口同用 Run 原生滚动容器，缓存、展开、内容和 DOM 窗口分别有界。
+
+薄索引保留全 Run 元数据扫描与有序候选索引成本，折叠组传输量与子项数脱钩；不把这项优化声称为常数时间数据库查询。初次短内容
+有界自动补齐，失败原位恢复，历史阅读锚点优先于后台更新。协议和预算见
+[Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md)，取舍见
+[V1.72-D10](../versions/v1.72/decisions.md#v1-72-d10)。

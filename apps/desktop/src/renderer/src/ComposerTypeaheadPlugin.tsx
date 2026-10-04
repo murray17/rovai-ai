@@ -28,6 +28,7 @@ interface ComposerTypeaheadRenderState {
 
 export interface ComposerTypeaheadPluginProps {
   match: ComposerTriggerMatch | null
+  selectionScope?: string
   optionCount: number
   getOptionState(match: ComposerTriggerMatch): ComposerTypeaheadOptionState
   onMatchChange(match: ComposerTriggerMatch | null): void
@@ -53,6 +54,7 @@ export function composerTypeaheadEnterAction(
 /** One bounded selection listener and one keyboard owner for both @ and /. */
 export function ComposerTypeaheadPlugin({
   match,
+  selectionScope,
   optionCount,
   getOptionState,
   onMatchChange,
@@ -167,7 +169,7 @@ export function ComposerTypeaheadPlugin({
     setSelectedIndex((index) => optionCount === 0 ? 0 : Math.min(index, optionCount - 1))
   }, [optionCount])
 
-  useEffect(() => { setSelectedIndex(0) }, [match?.kind, match?.nodeKey, match?.fromOffset])
+  useEffect(() => { setSelectedIndex(0) }, [match?.kind, match?.nodeKey, match?.fromOffset, selectionScope])
 
   useLayoutEffect(() => {
     const root = editor.getRootElement()

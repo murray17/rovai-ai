@@ -12,12 +12,15 @@ type Engine = { source: string; node: string; nodeDigest: string; sourceDigest: 
 type Binding = { automationId: string; automationVersion: number; workspace: string; output: string; plan: string; planDigest: string; registeredAt: string; timeoutSeconds: number | null }
 type Job = {
   schemaVersion: 1; jobId: string; mode: 'gate' | 'weekly'; plan: string; planDigest: string; output: string
-  automationId: string | null; campId: string | null; createdAt: string; endedAt: string | null
+  automationId: string | null; threadId: string | null; createdAt: string; endedAt: string | null
   state: 'running' | 'completed' | 'failed' | 'interrupted'; reportStatus: string | null
   directory: string | null; reason: string | null; engine: Engine | null
   executionPlanDigest?: string | null
 }
 type Live = { child: ChildProcess; job: Job; closed: Promise<void>; timer: NodeJS.Timeout | undefined }
+function requestWorkerStop(child: ChildProcess): void {
+  if (child.connected) child.send({ type: 'cancel' }, () => undefined)
+}
 const exec = promisify(execFile)
 const identifier = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)) throw new Error('Invalid evaluation identity')
@@ -41,6 +44,16 @@ async function fileDigest(path: string): Promise<string> {
   return hash.digest('hex')
 }
 async function readJson<T>(path: string): Promise<T> { return JSON.parse(await readFile(path, 'utf8')) as T }
+async function readJob(path: string): Promise<Job> {
+  const value = await readJson<Omit<Job, 'threadId'> & { threadId?: string | null; campId?: string | null }>(path)
+  if ('campId' in value) {
+    if ('threadId' in value) throw new Error('Mixed Thread identity in evaluation job')
+    const { campId, ...rest } = value
+    return { ...rest, threadId: campId ?? null }
+  }
+  return value as Job
+}
+
 async function optionalJson<T>(path: string, fallback: T): Promise<T> {
   try { return await readJson<T>(path) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback; throw error }
 }
@@ -102,7 +115,7 @@ export class EvaluationHostService {
   start(value: unknown, mode: 'gate' | 'weekly'): Promise<Job> {
     return this.#exclusive(async () => {
       const params = input(value, ['plan', 'output', 'jobId'])
-      return this.#start({ jobId: identifier(params.jobId), mode, plan: absolute(params.plan), output: absolute(params.output), automationId: null, campId: null })
+      return this.#start({ jobId: identifier(params.jobId), mode, plan: absolute(params.plan), output: absolute(params.output), automationId: null, threadId: null })
     })
   }
 
@@ -128,7 +141,7 @@ export class EvaluationHostService {
       if (configured.status !== 'applied') throw new Error(`Automation time-limit configuration failed: ${configured.code}`)
       const binding = { automationId, automationVersion: configured.payload.automationVersion, workspace, output, plan, planDigest: frozen.planDigest, registeredAt: new Date().toISOString(), timeoutSeconds }
       const bindings = existing.filter(item => item.automationId !== automationId).concat(binding)
-      // The helper only waits for a receipt belonging to the current Camp. It
+      // The helper only waits for a receipt belonging to the current Thread. It
       // cannot submit a job, reach owner IPC, or treat an old report as current.
       await writeFile(join(output, 'wait-for-evaluation.mjs'), await readFile(join(engine.source, 'scripts/eval-wait.mjs')), { mode: 0o600 })
       await atomicJson(join(this.root, 'schedules.json'), bindings)
@@ -139,7 +152,7 @@ export class EvaluationHostService {
 
   async status(value: unknown = {}): Promise<unknown> {
     const params = input(value, ['jobId'])
-    if (params.jobId !== undefined) return readJson<Job>(join(this.root, 'jobs', identifier(params.jobId), 'job.json'))
+    if (params.jobId !== undefined) return readJob(join(this.root, 'jobs', identifier(params.jobId), 'job.json'))
     return { engine: await optionalJson<Engine | null>(join(this.root, 'engine.json'), null), schedules: await optionalJson<Binding[]>(join(this.root, 'schedules.json'), []), activeJobs: [...this.#live.keys()] }
   }
 
@@ -147,7 +160,7 @@ export class EvaluationHostService {
     return this.#exclusive(async () => {
       const params = input(value, ['jobId']), jobId = identifier(params.jobId)
       const live = this.#live.get(jobId)
-      if (live) { live.job.reason = 'cancelled_by_owner'; live.child.kill('SIGTERM') }
+      if (live) { live.job.reason = 'cancelled_by_owner'; requestWorkerStop(live.child) }
       return { jobId, cancellationRequested: Boolean(live) }
     })
   }
@@ -165,7 +178,7 @@ export class EvaluationHostService {
           // saved PIDs. The worker stops its children when its original parent exits.
           const jobs = await readdir(join(this.root, 'jobs')).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error })
           for (const id of jobs) {
-            const job = await readJson<Job>(join(this.root, 'jobs', identifier(id), 'job.json'))
+            const job = await readJob(join(this.root, 'jobs', identifier(id), 'job.json'))
             if (job.state === 'running' && !this.#live.has(id)) { job.state = 'interrupted'; job.reason = 'app_restarted'; job.endedAt = now.toISOString(); await this.#publish(job) }
           }
           this.#recovered = true
@@ -179,17 +192,17 @@ export class EvaluationHostService {
           const eligible = enabledOrConsumedOnce && automation?.projectRef.kind === 'directory' && await realpath(automation.projectRef.path) === binding.workspace
           const page = eligible ? await this.core.request<AutomationRunListPage>('automations.runs.list', { automationId: binding.automationId, limit: 50 }) : null
           if (live && !page?.runs.some(run => run.runId === live.job.jobId && run.status === 'running')) {
-            live.job.reason = 'automation_stopped_or_finished'; live.child.kill('SIGTERM')
+            live.job.reason = 'automation_stopped_or_finished'; requestWorkerStop(live.child)
           }
           if (!eligible || this.#live.size) continue
-          const run = page?.runs.find(item => item.status === 'running' && item.campId && Date.parse(item.createdAt) >= Date.parse(binding.registeredAt))
-          if (!run?.campId) continue
+          const run = page?.runs.find(item => item.status === 'running' && item.threadId && Date.parse(item.createdAt) >= Date.parse(binding.registeredAt))
+          if (!run?.threadId) continue
           const previous = await optionalJson<Job | null>(join(this.root, 'jobs', identifier(run.runId), 'job.json'), null)
           if (previous) continue
           try {
-            await this.#start({ jobId: run.runId, mode: 'weekly', plan: binding.plan, output: binding.output, automationId: binding.automationId, campId: identifier(run.campId) }, binding)
+            await this.#start({ jobId: run.runId, mode: 'weekly', plan: binding.plan, output: binding.output, automationId: binding.automationId, threadId: identifier(run.threadId) }, binding)
           } catch (error) {
-            const failed: Job = { schemaVersion: 1, jobId: run.runId, mode: 'weekly', plan: binding.plan, planDigest: binding.planDigest, output: binding.output, automationId: binding.automationId, campId: identifier(run.campId), createdAt: now.toISOString(), endedAt: now.toISOString(), state: 'failed', reportStatus: null, directory: null, reason: (error as Error).message.slice(0, 300), engine: null }
+            const failed: Job = { schemaVersion: 1, jobId: run.runId, mode: 'weekly', plan: binding.plan, planDigest: binding.planDigest, output: binding.output, automationId: binding.automationId, threadId: identifier(run.threadId), createdAt: now.toISOString(), endedAt: now.toISOString(), state: 'failed', reportStatus: null, directory: null, reason: (error as Error).message.slice(0, 300), engine: null }
             await mkdir(join(this.root, 'jobs', run.runId), { recursive: true, mode: 0o700 })
             await this.#publish(failed)
           }
@@ -202,7 +215,7 @@ export class EvaluationHostService {
     this.#stopped = true
     await this.#serial
     const live = [...this.#live.values()]
-    for (const item of live) { item.job.reason = 'app_shutdown'; item.child.kill('SIGTERM') }
+    for (const item of live) { item.job.reason = 'app_shutdown'; requestWorkerStop(item.child) }
     await Promise.all(live.map(item => item.closed))
   }
 
@@ -232,7 +245,7 @@ export class EvaluationHostService {
     await mkdir(destination, { recursive: true, mode: 0o700 })
     return await realpath(destination)
   }
-  async #start(params: Pick<Job, 'jobId' | 'mode' | 'plan' | 'output' | 'automationId' | 'campId'>, binding?: Binding): Promise<Job> {
+  async #start(params: Pick<Job, 'jobId' | 'mode' | 'plan' | 'output' | 'automationId' | 'threadId'>, binding?: Binding): Promise<Job> {
     if (this.#stopped) throw new Error('Evaluation Host is shutting down')
     const jobDirectory = join(this.root, 'jobs', params.jobId)
     const previous = await optionalJson<Job | null>(join(jobDirectory, 'job.json'), null)
@@ -250,13 +263,13 @@ export class EvaluationHostService {
     await this.#publish(job)
     const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${dirname(engine.node)}${sep === '/' ? ':' : ';'}${process.env.PATH ?? ''}` }
     delete env.ROVAI_APP_AUTOMATION_CONTEXT
-    const child = spawn(engine.node, [join(engine.source, 'scripts/eval-host.mjs'), '--job', join(jobDirectory, 'job.json'), '--parent', String(process.pid)], { cwd: engine.source, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(engine.node, [join(engine.source, 'scripts/eval-host.mjs'), '--job', join(jobDirectory, 'job.json'), '--parent', String(process.pid)], { cwd: engine.source, env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
     let log = ''
     child.stdout?.on('data', chunk => { log = (log + String(chunk)).slice(-65536) })
     child.stderr?.on('data', chunk => { log = (log + String(chunk)).slice(-65536) })
     let spawnError: string | null = null
     child.once('error', error => { spawnError = error.message })
-    const timer = frozen.budget.wallSeconds === null ? undefined : setTimeout(() => { job.reason = 'host_budget_exhausted'; child.kill('SIGTERM') }, (frozen.budget.wallSeconds + 120) * 1000)
+    const timer = frozen.budget.wallSeconds === null ? undefined : setTimeout(() => { job.reason = 'host_budget_exhausted'; requestWorkerStop(child) }, (frozen.budget.wallSeconds + 120) * 1000)
     const closed = new Promise<void>(resolveClose => {
       child.once('close', (code, signal) => {
         clearTimeout(timer)
@@ -278,14 +291,14 @@ export class EvaluationHostService {
   }
   async #publish(job: Job): Promise<void> {
     await atomicJson(join(this.root, 'jobs', job.jobId, 'job.json'), job)
-    if (job.campId) {
+    if (job.threadId) {
       const binding = (await optionalJson<Binding[]>(join(this.root, 'schedules.json'), [])).find(item => item.automationId === job.automationId)
       if (!binding || await realpath(job.output) !== binding.output || !inside(binding.workspace, binding.output)) return
       const directory = join(binding.output, 'automation')
       await mkdir(directory, { recursive: true, mode: 0o700 })
       if (await realpath(directory) !== directory) throw new Error('Automation receipt directory cannot be a symlink')
       const { engine: _engine, plan: _plan, ...receipt } = job
-      await atomicJson(join(directory, `${job.campId}.json`), receipt)
+      await atomicJson(join(directory, `${job.threadId}.json`), receipt)
     }
   }
 }

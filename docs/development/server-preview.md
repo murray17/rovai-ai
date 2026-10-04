@@ -1,22 +1,21 @@
 ---
 document_type: development-guide
 authority: standalone-server-preview-operation
-last_updated: 2026-09-14
+last_updated: 2026-10-03
 ---
 
 # 原生 Server 安装与开发验收
 
-这是尚未正式发布的原生 Server 链路，提供同一个 Rust Host 和共享生产 Camp 页面。
-以下命令在取得匹配的预编译包并安装后使用；当前不宣称 GitHub 安装地址或正式版本已可下载。
-当前已接通独立草稿、四种 source 上传目标、执行审批、单聊和正式管理页，Automation 由 Rust Host 驱动。
-macOS 上的 Desktop/Headless 真实执行及浏览器管理操作已有证据；第二实体设备与其他平台仍分别验收。每个检查点的实际证据见[当前实施计划](../versions/v1.59/implementation-plan.md)。
-该包不是正式发布资格证明。当前产品为单 Owner、可信自托管 Host，不承诺同 UID 强隔离；
-历史哨兵失败保留，但不再作为本轮交付前置。
+Server 0.4.3 已与 Desktop 一起公开发布于 [`v0.4.3`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.3)，两端使用同一源码提交。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
+
+2026-09-29 的 macOS arm64 **0.4.0** 发布包实测确认安装、登录与会话可用，但有两个发布包阻碍：快捷命令启动可能找不到 WebUI；直接运行 `current/rovai-server` 后，首次 Agent 执行仍因 `bundled Skill resources are unavailable` 失败，归档缺少内置 Skill 资源。0.4.1 桥接包补齐归档资源与快捷命令路径，包内 Skill 读取和 0.4.0 数据升级已在隔离环境验收；尚不能把旧截图记成端到端执行成功。完整记录见[官网部署素材说明](../../website/deployment-notes.md)。
+
+已接通能力与平台资格分别判断，按[当前版本入口](../versions/README.md)及 [Runtime 兼容性清单](../runtime-compatibility.md)查看当前状态。产品为单 Owner、可信自托管 Host，不承诺同 UID 强隔离。本文历史 Gate 与草稿发布流程描述的是资格流程，不是“当前尚无公开包”的声明。
 
 ## 构建与包内容
 
 在目标 OS/CPU 的原生机器上运行 `pnpm build:server`；本地快速验证可加 `--debug`。
-构建依赖 Rust、Node 与 pnpm；包内包含 `rovai-server`、兼容入口 `rovai-host`、Agent `rovai` CLI、`web-ui/`、安装脚本、许可证及
+构建依赖 Rust、Node 与 pnpm；包内包含 `rovai-server`、兼容入口 `rovai-host`、Agent `rovai` CLI、`web-ui/`、`skills/`、安装脚本、许可证及
 SHA-256 manifest。运行 Host 本身不依赖 Electron、Node 或 pnpm；Runtime 自身依赖另行配置。
 解包内容位于 `out/server/<target>/`；压缩包和 `SHA256SUMS` 位于 `out/server/releases/<target>/`，
 不能从同名目录推断平台通过。源码构建属于开发流程，正式用户无需 clone、Rust 或前端工具链。
@@ -41,6 +40,13 @@ Python smoke 只作为外部驱动，Host 的 PATH 中不含 Node/Electron/Rust�
 原生复核可以用 `server_target` 只选择发生变更的目标；默认 `all` 才运行全部四个目标，单目标通过
 不能写成三平台通过。main 上全部目标通过后可显式开启 `server_release_draft` 组装 GitHub draft Release；
 它校验 source SHA、release profile、版本及平台一致，不自动公开发布或晋升默认安装指针。
+
+从 0.4.2 起，Desktop 与 Server 必须以相同版本、同一个确定的源码 SHA 构建，资产集中在 `v<版本>`。
+Server workflow 在四个原生目标与三套 Linux OS 检查通过后创建该统一草稿，使用
+`build/release-notes.md` 的共用说明。发布者继续加入同一 SHA 的 Desktop 安装包与更新清单，核对
+所有资产版本、来源、校验值及 Desktop 签名验证报告后，一次公开完整 Release。两端构建可并行，
+不得先公开缺少另一端资产的版本。公开资产验证可下载后才晋升 `scripts/server-release-tag.txt`，
+同步官网安装与下载说明；旧 `scripts/server-channel.txt` 固定为 0.4.1，保留到桥接包的入口。
 
 ## Linux 的两个验收 Gate
 
@@ -70,11 +76,12 @@ Windows 对应 `install-server.ps1 -Version <版本> -FromDirectory <发布资�
 Unix 默认配置 `.profile`、`.bashrc`、`.bash_profile`、`.zshrc` 的去重 PATH；Windows 配置用户 PATH。
 安装器打印新终端和立即生效方法。自动验收使用隔离安装位置；Windows 测试不修改真实用户 PATH。
 
-官方源固定为 GitHub Releases，Server tag 为 `server-v<版本>`。资产名为
+官方源固定为 GitHub Releases。0.4.0 和 0.4.1 桥接包使用 `server-v<版本>`；后续与 Desktop 同版合发时使用 `v<版本>`。资产名为
 `rovai-server-<版本>-<target>.tar.gz`（Unix）或 `.zip`（Windows），`SHA256SUMS` 每个资产恰好一项。
 安装器先完整下载、校验 SHA-256，检查归档路径/类型和包内版本/目标，再切换入口；下载/校验失败保留旧安装。
-默认版本由仓库 `scripts/server-channel.txt` 指定：稳定版本号表示默认网络安装使用该版本，`unpublished`
-表示默认网络安装明确失败。只有实际发布相应资产并晋升该指针后，才能把网络安装命令描述为可用。
+0.4.0 已安装程序继续读 `scripts/server-channel.txt`，该旧指针在桥接版发布后固定为 `0.4.1`。
+0.4.1 起的程序和安装器改读 `scripts/server-release-tag.txt`：当前 `v0.4.3` 指向同版 Desktop/Server 包，历史 `server-v0.4.1` 指向桥接包，`unpublished`
+表示新通道尚未晋升。只有实际发布相应资产并晋升指针后，才能把网络安装命令描述为可用。
 没有独立域名或下载服务。
 
 安装完成后可在任意工作目录运行：
@@ -184,8 +191,8 @@ pnpm smoke:host-web-runtime
 ## 更新、备份与既有 Mac 包演练
 
 新入口更新时重新运行同一安装器，替换匹配程序与 UI，仍用原 `--data-dir` 启动。自定义数据根不会被安装器改写。
-完整原生包提供 WebUI/MobileUI「关于与更新」中的检查、下载、安装并重启；使用独立的 `server-v<版本>` 资产。
-当前官方 Server 通道仍需发布和晋升，未发布会明确显示，不能将模拟发布源验证当成真实 Release 升级。
+完整原生包提供 WebUI/MobileUI「关于与更新」中的检查、下载、安装并重启；按新通道指向的精确 tag 使用 Server 资产。
+官方 Server 通道以实际已发布并完成晋升的 tag 为准，不能将模拟发布源验证当成真实 Release 升级。
 数据必须放在程序目录之外。安装前会受控结束执行并保留 Session，Windows 重启后不另开终端，诊断仍在原数据目录。
 `rovai-server upgrade` 命令未提供；不宣称无损热升级或数据库自动回滚。
 停机备份新布局时保留整个数据根及其权限、目录身份要求；源附件、用户项目与 Agent CLI 原生认证/会话独立保留。

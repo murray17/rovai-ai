@@ -9,7 +9,7 @@ last_updated: 2026-09-25
 
 # ContextManifest Evidence v31
 
-新公开 Camp batch Run 使用 Formatter／Manifest **31**、[Profile 10](context-delivery-profile-v10.md)、[Run Facts 8](run-facts-v8.md)；新非 batch 仍为 Formatter／Manifest 27、Profile 7、Run Facts 5。新 Binding 的 Bootstrap v5／Formatter 5、普通 Camp Charter revision 14；现有 Binding 的冻结 Bootstrap 与系统提示词不替换，Native Binding 的兼容摘要仍投影 v4／Formatter 4／Charter 13／非 batch 26。模型输入变更的完整前后文本与确认见 [v1.70 revision 5](../versions/v1.70/model-context-change-history-hint-additional.md)；Skills section 与 Selection／Resolution 形状沿用 [Skills Rebuild v1](skills-rebuild-v1.md)。
+新公开 Camp batch Run 使用 Formatter／Manifest **31**、[Profile 10](context-delivery-profile-v10.md)、[Run Facts 8](run-facts-v8.md)；新非 batch 仍为 Formatter／Manifest 27、Profile 7、Run Facts 5。新 Binding 的 Bootstrap v5／Formatter 5、普通 Camp Charter revision 16；Native Binding 的兼容摘要投影 v4／Formatter 4／Charter 16／非 batch 26，使已有 Session 在下一次正常执行时切换到新 Charter。旧 Binding 的冻结 Bootstrap 与系统提示词不回写。此前 [v1.70 revision 5](../versions/v1.70/model-context-change-history-hint-additional.md) 的 historyHint 文案变更采用新建 Charter 14、兼容摘要 Charter 13；本次按已确认的 [Charter 精简稿](../versions/v1.70/model-context-change-charter-simplification.md) 压缩公开 Camp 正文，等待队友规则仅留在正文末尾，并轮换兼容摘要。此静态 Charter revision 不改变本合同的动态 payload／Manifest shape。Skills section 与 Selection／Resolution 形状沿用 [Skills Rebuild v1](skills-rebuild-v1.md)。
 
 公开 batch 动态 section 的顺序为：
 

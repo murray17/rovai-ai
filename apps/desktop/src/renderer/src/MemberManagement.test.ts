@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { submitMemberRuntimeConfiguration } from './MemberManagement'
+import { submitMemberRuntimeConfiguration } from './member-runtime-commands'
 
 describe('member Runtime save catalog recovery', () => {
   afterEach(() => vi.unstubAllGlobals())

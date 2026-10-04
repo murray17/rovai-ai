@@ -15,8 +15,11 @@ export function hasPublishedChannelBot(snapshot: {
   ))
 }
 
+type OpenPlatformKind = Exclude<ChannelKind, 'dingtalk'>
+
 export class ChannelSettingsCoordinator {
-  readonly #feishu: ChannelSettingsService
+  // Snapshot order is fixed: Feishu, Lark, DingTalk.
+  readonly #openPlatform: ReadonlyArray<readonly [OpenPlatformKind, ChannelSettingsService]>
   readonly #dingtalk: DingTalkChannelSettingsService
   readonly #publications = new Set<ChannelKind>()
   readonly #listeners = new Set<(snapshot: ChannelSettingsSnapshot) => void>()
@@ -24,69 +27,75 @@ export class ChannelSettingsCoordinator {
 
   constructor(input: {
     feishu: ChannelSettingsService
+    lark: ChannelSettingsService
     dingtalk: DingTalkChannelSettingsService
   }) {
-    this.#feishu = input.feishu
+    this.#openPlatform = [['feishu', input.feishu], ['lark', input.lark]]
     this.#dingtalk = input.dingtalk
     this.#unsubscribeChildren = [
-      this.#feishu.onChanged(() => { void this.#emit() }),
+      ...this.#openPlatform.map(([, service]) => service.onChanged(() => { void this.#emit() })),
       this.#dingtalk.onChanged(() => { void this.#emit() })
     ]
   }
 
   async start(): Promise<void> {
-    const [feishu, dingtalk] = await Promise.allSettled([
-      this.#feishu.start(),
-      this.#dingtalk.start()
-    ])
-    if (feishu.status === 'rejected') {
-      console.warn('[rovai] Feishu Channel Host startup failed.', feishu.reason)
-    }
-    if (dingtalk.status === 'rejected') {
-      console.warn('[rovai] DingTalk Channel Host startup failed.', dingtalk.reason)
-    }
-    if (feishu.status === 'rejected' && dingtalk.status === 'rejected') {
-      throw new AggregateError(
-        [feishu.reason, dingtalk.reason],
-        'All Channel Hosts failed to start'
-      )
+    const hosts = [
+      ...this.#openPlatform.map(([kind, service]) => [kind, service.start()] as const),
+      ['dingtalk', this.#dingtalk.start()] as const
+    ]
+    const results = await Promise.allSettled(hosts.map(([, started]) => started))
+    const failures: unknown[] = []
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') return
+      console.warn(`[rovai] ${HOST_LABELS[hosts[index]![0]]} Channel Host startup failed.`, result.reason)
+      failures.push(result.reason)
+    })
+    if (failures.length === results.length) {
+      throw new AggregateError(failures, 'All Channel Hosts failed to start')
     }
   }
 
   async stop(): Promise<void> {
-    await Promise.allSettled([this.#feishu.stop(), this.#dingtalk.stop()])
+    await Promise.allSettled([
+      ...this.#openPlatform.map(([, service]) => service.stop()),
+      this.#dingtalk.stop()
+    ])
   }
 
   handleCoreEvent(event: CoreEvent): void {
-    this.#feishu.handleCoreEvent(event)
+    for (const [, service] of this.#openPlatform) service.handleCoreEvent(event)
     this.#dingtalk.handleCoreEvent(event)
   }
 
   async get(): Promise<ChannelSettingsSnapshot> {
-    const [feishu, dingtalk] = await Promise.all([
-      this.#feishu.get(),
+    const [openPlatform, dingtalk] = await Promise.all([
+      Promise.all(this.#openPlatform.map(async ([kind, service]) => ({ kind, snapshot: await service.get() }))),
       this.#dingtalk.get()
     ])
+    const activeQr = dingtalk.activeQrAttempt
+      ? { ...dingtalk.activeQrAttempt, kind: 'dingtalk' as const }
+      : openPlatform.flatMap(({ kind, snapshot }) => snapshot.activeQrAttempt
+        ? [{ ...snapshot.activeQrAttempt, kind }] : [])[0] ?? null
+    const activeProvisioning = dingtalk.activeProvisioning
+      ? { ...dingtalk.activeProvisioning, kind: 'dingtalk' as const }
+      : openPlatform.flatMap(({ kind, snapshot }) => snapshot.activeProvisioning
+        ? [{ ...snapshot.activeProvisioning, kind }] : [])[0] ?? null
     return {
       schemaVersion: 4,
       channels: [
-        ...feishu.channels.map(provider => ({ ...provider, provisioning: feishu.activeProvisioning
-          ? { ...feishu.activeProvisioning, kind: 'feishu' as const } : null })),
+        ...openPlatform.flatMap(({ kind, snapshot }) => snapshot.channels.map(provider => ({
+          ...provider,
+          provisioning: snapshot.activeProvisioning ? { ...snapshot.activeProvisioning, kind } : null
+        }))),
         { ...dingtalk.provider, provisioning: dingtalk.activeProvisioning
           ? { ...dingtalk.activeProvisioning, kind: 'dingtalk' as const } : null }
       ],
-      pendingBindingCount: feishu.pendingBindingCount + dingtalk.pendingBindingCount,
-      bindingIssueCount: feishu.bindingIssueCount + dingtalk.bindingIssueCount,
-      activeQrAttempt: dingtalk.activeQrAttempt
-        ? { ...dingtalk.activeQrAttempt, kind: 'dingtalk' }
-        : feishu.activeQrAttempt
-          ? { ...feishu.activeQrAttempt, kind: 'feishu' }
-          : null,
-      activeProvisioning: dingtalk.activeProvisioning
-        ? { ...dingtalk.activeProvisioning, kind: 'dingtalk' }
-        : feishu.activeProvisioning
-          ? { ...feishu.activeProvisioning, kind: 'feishu' }
-          : null
+      pendingBindingCount: openPlatform.reduce((sum, { snapshot }) => sum + snapshot.pendingBindingCount, 0)
+        + dingtalk.pendingBindingCount,
+      bindingIssueCount: openPlatform.reduce((sum, { snapshot }) => sum + snapshot.bindingIssueCount, 0)
+        + dingtalk.bindingIssueCount,
+      activeQrAttempt: activeQr,
+      activeProvisioning
     }
   }
 
@@ -97,13 +106,13 @@ export class ChannelSettingsCoordinator {
 
   async connect(kind: ChannelKind = 'feishu'): Promise<ChannelSettingsSnapshot> {
     if (kind === 'dingtalk') await this.#dingtalk.connect()
-    else await this.#feishu.connect()
+    else await this.#service(kind).connect()
     return this.get()
   }
 
   async disconnect(kind: ChannelKind = 'feishu'): Promise<ChannelSettingsSnapshot> {
     if (kind === 'dingtalk') await this.#dingtalk.disconnect()
-    else await this.#feishu.disconnect()
+    else await this.#service(kind).disconnect()
     return this.get()
   }
 
@@ -113,7 +122,7 @@ export class ChannelSettingsCoordinator {
   ): Promise<ChannelSettingsSnapshot> {
     return this.#publication(kind, async () => {
       if (kind === 'dingtalk') await this.#dingtalk.publish(agentId)
-      else await this.#feishu.publishMemberBot(agentId)
+      else await this.#service(kind).publishMemberBot(agentId)
     })
   }
 
@@ -123,7 +132,7 @@ export class ChannelSettingsCoordinator {
   ): Promise<ChannelSettingsSnapshot> {
     return this.#publication(kind, async () => {
       if (kind === 'dingtalk') await this.#dingtalk.publish(agentId)
-      else await this.#feishu.retryMemberBot(agentId)
+      else await this.#service(kind).retryMemberBot(agentId)
     })
   }
 
@@ -132,7 +141,7 @@ export class ChannelSettingsCoordinator {
     userId: string,
     kind: ChannelKind = 'feishu'
   ): Promise<ChannelSettingsSnapshot> {
-    if (kind !== 'dingtalk') throw new Error('feishu_publication_approver_not_supported')
+    if (kind !== 'dingtalk') throw new Error(`${kind}_publication_approver_not_supported`)
     return this.#publication(kind, () => this.#dingtalk.selectApprover(agentId, userId))
   }
 
@@ -150,7 +159,8 @@ export class ChannelSettingsCoordinator {
     if (dingtalk.activeQrAttempt?.attemptId === attemptId) {
       await this.#dingtalk.cancelLogin(attemptId)
     } else {
-      await this.#feishu.cancelQrAttempt(attemptId)
+      // Each open-platform Host ignores an attempt it does not own.
+      await Promise.all(this.#openPlatform.map(([, service]) => service.cancelQrAttempt(attemptId)))
     }
     return this.get()
   }
@@ -160,7 +170,10 @@ export class ChannelSettingsCoordinator {
   }
 
   async refreshLoginQr(attemptId: string): Promise<void> {
-    if (!await this.#feishu.refreshLoginQr(attemptId)) await this.#dingtalk.refreshLoginQr(attemptId)
+    for (const [, service] of this.#openPlatform) {
+      if (await service.refreshLoginQr(attemptId)) return
+    }
+    await this.#dingtalk.refreshLoginQr(attemptId)
   }
 
   dispose(): void {
@@ -168,9 +181,19 @@ export class ChannelSettingsCoordinator {
     this.#listeners.clear()
   }
 
+  #service(kind: OpenPlatformKind): ChannelSettingsService {
+    return this.#openPlatform.find(([candidate]) => candidate === kind)![1]
+  }
+
   async #emit(): Promise<ChannelSettingsSnapshot> {
     const snapshot = await this.get()
     for (const listener of this.#listeners) listener(structuredClone(snapshot))
     return snapshot
   }
+}
+
+const HOST_LABELS: Readonly<Record<ChannelKind, string>> = {
+  feishu: 'Feishu',
+  lark: 'Lark',
+  dingtalk: 'DingTalk'
 }

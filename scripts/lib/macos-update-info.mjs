@@ -66,6 +66,8 @@ export function mergeMacUpdateInfoDocuments(documents) {
 
 export function mergeMacUpdateInfoYaml(documents) {
   return stringify(mergeMacUpdateInfoDocuments(documents), {
+    // Keep timestamp strings quoted for electron-updater's YAML 1.1 parser.
+    compat: 'yaml-1.1',
     lineWidth: 0,
     minContentWidth: 0
   })

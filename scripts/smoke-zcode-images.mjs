@@ -35,25 +35,25 @@ try {
   assert(before.every(item => ['workspace/readState', 'session/create', 'session/subscribe', 'session/setMode'].includes(item.method)), 'Probe must not generate or upload')
   const created = await core.request('camps.create', { commandId: crypto.randomUUID(), name: 'ZCode vision acceptance', workspace: { projectPath: workspace.projectPath }, memberAgentIds: ['agent_2'], defaultLeadAgentId: 'agent_2', collaborationMode: 'peer' })
   assert.equal(created.status, 'applied')
-  const campId = created.payload.campId
+  const threadId = created.payload.threadId
   const codes = [String(randomInt(100000, 999999)), String(randomInt(100000, 999999))]
   const images = await numberImages(codes)
-  let draft = await core.request('camp.composerDraft.get', { campId })
+  let draft = await core.request('camp.composerDraft.get', { threadId })
   for (const [index, bytes] of images.entries()) {
     const sourcePath = join(root, `image-${index}.png`)
     await writeFile(sourcePath, bytes)
-    draft = await core.request('camp.sourceAttachments.addFromPath', { campId, expectedRevision: draft.revision, sourcePath, displayName: `Image ${index + 1}.png` })
+    draft = await core.request('camp.sourceAttachments.addFromPath', { threadId, expectedRevision: draft.revision, sourcePath, displayName: `Image ${index + 1}.png` })
   }
-  const first = await send(campId, draft, 'Use the native Read tool to open each of the two image paths in CURRENT_INPUT.attachments. Read the six digit number visible in each image. Answer with only the two numbers in attachment order, separated by a comma. Do not use shell commands or external OCR; the native Read tool supports images.')
-  await finish(campId, first)
-  const inspection = await core.request('camps.snapshot', { campId })
+  const first = await send(threadId, draft, 'Use the native Read tool to open each of the two image paths in CURRENT_INPUT.attachments. Read the six digit number visible in each image. Answer with only the two numbers in attachment order, separated by a comma. Do not use shell commands or external OCR; the native Read tool supports images.')
+  await finish(threadId, first)
+  const inspection = await core.request('camps.snapshot', { threadId })
   const firstBody = inspection.messages.find(message => message.sourceAgentRunId === first)?.body ?? ''
   for (const code of codes) assert(firstBody.includes(code), 'Actual model must read the random number present only in the image')
   assert(firstBody.indexOf(codes[0]) < firstBody.indexOf(codes[1]), 'Image order must be preserved')
   const firstStart = events.find(event => event.method === 'agent_run.started' && event.params?.agentRunId === first)
   const nativeSession = firstStart?.params?.nativeThreadId
   assert(nativeSession)
-  const evidence = await core.request('agentRunEvidence.list', { campId, agentRunId: first, afterSequence: 0, limit: 1000 })
+  const evidence = await core.request('agentRunEvidence.list', { threadId, agentRunId: first, afterSequence: 0, limit: 1000 })
   const reads = evidence.evidence.filter(item => item.canonical?.semanticKind === 'file.read')
   assert(reads.length >= 2, 'Both images must have native Read activity')
   assert(!evidence.evidence.some(item => ['file.write','file.edit','file.delete','file.move'].includes(item.canonical?.semanticKind)))
@@ -61,9 +61,9 @@ try {
   assert(!evidence.evidence.some(item => item.canonical?.diffProjection?.status === 'available'), 'Reading an image must not create modification Diff')
   console.log(JSON.stringify({ stage: 'vision-passed', agentRunId: first, imageCount: 2, nativeReadActivity: true, noModificationDiff: true }))
   await core.stop(); core = start()
-  const second = await send(campId, await core.request('camp.composerDraft.get', { campId }), 'Repeat the two six digit numbers you read in the previous images, in the same order. Do not call tools.')
-  await finish(campId, second)
-  const continuation = await core.request('camps.snapshot', { campId })
+  const second = await send(threadId, await core.request('camp.composerDraft.get', { threadId }), 'Repeat the two six digit numbers you read in the previous images, in the same order. Do not call tools.')
+  await finish(threadId, second)
+  const continuation = await core.request('camps.snapshot', { threadId })
   const secondBody = continuation.messages.find(message => message.sourceAgentRunId === second)?.body ?? ''
   for (const code of codes) assert(secondBody.includes(code))
   assert(secondBody.indexOf(codes[0]) < secondBody.indexOf(codes[1]))
@@ -80,22 +80,22 @@ try {
   if (passed) await rm(root, { recursive: true, force: true })
   else console.log(JSON.stringify({ stage: 'failed-fixture', root }))
 }
-async function send(campId, draft, body) {
-  draft = await core.request('camp.composerDraft.save', { campId, expectedRevision: draft.revision, content: composerDocumentForAddress({ mode: 'explicit', agentIds: ['agent_2'] }, body) })
-  const sent = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), campId, draftRevision: draft.revision, execution: { taskId: null, purpose: 'Native image input acceptance', completionRole: 'required' } })
+async function send(threadId, draft, body) {
+  draft = await core.request('camp.composerDraft.save', { threadId, expectedRevision: draft.revision, content: composerDocumentForAddress({ mode: 'explicit', agentIds: ['agent_2'] }, body) })
+  const sent = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), threadId, draftRevision: draft.revision, execution: { taskId: null, purpose: 'Native image input acceptance', completionRole: 'required' } })
   const result = sent.commandResult ?? sent
   assert.equal(result.status, 'accepted')
   assert(result.payload.agentRunIds[0])
   return result.payload.agentRunIds[0]
 }
-async function finish(campId, id) {
+async function finish(threadId, id) {
   const deadline = Date.now() + 180000
   while (Date.now() < deadline) {
-    const snapshot = await core.request('camps.snapshot', { campId })
+    const snapshot = await core.request('camps.snapshot', { threadId })
     const run = snapshot.agentRuns.find(item => item.id === id)
     if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
       assert.equal(run.status, 'succeeded', JSON.stringify(run.failure))
-      if (snapshot.turns.find(turn => turn.id === run.campTurnId)?.status === 'completed') return
+      if (snapshot.turns.find(turn => turn.id === run.threadTurnId)?.status === 'completed') return
     }
     await new Promise(resolveWait => setTimeout(resolveWait, 300))
   }

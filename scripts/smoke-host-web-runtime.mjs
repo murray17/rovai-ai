@@ -95,16 +95,16 @@ try {
   await browser.click(`document.querySelector('.web-login button[type=submit]')`)
   await browser.wait(`document.querySelector('.web-login-overlay') === null`)
   const name = `真实 ${desktopEntry ? 'Desktop' : '独立'} Host Web 执行验收`
-  const { campId } = await configureBrowserCamp({ browser, workspace, name,
+  const { threadId } = await configureBrowserCamp({ browser, workspace, name,
     read: (operation, params) => {
       assert.ok(['members.list', 'runtime.installations.list', 'navigation.snapshot'].includes(operation), 'Setup verification is read-only')
       return call(operation, params)
     }
   })
-  evidence.campId = campId
+  evidence.threadId = threadId
   evidence.checks.browserRuntimeMemberAndCampSetup = true
-  console.log(JSON.stringify({ stage: 'configured-through-production-ui', campId }))
-  const readCamp = () => call('camps.open', { campId, traceId: randomUUID() })
+  console.log(JSON.stringify({ stage: 'configured-through-production-ui', threadId }))
+  const readCamp = () => call('camps.open', { threadId, traceId: randomUUID() })
   await browser.wait(`document.body.innerText.includes(${JSON.stringify(name)})`)
   await browser.wait(`document.querySelector('[contenteditable=true]') !== null`)
   const type = async text => {
@@ -157,7 +157,7 @@ try {
       }
       assert.ok(resolved, 'Browser approval did not settle')
       const competing = await call('action.approvals.resolve', {
-        commandId: randomUUID(), campId, approvalId: approval.id, expectedVersion: approval.version,
+        commandId: randomUUID(), threadId, approvalId: approval.id, expectedVersion: approval.version,
         optionId: option.optionId, reason: 'Second client must not resolve a settled approval again'
       })
       assert.equal(competing.status, 'rejected')
@@ -209,7 +209,7 @@ try {
   await capture('web-stop-active.png')
   if (desktop) {
     await desktop.evaluate(`window.rovai.hostWeb.stop()`)
-    const observed = await desktop.evaluate(`window.rovai.request('camps.open',{campId:${JSON.stringify(campId)},traceId:${JSON.stringify(randomUUID())}})`)
+    const observed = await desktop.evaluate(`window.rovai.request('camps.open',{threadId:${JSON.stringify(threadId)},traceId:${JSON.stringify(randomUUID())}})`)
     assert.equal(observed.agentRuns.find(run=>run.id===stopRun.id)?.status, 'running', 'closing Web must preserve the active native Run')
     const resumed = await desktop.evaluate(`window.rovai.hostWeb.start({listen:${JSON.stringify(new URL(origin).host)},allowInsecureLan:false})`)
     assert.equal(resumed.origin, origin)

@@ -1,0 +1,35 @@
+{
+  "runtimeVersion": "0.1.5-rc.3",
+  "nativeEvent": {
+    "type": "assistant/message",
+    "data": {
+      "usage": { "inputTokens": 11386, "outputTokens": 24, "totalTokens": 11410 }
+    }
+  },
+  "acpProjection": {
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-redacted",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "_meta": {
+          "dshUsage": [{
+            "schemaVersion": 1,
+            "sessionId": "session-redacted",
+            "seq": 1,
+            "turn": 1,
+            "sourceEvent": "assistant/message",
+            "usage": { "inputTokens": 11386, "outputTokens": 24 }
+          }]
+        }
+      }
+    }
+  },
+  "expected": {
+    "uncachedInputTokens": 11386,
+    "promptInputTotalTokens": null,
+    "outputTokens": 24,
+    "cacheReadTokens": null,
+    "cacheWriteTokens": null
+  }
+}

@@ -22,6 +22,10 @@ const dataDir = assertUserDataIsIsolated(join(fixtureRoot, 'user-data'))
 const outputDir = resolve(process.env.ROVAI_BOOTSTRAP_ACCEPT_OUTPUT_DIR
   ?? join(fixtureRoot, 'captures'))
 const port = Number(process.env.ROVAI_BOOTSTRAP_ACCEPT_DEBUG_PORT ?? 9531)
+const acceptanceScope = process.env.ROVAI_BOOTSTRAP_ACCEPT_SCOPE ?? 'all'
+if (!['all', 'bootstrap'].includes(acceptanceScope)) {
+  throw new Error(`Unsupported Bootstrap acceptance scope: ${acceptanceScope}`)
+}
 const databasePath = join(dataDir, 'rovai.sqlite')
 const retainedAuthority = Buffer.from('retained unknown authority\n', 'utf8')
 
@@ -81,11 +85,55 @@ try {
 
   await closeApp(running)
   running = null
-  const recovery = await verifyCoreCrashRecovery()
-  const optionalSubsystem = await verifyOptionalSubsystemRecovery()
+
+  const englishDataDir = assertUserDataIsIsolated(join(fixtureRoot, 'english-user-data'))
+  await mkdir(join(englishDataDir, 'managed-skill-library'), { recursive: true })
+  await writeFile(join(englishDataDir, 'rovai.sqlite'), retainedAuthority, { flag: 'wx', mode: 0o600 })
+  await writeFile(join(englishDataDir, 'general-preferences.json'), `${JSON.stringify({
+    schemaVersion: 5,
+    interfaceLanguage: 'en',
+    startupLocationMode: 'last_location',
+    lastSettingsSection: 'general',
+    executionConsolePlacement: 'inspector',
+    newConversationDefaults: null,
+    newConversationDefaultsRequireConfirmation: false,
+    oneClickNewConversationEnabled: false,
+    worldMapEnabled: false
+  })}\n`, { flag: 'wx', mode: 0o600 })
+
+  running = await launchApp(englishDataDir)
+  await waitForSelector(running.cdp, '.bootstrap-shell', 45_000)
+  await waitForExpression(running.cdp, `document.documentElement.lang === 'en'
+    && document.querySelector('.bootstrap-authority-card h1')?.textContent === 'Session temporarily unavailable'
+    && window.rovai.supervisor.getSnapshot().then((snapshot) => snapshot.fullCoreState === 'blocked')`, 45_000)
+  const locallyReadLanguage = await evaluate(running.cdp,
+    `window.rovai.desktopSession.getInterfaceLanguage()`, true)
+  assert(locallyReadLanguage === 'en', `Bootstrap language read did not return the saved preference: ${locallyReadLanguage}`)
+  await setTheme(running.cdp, 'day')
+  await wait(350)
+  const englishBlocked = await inspectBootstrap(running.cdp)
+  assert(englishBlocked.title === 'Session temporarily unavailable'
+    && englishBlocked.body.includes('Reopen')
+    && englishBlocked.body.includes('Export diagnostics')
+    && !/[\u3400-\u9fff]/u.test(englishBlocked.body)
+    && englishBlocked.retryFocused
+    && !englishBlocked.retryDisabled
+    && englishBlocked.diagnosticsButton
+    && englishBlocked.themeButtons === 3
+    && !englishBlocked.authoritativeTree
+    && !englishBlocked.horizontalOverflow,
+  `Saved English language was not restored on the blocked Bootstrap Shell: ${JSON.stringify(englishBlocked)}`)
+  const englishCapture = join(outputDir, 'bootstrap-blocked-english-day-1040x700.png')
+  await capture(running.cdp, englishCapture)
+  await closeApp(running)
+  running = null
+
+  const recovery = acceptanceScope === 'all' ? await verifyCoreCrashRecovery() : null
+  const optionalSubsystem = acceptanceScope === 'all' ? await verifyOptionalSubsystemRecovery() : null
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
+    scope: acceptanceScope,
     app: basename(appPath),
     fixtureRoot,
     dataDir,
@@ -102,17 +150,25 @@ try {
       narrowTwoHundredPercentEquivalentLayout: true,
       reducedMotion: true,
       horizontalOverflow: false,
-      automaticCoreCrashRecovery: true,
-      interruptedWriteRolledBack: true,
-      committedStatePreserved: true,
-      structuredCrashFailureInRenderer: true,
-      workspaceRemounted: true,
-      optionalSubsystemDoesNotUnmountWorkspace: true,
-      optionalSubsystemRetryWithoutCoreRestart: true
+      savedLanguageRestoredWithoutCore: true,
+      ...(acceptanceScope === 'all' ? {
+        automaticCoreCrashRecovery: true,
+        interruptedWriteRolledBack: true,
+        committedStatePreserved: true,
+        structuredCrashFailureInRenderer: true,
+        workspaceRemounted: true,
+        optionalSubsystemDoesNotUnmountWorkspace: true,
+        optionalSubsystemRetryWithoutCoreRestart: true
+      } : {})
     },
     recovery,
     optionalSubsystem,
-    captures: { day: dayCapture, nightCompact: nightCapture, recovered: recovery.capture }
+    captures: {
+      day: dayCapture,
+      nightCompact: nightCapture,
+      englishBlocked: englishCapture,
+      ...(recovery ? { recovered: recovery.capture } : {})
+    }
   }, null, 2)}\n`)
 } finally {
   if (running) await closeApp(running)
@@ -122,6 +178,7 @@ async function verifyCoreCrashRecovery() {
   const recoveryDataDir = assertUserDataIsIsolated(join(fixtureRoot, 'crash-recovery-user-data'))
   await mkdir(recoveryDataDir, { recursive: false })
   const coreExecutable = await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core'))
+  const hostExecutable = await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-host'))
   const core = startQualificationCore({
     coreExecutable,
     dataDirectory: recoveryDataDir,
@@ -211,7 +268,7 @@ async function verifyCoreCrashRecovery() {
       walBytes = await stat(walPath).then(metadata => metadata.size)
     }
     assert(walBytes >= walBefore + 4 * 1024 * 1024, 'Core did not spill an active write to WAL')
-    const killedPid = await killIsolatedCore(application, recoveryDataDir, coreExecutable)
+    const killedPid = await killIsolatedCore(application, recoveryDataDir, hostExecutable)
     const interrupted = await evaluate(application.cdp, 'window.__crashWrite', true)
     const failure = interrupted?.failure
     assert(failure?.kind === 'infrastructure_failure'
@@ -414,7 +471,7 @@ function assertBootstrapState(state, context) {
   `${context} returned the wrong capability matrix: ${JSON.stringify(state.snapshot.capabilities)}`)
   assert(state.title === '暂时无法打开会话' && !state.authoritativeTree,
     `${context} mounted the wrong root: ${JSON.stringify(state)}`)
-  assert(state.camps === 0 && state.members === 0 && state.memory === 0,
+  assert(state.threads === 0 && state.members === 0 && state.memory === 0,
     `${context} exposed authoritative business surfaces: ${JSON.stringify(state)}`)
   assert(state.retryFocused && !state.retryDisabled && state.diagnosticsButton,
     `${context} did not expose keyboard-operable recovery actions: ${JSON.stringify(state)}`)

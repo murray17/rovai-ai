@@ -1,4 +1,4 @@
 interface:
   display_name: "双人代码评审"
-  short_description: "与固定 Camp 搭档分别检查代码质量和需求符合度并形成只读报告"
+  short_description: "与固定对话搭档分别检查代码质量和需求符合度并形成只读报告"
   default_prompt: "使用 $review-duo 对这份明确的代码改动进行双人只读评审：固定搭档检查规范与质量，当前评审者检查需求符合度，最后分别呈现两个方向的结果。"

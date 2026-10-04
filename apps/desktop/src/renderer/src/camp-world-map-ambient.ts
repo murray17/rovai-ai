@@ -1,20 +1,21 @@
 import {
   CAMP_WORLD_MAP_AMBIENT_BEATS,
   CAMP_WORLD_MAP_NODE_ENVIRONMENT,
-  type CampWorldMapAmbientBeat,
-  type CampWorldMapAmbientEnvironment,
-  type CampWorldMapAmbientTopic,
-  type CampWorldMapGenericEncounterBeat,
-  type CampWorldMapGenericStationarySoloBeat,
-  type CampWorldMapMovingSoloBeat,
-  type CampWorldMapNodeEncounterBeat,
-  type CampWorldMapNodeSoloBeat
+  type ThreadWorldMapAmbientBeat,
+  type ThreadWorldMapAmbientEnvironment,
+  type ThreadWorldMapAmbientTopic,
+  type ThreadWorldMapGenericEncounterBeat,
+  type ThreadWorldMapGenericStationarySoloBeat,
+  type ThreadWorldMapMovingSoloBeat,
+  type ThreadWorldMapNodeEncounterBeat,
+  type ThreadWorldMapNodeSoloBeat
 } from './camp-world-map-ambient-copy'
 import {
   campWorldMapStableHash,
-  type CampWorldMapAgent,
-  type CampWorldMapNodeId
+  type ThreadWorldMapAgent,
+  type ThreadWorldMapNodeId
 } from './camp-world-map-model'
+import { uiAttribute } from './interface-language'
 
 export const CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY = { minimum: 6_000, maximum: 12_000 } as const
 export const CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY = { minimum: 4_000, maximum: 6_000 } as const
@@ -30,74 +31,74 @@ export const CAMP_WORLD_MAP_AMBIENT_RELAXATION_TIERS = [
   { globalRecent: 0, nodeRecent: 0 }
 ] as const
 
-export type CampWorldMapAmbientRandom = () => number
+export type ThreadWorldMapAmbientRandom = () => number
 
-export type CampWorldMapAmbientParticipant = {
+export type ThreadWorldMapAmbientParticipant = {
   agentId: string
-  nodeId: CampWorldMapNodeId
-  mode: CampWorldMapAgent['mode']
+  nodeId: ThreadWorldMapNodeId
+  mode: ThreadWorldMapAgent['mode']
   motion: 'stationary' | 'moving'
   rendezvousKey: string | null
 }
 
-export type CampWorldMapAmbientHistory = {
+export type ThreadWorldMapAmbientHistory = {
   globalBeatIds: string[]
-  nodeBeatIds: Map<CampWorldMapNodeId, string[]>
+  nodeBeatIds: Map<ThreadWorldMapNodeId, string[]>
   participantLastShownAt: Map<string, number>
   pairLastShownAt: Map<string, number>
   lastBeatId: string | null
-  lastTopic: CampWorldMapAmbientTopic | null
+  lastTopic: ThreadWorldMapAmbientTopic | null
 }
 
-type CampWorldMapAmbientSelectionBase = {
+type ThreadWorldMapAmbientSelectionBase = {
   beatId: string
-  topic: CampWorldMapAmbientTopic
-  nodeId: CampWorldMapNodeId
+  topic: ThreadWorldMapAmbientTopic
+  nodeId: ThreadWorldMapNodeId
   text: string
 }
 
-export type CampWorldMapAmbientSoloSelection = CampWorldMapAmbientSelectionBase & {
+export type ThreadWorldMapAmbientSoloSelection = ThreadWorldMapAmbientSelectionBase & {
   kind: 'solo'
   agentIds: readonly [string]
   motion: 'stationary' | 'moving'
 }
 
-export type CampWorldMapAmbientEncounterSelection = CampWorldMapAmbientSelectionBase & {
+export type ThreadWorldMapAmbientEncounterSelection = ThreadWorldMapAmbientSelectionBase & {
   kind: 'encounter'
   agentIds: readonly [string, string]
   motion: 'stationary'
 }
 
-export type CampWorldMapAmbientSelection =
-  | CampWorldMapAmbientSoloSelection
-  | CampWorldMapAmbientEncounterSelection
+export type ThreadWorldMapAmbientSelection =
+  | ThreadWorldMapAmbientSoloSelection
+  | ThreadWorldMapAmbientEncounterSelection
 
-export type CampWorldMapAmbientSelectionSnapshot = {
+export type ThreadWorldMapAmbientSelectionSnapshot = {
   now: number
   hasAuthoritativeSpeech: boolean
-  participants: readonly CampWorldMapAmbientParticipant[]
-  history: CampWorldMapAmbientHistory
+  participants: readonly ThreadWorldMapAmbientParticipant[]
+  history: ThreadWorldMapAmbientHistory
 }
 
 type RelaxationTier = typeof CAMP_WORLD_MAP_AMBIENT_RELAXATION_TIERS[number]
 
-type SoloBeat = CampWorldMapNodeSoloBeat
-  | CampWorldMapGenericStationarySoloBeat
-  | CampWorldMapMovingSoloBeat
+type SoloBeat = ThreadWorldMapNodeSoloBeat
+  | ThreadWorldMapGenericStationarySoloBeat
+  | ThreadWorldMapMovingSoloBeat
 
-type EncounterBeat = CampWorldMapNodeEncounterBeat | CampWorldMapGenericEncounterBeat
+type EncounterBeat = ThreadWorldMapNodeEncounterBeat | ThreadWorldMapGenericEncounterBeat
 
 type SoloCandidate = {
-  participant: CampWorldMapAmbientParticipant
-  nodeBeats: readonly CampWorldMapNodeSoloBeat[]
-  genericBeats: readonly (CampWorldMapGenericStationarySoloBeat | CampWorldMapMovingSoloBeat)[]
+  participant: ThreadWorldMapAmbientParticipant
+  nodeBeats: readonly ThreadWorldMapNodeSoloBeat[]
+  genericBeats: readonly (ThreadWorldMapGenericStationarySoloBeat | ThreadWorldMapMovingSoloBeat)[]
 }
 
 type EncounterCandidate = {
   pairKey: string
-  participants: readonly [CampWorldMapAmbientParticipant, CampWorldMapAmbientParticipant]
-  nodeBeats: readonly CampWorldMapNodeEncounterBeat[]
-  genericBeats: readonly CampWorldMapGenericEncounterBeat[]
+  participants: readonly [ThreadWorldMapAmbientParticipant, ThreadWorldMapAmbientParticipant]
+  nodeBeats: readonly ThreadWorldMapNodeEncounterBeat[]
+  genericBeats: readonly ThreadWorldMapGenericEncounterBeat[]
 }
 
 type AmbientCandidates = {
@@ -105,13 +106,13 @@ type AmbientCandidates = {
   encounters: EncounterCandidate[]
 }
 
-export type CampWorldMapAmbientDisplayedEvent = CampWorldMapAmbientSelection & {
+export type ThreadWorldMapAmbientDisplayedEvent = ThreadWorldMapAmbientSelection & {
   eventId: string
   startedAt: number
   expiresAt: number
 }
 
-export type CampWorldMapCaption =
+export type ThreadWorldMapCaption =
   | {
       kind: 'real' | 'waiting'
       interactive: true
@@ -126,24 +127,24 @@ export type CampWorldMapCaption =
       text: string
     }
 
-export type CampWorldMapAmbientSchedulerClock = {
+export type ThreadWorldMapAmbientSchedulerClock = {
   now(): number
   setTimeout(callback: () => void, delay: number): unknown
   clearTimeout(handle: unknown): void
 }
 
-export type CampWorldMapAmbientSchedulerDependencies = {
-  clock: CampWorldMapAmbientSchedulerClock
-  random: CampWorldMapAmbientRandom
-  select(now: number, random: CampWorldMapAmbientRandom): CampWorldMapAmbientSelection | null
-  onDisplayed(event: CampWorldMapAmbientDisplayedEvent): void
-  onEventChange(event: CampWorldMapAmbientDisplayedEvent | null): void
+export type ThreadWorldMapAmbientSchedulerDependencies = {
+  clock: ThreadWorldMapAmbientSchedulerClock
+  random: ThreadWorldMapAmbientRandom
+  select(now: number, random: ThreadWorldMapAmbientRandom): ThreadWorldMapAmbientSelection | null
+  onDisplayed(event: ThreadWorldMapAmbientDisplayedEvent): void
+  onEventChange(event: ThreadWorldMapAmbientDisplayedEvent | null): void
 }
 
 export function campWorldMapCaption(
-  agents: readonly CampWorldMapAgent[],
-  ambientEvent: CampWorldMapAmbientDisplayedEvent | null
-): CampWorldMapCaption | null {
+  agents: readonly ThreadWorldMapAgent[],
+  ambientEvent: ThreadWorldMapAmbientDisplayedEvent | null
+): ThreadWorldMapCaption | null {
   const realAgent = agents.find(
     (agent) => agent.speech?.kind === 'real' && agent.hasExecutionProcess
   )
@@ -152,7 +153,7 @@ export function campWorldMapCaption(
       kind: 'real',
       interactive: true,
       agentId: realAgent.agentId,
-      label: `真实执行 · ${realAgent.displayName}`,
+      label: uiAttribute('真实执行 · {0}', realAgent.displayName),
       text: realAgent.speech.text
     }
   }
@@ -164,7 +165,7 @@ export function campWorldMapCaption(
       kind: 'waiting',
       interactive: true,
       agentId: waitingAgent.agentId,
-      label: `结果待确认 · ${waitingAgent.displayName}`,
+      label: uiAttribute('结果待确认 · {0}', waitingAgent.displayName),
       text: waitingAgent.speech.text
     }
   }
@@ -187,20 +188,20 @@ export function campWorldMapCaption(
 }
 
 export function campWorldMapAuthoritativeSpeechBlocksAmbient(
-  agents: readonly CampWorldMapAgent[]
+  agents: readonly ThreadWorldMapAgent[]
 ): boolean {
   return agents.some((agent) => agent.speech !== null)
     && !agents.some((agent) => agent.mode === 'idle')
 }
 
-function normalizedRandom(random: CampWorldMapAmbientRandom): number {
+function normalizedRandom(random: ThreadWorldMapAmbientRandom): number {
   const value = random()
   if (!Number.isFinite(value) || value <= 0) return 0
   if (value >= 1) return 1
   return value
 }
 
-function randomItem<T>(items: readonly T[], random: CampWorldMapAmbientRandom): T | null {
+function randomItem<T>(items: readonly T[], random: ThreadWorldMapAmbientRandom): T | null {
   if (items.length === 0) return null
   if (items.length === 1) return items[0] ?? null
   const index = Math.min(items.length - 1, Math.floor(normalizedRandom(random) * items.length))
@@ -209,28 +210,28 @@ function randomItem<T>(items: readonly T[], random: CampWorldMapAmbientRandom): 
 
 function delayInRange(
   range: { minimum: number; maximum: number },
-  random: CampWorldMapAmbientRandom
+  random: ThreadWorldMapAmbientRandom
 ): number {
   return range.minimum + normalizedRandom(random) * (range.maximum - range.minimum)
 }
 
-export function campWorldMapAmbientInitialDelay(random: CampWorldMapAmbientRandom): number {
+export function campWorldMapAmbientInitialDelay(random: ThreadWorldMapAmbientRandom): number {
   return delayInRange(CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY, random)
 }
 
-export function campWorldMapAmbientAttemptDelay(random: CampWorldMapAmbientRandom): number {
+export function campWorldMapAmbientAttemptDelay(random: ThreadWorldMapAmbientRandom): number {
   return delayInRange(CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY, random)
 }
 
-export function createCampWorldMapAmbientRandom(campId: string): CampWorldMapAmbientRandom {
-  let state = campWorldMapStableHash(`${campId}:world-map-ambient-v2`) || 1
+export function createThreadWorldMapAmbientRandom(threadId: string): ThreadWorldMapAmbientRandom {
+  let state = campWorldMapStableHash(`${threadId}:world-map-ambient-v2`) || 1
   return () => {
     state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
     return state / 4_294_967_296
   }
 }
 
-export function createCampWorldMapAmbientHistory(): CampWorldMapAmbientHistory {
+export function createThreadWorldMapAmbientHistory(): ThreadWorldMapAmbientHistory {
   return {
     globalBeatIds: [],
     nodeBeatIds: new Map(),
@@ -245,9 +246,9 @@ export function campWorldMapAmbientPairKey(leftAgentId: string, rightAgentId: st
   return [leftAgentId, rightAgentId].sort((left, right) => left.localeCompare(right)).join('\u0000')
 }
 
-export function recordCampWorldMapAmbientEvent(
-  history: CampWorldMapAmbientHistory,
-  event: CampWorldMapAmbientSelection,
+export function recordThreadWorldMapAmbientEvent(
+  history: ThreadWorldMapAmbientHistory,
+  event: ThreadWorldMapAmbientSelection,
   shownAt: number
 ): void {
   history.globalBeatIds.push(event.beatId)
@@ -267,16 +268,16 @@ export function recordCampWorldMapAmbientEvent(
 }
 
 function isEnvironmentMatch(
-  beatEnvironment: CampWorldMapAmbientEnvironment,
-  nodeId: CampWorldMapNodeId
+  beatEnvironment: ThreadWorldMapAmbientEnvironment,
+  nodeId: ThreadWorldMapNodeId
 ): boolean {
   return beatEnvironment === 'any' || beatEnvironment === CAMP_WORLD_MAP_NODE_ENVIRONMENT[nodeId]
 }
 
 function isOutsideRecentHistory(
-  beat: CampWorldMapAmbientBeat,
-  nodeId: CampWorldMapNodeId,
-  history: CampWorldMapAmbientHistory,
+  beat: ThreadWorldMapAmbientBeat,
+  nodeId: ThreadWorldMapNodeId,
+  history: ThreadWorldMapAmbientHistory,
   tier: RelaxationTier
 ): boolean {
   const globalRecent = tier.globalRecent === 0
@@ -290,9 +291,9 @@ function isOutsideRecentHistory(
 }
 
 function passesBeatConstraints(
-  beat: CampWorldMapAmbientBeat,
-  nodeId: CampWorldMapNodeId,
-  history: CampWorldMapAmbientHistory,
+  beat: ThreadWorldMapAmbientBeat,
+  nodeId: ThreadWorldMapNodeId,
+  history: ThreadWorldMapAmbientHistory,
   tier: RelaxationTier
 ): boolean {
   if (beat.id === history.lastBeatId || beat.topic === history.lastTopic) return false
@@ -300,8 +301,8 @@ function passesBeatConstraints(
 }
 
 function participantIsEligible(
-  participant: CampWorldMapAmbientParticipant,
-  snapshot: CampWorldMapAmbientSelectionSnapshot
+  participant: ThreadWorldMapAmbientParticipant,
+  snapshot: ThreadWorldMapAmbientSelectionSnapshot
 ): boolean {
   if (participant.mode !== 'idle' || participant.rendezvousKey) return false
   const lastShownAt = snapshot.history.participantLastShownAt.get(participant.agentId)
@@ -310,12 +311,12 @@ function participantIsEligible(
 }
 
 function soloBeatsFor(
-  participant: CampWorldMapAmbientParticipant,
-  snapshot: CampWorldMapAmbientSelectionSnapshot,
+  participant: ThreadWorldMapAmbientParticipant,
+  snapshot: ThreadWorldMapAmbientSelectionSnapshot,
   tier: RelaxationTier
 ): Pick<SoloCandidate, 'nodeBeats' | 'genericBeats'> {
-  const nodeBeats: CampWorldMapNodeSoloBeat[] = []
-  const genericBeats: (CampWorldMapGenericStationarySoloBeat | CampWorldMapMovingSoloBeat)[] = []
+  const nodeBeats: ThreadWorldMapNodeSoloBeat[] = []
+  const genericBeats: (ThreadWorldMapGenericStationarySoloBeat | ThreadWorldMapMovingSoloBeat)[] = []
   for (const beat of CAMP_WORLD_MAP_AMBIENT_BEATS) {
     if (beat.kind !== 'solo' || beat.motion !== participant.motion) continue
     if (!passesBeatConstraints(beat, participant.nodeId, snapshot.history, tier)) continue
@@ -329,12 +330,12 @@ function soloBeatsFor(
 }
 
 function encounterBeatsFor(
-  nodeId: CampWorldMapNodeId,
-  snapshot: CampWorldMapAmbientSelectionSnapshot,
+  nodeId: ThreadWorldMapNodeId,
+  snapshot: ThreadWorldMapAmbientSelectionSnapshot,
   tier: RelaxationTier
 ): Pick<EncounterCandidate, 'nodeBeats' | 'genericBeats'> {
-  const nodeBeats: CampWorldMapNodeEncounterBeat[] = []
-  const genericBeats: CampWorldMapGenericEncounterBeat[] = []
+  const nodeBeats: ThreadWorldMapNodeEncounterBeat[] = []
+  const genericBeats: ThreadWorldMapGenericEncounterBeat[] = []
   for (const beat of CAMP_WORLD_MAP_AMBIENT_BEATS) {
     if (beat.kind !== 'encounter') continue
     if (!passesBeatConstraints(beat, nodeId, snapshot.history, tier)) continue
@@ -348,7 +349,7 @@ function encounterBeatsFor(
 }
 
 function buildCandidates(
-  snapshot: CampWorldMapAmbientSelectionSnapshot,
+  snapshot: ThreadWorldMapAmbientSelectionSnapshot,
   tier: RelaxationTier
 ): AmbientCandidates {
   const eligible = snapshot.participants
@@ -402,9 +403,9 @@ function oldestCandidates<T>(
 
 function selectSolo(
   candidates: readonly SoloCandidate[],
-  history: CampWorldMapAmbientHistory,
-  random: CampWorldMapAmbientRandom
-): CampWorldMapAmbientSoloSelection | null {
+  history: ThreadWorldMapAmbientHistory,
+  random: ThreadWorldMapAmbientRandom
+): ThreadWorldMapAmbientSoloSelection | null {
   const fairCandidates = oldestCandidates(
     candidates,
     (candidate) => history.participantLastShownAt.get(candidate.participant.agentId)
@@ -433,9 +434,9 @@ function selectSolo(
 
 function selectEncounter(
   candidates: readonly EncounterCandidate[],
-  history: CampWorldMapAmbientHistory,
-  random: CampWorldMapAmbientRandom
-): CampWorldMapAmbientEncounterSelection | null {
+  history: ThreadWorldMapAmbientHistory,
+  random: ThreadWorldMapAmbientRandom
+): ThreadWorldMapAmbientEncounterSelection | null {
   const fairCandidates = oldestCandidates(
     candidates,
     (candidate) => history.pairLastShownAt.get(candidate.pairKey)
@@ -458,10 +459,10 @@ function selectEncounter(
   }
 }
 
-export function selectCampWorldMapAmbientEvent(
-  snapshot: CampWorldMapAmbientSelectionSnapshot,
-  random: CampWorldMapAmbientRandom
-): CampWorldMapAmbientSelection | null {
+export function selectThreadWorldMapAmbientEvent(
+  snapshot: ThreadWorldMapAmbientSelectionSnapshot,
+  random: ThreadWorldMapAmbientRandom
+): ThreadWorldMapAmbientSelection | null {
   if (snapshot.hasAuthoritativeSpeech) return null
   const candidatesByTier = CAMP_WORLD_MAP_AMBIENT_RELAXATION_TIERS.map(
     (tier) => buildCandidates(snapshot, tier)
@@ -483,21 +484,21 @@ export function selectCampWorldMapAmbientEvent(
   return null
 }
 
-export class CampWorldMapAmbientScheduler {
-  readonly #dependencies: CampWorldMapAmbientSchedulerDependencies
+export class ThreadWorldMapAmbientScheduler {
+  readonly #dependencies: ThreadWorldMapAmbientSchedulerDependencies
   #active = false
   #attemptHandle: unknown = null
   #expiryHandle: unknown = null
   #scheduleGeneration = 0
   #eventGeneration = 0
   #eventSequence = 0
-  #currentEvent: CampWorldMapAmbientDisplayedEvent | null = null
+  #currentEvent: ThreadWorldMapAmbientDisplayedEvent | null = null
 
-  constructor(dependencies: CampWorldMapAmbientSchedulerDependencies) {
+  constructor(dependencies: ThreadWorldMapAmbientSchedulerDependencies) {
     this.#dependencies = dependencies
   }
 
-  currentEvent(): CampWorldMapAmbientDisplayedEvent | null {
+  currentEvent(): ThreadWorldMapAmbientDisplayedEvent | null {
     return this.#currentEvent
   }
 
@@ -551,14 +552,14 @@ export class CampWorldMapAmbientScheduler {
     }, delay)
   }
 
-  #display(selection: CampWorldMapAmbientSelection, now: number): void {
+  #display(selection: ThreadWorldMapAmbientSelection, now: number): void {
     this.#clearEvent()
     const event = {
       ...selection,
       eventId: `${selection.beatId}:${++this.#eventSequence}`,
       startedAt: now,
       expiresAt: now + CAMP_WORLD_MAP_AMBIENT_DISPLAY_MS
-    } satisfies CampWorldMapAmbientDisplayedEvent
+    } satisfies ThreadWorldMapAmbientDisplayedEvent
     this.#currentEvent = event
     this.#dependencies.onDisplayed(event)
     this.#dependencies.onEventChange(event)

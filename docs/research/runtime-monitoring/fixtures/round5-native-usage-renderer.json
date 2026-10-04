@@ -1,0 +1,717 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-01",
+  "branchBase": "0e23f6fc6f7f6943ce93e4e1f083efb68b453f2b",
+  "rendererVerified": true,
+  "restartImageDigest": "f0a87df5a7999e5bf72546ffab119d1c480a78166f5ba8ce196885679fa0c6f9",
+  "privacy": "Numeric observations, generated public acceptance task, usage/context accessible labels and screenshot geometry only. No thought text or raw provider payload.",
+  "entries": [
+    {
+      "runtime": "pi",
+      "version": "0.84.4",
+      "status": "succeeded",
+      "liveCoreDigest": null,
+      "liveCoreDigestNote": "Pi positive live sample precedes the ACP terminal-grace packaging; unchanged Pi path. Its original signed image digest was not captured.",
+      "publicUnits": 87675,
+      "reasoningUnits": 10525,
+      "numericPublications": 32,
+      "maxNumericPublicationsPer30Seconds": 22,
+      "minimumNumericPublicationIntervalMs": 997.8,
+      "readback": {
+        "promptInputTotalTokens": 34573,
+        "outputTokens": 874,
+        "cacheReadTokens": 21504,
+        "cacheWriteTokens": 0,
+        "finalizedAt": "2026-09-30T15:32:04.367549+00:00"
+      },
+      "sessionReadback": [
+        {
+          "agentId": "agent_101",
+          "conversationId": "7039d005-583f-4ae5-b45a-d922490490f7",
+          "dialectId": "pi-native-context-estimate-v1",
+          "modelKey": "pi://model?provider=sub2api&id=gpt-6.1-sol",
+          "observedAt": "2026-09-30T15:32:04.365940+00:00",
+          "runtimeKind": "pi",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 9396,
+          "windowTokens": 1050000
+        }
+      ],
+      "usageRows": [
+        [
+          "Input Token",
+          "34.6k"
+        ],
+        [
+          "Output Token",
+          "0.9k"
+        ],
+        [
+          "Cache Read",
+          "21.5k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 10秒"
+        ]
+      ],
+      "contextAccessibleLabel": "当前原生会话上下文：9.4k / 1050k，0.9%",
+      "coreRestartVerified": true,
+      "visibleUsagePopover": {
+        "rows": [
+          [
+            "Input Token",
+            "34.6k"
+          ],
+          [
+            "Output Token",
+            "0.9k"
+          ],
+          [
+            "Cache Read",
+            "21.5k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 10秒"
+          ]
+        ],
+        "popover": {
+          "left": 1189,
+          "top": 313,
+          "width": 172,
+          "height": 133.484375
+        },
+        "anchor": {
+          "left": 1311.8828125,
+          "top": 280.5,
+          "width": 49.1171875,
+          "height": 26
+        },
+        "durationOutsidePopover": false
+      },
+      "captures": {
+        "speed": "pi-renderer-third/observable-real-pi.png",
+        "usage": "pi-renderer-third/native-usage-pi.png",
+        "context": "pi-renderer-third/native-context-pi.png"
+      },
+      "thoughtUIVerified": true
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "version": "2.1.1",
+      "status": "succeeded",
+      "liveCoreDigest": "f0a87df5a7999e5bf72546ffab119d1c480a78166f5ba8ce196885679fa0c6f9",
+      "liveCoreDigestNote": "Includes native 400ms terminal tail read, before subsequent Claude placeholder/child fence hardening.",
+      "publicUnits": 92500,
+      "reasoningUnits": 0,
+      "numericPublications": 38,
+      "maxNumericPublicationsPer30Seconds": 21,
+      "minimumNumericPublicationIntervalMs": 997.5,
+      "readback": {
+        "promptInputTotalTokens": 84344,
+        "outputTokens": 867,
+        "cacheReadTokens": 62080,
+        "cacheWriteTokens": 0,
+        "finalizedAt": "2026-09-30T15:36:24.442601+00:00"
+      },
+      "sessionReadback": [
+        {
+          "agentId": "agent_101",
+          "conversationId": "32946536-aa3a-4892-982f-f5e1bd4b1032",
+          "dialectId": "acp-session-context-gauge-v1",
+          "modelKey": "__kimi_env_model__",
+          "observedAt": "2026-09-30T15:36:24.448935+00:00",
+          "runtimeKind": "kimi-code-cli",
+          "sessionGeneration": 1,
+          "source": "runtime_event",
+          "usedTokens": 21842,
+          "windowTokens": 262144
+        }
+      ],
+      "usageRows": [
+        [
+          "Input Token",
+          "84.3k"
+        ],
+        [
+          "Output Token",
+          "0.9k"
+        ],
+        [
+          "Cache Read",
+          "62.1k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 16秒"
+        ]
+      ],
+      "contextAccessibleLabel": "当前原生会话上下文：21.8k / 262.1k，8.3%",
+      "coreRestartVerified": true,
+      "visibleUsagePopover": {
+        "rows": [
+          [
+            "Input Token",
+            "84.3k"
+          ],
+          [
+            "Output Token",
+            "0.9k"
+          ],
+          [
+            "Cache Read",
+            "62.1k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 16秒"
+          ]
+        ],
+        "popover": {
+          "left": 1189,
+          "top": 313,
+          "width": 172,
+          "height": 133.484375
+        },
+        "anchor": {
+          "left": 1311.8828125,
+          "top": 280.5,
+          "width": 49.1171875,
+          "height": 26
+        },
+        "durationOutsidePopover": false
+      },
+      "captures": {
+        "speed": "kimi-code-cli-renderer/observable-real-kimi-code-cli.png",
+        "usage": "kimi-code-cli-renderer/native-usage-kimi-code-cli.png",
+        "context": "kimi-code-cli-renderer/native-context-kimi-code-cli.png"
+      },
+      "thoughtUIVerified": false
+    },
+    {
+      "runtime": "codebuddy-cli",
+      "version": "2.133.1",
+      "status": "succeeded",
+      "liveCoreDigest": "f0a87df5a7999e5bf72546ffab119d1c480a78166f5ba8ce196885679fa0c6f9",
+      "liveCoreDigestNote": "Includes native 400ms terminal tail read, before subsequent Claude placeholder/child fence hardening.",
+      "publicUnits": 89775,
+      "reasoningUnits": 0,
+      "numericPublications": 37,
+      "maxNumericPublicationsPer30Seconds": 20,
+      "minimumNumericPublicationIntervalMs": 1000.0,
+      "readback": {
+        "promptInputTotalTokens": 66474,
+        "outputTokens": 882,
+        "cacheReadTokens": 43264,
+        "cacheWriteTokens": null,
+        "finalizedAt": "2026-09-30T15:41:15.264331+00:00"
+      },
+      "sessionReadback": [],
+      "usageRows": [
+        [
+          "Input Token",
+          "66.5k"
+        ],
+        [
+          "Output Token",
+          "0.9k"
+        ],
+        [
+          "Cache Read",
+          "43.3k"
+        ],
+        [
+          "Cache Write",
+          "—"
+        ],
+        [
+          "执行耗时",
+          "1分 10秒"
+        ]
+      ],
+      "contextAccessibleLabel": "当前原生会话上下文：— / —，比例未知",
+      "coreRestartVerified": true,
+      "visibleUsagePopover": {
+        "rows": [
+          [
+            "Input Token",
+            "66.5k"
+          ],
+          [
+            "Output Token",
+            "0.9k"
+          ],
+          [
+            "Cache Read",
+            "43.3k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "1分 10秒"
+          ]
+        ],
+        "popover": {
+          "left": 1189,
+          "top": 313,
+          "width": 172,
+          "height": 133.484375
+        },
+        "anchor": {
+          "left": 1311.8828125,
+          "top": 280.5,
+          "width": 49.1171875,
+          "height": 26
+        },
+        "durationOutsidePopover": false
+      },
+      "captures": {
+        "speed": "codebuddy-cli-renderer/observable-real-codebuddy-cli.png",
+        "usage": "codebuddy-cli-renderer/native-usage-codebuddy-cli.png",
+        "context": null
+      },
+      "thoughtUIVerified": false
+    },
+    {
+      "runtime": "claude-code-cli",
+      "version": "2.1.280 (Claude Code)",
+      "status": "succeeded",
+      "liveCoreDigest": "f0a87df5a7999e5bf72546ffab119d1c480a78166f5ba8ce196885679fa0c6f9",
+      "liveCoreDigestNote": "Includes native 400ms terminal tail read, before subsequent Claude placeholder/child fence hardening.",
+      "publicUnits": 82460,
+      "reasoningUnits": 0,
+      "numericPublications": 42,
+      "maxNumericPublicationsPer30Seconds": 21,
+      "minimumNumericPublicationIntervalMs": 999.9,
+      "readback": {
+        "promptInputTotalTokens": 48379,
+        "outputTokens": 2455,
+        "cacheReadTokens": 17664,
+        "cacheWriteTokens": 0,
+        "finalizedAt": "2026-09-30T15:45:14.231822+00:00"
+      },
+      "sessionReadback": [
+        {
+          "agentId": "agent_101",
+          "conversationId": "cacff940-bafd-4a51-aae9-7f7dd35d2fc2",
+          "dialectId": "claude-last-call-context-input-v1",
+          "modelKey": "gpt-6.1-sol",
+          "observedAt": "2026-09-30T15:45:14.153273+00:00",
+          "runtimeKind": "claude-code-cli",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 13049,
+          "windowTokens": 200000
+        }
+      ],
+      "usageRows": [
+        [
+          "Input Token",
+          "48.4k"
+        ],
+        [
+          "Output Token",
+          "2.5k"
+        ],
+        [
+          "Cache Read",
+          "17.7k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "2分 27秒"
+        ]
+      ],
+      "contextAccessibleLabel": "当前原生会话上下文：13k / 200k，6.5%",
+      "coreRestartVerified": true,
+      "visibleUsagePopover": {
+        "rows": [
+          [
+            "Input Token",
+            "48.4k"
+          ],
+          [
+            "Output Token",
+            "2.5k"
+          ],
+          [
+            "Cache Read",
+            "17.7k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "2分 27秒"
+          ]
+        ],
+        "popover": {
+          "left": 1189,
+          "top": 313,
+          "width": 172,
+          "height": 133.484375
+        },
+        "anchor": {
+          "left": 1311.8828125,
+          "top": 280.5,
+          "width": 49.1171875,
+          "height": 26
+        },
+        "durationOutsidePopover": false
+      },
+      "captures": {
+        "speed": "claude-code-cli-renderer/observable-real-claude-code-cli.png",
+        "usage": "claude-code-cli-renderer/native-usage-claude-code-cli.png",
+        "context": "claude-code-cli-renderer/native-context-claude-code-cli.png"
+      },
+      "thoughtUIVerified": false
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.30",
+      "status": "succeeded",
+      "liveCoreDigest": "f0a87df5a7999e5bf72546ffab119d1c480a78166f5ba8ce196885679fa0c6f9",
+      "liveCoreDigestNote": "Includes native 400ms terminal tail read, before subsequent Claude placeholder/child fence hardening.",
+      "publicUnits": 91650,
+      "reasoningUnits": 0,
+      "numericPublications": 36,
+      "maxNumericPublicationsPer30Seconds": 20,
+      "minimumNumericPublicationIntervalMs": 1000.0,
+      "readback": {
+        "promptInputTotalTokens": 34415,
+        "outputTokens": 898,
+        "cacheReadTokens": 24832,
+        "cacheWriteTokens": 0,
+        "finalizedAt": "2026-09-30T15:47:10.835644+00:00"
+      },
+      "sessionReadback": [],
+      "usageRows": [
+        [
+          "Input Token",
+          "34.4k"
+        ],
+        [
+          "Output Token",
+          "0.9k"
+        ],
+        [
+          "Cache Read",
+          "24.8k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 10秒"
+        ]
+      ],
+      "contextAccessibleLabel": "当前原生会话上下文：— / —，比例未知",
+      "coreRestartVerified": true,
+      "visibleUsagePopover": {
+        "rows": [
+          [
+            "Input Token",
+            "34.4k"
+          ],
+          [
+            "Output Token",
+            "0.9k"
+          ],
+          [
+            "Cache Read",
+            "24.8k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 10秒"
+          ]
+        ],
+        "popover": {
+          "left": 1189,
+          "top": 313,
+          "width": 172,
+          "height": 133.484375
+        },
+        "anchor": {
+          "left": 1311.8828125,
+          "top": 280.5,
+          "width": 49.1171875,
+          "height": 26
+        },
+        "durationOutsidePopover": false
+      },
+      "captures": {
+        "speed": "opencode-cli-renderer/observable-real-opencode-cli.png",
+        "usage": "opencode-cli-renderer/native-usage-opencode-cli.png",
+        "context": null
+      },
+      "thoughtUIVerified": false
+    }
+  ],
+  "supplementalEntries": [
+    {
+      "runtime": "claude-code-cli",
+      "version": "2.1.280 (Claude Code)",
+      "status": "succeeded",
+      "liveCoreDigest": "2d38e5dcaaf070065f0503071253d91780de51bb32428a103c60f7317bff0a9c",
+      "liveCoreDigestNote": "Claude supplemental candidate with 400ms tail read and zero placeholder/root-child isolation, before later Pi handoff owner fix.",
+      "publicUnits": 81490,
+      "reasoningUnits": 10710,
+      "numericPublications": 43,
+      "maxNumericPublicationsPer30Seconds": 24,
+      "minimumNumericPublicationIntervalMs": 999.8,
+      "readback": {
+        "promptInputTotalTokens": 48352,
+        "outputTokens": 2888,
+        "cacheReadTokens": 11776,
+        "cacheWriteTokens": 0,
+        "finalizedAt": "2026-09-30T16:09:14.472240+00:00"
+      },
+      "sessionReadback": [
+        {
+          "agentId": "agent_101",
+          "conversationId": "fde191d8-0f8b-4b6c-8d89-f98274afe192",
+          "dialectId": "claude-last-call-context-input-v1",
+          "modelKey": "gpt-6.1-sol",
+          "observedAt": "2026-09-30T16:09:14.394909+00:00",
+          "runtimeKind": "claude-code-cli",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 13050,
+          "windowTokens": 200000
+        }
+      ],
+      "usageRows": [
+        [
+          "Input Token",
+          "48.4k"
+        ],
+        [
+          "Output Token",
+          "2.9k"
+        ],
+        [
+          "Cache Read",
+          "11.8k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "2分 56秒"
+        ]
+      ],
+      "contextAccessibleLabel": "当前原生会话上下文：13.1k / 200k，6.5%",
+      "coreRestartVerified": true,
+      "visibleUsagePopover": {
+        "rows": [
+          [
+            "Input Token",
+            "48.4k"
+          ],
+          [
+            "Output Token",
+            "2.9k"
+          ],
+          [
+            "Cache Read",
+            "11.8k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "2分 56秒"
+          ]
+        ],
+        "popover": {
+          "left": 1189,
+          "top": 313,
+          "width": 172,
+          "height": 133.484375
+        },
+        "anchor": {
+          "left": 1311.8828125,
+          "top": 280.5,
+          "width": 49.1171875,
+          "height": 26
+        },
+        "durationOutsidePopover": false
+      },
+      "captures": {
+        "speed": "claude-final-renderer/observable-real-claude-code-cli.png",
+        "usage": "claude-final-renderer/native-usage-claude-code-cli.png",
+        "context": "claude-final-renderer/native-context-claude-code-cli.png"
+      },
+      "thoughtUIVerified": false,
+      "thoughtUILimit": "Qualified thought arrived in the last ~2 seconds; Core and App received numbers but no numeric speed publication carried thought scope before terminal."
+    },
+    {
+      "runtime": "pi",
+      "version": "0.84.4",
+      "status": "succeeded",
+      "liveCoreDigest": "5f50b291bbd79ff9b60624fdcbff1d156fd38815c6c3cef37821bf9a7ed4416b",
+      "liveCoreDigestNote": "Final candidate preserves validated Pi private Context packet owner across handoff; fresh live sample and restart use the same signed image.",
+      "publicUnits": 89200,
+      "reasoningUnits": 0,
+      "numericPublications": 31,
+      "maxNumericPublicationsPer30Seconds": 22,
+      "minimumNumericPublicationIntervalMs": 995.6,
+      "readback": {
+        "promptInputTotalTokens": 34513,
+        "outputTokens": 851,
+        "cacheReadTokens": 16768,
+        "cacheWriteTokens": 0,
+        "finalizedAt": "2026-09-30T16:58:59.983896+00:00"
+      },
+      "sessionReadback": [
+        {
+          "agentId": "agent_101",
+          "conversationId": "d4b3401f-7a8b-4b93-9b01-4b3b309c9fe5",
+          "dialectId": "pi-native-context-estimate-v1",
+          "modelKey": "pi://model?provider=sub2api&id=gpt-6.1-sol",
+          "observedAt": "2026-09-30T16:58:59.981101+00:00",
+          "runtimeKind": "pi",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 9374,
+          "windowTokens": 1050000
+        }
+      ],
+      "usageRows": [
+        [
+          "Input Token",
+          "34.5k"
+        ],
+        [
+          "Output Token",
+          "0.9k"
+        ],
+        [
+          "Cache Read",
+          "16.8k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 08秒"
+        ]
+      ],
+      "contextAccessibleLabel": "当前原生会话上下文：9.4k / 1050k，0.9%",
+      "coreRestartVerified": true,
+      "visibleUsagePopover": {
+        "rows": [
+          [
+            "Input Token",
+            "34.5k"
+          ],
+          [
+            "Output Token",
+            "0.9k"
+          ],
+          [
+            "Cache Read",
+            "16.8k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 08秒"
+          ]
+        ],
+        "popover": {
+          "left": 1189,
+          "top": 313,
+          "width": 172,
+          "height": 133.484375
+        },
+        "anchor": {
+          "left": 1311.8828125,
+          "top": 280.5,
+          "width": 49.1171875,
+          "height": 26
+        },
+        "durationOutsidePopover": false
+      },
+      "captures": {
+        "speed": "pi-owner-final-renderer/observable-real-pi.png",
+        "usage": "pi-owner-final-renderer/native-usage-pi.png",
+        "context": "pi-owner-final-renderer/native-context-pi.png"
+      },
+      "bodyUIVerified": true,
+      "thoughtUIVerified": false,
+      "thoughtScopeSpeedSamples": 0,
+      "strictThoughtGate": "not_met_no_reasoning_observed",
+      "thoughtUILimit": "Healthy final-image sample reported no thought increments; strict thought requirement was not met. Earlier Pi thought UI positive remains separately recorded; this sample only verifies body, Usage, Context and restart."
+    }
+  ],
+  "finalPackagedBinaries": {
+    "rovai-core": "5f50b291bbd79ff9b60624fdcbff1d156fd38815c6c3cef37821bf9a7ed4416b",
+    "rovai-host": "3e6ea75cea18afab658412b9df9fa9cf10d9557e6054c8a4e5f1e70db53f94b6",
+    "rovai": "9df0efaa8f8e07b07d4171faf0e8f67bee26eb30d6bc537962e90fad8784d21d"
+  },
+  "partialAttempts": [
+    {
+      "runtime": "claude-code-cli",
+      "version": "2.1.280",
+      "scenario": "Long graph reasoning task still emitting third public section at the 480s App acceptance deadline",
+      "acceptanceStatus": "running",
+      "publicUnits": 180245,
+      "reasoningUnits": 0,
+      "thoughtUIVerified": false,
+      "partialUsageAfterControlledShutdown": {
+        "promptInputTotalTokens": 26397,
+        "outputTokens": 8713,
+        "cacheReadTokens": 11776,
+        "cacheWriteTokens": 0,
+        "finalizedAt": "2026-09-30T16:26:22.103762+00:00",
+        "runStatus": "cancelled"
+      },
+      "result": "Partial execution, no healthy terminal within deadline. Usage present is not marked as complete; current renderer test reports deadline instead of blaming missing Usage."
+    }
+  ],
+  "rendererVerifiedScope": "Body speed, layout and native Usage/Context as recorded per entry; thought speed qualification is independent and must use thoughtUIVerified."
+}

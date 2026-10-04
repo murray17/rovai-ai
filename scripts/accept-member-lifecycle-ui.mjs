@@ -87,8 +87,8 @@ seedCompletedOnboardingForAcceptance(freshDataDir)
 seedCompletedOnboardingForAcceptance(upgradeDataDir)
 
 let running = null
-let campId = null
-let campTitle = null
+let threadId = null
+let threadTitle = null
 let projectCampId = null
 let projectCampTitle = null
 let projectCampPath = null
@@ -553,19 +553,19 @@ try {
       }
     : fallbackAcceptanceRuntime
   const fixtureMemberAgentIds = freshPreflight.presentMembers.map((member) => member.agentId)
-  campTitle = 'Camp 生命周期验收'
+  threadTitle = 'Camp 生命周期验收'
   const createdQuickChatCamp = await request(running.cdp, 'camps.create', {
     commandId: randomUUID(),
-    name: campTitle,
+    name: threadTitle,
     workspace: null,
     memberAgentIds: fixtureMemberAgentIds,
     defaultLeadAgentId: freshPreflight.initialLeadAgentId,
     collaborationMode: 'peer',
     activationState: 'active'
   })
-  campId = createdQuickChatCamp.payload?.campId
+  threadId = createdQuickChatCamp.payload?.threadId
   assert(
-    createdQuickChatCamp.status === 'applied' && campId,
+    createdQuickChatCamp.status === 'applied' && threadId,
     `Could not create lifecycle acceptance Camp through Core: ${JSON.stringify(createdQuickChatCamp)}`
   )
   projectCampTitle = '项目会话返回验收 · 一个用于确认成员名册单行截断的超长对话标题'
@@ -580,7 +580,7 @@ try {
     collaborationMode: 'peer',
     activationState: 'active'
   })
-  projectCampId = createdProjectCamp.payload?.campId
+  projectCampId = createdProjectCamp.payload?.threadId
   assert(
     createdProjectCamp.status === 'applied' && projectCampId,
     `Could not create project-return acceptance Camp through Core: ${JSON.stringify(createdProjectCamp)}`
@@ -595,7 +595,7 @@ try {
     collaborationMode: 'peer',
     activationState: 'active'
   })
-  membershipCampId = createdMembershipCamp.payload?.campId
+  membershipCampId = createdMembershipCamp.payload?.threadId
   assert(
     createdMembershipCamp.status === 'applied' && membershipCampId,
     `Could not create dynamic membership acceptance Camp: ${JSON.stringify(createdMembershipCamp)}`
@@ -608,7 +608,7 @@ try {
     ['agent_1', 'agent_3', 'agent_4'],
     acceptanceRuntime
   )
-  await seedCampFixtureContent(join(freshDataDir, 'rovai.sqlite'), campId)
+  await seedCampFixtureContent(join(freshDataDir, 'rovai.sqlite'), threadId)
   await seedCampFixtureContent(join(freshDataDir, 'rovai.sqlite'), projectCampId)
   running = await launchApp(freshDataDir, firstPort + 1, 1040, 700)
   const configuredPreflight = await request(running.cdp, 'camps.creationPreflight')
@@ -805,13 +805,13 @@ try {
       && !document.querySelector('.camp-member-dialog')`, 30_000)
   await waitForText(running.cdp, '.app-toast', '1 位队员已加入')
   const membershipSnapshot = await request(running.cdp, 'camps.snapshot', {
-    campId: membershipCampId
+    threadId: membershipCampId
   })
   assert(
     membershipSnapshot.membershipReconciliations.length === 0
-      && membershipSnapshot.camp.membershipGeneration === 4
+      && membershipSnapshot.thread.membershipGeneration === 4
       && membershipSnapshot.members.find((member) => member.agentId === 'agent_2')?.version === 3,
-    `Dynamic membership revisions did not remain monotonic: ${JSON.stringify(membershipSnapshot.camp)}`
+    `Dynamic membership revisions did not remain monotonic: ${JSON.stringify(membershipSnapshot.thread)}`
   )
   await setTheme(running.cdp, 'day')
 
@@ -1017,7 +1017,7 @@ try {
       && profile.runtimeConfiguration === null
       && profile.runtimeConfiguration === null)
 
-  await openCamp(running.cdp, campTitle)
+  await openCamp(running.cdp, threadTitle)
   await waitForSelector(running.cdp, '.conversation-bubble.user .message-copy-button')
   const campColorState = await evaluate(running.cdp, `(() => {
     const color = (selector, property) => {
@@ -1109,11 +1109,11 @@ try {
   await focusElement(running.cdp, '.conversation-bubble.user .message-copy-button')
   await capture(running.cdp, captures.userMessagePresentation)
   await mouseClick(running.cdp, '.conversation-bubble.user .message-copy-button')
-  let snapshot = await request(running.cdp, 'camps.snapshot', { campId })
+  let snapshot = await request(running.cdp, 'camps.snapshot', { threadId })
   assert(
-    snapshot.camp.defaultLeadAgentId === 'agent_1'
+    snapshot.thread.defaultLeadAgentId === 'agent_1'
       && snapshot.members.length === 4,
-    `Fresh Camp did not include every present member with 叮叮 as Lead: ${JSON.stringify(snapshot.camp)}`
+    `Fresh Camp did not include every present member with 叮叮 as Lead: ${JSON.stringify(snapshot.thread)}`
   )
   await focusContenteditableAndInsertText(running.cdp, '#camp-message', '@')
   await waitForSelector(running.cdp, '.structured-mention-menu')
@@ -1187,7 +1187,7 @@ try {
     'member-content-roster-day-1440x920.png'
   )
   await capture(running.cdp, captures.memberContentRoster)
-  await openCamp(running.cdp, campTitle)
+  await openCamp(running.cdp, threadTitle)
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
   const qiluBeforeRemoval = await request(running.cdp, 'members.get', {
@@ -1227,7 +1227,7 @@ try {
       && !activeAfterRemoval.some((profile) => profile.agentId === 'agent_4'),
     `Permanent removal did not retain identity/Runtime or hide the active Profile: ${JSON.stringify(qiluAfterRemoval)}`
   )
-  snapshot = await request(running.cdp, 'camps.snapshot', { campId })
+  snapshot = await request(running.cdp, 'camps.snapshot', { threadId })
   const historicQilu = snapshot.members.find((member) => member.agentId === 'agent_4')
   assert(
     historicQilu?.profilePresence === 'removed'
@@ -1240,12 +1240,12 @@ try {
     await setPresence(running.cdp, agentId, 'away')
   }
   await reloadRenderer(running.cdp)
-  await openCamp(running.cdp, campTitle)
-  snapshot = await request(running.cdp, 'camps.snapshot', { campId })
+  await openCamp(running.cdp, threadTitle)
+  snapshot = await request(running.cdp, 'camps.snapshot', { threadId })
   assert(
-    snapshot.camp.defaultLeadAgentId === null
+    snapshot.thread.defaultLeadAgentId === null
       && snapshot.members.filter((member) => member.profilePresence === 'present').length === 0,
-    `Camp reconciliation did not persist a null Lead: ${JSON.stringify(snapshot.camp)}`
+    `Camp reconciliation did not persist a null Lead: ${JSON.stringify(snapshot.thread)}`
   )
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'
@@ -1265,11 +1265,11 @@ try {
 
   await setPresence(running.cdp, 'agent_2', 'present')
   await reloadRenderer(running.cdp)
-  await openCamp(running.cdp, campTitle)
-  snapshot = await request(running.cdp, 'camps.snapshot', { campId })
+  await openCamp(running.cdp, threadTitle)
+  snapshot = await request(running.cdp, 'camps.snapshot', { threadId })
   assert(
-    snapshot.camp.defaultLeadAgentId === 'agent_2',
-    `Camp did not inherit the first present member by Member Order: ${JSON.stringify(snapshot.camp)}`
+    snapshot.thread.defaultLeadAgentId === 'agent_2',
+    `Camp did not inherit the first present member by Member Order: ${JSON.stringify(snapshot.thread)}`
   )
   assert(
     snapshot.members.find((member) => member.agentId === 'agent_2')
@@ -1316,29 +1316,29 @@ try {
   await capture(running.cdp, captures.memberProjectNavigation)
   await openCamp(running.cdp, projectCampTitle)
   const projectSnapshot = await request(running.cdp, 'camps.snapshot', {
-    campId: projectCampId
+    threadId: projectCampId
   })
   await openMembers(running.cdp)
   const deletedProjectCamp = await request(running.cdp, 'camps.delete', {
     commandId: crypto.randomUUID(),
     command: {
-      campId: projectCampId,
-      expectedVersion: projectSnapshot.camp.version
+      threadId: projectCampId,
+      expectedVersion: projectSnapshot.thread.version
     }
   })
   assert(
     deletedProjectCamp.status === 'accepted',
     `Could not accept deletion of the project Camp fixture: ${JSON.stringify(deletedProjectCamp)}`
   )
-  await openCamp(running.cdp, campTitle)
+  await openCamp(running.cdp, threadTitle)
   await closeApp(running)
   running = null
 
   running = await launchApp(freshDataDir, firstPort + 2, 1440, 920)
-  await openCamp(running.cdp, campTitle)
-  snapshot = await request(running.cdp, 'camps.snapshot', { campId })
+  await openCamp(running.cdp, threadTitle)
+  snapshot = await request(running.cdp, 'camps.snapshot', { threadId })
   assert(
-    snapshot.camp.defaultLeadAgentId === 'agent_2'
+    snapshot.thread.defaultLeadAgentId === 'agent_2'
       && !((await request(running.cdp, 'members.list'))
         .some((profile) => profile.agentId === 'agent_4'))
       && (await historicalProfile(

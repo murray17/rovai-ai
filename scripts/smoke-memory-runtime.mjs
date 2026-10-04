@@ -55,16 +55,16 @@ async function runAdapterSmoke(adapterKind) {
       purpose: `Verify ${adapterKind} receives the effective Agent Memory write receipt.`,
     })
     const created = createdResponse.commandResult ?? createdResponse
-    const campId = created.payload?.campId
+    const threadId = created.payload?.threadId
     const agentRunId = created.payload?.agentRunIds?.[0]
-    if (created.status !== 'accepted' || !campId || !agentRunId) {
+    if (created.status !== 'accepted' || !threadId || !agentRunId) {
       throw new Error(`Memory Runtime Camp was not accepted: ${JSON.stringify(createdResponse)}`)
     }
 
     let lastState = null
     const accepted = await waitFor(async () => {
       const [snapshot, library] = await Promise.all([
-        core.request('camps.snapshot', { campId }),
+        core.request('camps.snapshot', { threadId }),
         core.request('memory.list')
       ])
       const run = snapshot.agentRuns.find((value) => value.id === agentRunId)
@@ -101,7 +101,7 @@ async function runAdapterSmoke(adapterKind) {
     return {
       adapterKind,
       runtimeVersion,
-      campId,
+      threadId,
       agentRunId,
       memoryId: accepted.memory.id,
       revisionId: accepted.memory.currentRevisionId,

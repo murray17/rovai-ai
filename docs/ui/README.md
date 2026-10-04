@@ -4,7 +4,7 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-09-19
+last_updated: 2026-09-28
 ---
 
 # Rovai AI UI 规范
@@ -50,7 +50,7 @@ Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 当前 Skills 原生只读页、工具箱逐队员配置和会话 `/` 候选见 [Skills、工具箱与会话选择](components/skills-settings.md)。MCP 的列表/详情、导入和编辑见 [Capability settings](components/capability-settings.md)；其中旧 Skills Library 描述仅作历史解释。
 
 使命板、抽屉与完整会话、交付和活动见[使命板](components/mission-board.md)。当前发布显示一级菜单入口，
-以右侧蓝点提示存在未读 Agent 回复的使命；Mobile 仍无使命入口。
+以右侧蓝点提示存在未读 Agent 回复的使命；Mobile WebUI 在主抽屉中提供使命板入口。
 
 ## Web 与 Mobile
 

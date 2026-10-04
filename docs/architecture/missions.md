@@ -2,7 +2,7 @@
 document_type: architecture
 authority: mission-architecture
 status: accepted
-last_updated: 2026-09-20
+last_updated: 2026-09-26
 ---
 
 # Missions
@@ -109,8 +109,9 @@ Deleted numbers are never reused; collision suffixes do not change the number. C
 snapshot has its own dynamic section and acceptance marker, fenced to the native binding/generation.
 No Mission business version is taught to Agents; field patches use last-committed values.
 
-Desktop/wide Web share Mission navigation and the existing CampWorkspace. Drawer and full conversation
-preserve one mounted composer/preview owner. Mobile is intentionally outside this increment. Renderer consumes
+Desktop, wide Web and Mobile share Mission commands and the existing CampWorkspace. Desktop drawer and full
+conversation preserve one mounted composer/preview owner; Mobile uses a status list and full conversation with
+board return, retaining the same Camp draft and preview ownership. Renderer consumes
 Core's cleanup capability and does not infer it from Mission status. Deletion defaults to leaving worktree and
 branch in place. Optional cleanup records its intent in the same transaction that deletes the Mission, removes
 the card immediately, and exposes only failed orphan work through the existing cleanup route; retained resources

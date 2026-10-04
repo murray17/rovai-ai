@@ -63,6 +63,6 @@ scp "${ssh_options[@]}" -P "$port" "$repository/scripts/install-server.sh" "$rep
 version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repository/package.json")
 [[ "$version" =~ ^[0-9A-Za-z.+-]+$ && "$source_sha" =~ ^[0-9a-f]{40}$ ]]
 ssh "${ssh_options[@]}" -p "$port" rovai@127.0.0.1 \
-  "sh install-server.sh --version '$version' --from-dir /home/rovai/assets --no-modify-path && python3 smoke-linux-server.py /home/rovai/.local/share/rovai-server/current --expected-source '$source_sha' --output /home/rovai/debian-12.json"
+  "sh install-server.sh --version '$version' --from-dir /home/rovai/assets --no-modify-path && python3 smoke-linux-server.py /home/rovai/.local/share/rovai-server/current --expected-source '$source_sha' --startup-timeout 90 --output /home/rovai/debian-12.json"
 mkdir -p "$(dirname "$output")"
 scp "${ssh_options[@]}" -P "$port" rovai@127.0.0.1:debian-12.json "$output"

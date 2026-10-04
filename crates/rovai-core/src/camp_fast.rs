@@ -58,12 +58,12 @@ impl ObservedFastState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FrozenCampMemberFast {
+pub struct FrozenThreadMemberFast {
     pub runtime_binding_revision: String,
     pub fast_override: Option<bool>,
 }
 
-impl FrozenCampMemberFast {
+impl FrozenThreadMemberFast {
     pub fn service_tier_for_turn(&self) -> Option<&'static str> {
         self.fast_override
             .map(|fast| if fast { "priority" } else { "default" })
@@ -72,7 +72,7 @@ impl FrozenCampMemberFast {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampMemberFastView {
+pub struct ThreadMemberFastView {
     pub runtime_binding_revision: String,
     pub fast_override: Option<bool>,
     pub runtime_default_fast: Option<bool>,
@@ -80,7 +80,7 @@ pub struct CampMemberFastView {
 
 /// A probe target is also the fence for an async result. Re-probes never create revisions.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CampMemberFastTarget {
+pub struct ThreadMemberFastTarget {
     pub camp_id: String,
     pub agent_id: String,
     pub runtime_binding_revision: String,
@@ -99,7 +99,7 @@ pub(crate) fn target_on_connection(
     connection: &Connection,
     camp_id: &str,
     agent_id: &str,
-) -> Result<Option<CampMemberFastTarget>> {
+) -> Result<Option<ThreadMemberFastTarget>> {
     let row = connection.query_row(
         "SELECT profile.runtime_binding_revision, camp.project_path, profile.selected_runtime_adapter_kind,
                 profile.default_model_selection_json
@@ -121,7 +121,7 @@ pub(crate) fn target_on_connection(
     ) {
         return Ok(None);
     }
-    Ok(Some(CampMemberFastTarget {
+    Ok(Some(ThreadMemberFastTarget {
         camp_id: camp_id.into(),
         agent_id: agent_id.into(),
         runtime_binding_revision: revision,
@@ -133,7 +133,7 @@ pub(crate) fn target_on_connection(
 
 pub(crate) fn runtime_for_target_on_connection(
     connection: &Connection,
-    expected: &CampMemberFastTarget,
+    expected: &ThreadMemberFastTarget,
 ) -> Result<Option<FrozenAgentRuntimeConfig>> {
     if target_on_connection(connection, &expected.camp_id, &expected.agent_id)?.as_ref()
         != Some(expected)
@@ -163,7 +163,7 @@ pub(crate) fn runtime_for_target_on_connection(
 
 pub(crate) fn record_eligibility_on_connection(
     connection: &Connection,
-    expected: &CampMemberFastTarget,
+    expected: &ThreadMemberFastTarget,
     runtime: &FrozenAgentRuntimeConfig,
     observation: &NativeFastEligibility,
 ) -> Result<bool> {
@@ -210,7 +210,7 @@ pub(crate) fn view_on_connection(
     connection: &Connection,
     camp_id: &str,
     agent_id: &str,
-) -> Result<Option<CampMemberFastView>> {
+) -> Result<Option<ThreadMemberFastView>> {
     let row = connection.query_row(
         "SELECT fast.runtime_binding_revision, fast.fast_override,
                 CASE WHEN profile.selected_runtime_adapter_kind = 'codex-cli' THEN fast.runtime_default_fast ELSE NULL END
@@ -228,7 +228,7 @@ pub(crate) fn view_on_connection(
            AND snapshot.authentication_status != 'authentication_required'
            AND fast.executable_fingerprint = snapshot.executable_fingerprint",
         params![camp_id, agent_id],
-        |row| Ok(CampMemberFastView {
+        |row| Ok(ThreadMemberFastView {
             runtime_binding_revision: row.get(0)?,
             fast_override: row.get(1)?,
             runtime_default_fast: row.get(2)?,
@@ -262,7 +262,7 @@ pub fn freeze(
         "SELECT fast_override FROM camp_member_fast_preference WHERE camp_id = ?1 AND agent_id = ?2 AND runtime_binding_revision = ?3",
         params![camp_id, agent_id, target.runtime_binding_revision], |row| row.get::<_, Option<bool>>(0),
     ).optional()?.flatten();
-    let fast = FrozenCampMemberFast {
+    let fast = FrozenThreadMemberFast {
         runtime_binding_revision: target.runtime_binding_revision,
         fast_override: saved_override,
     };
@@ -288,21 +288,22 @@ pub fn freeze(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetCampMemberFastCommand {
+pub struct SetThreadMemberFastCommand {
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
     pub expected_runtime_binding_revision: String,
     pub fast_override: Option<bool>,
 }
 
-impl sealed::Sealed for SetCampMemberFastCommand {}
-impl DomainCommand for SetCampMemberFastCommand {
+impl sealed::Sealed for SetThreadMemberFastCommand {}
+impl DomainCommand for SetThreadMemberFastCommand {
     const TYPE: &'static str = "camp.member.fast.set";
 }
 
 pub fn set_preference(
     database: &mut Database,
-    envelope: &CommandEnvelope<SetCampMemberFastCommand>,
+    envelope: &CommandEnvelope<SetThreadMemberFastCommand>,
 ) -> Result<CommandExecution> {
     DomainCommandGateway.execute(database, envelope, |transaction| {
         let command = &envelope.payload;
@@ -346,7 +347,7 @@ pub fn set_preference(
         Ok(CommandHandlerResult::applied(
             "camp.member.fast.updated",
             json!({
-                "campId": command.camp_id, "agentId": command.agent_id,
+                "threadId": command.camp_id, "agentId": command.agent_id,
                 "fast": view_on_connection(transaction, &command.camp_id, &command.agent_id)?,
             }),
             None,
@@ -475,25 +476,25 @@ pub fn target(
     database: &Database,
     camp_id: &str,
     agent_id: &str,
-) -> Result<Option<CampMemberFastTarget>> {
+) -> Result<Option<ThreadMemberFastTarget>> {
     target_on_connection(database.connection(), camp_id, agent_id)
 }
 pub fn view(
     database: &Database,
     camp_id: &str,
     agent_id: &str,
-) -> Result<Option<CampMemberFastView>> {
+) -> Result<Option<ThreadMemberFastView>> {
     view_on_connection(database.connection(), camp_id, agent_id)
 }
 pub fn runtime_for_target(
     database: &Database,
-    target: &CampMemberFastTarget,
+    target: &ThreadMemberFastTarget,
 ) -> Result<Option<FrozenAgentRuntimeConfig>> {
     runtime_for_target_on_connection(database.connection(), target)
 }
 pub fn record_eligibility(
     database: &Database,
-    target: &CampMemberFastTarget,
+    target: &ThreadMemberFastTarget,
     runtime: &FrozenAgentRuntimeConfig,
     observation: &NativeFastEligibility,
 ) -> Result<bool> {
@@ -660,7 +661,7 @@ mod tests {
 
     #[test]
     fn camp_preference_survives_probes_but_not_rebinding_and_frozen_runs_do_not_change() {
-        use crate::collaboration::{CollaborationService, CreateCampCommand};
+        use crate::collaboration::{CollaborationService, CreateThreadCommand};
         let mut database = crate::test_support::seeded_runtime_database_owned();
         let workspace = database.directory().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
@@ -671,7 +672,7 @@ mod tests {
                     &mut database,
                     &envelope(
                         None,
-                        CreateCampCommand::for_test_with_members(
+                        CreateThreadCommand::for_test_with_members(
                             workspace.to_string_lossy().into_owned(),
                             &["agent_1", "agent_2"],
                             "agent_1",
@@ -680,7 +681,7 @@ mod tests {
                 )
                 .unwrap();
             camps.push(
-                created.result.payload["campId"]
+                created.result.payload["threadId"]
                     .as_str()
                     .unwrap()
                     .to_owned(),
@@ -697,7 +698,7 @@ mod tests {
         let set = |camp: &str, revision: &str, value| {
             envelope(
                 Some(camp),
-                SetCampMemberFastCommand {
+                SetThreadMemberFastCommand {
                     camp_id: camp.into(),
                     agent_id: "agent_1".into(),
                     expected_runtime_binding_revision: revision.into(),

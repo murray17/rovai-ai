@@ -1,55 +1,40 @@
 ---
 name: cli-operations
-description: 当不确定当前工作应使用 CampMessage、持久 Task、Camp/History 检索还是 Memory，需要由 Default Lead 并行征集多个成员后统一综合，普通消息是否应升级为 Task，一次业务事件需要协调多个 Rovai 操作，需要协调使命内容、状态与公开消息，或 CLI 返回后需要根据最新状态选择恢复动作时使用。普通单一操作及其具体收件人或参数应直接查看对应操作帮助，不要因此自动加载本 Skill。
+description: Choose among Rovai messages, Tasks, Missions, history and Memory; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly.
 ---
 
-# Rovai CLI 操作协调
+# Rovai CLI coordination
 
-## 快速路径
+Use `rovai --help` to find an operation and its exact `--help` for syntax. Read only the references needed by the current decision. Write user-facing prose in the user's language.
 
-普通单一操作直接查看对应操作的 `--help`，无需加载 references。
-操作不明确时查看 `rovai --help`；Task 子命令不明确时查看 `rovai task --help`。
+## Choose the result to preserve
 
-## 选择操作
+| Need | Operation family |
+| --- | --- |
+| Public answer, progress, question or one-time collaboration | ThreadMessage |
+| Shared objective or whole-Mission status | Mission |
+| Default Lead requests independent work from several members | One ThreadMessage with repeated `--to`; replies return separately |
+| Responsibility that survives Runs and can be handed off and accepted independently | Task |
+| Thread or message evidence | Thread/History |
+| Who is running, queued or waiting | Thread execution query |
+| Durable collaboration preference, agreement or lesson | Memory governance |
 
-先判断用户需要留下什么领域事实：
+Choose the smallest object that fully serves the request. Tasks own durable responsibilities; project sources and history own their facts.
 
-- Camp 中可见的答复、进展说明、问题或一次性协作消息：选择 CampMessage。
-- 查找或读取使命定义，或修改当前使命内容与整体状态：选择 Mission。
-- 当前 Default Lead 要把同一主题并行交给多个成员：选择一条带多个 `--to` 的普通 CampMessage；成员回复分别进入发起者的普通队列。
-- 跨 AgentRun 仍需追踪、可独立交接和验收的责任：选择 Task。
-- 查找 Camp、消息或稳定 ID 对应的历史事实：选择 Camp/History 读取。
-- 跨未来 AgentRun 仍有价值的稳定偏好、约定或经验：转交 Memory 治理判断。
+## Coordinate operations
 
-边界不清时，优先选择最小且能完整表达用户意图的领域对象。不要用 Task 代替普通公开消息，也不要用
-Memory 代替 Task、项目文档或历史证据。
+1. Read the authoritative state needed for the decision.
+2. Use one supported input source per call, following that operation's help.
+3. Inspect the committed business result before taking the next step.
+4. Publish any required Thread-visible answer before ending the Run.
 
-## 协调多步流程
+A successful operation proves its own commit, not downstream execution, validation or completion of the user's objective.
 
-1. 先读取做决定所需的权威状态，再执行 mutation。
-2. 为每一步选择一个具体 operation，并查看它自己的精确 `--help`。
-3. 每次调用只使用该 operation 接受的一种输入来源。
-4. 检查 compact business result；只有已提交的 operation 可以作为后续步骤的事实。
-5. 如果当前责任需要 Camp 中的公开答复，在结束前成功发送 CampMessage。
+## References
 
-一次 operation 成功只证明该 Rovai operation 已提交，不证明下游执行完成、整体工作质量、测试、评审
-或用户意图已经满足。
-
-## 按需读取
-
-- 需要协调使命内容、状态与公开消息时，读取 [Mission](references/mission.md)。
-
-- 需要决定公开消息、Agent routing、User attention 或是否无需 Task 时，读取
-  [Send](references/send.md)。
-- 需要并行邀请成员或决定成员回复路由时，读取 [Send](references/send.md)。
-- 需要判断消息是否升级为持久责任，或协调 Task 与消息 linkage 时，读取
-  [Task](references/task.md)。
-- 需要在当前 Camp、指定 Camp、跨 Camp 历史或稳定 ID exact read 之间选择时，读取
-  [Camp 与 History](references/camp-history.md)；该 reference 同时定义裸 `rovai camp read` 的默认
-  Timeline 行为、message-anchored 显式模式和 cursor 延续规则。
-- 需求可能属于长期记忆时，读取 [Memory 路由](references/memory.md)，随后使用
-  `$memory-stewardship`；此处不替代 Memory 治理。
-- CLI 返回 `error.recovery`，尤其要求 refresh 或确认结果时，读取
-  [Recovery](references/recovery.md)。
-
-多步需求可以读取多份直接相关的 reference；不要为了普通单一 operation 预读全部文件。
+- [Send](references/send.md): public messages, Agent routing, parallel invitations and User attention.
+- [Task](references/task.md): durable responsibility and Task-linked messages.
+- [Mission](references/mission.md): objective, status and public explanation.
+- [Thread/History](references/camp-history.md): message reads, addressing, execution state and pagination.
+- [Memory](references/memory.md): route durable information to `memory-stewardship`.
+- [Recovery](references/recovery.md): follow `error.recovery`, especially uncertain outcomes.

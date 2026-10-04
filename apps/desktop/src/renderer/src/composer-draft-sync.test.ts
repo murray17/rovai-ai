@@ -47,6 +47,37 @@ function replaceText(editor: LexicalEditor, value: string): void {
 afterEach(() => vi.useRealTimers())
 
 describe('ComposerDraftSync', () => {
+  it('derives pending member identities from the live editor after each atom removal', () => {
+    const editor = createComposerEditor()
+    const seen: string[][] = []
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
+      currentDraft: () => ({ revision: 0 }),
+      atomIsAvailable: () => true,
+      onStatusChange: (status) => seen.push(status.memberAgentIds)
+    })
+    const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
+    const replace = (count: number): void => {
+      editor.update(() => $replaceEditorWithComposerDocument({
+        version: 2,
+        segments: Array.from({ length: count }, () => ({
+          kind: 'atom' as const,
+          atom: { type: 'member' as const, agentId: 'outside', labelFallback: 'Alice' }
+        }))
+      }), { discrete: true })
+    }
+
+    replace(2)
+    expect(sync.getStatus().memberAgentIds).toEqual(['outside'])
+    replace(1)
+    expect(sync.getStatus().memberAgentIds).toEqual(['outside'])
+    replace(0)
+    expect(sync.getStatus().memberAgentIds).toEqual([])
+    expect(seen).toEqual([[], ['outside'], []])
+
+    unregister()
+    sync.destroy()
+  })
+
   it('does not serialize on a key update and snapshots only at the debounce boundary', async () => {
     vi.useFakeTimers()
     const editor = createComposerEditor()

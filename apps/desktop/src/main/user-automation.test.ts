@@ -18,7 +18,7 @@ it('routes only closed evaluation operations to Host without granting generic Co
   const invoke = async (name: string, params: unknown) => { calls.push([name, params]); return { state: 'running' } }
   const dependencies = {
     core: { async request<T>(): Promise<T> { throw new Error('Evaluation dispatch must not call generic Core') } },
-    openCamp: async (campId: string) => ({ campId, opened: true as const }), appVersion: 'test',
+    openThread: async (threadId: string) => ({ threadId, opened: true as const }), appVersion: 'test',
     evaluation: {
       configure: (params: unknown) => invoke('configure', params),
       schedule: (params: unknown) => invoke('schedule', params),
@@ -59,21 +59,28 @@ describe('User Automation transport', () => {
         calls.push({ method, params })
         return { schemaVersion: 1, facts: {}, metrics: {} } as T
       } },
-      openCamp: async () => { throw new Error('Trace export must not navigate') },
+      openThread: async () => { throw new Error('Trace export must not navigate') },
       appVersion: 'test'
     }
     await dispatchUserAutomation('trace.export', {
       since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z',
-      excludeAutomationIds: ['daily-analysis'], excludeCampIds: ['rvcamp_trial']
+      excludeAutomationIds: ['daily-analysis'], excludeThreadIds: ['rvcamp_trial']
     }, dependencies)
     expect(calls).toEqual([{ method: 'executionTrace.export', params: {
-      since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z', campIds: [],
-      excludeAutomationIds: ['daily-analysis'], excludeCampIds: ['rvcamp_trial']
+      since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z', threadIds: [],
+      excludeAutomationIds: ['daily-analysis'], excludeThreadIds: ['rvcamp_trial']
     } }])
     await expect(dispatchUserAutomation('trace.export', {
       since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z', rawSql: 'SELECT 1'
     }, dependencies)).rejects.toMatchObject({ code: 'automation_invalid_input' })
     expect(calls).toHaveLength(1)
+    await dispatchUserAutomation('trace.export', {
+      since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z', excludeCampIds: ['legacy-exclusion']
+    }, dependencies)
+    expect(calls[1].params).toMatchObject({ excludeThreadIds: ['legacy-exclusion'] })
+    await expect(dispatchUserAutomation('trace.export', {
+      since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z', campIds: [], threadIds: []
+    }, dependencies)).rejects.toMatchObject({ code: 'automation_invalid_input' })
   })
 
   it('sends through one atomic Core operation and maps only the closed V1 launch shape', async () => {
@@ -81,13 +88,13 @@ describe('User Automation transport', () => {
     const core = {
       async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
         calls.push({ method, params })
-        if (method === 'userAutomation.camp.send') {
+        if (method === 'userAutomation.thread.send') {
           return {
             commandResult: {
               status: 'accepted',
               payload: {
-                campMessageId: 'rvmsg_1',
-                campTurnId: 'rvturn_1',
+                threadMessageId: 'rvmsg_1',
+                threadTurnId: 'rvturn_1',
                 agentRunIds: ['rvrun_1'],
                 executionBudget: { deadlineAt: '2026-08-21T10:30:00Z' }
               }
@@ -101,10 +108,10 @@ describe('User Automation transport', () => {
       }
     }
     const result = await dispatchUserAutomation(
-      'camp.send',
+      'thread.send',
       {
         commandId: 'command-1',
-        campId: 'rvcamp_test',
+        threadId: 'rvcamp_test',
         agentId: 'agent_1',
         body: 'task',
         executionBudget: {
@@ -113,18 +120,18 @@ describe('User Automation transport', () => {
           maxAcceptedA2a: 0
         }
       },
-      { core, openCamp: async (campId) => ({ campId, opened: true }), appVersion: 'test' }
+      { core, openThread: async (threadId) => ({ threadId, opened: true }), appVersion: 'test' }
     )
 
     expect(result).toEqual({
       status: 'dispatched',
-      campMessageId: 'rvmsg_1',
-      campTurnId: 'rvturn_1',
+      threadMessageId: 'rvmsg_1',
+      threadTurnId: 'rvturn_1',
       agentRunIds: ['rvrun_1'],
       executionBudget: { deadlineAt: '2026-08-21T10:30:00Z' },
       replayed: false
     })
-    expect(calls.map(({ method }) => method)).toEqual(['userAutomation.camp.send'])
+    expect(calls.map(({ method }) => method)).toEqual(['userAutomation.thread.send'])
     expect(calls[0].params).toMatchObject({
       execution: {
         budget: {
@@ -139,7 +146,7 @@ describe('User Automation transport', () => {
   it('fails closed when Core ever returns Pending Execution', async () => {
     const core = {
       async request<T>(method: CoreMethod): Promise<T> {
-        expect(method).toBe('userAutomation.camp.send')
+        expect(method).toBe('userAutomation.thread.send')
         return {
           commandResult: null,
           replayed: false,
@@ -150,9 +157,9 @@ describe('User Automation transport', () => {
     }
 
     await expect(dispatchUserAutomation(
-      'camp.send',
-      { commandId: 'c', campId: 'rvcamp_test', agentId: 'agent_1', body: 'task' },
-      { core, openCamp: async (campId) => ({ campId, opened: true }), appVersion: 'test' }
+      'thread.send',
+      { commandId: 'c', threadId: 'rvcamp_test', agentId: 'agent_1', body: 'task' },
+      { core, openThread: async (threadId) => ({ threadId, opened: true }), appVersion: 'test' }
     )).rejects.toMatchObject({ code: 'automation_contract_upgrade_required' })
   })
 
@@ -161,7 +168,7 @@ describe('User Automation transport', () => {
     await expect(dispatchUserAutomation(
       'core.invoke',
       { method: 'members.runtime.set' },
-      { core, openCamp: async (campId) => ({ campId, opened: true }), appVersion: 'test' }
+      { core, openThread: async (threadId) => ({ threadId, opened: true }), appVersion: 'test' }
     )).rejects.toBeInstanceOf(UserAutomationError)
   })
 
@@ -175,7 +182,7 @@ describe('User Automation transport', () => {
     }
     const dependencies = {
       core,
-      openCamp: async (campId: string) => ({ campId, opened: true as const }),
+      openThread: async (threadId: string) => ({ threadId, opened: true as const }),
       appVersion: 'test'
     }
 
@@ -278,7 +285,7 @@ describe('User Automation transport', () => {
       permissions: { adapterKind: 'kiro-cli', schemaVersion: 1, values: {} }
     }, {
       core,
-      openCamp: async (campId) => ({ campId, opened: true }),
+      openThread: async (threadId) => ({ threadId, opened: true }),
       appVersion: 'test'
     })).rejects.toMatchObject({ code: 'automation_invalid_input' })
     expect(calls).toEqual([])
@@ -317,7 +324,7 @@ describe('User Automation transport', () => {
       }
       const server = new UserAutomationServer(root, {
         core,
-        openCamp: async (campId) => ({ campId, opened: true }),
+        openThread: async (threadId) => ({ threadId, opened: true }),
         appVersion: 'app-test'
       })
       try {

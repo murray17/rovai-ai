@@ -1,0 +1,17 @@
+.window-close-setting { margin-bottom: 22px; }
+.window-close-setting select { width: 210px; max-width: 100%; min-height: 34px; border-radius: 6px; font-size: 12px; }
+.window-close-dialog {
+  --brand: var(--conversation-action);
+  --brand-hover: var(--conversation-action-hover);
+  --brand-contrast: var(--conversation-action-contrast);
+}
+.window-close-remember { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.window-close-remember input { width: 15px; height: 15px; margin: 0; accent-color: var(--conversation-action); }
+.window-close-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+.window-close-dialog .app-dialog-footer-copy { flex: 1; }
+.window-close-dialog button:focus-visible { background-color: var(--neutral-hover); }
+.window-close-dialog .primary-button:focus-visible { background-color: var(--conversation-action-hover); }
+@media (forced-colors: active) {
+  .window-close-setting select { appearance: auto; }
+  .window-close-dialog :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+}

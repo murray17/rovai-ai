@@ -1,0 +1,1799 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-01",
+  "branchHeadBeforeChanges": "8dd51cb1371b7ea70aaaa99c6f52aef83758a2f1",
+  "signedCoreDigest": "d75184b866e623ec4fe68b37e79b476d205c6b6c9a43f515411c05485a1aef9e",
+  "privacy": "Numeric native fields and bounded identity/shape metadata only. Qoder message/Session/workspace aliases replace originals; no content, thinking, request IDs, endpoints or credentials. Existing full Core/App reports remain in private acceptance directories.",
+  "entries": [
+    {
+      "runtime": "codex-cli",
+      "version": "0.159.2",
+      "providerModel": "native-subscription/gpt-6.1-sol",
+      "nativeConfiguration": {
+        "model_auto_compact_token_limit": 18000,
+        "windowSource": "Same native tokenUsage notification; not overridden"
+      },
+      "coldRestore": {
+        "coreStopStart": true,
+        "previousProjectionEqualAfterRestart": true,
+        "sessionGeneration": 1,
+        "identityEvidence": "Persisted Core conversation/binding remains generation 1; resumed native cumulative token frame and exact public marker match previous Run. This observer did not retain native threadId."
+      },
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:26:22.819010+00:00",
+          "finishedAt": "2026-10-01T12:33:51.858472+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 160779,
+            "outputTokens": 1656,
+            "cacheReadTokens": 135936,
+            "cacheWriteTokens": 0
+          },
+          "finalizedAt": "2026-10-01T12:33:51.858472+00:00",
+          "expectedContext": {
+            "usedTokens": 19501,
+            "windowTokens": 258400,
+            "nativeRatio": null,
+            "modelKey": "gpt-6.1-sol",
+            "source": "runtime_event",
+            "dialectId": "codex-thread-context-v2",
+            "observedAt": "2026-10-01T12:33:51.848656+00:00",
+            "sessionGeneration": 1
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:33:52.438426+00:00",
+          "finishedAt": "2026-10-01T12:38:22.198434+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 98596,
+            "outputTokens": 650,
+            "cacheReadTokens": 75648,
+            "cacheWriteTokens": 0
+          },
+          "finalizedAt": "2026-10-01T12:38:22.198434+00:00",
+          "expectedContext": {
+            "usedTokens": 19329,
+            "windowTokens": 258400,
+            "nativeRatio": null,
+            "modelKey": "gpt-6.1-sol",
+            "source": "runtime_event",
+            "dialectId": "codex-thread-context-v2",
+            "observedAt": "2026-10-01T12:38:22.189330+00:00",
+            "sessionGeneration": 1
+          }
+        }
+      ],
+      "contextDecreasePair": {
+        "identityNote": "threadId aliases the owned Core binding; turnId aliases the native identity; all numeric fields are direct wire witness.",
+        "frames": [
+          {
+            "method": "thread/tokenUsage/updated",
+            "params": {
+              "threadId": "codex-session-1",
+              "turnId": "codex-turn-1",
+              "tokenUsage": {
+                "total": {
+                  "totalTokens": 101163,
+                  "inputTokens": 100051,
+                  "cachedInputTokens": 81152,
+                  "cacheWriteInputTokens": 0,
+                  "outputTokens": 1112
+                },
+                "last": {
+                  "totalTokens": 20620,
+                  "inputTokens": 20592,
+                  "cachedInputTokens": 17408,
+                  "cacheWriteInputTokens": 0,
+                  "outputTokens": 28
+                },
+                "modelContextWindow": 258400
+              }
+            },
+            "expectedContext": {
+              "usedTokens": 20620,
+              "windowTokens": 258400
+            },
+            "expectedParsedUsage": {
+              "promptInputTotalTokens": 20592,
+              "outputTokens": 28,
+              "cacheReadTokens": 17408,
+              "cacheWriteTokens": 0
+            }
+          },
+          {
+            "method": "thread/tokenUsage/updated",
+            "params": {
+              "threadId": "codex-session-1",
+              "turnId": "codex-turn-1",
+              "tokenUsage": {
+                "total": {
+                  "totalTokens": 101163,
+                  "inputTokens": 100051,
+                  "cachedInputTokens": 81152,
+                  "cacheWriteInputTokens": 0,
+                  "outputTokens": 1112
+                },
+                "last": {
+                  "totalTokens": 13262,
+                  "inputTokens": 0,
+                  "cachedInputTokens": 0,
+                  "cacheWriteInputTokens": 0,
+                  "outputTokens": 0
+                },
+                "modelContextWindow": 258400
+              }
+            },
+            "expectedContext": {
+              "usedTokens": 13262,
+              "windowTokens": 258400
+            },
+            "expectedParsedUsage": {
+              "promptInputTotalTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        ]
+      },
+      "rawCumulativeEnds": [
+        {
+          "totalTokens": 162435,
+          "inputTokens": 160779,
+          "cachedInputTokens": 135936,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1656
+        },
+        {
+          "totalTokens": 261681,
+          "inputTokens": 259375,
+          "cachedInputTokens": 211584,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 2306
+        }
+      ],
+      "cumulativeEndDeltaMatchesEachRun": true,
+      "rawContextDecreasesWithUnchangedTotal": [
+        {
+          "before": 19115,
+          "after": 12437
+        },
+        {
+          "before": 20381,
+          "after": 12809
+        },
+        {
+          "before": 20294,
+          "after": 12878
+        },
+        {
+          "before": 20753,
+          "after": 13325
+        },
+        {
+          "before": 20620,
+          "after": 13262
+        },
+        {
+          "before": 20991,
+          "after": 13601
+        },
+        {
+          "before": 20780,
+          "after": 11829
+        },
+        {
+          "before": 19501,
+          "after": 6854
+        },
+        {
+          "before": 19601,
+          "after": 12322
+        },
+        {
+          "before": 20356,
+          "after": 12382
+        },
+        {
+          "before": 19968,
+          "after": 12379
+        },
+        {
+          "before": 19992,
+          "after": 11582
+        }
+      ],
+      "actualContextProjectionTrajectory": [
+        {
+          "atMs": 4095,
+          "usedTokens": []
+        },
+        {
+          "atMs": 22750,
+          "usedTokens": [
+            19115
+          ]
+        },
+        {
+          "atMs": 66602,
+          "usedTokens": [
+            12437
+          ]
+        },
+        {
+          "atMs": 90790,
+          "usedTokens": [
+            20381
+          ]
+        },
+        {
+          "atMs": 138676,
+          "usedTokens": [
+            12809
+          ]
+        },
+        {
+          "atMs": 150763,
+          "usedTokens": [
+            20294
+          ]
+        },
+        {
+          "atMs": 194859,
+          "usedTokens": [
+            12878
+          ]
+        },
+        {
+          "atMs": 222776,
+          "usedTokens": [
+            20753
+          ]
+        },
+        {
+          "atMs": 282757,
+          "usedTokens": [
+            13325
+          ]
+        },
+        {
+          "atMs": 286817,
+          "usedTokens": [
+            20620
+          ]
+        },
+        {
+          "atMs": 338650,
+          "usedTokens": [
+            13262
+          ]
+        },
+        {
+          "atMs": 366594,
+          "usedTokens": [
+            20991
+          ]
+        },
+        {
+          "atMs": 422542,
+          "usedTokens": [
+            13601
+          ]
+        },
+        {
+          "atMs": 430679,
+          "usedTokens": [
+            20780
+          ]
+        },
+        {
+          "atMs": 450527,
+          "usedTokens": [
+            11829
+          ]
+        },
+        {
+          "atMs": 453577,
+          "usedTokens": [
+            19501
+          ]
+        },
+        {
+          "atMs": 494175,
+          "usedTokens": [
+            6854
+          ]
+        },
+        {
+          "atMs": 505895,
+          "usedTokens": [
+            19601
+          ]
+        },
+        {
+          "atMs": 557870,
+          "usedTokens": [
+            12322
+          ]
+        },
+        {
+          "atMs": 581794,
+          "usedTokens": [
+            20356
+          ]
+        },
+        {
+          "atMs": 626129,
+          "usedTokens": [
+            12382
+          ]
+        },
+        {
+          "atMs": 637860,
+          "usedTokens": [
+            19968
+          ]
+        },
+        {
+          "atMs": 681705,
+          "usedTokens": [
+            12379
+          ]
+        },
+        {
+          "atMs": 693952,
+          "usedTokens": [
+            19992
+          ]
+        },
+        {
+          "atMs": 722021,
+          "usedTokens": [
+            11582
+          ]
+        },
+        {
+          "atMs": 723548,
+          "usedTokens": [
+            19329
+          ]
+        }
+      ],
+      "compactionEvidencePhases": {
+        "completed": 12,
+        "started": 12
+      }
+    },
+    {
+      "runtime": "qoder-cli",
+      "version": "1.1.64",
+      "providerModel": "sub2api-custom/gpt-6.1-sol",
+      "nativeConfiguration": {
+        "protocol": "openai-responses",
+        "modelSource": "custom",
+        "nativeWindowSetting": 1050000,
+        "note": "Configured window is not substituted for missing journal counts."
+      },
+      "coldRestore": {
+        "coreStopStart": true,
+        "previousProjectionEqualAfterRestart": true,
+        "sameNativeSession": true,
+        "sameBindingGeneration": true,
+        "distinctNativeHostCount": 2
+      },
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:20:15.398354+00:00",
+          "finishedAt": "2026-10-01T12:21:53.659901+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 50776,
+            "outputTokens": 2610,
+            "cacheReadTokens": 23936,
+            "cacheWriteTokens": null
+          },
+          "finalizedAt": "2026-10-01T12:21:53.659901+00:00",
+          "expectedContext": {
+            "usedTokens": null,
+            "windowTokens": null,
+            "nativeRatio": 0.025412380952380954,
+            "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+            "source": "runtime_private_extension",
+            "dialectId": "qoder-native-context-ratio-1.1.64",
+            "observedAt": "2026-10-01T12:21:53.120Z",
+            "sessionGeneration": 1
+          },
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:21:42.452Z",
+                "message": {
+                  "id": "call-1-1",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24093,
+                    "output_tokens": 2534,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.022945714285714285
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24093,
+                "outputTokens": 2534,
+                "cacheReadTokens": null,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.022945714285714285
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:21:53.120Z",
+                "message": {
+                  "id": "call-1-2",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 26683,
+                    "output_tokens": 76,
+                    "cache_read_input_tokens": 23936,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.025412380952380954
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 26683,
+                "outputTokens": 76,
+                "cacheReadTokens": 23936,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.025412380952380954
+              }
+            }
+          ],
+          "caseKind": "real_cold_restore"
+        },
+        {
+          "runOrdinal": 2,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:21:53.924051+00:00",
+          "finishedAt": "2026-10-01T12:23:00.187448+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 55753,
+            "outputTokens": 1396,
+            "cacheReadTokens": 40704,
+            "cacheWriteTokens": null
+          },
+          "finalizedAt": "2026-10-01T12:23:00.187448+00:00",
+          "expectedContext": {
+            "usedTokens": null,
+            "windowTokens": null,
+            "nativeRatio": 0.02722952380952381,
+            "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+            "source": "runtime_private_extension",
+            "dialectId": "qoder-native-context-ratio-1.1.64",
+            "observedAt": "2026-10-01T12:22:59.658Z",
+            "sessionGeneration": 1
+          },
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:22:54.281Z",
+                "message": {
+                  "id": "call-2-1",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 27162,
+                    "output_tokens": 1376,
+                    "cache_read_input_tokens": 13696,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.02586857142857143
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 27162,
+                "outputTokens": 1376,
+                "cacheReadTokens": 13696,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.02586857142857143
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:22:59.658Z",
+                "message": {
+                  "id": "call-2-2",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 28591,
+                    "output_tokens": 20,
+                    "cache_read_input_tokens": 27008,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.02722952380952381
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 28591,
+                "outputTokens": 20,
+                "cacheReadTokens": 27008,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.02722952380952381
+              }
+            }
+          ],
+          "caseKind": "real_cold_restore"
+        },
+        {
+          "runOrdinal": 3,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:28:34.469218+00:00",
+          "finishedAt": "2026-10-01T12:29:29.663441+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 48774,
+            "outputTokens": 530,
+            "cacheReadTokens": 23936,
+            "cacheWriteTokens": null
+          },
+          "finalizedAt": "2026-10-01T12:29:29.663441+00:00",
+          "expectedContext": {
+            "usedTokens": null,
+            "windowTokens": null,
+            "nativeRatio": 0.023492380952380952,
+            "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+            "source": "runtime_private_extension",
+            "dialectId": "qoder-native-context-ratio-1.1.64",
+            "observedAt": "2026-10-01T12:29:29.121Z",
+            "sessionGeneration": 1
+          },
+          "caseKind": "real_provider_zero",
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:29:17.267Z",
+                "message": {
+                  "id": "call-3-1",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24107,
+                    "output_tokens": 501,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.02295904761904762
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24107,
+                "outputTokens": 501,
+                "cacheReadTokens": null,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.02295904761904762
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:29:29.121Z",
+                "message": {
+                  "id": "call-3-2",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24667,
+                    "output_tokens": 29,
+                    "cache_read_input_tokens": 23936,
+                    "cache_creation_input_tokens": 0,
+                    "context_usage_ratio": 0.023492380952380952
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24667,
+                "outputTokens": 29,
+                "cacheReadTokens": 23936,
+                "cacheWriteTokens": null
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.023492380952380952
+              }
+            }
+          ]
+        },
+        {
+          "runOrdinal": 4,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:36:16.387543+00:00",
+          "finishedAt": "2026-10-01T12:37:11.427865+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 73532,
+            "outputTokens": 635,
+            "cacheReadTokens": 62080,
+            "cacheWriteTokens": 111
+          },
+          "finalizedAt": "2026-10-01T12:37:11.427865+00:00",
+          "expectedContext": {
+            "usedTokens": null,
+            "windowTokens": null,
+            "nativeRatio": 0.023622857142857143,
+            "modelKey": "qoder-custom-provider/gpt-6.1-sol",
+            "source": "runtime_private_extension",
+            "dialectId": "qoder-native-context-ratio-1.1.64",
+            "observedAt": "2026-10-01T12:37:10.888Z",
+            "sessionGeneration": 1
+          },
+          "caseKind": "controlled_positive",
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:36:57.221Z",
+                "message": {
+                  "id": "call-4-1",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24093,
+                    "output_tokens": 499,
+                    "cache_read_input_tokens": 13696,
+                    "cache_creation_input_tokens": 37,
+                    "context_usage_ratio": 0.022945714285714285
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24093,
+                "outputTokens": 499,
+                "cacheReadTokens": 13696,
+                "cacheWriteTokens": 37
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.022945714285714285
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:37:05.219Z",
+                "message": {
+                  "id": "call-4-2",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24635,
+                    "output_tokens": 111,
+                    "cache_read_input_tokens": 23936,
+                    "cache_creation_input_tokens": 37,
+                    "context_usage_ratio": 0.02346190476190476
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24635,
+                "outputTokens": 111,
+                "cacheReadTokens": 23936,
+                "cacheWriteTokens": 37
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.02346190476190476
+              }
+            },
+            {
+              "raw": {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "entrypoint": "acp",
+                "isSidechain": false,
+                "modelSource": "custom",
+                "timestamp": "2026-10-01T12:37:10.888Z",
+                "message": {
+                  "id": "call-4-3",
+                  "role": "assistant",
+                  "usage": {
+                    "input_tokens": 24804,
+                    "output_tokens": 25,
+                    "cache_read_input_tokens": 24448,
+                    "cache_creation_input_tokens": 37,
+                    "context_usage_ratio": 0.023622857142857143
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24804,
+                "outputTokens": 25,
+                "cacheReadTokens": 24448,
+                "cacheWriteTokens": 37
+              },
+              "expectedContext": {
+                "usedTokens": null,
+                "windowTokens": null,
+                "nativeRatio": 0.023622857142857143
+              }
+            }
+          ]
+        }
+      ],
+      "realProviderCacheWriteWitness": [
+        {
+          "call": 1,
+          "eventType": "response.completed",
+          "usageKeys": [
+            "attribution",
+            "input_tokens",
+            "input_tokens_details",
+            "output_tokens",
+            "output_tokens_details",
+            "total_tokens"
+          ],
+          "usage": {
+            "input_tokens": 24107,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0
+            },
+            "output_tokens": 501,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 24608
+          },
+          "cacheWriteFieldPresent": true
+        },
+        {
+          "call": 2,
+          "eventType": "response.completed",
+          "usageKeys": [
+            "attribution",
+            "input_tokens",
+            "input_tokens_details",
+            "output_tokens",
+            "output_tokens_details",
+            "total_tokens"
+          ],
+          "usage": {
+            "input_tokens": 24667,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 23936
+            },
+            "output_tokens": 29,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 24696
+          },
+          "cacheWriteFieldPresent": true
+        }
+      ],
+      "controlledProviderCacheWriteWitness": [
+        {
+          "call": 1,
+          "eventType": "response.completed",
+          "usageKeys": [
+            "attribution",
+            "input_tokens",
+            "input_tokens_details",
+            "output_tokens",
+            "output_tokens_details",
+            "total_tokens"
+          ],
+          "usage": {
+            "input_tokens": 24093,
+            "input_tokens_details": {
+              "cache_write_tokens": 37,
+              "cached_tokens": 13696
+            },
+            "output_tokens": 499,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 24592
+          },
+          "cacheWriteFieldPresent": true
+        },
+        {
+          "call": 2,
+          "eventType": "response.completed",
+          "usageKeys": [
+            "attribution",
+            "input_tokens",
+            "input_tokens_details",
+            "output_tokens",
+            "output_tokens_details",
+            "total_tokens"
+          ],
+          "usage": {
+            "input_tokens": 24635,
+            "input_tokens_details": {
+              "cache_write_tokens": 37,
+              "cached_tokens": 23936
+            },
+            "output_tokens": 111,
+            "output_tokens_details": {
+              "reasoning_tokens": 10
+            },
+            "total_tokens": 24746
+          },
+          "cacheWriteFieldPresent": true
+        },
+        {
+          "call": 3,
+          "eventType": "response.completed",
+          "usageKeys": [
+            "attribution",
+            "input_tokens",
+            "input_tokens_details",
+            "output_tokens",
+            "output_tokens_details",
+            "total_tokens"
+          ],
+          "usage": {
+            "input_tokens": 24804,
+            "input_tokens_details": {
+              "cache_write_tokens": 37,
+              "cached_tokens": 24448
+            },
+            "output_tokens": 25,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 24829
+          },
+          "cacheWriteFieldPresent": true
+        }
+      ],
+      "cacheWriteConclusion": "Real Provider reported explicit cache_write_tokens=0. Journal normalizer does not preserve missing-versus-zero presence. Core retains null for journal zero. Controlled 37 per call survives installed native journal, Core and SQLite; 111 is synthetic, not billing."
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.30",
+      "providerModel": "sub2api/gpt-6.1-sol",
+      "nativeConfiguration": {
+        "defaultLimitContext": 0,
+        "isolatedExplicitLimitContext": 1050000,
+        "isolatedExplicitLimitOutput": 128000,
+        "source": "Existing native Qoder custom model configuration for the same authorised origin/model copied into isolated OpenCode config; not an independently measured Provider maximum."
+      },
+      "coldRestore": {
+        "coreStopStart": true,
+        "previousProjectionEqualAfterRestart": true,
+        "sameNativeSession": true,
+        "sameBindingGeneration": true,
+        "distinctNativeHostCount": 2
+      },
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:13:00.819286+00:00",
+          "finishedAt": "2026-10-01T12:19:13.838615+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 95729,
+            "outputTokens": 7653,
+            "cacheReadTokens": 79872,
+            "cacheWriteTokens": 0
+          },
+          "finalizedAt": "2026-10-01T12:19:13.838615+00:00",
+          "expectedContext": {
+            "usedTokens": 14793,
+            "windowTokens": 1050000,
+            "nativeRatio": null,
+            "modelKey": "sub2api/gpt-6.1-sol",
+            "source": "runtime_event",
+            "dialectId": "acp-session-context-gauge-v1",
+            "observedAt": "2026-10-01T12:19:13.413141+00:00",
+            "sessionGeneration": 1
+          },
+          "sourceRecords": [
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790856928921
+                },
+                "tokens": {
+                  "input": 8069,
+                  "output": 1049,
+                  "reasoning": 1759,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 8069,
+                "outputTokens": 2808,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 8069,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790856972730
+                },
+                "tokens": {
+                  "input": 1194,
+                  "output": 1276,
+                  "reasoning": 19,
+                  "cache": {
+                    "write": 0,
+                    "read": 7936
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 9130,
+                "outputTokens": 1295,
+                "cacheReadTokens": 7936,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 9130,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857012900
+                },
+                "tokens": {
+                  "input": 1479,
+                  "output": 1176,
+                  "reasoning": 30,
+                  "cache": {
+                    "write": 0,
+                    "read": 8960
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10439,
+                "outputTokens": 1206,
+                "cacheReadTokens": 8960,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 10439,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857068097
+                },
+                "tokens": {
+                  "input": 1646,
+                  "output": 929,
+                  "reasoning": 63,
+                  "cache": {
+                    "write": 0,
+                    "read": 10240
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 11886,
+                "outputTokens": 992,
+                "cacheReadTokens": 10240,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 11886,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857124584
+                },
+                "tokens": {
+                  "input": 1051,
+                  "output": 995,
+                  "reasoning": 26,
+                  "cache": {
+                    "write": 0,
+                    "read": 11776
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 12827,
+                "outputTokens": 1021,
+                "cacheReadTokens": 11776,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 12827,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857131881
+                },
+                "tokens": {
+                  "input": 1280,
+                  "output": 24,
+                  "reasoning": 31,
+                  "cache": {
+                    "write": 0,
+                    "read": 12672
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 13952,
+                "outputTokens": 55,
+                "cacheReadTokens": 12672,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 13952,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857144944
+                },
+                "tokens": {
+                  "input": 809,
+                  "output": 107,
+                  "reasoning": 33,
+                  "cache": {
+                    "write": 0,
+                    "read": 13824
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 14633,
+                "outputTokens": 140,
+                "cacheReadTokens": 13824,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 14633,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857153392
+                },
+                "tokens": {
+                  "input": 329,
+                  "output": 136,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 14464
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 14793,
+                "outputTokens": 136,
+                "cacheReadTokens": 14464,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 14793,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "update": {
+                "sessionUpdate": "usage_update",
+                "used": 14793,
+                "size": 1050000
+              }
+            }
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:19:14.156088+00:00",
+          "finishedAt": "2026-10-01T12:20:13.535726+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 47455,
+            "outputTokens": 822,
+            "cacheReadTokens": 34816,
+            "cacheWriteTokens": 0
+          },
+          "finalizedAt": "2026-10-01T12:20:13.535726+00:00",
+          "expectedContext": {
+            "usedTokens": 16150,
+            "windowTokens": 1050000,
+            "nativeRatio": null,
+            "modelKey": "sub2api/gpt-6.1-sol",
+            "source": "runtime_event",
+            "dialectId": "acp-session-context-gauge-v1",
+            "observedAt": "2026-10-01T12:20:13.112701+00:00",
+            "sessionGeneration": 1
+          },
+          "sourceRecords": [
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857194000
+                },
+                "tokens": {
+                  "input": 11631,
+                  "output": 605,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 3712
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 15343,
+                "outputTokens": 605,
+                "cacheReadTokens": 3712,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 15343,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857204124
+                },
+                "tokens": {
+                  "input": 730,
+                  "output": 138,
+                  "reasoning": 13,
+                  "cache": {
+                    "write": 0,
+                    "read": 15232
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 15962,
+                "outputTokens": 151,
+                "cacheReadTokens": 15232,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 15962,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            },
+            {
+              "raw": {
+                "role": "assistant",
+                "sessionID": "session-1",
+                "time": {
+                  "completed": 1790857213092
+                },
+                "tokens": {
+                  "input": 278,
+                  "output": 66,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 15872
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 16150,
+                "outputTokens": 66,
+                "cacheReadTokens": 15872,
+                "cacheWriteTokens": 0
+              },
+              "expectedContext": {
+                "usedTokens": 16150,
+                "windowTokens": null,
+                "nativeRatio": null
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "update": {
+                "sessionUpdate": "usage_update",
+                "used": 16150,
+                "size": 1050000
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "grok-build",
+      "version": "grok 1.0.44 (5b807183dd79)",
+      "providerModel": "sub2api/gpt-6.1-sol",
+      "nativeConfiguration": {
+        "modelContextWindow": 1050000,
+        "source": "Exact model native [model.<id>].context_window; isolated native arm_auto_compact acceptance call after Core restart."
+      },
+      "coldRestore": {
+        "coreStopStart": true,
+        "previousProjectionEqualAfterRestart": true,
+        "sameNativeSession": true,
+        "sameBindingGeneration": true,
+        "distinctNativeHostCount": 2
+      },
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:16:21.702400+00:00",
+          "finishedAt": "2026-10-01T12:18:06.979680+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 92387,
+            "outputTokens": 1498,
+            "cacheReadTokens": 72064,
+            "cacheWriteTokens": 0
+          },
+          "finalizedAt": "2026-10-01T12:18:06.979680+00:00",
+          "expectedContext": {
+            "usedTokens": 19659,
+            "windowTokens": 1050000,
+            "nativeRatio": null,
+            "modelKey": "gpt-6.1-sol",
+            "source": "runtime_event",
+            "dialectId": "grok-acp-meta-context-1.0.44",
+            "observedAt": "2026-10-01T12:18:06.333464+00:00",
+            "sessionGeneration": 1
+          },
+          "sourceRecords": [
+            {
+              "raw": {
+                "method": "_x.ai/session_notification",
+                "params": {
+                  "sessionId": "session-1",
+                  "update": {
+                    "sessionUpdate": "turn_completed",
+                    "prompt_id": "prompt-1",
+                    "usage": {
+                      "inputTokens": 92387,
+                      "outputTokens": 1498,
+                      "totalTokens": 93885,
+                      "cachedReadTokens": 72064,
+                      "cacheCreationTokens": 0,
+                      "reasoningTokens": 79
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 92387,
+                "outputTokens": 1498,
+                "cacheReadTokens": 72064,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "_meta": {
+                "totalTokens": 19659
+              },
+              "update": {
+                "sessionUpdate": "agent_message_chunk"
+              }
+            }
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "status": "succeeded",
+          "executionEpoch": 1,
+          "startedAt": "2026-10-01T12:18:07.484512+00:00",
+          "finishedAt": "2026-10-01T12:20:14.560220+00:00",
+          "finalReadback": {
+            "promptInputTotalTokens": 58727,
+            "outputTokens": 616,
+            "cacheReadTokens": 53504,
+            "cacheWriteTokens": 0
+          },
+          "finalizedAt": "2026-10-01T12:20:14.560220+00:00",
+          "expectedContext": {
+            "usedTokens": 19870,
+            "windowTokens": 1050000,
+            "nativeRatio": null,
+            "modelKey": "gpt-6.1-sol",
+            "source": "runtime_event",
+            "dialectId": "grok-acp-meta-context-1.0.44",
+            "observedAt": "2026-10-01T12:20:13.865493+00:00",
+            "sessionGeneration": 1
+          },
+          "sourceRecords": [
+            {
+              "raw": {
+                "method": "_x.ai/session_notification",
+                "params": {
+                  "sessionId": "session-1",
+                  "update": {
+                    "sessionUpdate": "turn_completed",
+                    "prompt_id": "prompt-2",
+                    "usage": {
+                      "inputTokens": 58727,
+                      "outputTokens": 616,
+                      "totalTokens": 59343,
+                      "cachedReadTokens": 53504,
+                      "cacheCreationTokens": 0,
+                      "reasoningTokens": 0
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 58727,
+                "outputTokens": 616,
+                "cacheReadTokens": 53504,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "rawContext": {
+            "method": "session/update",
+            "params": {
+              "sessionId": "session-1",
+              "_meta": {
+                "totalTokens": 19870
+              },
+              "update": {
+                "sessionUpdate": "agent_message_chunk"
+              }
+            }
+          }
+        }
+      ],
+      "compactionWireShape": [
+        {
+          "method": "_x.ai/session_notification",
+          "sessionUpdate": "auto_compact_started",
+          "updateKeys": [
+            "context_window",
+            "percentage",
+            "reason",
+            "sessionUpdate",
+            "tokens_used"
+          ]
+        },
+        {
+          "method": "_x.ai/session_notification",
+          "sessionUpdate": "auto_compact_completed",
+          "updateKeys": [
+            "elapsed_ms",
+            "sessionUpdate",
+            "summary_preview",
+            "tokens_after",
+            "tokens_before"
+          ]
+        }
+      ],
+      "compactionObservation": [
+        {
+          "sourceSignal": "grok.acp.auto_compact_completed.v1",
+          "admissionPoint": "completed",
+          "requestedRevision": 1
+        }
+      ],
+      "compactionNumericEvidence": {
+        "source": "Core Execution Evidence (not independent raw numeric witness)",
+        "before": 9325,
+        "after": 7415
+      },
+      "compactionContextInvalidated": true
+    }
+  ],
+  "apps": [
+    {
+      "runtime": "grok-build",
+      "version": "grok 1.0.44 (5b807183dd79)",
+      "status": "succeeded",
+      "publicUnits": 310585,
+      "reasoningUnits": 5350,
+      "numericPublications": 90,
+      "maximumInAny30s": 25,
+      "minimumNumericIntervalMs": 999.5,
+      "sameTimeThinkingSpeedSampleCount": 423,
+      "lastUiSpeed": null,
+      "contextLabel": "当前原生会话上下文：24.9k / 1050k，2.4%",
+      "usageRows": [
+        [
+          "Input Token",
+          "175k"
+        ],
+        [
+          "Output Token",
+          "5.5k"
+        ],
+        [
+          "Cache Read",
+          "126.2k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "4分 54秒"
+        ]
+      ],
+      "finalReadback": {
+        "runs": [
+          {
+            "agentRunId": "identity-1",
+            "cacheReadTokens": 126208,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T12:18:06.411621+00:00",
+            "lastObservedAt": "2026-10-01T12:18:06.375318+00:00",
+            "outputTokens": 5547,
+            "promptInputTotalTokens": 174991
+          }
+        ],
+        "schemaVersion": 1,
+        "sessions": [
+          {
+            "agentId": "agent_101",
+            "conversationId": "identity-2",
+            "dialectId": "grok-acp-meta-context-1.0.44",
+            "modelKey": "gpt-6.1-sol",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T12:18:05.645585+00:00",
+            "runtimeKind": "grok-build",
+            "sessionGeneration": 1,
+            "source": "runtime_event",
+            "usedTokens": 24883,
+            "windowTokens": 1050000
+          }
+        ]
+      }
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.30",
+      "status": "succeeded",
+      "publicUnits": 150525,
+      "reasoningUnits": 0,
+      "numericPublications": 57,
+      "maximumInAny30s": 20,
+      "minimumNumericIntervalMs": 991.8000000002794,
+      "sameTimeThinkingSpeedSampleCount": 0,
+      "lastUiSpeed": null,
+      "contextLabel": "当前原生会话上下文：9.9k / 1050k，0.9%",
+      "usageRows": [
+        [
+          "Input Token",
+          "44.4k"
+        ],
+        [
+          "Output Token",
+          "1.5k"
+        ],
+        [
+          "Cache Read",
+          "33.9k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "1分 49秒"
+        ]
+      ],
+      "finalReadback": {
+        "runs": [
+          {
+            "agentRunId": "identity-3",
+            "cacheReadTokens": 33920,
+            "cacheWriteTokens": 0,
+            "executionEpoch": 1,
+            "finalizedAt": "2026-10-01T12:25:48.903158+00:00",
+            "lastObservedAt": "2026-10-01T12:25:48.463+00:00",
+            "outputTokens": 1524,
+            "promptInputTotalTokens": 44362
+          }
+        ],
+        "schemaVersion": 1,
+        "sessions": [
+          {
+            "agentId": "agent_101",
+            "conversationId": "identity-4",
+            "dialectId": "acp-session-context-gauge-v1",
+            "modelKey": "sub2api/gpt-6.1-sol",
+            "nativeRatio": null,
+            "observedAt": "2026-10-01T12:25:48.481749+00:00",
+            "runtimeKind": "opencode-cli",
+            "sessionGeneration": 1,
+            "source": "runtime_event",
+            "usedTokens": 9855,
+            "windowTokens": 1050000
+          }
+        ]
+      }
+    }
+  ],
+  "packagedAppReopens": [
+    {
+      "case": "qoder-controlled-reopen",
+      "runtime": "qoder-cli",
+      "contextLabel": "当前原生会话上下文：— / —，2.4%",
+      "usageRows": [
+        [
+          "Input Token",
+          "73.5k"
+        ],
+        [
+          "Output Token",
+          "0.6k"
+        ],
+        [
+          "Cache Read",
+          "62.1k"
+        ],
+        [
+          "Cache Write",
+          "0.1k"
+        ],
+        [
+          "执行耗时",
+          "0分 55秒"
+        ]
+      ],
+      "speedAbsent": true
+    },
+    {
+      "case": "qoder-cold-reopen",
+      "runtime": "qoder-cli",
+      "contextLabel": "当前原生会话上下文：— / —，2.7%",
+      "usageRows": [
+        [
+          "Input Token",
+          "55.8k"
+        ],
+        [
+          "Output Token",
+          "1.4k"
+        ],
+        [
+          "Cache Read",
+          "40.7k"
+        ],
+        [
+          "Cache Write",
+          "—"
+        ],
+        [
+          "执行耗时",
+          "1分 06秒"
+        ]
+      ],
+      "speedAbsent": true
+    },
+    {
+      "case": "opencode-cold-reopen",
+      "runtime": "opencode-cli",
+      "contextLabel": "当前原生会话上下文：16.1k / 1050k，1.5%",
+      "usageRows": [
+        [
+          "Input Token",
+          "47.5k"
+        ],
+        [
+          "Output Token",
+          "0.8k"
+        ],
+        [
+          "Cache Read",
+          "34.8k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "0分 59秒"
+        ]
+      ],
+      "speedAbsent": true
+    },
+    {
+      "case": "grok-cold-reopen",
+      "runtime": "grok-build",
+      "contextLabel": "当前原生会话上下文：19.9k / 1050k，1.9%",
+      "usageRows": [
+        [
+          "Input Token",
+          "58.7k"
+        ],
+        [
+          "Output Token",
+          "0.6k"
+        ],
+        [
+          "Cache Read",
+          "53.5k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "2分 07秒"
+        ]
+      ],
+      "speedAbsent": true
+    },
+    {
+      "case": "codex-cold-reopen",
+      "runtime": "codex-cli",
+      "contextLabel": "当前原生会话上下文：19.3k / 258.4k，7.5%",
+      "usageRows": [
+        [
+          "Input Token",
+          "98.6k"
+        ],
+        [
+          "Output Token",
+          "0.7k"
+        ],
+        [
+          "Cache Read",
+          "75.6k"
+        ],
+        [
+          "Cache Write",
+          "0k"
+        ],
+        [
+          "执行耗时",
+          "4分 29秒"
+        ]
+      ],
+      "speedAbsent": true
+    }
+  ]
+}

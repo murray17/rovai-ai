@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "runtime": "opencode-cli",
+  "runtimeVersion": "1.18.30",
+  "observedModel": "sub2api/gpt-6-sol",
+  "source": "isolated one-Run smoke, monitoring.execution read after terminal",
+  "visibleTextDeltaCount": 9,
+  "run": {
+    "status": "succeeded",
+    "promptInputTotalTokens": 8235,
+    "outputTokens": 59,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "finalized": true
+  },
+  "currentSession": null,
+  "limits": [
+    "Provider account identity and native Session ID are omitted",
+    "No Session context gauge or Renderer screenshot was observed"
+  ]
+}

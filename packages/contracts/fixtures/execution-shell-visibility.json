@@ -1,0 +1,62 @@
+[
+  {
+    "title": "Bash",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "execute",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "exec_command",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "execute_command",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "run command",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "run_command",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "Shell",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "terminal",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "执行 Shell 命令",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "终端操作",
+    "toolName": "exec_command",
+    "visible": false
+  },
+  {
+    "title": "command",
+    "toolName": "exec_command",
+    "visible": true
+  },
+  {
+    "title": "Bash",
+    "toolName": "compile project",
+    "visible": true
+  }
+]

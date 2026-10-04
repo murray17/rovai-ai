@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-monitoring
 authority: runtime-usage-metering-and-read-boundaries
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-10-04
 ---
 
 # Runtime Monitoring 架构
 
-精确字段与方法见 [Runtime Usage Monitoring v4](../contracts/runtime-usage-monitoring-v4.md)。长期最小化、
+精确字段与方法见 [Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md)；执行台的原生用量与上下文另见 [Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)。长期最小化、
 稀疏语义、clean break 与 Cost grain 由
 [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)拥有。本架构只说明 Usage Transport、内存归一化、
 Projection/Rollup、Read Side 和 Renderer 如何组合。
@@ -17,8 +17,9 @@ Projection/Rollup、Read Side 和 Renderer 如何组合。
 
 | Component | Responsibility |
 | --- | --- |
-| Runtime adapter parser | 从已证明的 Runtime/version wire path 提取稀疏 Token/Cache/Cost；不估算缺失值 |
-| Usage buffer | 以内存 source identity 去重，合并兼容 update，保持 cumulative/gauge baseline |
+| Runtime adapter parser | 从已证明的 Runtime wire path 提取稀疏 Token/Cache/Cost；不估算缺失值 |
+| Native Usage reader | 在 prompt 发送前冻结当前根 Session cursor，按已验证字段结构只读本地数值元数据；不保存正文或历史回填 |
+| Usage buffer | 按调用归一化并以 source identity 去重；保留有序数值帧与 cumulative/gauge baseline |
 | Usage flush service | 周期最多每 4 秒一次；一个短事务更新 checkpoint、Run summary 与 hourly rollup |
 | Pricing catalog | 按 model key、service tier 与 effective date 提供版本化公开费率；不访问网络 |
 | AgentRun terminal boundary | 在结算前等待该 Run pending Usage Flush；权威状态 transition finalizes summary 并删除 checkpoint |
@@ -30,13 +31,15 @@ Projection/Rollup、Read Side 和 Renderer 如何组合。
 Execution Evidence、Canonical Activity、AgentRun、Approval、Delivery、Recovery、Context 和 Runtime health
 继续由各自 Core domain 拥有。Monitoring 不复制、不删除也不重建这些事实。
 
+执行台增加一条窄读取路径：现有 Run summary 提供每 Run 四项用量，当前原生 Session 上下文单独保存在 `runtime_session_context_latest`。后者由 Session gauge 写入，并由 `Conversation` 的当前 Binding ID、代次和原生 Session ID 在读取时栅栏；指标分支的 Migration 178 从 v1.72/schema 127 建立空表，179 添加 nullable `native_context_ratio` 并升级到 schema 129，保留已安装分支的数据，不回填旧 Run 或旧 Session。合入 Thread 更名后由 180 收口为 schema 130；main 已部署的另一种 schema 128 仅按完整 v32 准入、指标表缺失和精确收据链识别，179 原子补建指标投影，180 保留已具备的 Thread 格式和冻结证据。占用数量与原生比例属于同一最新观测；比例不用于反推 token 数。所有 Runtime 的输出测速已于 2026-10-02 退出；没有字符计数器或临时速度读取路径。原生 Usage buffer、checkpoint、hourly rollup 与 Session Context 继续按既有合同工作。
+
 ## Write path
 
 ```text
 Runtime event/result
-  -> adapter/version parser
+  -> adapter/format parser
   -> sparse normalized Usage in memory
-  -> source-identity dedupe + compatible merge
+  -> source-identity dedupe + ordered per-source numeric buffer
   -> 4s periodic flush OR terminal forced flush
   -> one short SQLite transaction
        runtime_usage_checkpoint
@@ -45,25 +48,70 @@ Runtime event/result
        optional Codex price_estimated projection
 ```
 
-`delta` 可直接进入 additive projection；`cumulative` 与 `gauge` 的首值只建立 baseline，之后只投影正差。
+`delta` 可直接进入 additive projection；Session／Run 的 `cumulative` 与 `gauge` 首值只建立 baseline，之后只投影正差。
+Claude 已核验的 `claude-stream-call-usage-v1 / model_call` 身份在当前 Run 内新建，首次累计值从零计入。
 counter reset 只重建 baseline。Run summary 以 logical `agent_run_id` 为粒度，Recovery execution epoch 只隔离
 checkpoint，避免重复 Run 和 Coverage。Runtime 事件处理不写 raw/normalized observation row，也不追加
 Execution Evidence。
 
-OpenCode `>= 1.18.15` 的官方 dialect 把可选 thought/cache bucket 的省略定义为零；parser 只在完整成功
-terminal Usage 上应用该版本感知规则。OpenCode ACP `usage_update.cost` 是累计 Session gauge，不进入 Run
-summary。Codex `>= 0.145.0` 的四个完整 Token bucket 可在同一 Flush 事务中命中静态价格目录，覆盖当前
-Run 的 API public-price equivalent；不新增长期事件表，也不在页面读取时计算。
+原始 input/read/write 不跨独立调用合并。请求命中计数在已验证的单调用边界生成，
+summary/hourly 只加已归一的 contribution；缺 Input/Output 的 contribution 会将 summary 标为部分，
+终态不会把部分和升级为完整总量。失败恢复保留旧数值帧在新帧之前，累计首次基线与 reset 不能被
+“只保留最后一帧”覆盖。Delta checkpoint 按调用身份暂存，仍遵守 terminal 删除与 72 小时上限。
+执行台根据新完整性字段决定是否能显示 Input＋Output，四项已观测值继续可读。
+
+指标层没有 CLI 版本白名单或私设最低版本。实际字段、来源身份和计量语义决定准入；产品本身的
+Runtime 最低版本和平台门槛保持。OpenCode prompt result 不能证明整轮范围，使用原生逐调用
+来源；ACP `usage_update.cost` 的 Session 累计不进入 Run summary。Codex 完整 buckets、
+模型／档位／生效时间仍决定静态价格投影，不以 CLI 版本代替字段完整性。
 
 周期 Flush 不发出立即 Snapshot 事件。普通事件受全局最短间隔约束；terminal 事件可在 Debounce 后立即
 刷新。所有请求仍 single-flight，从而不让 Dashboard 反向阻塞单一 SQLite Database Mutex 上的运行结算。
+既有 4 秒周期 Flush 实际提交 Usage／Context 后发出 `monitoring.changed`，活动 Session 与
+迟到结果均可刷新当前可见范围；没有写入不通知。提交失败才恢复 batch，不再次累加已提交用量。
+
+### 本地原生数值来源与 Context
+
+CodeBuddy、Kimi Code、Qoder 与 TRAE 使用当前 workspace／Session 下的 JSONL cursor；OpenCode
+使用只读 SQLite 中的根 Session assistant 元数据。版本仅记录实测，不决定 reader 是否运行。prompt 发送前建立历史 offset 与身份 baseline；之后
+最多每 4 秒在既有 Flush 锁内读取、buffer、落盘，terminal 强制 Flush 保持同一 Run cursor，增加 400ms
+尾读后才允许后继 prompt 建立 baseline。整个过程在 blocking pool 读取，不持有 Core Database Mutex
+等待原生磁盘。部分行等待完整换行；文件换代、缺口、超限停止采集且不重扫历史。
+
+这些 reader 只保留有界调用身份、offset、文件身份和必要数值。JSONL 的非 Usage 字段由封闭 DTO 跳过，
+SQLite 不读取 part／正文；原始行只在本次解析缓冲中存在，不进入 Evidence、Blob、日志或 Renderer。
+选定本地 Token 来源后不再混加 ACP Token；Gauge 和 Cost 独立处理。最新版本与字段语义由
+[Usage v8](../contracts/runtime-usage-monitoring-v8.md)及其继承的原生来源合同拥有。
+
+Antigravity 在当前根 DONE step 进入 buffer 前，只读对应原生 SQLite 的同调用数值，
+交叉核对 stream 与本地身份/计数后替换稀疏观测；Context 读取同一 generator 的原生窗口估计。
+Qoder 的 custom-provider input 与显式模型窗口须与原生比例相符；TRAE 的最近根 prompt
+占用按已核验的原生 calibrated 语义使用，窗口从本次有效原生模型目录取得。
+Kiro 只从精确绑定 Session 文件补原生窗口，缺少独立 used 时仍保留比例和未知数量。
+这些补充均不扫描历史会话、不恢复测速，也不从比例反推数量。
+
+Claude 的 Core 私有路径保留最新根调用的数值 Usage 和原生模型身份；真实 message_delta 的
+三个输入桶齐全即发出 used-only Session Gauge，同一 result 的该模型 `modelUsage.contextWindow`
+到达后确认窗口。Context 保留实际模型身份；同绑定/实际模型/有效配置的后续 used-only
+观测复用已确认窗口。模型/配置变化撤下旧分母，used 始终独立；不使用整轮 Usage。Pi managed host v8
+调用原生 `ctx.getContextUsage()` 并只发送封闭数值 status，Core 验证 Host、Run、Session、绑定代次和
+实际 provider/model 后消费；正文或全会话统计不进入此路径。只有窗口上限时 used 仍未知，压缩后
+原生 tokens 尚未重新有效时清空旧 used。两条私有路径均在公开 Evidence 分发前截断。
+
+Kiro 从原生 metadata 接收比例，CodeBuddy 从最新根调用输入与同模型 catalog 窗口得到 Context；
+只有比例／只有 used 都可保留，但不能反推精确数量或猜窗口。Antigravity 的结构化 DONE step
+走数值专用 Usage 事件，消费后在公开 Evidence 分发前截断；累计 result 不混入 Run。
+
+DSH 私有 committed Usage 保留原生完整调用 total，校验后以 total 减 output 接通含缓存 Input；
+缓存桶缺失仍未知。ZCode 从已有终态 session/read 的原生 runtime.contextUsage 提取同 Session
+used/size，在 prompt 终态之前交给现有绑定栅栏；不增加轮询或传播完整 snapshot。
 
 ## Read path
 
 Codex Run summary 可记录实际 service tier；费用投影先用原生观察、再用冻结/发送时请求档位。未知不套
 Standard 价，实际回退 Standard 不按请求 Fast 计价；失去档位依据时撤回旧目录估价。这个小型 metadata
 写入不新增计费系统，也不替代 Claude 等 Runtime 的原生 reported cost。精确行为由
-[Runtime Usage Monitoring v4](../contracts/runtime-usage-monitoring-v4.md) 拥有。
+[Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md) 拥有。
 
 ```text
 visible Settings page
@@ -101,8 +149,19 @@ epoch、Database contract `v0.99` 与 projection schema `47`。不存在回填�
 ## References
 
 - [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)
-- [Runtime Usage Monitoring v4](../contracts/runtime-usage-monitoring-v4.md)
+- [Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md)
 - [v0.99 implementation plan](../versions/v0.99/implementation-plan.md)
 - [Runtime monitoring feasibility audit](../research/runtime-monitoring/README.md)
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
+
+### Context 的运行中可用性
+
+Context 以当前 Session/绑定/Run epoch 归属，和 delivery 是否 accepted 解耦；不存在等待 prompt
+终态的第二个临时 Context 池。原生占用不进入 consumption checkpoint，只更新一个 latest 行。
+消息省略实际模型时允许继承同绑定配置已经确认的身份，配置别名本身不建立确认。
+
+ZCode 当前根模型调用结束/压缩完成通过合并的待读序号唤醒一个 snapshot worker；返回快照已覆盖的触发不再补读，既有原生响应
+reader 不被查询阻塞。live、terminal 和 background snapshot 串行读取；仅 live 返回消息数限制为 1，终态沿用原参数，
+只把数值投递到 Core；旧 input 的回读丢弃。无通用新定时器或正文保存。Pi/Antigravity 的独立
+used/window 不再互为入口条件。支持时机与真实 App 范围见[可用性验收](../research/runtime-monitoring/live-context-usability-2026-10-04.md)。

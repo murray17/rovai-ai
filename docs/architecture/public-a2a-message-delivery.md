@@ -8,9 +8,9 @@ last_updated: 2026-09-24
 
 # Public Camp Message、Delivery 与 AgentRun
 
-本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v23](../contracts/camp-message-send-v23.md)、
+本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v24](../contracts/camp-message-send-v24.md)、
 [Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 30](../contracts/context-manifest-evidence-v30.md)
-与 [Camp History v10](../contracts/camp-history-v10.md)。Single Chat 不使用本主链。
+与 [Camp History v11](../contracts/camp-history-v11.md)。Single Chat 不使用本主链。
 
 ## 三类事实
 
@@ -90,10 +90,10 @@ completion 的协调循环。
 人类执行台读取与 Agent-facing 上下文隔离不同：Camp Open 把未 tombstone 消息关联的当前
 `camp_message_delivery` 全部投影到 `messageDeliveries`，不按消息作者过滤。用户消息没有 `sourceAgentRunId` 仍是
 同一 waiting 队列事实；Renderer 可在 claim 前显示只读排队卡。完整字段与 coverage 边界见
-[Camp Open Projection v24](../contracts/camp-open-projection-v24.md)，展示见
-[Run Process Detail Surface v42](../contracts/run-process-detail-surface-v42.md)。
+[Camp Open Projection v25](../contracts/camp-open-projection-v25.md)，展示见
+[Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md)。
 
-`RUN_INPUT` 与 quote-source 沿用冻结输入可见性；显式 read/search 使用 Camp History v10 的主动查询可见性。公共 Camp 历史对所有受认证
+`RUN_INPUT` 与 quote-source 沿用冻结输入可见性；显式 read/search 使用 Camp History v11 的主动查询可见性。公共 Camp 历史对所有受认证
 队员可读；目标 Camp membership 只控制参与、寻址与执行，不是历史 ACL。外层消息可见不代表它引用的 source 可见；
 每条 quote snapshot 在投影时按查看 Agent 和边界重新校验 source。ContextManifest 冻结当前输入和 discovery
 时序证据，但 Run 内的 `camp.read` 始终按调用时最新状态直接解析存续 Camp，不受 Manifest 上下界限制。
@@ -126,3 +126,17 @@ outcome-unknown 输入绝不重新入队。
 Migration 172/schema 122 只扩展新公开 Formatter/Manifest 29、Profile 9 与 Run Facts 7 的写入约束，
 保留旧业务行及审计原字节。旧格式执行不再继续派发或恢复，也不转换、双读或自动重播；需要继续工作时
 建立新执行，必要时使用新 Session。新格式 Run 的 `historyHint` 和输入保持冻结。
+
+## 正文 Principal 寻址
+
+Agent Send 在共享解析模块识别行首连续提及中的稳定 `@Principal`，并与显式 `mentionUser` 合并为当前用户结构化身份。
+PublicOnly 只抑制 Agent 路由，仍允许用户提及；通知沿用当前原子、消息局部和幂等投影。显示名称由当前用户资料解析，
+不持久化到身份字段。精确位置、排除规则与未改变的 Runtime final/quote 来源见 [Send v24](../contracts/camp-message-send-v24.md)。
+
+## 公开执行查询
+
+[Thread Runs v1](../contracts/thread-runs-v1.md) 由 `thread_runs` 只读模块拥有：复用 `camp_history` 的实时目标解析与消息正文投影，
+同一事务中筛选公共 Run、聚合 waiting Delivery 并生成预览。Single Chat Run 先从候选集排除；私有调用方沿用封闭 policy。
+公开结果统一为 items，不暴露内部来源分类；未形成 Run 的队列条目仅以 null agentRunId 和 queued 表达。
+输入数量使用全部冻结关联，首条预览按 ordinal；队列使用当前队首，不保证未来一次 claim 会处理整组。
+本查询不建立快照分页、缓存或调度管理机制；动态页间变化按命令说明保留明确限制。

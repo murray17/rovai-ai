@@ -37,12 +37,12 @@ use crate::{
     camp_attachment_publication::AuthorityAttachment,
     camp_content::{
         ComposerAtom, ComposerDocument, ComposerSegment, EMPTY_COMPOSER_DOCUMENT_JSON,
-        StructuredCampMessageContent, StructuredCampMessageSegment, composer_document_to_content,
-        has_all_members_mention, member_mention_ids, normalize_composer_document,
-        parse_composer_document_json, render_composer_plain_text, render_current_plain_text,
-        serialize_composer_document, validate_composer_document,
+        StructuredThreadMessageContent, StructuredThreadMessageSegment,
+        composer_document_to_content, has_all_members_mention, member_mention_ids,
+        normalize_composer_document, parse_composer_document_json, render_composer_plain_text,
+        render_current_plain_text, serialize_composer_document, validate_composer_document,
     },
-    camp_id::CampId,
+    camp_id::ThreadId,
     current_user::{CURRENT_USER_ID, CurrentUserResolver},
     db::Database,
     local_attachment_source::{
@@ -55,9 +55,9 @@ use crate::{
 pub(crate) const DRAFT_RETENTION_DAYS: i64 = 7;
 const ATTACHMENT_METADATA_FILE: &str = ".rovai-attachment.json";
 const ATTACHMENT_METADATA_SCHEMA_VERSION: u32 = 1;
-type CampAuthorityIngressGate = Arc<Mutex<()>>;
-type CampAuthorityIngressGateRegistry = Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>;
-static CAMP_AUTHORITY_INGRESS_GATES: OnceLock<CampAuthorityIngressGateRegistry> = OnceLock::new();
+type ThreadAuthorityIngressGate = Arc<Mutex<()>>;
+type ThreadAuthorityIngressGateRegistry = Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>;
+static CAMP_AUTHORITY_INGRESS_GATES: OnceLock<ThreadAuthorityIngressGateRegistry> = OnceLock::new();
 
 #[cfg(feature = "slow-tests")]
 #[doc(hidden)]
@@ -170,7 +170,8 @@ struct ManagedAttachmentMetadata {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampComposerDraftView {
+pub struct ThreadComposerDraftView {
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft_id: Option<String>,
@@ -179,8 +180,8 @@ pub struct CampComposerDraftView {
     pub quotes: Vec<MessageQuoteSnapshot>,
     pub revision: i64,
     pub attachments: Vec<LocalAttachmentSourceView>,
-    pub reply_intent: Option<CampComposerReplyIntentView>,
-    pub continuation_intent: Option<CampComposerContinuationIntentView>,
+    pub reply_intent: Option<ThreadComposerReplyIntentView>,
+    pub continuation_intent: Option<ThreadComposerContinuationIntentView>,
     pub updated_at: Option<String>,
     pub expires_at: Option<String>,
 }
@@ -212,15 +213,16 @@ pub(crate) fn consume_client_draft(
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampComposerContinuationIntentView {
+pub struct ThreadComposerContinuationIntentView {
+    #[serde(rename = "sourceThreadMessageId", alias = "sourceCampMessageId")]
     pub source_camp_message_id: String,
-    pub recipient: CampComposerContinuationRecipientView,
+    pub recipient: ThreadComposerContinuationRecipientView,
     pub recipient_selection_required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampComposerContinuationRecipientView {
+pub struct ThreadComposerContinuationRecipientView {
     pub agent_id: String,
     pub display_name: String,
     pub recipient_availability: String,
@@ -228,17 +230,18 @@ pub struct CampComposerContinuationRecipientView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampComposerReplyIntentView {
+pub struct ThreadComposerReplyIntentView {
+    #[serde(rename = "replyToThreadMessageId", alias = "replyToCampMessageId")]
     pub reply_to_camp_message_id: String,
     pub target_state: String,
-    pub author: Option<CampComposerReplyAuthorView>,
+    pub author: Option<ThreadComposerReplyAuthorView>,
     pub excerpt: Option<String>,
     pub recipient_selection_required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CampComposerReplyAuthorView {
+pub struct ThreadComposerReplyAuthorView {
     pub author_type: String,
     pub author_id: String,
     pub display_name: String,
@@ -247,7 +250,7 @@ pub struct CampComposerReplyAuthorView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CampComposerReplyRecipient {
+pub enum ThreadComposerReplyRecipient {
     Member {
         #[serde(rename = "agentId")]
         agent_id: String,
@@ -314,7 +317,7 @@ pub struct PreparedComposerAttachment {
 }
 
 #[derive(Debug)]
-pub struct CampAttachmentCleanupPlan {
+pub struct ThreadAttachmentCleanupPlan {
     camp_id: String,
     attachment_paths: Vec<PathBuf>,
 }
@@ -340,7 +343,7 @@ pub struct DesktopAttachmentTarget {
 
 pub fn attachment_location(
     database: &Database,
-    store: &CampAttachmentStore,
+    store: &ThreadAttachmentStore,
     locator: &LocalAttachmentOwnerLocator,
     client: &crate::draft_client::DraftClient,
 ) -> Result<Option<PathBuf>> {
@@ -454,12 +457,12 @@ pub fn legacy_attachment_belongs_to_owner(
 }
 
 #[derive(Debug, Clone)]
-pub struct CampAttachmentStore {
+pub struct ThreadAttachmentStore {
     root: PathBuf,
     client: DraftClient,
 }
 
-impl CampAttachmentStore {
+impl ThreadAttachmentStore {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             root: data_dir.join("camp-attachments"),
@@ -485,15 +488,15 @@ impl CampAttachmentStore {
         camp_id: &str,
         _admission: &MutexGuard<'_, ()>,
     ) -> Result<PathBuf> {
-        let camp_id = CampId::parse(camp_id)?;
+        let camp_id = ThreadId::parse(camp_id)?;
         let root = self.root.join(camp_id.as_str());
         ensure_directory(&root)?;
         restrict_discovery(&root)?;
         Ok(root)
     }
 
-    fn authority_ingress_gate(&self, camp_id: &str) -> Result<CampAuthorityIngressGate> {
-        let camp_id = CampId::parse(camp_id)?;
+    fn authority_ingress_gate(&self, camp_id: &str) -> Result<ThreadAuthorityIngressGate> {
+        let camp_id = ThreadId::parse(camp_id)?;
         let identity = self.root.join(camp_id.as_str());
         let registry = CAMP_AUTHORITY_INGRESS_GATES.get_or_init(|| Mutex::new(HashMap::new()));
         let mut registry = lock_unpoisoned(registry);
@@ -513,7 +516,7 @@ impl CampAttachmentStore {
         execution_workspace: &Path,
         run_tmp: &Path,
     ) -> Result<Vec<AuthorityAttachment>> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         if requested_paths.len() > MAX_PREPARED_ATTACHMENTS {
             anyhow::bail!("At most 10 files may be attached to one message");
         }
@@ -626,8 +629,12 @@ impl CampAttachmentStore {
         let _ = restrict_discovery(&camp_root);
     }
 
-    pub fn load_draft(&self, database: &Database, camp_id: &str) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+    pub fn load_draft(
+        &self,
+        database: &Database,
+        camp_id: &str,
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let draft = database
             .connection()
@@ -707,7 +714,7 @@ impl CampAttachmentStore {
                         has_attachments: !attachments.is_empty(),
                     },
                 )?;
-                CampComposerDraftView {
+                ThreadComposerDraftView {
                     draft_id: (!self.client.is_desktop()).then(|| self.client.draft_id(camp_id)),
                     camp_id: camp_id.to_string(),
                     quotes: load_quotes(
@@ -743,7 +750,7 @@ impl CampAttachmentStore {
                         has_attachments: !prepared_attachments.is_empty(),
                     },
                 )?;
-                CampComposerDraftView {
+                ThreadComposerDraftView {
                     draft_id: (!self.client.is_desktop()).then(|| self.client.draft_id(camp_id)),
                     camp_id: camp_id.to_string(),
                     quotes: load_quotes(
@@ -769,7 +776,7 @@ impl CampAttachmentStore {
         database: &mut Database,
         camp_id: &str,
         body: &str,
-    ) -> Result<CampComposerDraftView> {
+    ) -> Result<ThreadComposerDraftView> {
         let current = self.load_draft(database, camp_id)?;
         let content = ComposerDocument {
             version: crate::camp_content::COMPOSER_DOCUMENT_VERSION,
@@ -789,7 +796,7 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
         content: ComposerDocument,
-    ) -> Result<CampComposerDraftView> {
+    ) -> Result<ThreadComposerDraftView> {
         self.save_content_with_continuation(database, camp_id, expected_revision, content, None)
     }
 
@@ -800,8 +807,8 @@ impl CampAttachmentStore {
         expected_revision: i64,
         content: ComposerDocument,
         continuation_source_message_id: Option<&str>,
-    ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         if let Some(source_message_id) = continuation_source_message_id {
             validate_component(source_message_id, "Camp Message")?;
@@ -945,8 +952,8 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
         reply_to_camp_message_id: &str,
-    ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         validate_component(reply_to_camp_message_id, "Camp Message")?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
@@ -1012,8 +1019,8 @@ impl CampAttachmentStore {
         database: &mut Database,
         camp_id: &str,
         expected_revision: i64,
-    ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -1046,9 +1053,9 @@ impl CampAttachmentStore {
         database: &mut Database,
         camp_id: &str,
         expected_revision: i64,
-        recipient: CampComposerReplyRecipient,
-    ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+        recipient: ThreadComposerReplyRecipient,
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -1082,7 +1089,7 @@ impl CampAttachmentStore {
             });
         }
         let replacement = match recipient {
-            CampComposerReplyRecipient::Member { agent_id } => {
+            ThreadComposerReplyRecipient::Member { agent_id } => {
                 if !active_reply_agent(&transaction, camp_id, &agent_id)? {
                     anyhow::bail!("mention_target_unavailable");
                 }
@@ -1091,7 +1098,7 @@ impl CampAttachmentStore {
                     label_fallback: None,
                 }
             }
-            CampComposerReplyRecipient::AllMembers => ComposerAtom::AllMembers,
+            ThreadComposerReplyRecipient::AllMembers => ComposerAtom::AllMembers,
         };
         ensure_leading_composer_recipient(&mut content, replacement);
         persist_reply_mutation(
@@ -1117,8 +1124,8 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
         source_camp_message_id: &str,
-    ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         validate_component(source_camp_message_id, "Camp Message")?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
@@ -1172,8 +1179,8 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
         agent_id: &str,
-    ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -1251,7 +1258,7 @@ impl CampAttachmentStore {
         source_path: &Path,
         requested_display_name: &str,
     ) -> Result<ComposerAttachmentPreparePlan> {
-        CampId::parse(camp_id)?;
+        ThreadId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         ensure_draft_revision(
             &self.client,
@@ -1290,8 +1297,8 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
         source_ref: LocalAttachmentSourceRef,
-    ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadComposerDraftView> {
+        ThreadId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -1506,7 +1513,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         source_path: &Path,
         requested_display_name: &str,
-    ) -> Result<CampComposerDraftView> {
+    ) -> Result<ThreadComposerDraftView> {
         let plan = self.plan_prepare_from_path(
             database,
             camp_id,
@@ -1528,8 +1535,8 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
         attachment_id: &str,
-    ) -> Result<(CampComposerDraftView, CampAttachmentCleanupPlan)> {
-        CampId::parse(camp_id)?;
+    ) -> Result<(ThreadComposerDraftView, ThreadAttachmentCleanupPlan)> {
+        ThreadId::parse(camp_id)?;
         validate_component(attachment_id, "Prepared Attachment")?;
         ensure_draft_revision(
             &self.client,
@@ -1579,7 +1586,7 @@ impl CampAttachmentStore {
                 transaction.commit()?;
                 return Ok((
                     self.load_draft(database, camp_id)?,
-                    CampAttachmentCleanupPlan {
+                    ThreadAttachmentCleanupPlan {
                         camp_id: camp_id.to_string(),
                         attachment_paths: Vec::new(),
                     },
@@ -1620,7 +1627,7 @@ impl CampAttachmentStore {
         transaction.commit()?;
         Ok((
             self.load_draft(database, camp_id)?,
-            CampAttachmentCleanupPlan {
+            ThreadAttachmentCleanupPlan {
                 camp_id: camp_id.to_string(),
                 attachment_paths: vec![PathBuf::from(path)],
             },
@@ -1634,7 +1641,7 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
         attachment_id: &str,
-    ) -> Result<CampComposerDraftView> {
+    ) -> Result<ThreadComposerDraftView> {
         let (draft, cleanup) = self.remove_prepared_from_database(
             database,
             camp_id,
@@ -1654,7 +1661,7 @@ impl CampAttachmentStore {
         &self,
         database: &mut Database,
         camp_id: &str,
-    ) -> Result<CampAttachmentCleanupPlan> {
+    ) -> Result<ThreadAttachmentCleanupPlan> {
         let cleanup = self.draft_attachment_cleanup_plan(database, camp_id)?;
         consume_client_draft(database.connection(), camp_id, &self.client)?;
         Ok(cleanup)
@@ -1664,21 +1671,21 @@ impl CampAttachmentStore {
         &self,
         database: &Database,
         camp_id: &str,
-    ) -> Result<CampAttachmentCleanupPlan> {
-        CampId::parse(camp_id)?;
+    ) -> Result<ThreadAttachmentCleanupPlan> {
+        ThreadId::parse(camp_id)?;
         let paths = if self.client.is_desktop() {
             prepared_paths(database, camp_id)?
         } else {
             Vec::new()
         };
-        Ok(CampAttachmentCleanupPlan {
+        Ok(ThreadAttachmentCleanupPlan {
             camp_id: camp_id.to_string(),
             attachment_paths: paths.into_iter().map(PathBuf::from).collect(),
         })
     }
 
-    pub fn cleanup_detached_attachments(&self, plan: CampAttachmentCleanupPlan) -> Result<()> {
-        let parsed_camp_id = CampId::parse(&plan.camp_id)?;
+    pub fn cleanup_detached_attachments(&self, plan: ThreadAttachmentCleanupPlan) -> Result<()> {
+        let parsed_camp_id = ThreadId::parse(&plan.camp_id)?;
         let gate = self.authority_ingress_gate(&plan.camp_id)?;
         let _admission = lock_unpoisoned(&gate);
         let camp_root = self.root.join(parsed_camp_id.as_str());
@@ -1840,7 +1847,7 @@ impl CampAttachmentStore {
         &self,
         candidate: AttachmentPreviewCandidate,
     ) -> Result<AttachmentPreviewSource> {
-        let camp_id = CampId::parse(&candidate.camp_id)?;
+        let camp_id = ThreadId::parse(&candidate.camp_id)?;
         let gate = self.authority_ingress_gate(camp_id.as_str())?;
         let _admission = lock_unpoisoned(&gate);
         let normalized_name = normalize_display_name(&candidate.display_name)?;
@@ -1900,7 +1907,7 @@ impl CampAttachmentStore {
         camp_id: &str,
         attachment_id: &str,
     ) -> Result<Option<DesktopAttachmentOpenCandidate>> {
-        let camp_id = CampId::parse(camp_id)?;
+        let camp_id = ThreadId::parse(camp_id)?;
         validate_managed_attachment_id(attachment_id)?;
         let row = database
             .connection()
@@ -2121,7 +2128,7 @@ impl CampAttachmentStore {
     }
 
     pub fn remove_camp(&self, camp_id: &str) -> Result<()> {
-        let camp_id = CampId::parse(camp_id)?;
+        let camp_id = ThreadId::parse(camp_id)?;
         let gate = self.authority_ingress_gate(camp_id.as_str())?;
         let _admission = lock_unpoisoned(&gate);
         let root = self.root.join(camp_id.as_str());
@@ -2293,11 +2300,11 @@ pub(crate) fn remove_managed_attachment_tree(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn cleanup_consumed_prepared_attachment_paths(
-    store: &CampAttachmentStore,
+    store: &ThreadAttachmentStore,
     camp_id: &str,
     paths: &[PathBuf],
 ) -> Result<()> {
-    store.cleanup_detached_attachments(CampAttachmentCleanupPlan {
+    store.cleanup_detached_attachments(ThreadAttachmentCleanupPlan {
         camp_id: camp_id.to_string(),
         attachment_paths: paths.to_vec(),
     })
@@ -2306,7 +2313,7 @@ pub(crate) fn cleanup_consumed_prepared_attachment_paths(
 #[derive(Debug, Clone)]
 struct DraftMutationState {
     document: ComposerDocument,
-    structured_content: StructuredCampMessageContent,
+    structured_content: StructuredThreadMessageContent,
     revision: i64,
     reply_to_camp_message_id: Option<String>,
     recipient_selection_required: bool,
@@ -2588,19 +2595,19 @@ struct ContinuationProjectionInput<'a> {
     stored_source_message_id: Option<&'a str>,
     suppressed_source_message_id: Option<&'a str>,
     recipient_selection_touched: bool,
-    content: &'a [StructuredCampMessageSegment],
+    content: &'a [StructuredThreadMessageSegment],
     reply_to_camp_message_id: Option<&'a str>,
     has_attachments: bool,
 }
 
-fn recipient_signature(content: &[StructuredCampMessageSegment]) -> (bool, Vec<String>) {
+fn recipient_signature(content: &[StructuredThreadMessageSegment]) -> (bool, Vec<String>) {
     (
         has_all_members_mention(content),
         member_mention_ids(content),
     )
 }
 
-fn has_explicit_recipient(content: &[StructuredCampMessageSegment]) -> bool {
+fn has_explicit_recipient(content: &[StructuredThreadMessageSegment]) -> bool {
     has_all_members_mention(content) || !member_mention_ids(content).is_empty()
 }
 
@@ -2705,7 +2712,7 @@ fn project_continuation_intent(
     connection: &Connection,
     camp_id: &str,
     input: ContinuationProjectionInput<'_>,
-) -> Result<Option<CampComposerContinuationIntentView>> {
+) -> Result<Option<ThreadComposerContinuationIntentView>> {
     let ContinuationProjectionInput {
         stored_source_message_id,
         suppressed_source_message_id,
@@ -2739,9 +2746,9 @@ fn project_continuation_intent(
         && reply_to_camp_message_id.is_none()
         && !has_explicit_recipient(content)
         && has_payload;
-    Ok(Some(CampComposerContinuationIntentView {
+    Ok(Some(ThreadComposerContinuationIntentView {
         source_camp_message_id: candidate.source_message_id,
-        recipient: CampComposerContinuationRecipientView {
+        recipient: ThreadComposerContinuationRecipientView {
             agent_id: candidate.agent_id,
             display_name: candidate.display_name,
             recipient_availability: if candidate.available {
@@ -2833,7 +2840,7 @@ pub(crate) fn project_reply_intent(
     camp_id: &str,
     reply_to_camp_message_id: Option<&str>,
     recipient_selection_required: bool,
-) -> Result<Option<CampComposerReplyIntentView>> {
+) -> Result<Option<ThreadComposerReplyIntentView>> {
     let Some(reply_to_camp_message_id) = reply_to_camp_message_id else {
         return Ok(None);
     };
@@ -2856,7 +2863,7 @@ pub(crate) fn project_reply_intent(
         )
         .optional()?;
     let Some((author_type, author_id, body)) = target else {
-        return Ok(Some(CampComposerReplyIntentView {
+        return Ok(Some(ThreadComposerReplyIntentView {
             reply_to_camp_message_id: reply_to_camp_message_id.to_string(),
             target_state: "message_unavailable".to_string(),
             author: None,
@@ -2902,10 +2909,10 @@ pub(crate) fn project_reply_intent(
         .chars()
         .take(160)
         .collect();
-    Ok(Some(CampComposerReplyIntentView {
+    Ok(Some(ThreadComposerReplyIntentView {
         reply_to_camp_message_id: reply_to_camp_message_id.to_string(),
         target_state: "available".to_string(),
-        author: Some(CampComposerReplyAuthorView {
+        author: Some(ThreadComposerReplyAuthorView {
             author_type,
             author_id,
             display_name,
@@ -3615,8 +3622,8 @@ mod agent_source_tests {
             "rovai-authority-ingress-gate-test-{}",
             Uuid::new_v4()
         ));
-        let first_store = CampAttachmentStore::new(&directory);
-        let second_store = CampAttachmentStore::new(&directory);
+        let first_store = ThreadAttachmentStore::new(&directory);
+        let second_store = ThreadAttachmentStore::new(&directory);
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         let other_camp_id = "rvcamp_01m0evhykseprr56s0b940zrr3";
 
@@ -3651,7 +3658,7 @@ mod agent_source_tests {
         fs::write(outside.join("secret.txt"), b"outside source").unwrap();
 
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let frozen = store
             .freeze_agent_sources(
                 camp_id,
@@ -3902,13 +3909,13 @@ mod windows_attachment_tests {
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
-    use crate::camp_content::StructuredCampMessageSegment as Segment;
+    use crate::camp_content::StructuredThreadMessageSegment as Segment;
 
-    fn composer_document(content: StructuredCampMessageContent) -> ComposerDocument {
+    fn composer_document(content: StructuredThreadMessageContent) -> ComposerDocument {
         crate::camp_content::composer_document_from_content(&content).unwrap()
     }
 
-    fn structured_content(document: &ComposerDocument) -> StructuredCampMessageContent {
+    fn structured_content(document: &ComposerDocument) -> StructuredThreadMessageContent {
         composer_document_to_content(document).unwrap()
     }
 
@@ -3990,7 +3997,7 @@ mod slow_tests {
         }
 
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
-        let store = CampAttachmentStore::new(&data_directory);
+        let store = ThreadAttachmentStore::new(&data_directory);
         let error = store
             .freeze_agent_sources(
                 camp_id,
@@ -4039,7 +4046,7 @@ mod slow_tests {
         let other_camp_id = "rvcamp_01m0evhykseprr56s0b940zrr3";
         insert_test_camp(&database, camp_id);
         insert_test_camp(&database, other_camp_id);
-        let store = CampAttachmentStore::new(&data_directory);
+        let store = ThreadAttachmentStore::new(&data_directory);
         let draft = store
             .prepare_from_path(&mut database, camp_id, 0, &source, "preview.png")
             .unwrap();
@@ -4218,7 +4225,7 @@ mod slow_tests {
         let mut database = Database::open(&directory).unwrap();
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
 
         let first_content = vec![Segment::Text {
             text: "让@普通文字 ".into(),
@@ -4308,8 +4315,8 @@ mod slow_tests {
         let second_identity = crate::draft_client::resolve_editor(&database, None).unwrap();
         let first_client = DraftClient::verified_web(&first_identity.client_id).unwrap();
         let second_client = DraftClient::verified_web(&second_identity.client_id).unwrap();
-        let first_tab = CampAttachmentStore::for_client(&directory, first_client.clone());
-        let second_tab = CampAttachmentStore::for_client(&directory, second_client.clone());
+        let first_tab = ThreadAttachmentStore::for_client(&directory, first_client.clone());
+        let second_tab = ThreadAttachmentStore::for_client(&directory, second_client.clone());
         let first_web = first_tab
             .save_body(&mut database, camp_id, "first tab")
             .unwrap();
@@ -4404,7 +4411,7 @@ mod slow_tests {
             CURRENT_USER_ID,
             "用户消息",
         );
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let saved = store
             .save_content(
                 &mut database,
@@ -4526,7 +4533,7 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 unavailable.revision,
-                CampComposerReplyRecipient::Member {
+                ThreadComposerReplyRecipient::Member {
                     agent_id: "agent_3".into(),
                 },
             )
@@ -4587,7 +4594,7 @@ mod slow_tests {
                 [],
             )
             .unwrap();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let reply = store
             .start_reply(&mut database, camp_id, 0, "away-agent-message")
             .unwrap();
@@ -4647,7 +4654,7 @@ mod slow_tests {
             "agent_1",
             "Agent 后续消息",
         );
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let candidate = store.load_draft(&database, camp_id).unwrap();
         let intent = candidate.continuation_intent.unwrap();
         assert_eq!(intent.source_camp_message_id, "continuation-source");
@@ -4721,7 +4728,7 @@ mod slow_tests {
             )
             .unwrap();
         insert_test_explicit_user_message(&database, camp_id, "dismiss-source", 1, &["agent_2"]);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store.load_draft(&database, camp_id).unwrap();
         let dismissed = store
             .dismiss_continuation(&mut database, camp_id, draft.revision, "dismiss-source")
@@ -4784,7 +4791,7 @@ mod slow_tests {
             )
             .unwrap();
         insert_test_explicit_user_message(&database, camp_id, "repair-source", 1, &["agent_2"]);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store
             .save_content_with_continuation(
                 &mut database,
@@ -4851,7 +4858,7 @@ mod slow_tests {
             1,
             &["agent_2"],
         );
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store
             .save_content_with_continuation(
                 &mut database,
@@ -4937,7 +4944,7 @@ mod slow_tests {
                 [],
             )
             .unwrap();
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         assert!(
             store
                 .load_draft(&database, camp_id)
@@ -5009,7 +5016,7 @@ mod slow_tests {
             "agent_2",
             "Agent 消息",
         );
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let draft = store
             .save_content_with_continuation(
                 &mut database,
@@ -5067,7 +5074,7 @@ mod slow_tests {
         let mut database = Database::open(&directory).unwrap();
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
 
         let error = store
             .save_content(
@@ -5112,7 +5119,7 @@ mod slow_tests {
         let mut database = Database::open(&directory).unwrap();
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let saved = store
             .save_content(
                 &mut database,
@@ -5170,7 +5177,7 @@ mod slow_tests {
         let mut database = Database::open(&directory).unwrap();
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
-        let store = CampAttachmentStore::new(&directory);
+        let store = ThreadAttachmentStore::new(&directory);
         let legacy_source = directory.join("legacy.txt");
         let current_source = directory.join("current.txt");
         fs::write(&legacy_source, b"legacy").unwrap();
@@ -5247,7 +5254,7 @@ mod slow_tests {
         let mut database = Database::open(&data_directory).unwrap();
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
-        let store = CampAttachmentStore::new(&data_directory);
+        let store = ThreadAttachmentStore::new(&data_directory);
         let draft = store
             .prepare_from_path(&mut database, camp_id, 0, &source, "项目资料")
             .unwrap();
@@ -5322,7 +5329,7 @@ mod slow_tests {
         let mut database = Database::open(&data_directory).unwrap();
         let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
-        let store = CampAttachmentStore::new(&data_directory);
+        let store = ThreadAttachmentStore::new(&data_directory);
         let error = store
             .prepare_from_path(&mut database, camp_id, 0, &source, "source")
             .unwrap_err()

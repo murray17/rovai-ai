@@ -50,7 +50,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(current.long, { clipped: true, ellipsis: 'ellipsis' })
     assert.equal(current.overflow, false)
     await capture('channel-names-day-1040')
-    await run('document.querySelector(\'[data-sidebar-menu-target="camp:fixture-camp-1"]\').focus()')
+    await run('document.querySelector(\'[data-sidebar-menu-target="thread:fixture-camp-1"]\').focus()')
     await key('ArrowDown')
     await waitFor('document.activeElement?.classList.contains("sidebar-action-menu-item")')
     await key('ArrowDown')

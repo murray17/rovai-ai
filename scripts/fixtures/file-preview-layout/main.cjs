@@ -49,7 +49,8 @@ app.whenReady().then(async () => {
   const cases = []
   const check = async (name, operation) => {
     try { await operation(); cases.push(name) } catch (error) {
-      console.error(await run('JSON.stringify({ state: window.previewTest.snapshot(), conversation: window.previewTest.conversationSnapshot(), pointerEvents: window.previewTest.pointerEvents })'))
+      console.error(name, error)
+      console.error(await run('JSON.stringify({ state: window.previewTest.snapshot(), pointerEvents: window.previewTest.pointerEvents })'))
       writeFileSync(join(dirname(userData), 'failure.png'), (await window.webContents.capturePage()).toPNG())
       throw new Error(`${name}: ${error.message}`, { cause: error })
     }
@@ -125,6 +126,108 @@ app.whenReady().then(async () => {
     return result.text
   }
 
+  const initialExecutionFixture = async (scenario = 'new', ratio = null, width = 1440) => {
+    await run(`localStorage.clear(); sessionStorage.clear();
+      ${ratio === null ? '' : `localStorage.setItem('rovai.file-preview.preferred-ratio', '${ratio}')`}`)
+    await window.loadFile(renderer, { query: { 'initial-execution': scenario } })
+    await viewport(width)
+  }
+  const waitForExecution = async expression => {
+    for (let attempt = 0; attempt < 120; attempt++) {
+      await snapshot()
+      if (await run(expression)) return
+    }
+    throw new Error(`First execution did not settle: ${expression}`)
+  }
+  const submitFirstMessage = async () => {
+    await waitForExecution('[...document.querySelectorAll("form.composer button[type=submit]:not(:disabled)")].some(button => button.getBoundingClientRect().width > 0)')
+    await run(`(() => {
+      const form = [...document.querySelectorAll('form.composer')].find(form => form.getBoundingClientRect().width > 0)
+      form.querySelector('.structured-mention-editor[contenteditable]').focus()
+      form.requestSubmit()
+    })()`)
+    await waitForExecution('window.previewTest.executionPhase() === "submitted"')
+  }
+  const claimFirstRun = async () => {
+    await run('window.previewTest.claimFirstRun()')
+    await waitForExecution('window.previewTest.activeTabKind() === "execution"')
+    return snapshot()
+  }
+
+  await check('first submitted Run uses 420px without persisting or changing width when files join the pane', async () => {
+    for (const theme of ['day', 'night']) {
+      await initialExecutionFixture()
+      await run(`window.previewTest.setTheme('${theme}')`)
+      await submitFirstMessage()
+      await run('window.firstRunFocus = document.activeElement')
+      const state = await claimFirstRun()
+      closeTo(state.width, 420, 'First Run width')
+      assert.equal(state.stored, null)
+      assert.equal(state.aligned, true)
+      assert.equal(state.overflow, false)
+      assert.equal(await run('window.firstRunFocus === document.activeElement'), true, 'Auto-open preserves DOM focus')
+      await capture(`first-run-minimum-${theme}`)
+      await run('window.previewTest.openMarkdown()')
+      closeTo((await snapshot()).width, 420, 'Adding a file keeps the shared width')
+      await run('window.previewTest.selectExecution(); window.previewTest.hidePane()')
+      await snapshot()
+      await run('window.previewTest.showPane()')
+      closeTo((await snapshot()).width, 420, 'Reopening keeps the shared width')
+      await begin()
+      await release()
+      const resized = await key('Left')
+      closeTo(resized.width, 444, 'User can resize the initialized pane')
+      assert.ok(Number(resized.stored) > 0)
+    }
+  })
+
+  await check('saved widths and active Thread submissions keep their original proportions', async () => {
+    for (const [scenario, saved] of [['new', .64], ['existing', null]]) {
+      await initialExecutionFixture(scenario, saved)
+      await submitFirstMessage()
+      const state = await claimFirstRun()
+      closeTo(state.width, Math.min(state.available - 420, state.available * (saved ?? .56)), 'Existing ratio')
+      assert.equal(state.stored, saved === null ? null : String(saved))
+    }
+  })
+
+  await check('a late first Run preserves files, Activity and previously opened panes', async () => {
+    for (const scenario of ['file', 'hidden-file', 'mission', 'opened-empty', 'explicit-execution']) {
+      await initialExecutionFixture(scenario)
+      await submitFirstMessage()
+      if (scenario.includes('file')) await run('window.previewTest.openMarkdown()')
+      else if (scenario === 'mission') await run('window.previewTest.openActivity()')
+      else if (scenario === 'explicit-execution') await run('window.previewTest.openExecution()')
+      else await run('window.previewTest.showPane()')
+      await snapshot()
+      if (scenario === 'hidden-file' || scenario === 'opened-empty') {
+        await run('window.previewTest.hidePane()')
+        await snapshot()
+      }
+      const state = await claimFirstRun()
+      closeTo(state.width, state.available * .56, `${scenario} retains width`)
+      assert.equal(state.stored, null)
+      assert.equal(await run('window.previewTest.activeTabKind()'), 'execution', 'Existing selection priority is unchanged')
+      if (scenario.includes('file') || scenario === 'mission') assert.equal(state.tabCount, 2)
+    }
+  })
+
+  await check('first Run respects the compact breakpoint and starts at minimum in a wide workspace', async () => {
+    await initialExecutionFixture('new', null, 1040)
+    await submitFirstMessage()
+    const compact = await claimFirstRun()
+    assert.equal(compact.compact, true)
+    closeTo(compact.width, compact.available, 'Compact preview still replaces the conversation')
+    assert.equal(compact.handle, null)
+    const expanded = await viewport(1440)
+    closeTo(expanded.width, expanded.available * .56, 'Compact entry did not change the default ratio')
+    await initialExecutionFixture('new', null, 2560)
+    await submitFirstMessage()
+    closeTo((await claimFirstRun()).width, 420, 'Wide first Run uses the minimum')
+  })
+
+  await run('localStorage.clear(); sessionStorage.clear()')
+  await window.loadFile(renderer)
   await viewport(1440)
   await check('the persistent preview toggle opens an empty reading plane and closes without saving a new ratio', async () => {
     const initial = await reviewSnapshot()
@@ -914,7 +1017,7 @@ app.whenReady().then(async () => {
     assert.match(review.selectedTab, /^File Change·very-long-file-preview-name\.tsx$/)
     assert.match(review.text, /历史新内容/)
     assert.equal(review.fileReads, reads, 'Historical review never reads the working file')
-    assert.deepEqual(review.reviewRequests, [{ campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 }])
+    assert.deepEqual(review.reviewRequests, [{ threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 }])
     assert.deepEqual(review.tabs.map(tab => tab.icon), ['code', 'file_change'])
     assert.ok(review.tabs.every(tab => tab.iconVisible && tab.noDrag))
     assert.equal(review.headerDrag, 'drag')
@@ -946,7 +1049,7 @@ app.whenReady().then(async () => {
     assert.equal(current.tabs.length, 3)
     assert.equal((await snapshot()).focused, 'file-preview-tab-activate', 'Opening from a hidden review transfers keyboard focus to the current file tab')
     assert.deepEqual(current.fileOpens.at(-1), {
-      kind: 'run_evidence', campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1,
+      kind: 'run_evidence', threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1,
       evidenceFileId: 'file-1', action: 'open_current'
     })
     await click('[role="tab"][aria-label="File Change·styles.css"]')
@@ -1158,7 +1261,7 @@ app.whenReady().then(async () => {
     assert.equal(opened.selectedTab, 'path-only.ts')
     assert.equal(opened.reviewRequests.length, before.reviewRequests.length, 'Direct current-file preview does not read immutable detail')
     assert.deepEqual(opened.fileRestores.at(-1), {
-      kind: 'run_evidence', campId: 'camp-1', agentRunId: 'run-operation-only', executionEpoch: 1,
+      kind: 'run_evidence', threadId: 'camp-1', agentRunId: 'run-operation-only', executionEpoch: 1,
       evidenceFileId: 'file-operation-only', action: 'open_current'
     })
     const tabCount = opened.tabs.length
@@ -1303,7 +1406,7 @@ app.whenReady().then(async () => {
     for (const [index, path] of ['src/index.ts', 'tests/index.ts'].entries()) {
       await click(`${read} [role="listitem"]:nth-child(${index + 1}) button`)
       const state = await run('window.previewTest.toolState()')
-      assert.deepEqual(state.requests.at(-1), { kind: 'camp_workspace', campId: 'camp-1', rawReference: path })
+      assert.deepEqual(state.requests.at(-1), { kind: 'camp_workspace', threadId: 'camp-1', rawReference: path })
       assert.equal(await run(`document.querySelector('${read} details').open`), false)
     }
     await click(`${read} .shell-read-summary-title`)

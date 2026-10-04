@@ -66,7 +66,9 @@ describe('v0.29 member sidebar', () => {
     expect(markup).toContain(renderToStaticMarkup(createElement('img', {
       src: PRODUCT_RUNTIME_LOGOS['codex-cli'], alt: '', draggable: false
     })))
-    expect(markup).toContain('aria-label="折叠队员名册"')
+    expect(markup).toContain('aria-label="添加队员"')
+    expect(markup).toContain('aria-label="选择添加方式"')
+    expect(markup).not.toContain('aria-label="折叠队员名册"')
     expect(markup).not.toContain('secret-match')
   })
 

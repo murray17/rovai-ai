@@ -8,10 +8,12 @@ last_updated: 2026-09-24
 
 # Built-in Tool Runtime Architecture
 
+人类用户的主称呼、双别名、结构化搜索与冻结投影边界见 [User Naming v1](../contracts/user-naming-v1.md)。
+
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)、
+[Built-in Tool Transport v35](../contracts/builtin-tool-transport-v35.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
-[Camp History v10](../contracts/camp-history-v10.md)、
+[Camp History v11](../contracts/camp-history-v11.md)、
 [Durable Task v5](../contracts/durable-task-v5.md) 和
 [Camp Message Send v22](../contracts/camp-message-send-v22.md)、
 [Current User Attention v7](../contracts/current-user-attention-v7.md)与
@@ -195,10 +197,12 @@ Domain Service 保留 line-leading 连续有效 mention 的兼容 parser，未�
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 grammar。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 该 schema 继续进入当前 catalog digest。
-当前 v32 contract/CLI command version、`builtin_cli.transport.v32` capability 与 IPC protocol 2 必须同时进入
-Binding compatibility 和 digest。Camp History 当前使用 v10；Native Binding context contract 加入内部
-`sessionCharterRevision: 12`；Task help 路由教学的变化轮换 Binding。Bootstrap v4/Formatter 4；public 动态 Context
-使用 Formatter 28 / ContextManifest 28，Single Chat 使用 Formatter/Manifest 26，不做 endpoint 猜测并 fail closed。
+当前 Contract/CLI 为 35、Agent Output 为 8、capability 为 `builtin_cli.transport.v35`，IPC 仍为 2。
+[Thread Runs v1](../contracts/thread-runs-v1.md) 复用公开读取范围，用一个事务组合实际 Run 和按队员聚合的等待消息；不进入调度写路径。
+Camp History 当前使用 v11。新 Charter revision 为 19；Binding compatibility 保持 16 及原冻结 context tuple，
+Antigravity 继续使用既有固定工具兼容身份。当前目录变化不轮换旧 Session；恢复和压缩补发复用原 Bootstrap。
+新 Binding 使用 Bootstrap v5/Formatter 5，新公开批次 Formatter/Manifest 32、非批次 28 保持。
+Skill 正文与 reference 通过现有受管同步更新原路径；旧、新 Session 后续读取均可使用新版。
 
 Operation-specific errors use the same catalog entry both for discovery and for the emitted invocation recovery.
 Mission status therefore exposes `sourceMessageId` as optional, omits the retired conditional-required error and
@@ -371,6 +375,21 @@ status 和 stdin 写入都不是 accepted evidence。Adapter 只接受带预期 
 模型事件和 success result 之前失败时，结果仍按未知投递处理。单行 stream event 保持 2 MiB 安全上限，
 不会把完整流、Hook 正文或模型增量复制进 Runtime Input Delivery Evidence。
 
+### Claude Code 权限审批回调
+
+Claude Code 的打印进程同时读写 stream-json。审批使用 stdout 的原生 can_use_tool 控制请求和
+stdin 的 control_response，进程所有权绑定 Run/epoch/Native Session，初始化成功后才发送任务。
+request_id 用于回复，tool_use_id 关联实际工具结果。Core 转换为既有 Action/Approval；Dock 的
+允许一次回填原 input，拒绝回填 deny；原生建议允许且用户选择记忆时，原样回填所选 permission update，
+由 Claude 保存和匹配规则。响应 write/flush 完成才 ACK Runtime Delivery。
+
+控制通道仅保存待处理请求，完成、取消或断线后清理。普通工具展示状态仍由输出解析器拥有。
+审批不经过 Built-in 业务 IPC、不按工具输入反查身份，也没有累计工具调用额度；用户原有 Hook
+由 Claude 原生配置处理。业务 `rovai send` 继续由现有 Run lease 认证。
+
+允许后的同一 tool_use_id 的真实 tool_result 结算 Action；会话结束、stdin 关闭、取消与失败边界由
+[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md) 拥有。
+
 ### ACP Prompt 输入确认
 
 OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE 共用 ACP Host 输入确认。Core 创建
@@ -422,6 +441,9 @@ executable integrity 校验。每个 Run 最多自动 rebind 一次；第二次�
 
 Session Charter 只说明：
 
+- 公开 Camp 正文直接以 `Rovai-ai Session Charter` 为标题，不再包含 `Authority boundaries` 小标题；
+  用简短规则介绍自己与队友、当前 `RUN_INPUT.messages` 的 body／quotes／skills／attachments、Principal、
+  Task 责任、当前证据和已有用户工作保护；引用本身不产生执行请求；
 - CLI contract 标题固定为 `Rovai Built-in CLI Contract`，不显示应用 release/version；
 - 使用 bundled `rovai`；
 - 本地 `rovai` CLI 中的完整固定业务命令 catalog；operation 不清楚时使用根帮助，本次 invocation 所需
@@ -433,11 +455,12 @@ Session Charter 只说明：
   新的未解决 Principal 决定、回答或行动，或履行其明确要求的重要结果通知时才使用 `--to-principal`；
 - Agent addressing 不是 CC；acknowledgement、agreement、thanks、closure、standby、no-new-information、
   repeated conclusion 或 courtesy reply 不得创建新 Agent routing；
+- 只有确实无法在收到另一位 Agent 的回复前继续推进时，结束当前 Run，不反复轮询 Thread history 或执行状态；收到回复后再继续。
+  该规则在通用正文末尾出现一次，CLI Contract 不重复；
 - Core 可能在 successful zero-send 且 Adapter final boundary 可靠时执行 Missing-Send Recovery，但它不
   保证完整最终结论公开，也不应被 Agent 当作省略 `rovai send` 的正常路径；
 - Task responsibility definition belongs to the User or current Camp Default Lead；
 - Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
-- Core 在每次 invocation 重做授权，任何模型可见 ID/fact 都不是 authorization token；
 - Dynamic Context 可以按确定性容量省略 section 或完整消息，但不裁剪已选择消息正文。public
   `SHARED_CONVERSATION` 使用 Profile v8 的 Camp+Agent accepted 增量窗口，保留自身消息和原始顺序；超过
   15 条时返回最新 15 条及 `omittedCount + historyReadCursor`；
@@ -451,7 +474,7 @@ closed 或尚未绑定的会话不追加。已有 Binding 从 Blob 复用冻结 
 精确文本见 [Send v22](../contracts/camp-message-send-v22.md)。
 
 Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send、Memory
-治理或 polling 操作指导。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
+治理或具体 polling 操作指导；上面的等待队友回复时结束 Run 是通用停止条件。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
 与复杂 recovery 属于窄触发 `cli-operations` official Skill；Memory 治理属于
 `memory-stewardship`。特别是
 `task create --help` 面向 User/Default Lead 说明只持久化跨 Run/交接的独立责任，并优先推进已有
@@ -530,9 +553,9 @@ AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break �
 v1.23 不修改 Bootstrap wrapper、Formatter 或数据库，而是在 Native Binding context contract 中加入
 `sessionCharterRevision: 2`；该字段只进入每个 Adapter 的 Binding compatibility digest，使新 Run 轮换旧
 Native Session 并投递完整新 Charter，历史 Bootstrap Evidence 保留原 bytes/digest。
-当前 revision 为 5；Principal Authority-boundary 只教学 `--to-principal`，Agent 目标 authoring 只教学
-canonical `--to`，Structured Current User Mention 的 Agent audience 仍投影为 `@Principal`。本次教学收敛、
-既有去歧义与飞书文件提示继续复用同一兼容路径，不新增迁移或重启机制。
+当前 Charter revision 为 19，User 通知主 flag 为 `--to-user`，结构化用户提及投影为 `@User`。
+这些兼容教学更新保留 Binding compatibility 16；既有 Session 继续使用自身冻结的 Bootstrap，不因新 Charter
+revision 轮换。新 Session 才冻结新模板，既有 Evidence 保持原 bytes/digest。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。

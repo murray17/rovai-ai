@@ -119,13 +119,13 @@ impl LocalAttachmentSourceRef {
 #[serde(tag = "owner", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LocalAttachmentOwnerLocator {
     Composer {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "attachmentRefId")]
         attachment_ref_id: String,
     },
     Pending {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "pendingInputId")]
         pending_input_id: String,
@@ -133,7 +133,7 @@ pub enum LocalAttachmentOwnerLocator {
         attachment_ref_id: String,
     },
     PendingEdit {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "pendingInputId")]
         pending_input_id: String,
@@ -143,7 +143,7 @@ pub enum LocalAttachmentOwnerLocator {
         attachment_ref_id: String,
     },
     Message {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "messageId")]
         message_id: String,
@@ -151,7 +151,7 @@ pub enum LocalAttachmentOwnerLocator {
         attachment_ref_id: String,
     },
     Mission {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "missionId")]
         mission_id: String,
@@ -159,7 +159,7 @@ pub enum LocalAttachmentOwnerLocator {
         attachment_ref_id: String,
     },
     SingleChatComposer {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "conversationId")]
         conversation_id: String,
@@ -167,7 +167,7 @@ pub enum LocalAttachmentOwnerLocator {
         attachment_ref_id: String,
     },
     SingleChatPending {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "conversationId")]
         conversation_id: String,
@@ -177,7 +177,7 @@ pub enum LocalAttachmentOwnerLocator {
         attachment_ref_id: String,
     },
     SingleChatPendingEdit {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "conversationId")]
         conversation_id: String,
@@ -189,7 +189,7 @@ pub enum LocalAttachmentOwnerLocator {
         attachment_ref_id: String,
     },
     SingleChatMessage {
-        #[serde(rename = "campId")]
+        #[serde(rename = "threadId", alias = "campId")]
         camp_id: String,
         #[serde(rename = "conversationId")]
         conversation_id: String,
@@ -742,7 +742,7 @@ mod tests {
     fn source_ref_json_is_closed_and_pathless_view_is_stable() {
         let source_ref = LocalAttachmentSourceRef {
             id: Uuid::new_v4().to_string(),
-            source_path: "/tmp/example.txt".to_string(),
+            source_path: crate::test_support::absolute_test_path("/tmp/example.txt"),
             display_name: "example.txt".to_string(),
             kind: LocalAttachmentKind::File,
             media_type: Some("text/plain".to_string()),

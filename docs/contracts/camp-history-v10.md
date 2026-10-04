@@ -9,6 +9,8 @@ last_updated: 2026-09-24
 
 # Camp History v10
 
+当前 User 主称呼、双别名与新旧冻结投影遵循 [User Naming v1](user-naming-v1.md)。该命名合同替代本文及继承合同的 Principal 主称呼／唯一 `agent_v1` 限制，其他规则保持。
+
 v10 inherits [v9](camp-history-v9.md) authentication, public Camp scope, request shapes, live `camp.read` boundary, default 20 and explicit 1–100 page limit, complete pagination, attachment projection and quote-source validation. It changes explicit read/search visibility and withdrawn-message projection. New public Runs continue to use on-demand history; `RUN_INPUT` and `RUN_FACTS.historyHint` remain unchanged.
 
 ## Explicit read and search visibility

@@ -14,7 +14,48 @@ pub mod transport;
 
 pub const PROTOCOL: &str = "zcode-app-server-v1";
 pub const MINIMUM_VERSION: &str = "0.16.5";
-pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v8";
+pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v9";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeProtocol {
+    Legacy,
+    ProviderRegistry,
+}
+
+struct ProviderRuntimePaths {
+    builtin: PathBuf,
+    personal: PathBuf,
+}
+
+fn provider_runtime_paths(executable: &Path) -> Result<Option<ProviderRuntimePaths>> {
+    let script = runtime_script(executable)?;
+    let resources = script
+        .parent()
+        .and_then(Path::parent)
+        .context("ZCode resources directory missing")?;
+    let bundled = resources.join("config/provider/zcode-builtin.json");
+    let builtin = match bundled.canonicalize() {
+        Ok(path) if path.starts_with(resources) && path.is_file() => path,
+        Ok(_) => bail!("ZCode bundled Provider Config is outside official resources"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => bail!("ZCode bundled Provider Config is unreadable"),
+    };
+    let home = crate::runtime_discovery::runtime_home_directory(
+        crate::agent_profile::AdapterKind::ZcodeApp,
+    )
+    .context("ZCode native Home unavailable")?;
+    let base = crate::runtime_discovery::runtime_environment_variable(
+        crate::agent_profile::AdapterKind::ZcodeApp,
+        "ZCODE_DATA_BASE_DIR",
+    )
+    .filter(|value| !value.is_empty())
+    .map(PathBuf::from)
+    .unwrap_or(home);
+    Ok(Some(ProviderRuntimePaths {
+        builtin,
+        personal: base.join(".zcode/v2/provider_config.json"),
+    }))
+}
 
 pub fn is_bundle_executable(path: &Path) -> bool {
     path.file_name()
@@ -162,6 +203,11 @@ pub fn command(executable: &Path) -> Result<Command> {
         crate::agent_profile::AdapterKind::ZcodeApp,
         &mut command,
     );
+    if let Some(paths) = provider_runtime_paths(executable)? {
+        command
+            .env("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", paths.builtin)
+            .env("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE", paths.personal);
+    }
     command
         .args(["--eval", include_str!("zcode/stdio-owner.cjs")])
         .arg(script);
@@ -171,7 +217,11 @@ pub fn command(executable: &Path) -> Result<Command> {
 pub fn bundle_members(executable: &Path) -> Result<Vec<PathBuf>> {
     let script = runtime_script(executable)?;
     let executable = executable.canonicalize()?;
-    Ok(vec![executable, script, node_executable()?])
+    let mut members = vec![executable, script, node_executable()?];
+    if let Some(paths) = provider_runtime_paths(&members[0])? {
+        members.push(paths.builtin);
+    }
+    Ok(members)
 }
 
 pub fn default_executables() -> Vec<PathBuf> {
@@ -259,9 +309,44 @@ pub struct NativeConfig {
     value: Value,
     pub digest: String,
     app_config: bool,
+    protocol: NativeProtocol,
+    default_selection: Option<Value>,
 }
 
 impl NativeConfig {
+    pub fn protocol(&self) -> NativeProtocol {
+        self.protocol
+    }
+
+    pub fn load_for_executable(cwd: &Path, executable: &Path) -> Result<Self> {
+        let mut config = Self::load(cwd)?;
+        let Some(paths) = provider_runtime_paths(executable)? else {
+            return Ok(config);
+        };
+        let builtin = read_native_configuration(&paths.builtin)?
+            .context("ZCode bundled Provider Config is missing")?;
+        let personal = read_native_configuration(&paths.personal)?;
+        let default_selection = personal
+            .as_ref()
+            .and_then(|value| value.pointer("/config/defaultModelSelection"))
+            .filter(|value| {
+                value["providerId"]
+                    .as_str()
+                    .is_some_and(|id| !id.is_empty())
+                    && value["modelId"].as_str().is_some_and(|id| !id.is_empty())
+            })
+            .cloned();
+        config.digest = crate::command::canonical_json_digest(&json!({
+            "legacy":config.digest,"builtin":builtin,"personal":personal,
+            "builtinPath":paths.builtin,"personalPath":paths.personal,
+            "bridge":BRIDGE_REVISION
+        }))?;
+        config.protocol = NativeProtocol::ProviderRegistry;
+        config.default_selection = default_selection;
+        config.app_config = false;
+        Ok(config)
+    }
+
     pub fn output_root(&self) -> Result<PathBuf> {
         let storage = crate::runtime_discovery::runtime_environment_variable(
             crate::agent_profile::AdapterKind::ZcodeApp,
@@ -425,6 +510,8 @@ impl NativeConfig {
             value: config,
             digest,
             app_config: app_config_loaded,
+            protocol: NativeProtocol::Legacy,
+            default_selection: None,
         })
     }
 
@@ -435,6 +522,29 @@ impl NativeConfig {
     }
 
     pub fn runtime_model(&self, selected: Option<&str>) -> Result<Value> {
+        if self.protocol == NativeProtocol::ProviderRegistry {
+            let selection = match selected {
+                Some(selected) => {
+                    let (provider_id, model_id) = selected
+                        .split_once('/')
+                        .context("ZCode model selection must include a Provider")?;
+                    if provider_id.is_empty() || model_id.is_empty() {
+                        bail!("ZCode model selection is invalid");
+                    }
+                    let mut selection = json!({"providerId":provider_id,"modelId":model_id});
+                    if let Some(default) = &self.default_selection
+                        && default["providerId"] == provider_id
+                        && default["modelId"] == model_id
+                        && default["options"].is_object()
+                    {
+                        selection["options"] = default["options"].clone();
+                    }
+                    Some(selection)
+                }
+                None => self.default_selection.clone(),
+            };
+            return Ok(json!({"model":selection}));
+        }
         let main = self.configured_main();
         let default = if let Some(value) = main.as_str() {
             value.to_string()
@@ -556,7 +666,7 @@ impl NativeConfig {
     /// App-only providers are absent from the CLI's disk configuration. Register
     /// their complete catalog through the official memory-only registry RPC.
     pub fn app_provider_registry(&self) -> Result<Option<Value>> {
-        if !self.app_config {
+        if !self.app_config || self.protocol == NativeProtocol::ProviderRegistry {
             return Ok(None);
         }
         let mut providers = Vec::new();
@@ -712,10 +822,20 @@ impl NativeConfig {
             .map(|(provider, model)| format!("{provider}/{model}"))
             .context("ZCode current model missing")?;
         let expected = self.runtime_model(None)?;
-        if native["current"] != expected["model"] {
+        let matches_expected = if self.protocol == NativeProtocol::ProviderRegistry {
+            expected["model"].is_null()
+                || (native["current"]["providerId"] == expected["model"]["providerId"]
+                    && native["current"]["modelId"] == expected["model"]["modelId"])
+        } else {
+            native["current"] == expected["model"]
+        };
+        if !matches_expected {
             bail!("ZCode did not select the configured native default model");
         }
         let models = native["available"].as_array().context("ZCode model choices missing")?.iter().filter_map(|choice| {
+            if choice.get("disabledReason").and_then(Value::as_str).is_some_and(|reason| !reason.is_empty()) {
+                return None;
+            }
             let provider = choice["ref"]["providerId"].as_str()?;
             let model = choice["ref"]["modelId"].as_str()?;
             let id = format!("{provider}/{model}");
@@ -927,6 +1047,20 @@ mod tests {
                 runtime_script(&exe).unwrap(),
                 kernel.canonicalize().unwrap()
             );
+            assert!(provider_runtime_paths(&exe).unwrap().is_none());
+            let bundled = kernel
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("config/provider/zcode-builtin.json");
+            fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+            fs::write(&bundled, "{}").unwrap();
+            assert_eq!(
+                provider_runtime_paths(&exe).unwrap().unwrap().builtin,
+                bundled.canonicalize().unwrap()
+            );
+            fs::remove_file(bundled).unwrap();
             fs::remove_file(&kernel).unwrap();
             assert!(runtime_script(&exe).is_err());
         }

@@ -35,13 +35,13 @@ try {
     body: `The project label for this session is ${marker}. Remember it and reply READY. This reply needs no tools.`,
     address: { mode: 'explicit', agentIds: ['agent_2'] }, purpose: 'Verify native context retention.' })
   const accepted = initial.commandResult ?? initial
-  const campId = accepted.payload.campId
+  const threadId = accepted.payload.threadId
   const first = await finish(accepted.payload.agentRunIds[0])
   const send = async (body) => {
-    const draft = await core.request('camp.composerDraft.get', { campId })
-    const saved = await core.request('camp.composerDraft.save', { campId, expectedRevision: draft.revision,
+    const draft = await core.request('camp.composerDraft.get', { threadId })
+    const saved = await core.request('camp.composerDraft.save', { threadId, expectedRevision: draft.revision,
       content: composerDocumentForAddress({ mode: 'explicit', agentIds: ['agent_2'] }, body) })
-    const result = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), campId, draftRevision: saved.revision,
+    const result = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), threadId, draftRevision: saved.revision,
       execution: { taskId: null, purpose: 'Verify native compaction continuity.', completionRole: 'required' } })
     return finish(result.commandResult.payload.agentRunIds[0])
   }
@@ -80,7 +80,7 @@ try {
   async function finish(runId) {
     const deadline = Date.now() + 240_000
     while (Date.now() < deadline) {
-      const snapshot = await core.request('camps.snapshot', { campId })
+      const snapshot = await core.request('camps.snapshot', { threadId })
       const run = snapshot.agentRuns.find((run) => run.id === runId)
       if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
         assert.equal(run.status, 'succeeded', JSON.stringify(run.failure))

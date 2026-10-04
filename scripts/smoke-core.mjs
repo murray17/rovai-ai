@@ -94,15 +94,15 @@ try {
   if (ordinaryCamp.status !== 'applied' || emptyGitCamp.status !== 'applied') {
     throw new Error(`Directory Camp creation failed: ${JSON.stringify({ ordinaryCamp, emptyGitCamp })}`)
   }
-  const ordinarySnapshot = await core.request('camps.snapshot', { campId: ordinaryCamp.payload.campId })
-  const emptyGitSnapshot = await core.request('camps.snapshot', { campId: emptyGitCamp.payload.campId })
-  if (ordinarySnapshot.camp.projectBindingKind !== 'directory'
-      || ordinarySnapshot.camp.projectPath !== ordinary.projectPath
-      || emptyGitSnapshot.camp.projectBindingKind !== 'directory'
-      || emptyGitSnapshot.camp.projectPath !== emptyGit.projectPath) {
+  const ordinarySnapshot = await core.request('camps.snapshot', { threadId: ordinaryCamp.payload.threadId })
+  const emptyGitSnapshot = await core.request('camps.snapshot', { threadId: emptyGitCamp.payload.threadId })
+  if (ordinarySnapshot.thread.projectBindingKind !== 'directory'
+      || ordinarySnapshot.thread.projectPath !== ordinary.projectPath
+      || emptyGitSnapshot.thread.projectBindingKind !== 'directory'
+      || emptyGitSnapshot.thread.projectPath !== emptyGit.projectPath) {
     throw new Error(`Camp did not persist canonical directory identity: ${JSON.stringify({
-      ordinary: ordinarySnapshot.camp,
-      emptyGit: emptyGitSnapshot.camp
+      ordinary: ordinarySnapshot.thread,
+      emptyGit: emptyGitSnapshot.thread
     })}`)
   }
   const ordinaryAfterCreation = await core.request('workspaces.inspect', { path: ordinaryRoot })
@@ -121,11 +121,11 @@ try {
   if (restoredNavigation.projects.length !== 2) {
     throw new Error(`Directory Camps did not survive Core restart: ${JSON.stringify(restoredNavigation)}`)
   }
-  for (const campId of [ordinaryCamp.payload.campId, emptyGitCamp.payload.campId]) {
-    const snapshot = await core.request('camps.snapshot', { campId })
+  for (const threadId of [ordinaryCamp.payload.threadId, emptyGitCamp.payload.threadId]) {
+    const snapshot = await core.request('camps.snapshot', { threadId })
     const deletion = await core.request('camps.delete', {
       commandId: crypto.randomUUID(),
-      command: { campId, expectedVersion: snapshot.camp.version }
+      command: { threadId, expectedVersion: snapshot.thread.version }
     })
     if (deletion.status !== 'accepted' || deletion.code !== 'camp.delete_accepted') {
       throw new Error(`Smoke Camp deletion failed: ${JSON.stringify(deletion)}`)

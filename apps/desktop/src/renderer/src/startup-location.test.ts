@@ -13,7 +13,7 @@ describe('startup location resolution', () => {
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'general',
       restorableLocationStatus: 'valid',
-      restorableLocation: { kind: 'camp', campId: 'camp-1' }
+      restorableLocation: { kind: 'camp', threadId: 'camp-1' }
     })).toEqual({ kind: 'quick_chat' })
   })
 

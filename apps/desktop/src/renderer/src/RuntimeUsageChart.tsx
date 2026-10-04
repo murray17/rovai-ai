@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import type { RuntimeUsageTrendPoint } from '@contracts'
+import { UiText, uiAttribute } from './interface-language'
 
 export const USAGE_CHART_SERIES = [
   { key: 'promptInputTotalTokens', label: 'Input', color: 'var(--monitoring-input)' },
@@ -81,7 +82,7 @@ export function RuntimeUsageChart({ points }: { points: RuntimeUsageTrendPoint[]
   }
 
   return <div className="monitoring-plot" ref={host}>
-    <div className="monitoring-chart-legend" aria-label="显示的数据系列">
+    <div className="monitoring-chart-legend" aria-label={uiAttribute("显示的数据系列")}>
       {USAGE_CHART_SERIES.map(series => <button type="button" key={series.key} aria-pressed={shown.includes(series.key)}
         onClick={() => setShown(current => current.includes(series.key) ? current.filter(key => key !== series.key) : [...current, series.key])}>
         <i style={{ background: series.color }} />{series.label}
@@ -89,7 +90,7 @@ export function RuntimeUsageChart({ points }: { points: RuntimeUsageTrendPoint[]
       <span>Token</span>
     </div>
     <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="monitoring-chart-svg"
-      role="img" tabIndex={0} aria-label="Token 与 Cache 用量趋势，可用左右方向键查看时间点"
+      role="img" tabIndex={0} aria-label={uiAttribute("Token 与 Cache 用量趋势，可用左右方向键查看时间点")}
       aria-describedby={current && visible.length > 0 ? tooltipId : undefined} onPointerMove={move} onPointerLeave={() => setActive(null)}
       onKeyDown={handleKey} onBlur={() => setActive(null)}>
       {[0, 1, 2, 3, 4].map(index => <g key={index}>
@@ -120,7 +121,7 @@ export function RuntimeUsageChart({ points }: { points: RuntimeUsageTrendPoint[]
         })}
       </g>}
     </svg>
-    {!visible.length && <p className="monitoring-chart-empty">选择一种数据查看趋势</p>}
+    {!visible.length && <p className="monitoring-chart-empty"><UiText zh={"选择一种数据查看趋势"} /></p>}
     {current && active !== null && visible.length > 0 && <div id={tooltipId} role="tooltip" className="monitoring-chart-tooltip"
       style={{ left: Math.max(8, Math.min(width - tooltipWidth - 8, x(active))), width: tooltipWidth }}>
       <strong>{date(current.bucketStartAt)}</strong>

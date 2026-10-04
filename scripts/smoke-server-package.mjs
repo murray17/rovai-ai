@@ -40,26 +40,29 @@ try {
   const profiles = await active.request('members.list')
   const created = await active.request('camps.create', { commandId: randomUUID(), name: 'Package upgrade fixture', workspace: { projectPath: workspace, name: 'workspace' }, memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' })
   assert.equal(created.status, 'applied')
-  const campId = created.payload.campId
-  const draft = await active.request('camp.composerDraft.get', { campId })
-  const saved = await active.request('camp.composerDraft.save', { campId, expectedRevision: draft.revision, content: { version: 2, segments: [{ kind: 'text', text: 'PRESERVED_PACKAGE_MESSAGE' }] } })
-  await active.request('camp.messages.send', { commandId: randomUUID(), campId, draftRevision: saved.revision, execution: null })
-  const before = await active.request('camps.snapshot', { campId })
+  const threadId = created.payload.threadId ?? created.payload.campId
+  assert.equal(typeof threadId, 'string')
+  // The previous published package may predate the public Thread field rename.
+  const baselineScope = created.payload.threadId ? { threadId } : { campId: threadId }
+  const baselineReply = created.payload.threadId ? { replyToThreadMessageId: null } : { replyToCampMessageId: null }
+  const sent = await active.request('camp.messages.send', { commandId: randomUUID(), ...baselineScope, content: { version: 2, segments: [{ kind: 'text', text: 'PRESERVED_PACKAGE_MESSAGE' }] }, ...baselineReply, execution: null })
+  assert.equal(sent.commandResult.status, 'applied')
+  const before = await active.request('camps.snapshot', baselineScope)
   assert.ok(before.messages.some(message=>message.body==='PRESERVED_PACKAGE_MESSAGE'))
   await active.stop(); active = null
   await cp(prepared.dataDir, join(fixture, 'backup-data'), { recursive: true })
   const hasRuntimeFiles = await lstat(prepared.runtimeCampFilesRoot).then(()=>true, ()=>false)
   if (hasRuntimeFiles) await copyStoppedFixtureTree(prepared.runtimeCampFilesRoot, join(fixture, 'backup-runtime-files'))
   const beforeDatabase = createHash('sha256').update(await readFile(join(prepared.dataDir, 'rovai.sqlite'))).digest('hex')
-  console.log(JSON.stringify({ stage: 'closed-baseline-backed-up', campId }))
+  console.log(JSON.stringify({ stage: 'closed-baseline-backed-up', threadId }))
 
   const administrator = randomBytes(32).toString('hex')
   active = launchHeadless(administrator)
   const origin = await active.origin()
-  const login = await fetch(`${origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: administrator }), redirect: 'error' })
+  const login = await fetch(`${origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: administrator }), redirect: 'error' })
   assert.equal(login.status, 200)
   const token = (await login.json()).token
-  const opened = await fetch(`${origin}/api/v1/request`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ operation: 'camps.open', params: { campId, traceId: randomUUID() } }), redirect: 'error' }).then(response=>response.json())
+  const opened = await fetch(`${origin}/api/v1/request`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ operation: 'camps.open', params: { threadId, traceId: randomUUID() } }), redirect: 'error' }).then(response=>response.json())
   assert.equal(opened.error, null)
   assert.equal(opened.result.messages.filter(message=>message.body==='PRESERVED_PACKAGE_MESSAGE').length, 1)
   assert.equal((await fetch(origin, { redirect: 'error' })).status, 200)
@@ -78,7 +81,7 @@ try {
   }
   assert.equal(createHash('sha256').update(await readFile(join(prepared.dataDir, 'rovai.sqlite'))).digest('hex'), beforeDatabase)
   active = launchPipe(baseline)
-  const restored = await active.request('camps.snapshot', { campId })
+  const restored = await active.request('camps.snapshot', baselineScope)
   assert.equal(restored.messages.filter(message=>message.body==='PRESERVED_PACKAGE_MESSAGE').length, 1)
   await active.stop(); active = null
   report.checks.stoppedBackupRollback = true

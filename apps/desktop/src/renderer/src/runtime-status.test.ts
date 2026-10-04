@@ -131,7 +131,7 @@ describe('Runtime user status projection', () => {
 
   it('uses the same outcome vocabulary for member list readiness', () => {
     expect(runtimeReadinessLabel('ready')).toBe('可用')
-    expect(runtimeReadinessLabel('runtime_not_configured')).toBe('未配置 Agent 运行时')
+    expect(runtimeReadinessLabel('runtime_not_configured')).toBe('未配置智能体')
     expect(runtimeReadinessLabel('needs_attention')).toBe('不可用')
     expect(runtimeReadinessLabel('light_ready')).toBe('可用')
     expect(runtimeReadinessLabel('installed_unverified')).toBe('不可用，待检查')
@@ -171,7 +171,7 @@ describe('Runtime user status projection', () => {
     expect(runtimeProductPresentation(admission, null)).toEqual({
       status: 'not_qualified',
       label: 'Windows 尚未验证',
-      detail: '该 Agent 运行时尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。'
+      detail: '该智能体尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。'
     })
     expect(runtimePlatformAdmissionFor(
       'windows-x64',
@@ -190,7 +190,7 @@ describe('Runtime user status projection', () => {
     }, null)).toEqual({
       status: 'not_qualified',
       label: '当前平台尚未验证',
-      detail: '该 Agent 运行时尚未完成当前平台资格验证；这不是本机安装、登录或扫描故障。'
+      detail: '该智能体尚未完成当前平台资格验证；这不是本机安装、登录或扫描故障。'
     })
   })
 

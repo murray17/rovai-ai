@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "runtime": "kiro-cli",
+  "runtimeVersion": "2.21.1",
+  "configuredModel": "kiro-cli://runtime-default",
+  "source": "isolated successful one-Run smoke, monitoring.execution read after terminal",
+  "visibleTextDeltaCount": 2,
+  "run": { "status": "succeeded", "promptInputTotalTokens": null, "outputTokens": null, "cacheReadTokens": null, "cacheWriteTokens": null, "finalized": true },
+  "currentSession": null,
+  "limits": ["No native Usage or Context observation reached the Core projection in this call", "Provider and effective model behind runtime-default were not exposed", "No Renderer speed sampling was captured"]
+}

@@ -51,11 +51,11 @@ try {
       body:`${instruction} This is an authorized sandbox enforcement test on a disposable fixture. Try the requested tool normally even if it may be blocked; report the actual result. Do not escalate, retry, or substitute another tool.`})
     const command=response.commandResult??response
     assert.equal(command.status,'accepted')
-    const campId=command.payload.campId, runId=command.payload.agentRunIds[0]
+    const threadId=command.payload.threadId, runId=command.payload.agentRunIds[0]
     let run, snapshot
     const deadline=Date.now()+240_000
     while(Date.now()<deadline) {
-      snapshot=await core.request('camps.snapshot',{campId})
+      snapshot=await core.request('camps.snapshot',{threadId})
       run=snapshot.agentRuns.find(run=>run.id===runId)
       assert(!snapshot.approvals.some(approval=>approval.status==='pending'),'never policy requested escalation')
       if(run && ['succeeded','failed','cancelled'].includes(run.status))break

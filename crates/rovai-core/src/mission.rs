@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    camp_id::CampId,
+    camp_id::ThreadId,
     collaboration::{
-        CampActivationState, CampCollaborationMode, CreateCampCommand, ProjectBindingKind,
+        CreateThreadCommand, ProjectBindingKind, ThreadActivationState, ThreadCollaborationMode,
         actor_can_write_camp, admit_mission_start, append_domain_event, create_camp_in_tx,
     },
     command::{
@@ -137,6 +137,7 @@ pub struct MissionAgentAttachment {
 #[serde(rename_all = "camelCase")]
 pub struct MissionListItem {
     pub mission_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub title: String,
     pub status: MissionStatus,
@@ -157,6 +158,7 @@ pub struct MissionRecord {
     #[serde(flatten)]
     pub info: MissionInfo,
     pub number: i64,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub project_path: String,
     pub project_binding_kind: ProjectBindingKind,
@@ -404,7 +406,7 @@ impl MissionService {
                 &mission.camp_id,
             )?;
             let result=if !start_available {
-                CommandHandlerResult::applied("mission.already_running",json!({"missionId":mission.info.mission_id,"campId":mission.camp_id,"alreadyRunning":true}),None)
+                CommandHandlerResult::applied("mission.already_running",json!({"missionId":mission.info.mission_id,"threadId":mission.camp_id,"alreadyRunning":true}),None)
             } else { admit_mission_start(tx,&envelope.actor,&envelope.command_id,&mission)? };
             if result.status==CommandResultStatus::Rejected { return Ok(result); }
             if start_available {
@@ -428,12 +430,12 @@ impl MissionService {
             let mission_id = format!("rvm_{}", Uuid::now_v7().simple());
             tx.execute("INSERT INTO mission_number_sequence DEFAULT VALUES", [])?;
             let number = tx.last_insert_rowid();
-            let camp_id = CampId::new();
-            let created = create_camp_in_tx(tx, &envelope.actor, envelope.execution_epoch, &CreateCampCommand {
+            let camp_id = ThreadId::new();
+            let created = create_camp_in_tx(tx, &envelope.actor, envelope.execution_epoch, &CreateThreadCommand {
                 name: Some(input.title.trim().chars().take(80).collect()),
                 project_binding_kind: input.project_binding_kind, project_path: input.project_path.clone(),
                 member_agent_ids: input.member_agent_ids.clone(), default_lead_agent_id: input.default_lead_agent_id.clone(),
-                collaboration_mode: CampCollaborationMode::Peer, activation_state: CampActivationState::Active,
+                collaboration_mode: ThreadCollaborationMode::Peer, activation_state: ThreadActivationState::Active,
             }, &camp_id)?;
             if created.status == CommandResultStatus::Rejected { return Ok(created); }
             let now = chrono::Utc::now().to_rfc3339();
@@ -448,7 +450,7 @@ impl MissionService {
             }
             record_activity(tx, &mission_id, "created", &envelope.actor, envelope.execution_epoch,
                 Value::Object(changes))?;
-            Ok(CommandHandlerResult::applied("mission.created", json!({"missionId":mission_id,"missionNumber":number,"campId":camp_id}),
+            Ok(CommandHandlerResult::applied("mission.created", json!({"missionId":mission_id,"missionNumber":number,"threadId":camp_id}),
                 Some(EntityReference { entity_type: "mission".into(), entity_id: mission_id })))
         })
     }
@@ -528,6 +530,12 @@ impl MissionService {
             tx.execute("UPDATE mission SET status=?2,source_message_id=?3,updated_at=?4 WHERE id=?1",
                 params![input.mission_id,input.status.as_str(),input.source_message_id,chrono::Utc::now().to_rfc3339()])?;
             record_activity(tx, &input.mission_id, "status", &envelope.actor, envelope.execution_epoch, json!({"status":input.status,"sourceMessageId":input.source_message_id}))?;
+            if current.info.status != input.status {
+                crate::notification::record_status_transition(tx, &envelope.actor, crate::notification::StatusTransition {
+                    kind: "mission", id: &input.mission_id, camp_id: &current.camp_id,
+                    status: input.status.as_str(), source_message_id: input.source_message_id.as_deref(),
+                })?;
+            }
             Ok(mutation(&input.mission_id, true))
         })
     }
@@ -1248,12 +1256,12 @@ mod tests {
             camp_id: Some(ordinary.camp_id.clone()),
             expected_versions: vec![],
             execution_epoch: None,
-            payload: crate::collaboration::TestCampMessageCommand {
+            payload: crate::collaboration::TestThreadMessageCommand {
                 camp_id: ordinary.camp_id.clone(),
                 draft_revision: None,
                 body: "通过普通消息开始执行".into(),
                 prepared_attachment_ids: vec![],
-                address: crate::collaboration::TestCampMessageAddress::Default,
+                address: crate::collaboration::TestThreadMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: Some(crate::collaboration::ExecutionRequest {
                     task_id: None,
@@ -1490,6 +1498,17 @@ mod tests {
             .connection()
             .query_row("SELECT COUNT(*) FROM agent_run", [], |row| row.get(0))
             .unwrap();
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT count(*) FROM notification_occurrence WHERE source_type='mission'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0,
+            "user status edits and titles do not notify"
+        );
         for next_status in [
             MissionStatus::NotStarted,
             MissionStatus::InProgress,
@@ -1505,6 +1524,95 @@ mod tests {
             assert_eq!(current.status, next_status);
             assert_eq!(current.source_message_id, None);
         }
+        let notifications = crate::notification::NotificationEpisodeService::default();
+        let changes = notifications
+            .changes_since(&mut db, "local_user", 0, 100)
+            .unwrap();
+        let needs = changes
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .find(|s| s.semantic == crate::notification::NotificationSemantic::MissionNeedsYou);
+        assert!(
+            needs.is_none(),
+            "leaving needs_you resolves the old transient source"
+        );
+        let completed = changes
+            .changes
+            .iter()
+            .find(|change| {
+                change.heads_up_signal.as_ref().is_some_and(|signal| {
+                    signal.action.subject.as_ref().is_some_and(|subject| {
+                        subject.id == id && subject.status.as_deref() == Some("completed")
+                    })
+                })
+            })
+            .unwrap();
+        let completed_action = &completed.heads_up_signal.as_ref().unwrap().action;
+        let result = notifications
+            .acknowledge(
+                &mut db,
+                &command(crate::notification::AcknowledgeNotificationEpisodeCommand {
+                    episode_id: completed.episode_id.clone(),
+                    observed_episode_version: completed_action.observed_episode_version,
+                    acknowledgement_id: completed_action.acknowledgement_id.clone().unwrap(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(result.result.status, CommandResultStatus::Applied);
+        let inbox = notifications
+            .inbox(
+                &mut db,
+                "local_user",
+                crate::notification::NotificationEpisodeFilter::All,
+                None,
+                100,
+            )
+            .unwrap();
+        let mission_episode = inbox
+            .items
+            .iter()
+            .find(|episode| {
+                episode
+                    .primary_action
+                    .subject
+                    .as_ref()
+                    .is_some_and(|subject| subject.id == id)
+            })
+            .unwrap();
+        assert_eq!(
+            mission_episode
+                .primary_action
+                .subject
+                .as_ref()
+                .unwrap()
+                .status
+                .as_deref(),
+            Some("completed"),
+            "acknowledging completion cannot make an older unread transition the display state"
+        );
+        assert!(mission_episode.primary_action.acknowledgement_id.is_none());
+        assert!(
+            mission_episode.unread,
+            "older transitions retain independent attention"
+        );
+        assert!(mission_episode.secondary_actions.iter().any(|action| {
+            action.acknowledgement_id.is_some()
+                && action
+                    .subject
+                    .as_ref()
+                    .is_some_and(|subject| subject.status.as_deref() == Some("in_progress"))
+        }));
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT count(*) FROM notification_occurrence WHERE source_type='mission'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            4
+        );
         let source: String = db
             .connection()
             .query_row(
@@ -1521,12 +1629,40 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(start_body, "开始使命");
+        assert_eq!(start_body, "Start the current Mission.");
         state.command_id = Uuid::new_v4().to_string();
         state.payload.status = MissionStatus::NeedsYou;
         state.payload.source_message_id = Some(source.clone());
         let status = service.status(&mut db, &state).unwrap();
         assert_eq!(status.result.payload["changed"], true);
+        let changes = notifications
+            .changes_since(&mut db, "local_user", 0, 100)
+            .unwrap();
+        let signal = changes
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .find(|s| s.semantic == crate::notification::NotificationSemantic::MissionNeedsYou)
+            .unwrap();
+        assert_eq!(
+            signal.mention.as_ref().unwrap().summary.as_deref(),
+            Some("Start the current Mission.")
+        );
+        assert_eq!(signal.action.subject.as_ref().unwrap().id, id);
+        assert_eq!(
+            signal.action.kind,
+            crate::notification::NotificationActionKind::OpenMission
+        );
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT count(*) FROM notification_occurrence WHERE source_type='mission'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            5
+        );
         let status_activity_count = service
             .activity(&db, &id, None)
             .unwrap()
@@ -1677,7 +1813,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1696,8 +1832,8 @@ mod tests {
             )
             .unwrap();
         db.connection().execute(
-            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace',?1,?2,?3,'/repo','/repo','/repo/.git','/worktree','/worktree','main','rovai/mission/001','base','owner','ready','created','updated')",
-            params![mission_id, camp_id, host],
+            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace',?1,?2,?3,?4,?4,?5,?6,?6,'main','rovai/mission/001','base','owner','ready','created','updated')",
+            params![mission_id, camp_id, host, crate::test_support::absolute_test_path("/repo"), crate::test_support::absolute_test_path("/repo/.git"), crate::test_support::absolute_test_path("/worktree")],
         ).unwrap();
         let idle = service.get(&db, &mission_id).unwrap().unwrap();
         assert!(idle.workspace_ever_created);
@@ -1746,7 +1882,7 @@ mod tests {
                 &command(CreateMissionCommand {
                     title: "same execution root".into(),
                     description: String::new(),
-                    project_path: "/other/repo".into(),
+                    project_path: crate::test_support::absolute_test_path("/other/repo"),
                     project_binding_kind: ProjectBindingKind::Directory,
                     member_agent_ids: vec!["agent_1".into()],
                     default_lead_agent_id: "agent_1".into(),
@@ -1756,10 +1892,10 @@ mod tests {
             )
             .unwrap();
         let other_mission_id = other.result.payload["missionId"].as_str().unwrap();
-        let other_camp_id = other.result.payload["campId"].as_str().unwrap();
+        let other_camp_id = other.result.payload["threadId"].as_str().unwrap();
         db.connection().execute(
-            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace-other',?1,?2,?3,'/other/repo','/other/repo','/other/repo/.git','/other-worktree','/other-worktree','main','rovai/mission/002','base','owner','ready','created','updated')",
-            params![other_mission_id, other_camp_id, host],
+            "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,created_at,updated_at) VALUES('projection-workspace-other',?1,?2,?3,?4,?4,?5,?6,?6,'main','rovai/mission/002','base','owner','ready','created','updated')",
+            params![other_mission_id, other_camp_id, host, crate::test_support::absolute_test_path("/other/repo"), crate::test_support::absolute_test_path("/other/repo/.git"), crate::test_support::absolute_test_path("/other-worktree")],
         ).unwrap();
         service
             .start(
@@ -1777,8 +1913,8 @@ mod tests {
         );
         db.connection()
             .execute(
-                "UPDATE agent_run SET workspace_json=json_object('executionRoot','/worktree') WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)",
-                [other_camp_id],
+                "UPDATE agent_run SET workspace_json=json_object('executionRoot',?2) WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)",
+                params![other_camp_id, crate::test_support::absolute_test_path("/worktree")],
             )
             .unwrap();
         assert!(
@@ -1976,7 +2112,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let message_id = started.result.payload["campMessageId"].as_str().unwrap();
+        let message_id = started.result.payload["threadMessageId"].as_str().unwrap();
         let published_json: String = db
             .connection()
             .query_row(

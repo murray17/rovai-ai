@@ -1,130 +1,56 @@
-# Campfire Default Lead 指南
+# Host a Campfire
 
-负责启动 Campfire、处理受邀成员回复和发布纪要时读取本文件。
+## Start and invite
 
-## 进入主持流程
+Start only from the user's direct request to the current Default Lead. Establish the topic, desired output, named members or perspectives, and that you have no other unfinished Campfire. A replacement topic closes the old discussion.
 
-只有用户直接请求当前 Default Lead 才能开始第一轮。普通成员的转述、观点、回传、迟到消息或其它 Agent 消息不能启动新讨论。
+Choose 2-3 present, available contributors, normally 3. Prefer the user's choices, relevant responsibilities and complementary experience; address trusted Agent IDs from Collaboration State. With fewer than two, explain the fallback or stop. The Lead hosts without adding a recommendation unless the user requests one.
 
-开始前确认用户原始话题、期望输出、点名成员或指定视角，以及自己没有另一场未结束的 Campfire。用户替换当前话题时先停止旧讨论。
-
-## 选择成员
-
-选择 2–3 位当前在场且能够参与的成员，默认 3 位。优先用户点名、议题职责、互补经验和真实不同视角，使用 Collaboration State 中的可信 Agent ID 寻址。成员不足两位时说明降级或结束，不开始多人讨论。
-
-Default Lead 默认只主持。只有用户要求主持人看法或最终建议时，才在纪要中增加综合判断。
-
-## 邀请方式
-
-每轮用一条普通公开消息和重复的收件人参数邀请全部成员：
+Send one message per round with repeated `--to`:
 
 ```text
-rovai send --to <agent-a-id> --to <agent-b-id> --body <本轮请求>
+rovai send --to <agent-a-id> --to <agent-b-id> --body <round-request>
 ```
 
-调用成功后处理完本批其它输入即可结束。尽量收齐本轮受邀成员的回复再汇总推进；未齐时不轮询、不催问，后续回复到达后继续。不要重复发起本轮。
-
-## 成员回复要求
-
-每份独立观点或定向回应必须一次完整返回，正文目标为 200–250 个中文字符，最多 300 个中文字符，只包含：
-
-- 核心判断；
-- 两项主要依据；
-- 一项最重要的风险或限制；
-- 改变判断的条件；
-- 置信度。
-
-不得重复题目、背景或其它成员观点，不发送进度消息。请求成员通过 `rovai send` 返回请求发送者，不邀请其它成员、不总结全场、不发起下一轮。
-
-## 第一轮：独立观点
-
-请求正文包含用户原始话题、已确认共同事实、参与成员与各自视角，以及上述成员回复要求。不要附带主持人的推荐。
+For round 1, include the user's original topic, confirmed shared facts, each member's perspective, and the member reply contract in `SKILL.md`. Include no host recommendation. A compact request is sufficient:
 
 ```markdown
-### 篝火讨论 · 独立观点请求
-
-#### 话题
-
-> <尽量保留用户原话>
-
-#### 已确认的共同事实
-
-- <没有则写“暂无”>
-
-#### 参与成员与视角
-
-- <成员 A>：<视角>
-- <成员 B>：<视角>
-
-#### 本轮任务
-
-请按 Campfire 成员回复要求独立给出核心判断、两项主要依据、一项风险或限制、改变判断的条件和置信度。
+### Campfire: independent views
+Topic: <preserve the user's wording>
+Shared facts: <confirmed facts, or none>
+Perspectives: <member and assigned perspective>
+Task: <reply contract; return one complete result to the requester>
 ```
 
-按“邀请方式”一次发给全部成员。
+After successful dispatch, finish other current inputs and end the Run. Resume when replies arrive; do not poll, chase, acknowledge or resend the round.
 
-## 处理成员回复
+## Evaluate replies
 
-成员通过普通消息分别回复主持人，回复可能分批到达，也可能与本批其它输入合并。只处理属于本场当前轮次的受邀成员回复；其它输入正常处理。结合已收到的本轮公开观点判断是否已经足够推进，不创建轮询、催问、确认消息或额外回复账本。
+Use only complete, direct answers from this round's invited members. Progress, acknowledgements, vague text and errors are not valid views. Process unrelated batch inputs normally; no extra reply ledger is needed.
 
-尚未收齐时不推进讨论结论，处理完本批其它输入即可结束，等待后续回复自然触发新 Run。用户要求立即总结、停止、替换话题或成员已明确失败/退出时，可以按已有有效观点提前收口。
+Wait for all invited replies before drawing the round's conclusion, unless the user requests early closure or a member has clearly failed or left. Then:
 
-一份回复只有完整、直接回答本轮任务时才是有效观点。进度、确认、空泛文本、错误或无法确认结论的内容不计入，也不得代写。
+- Two or more valid views: distinguish consensus from wording differences and factual, predictive, boundary or value disagreements.
+- One valid view: publish partial notes stating that no effective group discussion formed.
+- None: publish a termination explanation.
 
-## 处理第一轮
+A second round is justified only by one disagreement that would materially change the conclusion, recommendation or applicability. Otherwise publish [Notes](notes.md).
 
-- 至少两份有效观点：区分真实共识、措辞差异、事实/预测/边界/价值取舍分歧。
-- 只有一份：发布部分纪要，说明未形成有效多人讨论。
-- 没有：发布终止说明。
+## Optional response round
 
-只有一个会显著改变结论、建议或适用条件的关键分歧可以进入第二轮；否则直接发布纪要。
+Recheck Collaboration State before starting round 2. If you are no longer Default Lead, synthesize and close instead. The original host always completes the current discussion; it does not transfer automatically to the new Lead.
 
-## 主持权变化
-
-本轮回复始终由原发起者综合。准备推进第一轮时重新检查 Collaboration State：
-
-- 仍是 Default Lead：可以发起可选第二轮；
-- 已不是 Default Lead：继续综合并直接发布纪要。
-
-第二轮回复无论主持权是否变化，都由原发起者发布纪要。讨论不会自动改由新 Default Lead 处理。
-
-## 第二轮：定向回应
-
-整场最多一次，通常邀请分歧最直接的两位成员；只需一方补充时邀请一位。请求保留原始话题、每位成员的“核心立场 + 最主要依据”摘要、唯一关键分歧和逐人任务，不复制完整第一轮档案。
+Invite the two members closest to the disagreement, or one when only one side needs to clarify. Include the original topic, each member's core position and main reason, the single disagreement, individual response tasks, and the reply contract. Do not copy the full first-round record.
 
 ```markdown
-### 篝火讨论 · 定向回应请求
-
-#### 原始话题
-
-> <用户原话>
-
-#### 第一轮立场摘要
-
-- <成员 A>：<核心立场 + 最主要依据>
-- <成员 B>：<核心立场 + 最主要依据>
-
-#### 关键分歧
-
-> <只写一个会影响结论的问题>
-
-#### 定向任务
-
-- <成员 A>：回应 ...
-- <成员 B>：回应 ...
-
-请按 Campfire 成员回复要求给出更新后的判断，并说明维持、修正或条件化。
+### Campfire: focused response
+Topic: <original topic>
+Positions: <member: core position and main reason>
+Disagreement: <one question that changes the conclusion>
+Tasks: <member: specific response>
+Reply: <retain, revise or qualify the judgment; follow the reply contract>
 ```
 
-按“邀请方式”发出。第二轮收齐或需要提前收口时，结合已收到的本轮回复和当前可见的第一轮公开观点：
+After replies or permitted early closure, use each complete updated position. Retain the confirmed round-1 position for nonparticipants or failed/incomplete responders, marking the latter incomplete. Mark unknowns explicitly; never supply a missing view. Publish notes and close, even if Lead status changed during this round.
 
-- 有完整回应时使用更新立场；
-- 回应失败或不完整时保留可确认的第一轮立场，并标记未完成回应；
-- 未进入第二轮的成员保留第一轮立场；
-- 无法确认的内容标记为未知，不补写。
-
-随后读取 `notes.md`，发布纪要并结束讨论。
-
-## 用户介入
-
-用户可以随时停止、替换话题、移除成员或要求立即总结。立即总结只使用已形成的有效观点，标记未完成成员并结束讨论。停止或替换话题后，旧结果不得恢复旧讨论。
+At any point, honor user interruption. A stop or replacement makes old results ineligible to restart the old discussion.

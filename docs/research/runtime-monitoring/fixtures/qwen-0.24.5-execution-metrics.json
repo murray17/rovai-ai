@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "runtime": "qwen-code",
+  "runtimeVersion": "0.24.5",
+  "observedModel": "gpt-5.6-sol(openai)",
+  "source": "isolated one-Run smoke, monitoring.execution read after terminal",
+  "visibleTextDeltaCount": 9,
+  "run": {
+    "status": "succeeded",
+    "promptInputTotalTokens": 18775,
+    "outputTokens": 13,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": null,
+    "finalized": true
+  },
+  "currentSession": {
+    "bindingGeneration": 1,
+    "usedTokens": 18775,
+    "windowTokens": 272000,
+    "dialectId": "acp-session-context-gauge-v1"
+  },
+  "limits": [
+    "Provider account identity and native Session ID are omitted",
+    "Cache Write was not reported; no Renderer screenshot was captured"
+  ]
+}

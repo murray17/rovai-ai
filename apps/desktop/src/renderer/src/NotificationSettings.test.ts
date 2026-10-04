@@ -11,6 +11,9 @@ function preference(overrides: Partial<NotificationPreference> = {}): Notificati
     userMentionHeadsUpEnabled: true,
     turnCompletedHeadsUpEnabled: true,
     turnIncompleteHeadsUpEnabled: true,
+    singleChatHeadsUpEnabled: true, missionNeedsYouHeadsUpEnabled: true,
+    missionStatusHeadsUpEnabled: true, taskStatusHeadsUpEnabled: false,
+    missionStatuses: ['completed'], taskStatuses: ['completed', 'blocked', 'cancelled'],
     version: 4,
     updatedAt: '2026-08-13T00:00:00Z',
     ...overrides
@@ -33,15 +36,18 @@ function renderPreferenceEditor(
 }
 
 describe('notification settings', () => {
-  it('uses one master switch and groups the four categories by user scenario', () => {
+  it('uses one master switch and groups eight categories by conversation, mission and task', () => {
     const markup = renderPreferenceEditor(preference())
 
-    expect(markup.match(/role="switch"/g)).toHaveLength(5)
+    expect(markup.match(/role="switch"/g)).toHaveLength(9)
     expect(markup).toContain('class="notification-master-panel"')
-    expect(markup).toContain('id="notification-scenario-response">需要响应</h3>')
-    expect(markup).toContain('新的请求或明确提到你的消息')
-    expect(markup).toContain('id="notification-scenario-outcome">本轮结果</h3>')
-    expect(markup).toContain('包含公共会话与单聊')
+    for (const [id, title] of [['conversation', '会话'], ['mission', '使命'], ['task', '任务']]) {
+      expect(markup).toContain(`id="notification-scenario-${id}">${title}</h3>`)
+    }
+    expect(markup).toContain('单聊回复')
+    expect(markup).toContain('使命需要你')
+    expect(markup).toContain('任务状态变更')
+    expect(markup).toContain('已完成、受阻、已取消')
     expect(markup).toContain('aria-label="待审批"')
     expect(markup).toContain('aria-label="提到你"')
     expect(markup).toContain('aria-label="本轮完成"')
@@ -57,9 +63,9 @@ describe('notification settings', () => {
     }))
 
     expect(markup).toContain('aria-disabled="true"')
-    expect(markup).toContain('1 / 2 项已保留')
+    expect(markup).toContain('4 / 5 项已保留')
     expect(markup).toContain('2 / 2 项已保留')
-    expect(markup.match(/disabled=""/g)).toHaveLength(4)
+    expect(markup.match(/disabled=""/g)).toHaveLength(10)
     expect(markup).not.toContain('关闭主开关时会保留四类选择')
   })
 

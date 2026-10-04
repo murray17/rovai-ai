@@ -1,87 +1,46 @@
-# 队员头像规则
+# Avatar sourcing
 
-头像用于在名册、提及和 Camp 消息中识别队员，不决定职责、权限、Runtime 或团队地位。
+An avatar identifies a member; it does not establish responsibilities, permissions, Runtime, or team authority.
 
-## 默认时序
+## Timing and file handling
 
-名牌确认前先给出头像方案。确认后，在当前 AgentRun 中生成、下载或准备实际图片，并立即调用 `rovai member create`。
+Present the visual plan before card confirmation. After confirmation, generate, download, or prepare the file in the current AgentRun and pass it promptly to `rovai member create`.
 
-文件暂存位置由 Agent 根据当前环境决定；只要 Core 在当前 Run 中可读即可。有 `ROVAI_RUN_TMP` 时优先使用其下的独立文件，也可以使用其他明确受控的临时目录。不要假设普通临时文件能够跨 AgentRun 复用。
+Prefer a separate file under `ROVAI_RUN_TMP` when available, or another controlled temporary directory readable by Core in this Run. Do not assume temporary files survive between Runs.
 
-## 共同要求
+Pass the local path through `--avatar-file`. Do not write directly to `userData/member-avatars/` or use a remote URL as `avatarRef`. The product decodes, strips metadata, resizes, crops, and stores the managed asset.
 
-最终输入图片应当：
+## Image requirements
 
-- 为静态 PNG 或 JPEG；
-- 至少 256×256，文件不超过产品上限；
-- 优先按 4:5 竖版准备，推荐 1024×1280；
-- 以头肩或半身构图为主，主体居中并略微靠上；
-- 背景简洁，不含文字、水印、品牌 Logo 或复杂边框；
-- 适合从中粗略裁出 1:1 头像。
+- Static PNG or JPEG, at least 256 x 256, within the product byte limit.
+- Prefer a 4:5 portrait at 1024 x 1280, with head and shoulders or upper body centered slightly above the middle.
+- Leave crop space; use a simple background without text, logos, watermarks, or complex borders.
+- Keep the central subject suitable for a square avatar.
 
-将本地文件路径作为 `--avatar-file` 交给创建操作。不要直接写 `userData/member-avatars/`，也不要把远程 URL 写成 `avatarRef`。产品会解码、去除元数据、缩放、粗裁并保存受控头像资产。
+## Original generation
 
-## 原创生成
+Follow the confirmed visual preference, name, role, and traits. Default to illustration, semi-realistic art, or the product's specified style; avoid a default likeness that could be mistaken for a real photograph.
 
-根据名称、团队角色、性格底色和用户的视觉偏好生成原创形象。默认采用插画、半写实或产品指定风格，不默认生成容易被误认为真实照片的真人肖像。
+For public or historical figures, use public professional references without claiming to reproduce the real person. For fictional characters, preserve requested qualities without copying a particular film, game, or illustration design.
 
-使用公开人物或历史人物名称时，可以参考公开职业形象，但不声称还原真实本人。使用受版权保护的虚构角色名称时，保留用户需要的角色气质，避免复制某个影视、游戏或插画版本的独特造型。
+Include the reference or name, role, 2-3 work traits, dimensions, framing, crop space, simple background, and exclusions above in the generation prompt. Optional Rovai details, such as warm lamps, travel gear, or badge motifs, should support distinct identities rather than make everyone share one costume or profession.
 
-生成说明至少包括：
+## Source online
 
-- 名称或参考原型；
-- 团队角色与 2–3 个工作气质；
-- 4:5 竖版、推荐 1024×1280；
-- 头肩或半身、主体居中略靠上、四周保留少量裁切空间、背景简洁；
-- 可少量使用暖色灯火、旅行装备或名牌纹样等 Rovai 元素；
-- 无文字、无 Logo、无水印；
-- 中央区域适合方形头像裁切。
+Use available, authorized search or network capabilities when the user chooses this method or generation is unavailable. Prefer:
 
-世界观元素只用于增强辨识度，不让所有队员穿着相同或呈现同一种职业形象。
+1. The user's specified official source.
+2. Public-domain or explicitly reusable collections.
+3. Other sources with a clear source page and license.
 
-## 网上寻找
+Download the original static image, not a search thumbnail or unknown CDN hotlink. Retain the source page and available author, institution, license, or usage information. If provenance or permission is unclear, choose another image or omit the avatar.
 
-没有可用生图能力时，使用当前 Agent 已获准的联网或图片搜索能力寻找图片。用户明确选择网上寻找，或自动模式需要回退时，也按此方式执行。
+## Fallback
 
-优先顺序：
+The default order is original generation, sourced image, then default avatar. Use only capabilities actually available and authorized. Without image capability, omit `--avatar-file` and report the default avatar; never invent a path, URL, or result. A changed avatar plan follows the card confirmation rule.
 
-1. 用户指定的官方来源；
-2. 公共领域或明确允许复用的素材库；
-3. 有清晰来源页和许可说明的其他来源。
+## Validate
 
-下载原始静态图片，不保存搜索缩略图或未知 CDN 热链。至少保留来源页面；作者、机构、许可或使用说明可得时一并记录。来源或许可明显不清晰时，改用其他可用图片或最终省略头像。
+Visually check a square crop using the image's shorter side, horizontally centered. For a 4:5 portrait, start about 3%-8% below the top. Keep the head, chin, and identifying features visible. The product creates the 192 x 192 icon; a finished icon file is unnecessary.
 
-## 无可用图片能力
-
-既不能生图，也没有可用的联网找图能力时，不要伪造路径、URL 或头像结果。省略 `--avatar-file`，让产品使用默认头像，并在完成报告中如实说明。
-
-## 自动模式
-
-推荐顺序：
-
-```text
-原创生成 → 网上寻找 → 无头像
-```
-
-只使用当前环境实际可用且获准的能力。Skill 本身不授予生图、联网或任意文件访问权限。
-
-## 粗略裁切检查
-
-不要求人脸检测或精细抠图。提交前做一次目视检查即可：
-
-1. 以图片短边作为方形边长；
-2. 横向居中；
-3. 对 4:5 竖图，从顶部约 3%–8% 处开始裁切，使面部和肩部保留在中央区域；
-4. 确认头顶、下巴和主要识别元素没有明显被切掉。
-
-产品会采用相同的轻量默认策略生成 192×192 图标，因此 Agent 无需自己产出最终图标文件。
-
-## 提交检查
-
-调用创建操作前确认：
-
-- 本地文件为可读的静态 PNG 或 JPEG；
-- 尺寸和字节数符合 `rovai member create --help` 与产品上限；
-- 粗略方形裁切不会丢失主要识别元素；
-- 当前 Run 中的文件路径仍然有效；
-- 头像气质与队员身份一致，但不把图像反向当作身份事实来源。
+Before creation, verify the readable static PNG/JPEG, dimensions and bytes against `rovai member create --help`, crop, and current-Run path. Match the confirmed identity without inferring identity facts from the image.

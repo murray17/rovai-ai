@@ -280,7 +280,7 @@ impl DomainCommandGateway {
             handler(&transaction)?
         };
         let recorded_at = chrono::Utc::now().to_rfc3339();
-        let stored_result = StoredCommandResult {
+        let mut stored_result = StoredCommandResult {
             command_id: envelope.command_id.clone(),
             command_type: C::TYPE.to_string(),
             request_digest,
@@ -297,6 +297,8 @@ impl DomainCommandGateway {
         append_command_result(&transaction, envelope, &stored_result)?;
         transaction.commit()?;
         crate::execution_text::flush_settled(database)?;
+
+        crate::thread_compat::project_command_result(C::TYPE, &mut stored_result.payload)?;
 
         Ok(CommandExecution {
             result: stored_result,
@@ -370,7 +372,7 @@ where
         "actor": envelope.actor,
         "campId": envelope.camp_id,
         "expectedVersions": expected_versions,
-        "payload": envelope.payload,
+        "payload": crate::thread_compat::stored_command_payload(serde_json::to_value(&envelope.payload)?)?,
     });
     canonical_json_digest(&semantic_request)
 }
@@ -434,7 +436,7 @@ pub(crate) fn write_canonical_json(writer: &mut dyn Write, value: &Value) -> Res
 }
 
 fn replay_or_conflict<C>(
-    result: StoredCommandResult,
+    mut result: StoredCommandResult,
     envelope: &CommandEnvelope<C>,
     request_digest: &str,
 ) -> Result<CommandExecution>
@@ -450,6 +452,7 @@ where
         && result.actor_id == envelope.actor.actor_id()
         && result.camp_id == envelope.camp_id;
     if normal_match || erased_scope_match {
+        crate::thread_compat::project_command_result(C::TYPE, &mut result.payload)?;
         return Ok(CommandExecution {
             result,
             replayed: true,
@@ -746,6 +749,13 @@ mod tests {
 
     #[test]
     fn canonical_digest_ignores_json_object_key_order() {
+        let legacy = json!({"campId":"scope", "replyToCampMessageId":"message", "content":{"text":"threadId", "threadId":"quoted-user-data"}});
+        let current = json!({"threadId":"scope", "replyToThreadMessageId":"message", "content":{"text":"threadId", "threadId":"quoted-user-data"}});
+        assert_eq!(
+            crate::thread_compat::stored_command_payload(current).unwrap(),
+            legacy
+        );
+
         let left = system_command("command-1", json!({ "a": 1, "b": { "c": 2, "d": 3 } }));
         let right = system_command("command-1", json!({ "b": { "d": 3, "c": 2 }, "a": 1 }));
 
@@ -905,6 +915,26 @@ mod tests {
 
     #[test]
     fn command_result_projection_preserves_json_boundaries_and_fails_closed_on_markers() {
+        let original = json!({
+            "campId": "public-id", "conversationId": "public-id",
+            "userData": { "campId": "literal", "conversationId": "literal" }
+        });
+        let mut automation = original.clone();
+        crate::thread_compat::project_command_result("automation.run", &mut automation).unwrap();
+        assert_eq!(automation["threadId"], "public-id");
+        assert!(automation.get("conversationId").is_none());
+        assert_eq!(automation["userData"], original["userData"]);
+        let mut single_chat = original.clone();
+        crate::thread_compat::project_command_result("single_chat.open", &mut single_chat).unwrap();
+        assert_eq!(single_chat["conversationId"], "public-id");
+        let mut old_automation_view = json!({ "lastRun": { "campId": "public-id" } });
+        crate::thread_compat::project_command_result("automation.update", &mut old_automation_view)
+            .unwrap();
+        assert_eq!(
+            old_automation_view["lastRun"],
+            json!({ "threadId": "public-id" })
+        );
+
         let large = "大正文🧭".repeat(32 * 1024);
         for result in [
             Value::Null,

@@ -26,7 +26,8 @@ function fixture(fetcher: typeof fetch) {
       })
     }
   })
-  const document = Object.assign(new EventTarget(), { readyState: 'complete', body: {}, querySelectorAll: () => [] })
+  const document = Object.assign(new EventTarget(), { readyState: 'complete', body: {}, querySelectorAll: () => [],
+    currentScript: { getAttribute: () => '/__rovai-preview/bridge/root.js' } })
   for (const [key, value] of Object.entries({ window: frame, parent: host, document, crypto: webcrypto, fetch: fetcher,
     addEventListener: frame.addEventListener.bind(frame), MutationObserver: class { observe() {} disconnect() {} }, scrollTo: vi.fn() })) vi.stubGlobal(key, value)
   const channel = new HtmlPreviewHostChannel(preview, () => frame as unknown as Window)
@@ -37,7 +38,16 @@ function fixture(fetcher: typeof fetch) {
   cleanup.push(close)
   previewBrowserBridge({ ...preview, documentId: 'root', hostOrigin: host.location.origin,
     map: { line: 1, column: 1, length: 0 }, documentError: null }, createFileFindDomIndex, parseHtmlPreviewDiagnostic)
-  return { channel, messages, close, preview, frame, host }
+  const policy = (patch: Record<string, unknown> = {}) => {
+    const event = new Event('securitypolicyviolation')
+    const { isTrusted = true, ...fields } = patch
+    Object.assign(event, { effectiveDirective: 'connect-src', disposition: 'enforce',
+      blockedURI: preview.origin + '/__rovai-preview/events?documentId=root',
+      sourceFile: preview.origin + '/__rovai-preview/bridge/root.js', ...fields })
+    Object.defineProperty(event, 'isTrusted', { value: isTrusted })
+    document.dispatchEvent(event)
+  }
+  return { channel, messages, close, preview, frame, host, policy }
 }
 
 function responseStream(signal: AbortSignal) {
@@ -134,4 +144,64 @@ it.each(['backoff', 'connecting', 'streaming', 'revoked'] as const)('stops diagn
   expect(fetcher).toHaveBeenCalledTimes(1)
   expect(messages).toHaveLength(count)
   expect(vi.getTimerCount()).toBe(0)
+})
+
+it.each(['connecting', 'backoff'] as const)('stops only internal diagnostics when enforced CSP arrives during %s', async phase => {
+  let signal!: AbortSignal
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) => {
+    signal = options!.signal!
+    if (phase === 'backoff') throw new Error('CSP fetch rejected before the policy event')
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+  })
+  const { channel, messages, frame, policy, close } = fixture(fetcher)
+  await vi.advanceTimersByTimeAsync(0)
+  policy()
+  await vi.advanceTimersByTimeAsync(60_000)
+  expect(signal.aborted).toBe(true)
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(vi.getTimerCount()).toBe(0)
+  expect(messages.at(-1)).toMatchObject({ type: 'server-diagnostics', state: 'unavailable', reason: 'policy' })
+  expect(messages.some(message => message.type === 'diagnostic')).toBe(false)
+  channel.connect()
+  channel.send('restore-reading', { top: 150, left: 0 })
+  await vi.advanceTimersByTimeAsync(0)
+  channel.send('restore-reading', { top: 150, left: 0 })
+  const rejection = new Event('unhandledrejection')
+  Object.assign(rejection, { reason: new Error('Author error after internal CSP failure') })
+  frame.dispatchEvent(rejection)
+  await vi.advanceTimersByTimeAsync(60_000)
+  expect(channel.connected).toBe(true)
+  expect(scrollTo).toHaveBeenCalledWith({ top: 150, left: 0, behavior: 'instant' })
+  expect(messages.filter(message => message.type === 'diagnostic')).toEqual([
+    expect.objectContaining({ diagnostic: expect.objectContaining({ kind: 'promise', message: 'Author error after internal CSP failure' }) })
+  ])
+  expect(messages.filter(message => message.type === 'server-diagnostics').at(-1)).toMatchObject({ reason: 'policy' })
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  close()
+  const count = messages.length
+  policy()
+  await vi.advanceTimersByTimeAsync(60_000)
+  expect(messages).toHaveLength(count)
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+it.each([
+  { blockedURI: 'http://other.localhost:9000/__rovai-preview/events?documentId=root' },
+  { blockedURI: 'http://preview.localhost:9000/business/__rovai-preview/events?documentId=root' },
+  { blockedURI: 'http://preview.localhost:9000/__rovai-preview/events?documentId=old' },
+  { sourceFile: 'http://preview.localhost:9000/index.html' },
+  { sourceFile: '' },
+  { effectiveDirective: 'script-src' },
+  { disposition: 'report' },
+  { isTrusted: false },
+])('preserves policy events not proven to block this internal request: %j', async patch => {
+  const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error('offline'))
+  const { messages, policy } = fixture(fetcher)
+  await vi.advanceTimersByTimeAsync(0)
+  policy(patch)
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(messages.filter(message => message.type === 'diagnostic')).toHaveLength(1)
+  expect(messages.find(message => message.type === 'diagnostic')).toMatchObject({ diagnostic: { kind: 'policy' } })
+  expect(messages.some(message => message.reason === 'policy')).toBe(false)
+  expect(fetcher).toHaveBeenCalledTimes(2)
 })

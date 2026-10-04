@@ -1,4 +1,5 @@
 import type { AutomationNotifyChannel, AutomationProjectRef, AutomationRunSummary, AutomationSchedule, AutomationView, AutomationWeekday, StoredCommandResult } from '@contracts'
+import { getInterfaceLanguage, uiAttribute } from './interface-language'
 
 export type AutomationDraft = {
   name: string
@@ -43,6 +44,17 @@ export const templates: Record<TemplateId, Pick<AutomationDraft, 'name' | 'promp
     icon: 'document',
     prompt: '根据当前项目的变更和提交记录，整理面向用户的发布说明，并标出需要人工确认的内容。',
     schedule: { kind: 'manual' }
+  }
+}
+
+/** A template becomes user-owned draft text when selected. Existing task text is never rewritten. */
+export function localizedAutomationTemplate(id: TemplateId): typeof templates[TemplateId] {
+  const template = templates[id]
+  return {
+    ...template,
+    name: uiAttribute(template.name),
+    description: uiAttribute(template.description),
+    prompt: uiAttribute(template.prompt)
   }
 }
 
@@ -96,8 +108,8 @@ export function automationFromResult(result: StoredCommandResult): AutomationVie
     const message = typeof result.payload.message === 'string'
       ? result.payload.message
       : result.code === 'command.version_conflict'
-        ? '任务已在其他位置更新。请选择重新载入，或确认保留当前草稿后重试。'
-        : '任务保存失败，请重试。'
+        ? uiAttribute('任务已在其他位置更新。请选择重新载入，或确认保留当前草稿后重试。')
+        : uiAttribute('任务保存失败，请重试。')
     throw new AutomationCommandError(result.code, message)
   }
   return result.payload as unknown as AutomationView
@@ -133,12 +145,12 @@ export function scheduleWithKind(kind: AutomationSchedule['kind']): AutomationSc
 
 export function scheduleLabel(schedule: AutomationSchedule): string {
   switch (schedule.kind) {
-    case 'daily': return `每天 ${schedule.at}`
-    case 'weekdays': return `工作日 ${schedule.at}`
-    case 'weekly': return `每${weekdays.find((day) => day.value === schedule.weekday)?.label ?? '每周'} ${schedule.at}`
+    case 'daily': return uiAttribute('每天 {0}', schedule.at)
+    case 'weekdays': return uiAttribute('工作日 {0}', schedule.at)
+    case 'weekly': return uiAttribute('每{0} {1}', uiAttribute(weekdays.find((day) => day.value === schedule.weekday)?.label ?? '周一'), schedule.at)
     case 'once': return `${schedule.date} ${schedule.at}`
     case 'cron': return `Cron · ${schedule.expression}`
-    case 'manual': return '手动触发'
+    case 'manual': return uiAttribute('手动触发')
   }
 }
 
@@ -146,24 +158,24 @@ export function dateTimeLabel(value: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(getInterfaceLanguage() === 'en' ? 'en-US' : 'zh-CN', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
   }).format(date)
 }
 
 export function runStatus(run: AutomationRunSummary | null): { label: string; tone: string; detail: string | null } {
-  if (!run) return { label: '尚未运行', tone: 'idle', detail: null }
+  if (!run) return { label: uiAttribute('尚未运行'), tone: 'idle', detail: null }
   if (run.status === 'completed' && ['failed', 'partial'].includes(run.notificationStatus)) {
-    return { label: '运行成功 · 通知失败', tone: 'attention', detail: '任务结果已保留，可在运行对话中查看。' }
+    return { label: uiAttribute('运行成功 · 通知失败'), tone: 'attention', detail: uiAttribute('任务结果已保留，可在运行对话中查看。') }
   }
-  if (run.status === 'completed') return { label: '运行成功', tone: 'success', detail: null }
-  if (run.status === 'running') return { label: '运行中', tone: 'running', detail: null }
-  if (run.status === 'cancelling') return { label: '正在停止', tone: 'attention', detail: null }
+  if (run.status === 'completed') return { label: uiAttribute('运行成功'), tone: 'success', detail: null }
+  if (run.status === 'running') return { label: uiAttribute('运行中'), tone: 'running', detail: null }
+  if (run.status === 'cancelling') return { label: uiAttribute('正在停止'), tone: 'attention', detail: null }
   if (run.status === 'skipped') {
     return {
-      label: '已跳过',
+      label: uiAttribute('已跳过'),
       tone: 'idle',
-      detail: run.reason === 'overlap' ? '到点时上一次运行尚未结束。' : '应用退出或电脑休眠期间错过了触发时间。'
+      detail: run.reason === 'overlap' ? uiAttribute('到点时上一次运行尚未结束。') : uiAttribute('应用退出或电脑休眠期间错过了触发时间。')
     }
   }
   const reasons: Record<string, string> = {
@@ -171,10 +183,10 @@ export function runStatus(run: AutomationRunSummary | null): { label: string; to
     timeout: '运行超过后台时限，已停止。',
     interrupted: '应用退出中断了本次运行。',
     no_result: '运行结束，但没有发布公共结果。',
-    runtime_not_ready: '所选队员的 Runtime 当前不可用。',
+    runtime_not_ready: '所选队员的智能体当前不可用。',
     execution_failed: '运行对话执行失败。'
   }
-  return { label: '运行失败', tone: 'danger', detail: run.reason ? reasons[run.reason] ?? run.reason : null }
+  return { label: uiAttribute('运行失败'), tone: 'danger', detail: run.reason ? reasons[run.reason] ? uiAttribute(reasons[run.reason]) : run.reason : null }
 }
 
 export type AutomationFilter = 'all' | 'enabled' | 'closed'

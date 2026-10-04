@@ -60,12 +60,12 @@ function imageFrame(node: HTMLImageElement) {
 root.render(
   <main style={{ maxWidth: 880, margin: '32px auto', padding: '0 24px' }}>
     <p style={{ marginBottom: 18 }}>检查结果如下，图片只展示在本地运行记录中。</p>
-    <ImageGallery images={['first', 'second', 'broken'].map(id => ({ kind: 'runtime', campId: 'fixture', image: image(id) }))} />
+    <ImageGallery images={['first', 'second', 'broken'].map(id => ({ kind: 'runtime', threadId: 'fixture', image: image(id) }))} />
     <p style={{ margin: '24px 0 12px' }}>这张图片已作为消息附件发送。</p>
-    <ImageGallery variant="user-attachment" images={['attachment', 'attachment-broken'].map(id => ({ kind: 'attachment', campId: 'fixture', image: {
+    <ImageGallery variant="user-attachment" images={['attachment', 'attachment-broken'].map(id => ({ kind: 'attachment', threadId: 'fixture', image: {
       ...image(id), kind: 'file', fileCount: 1, previewKind: 'image', availability: 'unknown'
     }, locator: {
-      owner: 'message', campId: 'fixture', messageId: `message-${id}`, attachmentRefId: id
+      owner: 'message', threadId: 'fixture', messageId: `message-${id}`, attachmentRefId: id
     } }))} />
   </main>
 )
@@ -81,11 +81,11 @@ Object.assign(window, { imageGalleryTest: {
   showScenario: (kind: 'runtime' | 'attachment', id: string, offset = 0) => {
     const runtimeImage = image(id)
     const source = kind === 'runtime'
-      ? { kind, campId: 'cache-fixture', image: runtimeImage }
-      : { kind, campId: 'cache-fixture', image: {
+      ? { kind, threadId: 'cache-fixture', image: runtimeImage }
+      : { kind, threadId: 'cache-fixture', image: {
           ...runtimeImage, kind: 'file', fileCount: 1, previewKind: 'image', availability: 'unknown'
         }, locator: {
-          owner: 'message', campId: 'cache-fixture', messageId: `message-${id}`, attachmentRefId: id
+          owner: 'message', threadId: 'cache-fixture', messageId: `message-${id}`, attachmentRefId: id
         } }
     flushSync(() => root.render(<StrictMode><main style={{ paddingTop: offset }}><ImageGallery images={[source]} /></main></StrictMode>))
     return {
@@ -113,7 +113,7 @@ Object.assign(window, { imageGalleryTest: {
     window.rovai.request = async (_method: string, params: { imageId: string }) => results[Number(params.imageId)]
     root.render(<main style={{ maxWidth: 880, margin: '32px auto', padding: '0 24px' }}>
       <ImageGallery key={sequence} images={results.map((result, index) => ({
-        kind: 'runtime', campId: `runtime-acceptance-${sequence}`, image: {
+        kind: 'runtime', threadId: `runtime-acceptance-${sequence}`, image: {
           id: String(index), displayName: result.displayName, mediaType: result.mediaType, byteSize: atob(result.data).length
         }
       }))} />

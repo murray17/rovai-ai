@@ -131,7 +131,7 @@ export async function materializeToolMeasurementFixtures({
       execution: null
     })
     const result = response.commandResult ?? response
-    const messageId = result.payload?.campMessageId ?? result.payload?.messageId
+    const messageId = (result.payload?.threadMessageId ?? result.payload?.campMessageId) ?? result.payload?.messageId
     if (!['applied', 'accepted'].includes(result.status) || typeof messageId !== 'string') {
       throw new Error(`Camp fixture message materialization failed for ${message.symbol}`)
     }

@@ -1,7 +1,7 @@
 //! Immutable, owner-scoped excerpts. This module never resolves recipients or executable intent.
 use crate::{
     camp_content::{
-        StructuredCampMessageContent, StructuredCampMessageSegment, render_current_plain_text,
+        StructuredThreadMessageContent, StructuredThreadMessageSegment, render_current_plain_text,
         render_plain_text_with_current_user,
     },
     camp_message_publication::public_camp_message_publication_cte,
@@ -77,7 +77,7 @@ impl MessageQuoteSnapshot {
 
     pub fn model_projection(&self) -> Value {
         json!({"kind":"message_excerpt", "source": {
-            "scope":"current_conversation_messages", "messageId":self.source.message_id,
+            "scope":"current_messages", "messageId":self.source.message_id,
             "author":self.author_at_capture
         }, "text":self.text})
     }
@@ -96,7 +96,7 @@ pub fn public_history_quotes(quotes: &[MessageQuoteSnapshot]) -> Vec<Value> {
     model_quotes(quotes)
         .into_iter()
         .map(|mut value| {
-            value["source"]["scope"] = json!("camp_messages");
+            value["source"]["scope"] = json!("thread_messages");
             value
         })
         .collect()
@@ -224,7 +224,7 @@ pub fn load_quotes(
 /// projected to one Agent. The stored snapshot remains unchanged; only the
 /// per-viewer projection is filtered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CampQuoteFence {
+pub enum ThreadQuoteFence {
     CampSequence(i64),
     GlobalPublicationSequence(i64),
 }
@@ -234,7 +234,7 @@ pub fn load_agent_visible_camp_quotes(
     owner_message_id: &str,
     camp_id: &str,
     viewer_agent_id: &str,
-    fence: CampQuoteFence,
+    fence: ThreadQuoteFence,
 ) -> Result<Vec<MessageQuoteSnapshot>> {
     load_agent_visible_camp_quotes_with_claimed_sources(
         connection,
@@ -251,29 +251,27 @@ pub(crate) fn load_agent_visible_camp_quotes_with_claimed_sources(
     owner_message_id: &str,
     camp_id: &str,
     viewer_agent_id: &str,
-    fence: CampQuoteFence,
+    fence: ThreadQuoteFence,
     claimed_source_message_ids: &std::collections::HashSet<String>,
 ) -> Result<Vec<MessageQuoteSnapshot>> {
     let quotes = load_quotes(connection, QuoteStorage::CampMessage, owner_message_id)?;
     quotes
         .into_iter()
-        .filter_map(|quote| {
+        .map(|quote| {
             if quote.source.scope != "camp"
                 || quote.source.camp_id != camp_id
                 || quote.source.conversation_id.is_some()
             {
-                return Some(Ok(None));
+                return Ok(None);
             }
-            Some(
-                camp_quote_source_is_visible(
-                    connection,
-                    &quote,
-                    viewer_agent_id,
-                    fence,
-                    claimed_source_message_ids.contains(&quote.source.message_id),
-                )
-                .map(|visible| visible.then_some(quote)),
+            camp_quote_source_is_visible(
+                connection,
+                &quote,
+                viewer_agent_id,
+                fence,
+                claimed_source_message_ids.contains(&quote.source.message_id),
             )
+            .map(|visible| visible.then_some(quote))
         })
         .collect::<Result<Vec<_>>>()
         .map(|quotes| quotes.into_iter().flatten().collect())
@@ -283,11 +281,11 @@ fn camp_quote_source_is_visible(
     connection: &Connection,
     quote: &MessageQuoteSnapshot,
     viewer_agent_id: &str,
-    fence: CampQuoteFence,
+    fence: ThreadQuoteFence,
     claimed_source_is_visible: bool,
 ) -> Result<bool> {
     let (sql, boundary) = match fence {
-        CampQuoteFence::CampSequence(boundary) => (
+        ThreadQuoteFence::CampSequence(boundary) => (
             r#"
             SELECT EXISTS (
                 SELECT 1
@@ -310,7 +308,7 @@ fn camp_quote_source_is_visible(
             .to_string(),
             boundary,
         ),
-        CampQuoteFence::GlobalPublicationSequence(boundary) => (
+        ThreadQuoteFence::GlobalPublicationSequence(boundary) => (
             format!(
                 r#"
                 WITH {}
@@ -448,7 +446,7 @@ pub fn capture_quote(
             )
             .optional()?
             .context("quote.source_unavailable")?;
-        let content: StructuredCampMessageContent = serde_json::from_str(&row.2)?;
+        let content: StructuredThreadMessageContent = serde_json::from_str(&row.2)?;
         let body = render_current_plain_text(transaction, &content)?;
         (
             row.0,
@@ -475,7 +473,7 @@ pub fn capture_quote(
     let projection = if author_type == "user" {
         body.replace("\r\n", "\n")
     } else if let Some(content) = revision.get("content") {
-        let content: StructuredCampMessageContent = serde_json::from_value(content.clone())?;
+        let content: StructuredThreadMessageContent = serde_json::from_value(content.clone())?;
         let name = selection
             .current_user_display_name
             .as_deref()
@@ -552,11 +550,11 @@ pub fn capture_quote(
 
 /// Mirrors the two production structured-prefix rendering seams; plain Markdown keeps its own parser.
 pub fn project_structured_quote_text(
-    content: &StructuredCampMessageContent,
+    content: &StructuredThreadMessageContent,
     mut member_name: impl FnMut(&str) -> Option<String>,
     current_user: &str,
 ) -> Result<String> {
-    use StructuredCampMessageSegment as Segment;
+    use StructuredThreadMessageSegment as Segment;
     let render = |parts: &[Segment], names: &mut dyn FnMut(&str) -> Option<String>| {
         render_plain_text_with_current_user(parts, names, current_user)
     };
@@ -597,7 +595,28 @@ pub fn project_structured_quote_text(
                 format!("{prefix} \n\n{projected}")
             });
         }
-        return render(content, &mut member_name).map(|text| text.replace("\r\n", "\n"));
+        // Project an opaque token through Markdown, then restore the literal
+        // profile name. Escaping the name before parsing is insufficient in
+        // code blocks, where escapes themselves are visible. Exclude decoded
+        // source collisions as well as raw ones before inserting the token.
+        let source = markdown(content, &mut member_name)?;
+        let projected_source = project_quote_text(&source);
+        let mut token = "ROVAICURRENTUSER".to_string();
+        while source.contains(&token) || projected_source.contains(&token) {
+            token.push('X');
+        }
+        let mut body = String::new();
+        for (index, part) in content.iter().enumerate() {
+            if matches!(part, Segment::CurrentUserMention { .. }) {
+                body.push_str(&token);
+                if index == 0 && content.len() > 1 {
+                    body.push(' ');
+                }
+            } else {
+                body.push_str(&markdown(std::slice::from_ref(part), &mut member_name)?);
+            }
+        }
+        return Ok(project_quote_text(&body).replace(&token, &format!("@{current_user}")));
     }
     let mut prefix_length = 0;
     for (index, part) in content.iter().enumerate() {
@@ -646,6 +665,7 @@ pub fn project_quote_text(body: &str) -> String {
     let mut boundary = 0usize;
     let mut image_depth = 0usize;
     let mut cell = false;
+    let mut code_block_start = None;
     for event in Parser::new_ext(&body, options) {
         match event {
             Event::Start(Tag::Image { .. }) => {
@@ -667,10 +687,27 @@ pub fn project_quote_text(body: &str) -> String {
                 boundary = boundary.max(1);
                 cell = false;
             }
+            Event::Start(Tag::CodeBlock(_)) => {
+                code_block_start = Some(output.len());
+                if !output.is_empty() {
+                    boundary = boundary.max(2);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                // SafeMarkdown's code element ends nonempty code with a newline,
+                // including indented code whose source ends without one.
+                if code_block_start
+                    .take()
+                    .is_some_and(|start| output.len() > start)
+                    && !output.ends_with('\n')
+                {
+                    output.push('\n');
+                }
+                boundary = boundary.max(2);
+            }
             Event::Start(
                 Tag::Paragraph
                 | Tag::Heading { .. }
-                | Tag::CodeBlock(_)
                 | Tag::BlockQuote(_)
                 | Tag::List(_)
                 | Tag::Item
@@ -683,7 +720,6 @@ pub fn project_quote_text(body: &str) -> String {
             Event::End(
                 TagEnd::Paragraph
                 | TagEnd::Heading(_)
-                | TagEnd::CodeBlock
                 | TagEnd::BlockQuote(_)
                 | TagEnd::List(_)
                 | TagEnd::Item
@@ -804,6 +840,7 @@ pub struct MutateQuoteDraftCommand {
     )]
     pub draft_client: crate::draft_client::DraftClient,
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub conversation_id: Option<String>,
     pub expected_revision: i64,
@@ -921,7 +958,7 @@ mod tests {
             "message_2",
             "camp_1",
             "agent_b",
-            CampQuoteFence::CampSequence(2),
+            ThreadQuoteFence::CampSequence(2),
         )
         .unwrap();
         assert!(hidden.is_empty());
@@ -931,7 +968,7 @@ mod tests {
                 "message_2",
                 "camp_1",
                 "agent_a",
-                CampQuoteFence::CampSequence(2),
+                ThreadQuoteFence::CampSequence(2),
             )
             .unwrap(),
             vec![quote.clone()]
@@ -949,7 +986,7 @@ mod tests {
                 "message_2",
                 "camp_1",
                 "agent_b",
-                CampQuoteFence::CampSequence(2),
+                ThreadQuoteFence::CampSequence(2),
             )
             .unwrap(),
             vec![quote]
@@ -1055,7 +1092,7 @@ mod tests {
                     [case["content"].to_string()],
                 )
                 .unwrap();
-            let content: StructuredCampMessageContent =
+            let content: StructuredThreadMessageContent =
                 serde_json::from_value(case["content"].clone()).unwrap();
             let text = case["text"].as_str().unwrap();
             let captured = capture_quote(
@@ -1086,7 +1123,7 @@ mod tests {
         assert_eq!(frozen, vec![quote.clone()]);
         let model = quote.model_projection();
         assert_eq!(model["source"]["author"]["displayName"], "芝士");
-        assert!(model["source"].get("campId").is_none());
+        assert!(model["source"].get("threadId").is_none());
         assert_eq!(model["text"], text);
         assert!(model.get("skills").is_none());
         assert!(model.get("locator").is_none());

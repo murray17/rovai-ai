@@ -6,15 +6,19 @@ export function createBrowserNavigationHistory(scope: string, host: Window = win
   const key = `rovai.web.history.v1:${scope}`
   const parse = (value: unknown): NavigationState | null => {
     if (!value || typeof value !== 'object') return null
-    const candidate = value as NavigationState
+    const source = value as NavigationState
+    const candidate = { ...source, entries: Array.isArray(source.entries) ? source.entries.map(normalizeTarget) : source.entries }
     return Array.isArray(candidate.entries) && candidate.entries.length > 0
       && Number.isInteger(candidate.index) && candidate.index >= 0 && candidate.index < candidate.entries.length
-      && candidate.entries.every(isTarget) ? candidate : null
+      && candidate.entries.every(isTarget) ? { entries: candidate.entries, index: candidate.index } : null
   }
   let stored: NavigationState | null = null
   let ids: string[] = []
   try { const saved = JSON.parse(host.sessionStorage.getItem(key) ?? 'null'); stored = parse(saved?.snapshot); ids = Array.isArray(saved?.ids) ? saved.ids : [] } catch { /* Invalid old presentation state is discarded. */ }
-  const marker = () => host.history.state?.rovai as { scope?: string; id?: string; target?: unknown } | undefined
+  const marker = () => {
+    const value = host.history.state?.rovai as { scope?: string; id?: string; target?: unknown } | undefined
+    return value ? { ...value, target: normalizeTarget(value.target) } : undefined
+  }
   const initialMarker = marker()
   if (initialMarker?.scope === scope && stored && ids.length === stored.entries.length && ids.includes(initialMarker.id ?? '')) stored = { ...stored, index: ids.indexOf(initialMarker.id!) }
   else if (initialMarker?.scope && initialMarker.scope !== scope && isTarget(initialMarker.target)) {
@@ -93,15 +97,24 @@ export function createBrowserNavigationHistory(scope: string, host: Window = win
   }
 }
 
+function normalizeTarget(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const target = value as Record<string, unknown>
+  if (target.kind !== 'camp' || !('campId' in target)) return value
+  if ('threadId' in target) return null
+  const { campId, ...rest } = target
+  return { ...rest, threadId: campId }
+}
+
 function isTarget(value: unknown): value is NavigationTarget {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>
   switch (target.kind) {
     case 'quick_chat': case 'automations': case 'missions': return true
-    case 'camp': return typeof target.campId === 'string'
+    case 'camp': return typeof target.threadId === 'string'
     case 'members': return (target.agentId === null || typeof target.agentId === 'string') && ['identity', 'runtime', 'skills', 'mcp'].includes(String(target.tab))
     case 'memory': return target.memoryId === null || typeof target.memoryId === 'string'
-    case 'settings': return typeof target.section === 'string'
+    case 'settings': return typeof target.section === 'string' && (target.overview === undefined || target.overview === true)
     default: return false
   }
 }

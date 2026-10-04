@@ -127,12 +127,84 @@ struct PiManagedSessionState {
     cwd: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PiManagedContextUsage {
+    schema_version: i64,
+    extension_version: String,
+    host_instance_id: String,
+    host_binding_generation: u64,
+    agent_run_id: String,
+    execution_epoch: i64,
+    native_binding_id: String,
+    native_binding_generation: i64,
+    session_id: String,
+    provider: String,
+    model_id: String,
+    used_tokens: Option<i64>,
+    window_tokens: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PiRuntimeOwner {
     agent_run_id: String,
     execution_epoch: i64,
     native_prompt_id: String,
     delivery_id: String,
+}
+
+impl PiManagedContextUsage {
+    fn matches(
+        &self,
+        host: &str,
+        session: &str,
+        binding: &PiHostBindingDocument,
+        owner: &PiRuntimeOwner,
+    ) -> bool {
+        self.schema_version == 1
+            && self.extension_version == PI_HOST_EXTENSION_VERSION
+            && self.host_instance_id == host
+            && self.host_binding_generation == binding.host_binding_generation
+            && self.agent_run_id == binding.agent_run_id
+            && self.agent_run_id == owner.agent_run_id
+            && self.execution_epoch == binding.execution_epoch
+            && self.execution_epoch == owner.execution_epoch
+            && self.native_binding_id == binding.native_binding_id
+            && self.native_binding_generation == binding.native_binding_generation
+            && self.session_id == session
+            && !self.provider.is_empty()
+            && self.provider.len() <= 512
+            && !self.model_id.is_empty()
+            && self.model_id.len() <= 512
+            && (self.used_tokens.is_some() || self.window_tokens.is_some())
+            && self
+                .window_tokens
+                .is_none_or(|n| n >= 0 && n <= 9_007_199_254_740_991)
+            && self
+                .used_tokens
+                .is_none_or(|n| n >= 0 && n <= 9_007_199_254_740_991)
+    }
+
+    fn into_incoming(
+        self,
+        host_instance_id: String,
+        owner: PiRuntimeOwner,
+        sequence: u64,
+    ) -> PiIncoming {
+        // Preserve the identity validated before any await. Re-reading the
+        // live owner after validation can relabel an old status during handoff.
+        PiIncoming::Message {
+            host_instance_id,
+            agent_run_id: self.agent_run_id,
+            execution_epoch: self.execution_epoch,
+            native_session_id: self.session_id,
+            native_prompt_id: owner.native_prompt_id,
+            delivery_id: owner.delivery_id,
+            sequence,
+            message: json!({"type":"rovai.context_usage", "usedTokens":self.used_tokens,
+                "windowTokens":self.window_tokens, "provider":self.provider, "modelId":self.model_id}),
+        }
+    }
 }
 
 struct PendingPiCommand {
@@ -694,6 +766,54 @@ impl PiHost {
     }
 
     async fn route_message(&self, message: Value) {
+        if message.get("type").and_then(Value::as_str) == Some("extension_ui_request")
+            && message.get("method").and_then(Value::as_str) == Some("setStatus")
+            && message.get("statusKey").and_then(Value::as_str)
+                == Some("rovai-managed-context-usage")
+        {
+            let Some(binding) = self.binding_document.read().await.clone() else {
+                return;
+            };
+            let Some(owner) = self.owner.read().await.clone() else {
+                return;
+            };
+            let Some(text) = message
+                .get("statusText")
+                .and_then(Value::as_str)
+                .filter(|s| s.len() <= 4096)
+            else {
+                return;
+            };
+            let Ok(value) = serde_json::from_str::<PiManagedContextUsage>(text) else {
+                return;
+            };
+            if !value.matches(
+                &self.host_instance_id,
+                &self.session_id.read().await,
+                &binding,
+                &owner,
+            ) {
+                return;
+            }
+            if !self
+                .model_identity
+                .read()
+                .await
+                .as_ref()
+                .is_some_and(|(provider, model, _)| {
+                    value.provider == *provider && value.model_id == *model
+                })
+            {
+                return;
+            }
+            let sequence = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
+            let _ = self.incoming.send(value.into_incoming(
+                self.host_instance_id.clone(),
+                owner,
+                sequence,
+            ));
+            return;
+        }
         if message.get("type").and_then(Value::as_str) == Some("extension_ui_request")
             && message.get("method").and_then(Value::as_str) == Some("setStatus")
             && message.get("statusKey").and_then(Value::as_str) == Some("rovai-managed-failure")
@@ -1354,6 +1474,16 @@ impl PiRuntime {
 
     pub fn model_fingerprint(&self) -> &str {
         &self.model_fingerprint
+    }
+
+    pub async fn observed_model_id(&self) -> Option<String> {
+        let identity = self.host.model_identity.read().await;
+        let (provider, model, _) = identity.as_ref()?;
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("provider", provider)
+            .append_pair("id", model)
+            .finish();
+        Some(format!("pi://model?{query}"))
     }
 
     pub fn prompt_id(&self) -> &str {
@@ -2457,6 +2587,95 @@ mod tests {
     }
 
     #[test]
+    fn numeric_context_rejects_content_and_stale_run_host_session_or_binding() {
+        let value = json!({"schemaVersion":1,"extensionVersion":PI_HOST_EXTENSION_VERSION,
+            "hostInstanceId":"host","hostBindingGeneration":2,"agentRunId":"run","executionEpoch":3,
+            "nativeBindingId":"binding","nativeBindingGeneration":4,"sessionId":"session",
+            "provider":"provider","modelId":"model","usedTokens":32,"windowTokens":100});
+        let binding = PiBindingSeed {
+            agent_run_id: "run".into(),
+            execution_epoch: 3,
+            native_binding_id: "binding".into(),
+            native_binding_generation: 4,
+            expected_native_session_id: Some("session".into()),
+            bootstrap: String::new(),
+            bootstrap_payload_digest: String::new(),
+        }
+        .document("host", 2);
+        let owner = PiRuntimeOwner {
+            agent_run_id: "run".into(),
+            execution_epoch: 3,
+            native_prompt_id: "prompt".into(),
+            delivery_id: "delivery".into(),
+        };
+        let parse = |v: Value| serde_json::from_value::<PiManagedContextUsage>(v).unwrap();
+        assert!(parse(value.clone()).matches("host", "session", &binding, &owner));
+        let packet = parse(value.clone()).into_incoming("host".into(), owner.clone(), 7);
+        let successor = PiRuntimeOwner {
+            agent_run_id: "next-run".into(),
+            execution_epoch: 4,
+            native_prompt_id: "next-prompt".into(),
+            delivery_id: "next-delivery".into(),
+        };
+        let PiIncoming::Message {
+            agent_run_id,
+            execution_epoch,
+            native_session_id,
+            native_prompt_id,
+            delivery_id,
+            message,
+            ..
+        } = packet
+        else {
+            panic!("expected numeric packet")
+        };
+        assert_eq!(agent_run_id, owner.agent_run_id);
+        assert_eq!(execution_epoch, owner.execution_epoch);
+        assert_eq!(native_session_id, "session");
+        assert_eq!(native_prompt_id, owner.native_prompt_id);
+        assert_eq!(delivery_id, owner.delivery_id);
+        assert_ne!(agent_run_id, successor.agent_run_id);
+        assert_eq!(message["usedTokens"], 32);
+        for (key, changed) in [
+            ("agentRunId", json!("old-run")),
+            ("executionEpoch", json!(2)),
+            ("hostInstanceId", json!("old-host")),
+            ("hostBindingGeneration", json!(1)),
+            ("nativeBindingId", json!("old-binding")),
+            ("nativeBindingGeneration", json!(3)),
+            ("sessionId", json!("old-session")),
+            ("usedTokens", json!(-1)),
+            ("windowTokens", json!(-1)),
+        ] {
+            let mut altered = value.clone();
+            altered[key] = changed;
+            assert!(
+                !parse(altered).matches("host", "session", &binding, &owner),
+                "reject {key}"
+            );
+        }
+        let mut unknown = value.clone();
+        unknown["usedTokens"] = Value::Null;
+        assert!(parse(unknown).matches("host", "session", &binding, &owner));
+        let mut used_only = value.clone();
+        used_only["windowTokens"] = json!(0);
+        assert!(parse(used_only.clone()).matches("host", "session", &binding, &owner));
+        used_only["windowTokens"] = Value::Null;
+        assert!(parse(used_only.clone()).matches("host", "session", &binding, &owner));
+        used_only["usedTokens"] = Value::Null;
+        assert!(!parse(used_only).matches("host", "session", &binding, &owner));
+        let mut overflow = value.clone();
+        overflow["usedTokens"] = json!(101);
+        assert!(
+            parse(overflow).matches("host", "session", &binding, &owner),
+            "projection preserves used and removes the inapplicable window"
+        );
+        let mut content = value;
+        content["text"] = json!("PRIVATE_CANARY");
+        assert!(serde_json::from_value::<PiManagedContextUsage>(content).is_err());
+    }
+
+    #[test]
     fn execution_epoch_fence_rejects_stale_before_runtime_retirement() {
         assert_eq!(
             pi_epoch_disposition(7, 7),
@@ -2559,7 +2778,7 @@ write_session() {
 emit_managed_session_state() {
   host_instance_id=$(sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
   host_binding_generation=$(sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
-  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":3,\\"extensionVersion\\":\\"rovai-pi-host-v7\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
+  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":3,\\"extensionVersion\\":\\"rovai-pi-host-v8\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
   printf '%s\n' "$event" >> "$event_log"
   printf '%s\n' "$event"
 }
@@ -2831,7 +3050,7 @@ done
 
     #[test]
     fn production_host_launch_preserves_pi_native_resources() {
-        let extension = Path::new("/private/rovai-pi-host-v7.ts");
+        let extension = Path::new("/private/rovai-pi-host-v8.ts");
         let mut production = Command::new("pi");
         append_host_arguments(&mut production, extension);
         let production_args = production
@@ -2847,7 +3066,7 @@ done
                 "--no-themes",
                 "--approve",
                 "--extension",
-                "/private/rovai-pi-host-v7.ts",
+                "/private/rovai-pi-host-v8.ts",
             ]
         );
         for forbidden in [

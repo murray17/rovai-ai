@@ -120,9 +120,9 @@ for (const specification of specifications) {
       body: zeroSendPrompt(zeroMarker),
       purpose: 'Exercise the Core zero-send recovery boundary without an Agent send.'
     })
-    const campId = acceptedRunId(zeroStart).campId
+    const threadId = acceptedRunId(zeroStart).threadId
     const zeroRunId = acceptedRunId(zeroStart).agentRunId
-    await waitForTerminalRun(core, campId, zeroRunId, `${specification.adapterKind} zero-send`)
+    await waitForTerminalRun(core, threadId, zeroRunId, `${specification.adapterKind} zero-send`)
     const zeroFacts = await readRunFacts(databasePath, zeroRunId)
     assertRecoveryPublication(zeroFacts, {
       adapterKind: specification.adapterKind,
@@ -134,13 +134,13 @@ for (const specification of specifications) {
 
     const suppressionStart = await startFollowUpRun(
       core.request,
-      campId,
+      threadId,
       suppressionPrompt(specification.adapterKind, progressMarker, privateFinalMarker),
       'Exercise accepted-send suppression with a different private final.'
     )
     await waitForTerminalRun(
       core,
-      campId,
+      threadId,
       suppressionStart.agentRunId,
       `${specification.adapterKind} accepted-send suppression`
     )
@@ -157,7 +157,7 @@ for (const specification of specifications) {
     if (specification.acp || ['pi', 'zcode-app'].includes(specification.adapterKind)) {
       const toolStart = await startFollowUpRun(
         core.request,
-        campId,
+        threadId,
         toolThenFinalPrompt(specification),
         specification.acp
           ? 'Exercise a real ACP tool boundary followed by a zero-send final.'
@@ -165,7 +165,7 @@ for (const specification of specifications) {
       )
       await waitForTerminalRun(
         core,
-        campId,
+        threadId,
         toolStart.agentRunId,
         `${specification.adapterKind} tool-then-final`
       )
@@ -305,20 +305,20 @@ function toolThenFinalPrompt(specification) {
   ].join(' ')
 }
 
-async function startFollowUpRun(request, campId, body, purpose) {
-  const currentDraft = await request('camp.composerDraft.get', { campId })
+async function startFollowUpRun(request, threadId, body, purpose) {
+  const currentDraft = await request('camp.composerDraft.get', { threadId })
   const savedDraft = await request('camp.composerDraft.save', {
-    campId,
+    threadId,
     expectedRevision: currentDraft.revision,
     content: { version: 2, segments: [{ kind: 'text', text: body }] }
   })
   const sent = await request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId,
+    threadId,
     draftRevision: savedDraft.revision,
     execution: { taskId: null, purpose, completionRole: 'required' }
   })
-  return acceptedRunId(sent, campId)
+  return acceptedRunId(sent, threadId)
 }
 
 async function selectExplicitModel(request, agentId, adapterKind, modelId) {
@@ -349,19 +349,19 @@ async function selectExplicitModel(request, agentId, adapterKind, modelId) {
 
 function acceptedRunId(sent, knownCampId = null) {
   const commandResult = sent.commandResult ?? sent
-  const campId = knownCampId ?? commandResult.payload?.campId
+  const threadId = knownCampId ?? commandResult.payload?.threadId
   const agentRunId = commandResult.payload?.agentRunIds?.[0]
-  if (commandResult.status !== 'accepted' || !campId || !agentRunId) {
+  if (commandResult.status !== 'accepted' || !threadId || !agentRunId) {
     throw new Error(`AgentRun intake failed: ${JSON.stringify(sent)}`)
   }
-  return { campId, agentRunId }
+  return { threadId, agentRunId }
 }
 
-async function waitForTerminalRun(core, campId, agentRunId, label) {
+async function waitForTerminalRun(core, threadId, agentRunId, label) {
   const deadline = Date.now() + Number(process.env.ROVAI_MISSING_SEND_RECOVERY_TIMEOUT_MS ?? 480_000)
   const resolvedApprovals = new Set()
   while (Date.now() < deadline) {
-    const snapshot = await core.request('camps.snapshot', { campId })
+    const snapshot = await core.request('camps.snapshot', { threadId })
     await resolvePendingApprovals(core.request, snapshot, agentRunId, resolvedApprovals)
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (run?.status === 'succeeded') return { snapshot, run }
@@ -392,7 +392,7 @@ async function resolvePendingApprovals(request, snapshot, agentRunId, resolvedAp
     if (!option) throw new Error(`No bounded allow option for ${approval.id}`)
     const result = await request('action.approvals.resolve', {
       commandId: crypto.randomUUID(),
-      campId: snapshot.camp.id,
+      threadId: snapshot.thread.id,
       approvalId: approval.id,
       expectedVersion: approval.version,
       optionId: option.optionId,
@@ -421,7 +421,7 @@ async function readRunFacts(databasePath, agentRunId) {
            effective_recipient_ids_json AS effectiveRecipientIdsJson,
            recipient_presentation_json AS recipientPresentationJson,
            source_operation_id AS sourceOperationId,
-           reply_to_camp_message_id AS replyToCampMessageId,
+           reply_to_camp_message_id AS replyToThreadMessageId,
            (SELECT COUNT(*) FROM message_delivery WHERE message_id = camp_message.id) AS deliveryCount
     FROM camp_message WHERE source_agent_run_id = ${id}
     ORDER BY sequence, id;
@@ -475,7 +475,7 @@ function assertRecoveryPublication(facts, {
       || message.authorId !== expectedAuthorId
       || message.sourceAgentRunId !== facts.run.id
       || message.sourceOperationId !== null
-      || message.replyToCampMessageId !== null
+      || message.replyToThreadMessageId !== null
       || message.addressMode !== 'default'
       || message.deliveryCount !== 0
       || JSON.stringify(message.addressedAgentIds) !== '[]'

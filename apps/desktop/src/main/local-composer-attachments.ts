@@ -17,7 +17,7 @@ const MAX_ENTRIES = 200
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1_000
 
 interface RegistryEntry {
-  campId: string
+  threadId: string
   attachmentId: string
   sourcePath: string
   displayName: string
@@ -33,8 +33,8 @@ interface PersistedRegistry {
   entries: RegistryEntry[]
 }
 
-function entryKey(campId: string, attachmentId: string): string {
-  return `${campId}:${attachmentId}`
+function entryKey(threadId: string, attachmentId: string): string {
+  return `${threadId}:${attachmentId}`
 }
 
 function availabilityFromError(error: unknown): LocalAttachmentAvailability {
@@ -48,8 +48,8 @@ function availabilityFromError(error: unknown): LocalAttachmentAvailability {
 function validEntry(value: unknown): value is RegistryEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const entry = value as Partial<RegistryEntry>
-  return typeof entry.campId === 'string'
-    && entry.campId.length > 0
+  return typeof entry.threadId === 'string'
+    && entry.threadId.length > 0
     && isAttachmentId(entry.attachmentId)
     && typeof entry.sourcePath === 'string'
     && isAbsolute(entry.sourcePath)
@@ -75,7 +75,7 @@ export class LocalComposerAttachmentRegistry {
   }
 
   async prepare(input: {
-    campId: string
+    threadId: string
     sourcePath: string
     displayName: string
     mediaType: string | null
@@ -84,7 +84,7 @@ export class LocalComposerAttachmentRegistry {
     const attachmentId = randomUUID()
     const now = new Date().toISOString()
     const inspected = await this.#inspect({
-      campId: input.campId,
+      threadId: input.threadId,
       attachmentId,
       sourcePath: input.sourcePath,
       displayName: input.displayName,
@@ -98,20 +98,20 @@ export class LocalComposerAttachmentRegistry {
       throw new Error('附件当前不可读取。')
     }
     await this.#mutate(() => {
-      this.#entries.set(entryKey(input.campId, attachmentId), inspected.entry!)
+      this.#entries.set(entryKey(input.threadId, attachmentId), inspected.entry!)
       this.#prune()
     })
     return inspected.view
   }
 
   async restore(
-    campId: string,
+    threadId: string,
     attachments: readonly LocalAttachmentSourceView[]
   ): Promise<LocalAttachmentSourceView[]> {
     await this.#ensureLoaded()
     const restored: LocalAttachmentSourceView[] = []
     for (const requested of attachments.slice(0, 10)) {
-      const entry = this.#entries.get(entryKey(campId, requested.id))
+      const entry = this.#entries.get(entryKey(threadId, requested.id))
       if (!entry) {
         restored.push({ ...requested, availability: 'missing', sourcePath: undefined })
         continue
@@ -122,12 +122,12 @@ export class LocalComposerAttachmentRegistry {
     return restored
   }
 
-  async discard(campId: string, attachmentRefIds?: readonly string[]): Promise<void> {
+  async discard(threadId: string, attachmentRefIds?: readonly string[]): Promise<void> {
     await this.#ensureLoaded()
     await this.#mutate(() => {
       const selected = attachmentRefIds ? new Set(attachmentRefIds) : null
       for (const [key, entry] of this.#entries) {
-        if (entry.campId === campId && (!selected || selected.has(entry.attachmentId))) {
+        if (entry.threadId === threadId && (!selected || selected.has(entry.attachmentId))) {
           this.#entries.delete(key)
         }
       }
@@ -137,7 +137,7 @@ export class LocalComposerAttachmentRegistry {
   async preview(locator: LocalAttachmentOwnerLocator): Promise<AttachmentPreviewResult | null> {
     if (locator.owner !== 'composer') return null
     await this.#ensureLoaded()
-    const entry = this.#entries.get(entryKey(locator.campId, locator.attachmentRefId))
+    const entry = this.#entries.get(entryKey(locator.threadId, locator.attachmentRefId))
     if (!entry) return { preview: null, availability: 'missing' }
     const inspected = await this.#inspect(entry, false)
     if (inspected.view.availability !== 'available'
@@ -168,7 +168,7 @@ export class LocalComposerAttachmentRegistry {
   ): Promise<{ target: DesktopAttachmentTarget | null; availability: LocalAttachmentAvailability } | null> {
     if (locator.owner !== 'composer') return null
     await this.#ensureLoaded()
-    const entry = this.#entries.get(entryKey(locator.campId, locator.attachmentRefId))
+    const entry = this.#entries.get(entryKey(locator.threadId, locator.attachmentRefId))
     if (!entry) return { target: null, availability: 'missing' }
     const inspected = await this.#inspect(entry, false)
     if (inspected.view.availability !== 'available') {
@@ -254,7 +254,7 @@ export class LocalComposerAttachmentRegistry {
         const record = persisted as Partial<PersistedRegistry>
         if (record.schemaVersion !== REGISTRY_SCHEMA_VERSION || !Array.isArray(record.entries)) return
         for (const entry of record.entries) {
-          if (validEntry(entry)) this.#entries.set(entryKey(entry.campId, entry.attachmentId), entry)
+          if (validEntry(entry)) this.#entries.set(entryKey(entry.threadId, entry.attachmentId), entry)
         }
         this.#prune()
       })()

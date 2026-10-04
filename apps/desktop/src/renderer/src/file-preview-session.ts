@@ -47,7 +47,7 @@ export interface FilePreviewChangesTabSnapshot {
   reading?: FilePreviewReadingState
   kind: 'file_change'
   id: string
-  campId: string
+  threadId: string
   changes: AgentRunFileChangesView
   selectedEvidenceFileId: string | null
 }
@@ -105,7 +105,7 @@ export class FilePreviewSessionStore {
   readonly #sessions = new Map<string, FilePreviewSessionSnapshot>()
   readonly #usage = new Map<string, number>()
   readonly #protected = new Set<string>()
-  readonly #discardListeners = new Set<(campId: string) => void>()
+  readonly #discardListeners = new Set<(threadId: string) => void>()
   #sequence = 0
   readonly #skipNextSave = new Set<string>()
 
@@ -113,49 +113,49 @@ export class FilePreviewSessionStore {
     this.#limit = Math.max(1, Math.trunc(limit))
   }
 
-  get(campId: string): FilePreviewSessionSnapshot | null {
-    const snapshot = this.#sessions.get(campId)
+  get(threadId: string): FilePreviewSessionSnapshot | null {
+    const snapshot = this.#sessions.get(threadId)
     if (!snapshot) return null
     return copySnapshot(snapshot)
   }
 
-  set(campId: string, snapshot: FilePreviewSessionSnapshot): void {
-    if (this.#skipNextSave.delete(campId)) return
-    this.#sessions.set(campId, copySnapshot(snapshot))
+  set(threadId: string, snapshot: FilePreviewSessionSnapshot): void {
+    if (this.#skipNextSave.delete(threadId)) return
+    this.#sessions.set(threadId, copySnapshot(snapshot))
     while (this.#sessions.size > this.#limit) {
-      const oldestCampId = [...this.#sessions.keys()].filter(id => !this.#protected.has(id))
+      const oldestThreadId = [...this.#sessions.keys()].filter(id => !this.#protected.has(id))
         .sort((a, b) => (this.#usage.get(a) ?? 0) - (this.#usage.get(b) ?? 0))[0]
-      if (!oldestCampId) break
-      this.#sessions.delete(oldestCampId)
+      if (!oldestThreadId) break
+      this.#sessions.delete(oldestThreadId)
     }
   }
 
-  touch(campId: string): void { this.#usage.set(campId, ++this.#sequence) }
+  touch(threadId: string): void { this.#usage.set(threadId, ++this.#sequence) }
 
-  protect(campIds: Iterable<string>): void {
+  protect(threadIds: Iterable<string>): void {
     this.#protected.clear()
-    for (const id of campIds) this.#protected.add(id)
+    for (const id of threadIds) this.#protected.add(id)
   }
 
-  onDiscard(listener: (campId: string) => void): () => void {
+  onDiscard(listener: (threadId: string) => void): () => void {
     this.#discardListeners.add(listener)
     return () => this.#discardListeners.delete(listener)
   }
 
-  discard(campId: string, preventNextSave = false): void {
-    for (const listener of this.#discardListeners) listener(campId)
-    this.#usage.delete(campId)
-    this.#sessions.delete(campId)
+  discard(threadId: string, preventNextSave = false): void {
+    for (const listener of this.#discardListeners) listener(threadId)
+    this.#usage.delete(threadId)
+    this.#sessions.delete(threadId)
     if (!preventNextSave) {
-      this.#skipNextSave.delete(campId)
+      this.#skipNextSave.delete(threadId)
       return
     }
-    this.#skipNextSave.delete(campId)
-    this.#skipNextSave.add(campId)
+    this.#skipNextSave.delete(threadId)
+    this.#skipNextSave.add(threadId)
     while (this.#skipNextSave.size > this.#limit) {
-      const oldestCampId = this.#skipNextSave.values().next().value as string | undefined
-      if (!oldestCampId) break
-      this.#skipNextSave.delete(oldestCampId)
+      const oldestThreadId = this.#skipNextSave.values().next().value as string | undefined
+      if (!oldestThreadId) break
+      this.#skipNextSave.delete(oldestThreadId)
     }
   }
 
@@ -185,43 +185,43 @@ function referenceFileName(value: string): string {
 export function filePreviewSourceKey(request: OpenFilePreviewRequest): string {
   switch (request.kind) {
     case 'skill_reference':
-      return `skill:${request.campId}:${request.skillId}`
+      return `skill:${request.threadId}:${request.skillId}`
     case 'message_reference': {
       const path = parseFileReference(request.rawReference)?.pathPart ?? request.rawReference
-      return `message:${request.campId}:${request.messageId}:${path}`
+      return `message:${request.threadId}:${request.messageId}:${path}`
     }
     case 'camp_workspace': {
       const path = parseFileReference(request.rawReference)?.pathPart ?? request.rawReference
-      return `workspace:${request.campId}:${path}`
+      return `workspace:${request.threadId}:${path}`
     }
     case 'attachment': {
       const locator = request.locator
       switch (locator.owner) {
         case 'composer':
-          return `attachment:composer:${locator.campId}:${locator.attachmentRefId}`
+          return `attachment:composer:${locator.threadId}:${locator.attachmentRefId}`
         case 'message':
-          return `attachment:message:${locator.campId}:${locator.messageId}:${locator.attachmentRefId}`
+          return `attachment:message:${locator.threadId}:${locator.messageId}:${locator.attachmentRefId}`
         case 'mission':
-          return `attachment:mission:${locator.campId}:${locator.missionId}:${locator.attachmentRefId}`
+          return `attachment:mission:${locator.threadId}:${locator.missionId}:${locator.attachmentRefId}`
         case 'pending':
-          return `attachment:pending:${locator.campId}:${locator.pendingInputId}:${locator.attachmentRefId}`
+          return `attachment:pending:${locator.threadId}:${locator.pendingInputId}:${locator.attachmentRefId}`
         case 'pending_edit':
-          return `attachment:pending-edit:${locator.campId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+          return `attachment:pending-edit:${locator.threadId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
         case 'single_chat_composer':
-          return `attachment:single-chat-composer:${locator.campId}:${locator.conversationId}:${locator.attachmentRefId}`
+          return `attachment:single-chat-composer:${locator.threadId}:${locator.conversationId}:${locator.attachmentRefId}`
         case 'single_chat_pending':
-          return `attachment:single-chat-pending:${locator.campId}:${locator.conversationId}:${locator.pendingInputId}:${locator.attachmentRefId}`
+          return `attachment:single-chat-pending:${locator.threadId}:${locator.conversationId}:${locator.pendingInputId}:${locator.attachmentRefId}`
         case 'single_chat_pending_edit':
-          return `attachment:single-chat-pending-edit:${locator.campId}:${locator.conversationId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+          return `attachment:single-chat-pending-edit:${locator.threadId}:${locator.conversationId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
         case 'single_chat_message':
-          return `attachment:single-chat-message:${locator.campId}:${locator.conversationId}:${locator.conversationMessageId}:${locator.attachmentRefId}`
+          return `attachment:single-chat-message:${locator.threadId}:${locator.conversationId}:${locator.conversationMessageId}:${locator.attachmentRefId}`
       }
     }
     case 'run_evidence':
-      return `evidence:${request.campId}:${request.agentRunId}:${request.executionEpoch}:${request.evidenceFileId}:${request.action}`
+      return `evidence:${request.threadId}:${request.agentRunId}:${request.executionEpoch}:${request.evidenceFileId}:${request.action}`
     case 'run_activity_file': {
       const path = parseFileReference(request.rawReference)?.pathPart ?? request.rawReference
-      return `run-activity:${request.campId}:${request.agentRunId}:${request.executionEpoch}:${request.evidenceId}:${path}`
+      return `run-activity:${request.threadId}:${request.agentRunId}:${request.executionEpoch}:${request.evidenceId}:${path}`
     }
     case 'child_of_handle': {
       const path = parseFileReference(request.rawReference)?.pathPart ?? request.rawReference
@@ -229,7 +229,7 @@ export function filePreviewSourceKey(request: OpenFilePreviewRequest): string {
     }
     case 'authorized_root': {
       const path = parseFileReference(request.rawReference)?.pathPart ?? request.rawReference
-      return `root:${request.campId}:${request.rootGrantId}:${path}`
+      return `root:${request.threadId}:${request.rootGrantId}:${path}`
     }
   }
 }
@@ -238,8 +238,8 @@ export function stableFilePreviewSourceKey(
   request: OpenFilePreviewRequest,
   presentation: Pick<FilePreviewPresentation, 'displayPath' | 'pathPresentation'>
 ): string {
-  if ('campId' in request && presentation.pathPresentation === 'project_relative') {
-    return `workspace:${request.campId}:${presentation.displayPath}`
+  if ('threadId' in request && presentation.pathPresentation === 'project_relative') {
+    return `workspace:${request.threadId}:${presentation.displayPath}`
   }
   return filePreviewSourceKey(request)
 }
@@ -318,6 +318,6 @@ export function filePreviewPresentationFromFile(file: ResolvedFilePreview): File
 
 export const filePreviewSessionStore = new FilePreviewSessionStore()
 
-export function forgetFilePreviewSession(campId: string, preventNextSave = false): void {
-  filePreviewSessionStore.discard(campId, preventNextSave)
+export function forgetFilePreviewSession(threadId: string, preventNextSave = false): void {
+  filePreviewSessionStore.discard(threadId, preventNextSave)
 }

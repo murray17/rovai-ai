@@ -148,7 +148,7 @@ export type CoreShutdownResult = {
 
 export function coreLaunchArguments(
   dataDirectory: string,
-  runtimeCampFilesRoot: string,
+  runtimeThreadFilesRoot: string,
   skillLibraryRoot: string | null,
   removedSkillProjectRoots: readonly string[],
   mcpConfigPath: string | null = null,
@@ -156,7 +156,7 @@ export function coreLaunchArguments(
 ): string[] {
   const args = [
     '--data-dir', dataDirectory,
-    '--runtime-camp-files-root', runtimeCampFilesRoot
+    '--runtime-camp-files-root', runtimeThreadFilesRoot
   ]
   if (skillLibraryRoot) args.push('--skill-library-root', skillLibraryRoot)
   else args.push('--use-default-skill-library')
@@ -184,7 +184,7 @@ function canonicalPath(path: string, platform: NodeJS.Platform = process.platfor
   }
 }
 
-export function runtimeCampFilesRoot(
+export function runtimeThreadFilesRoot(
   dataDirectory: string,
   homeDirectory: string,
   platform: NodeJS.Platform = process.platform
@@ -327,7 +327,7 @@ export class CoreClient {
   #mcpConfigPath: string | null = null
   #automationSchedulerControl: AutomationSchedulerControl
   readonly #dataDirectory: string | null
-  readonly #runtimeCampFilesRoot: string | null
+  readonly #runtimeThreadFilesRoot: string | null
   #startupBlock: { error: StructuredError; phase: StartupPhase } | null = null
 
   constructor(
@@ -336,7 +336,7 @@ export class CoreClient {
     automationStartedAt = new Date().toISOString()
   ) {
     this.#dataDirectory = dataDirectory
-    this.#runtimeCampFilesRoot = dataDirectory === null ? null : runtimeFilesRoot ?? runtimeCampFilesRoot(
+    this.#runtimeThreadFilesRoot = dataDirectory === null ? null : runtimeFilesRoot ?? runtimeThreadFilesRoot(
       dataDirectory,
       coreProcessHomeDirectory(app.getPath('home'))
     )
@@ -392,7 +392,7 @@ export class CoreClient {
   }
 
   start(options?: CoreStartOptions): void {
-    if (this.#startupBlock || this.#dataDirectory === null || this.#runtimeCampFilesRoot === null) {
+    if (this.#startupBlock || this.#dataDirectory === null || this.#runtimeThreadFilesRoot === null) {
       this.blockStartup(this.#startupBlock?.error ?? {
         code: 'core_data_directory_not_admitted',
         message: 'The Core data directory has not been admitted.',
@@ -443,7 +443,7 @@ export class CoreClient {
     }
     const args = coreLaunchArguments(
       this.#dataDirectory,
-      this.#runtimeCampFilesRoot,
+      this.#runtimeThreadFilesRoot,
       this.#skillLibraryRoot,
       this.#removedSkillProjectRoots,
       this.#mcpConfigPath,
@@ -630,7 +630,7 @@ export class CoreClient {
     const payload = `${JSON.stringify({ id, method, params })}\n`
     const startedAt = performance.now()
     const traceId = campOpenTraceId(params)
-    if (traceId && (method === 'camps.enter' || method === 'camps.open')) {
+    if (traceId && (method === 'threads.enter' || method === 'threads.open')) {
       console.info(`[camp-open] trace=${traceId} stage=main_request method=${method}`)
     }
     return new Promise<T>((resolve, reject) => {
@@ -770,7 +770,7 @@ export class CoreClient {
     this.#pending.delete(response.id)
     if (
       pending.traceId
-      && (pending.method === 'camps.enter' || pending.method === 'camps.open')
+      && (pending.method === 'threads.enter' || pending.method === 'threads.open')
     ) {
       console.info(
         `[camp-open] trace=${pending.traceId} stage=main_response method=${pending.method} `

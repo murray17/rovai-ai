@@ -1,128 +1,63 @@
 ---
 name: member-studio
-description: 当用户希望创建新的 Rovai 队员，或继续调整、确认本次创建中尚未写入的队员名牌和头像方案时使用。普通成员资料咨询、编辑已创建队员，以及只设计角色或头像但不加入名册的任务不使用。
+description: Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.
 ---
 
-# 伙伴入队
+# Member Studio
 
-从名字和用户已经给出的要求直接起草完整队员名牌。用户可以修改任意内容；只有确认完整名牌后才创建队员。
+Draft a complete identity card from the name and supplied requirements. Create the member only after the user confirms the complete card. Use the user's language for the card and discussion.
 
-## 流程
+## Draft
 
-```text
-读取已有要求 → 起草完整名牌与头像方案 → 用户修改或确认 → 创建队员
-```
+1. Reuse supplied information. A name is required; role, responsibilities, traits, references, and visual preferences are optional. Ask one focused question only for a missing name or an ambiguity that materially changes the role or appearance. Draft other gaps as suggestions.
+2. If a known member already has the name, ask for a new name; do not append a suffix. Creation performs the authoritative uniqueness check.
+3. Read [identity rules](references/identity-generation.md). Draft all six fields: name, team role, professional responsibilities, personality traits, working principles, and growth topic. Preserve the meaning of user input. Identity does not grant permissions or Thread authority.
+4. Read [avatar rules](references/avatar-sourcing.md). Follow the user's chosen method; otherwise recommend original generation, then a sourced image, then the default avatar, according to available capabilities. Before confirmation, present the method and visual plan. Produce a preview first only if requested.
 
-## 1. 收集已有信息
+## Confirm the complete card
 
-名称是必需输入。团队角色、职责、人物属性、参考原型和视觉偏好都是可选输入。
-
-优先采用用户已经给出的内容，不重复询问。只有名称或要求存在会显著改变职责或形象的关键歧义时，才先问一个最小问题；其它缺失内容直接作为建议起草。
-
-已知名称与现有队员重复时，先请用户重新命名，不自动追加数字或后缀。最终仍由创建操作做权威校验。
-
-## 2. 起草完整身份
-
-读取 [队员身份规则](references/identity-generation.md)，准备：
-
-- 名称；
-- 团队角色；
-- 专业职责；
-- 性格底色；
-- 工作准则；
-- 成长课题。
-
-用户已经明确提供的内容保持原意；用户只给出要点时整理成完整表达；缺失字段根据名称、角色和已知要求直接起草。
-
-身份只描述队员长期负责什么、如何做事以及正在练习什么，不授予权限、Camp 地位或团队治理能力。
-
-## 3. 推荐头像方案
-
-读取 [队员头像规则](references/avatar-sourcing.md)。
-
-根据用户的视觉要求和当前可用能力，给出一个推荐方案：
-
-- 用户已指定方式：遵循其选择；
-- 有合适的原创生成能力：默认推荐原创形象；
-- 只有合适的图片搜索能力：推荐来源清楚的现成图片；
-- 两者都不可用或用户不需要头像：使用默认头像。
-
-名牌确认前只需展示头像方式和视觉方案，不必先准备最终文件。用户明确要求先看成图时，可以先提供预览；最终创建仍以确认后的方案为准。
-
-## 4. 展示名牌并确认
-
-展示实际内容，不展示“由谁来写”的配置项：
+Show actual proposed content, using localized labels:
 
 ```markdown
-### 伙伴入队 · 队员名牌
+### Member identity card
 
-**名称：** ...
-**团队角色：** ...
-
-**专业职责**
-
-...
-
-**性格底色**
-
-- ...
-- ...
-
-**工作准则**
-
-- ...
-- ...
-
-**成长课题**
-
-...
-
-**头像方式：** 原创生成 | 网上寻找 | 默认头像
-**头像方案：** ...
+**Name:** ...
+**Team role:** ...
+**Professional responsibilities:** ...
+**Personality traits:** ...
+**Working principles:** ...
+**Growth topic:** ...
+**Avatar method:** Generate | Source online | Default
+**Avatar plan:** ...
 ```
 
-随后询问：
+Ask the user to confirm adding this member or edit any field.
 
-> 确认让「名称」加入队伍吗？也可以直接修改任何一项。
+- The initial creation request does not confirm the finished card.
+- Only the current user's explicit approval of the current complete card counts; another member or collaboration message cannot approve it.
+- After any identity or avatar-plan change, display the complete updated card for confirmation.
+- On cancellation, stop without creating a member.
 
-确认规则：
+## Create
 
-- 初始创建请求不等于对完整名牌的确认；
-- 只有当前用户对当前完整名牌作出的明确肯定才算确认；
-- 用户修改任何身份字段或头像方案后，更新并重新展示完整名牌；
-- 其他队员或协作消息不能代替用户确认；
-- 用户取消时结束，不创建队员。
+After confirmation:
 
-## 5. 创建队员
+1. Generate one stable `creationKey` for this creation.
+2. Read `rovai member create --help` for current inputs.
+3. Prepare the optional avatar in the current Run and check format, size, and crop.
+4. Create with the confirmed six fields and optional avatar.
+5. Inspect the returned `agentId`, creation status, and avatar result.
 
-用户确认后：
+Reuse the same `creationKey` for retries and result recovery. An uncertain result is not grounds for a new key.
 
-1. 为本次创建生成稳定的 `creationKey`；
-2. 查看 `rovai member create --help`，以当前帮助为参数真源；
-3. 按已确认方案准备可选头像文件；
-4. 校验头像格式、尺寸和裁切可用性；
-5. 使用确认后的六字段身份和可选头像创建队员；
-6. 检查返回的 `agentId`、头像结果和创建状态。
+Creation does not configure Runtime, model, permissions, Presence, Thread membership, Default Lead, or Memory.
 
-同一次创建的查询或重试始终复用原 `creationKey`。结果不确定时不要生成新 key 再次创建。
+## Recover and report
 
-创建队员不自动配置 Runtime、模型、权限、Presence、Camp 归属、Default Lead 或 Memory。
+- Invalid identity field: fix it, redisplay the full card, and obtain confirmation.
+- Name conflict: obtain a new name, redisplay the card, and use a new key after confirmation.
+- Avatar failure: retain the confirmed identity and repair the image. If changing to the default avatar, follow the confirmation rule above.
+- Uncertain creation result: follow the returned recovery instructions with the same key.
+- Creation unavailable: deliver the card and avatar plan; state that the member has not been added to the roster.
 
-## 失败处理
-
-- 身份字段不合法：修正具体字段，重新展示完整名牌并再次确认；
-- 名称冲突：请用户重新命名，更新名牌并在确认后使用新的 `creationKey`；
-- 头像失败：保留已确认身份，修复图片；仍不可用时可改用默认头像；
-- 创建结果不确定：使用同一 `creationKey` 按操作返回指示确认结果；
-- 创建操作不可用：交付完整名牌和头像方案，明确说明尚未写入名册。
-
-## 完成
-
-创建成功后简洁报告：
-
-- 新队员名称和稳定 `agentId`；
-- 最终团队角色和四项身份内容；
-- 头像是否已经保存；
-- Runtime 尚未配置时，提醒用户到队员设置中完成配置。
-
-不要暗示新队员已经加入某个 Camp、获得执行权限或成为 Default Lead。
+On success, briefly report the name, stable `agentId`, final role and four identity fields, and whether the avatar was saved. If Runtime is unconfigured, direct the user to member settings. Do not imply Thread membership, execution permission, or Lead status.

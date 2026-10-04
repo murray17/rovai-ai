@@ -29,10 +29,10 @@ const MAX_ORACLE_LIST_ITEMS = 64
 
 const MODES = new Set(['forced_use', 'natural_use', 'non_use_control'])
 const ADAPTER_OPERATIONS = Object.freeze({
-  camp_history: Object.freeze(['camp.list', 'camp.search', 'history.search', 'camp.read']),
+  camp_history: Object.freeze(['camp.list', 'camp.search', 'history.search', 'camp.read', 'thread.list', 'thread.search', 'thread.read']),
   memory_retrieval: Object.freeze(['memory.view', 'memory.search', 'memory.read']),
   memory_mutation: Object.freeze(['memory.write']),
-  camp_message_send: Object.freeze(['camp.message.send']),
+  camp_message_send: Object.freeze(['camp.message.send', 'thread.message.send']),
   task_coordination: Object.freeze([
     'team.create_task',
     'team.get_task',
@@ -1113,7 +1113,7 @@ function assessTaskEffectBinding(oracle, effectBindings) {
 }
 
 function projectOperation(operation, source) {
-  if (!isObject(source) || ![1, 2].includes(source.schemaVersion) || source.operation !== operation) {
+  if (!isObject(source) || ![1, 2, 3, 4].includes(source.schemaVersion) || source.operation !== operation) {
     throw new Error('Core operation projection identity is invalid')
   }
   return {
@@ -1139,7 +1139,7 @@ function validateCoreOperationProjection(value, operation) {
     'resultDigest',
     'projectionDigest'
   ], 'Core operationProjection')
-  if (![1, 2].includes(value.schemaVersion) || value.operation !== operation
+  if (![1, 2, 3, 4].includes(value.schemaVersion) || value.operation !== operation
       || !isObject(value.canonicalInput)
       || (value.canonicalResult !== null && !isObject(value.canonicalResult))) {
     throw new Error('Core operationProjection identity is invalid')
@@ -1178,7 +1178,7 @@ function validateCoreOperationProjection(value, operation) {
 
 function projectOperationInput(operation, value) {
   if (!isObject(value)) throw new Error('Core operation input projection must be an object')
-  if (operation === 'camp.list') return compactObject({
+  if ((operation === 'camp.list' || operation === 'thread.list')) return compactObject({
     query: boundedNullableString(value.query),
     queryCharCount: boundedInteger(value.queryCharCount),
     queryTruncated: booleanOrNull(value.queryTruncated),
@@ -1186,22 +1186,22 @@ function projectOperationInput(operation, value) {
     cursor: boundedNullableString(value.cursor),
     limit: boundedInteger(value.limit)
   })
-  if (operation === 'camp.search' || operation === 'history.search') return compactObject({
+  if ((operation === 'camp.search' || operation === 'thread.search') || operation === 'history.search') return compactObject({
     query: boundedNullableString(value.query),
     queryCharCount: boundedInteger(value.queryCharCount),
     queryTruncated: booleanOrNull(value.queryTruncated),
     queryRedacted: booleanOrNull(value.queryRedacted),
     limit: boundedInteger(value.limit),
     cursor: boundedNullableString(value.cursor),
-    campIds: normalizedIdentifiers(value.campIds),
+    campIds: normalizedIdentifiers((value.threadIds ?? value.campIds)),
     dateFrom: boundedNullableString(value.dateFrom),
     dateTo: boundedNullableString(value.dateTo),
     beforeSequence: boundedInteger(value.beforeSequence),
     afterSequence: boundedInteger(value.afterSequence)
   })
-  if (operation === 'camp.read') return compactObject({
+  if ((operation === 'camp.read' || operation === 'thread.read')) return compactObject({
     mode: boundedNullableString(value.mode),
-    campId: boundedNullableString(value.campId),
+    campId: boundedNullableString((value.threadId ?? value.campId)),
     messageId: boundedNullableString(value.messageId),
     messageIds: normalizedIdentifiers(value.messageIds),
     direction: boundedNullableString(value.direction),
@@ -1297,14 +1297,14 @@ function projectOperationInput(operation, value) {
 
 function projectOperationResult(operation, value) {
   if (!isObject(value)) throw new Error('Core operation result projection must be an object')
-  if (operation === 'camp.list') return compactObject({
-    campIds: normalizedIdentifiers(value.campIds ?? value.camps?.map((item) => item?.campId ?? item?.id)),
-    campCount: boundedInteger(value.campCount),
-    campsTruncated: booleanOrNull(value.campsTruncated),
+  if ((operation === 'camp.list' || operation === 'thread.list')) return compactObject({
+    campIds: normalizedIdentifiers(value.threadIds ?? value.campIds ?? (value.threads ?? value.camps)?.map((item) => item?.threadId ?? item?.campId ?? item?.id)),
+    campCount: boundedInteger((value.threadCount ?? value.campCount)),
+    campsTruncated: booleanOrNull((value.threadsTruncated ?? value.campsTruncated)),
     truncated: booleanOrNull(value.truncated),
     nextCursor: boundedNullableString(value.nextCursor)
   })
-  if (operation === 'camp.search' || operation === 'history.search') return compactObject({
+  if ((operation === 'camp.search' || operation === 'thread.search') || operation === 'history.search') return compactObject({
     messageIds: normalizedIdentifiers(
       value.messageIds ?? value.results?.map((item) => item?.messageId)
     ),
@@ -1314,13 +1314,13 @@ function projectOperationResult(operation, value) {
     searchIncomplete: booleanOrNull(value.searchIncomplete),
     nextCursor: boundedNullableString(value.nextCursor)
   })
-  if (operation === 'camp.read') return compactObject({
+  if ((operation === 'camp.read' || operation === 'thread.read')) return compactObject({
     messageIds: normalizedIdentifiers(
       value.messageIds ?? value.items?.map((item) => item?.messageId)
     ),
     mode: boundedNullableString(value.mode),
     anchorMessageId: boundedNullableString(value.anchorMessageId),
-    threadRootMessageId: boundedNullableString(value.threadRootMessageId),
+    threadRootMessageId: boundedNullableString((value.replyChainRootMessageId ?? value.threadRootMessageId)),
     direction: boundedNullableString(value.direction),
     itemCount: boundedInteger(value.itemCount),
     itemsTruncated: booleanOrNull(value.itemsTruncated),
@@ -1710,7 +1710,7 @@ function validateInteraction(value) {
 
 function validateOperationProjection(value, operation) {
   assertExactKeys(value, ['schemaVersion', 'operation', 'input', 'result'], 'operation projection')
-  if (![1, 2].includes(value.schemaVersion) || value.operation !== operation) {
+  if (![1, 2, 3, 4].includes(value.schemaVersion) || value.operation !== operation) {
     throw new Error('operation projection identity is invalid')
   }
   const rebuilt = projectOperation(operation, value)

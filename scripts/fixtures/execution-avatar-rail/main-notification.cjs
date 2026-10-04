@@ -75,12 +75,39 @@ app.whenReady().then(async () => {
     assert.equal(current.previewHidden, false, 'Compact notification navigation must retain the execution pane')
     assert.deepEqual(current.visibleRunIds, ['run-agent-1'])
 
+    assert.equal(current.historyExpanded, false, 'The historical Run must start in a collapsed group')
+    await run("window.executionNotificationTest.focusRun(104, 'run-agent-1-history')")
+    current = await waitFor(
+      value => value.historyExpanded
+        && value.terminalTargetVisible
+        && value.terminalTargetFocused
+        && value.presentedRequests.includes(104),
+      'Notification navigation did not expand and focus the completed Run in execution history'
+    )
+    assert.ok(current.visibleRunIds.includes('run-agent-1-history'), 'The revealed completed Run must be reported as visible')
+
+    await run("window.executionNotificationTest.focusRun(105, 'run-agent-4')")
+    await waitFor(
+      value => value.historyExpanded
+        && value.otherTerminalTargetVisible
+        && value.otherTerminalTargetFocused
+        && value.presentedRequests.includes(105),
+      'Opening another member must start with its completed Run visible'
+    )
+
+    await run("window.executionNotificationTest.focusSubject('task', 102)")
+    await waitFor(value => value.focusedTask === 'task-rail' && value.presentedRequests.includes(102), 'Task notification did not open and focus its exact detail')
+    await run("window.executionNotificationTest.focusSubject('mission', 103)")
+    await waitFor(value => value.focusedMission === 'mission-rail' && value.presentedRequests.includes(103), 'Mission notification did not focus its exact introduction')
+
     console.log(JSON.stringify({
       ok: true,
       cases: [
         'right-side Portal Run contributes visible source identity',
         'closed right execution pane reopens for exact notification navigation',
-        'compact layout retains and focuses the notification target'
+        'compact layout retains and focuses the notification target',
+        'completed Run notifications expand execution history before focusing',
+        'Task and Mission notifications focus their exact subject'
       ]
     }))
     window.destroy()

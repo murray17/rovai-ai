@@ -91,7 +91,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(code, expected, 'excluded discovery addresses retain authentication and same-origin admission')
     }
     const login = async (editor) => {
-      const response = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: administrator, ...(editor ? { editor } : {}) }) })
+      const response = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: administrator, ...(editor ? { editor } : {}) }) })
       assert.equal(response.status, 200)
       assert.equal(response.headers.get('set-cookie'), null)
       return response.json()
@@ -102,6 +102,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       ['capabilities', { headers: { Authorization: `Bearer ${administrator}` } }, 401],
       ['capabilities', { headers: { Origin: 'http://127.0.0.1:1' } }, 403],
       ['capabilities?token=not-a-real-token', {}, 400],
+      ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: administrator }) }, 409],
       ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 2, administratorToken: administrator }) }, 409],
       ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 1, administratorToken: administrator }) }, 409],
       ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, 400]
@@ -112,7 +113,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(response.headers.get('set-cookie'), null)
     }
     const first = await login()
-    assert.equal(first.protocolVersion, 3)
+    assert.equal(first.protocolVersion, 4)
     assert.ok(first.expiresAt - first.serverTime <= 30 * 24 * 60 * 60 * 1000 && first.expiresAt - first.serverTime > 30 * 24 * 60 * 60 * 1000 - 10000)
     assert.equal(first.renewalWindowSeconds, 7 * 24 * 60 * 60)
     const second = await login()
@@ -123,7 +124,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const earlyTiming = await earlyRenewal.json()
     assert.equal(earlyTiming.expiresAt, first.expiresAt)
     assert.equal('token' in earlyTiming, false)
-    const exchange = ticket => request('login-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, ticket }) })
+    const exchange = ticket => request('login-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, ticket }) })
     const staleTicket = await host.request('host.web.loginTicket')
     const ticket = await host.request('host.web.loginTicket')
     assert.equal(ticket.expiresInSeconds, 120)
@@ -202,12 +203,12 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const createParams = { commandId: crypto.randomUUID(), name: 'Web owned message', workspace: null, memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' }
     const created = await call(first, 'camps.create', createParams)
     assert.equal(created.status, 'applied')
-    const campId = created.payload.campId
+    const threadId = created.payload.threadId
     for (const [operation, cursor] of [
       ['agentRunExecution.page', { afterSequence: 1 }],
       ['agentRunExecution.changes', { afterChangeSequence: 1, refreshEvidenceIds: [] }]
     ]) {
-      const response = await authorized(first, 'request', { method: 'POST', body: JSON.stringify({ operation, params: { campId, agentRunId: 'missing-run', ...cursor, limit: 12 } }) })
+      const response = await authorized(first, 'request', { method: 'POST', body: JSON.stringify({ operation, params: { threadId, agentRunId: 'missing-run', ...cursor, limit: 12 } }) })
       assert.equal(response.status, 200)
       const reply = await response.json()
       assert.match(reply.error?.message ?? '', /AgentRun does not exist in this Camp/)
@@ -226,7 +227,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camps.create', params: directoryParams })).result, directoryCamp)
     // Public Camp editing is local to each Renderer. The Host owns only the
     // authenticated upload source and the one-shot publication command.
-    const forged = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: administrator, editor: { clientId: first.clientId, proof: second.editorProof } }) })
+    const forged = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: administrator, editor: { clientId: first.clientId, proof: second.editorProof } }) })
     assert.equal(forged.status, 401)
     const resumed = await login({ clientId: first.clientId, proof: first.editorProof })
     assert.equal(resumed.clientId, first.clientId)
@@ -234,7 +235,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     Object.assign(first, resumed)
     const input = new TextEncoder().encode('source ref from real HTTP upload')
     const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', input))].map(value => value.toString(16).padStart(2, '0')).join('')
-    const intent = { commandId: crypto.randomUUID(), campId, expectedRevision: 1, displayName: '浏览器 source.txt', byteSize: input.length, sha256 }
+    const intent = { commandId: crypto.randomUUID(), threadId, expectedRevision: 1, displayName: '浏览器 source.txt', byteSize: input.length, sha256 }
     const spools = async () => (await readdir(uploadScratch)).filter(name => name.startsWith('rovai-web-upload-'))
     const postUpload = body => request('uploads', { method: 'POST', headers: { Authorization: `Bearer ${first.token}` }, body })
     for (const scenario of ['digest', 'duplicate-file', 'too-large']) {
@@ -287,7 +288,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
 
     // Actual HTTP ingress and the shared private page API use the verified
     // editor, never the client-provided conversation or command identity alone.
-    const privateOpen = session => call(session, 'singleChat.open', { commandId: crypto.randomUUID(), command: { campId, agentId: profiles[0].agentId } })
+    const privateOpen = session => call(session, 'singleChat.open', { commandId: crypto.randomUUID(), command: { threadId, agentId: profiles[0].agentId } })
     const privateA = await privateOpen(first)
     const privateB = await privateOpen(second)
     assert.equal(privateA.status, 'applied')
@@ -302,7 +303,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(privateSnapshot.draft.attachments[0].id, privateIntent.commandId)
     assert.equal((await call(second, 'singleChat.get', { conversationId })).draft.attachments.length, 0)
     assert.equal((await host.request('singleChat.get', { conversationId })).draft.attachments.length, 0)
-    const privateLocator = { owner: 'single_chat_composer', campId, conversationId, attachmentRefId: privateIntent.commandId }
+    const privateLocator = { owner: 'single_chat_composer', threadId, conversationId, attachmentRefId: privateIntent.commandId }
     assert.equal((await authorized(first, 'attachments', { method: 'POST', body: JSON.stringify(privateLocator) })).status, 200)
     assert.equal((await authorized(second, 'attachments', { method: 'POST', body: JSON.stringify(privateLocator) })).status, 404)
     assert.equal((await sendPrivateUpload()).status, 200)
@@ -310,13 +311,13 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const privateRemove = await call(first, 'singleChat.composerDraft.removeAttachment', { conversationId, expectedDraftRevision: privateSnapshot.draft.revision, attachmentRefId: privateIntent.commandId })
     assert.equal(privateRemove.draft.attachments.length, 0)
     assert.equal((await call(second, 'singleChat.get', { conversationId })).draft.revision, 0)
-    const sentParams = { commandId: crypto.randomUUID(), campId,
+    const sentParams = { commandId: crypto.randomUUID(), threadId,
       content: { version: 2, segments: [{ kind: 'text', text: 'Published from Web' }] },
-      sourceAttachments: [bound], quotes: [], replyToCampMessageId: null, execution: null }
+      sourceAttachments: [bound], quotes: [], replyToThreadMessageId: null, execution: null }
     const sent = await call(first, 'camp.messages.send', sentParams)
     assert.notEqual(sent.commandResult.status, 'rejected', JSON.stringify(sent))
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camp.messages.send', params: sentParams })).result.commandResult, sent.commandResult)
-    const messageLocator = { owner: 'message', campId, messageId: sent.commandResult.payload.campMessageId, attachmentRefId: intent.commandId }
+    const messageLocator = { owner: 'message', threadId, messageId: sent.commandResult.payload.threadMessageId, attachmentRefId: intent.commandId }
     const historyFile = await authorized(first, 'attachments', { method: 'POST', body: JSON.stringify(messageLocator) })
     assert.equal(historyFile.status, 200)
     assert.equal(await historyFile.text(), new TextDecoder().decode(input))
@@ -330,7 +331,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
         values(?,?,1,'needs_repair','Pending private fixture','local_user',?,?)`).run(pendingInputId, conversationId, now, now)
     } finally { seed.close() }
     const operation = 'singleChat.pendingInputs.edit'
-    const command = { campId, conversationId, pendingInputId, expectedRevision: 1, editToken: null, action: { type: 'begin' } }
+    const command = { threadId, conversationId, pendingInputId, expectedRevision: 1, editToken: null, action: { type: 'begin' } }
     const begun = await call(first, operation, { commandId: crypto.randomUUID(), command })
     assert.equal(begun.status, 'applied', JSON.stringify(begun))
     const pendingIntent = { ...intent, commandId: crypto.randomUUID(), expectedRevision: 1, target: { kind: 'single_chat_pending', conversationId, pendingInputId, editToken: begun.payload.editToken } }
@@ -386,7 +387,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal((await authorized(first, 'capabilities')).status, 200)
     assert.equal((await authorized(second, 'capabilities')).status, 200)
     await rename(`${workspace}-moved`, workspace)
-    const fileCampId = directoryCamp.payload.campId
+    const fileCampId = directoryCamp.payload.threadId
     const largePath = join(workspace, 'large-preview.txt')
     const largeText = '第一行\n' + 'a'.repeat(2 * 1024 * 1024) + '\n最后🌸'
     await writeFile(largePath, largeText)
@@ -404,7 +405,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(response.status, 200)
       return response.json()
     }
-    const largeOpen = await fileCall(first, 'open', { kind: 'camp_workspace', campId: fileCampId, rawReference: 'large-preview.txt' })
+    const largeOpen = await fileCall(first, 'open', { kind: 'camp_workspace', threadId: fileCampId, rawReference: 'large-preview.txt' })
     assert.equal(largeOpen.ok, true, JSON.stringify(largeOpen))
     let largeFile = largeOpen.value.file
     assert.equal(largeFile.kind, 'paged_text')
@@ -422,7 +423,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal((await fileCall(second, 'readPage', { handleId: largeFile.handleId, expectedGeneration: largeFile.contentGeneration, offset: 0 })).ok, false)
     await writeFile(largePath, largeText + '\nchanged')
     const updates = await fileCall(first, 'updates', {})
-    assert.ok(updates.value.some(event => event.campId === fileCampId && event.previewKeys.includes(largeFile.previewKey)))
+    assert.ok(updates.value.some(event => event.threadId === fileCampId && event.previewKeys.includes(largeFile.previewKey)))
     const otherUpdates = await fileCall(second, 'updates', {})
     assert.equal(otherUpdates.value.some(event => event.previewKeys.includes(largeFile.previewKey)), false)
     assert.equal((await fileCall(first, 'readPage', { handleId: largeFile.handleId, expectedGeneration: largeFile.contentGeneration, offset: 0 })).ok, false)
@@ -437,7 +438,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     // the real Host API. The separate Chrome case owns rendering and native browser capabilities.
     const htmlText = '<!doctype html><h1>HTML preview</h1><button>Run</button>'
     await writeFile(join(workspace, 'interactive.html'), htmlText)
-    const htmlFile = (await fileCall(first, 'open', { kind: 'camp_workspace', campId: fileCampId, rawReference: 'interactive.html' })).value.file
+    const htmlFile = (await fileCall(first, 'open', { kind: 'camp_workspace', threadId: fileCampId, rawReference: 'interactive.html' })).value.file
     assert.equal(htmlFile.kind, 'html')
     assert.equal(htmlFile.mime, 'text/html')
     const htmlRead = { handleId: htmlFile.handleId, expectedGeneration: htmlFile.contentGeneration }
@@ -482,7 +483,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const childPath = join(workspace, 'child notes.md')
     await writeFile(childPath, '# Child\nRelative resource marker')
     await writeFile(join(workspace, 'parent.md'), '[Child](./child%20notes.md#L2)')
-    const parent = (await fileCall(first, 'open', { kind: 'camp_workspace', campId: fileCampId, rawReference: 'parent.md' })).value.file
+    const parent = (await fileCall(first, 'open', { kind: 'camp_workspace', threadId: fileCampId, rawReference: 'parent.md' })).value.file
     assert.ok(parent.capabilities.includes('read_child'))
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')
     await writeFile(join(workspace, 'inline.png'), png)
@@ -500,39 +501,39 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const childReply = await fileCall(first, 'open', childRequest)
     assert.equal(childReply.ok, true, JSON.stringify(childReply))
     const childFile = childReply.value.file
-    assert.deepEqual(childFile.restoreRequest, { kind: 'camp_workspace', campId: fileCampId, rawReference: 'child notes.md' })
+    assert.deepEqual(childFile.restoreRequest, { kind: 'camp_workspace', threadId: fileCampId, rawReference: 'child notes.md' })
     await fileCall(first, 'release', { handleId: parent.handleId })
     assert.match((await fileCall(first, 'readText', { handleId: childFile.handleId, expectedGeneration: childFile.contentGeneration })).value.text, /Relative resource marker/)
     assert.equal((await fileCall(first, 'restore', childFile.restoreRequest)).ok, true)
-    const located = await fileCall(first, 'open', { kind: 'camp_workspace', campId: fileCampId, rawReference: './child%20notes.md:2:3' })
+    const located = await fileCall(first, 'open', { kind: 'camp_workspace', threadId: fileCampId, rawReference: './child%20notes.md:2:3' })
     assert.equal(located.ok, true, JSON.stringify(located))
     const externalPath = join(fixture, 'external.md')
     await writeFile(externalPath, '# Exact external file')
-    const external = await fileCall(first, 'open', { kind: 'camp_workspace', campId: fileCampId, rawReference: externalPath })
+    const external = await fileCall(first, 'open', { kind: 'camp_workspace', threadId: fileCampId, rawReference: externalPath })
     assert.equal(external.ok, true, JSON.stringify(external))
     const preference = await call(first, 'notifications.preference.get')
-    const preferenceParams = { commandId: crypto.randomUUID(), command: { expectedVersion: preference.version, headsUpEnabled: !preference.headsUpEnabled, ...Object.fromEntries(['approvalHeadsUpEnabled', 'userMentionHeadsUpEnabled', 'turnCompletedHeadsUpEnabled', 'turnIncompleteHeadsUpEnabled'].map(key => [key, preference[key]])) } }
+    const preferenceParams = { commandId: crypto.randomUUID(), command: { expectedVersion: preference.version, headsUpEnabled: !preference.headsUpEnabled, ...Object.fromEntries(['approvalHeadsUpEnabled', 'userMentionHeadsUpEnabled', 'turnCompletedHeadsUpEnabled', 'turnIncompleteHeadsUpEnabled','singleChatHeadsUpEnabled','missionNeedsYouHeadsUpEnabled','missionStatusHeadsUpEnabled','taskStatusHeadsUpEnabled','missionStatuses','taskStatuses'].map(key => [key, preference[key]])) } }
     const changedPreference = await call(first, 'notifications.preference.update', preferenceParams)
     assert.equal(changedPreference.status, 'applied')
     assert.deepEqual((await call(second, 'notifications.preference.get')).headsUpEnabled, !preference.headsUpEnabled)
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'notifications.preference.update', params: preferenceParams })).result, changedPreference)
-    assert.equal((await call(first, 'notifications.inbox', { filter: 'unread', limit: 1 })).schemaVersion, 8)
+    assert.equal((await call(first, 'notifications.inbox', { filter: 'unread', limit: 1 })).schemaVersion, 9)
     const exported = await call(first, 'diagnostics.export')
     assert.equal(exported.format, 'rovai-diagnostics-v5')
     assert.equal(JSON.stringify(exported).includes(administrator), false)
     assert.equal(JSON.stringify(exported).includes(fixture), false)
     const temporary = await call(first, 'camps.create', { ...createParams, commandId: crypto.randomUUID(), name: 'Temporary remote management Camp' })
-    const temporaryId = temporary.payload.campId
-    const temporaryCamp = (await call(first, 'camps.open', { campId: temporaryId, traceId: crypto.randomUUID() })).camp
-    const renameParams = { commandId: crypto.randomUUID(), command: { campId: temporaryId, expectedVersion: temporaryCamp.version, title: 'Renamed remotely' } }
+    const temporaryId = temporary.payload.threadId
+    const temporaryCamp = (await call(first, 'camps.open', { threadId: temporaryId, traceId: crypto.randomUUID() })).thread
+    const renameParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId, expectedVersion: temporaryCamp.version, title: 'Renamed remotely' } }
     const renamed = await call(first, 'camps.rename', renameParams)
     assert.equal(renamed.status, 'applied')
-    assert.equal((await call(second, 'camps.open', { campId: temporaryId, traceId: crypto.randomUUID() })).camp.title, 'Renamed remotely')
+    assert.equal((await call(second, 'camps.open', { threadId: temporaryId, traceId: crypto.randomUUID() })).thread.title, 'Renamed remotely')
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camps.rename', params: renameParams })).result, renamed)
-    const deleteParams = { commandId: crypto.randomUUID(), command: { campId: temporaryId, expectedVersion: (await call(first, 'camps.open', { campId: temporaryId, traceId: crypto.randomUUID() })).camp.version, force: false } }
+    const deleteParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId, expectedVersion: (await call(first, 'camps.open', { threadId: temporaryId, traceId: crypto.randomUUID() })).thread.version, force: false } }
     const deleted = await call(first, 'camps.delete', deleteParams)
     assert.equal(deleted.status, 'accepted')
-    assert.equal(await call(first, 'camps.exists', { campId: temporaryId }), false)
+    assert.equal(await call(first, 'camps.exists', { threadId: temporaryId }), false)
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camps.delete', params: deleteParams })).result, deleted, 'deleted Camp receipts remain queryable')
     const unusedBeforeRotation = await host.request('host.web.loginTicket')
     const rotated = await host.request('host.web.rotate')
@@ -547,7 +548,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(await expectClosed(reader), true, 'rotation must close every client stream')
       reader.releaseLock()
     }
-    const rotatedLogin = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: rotated.administratorToken }) })
+    const rotatedLogin = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: rotated.administratorToken }) })
     assert.equal(rotatedLogin.status, 200)
     const beforeStop = await rotatedLogin.json()
     const unusedBeforeStop = await host.request('host.web.loginTicket')
@@ -562,9 +563,9 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const restarted = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: ownedUiDirectory })
     assert.equal(restarted.enabled, true)
     assert.equal(restarted.administratorToken, rotated.administratorToken, 'restart reuses the retained credential')
-    assert.equal((await fetch(`${restarted.origin}/api/v1/login-ticket`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, ticket: unusedBeforeStop.ticket }) })).status, 401)
+    assert.equal((await fetch(`${restarted.origin}/api/v1/login-ticket`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, ticket: unusedBeforeStop.ticket }) })).status, 401)
     assert.equal((await fetch(`${restarted.origin}/api/v1/capabilities`, { headers: { Authorization: `Bearer ${beforeStop.token}` } })).status, 401, 'old browser sessions cannot resume after stop')
-    const beforeExitReply = await fetch(`${restarted.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: restarted.administratorToken }) })
+    const beforeExitReply = await fetch(`${restarted.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: restarted.administratorToken }) })
     assert.equal(beforeExitReply.status, 200, 'the retained credential permits a fresh login')
     const beforeExit = await beforeExitReply.json()
     const reply = await host.request('core.shutdown', { protocolVersion: 3, deadlineMs: 10_000 })

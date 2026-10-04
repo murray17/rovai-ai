@@ -5,11 +5,16 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
+import { createServer as createViteServer } from 'vite'
 import { launchHost, within } from './host-test-client.mjs'
 import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from './runtime-camp-files-root.mjs'
-import { createHostChannelHandler, parseHostChannelRequest } from '../../apps/desktop/src/main/host-channels.ts'
 
 const root = resolve(import.meta.dirname, '../..')
+// Load the production TypeScript adapter through its bundler. Node's native
+// type stripping cannot resolve the extensionless imports inside this module.
+const vite = await createViteServer({ root, configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } })
+const { createHostChannelHandler, parseHostChannelRequest } = await vite.ssrLoadModule('/apps/desktop/src/main/host-channels.ts')
+await vite.close()
 const uiDirectory = process.env.ROVAI_WEB_UI ?? join(root, 'out/web')
 const binary = process.env.ROVAI_HOST_BIN ?? join(root, 'target/debug', process.platform === 'win32' ? 'rovai-host.exe' : 'rovai-host')
 
@@ -60,7 +65,7 @@ test('Hosted channels use the closed parent adapter and survive browser logout a
     assert.equal(entry.headers.get('cache-control'), 'no-store')
     assert.match(await entry.text(), /name="rovai-host-kind" content="desktop"/)
     const login = async () => {
-      const reply = await fetch(`${web.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: web.administratorToken }) })
+      const reply = await fetch(`${web.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: web.administratorToken }) })
       assert.equal(reply.status, 200)
       const result = await reply.json(); assert.equal(result.channels, 'desktop'); return result
     }

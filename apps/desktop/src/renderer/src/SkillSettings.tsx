@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -26,9 +26,10 @@ import { localizeExecutionEngineTerms } from './product-copy'
 import { readErrorMessage } from './error-message'
 import { CapabilityDeleteDialog } from './CapabilityDeleteDialog'
 import { AppDialogGlyph, DialogControlIcon } from './AppDialog'
+import { UiText, uiAttribute } from './interface-language'
 
 export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const [skills, setSkills] = useState<SkillView[] | null>(null)
   const [groups, setGroups] = useState<SkillDeliveryGroupView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -240,8 +241,8 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
           <>
             <header className="capability-detail-heading">
               <div>
-                <h2>导入 Skill</h2>
-                <p className="capability-note">从本地文件夹或 GitHub 导入</p>
+                <h2><UiText zh={"导入 Skill"} /></h2>
+                <p className="capability-note"><UiText zh={"从本地文件夹或 GitHub 导入"} /></p>
               </div>
               <div className="capability-actions">
                 <button
@@ -249,9 +250,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                   type="button"
                   disabled={busy !== null}
                   onClick={() => choose('')}
-                >
-                  取消
-                </button>
+                ><UiText zh={"取消"} /></button>
                 <button
                   type="button"
                   className="primary-button"
@@ -263,10 +262,10 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                   }
                 >
                   {busy === 'import'
-                    ? '正在保存…'
+                    ? uiAttribute("正在保存…")
                     : candidate?.importAction === 'update'
-                      ? '更新 Skill'
-                      : '导入 Skill'}
+                      ? uiAttribute("更新 Skill")
+                      : uiAttribute("导入 Skill")}
                 </button>
               </div>
             </header>
@@ -277,7 +276,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                   if (event.key === 'Escape') setConfirmation(null)
                 }}
               >
-                <span>更新 {candidate.name}？现有启停状态和生效组将保留。</span>
+                <span><UiText zh={"更新 "} />{candidate.name}<UiText zh={"？现有启停状态和生效组将保留。"} /></span>
                 <div className="capability-actions">
                   <button
                     autoFocus
@@ -285,17 +284,13 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                     type="button"
                     disabled={busy !== null}
                     onClick={() => setConfirmation(null)}
-                  >
-                    取消更新
-                  </button>
+                  ><UiText zh={"取消更新"} /></button>
                   <button
                     className="primary-button"
                     type="button"
                     disabled={busy !== null}
                     onClick={() => commit(true)}
-                  >
-                    确认更新
-                  </button>
+                  ><UiText zh={"确认更新"} /></button>
                 </div>
               </div>
             )}
@@ -324,7 +319,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                     <button
                       className="quiet-button compact danger-text"
                       type="button"
-                      aria-label="删除 Skill"
+                      aria-label={uiAttribute("删除 Skill")}
                       disabled={busy !== null}
                       onClick={() => {
                         setError(null)
@@ -335,8 +330,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                         })
                       }}
                     >
-                      <AppDialogGlyph name="trash" />删除
-                    </button>
+                      <AppDialogGlyph name="trash" /><UiText zh={"删除"} /></button>
                   </>
                 )}
               </div>
@@ -351,9 +345,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
       list={
         <>
           {skills === null ? (
-            <div className="capability-empty" role="status">
-              正在读取 Skill Library…
-            </div>
+            <div className="capability-empty" role="status"><UiText zh={"正在读取 Skill Library…"} /></div>
           ) : visible.length ? (
             visible.map((skill) => (
               <SkillListItem
@@ -365,7 +357,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
             ))
           ) : (
             <div className="capability-empty">
-              {allSkills.length ? '没有匹配的 Skill。' : '还没有 Skill。'}
+              {allSkills.length ? uiAttribute("没有匹配的 Skill。") : uiAttribute("还没有 Skill。")}
             </div>
           )}
         </>
@@ -396,7 +388,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
       />
       {selectedId === 'new' ? (
         <>
-          <div className="capability-tabs" role="group" aria-label="Skill 导入方式">
+          <div className="capability-tabs" role="group" aria-label={uiAttribute("Skill 导入方式")}>
             <button
               type="button"
               aria-pressed={importTab === 'local'}
@@ -408,9 +400,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                   setConfirmation(null)
                 }
               }}
-            >
-              本地文件夹
-            </button>
+            ><UiText zh={"本地文件夹"} /></button>
             <button
               type="button"
               aria-pressed={importTab === 'github'}
@@ -428,22 +418,20 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
           </div>
           {importTab === 'local' ? (
             <div className="capability-folder-import">
-              <p>选择包含 SKILL.md 的文件夹，预览后导入。</p>
+              <p><UiText zh={"选择包含 SKILL.md 的文件夹，预览后导入。"} /></p>
               <button
                 type="button"
                 className="primary-button"
                 disabled={busy !== null}
                 onClick={inspect}
               >
-                {busy === 'inspect' ? '正在读取…' : '选择文件夹'}
+                {busy === 'inspect' ? uiAttribute("正在读取…") : uiAttribute("选择文件夹")}
               </button>
             </div>
           ) : (
             <div className="capability-import-source">
-              <label>
-                GitHub 链接
-                <input
-                  aria-label="GitHub Skill 链接"
+              <label><UiText zh={"GitHub 链接"} /><input
+                  aria-label={uiAttribute("GitHub Skill 链接")}
                   value={githubInput}
                   placeholder="https://github.com/owner/repository"
                   onChange={(event) => setGithubInput(event.target.value)}
@@ -458,14 +446,14 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                 disabled={busy !== null || !githubInput.trim()}
                 onClick={inspect}
               >
-                {busy === 'inspect' ? '正在读取…' : '读取'}
+                {busy === 'inspect' ? uiAttribute("正在读取…") : uiAttribute("读取")}
               </button>
             </div>
           )}
           {inspection && (
             <>
               {inspection.candidates.length > 1 && (
-                <div className="capability-candidates" role="group" aria-label="待导入 Skills">
+                <div className="capability-candidates" role="group" aria-label={uiAttribute("待导入 Skills")}>
                   {inspection.candidates.map((value) => (
                     <button
                       type="button"
@@ -486,7 +474,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                 <section className="capability-section">
                   <div className="capability-detail-heading">
                     <h3>{candidate.name}</h3>
-                    <span className="capability-note">{candidate.fileCount} 个文件</span>
+                    <span className="capability-note">{candidate.fileCount}<UiText zh={" 个文件"} /></span>
                   </div>
                   <p className="capability-note">{candidate.description}</p>
                   <SkillContentPreview
@@ -501,14 +489,12 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
                   />
                 </section>
               ) : (
-                <p className="capability-note">没有可导入的 Skill。</p>
+                <p className="capability-note"><UiText zh={"没有可导入的 Skill。"} /></p>
               )}
               {inspection.rejectedCandidates.length > 0 && (
                 <details className="capability-section">
-                  <summary>其他 {inspection.rejectedCandidates.length} 项暂不可导入</summary>
-                  <p className="capability-note">
-                    请检查文件夹是否包含有效的 SKILL.md，且内容不含符号链接或超出大小限制。
-                  </p>
+                  <summary><UiText zh={"其他 "} />{inspection.rejectedCandidates.length}<UiText zh={" 项暂不可导入"} /></summary>
+                  <p className="capability-note"><UiText zh={"请检查文件夹是否包含有效的 SKILL.md，且内容不含符号链接或超出大小限制。"} /></p>
                 </details>
               )}
             </>
@@ -516,16 +502,13 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
         </>
       ) : selected ? (
         <>
-          <div className="capability-tabs" role="group" aria-label="Skill 详情">
+          <div className="capability-tabs" role="group" aria-label={uiAttribute("Skill 详情")}>
             <button
               type="button"
               aria-pressed={tab === 'content'}
               onClick={() => setTab('content')}
-            >
-              内容
-            </button>
-            <button type="button" aria-pressed={tab === 'groups'} onClick={() => setTab('groups')}>
-              生效范围{' '}
+            ><UiText zh={"内容"} /></button>
+            <button type="button" aria-pressed={tab === 'groups'} onClick={() => setTab('groups')}><UiText zh={"生效范围"} />{' '}
               <span>{groupAssignmentSummary(selected.groupAssignments.length, groups.length)}</span>
             </button>
           </div>
@@ -550,7 +533,7 @@ export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): Rea
           )}
         </>
       ) : (
-        <div className="capability-empty">从左侧选择 Skill，或导入新的 Skill。</div>
+        <div className="capability-empty"><UiText zh={"从左侧选择 Skill，或导入新的 Skill。"} /></div>
       )}
     </CapabilityWorkspace>
   )
@@ -571,7 +554,7 @@ export function SkillListItem({
       mark={<SkillIdentityMark skillId={skill.id} name={skill.name} />}
       source={skillSourcePresentation(skill).badgeLabel}
       enabled={skill.enabled}
-      summary={skill.currentRevision.description || '未提供说明。'}
+      summary={skill.currentRevision.description ||uiAttribute("未提供说明。")}
       selected={selected}
       onSelect={onSelect}
     />
@@ -593,10 +576,8 @@ export function SkillGroupChoices({
     <section>
       <div className="capability-scope-heading">
         <div className="capability-title">
-          <h3>生效组</h3>
-          <NewConversationQuickHelp label="Skill 生效组说明">
-            新导入的 Skill 默认对全部组生效。停用后保留已选组。
-          </NewConversationQuickHelp>
+          <h3><UiText zh={"生效组"} /></h3>
+          <NewConversationQuickHelp label={uiAttribute("Skill 生效组说明")}><UiText zh={"新导入的 Skill 默认对全部组生效。停用后保留已选组。"} /></NewConversationQuickHelp>
         </div>
         <button
           type="button"
@@ -606,7 +587,7 @@ export function SkillGroupChoices({
             onChange(selected.size === groups.length ? [] : groups.map((group) => group.key))
           }
         >
-          {selected.size === groups.length ? '清除选择' : '选择全部'}
+          {selected.size === groups.length ? uiAttribute("清除选择") : uiAttribute("选择全部")}
         </button>
       </div>
       <div className="capability-group-options">
@@ -645,7 +626,7 @@ export function SkillGroupChoices({
                     <span>{group.members.map((member) => member.displayName).join('、')}</span>
                   </>
                 ) : (
-                  <span>暂无队员</span>
+                  <span><UiText zh={"暂无队员"} /></span>
                 )}
               </span>
             </span>
@@ -664,9 +645,9 @@ export function deleteSkillConfirmationCopy(name: string): {
   confirmLabel: string
 } {
   return {
-    title: `删除 Skill “${name}”？`,
-    description: '原始导入文件会保留。',
-    confirmLabel: '确认删除 Skill'
+    title: uiAttribute("删除 Skill “{0}”？", String(name)),
+    description:uiAttribute("原始导入文件会保留。"),
+    confirmLabel:uiAttribute("确认删除 Skill")
   }
 }
 
@@ -676,10 +657,9 @@ export function updateSkillConfirmationCopy(name: string): {
   confirmLabel: string
 } {
   return {
-    title: `更新现有 Skill “${name}”？`,
-    description:
-      '将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。',
-    confirmLabel: '更新 Skill'
+    title: uiAttribute("更新现有 Skill “{0}”？", String(name)),
+    description:uiAttribute("将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。"),
+    confirmLabel:uiAttribute("更新 Skill")
   }
 }
 
@@ -742,7 +722,7 @@ export function patchSkillEnabledResult(
   const enabled = result.payload.enabled
   const version = result.payload.version
   if (typeof enabled !== 'boolean' || typeof version !== 'number') {
-    throw new Error('Skill 启停结果无效，请重试。')
+    throw new Error(uiAttribute('Skill 启停结果无效，请重试。'))
   }
   return skills.map((skill) => (skill.id === skillId ? { ...skill, enabled, version } : skill))
 }
@@ -773,21 +753,21 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
       return {
         kind: 'bundled',
         badgeLabel: 'Rovai',
-        sourceLabel: '随 Rovai 安装',
+        sourceLabel:uiAttribute("随 Rovai 安装"),
         repositoryUrl: repository.url,
         repositoryLabel: repository.label,
         revisionLabel: shortGitRevision(revision),
-        detailNote: '由 Rovai 维护并随应用更新；包内保留上游来源、许可与署名。'
+        detailNote:uiAttribute("由 Rovai 维护并随应用更新；包内保留上游来源、许可与署名。")
       }
     }
     return {
       kind: 'bundled',
       badgeLabel: 'Rovai',
-      sourceLabel: '随 Rovai 安装',
+      sourceLabel:uiAttribute("随 Rovai 安装"),
       repositoryUrl: null,
       repositoryLabel: null,
       revisionLabel: internalRevision,
-      detailNote: '随 Rovai 发布并由应用更新；启用不代表获得额外工具或权限。'
+      detailNote:uiAttribute("随 Rovai 发布并由应用更新；启用不代表获得额外工具或权限。")
     }
   }
 
@@ -806,7 +786,7 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
     repositoryUrl: repository?.url ?? null,
     repositoryLabel: repository?.label ?? null,
     revisionLabel: revision ? shortGitRevision(revision) : internalRevision,
-    detailNote: 'Rovai 已保存独立副本，不依赖原始来源；后续不会自动同步，启停和生效范围仍由你管理。'
+    detailNote:uiAttribute("Rovai 已保存独立副本，不依赖原始来源；后续不会自动同步，启停和生效范围仍由你管理。")
   }
 }
 
@@ -860,33 +840,33 @@ function shortGitRevision(value: string): string {
 }
 
 export function groupAssignmentSummary(selected: number, total: number): string {
-  if (total > 0 && selected === total) return '全部组'
-  if (selected === 0) return '未选择'
-  return `${selected} 个组`
+  if (total > 0 && selected === total) return uiAttribute("全部组")
+  if (selected === 0) return uiAttribute("未选择")
+  return uiAttribute("{0} 个组", String(selected))
 }
 
 export function importActionLabel(action: SkillImportCandidate['importAction']): string {
-  return (
+  return uiAttribute((
     {
       create: '新 Skill',
       update: '同名 Skill 已存在，将创建新 Revision',
       unchanged: '内容与当前 Revision 相同',
       official_conflict: '不能覆盖 Rovai 内置 Skill'
     } as const
-  )[action]
+  )[action])
 }
 
 export function projectionStateLabel(state: string): string {
-  return (
+  return uiAttribute((
     (
       {
         shadowed: '被项目同名 Skill 遮蔽',
         stale: '等待下次运行生效',
         pending_removal: '等待现有运行释放',
-        error: '投递失败'
+        error:uiAttribute("投递失败")
       } as Record<string, string>
     )[state] ?? state
-  )
+  ))
 }
 
 export function formatBytes(value: number): string {
@@ -896,13 +876,13 @@ export function formatBytes(value: number): string {
 }
 
 function sourceTypeLabel(sourceType: SkillView['currentRevision']['sourceType']): string {
-  return (
+  return uiAttribute((
     {
       bundled: '随 Rovai 安装',
       local_folder: '本地文件夹导入',
       github: 'GitHub 导入'
     } as const
-  )[sourceType]
+  )[sourceType])
 }
 
 function parseGithubImportInput(input: string): {
@@ -914,21 +894,21 @@ function parseGithubImportInput(input: string): {
   try {
     url = new URL(input.trim())
   } catch {
-    throw new Error('请输入有效的 GitHub HTTPS 链接。')
+    throw new Error(uiAttribute('请输入有效的 GitHub HTTPS 链接。'))
   }
   if (url.protocol !== 'https:' || url.hostname !== 'github.com')
-    throw new Error('仅支持 https://github.com/ 链接。')
+    throw new Error(uiAttribute('仅支持 https://github.com/ 链接。'))
   const segments = url.pathname
     .replace(/^\/+|\/+$/g, '')
     .split('/')
     .filter(Boolean)
-  if (segments.length < 2) throw new Error('GitHub 链接需要包含 owner 和 repository。')
+  if (segments.length < 2) throw new Error(uiAttribute('GitHub 链接需要包含 owner 和 repository。'))
   const [owner, rawRepository, marker, gitRef, ...subdirectory] = segments
   const repository = rawRepository.endsWith('.git') ? rawRepository.slice(0, -4) : rawRepository
   if (marker && marker !== 'tree')
-    throw new Error('请使用仓库链接，或 /tree/<ref>/<子目录> 形式的链接。')
+    throw new Error(uiAttribute('请使用仓库链接，或 /tree/<ref>/<子目录> 形式的链接。'))
   if (marker === 'tree' && !gitRef)
-    throw new Error('GitHub 子目录链接缺少 branch、tag 或 commit ref。')
+    throw new Error(uiAttribute('GitHub 子目录链接缺少 branch、tag 或 commit ref。'))
   return {
     repositoryUrl: `https://github.com/${owner}/${repository}`,
     ...(gitRef ? { gitRef: decodeURIComponent(gitRef) } : {}),
@@ -943,7 +923,7 @@ function assertCommandApplied(result: StoredCommandResult): void {
     const message =
       typeof result.payload.message === 'string'
         ? result.payload.message
-        : `操作未完成：${result.code}`
+        : uiAttribute("操作未完成：{0}", String(result.code))
     throw new Error(message)
   }
 }

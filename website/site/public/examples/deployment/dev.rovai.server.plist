@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>dev.rovai.server</string>
+  <key>ProgramArguments</key><array>
+    <string>/Users/rovai/.local/share/rovai-server/current/rovai-server</string>
+    <string>--data-dir</string><string>/Users/rovai/.rovai-server</string>
+    <string>--listen</string><string>127.0.0.1:8767</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/rovai</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>HOME</key><string>/Users/rovai</string>
+    <key>PATH</key><string>/Users/rovai/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>ExitTimeOut</key><integer>90</integer>
+  <key>StandardOutPath</key><string>/Users/rovai/.rovai-server/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/rovai/.rovai-server/logs/launchd.err.log</string>
+</dict></plist>

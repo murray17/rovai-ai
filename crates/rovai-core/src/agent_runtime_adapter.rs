@@ -22,9 +22,7 @@ use crate::{
         AdapterCapabilitySnapshot, AdapterKind, AdapterPermissionConfig, ModelDescriptor,
         ModelOptionDescriptor, PermissionOptionDescriptor, RuntimeOptionScope, ValueChoice,
     },
-    builtin_tool_transport::{
-        BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_RUNTIME_CAPABILITY, builtin_tool_catalog_digest,
-    },
+    builtin_tool_transport::BUILTIN_TOOL_RUNTIME_CAPABILITY,
     command::canonical_json_digest,
     context_contract::{
         CODEX_SESSION_GUIDANCE_REVISION,
@@ -1606,7 +1604,6 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
             "executableFingerprint": input.executable_fingerprint,
             "reportedVersion": input.reported_version,
             "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
-            "nativeSessionCompatibilityKey": input.native_session_compatibility_key,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -2238,7 +2235,7 @@ fn acp_capability_snapshot(
     let session_result = observation.session_result.as_ref();
     let mut models = if ready {
         let session = session_result.context("ready ACP probe did not create a session")?;
-        match acp_model_catalog_from_session(session) {
+        match acp_model_catalog_for_adapter(adapter_kind, session) {
             Ok(models) => models,
             Err(_)
                 if matches!(
@@ -2556,6 +2553,37 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
             .cmp(&left.is_default)
             .then_with(|| left.display_name.cmp(&right.display_name))
     });
+    Ok(models)
+}
+
+pub fn acp_model_catalog_for_adapter(
+    adapter_kind: AdapterKind,
+    session_result: &Value,
+) -> Result<Vec<ModelDescriptor>> {
+    let mut models = acp_model_catalog_from_session(session_result)?;
+    if adapter_kind == AdapterKind::CodebuddyCli
+        && let Some(current) = acp_runtime_model_id_from_session(session_result)
+        && !models.iter().any(|model| model.id == current)
+    {
+        // CodeBuddy's selected custom-local or API-environment model can be
+        // absent from an ACP options list containing only built-in IDs.
+        models.push(ModelDescriptor {
+            description: None,
+            runtime_metadata: None,
+            id: current.clone(),
+            display_name: current,
+            is_default: true,
+            hidden: false,
+            deprecated: false,
+            options: Vec::new(),
+        });
+        models.sort_by(|left, right| {
+            right
+                .is_default
+                .cmp(&left.is_default)
+                .then_with(|| left.display_name.cmp(&right.display_name))
+        });
+    }
     Ok(models)
 }
 
@@ -3025,7 +3053,7 @@ fn resolve_pi_runtime(
         "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
         "authScope": input.auth_scope,
         "protocolVersion": protocol_version,
-        "managedExtension": "rovai-pi-host-v7",
+        "managedExtension": "rovai-pi-host-v8",
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
@@ -3281,8 +3309,8 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
         let binding_compatibility_digest = antigravity_binding_compatibility_digest(
             input.installation_id,
             &protocol_version,
-            BUILTIN_TOOL_CONTRACT_VERSION,
-            &builtin_tool_catalog_digest()?,
+            NATIVE_BINDING_TOOL_COMPATIBILITY_VERSION,
+            NATIVE_BINDING_TOOL_COMPATIBILITY_DIGEST,
         )?;
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),
@@ -3304,6 +3332,12 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
         })
     }
 }
+
+// Tool names and input aliases changed in v33; native protocol/session semantics did not.
+// Keep the exact v32 identity used by existing bindings. Live discovery uses the current catalog.
+const NATIVE_BINDING_TOOL_COMPATIBILITY_VERSION: u32 = 32;
+const NATIVE_BINDING_TOOL_COMPATIBILITY_DIGEST: &str =
+    "sha256:f3a80021f106afb84a02db2eb0eaa5f81d4936df46a8aaa131f3c15127fb70c1";
 
 fn antigravity_binding_compatibility_digest(
     installation_id: &str,
@@ -3429,6 +3463,30 @@ mod tests {
         assert!(acp_model_catalog_from_session(&malformed).is_err());
         malformed["configOptions"][0]["options"][0]["options"] = Value::Null;
         assert!(acp_model_catalog_from_session(&malformed).is_err());
+
+        let codebuddy = json!({"configOptions":[{"id":"model","currentValue":"custom-local:gpt-6-sol","options":[{"value":"glm-5.2","name":"GLM"}]}]});
+        assert!(
+            !acp_model_catalog_from_session(&codebuddy)
+                .unwrap()
+                .iter()
+                .any(|model| model.is_default)
+        );
+        let configured =
+            acp_model_catalog_for_adapter(AdapterKind::CodebuddyCli, &codebuddy).unwrap();
+        assert_eq!(configured[0].id, "custom-local:gpt-6-sol");
+        assert!(configured[0].is_default);
+        let mut api_environment = codebuddy.clone();
+        api_environment["configOptions"][0]["currentValue"] = json!("gpt-6.1-sol");
+        let configured =
+            acp_model_catalog_for_adapter(AdapterKind::CodebuddyCli, &api_environment).unwrap();
+        assert_eq!(configured[0].id, "gpt-6.1-sol");
+        assert!(configured[0].is_default);
+        assert!(
+            !acp_model_catalog_for_adapter(AdapterKind::QoderCli, &codebuddy)
+                .unwrap()
+                .iter()
+                .any(|model| model.is_default)
+        );
     }
 
     #[cfg(unix)]
@@ -3653,9 +3711,9 @@ mod tests {
             resolved.binding_compatibility_digest, changed_session_key.binding_compatibility_digest,
             "the Adapter session key is persisted and evaluated independently"
         );
-        assert_ne!(
+        assert_eq!(
             resolved.host_config_digest, changed_session_key.host_config_digest,
-            "the native session key must fence a Runtime Host"
+            "the native session key does not change Codex Host startup"
         );
         let current_contract_digest = canonical_json_digest(&json!({
             "adapterKind": AdapterKind::CodexCli,
@@ -4439,23 +4497,37 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_catalog_upgrade_replaces_the_native_conversation_binding() {
-        let current_catalog = builtin_tool_catalog_digest().unwrap();
+    fn antigravity_catalog_rename_preserves_binding_but_protocol_changes_do_not() {
+        let baseline = antigravity_binding_compatibility_digest(
+            "agy-local",
+            "antigravity-app-cli-v1",
+            32,
+            "sha256:f3a80021f106afb84a02db2eb0eaa5f81d4936df46a8aaa131f3c15127fb70c1",
+        )
+        .unwrap();
         let current = antigravity_binding_compatibility_digest(
             "agy-local",
             "antigravity-app-cli-v1",
-            BUILTIN_TOOL_CONTRACT_VERSION,
-            &current_catalog,
+            NATIVE_BINDING_TOOL_COMPATIBILITY_VERSION,
+            NATIVE_BINDING_TOOL_COMPATIBILITY_DIGEST,
         )
         .unwrap();
-        let legacy = antigravity_binding_compatibility_digest(
-            "agy-local",
-            "antigravity-app-cli-v1",
-            7,
-            &format!("sha256:{}", "0".repeat(64)),
-        )
-        .unwrap();
-        assert_ne!(current, legacy);
+        assert_eq!(current, baseline);
+        for (installation, protocol) in [
+            ("agy-other", "antigravity-app-cli-v1"),
+            ("agy-local", "antigravity-app-cli-v2"),
+        ] {
+            assert_ne!(
+                current,
+                antigravity_binding_compatibility_digest(
+                    installation,
+                    protocol,
+                    NATIVE_BINDING_TOOL_COMPATIBILITY_VERSION,
+                    NATIVE_BINDING_TOOL_COMPATIBILITY_DIGEST,
+                )
+                .unwrap()
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,13 @@
+{
+  "runtimeVersion": "2.1.1",
+  "method": "session/update",
+  "params": {
+    "sessionId": "session-redacted",
+    "update": { "sessionUpdate": "usage_update", "used": 18913, "size": 262144 }
+  },
+  "expected": {
+    "scope": "session",
+    "contextUsedTokens": 18913,
+    "contextSizeTokens": 262144
+  }
+}

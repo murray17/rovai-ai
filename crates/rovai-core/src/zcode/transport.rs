@@ -2,7 +2,7 @@
 //! session transport. The child is the official App kernel, never an ACP package.
 
 use super::{
-    NativeConfig,
+    NativeConfig, NativeProtocol,
     events::{NativeTurnFailure, RUNTIME_HEADERS_UNAVAILABLE, SessionEvents},
 };
 use anyhow::{Context, Result, bail};
@@ -21,7 +21,7 @@ use tokio::{
         AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader,
         DuplexStream,
     },
-    sync::{Mutex, mpsc, oneshot},
+    sync::{Mutex, Notify, mpsc, oneshot},
     task::JoinSet,
 };
 
@@ -47,7 +47,7 @@ pub async fn probe(
         }
     }
     let root = Root(super::private_runtime_root("rvzp")?);
-    let mut config = NativeConfig::load(&std::env::current_dir()?)?;
+    let mut config = NativeConfig::load_for_executable(&std::env::current_dir()?, executable)?;
     // Native login and BYOK both resolve here. Report setup guidance before spawning.
     config.runtime_model(None)?;
     config.value["mcp"] = json!({"enabled":false,"servers":{}});
@@ -162,11 +162,13 @@ pub async fn confirm_owner_cleanup(
 
 struct Session {
     events: SessionEvents,
+    model_reasoning_defaults: HashMap<String, String>,
     terminal: Option<Reply>,
     cancelled: bool,
     cancel_input: Option<String>,
     cancel_requests: std::collections::HashSet<String>,
     acceptance_compaction: Option<oneshot::Sender<()>>,
+    context_refresh_pending: Option<u64>,
 }
 
 struct PendingPermission {
@@ -184,6 +186,8 @@ struct Bridge {
     sessions: Mutex<HashMap<String, Session>>,
     finished: mpsc::Sender<(String, Result<Value>)>,
     background_settle: mpsc::Sender<String>,
+    context_refresh: Notify,
+    snapshot_read: Mutex<()>,
     config: NativeConfig,
     cwd: PathBuf,
     mode: String,
@@ -219,6 +223,8 @@ where
         mode,
         finished,
         background_settle,
+        context_refresh: Notify::new(),
+        snapshot_read: Mutex::new(()),
         acceptance_compacted: AtomicBool::new(false),
     });
     tokio::spawn(async move {
@@ -235,9 +241,18 @@ where
                     {
                         let result = if message.get("error").is_some() {
                             // Native errors can echo a model configuration containing secrets.
-                            Err(anyhow::anyhow!(
+                            let native_message = message["error"]["message"]
+                                .as_str()
+                                .unwrap_or_default();
+                            Err(anyhow::anyhow!(if message["error"]["code"] == -32601 {
+                                "Official ZCode method not found; bundled protocol is incompatible"
+                            } else if native_message.contains("Provider Registry")
+                                && native_message.contains("Model")
+                            {
+                                "ZCode Provider Registry has no usable model; configure a personal BYOK provider in official ZCode"
+                            } else {
                                 "Official ZCode rejected the protocol request"
-                            ))
+                            }))
                         } else {
                             Ok(message.get("result").cloned().unwrap_or(Value::Null))
                         };
@@ -259,6 +274,48 @@ where
             }
             Ok(())
         });
+        let context_bridge = bridge.clone();
+        workers.spawn(async move {
+            loop {
+                context_bridge.context_refresh.notified().await;
+                let requested = {
+                    let mut sessions = context_bridge.sessions.lock().await;
+                    sessions
+                        .iter_mut()
+                        .filter_map(|(id, session)| {
+                            session.context_refresh_pending.take()?;
+                            Some((id.clone(), session.events.input_id()?.to_string()))
+                        })
+                        .collect::<Vec<_>>()
+                };
+                for (session_id, input_id) in requested {
+                    // The reader task continues servicing RPC responses while
+                    // this worker waits. No prompt-final or UI visibility gate.
+                    let Ok(snapshot) = context_bridge.read_snapshot(&session_id, true).await else {
+                        continue;
+                    };
+                    let mut sessions = context_bridge.sessions.lock().await;
+                    if let Some(session) = sessions.get_mut(&session_id)
+                        && session.events.input_id() == Some(input_id.as_str())
+                    {
+                        // The snapshot can already cover events received while
+                        // its RPC was in flight. Keep only newer pending work.
+                        if let Some(covered) = snapshot
+                            .pointer("/runtime/eventSeq")
+                            .and_then(Value::as_u64)
+                        {
+                            session.context_refresh_pending =
+                                session.context_refresh_pending.filter(|seq| *seq > covered);
+                        }
+                        // Keep the owner stable through forwarding. The next Run
+                        // must not inherit an earlier read's numeric receipt.
+                        if let Some(context) = native_context_update(&session_id, &snapshot) {
+                            write_frame(&context_bridge.core, &context).await?;
+                        }
+                    }
+                }
+            }
+        });
         let finish_bridge = bridge.clone();
         let background_bridge = bridge.clone();
         workers.spawn(async move {
@@ -273,11 +330,18 @@ where
         });
         workers.spawn(async move {
             while let Some((session_id,terminal)) = finished_rx.recv().await {
-                let jobs = finish_bridge.settle_foreground(&session_id, terminal.is_err()).await?;
+                let snapshot = finish_bridge.settle_foreground(&session_id, terminal.is_err()).await?;
+                let jobs = snapshot.pointer("/projection/backgroundJobs").and_then(Value::as_array)
+                    .context("ZCode background state unavailable")?;
                 let (messages,reply,cancel_tasks) = {
                     let mut sessions = finish_bridge.sessions.lock().await;
                     let session = sessions.get_mut(&session_id).context("ZCode finishing Session missing")?;
-                    let messages = session.events.finish(&session_id,&jobs)?;
+                    let mut messages = Vec::new();
+                    if session.events.input_id().is_some()
+                        && let Some(context) = native_context_update(&session_id, &snapshot) {
+                        messages.push(context);
+                    }
+                    messages.extend(session.events.finish(&session_id,jobs)?);
                     let cancel_tasks = if session.cancelled {
                         session.events.background_tasks_for_input(session.cancel_input.as_deref())
                     } else { Vec::new() };
@@ -490,19 +554,31 @@ impl Bridge {
     async fn dispatch(&self, method: &str, params: &Value) -> Result<Value> {
         match method {
             "initialize" => {
-                if let Some(registry) = self.config.app_provider_registry()? {
-                    let applied = self.call("workspace/updateProviderRegistry", json!({"workspace":self.workspace(),"registry":registry,"includeWorkspaceState":false})).await?;
-                    if applied["appliedProviderRevision"] != self.config.digest
-                        || !matches!(applied["status"].as_str(), Some("applied" | "unchanged"))
-                        || applied["providerCount"].as_u64()
-                            != registry["providers"]
-                                .as_array()
-                                .map(|providers| providers.len() as u64)
-                    {
-                        bail!("ZCode App provider registry was not confirmed");
+                if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                    let presentation = self
+                        .call(
+                            "workspace/readPresentation",
+                            json!({"workspace":self.workspace()}),
+                        )
+                        .await?;
+                    if presentation["workspace"] != self.workspace() {
+                        bail!("ZCode workspace presentation identity mismatch");
                     }
+                } else {
+                    if let Some(registry) = self.config.app_provider_registry()? {
+                        let applied = self.call("workspace/updateProviderRegistry", json!({"workspace":self.workspace(),"registry":registry,"includeWorkspaceState":false})).await?;
+                        if applied["appliedProviderRevision"] != self.config.digest
+                            || !matches!(applied["status"].as_str(), Some("applied" | "unchanged"))
+                            || applied["providerCount"].as_u64()
+                                != registry["providers"]
+                                    .as_array()
+                                    .map(|providers| providers.len() as u64)
+                        {
+                            bail!("ZCode App provider registry was not confirmed");
+                        }
+                    }
+                    self.call("workspace/readState", json!({"workspace":self.workspace(),"runtimeModel":self.config.runtime_model(None)?})).await?;
                 }
-                self.call("workspace/readState", json!({"workspace":self.workspace(),"runtimeModel":self.config.runtime_model(None)?})).await?;
                 Ok(json!({"protocolVersion":1,"agentInfo":{"name":"ZCode"},
                     "agentCapabilities":{"loadSession":false,"sessionCapabilities":{"resume":{}},"mcpCapabilities":{"http":true,"sse":true}},"authMethods":[]}))
             }
@@ -515,15 +591,30 @@ impl Bridge {
                 // Deferred native creation does not generate a title or run the
                 // model. The first input remains the Core-owned Bootstrap.
                 let snapshot = if method == "session/new" {
-                    self.call("session/create", json!({"workspace":self.workspace(),"persistence":"deferred",
-                        "mode":self.mode,"runtimeModel":runtime_model,"mcpServers":servers,"titleGenerationEnabled":false})).await?
+                    let mut create = json!({"workspace":self.workspace(),"persistence":"deferred",
+                        "mode":self.mode,"mcpServers":servers,"titleGenerationEnabled":false});
+                    if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                        if !runtime_model["model"].is_null() {
+                            create["model"] = runtime_model["model"].clone();
+                            if let Some(level) =
+                                runtime_model["model"]["options"]["reasoningLevel"].as_str()
+                            {
+                                // 0.16.9's create path converts ModelSelection to a
+                                // provider/model string; thoughtLevel is its separate
+                                // initial reasoning setting.
+                                create["thoughtLevel"] = json!(level);
+                            }
+                        }
+                    } else {
+                        create["runtimeModel"] = runtime_model;
+                    }
+                    self.call("session/create", create).await?
                 } else {
-                    self.call(
-                        "session/resume",
-                        json!({"sessionId":params["sessionId"],"workspace":self.workspace(),
-                        "runtimeModel":runtime_model,"mcpServers":servers}),
-                    )
-                    .await?
+                    let mut resume = json!({"sessionId":params["sessionId"],"workspace":self.workspace(),"mcpServers":servers});
+                    if self.config.protocol() == NativeProtocol::Legacy {
+                        resume["runtimeModel"] = runtime_model;
+                    }
+                    self.call("session/resume", resume).await?
                 };
                 let session_id = snapshot
                     .pointer("/session/sessionId")
@@ -534,6 +625,18 @@ impl Bridge {
                     bail!("ZCode exact resume mismatch");
                 }
                 let subscription = self.call("session/subscribe", json!({"sessionId":session_id,"deliveryKind":"desktop-continuous","includeSnapshot":false})).await?;
+                let model_reasoning_defaults = snapshot
+                    .pointer("/settings/model/available")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|choice| {
+                        let provider = choice.pointer("/ref/providerId")?.as_str()?;
+                        let model = choice.pointer("/ref/modelId")?.as_str()?;
+                        let level = choice.pointer("/reasoning/defaultLevel")?.as_str()?;
+                        Some((format!("{provider}/{model}"), level.to_string()))
+                    })
+                    .collect();
                 self.sessions.lock().await.insert(
                     session_id.to_string(),
                     Session {
@@ -543,11 +646,13 @@ impl Bridge {
                                 .and_then(Value::as_u64)
                                 .unwrap_or(0),
                         ),
+                        model_reasoning_defaults,
                         terminal: None,
                         cancelled: false,
                         cancel_input: None,
                         cancel_requests: Default::default(),
                         acceptance_compaction: None,
+                        context_refresh_pending: None,
                     },
                 );
                 self.call(
@@ -573,13 +678,40 @@ impl Bridge {
                 if key != "model" {
                     bail!("Unsupported ZCode model option");
                 }
-                let runtime_model = self.config.runtime_model(Some(selected))?;
-                let applied = self.call("session/setModel", json!({"sessionId":session_id,"model":runtime_model["model"],"runtimeModel":runtime_model})).await?;
-                if applied
+                let mut runtime_model = self.config.runtime_model(Some(selected))?;
+                let applied = if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                    let level = self
+                        .sessions
+                        .lock()
+                        .await
+                        .get(session_id)
+                        .and_then(|session| session.model_reasoning_defaults.get(selected))
+                        .cloned();
+                    if runtime_model["model"]["options"]["reasoningLevel"].is_null()
+                        && let Some(level) = level
+                    {
+                        runtime_model["model"]["options"] = json!({"reasoningLevel":level});
+                    }
+                    self.call(
+                        "session/setModel",
+                        json!({"sessionId":session_id,"model":runtime_model["model"]}),
+                    )
+                    .await?
+                } else {
+                    self.call("session/setModel", json!({"sessionId":session_id,"model":runtime_model["model"],"runtimeModel":runtime_model})).await?
+                };
+                let current = applied
                     .pointer("/model/current")
-                    .or_else(|| applied.pointer("/settings/model/current"))
-                    != Some(&runtime_model["model"])
-                {
+                    .or_else(|| applied.pointer("/settings/model/current"));
+                let confirmed = if self.config.protocol() == NativeProtocol::ProviderRegistry {
+                    current.is_some_and(|current| {
+                        current["providerId"] == runtime_model["model"]["providerId"]
+                            && current["modelId"] == runtime_model["model"]["modelId"]
+                    })
+                } else {
+                    current == Some(&runtime_model["model"])
+                };
+                if !confirmed {
                     bail!("ZCode model selection was not confirmed");
                 }
                 Ok(json!({}))
@@ -705,19 +837,43 @@ impl Bridge {
         Ok(())
     }
 
-    async fn settle_foreground(&self, session_id: &str, allow_failed: bool) -> Result<Vec<Value>> {
+    async fn read_snapshot(&self, session_id: &str, bounded_messages: bool) -> Result<Value> {
+        // Also serialize with terminal/background reads. The official protocol
+        // accepts a positive messageLimit; 1 avoids transferring chat history.
+        let _guard = self.snapshot_read.lock().await;
+        let mut params = json!({"sessionId":session_id});
+        if bounded_messages {
+            params["messageLimit"] = json!(1);
+        }
+        // Older native shapes may reject the optional limit. A live metrics
+        // failure must not break the pre-existing terminal settlement request.
+        let started = std::time::Instant::now();
+        let result = self.call("session/read", params).await;
+        crate::monitoring::context_acceptance_trace(|| {
+            let snapshot = result.as_ref().ok();
+            json!({"kind":"zcode_context_read", "sessionId":session_id,
+                "returnedAt":chrono::Utc::now().to_rfc3339(), "durationMs":started.elapsed().as_millis(),
+                "boundedMessages":bounded_messages, "succeeded":result.is_ok(),
+                "eventSeq":snapshot.and_then(|s|s.pointer("/runtime/eventSeq")).and_then(Value::as_u64),
+                "stateRevision":snapshot.and_then(|s|s.pointer("/runtime/stateRevision")).and_then(Value::as_u64),
+                "used":snapshot.and_then(|s|s.pointer("/runtime/contextUsage/used")).and_then(Value::as_u64),
+                "size":snapshot.and_then(|s|s.pointer("/runtime/contextUsage/size")).and_then(Value::as_u64)
+            })
+        });
+        result
+    }
+
+    async fn settle_foreground(&self, session_id: &str, allow_failed: bool) -> Result<Value> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
         loop {
-            let snapshot = self
-                .call("session/read", json!({"sessionId":session_id}))
-                .await?;
-            let jobs = snapshot
+            let snapshot = self.read_snapshot(session_id, false).await?;
+            snapshot
                 .pointer("/projection/backgroundJobs")
                 .and_then(Value::as_array)
                 .context("ZCode background state unavailable")?;
             let quiescent = foreground_quiescent(&snapshot, allow_failed);
             if quiescent {
-                return Ok(jobs.clone());
+                return Ok(snapshot);
             }
             if tokio::time::Instant::now() >= deadline {
                 bail!("ZCode foreground Tool or permission did not settle");
@@ -860,7 +1016,22 @@ impl Bridge {
                 .try_send(session_id.to_string())
                 .context("ZCode background observer queue unavailable")?;
         }
+        if translated.context_refresh {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(session) = sessions.get_mut(session_id)
+                && session.events.input_id().is_some()
+            {
+                session.context_refresh_pending = params.get("seq").and_then(Value::as_u64);
+                self.context_refresh.notify_one();
+            }
+        }
         if let Some(terminal) = translated.terminal {
+            crate::monitoring::context_acceptance_trace(|| {
+                json!({
+                    "kind":"zcode_native_final", "sessionId":session_id,
+                    "receivedAt":chrono::Utc::now().to_rfc3339()
+                })
+            });
             // Foreground closure is independent of managed background jobs.
             self.finished
                 .send((session_id.to_string(), terminal))
@@ -869,6 +1040,47 @@ impl Bridge {
         }
         Ok(())
     }
+}
+
+// Read the native root Session's own observation from a bounded live/terminal
+// snapshot. Its runtime contextUsage owns occupancy/window pairing, including
+// native compaction; turn Usage and projection.totalTokenCount are not Context.
+// Keep only numeric fields and native revision identities on the Core channel.
+fn native_context_update(session_id: &str, snapshot: &Value) -> Option<Value> {
+    if snapshot.pointer("/session/sessionId")?.as_str()? != session_id {
+        return None;
+    }
+    let runtime = snapshot.get("runtime")?;
+    let seq = runtime.get("eventSeq")?.as_u64()?;
+    let revision = runtime.get("stateRevision")?.as_u64()?;
+    let context = runtime.get("contextUsage")?;
+    let used = context
+        .get("used")
+        .and_then(Value::as_i64)
+        .filter(|n| (0..=9_007_199_254_740_991).contains(n));
+    let size = context
+        .get("size")
+        .and_then(Value::as_i64)
+        .filter(|n| (0..=9_007_199_254_740_991).contains(n));
+    if used.is_none() && size.is_none() {
+        return None;
+    }
+    let model = snapshot
+        .pointer("/settings/model/current/providerId")
+        .and_then(Value::as_str)
+        .zip(
+            snapshot
+                .pointer("/settings/model/current/modelId")
+                .and_then(Value::as_str),
+        )
+        .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
+        .map(|(provider, model)| format!("{provider}/{model}"));
+    Some(
+        json!({"method":"session/update","params":{"sessionId":session_id,"update":{
+            "sessionUpdate":"usage_update","used":used,"size":size,
+            "_meta":{"zcodeContext":{"eventSeq":seq,"stateRevision":revision,"modelId":model}}
+        }}}),
+    )
 }
 
 // A provider failure leaves the native projection in error, not idle. It can
@@ -995,6 +1207,61 @@ mod tests {
     // facade before Core receives the provider failure. No process, disk or DB.
     #[tokio::test]
     async fn provider_failure_reaches_core_without_poisoning_the_host() {
+        let context_snapshot = json!({"session":{"sessionId":"s1"},"runtime":{
+            "eventSeq":9,"stateRevision":4,"contextUsage":{"used":450,"size":1000,"breakdown":"PRIVATE_TEST_KEY"}},
+            "projection":{"totalTokenCount":99999}});
+        let context = native_context_update("s1", &context_snapshot).unwrap();
+        assert!(!context.to_string().contains("PRIVATE_TEST_KEY"));
+        let parsed = crate::monitoring::parse_acp_usage_message(
+            crate::agent_profile::AdapterKind::ZcodeApp,
+            None,
+            "session/update",
+            &context["params"],
+        );
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].fields.context_used_tokens, Some(450));
+        assert_eq!(parsed[0].fields.context_size_tokens, Some(1000));
+        assert_eq!(parsed[0].fields.input_tokens, None);
+        assert!(native_context_update("old-session", &context_snapshot).is_none());
+        let mut invalid = context_snapshot.clone();
+        invalid["runtime"]["eventSeq"] = json!(-1);
+        assert!(native_context_update("s1", &invalid).is_none());
+        for (field, value, remaining) in [
+            ("used", json!(-1), "size"),
+            ("used", json!("450"), "size"),
+            ("size", Value::Null, "used"),
+        ] {
+            let mut partial = context_snapshot.clone();
+            partial["runtime"]["contextUsage"][field] = value;
+            let mapped = native_context_update("s1", &partial).unwrap();
+            assert!(mapped["params"]["update"][field].is_null());
+            assert_eq!(
+                mapped["params"]["update"][remaining],
+                context["params"]["update"][remaining]
+            );
+        }
+        for (field, remaining) in [("used", "size"), ("size", "used")] {
+            let mut partial = context_snapshot.clone();
+            partial["runtime"]["contextUsage"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            let mapped = native_context_update("s1", &partial).unwrap();
+            assert_eq!(mapped["params"]["update"][field], Value::Null);
+            assert_eq!(
+                mapped["params"]["update"][remaining],
+                context["params"]["update"][remaining]
+            );
+        }
+        let mut compacted = context_snapshot.clone();
+        compacted["runtime"]["stateRevision"] = json!(5);
+        compacted["runtime"]["contextUsage"]["used"] = json!(100);
+        let decreased = native_context_update("s1", &compacted).unwrap();
+        assert_eq!(decreased["params"]["update"]["used"], 100);
+        assert_ne!(
+            decreased["params"]["update"]["_meta"],
+            context["params"]["update"]["_meta"]
+        );
         let snapshot = json!({"projection":{"status":"error","activeToolCalls":[],"pendingPermissions":[]},
             "runtime":{"pendingRequestIds":[]}});
         assert!(foreground_quiescent(&snapshot, true));
@@ -1017,11 +1284,16 @@ mod tests {
                 "models":{"model":{}}}}}),
             digest: "fixture".into(),
             app_config: false,
+            protocol: NativeProtocol::Legacy,
+            default_selection: None,
         };
         let (native, adapter) = tokio::io::duplex(64 * 1024);
         let (native_read, native_write) = tokio::io::split(native);
         let (adapter_read, adapter_write) = tokio::io::split(adapter);
+        let (live_tx, live_rx) = oneshot::channel();
+        let mut live_tx = Some(live_tx);
         let peer = tokio::spawn(async move {
+            let mut live_rx = Some(live_rx);
             let mut reader = BufReader::new(native_read);
             let writer: Mutex<Writer> = Mutex::new(Box::new(native_write));
             let mut frame = Vec::new();
@@ -1040,6 +1312,65 @@ mod tests {
                         )
                         .await
                         .unwrap();
+                        let completed = |seq| {
+                            json!({"method":"session/event","params":{
+                            "sessionId":"s1","seq":seq,"turnId":"t1","type":"session.updated",
+                            "payload":{"usage":{"inputTokens":40},"querySource":"main_turn"}}})
+                        };
+                        write_frame(&writer, &completed(2)).await.unwrap();
+                        let first = read_frame(&mut reader, &mut frame).await.unwrap().unwrap();
+                        assert_eq!(first["method"], "session/read");
+                        assert_eq!(first["params"]["messageLimit"], 1);
+                        for seq in 3..23 {
+                            write_frame(&writer, &completed(seq)).await.unwrap();
+                        }
+                        // This callback is processed after the burst, while the
+                        // first read is still held: proves one in-flight request.
+                        write_frame(
+                            &writer,
+                            &json!({"id":"barrier","method":"session/requestRuntimePreferences"}),
+                        )
+                        .await
+                        .unwrap();
+                        let barrier = read_frame(&mut reader, &mut frame).await.unwrap().unwrap();
+                        assert_eq!(barrier["id"], "barrier");
+                        let live_snapshot = |used, revision, seq| {
+                            json!({"session":{"sessionId":"s1"},
+                            "runtime":{"eventSeq":seq,"stateRevision":revision,"activeTurnId":"t1",
+                                "contextUsage":{"used":used,"size":1000}}})
+                        };
+                        write_frame(
+                            &writer,
+                            &json!({"id":first["id"],"result":live_snapshot(450,5,2)}),
+                        )
+                        .await
+                        .unwrap();
+                        let second = read_frame(&mut reader, &mut frame).await.unwrap().unwrap();
+                        assert_eq!(second["method"], "session/read");
+                        // These arrive while the second read is pending; its
+                        // snapshot already covers them, so no third read.
+                        for seq in 23..26 {
+                            write_frame(&writer, &completed(seq)).await.unwrap();
+                        }
+                        write_frame(
+                            &writer,
+                            &json!({"id":"covered","method":"session/requestRuntimePreferences"}),
+                        )
+                        .await
+                        .unwrap();
+                        assert_eq!(
+                            read_frame(&mut reader, &mut frame).await.unwrap().unwrap()["id"],
+                            "covered"
+                        );
+                        write_frame(
+                            &writer,
+                            &json!({"id":second["id"],"result":live_snapshot(400,6,25)}),
+                        )
+                        .await
+                        .unwrap();
+                        // Do not issue the final/error until Core received both
+                        // numeric observations. No completed prompt can mask this.
+                        live_rx.take().unwrap().await.unwrap();
                         write_frame(&writer,&json!({"id":"headers","method":"interaction/requestProviderRuntimeHeaders",
                             "params":{"sessionId":"s1","turnId":"t1","reason":"model-request",
                                 "workspace":{"workspacePath":"/fixture","workspaceKey":"/fixture"}}})).await.unwrap();
@@ -1047,7 +1378,7 @@ mod tests {
                         assert_eq!(callback["id"], "headers");
                         assert_eq!(callback["result"]["headersApplied"], false);
                         write_frame(&writer,&json!({"method":"session/event","params":{
-                            "sessionId":"s1","seq":2,"turnId":"t1","type":"turn.failed",
+                            "sessionId":"s1","seq":26,"turnId":"t1","type":"turn.failed",
                             "payload":{"inputId":input,"turnPhase":"model","error":{
                                 "type":"model_request_failed","code":"model_request_failed",
                                 "message":"Model request failed.","stack":"PRIVATE_TEST_KEY",
@@ -1055,8 +1386,11 @@ mod tests {
                         }})).await.unwrap();
                         json!({"status":"accepted","result":{"inputId":input}})
                     }
-                    "session/read" => json!({"projection":{"status":"error","backgroundJobs":[],
-                        "activeToolCalls":[],"pendingPermissions":[]},"runtime":{"pendingRequestIds":[]}}),
+                    "session/read" => {
+                        json!({"session":{"sessionId":"s1"},"projection":{"status":"error","backgroundJobs":[],
+                        "activeToolCalls":[],"pendingPermissions":[]},"runtime":{"pendingRequestIds":[],
+                        "eventSeq":26,"stateRevision":7,"contextUsage":{"used":450,"size":1000,"breakdown":"PRIVATE_TEST_KEY"}}})
+                    }
                     "workspace/readState" | "session/setMode" => json!({}),
                     method => panic!("unexpected native method {method}"),
                 };
@@ -1076,6 +1410,8 @@ mod tests {
         let mut reader = BufReader::new(read);
         let writer: Mutex<Writer> = Mutex::new(Box::new(write));
         let mut frame = Vec::new();
+        let mut observed_context = false;
+        let mut live_values = Vec::new();
         for (id, method, params) in [
             (1, "session/new", json!({"cwd":"/fixture"})),
             (
@@ -1095,6 +1431,19 @@ mod tests {
                         .unwrap()
                         .expect("provider failure must reach Core before any transport close");
                     assert!(!message.to_string().contains("PRIVATE_TEST_KEY"));
+                    if message["params"]["update"]["_meta"]
+                        .get("zcodeContext")
+                        .is_some()
+                    {
+                        observed_context = true;
+                        if live_values.len() < 2 {
+                            live_values.push(message["params"]["update"]["used"].as_i64().unwrap());
+                            if live_values.len() == 2 {
+                                assert_eq!(live_values, [450, 400]);
+                                live_tx.take().unwrap().send(()).unwrap();
+                            }
+                        }
+                    }
                     if message["id"] == id {
                         break message;
                     }
@@ -1103,6 +1452,10 @@ mod tests {
             .await
             .unwrap();
             if id == 2 {
+                assert!(
+                    observed_context,
+                    "native Context must precede the prompt terminal"
+                );
                 assert!(
                     response["error"]["message"]
                         .as_str()
@@ -1117,6 +1470,108 @@ mod tests {
                 );
             } else {
                 assert!(response.get("error").is_none(), "{response}");
+            }
+        }
+        assert_eq!(live_values, [450, 400]);
+        peer.abort();
+    }
+
+    // The 0.16.9 worker rejects the old registry/readState and runtimeModel
+    // fields. This facade test owns that wire boundary; the real kernel Probe
+    // separately verifies its model catalog and process startup.
+    #[tokio::test]
+    async fn provider_registry_protocol_uses_native_model_selection() {
+        let config = NativeConfig {
+            value: json!({}),
+            digest: "modern-fixture".into(),
+            app_config: false,
+            protocol: NativeProtocol::ProviderRegistry,
+            default_selection: Some(json!({"providerId":"fixture","modelId":"model",
+                "options":{"reasoningLevel":"disabled"}})),
+        };
+        let (native, adapter) = tokio::io::duplex(64 * 1024);
+        let (native_read, native_write) = tokio::io::split(native);
+        let (adapter_read, adapter_write) = tokio::io::split(adapter);
+        let peer = tokio::spawn(async move {
+            let mut reader = BufReader::new(native_read);
+            let writer: Mutex<Writer> = Mutex::new(Box::new(native_write));
+            let mut frame = Vec::new();
+            let model = json!({"providerId":"fixture","modelId":"model"});
+            let snapshot = json!({"session":{"sessionId":"s1"},"settings":{"model":{
+                "current":model,"available":[{"ref":model,"label":"Fixture model",
+                    "reasoning":{"defaultLevel":"enabled","levels":[{"value":"enabled","label":"Enabled"}]}}]}}});
+            while let Some(request) = read_frame(&mut reader, &mut frame).await.unwrap() {
+                let params = &request["params"];
+                let result = match request["method"].as_str().unwrap() {
+                    "workspace/readPresentation" => {
+                        json!({"workspace":params["workspace"],"mode":"build","slashCommands":[]})
+                    }
+                    "session/create" => {
+                        assert!(params.get("runtimeModel").is_none());
+                        assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
+                        assert_eq!(params["thoughtLevel"], "disabled");
+                        snapshot.clone()
+                    }
+                    "session/resume" => {
+                        assert!(params.get("runtimeModel").is_none());
+                        assert_eq!(params["sessionId"], "s1");
+                        snapshot.clone()
+                    }
+                    "session/setModel" => {
+                        assert!(params.get("runtimeModel").is_none());
+                        assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
+                        json!({"settings":{"model":{"current":model}}})
+                    }
+                    "session/subscribe" => json!({"eventSeq":0}),
+                    "session/setMode" => json!({}),
+                    method => panic!("unexpected modern native method {method}"),
+                };
+                write_frame(&writer, &json!({"id":request["id"],"result":result}))
+                    .await
+                    .unwrap();
+            }
+        });
+        let stream = start(
+            adapter_write,
+            adapter_read,
+            config,
+            PathBuf::from("/fixture"),
+            "build".into(),
+        );
+        let (read, write) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read);
+        let writer: Mutex<Writer> = Mutex::new(Box::new(write));
+        let mut frame = Vec::new();
+        for (id, method, params) in [
+            (1, "initialize", json!({})),
+            (2, "session/new", json!({"cwd":"/fixture"})),
+            (
+                3,
+                "session/set_model",
+                json!({"sessionId":"s1","modelId":"fixture/model"}),
+            ),
+            (
+                4,
+                "session/resume",
+                json!({"cwd":"/fixture","sessionId":"s1"}),
+            ),
+        ] {
+            write_frame(&writer, &json!({"id":id,"method":method,"params":params}))
+                .await
+                .unwrap();
+            let response =
+                tokio::time::timeout(Duration::from_secs(5), read_frame(&mut reader, &mut frame))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(response["id"], id);
+            assert!(response.get("error").is_none(), "{response}");
+            if id == 2 || id == 4 {
+                assert_eq!(
+                    response["result"]["models"]["currentModelId"],
+                    "fixture/model"
+                );
             }
         }
         peer.abort();

@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
 import {
   useFilePreview,
   type FilePreviewContextValue,
@@ -9,6 +10,8 @@ import {
 } from './FilePreviewContext'
 import { FilePreviewPaneContent as FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewTabs } from './FilePreviewTabs'
+import { changeInterfaceLanguage } from './interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
 vi.mock('./FilePreviewContext', () => ({ useFilePreview: vi.fn(), useFilePreviewApi: () => ({}) }))
 
@@ -33,7 +36,7 @@ function tab(id: string): FilePreviewTabModel {
     kind: 'file',
     id,
     sourceKey: `workspace:camp-1:src/${id}.ts`,
-    sourceRequest: { kind: 'camp_workspace', campId: 'camp-1', rawReference: `src/${id}.ts` },
+    sourceRequest: { kind: 'camp_workspace', threadId: 'camp-1', rawReference: `src/${id}.ts` },
     previewKey: id,
     presentation: {
       fileName: file.fileName,
@@ -114,6 +117,45 @@ beforeEach(() => {
   }
 })
 
+describe('localized preview status tabs', () => {
+  const preferences = {
+    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
+      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
+    })
+  } as GeneralPreferencesApi
+
+  afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
+
+  it('updates the visible labels, tooltips, close controls and panel names', async () => {
+    const activity = { kind: 'mission_activity' as const, id: 'activity', missionId: 'mission-1' }
+    const execution = { kind: 'execution' as const, id: 'execution' }
+    const namedFile = tab('named-file')
+    updateFile(namedFile, { fileName: '活动', displayPath: '活动', pathPresentation: 'file_name_only' })
+    preview.tabs = [activity, execution, namedFile]
+    preview.activeTab = execution
+    preview.activeTabId = execution.id
+
+    await changeInterfaceLanguage(preferences, 'en')
+    const englishTabs = renderTabs()
+    const englishPane = renderPane()
+    expect(englishTabs).toContain('aria-label="Activity"')
+    expect(englishTabs).toContain('aria-label="Run"')
+    expect(englishTabs).toContain('title="Activity"')
+    expect(englishTabs).toContain('title="Run"')
+    expect(englishTabs).toContain('aria-label="Close Activity"')
+    expect(englishTabs).toContain('aria-label="Close Run"')
+    expect(englishPane).toContain('aria-label="Activity"')
+    expect(englishPane).toContain('aria-label="Run"')
+    expect(englishTabs).toContain('aria-label="活动"')
+
+    await changeInterfaceLanguage(preferences, 'zh-CN')
+    const chineseTabs = renderTabs()
+    expect(chineseTabs).toContain('aria-label="活动"')
+    expect(chineseTabs).toContain('aria-label="执行"')
+    expect(chineseTabs).toContain('title="执行"')
+  })
+})
+
 describe('FilePreviewTabs open feedback', () => {
   it('does not announce a lazy background tab as actively opening', () => {
     const cold = tab('background')
@@ -153,7 +195,7 @@ describe('FilePreviewTabs open feedback', () => {
     const currentFile = tab('readme')
     updateFile(currentFile, { kind: 'markdown', fileName: 'readme.md', displayPath: 'docs/readme.md' })
     const review = {
-      kind: 'file_change' as const, id: 'review-1', campId: 'camp-1', selectedEvidenceFileId: 'evidence-1',
+      kind: 'file_change' as const, id: 'review-1', threadId: 'camp-1', selectedEvidenceFileId: 'evidence-1',
       changes: {
         schemaVersion: 2 as const, agentRunId: 'run-1', executionEpoch: 1,
         fileCount: 1, operationCount: 1, completedAt: '2026-08-30T08:00:00Z',

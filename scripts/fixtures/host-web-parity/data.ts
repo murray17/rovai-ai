@@ -1,4 +1,4 @@
-import type { ActionApprovalView, AgentProfile, AgentRunView, CampComposerDraftView, CampMessageView, CampSnapshot, NavigationSnapshot, ProductRuntimeAvailability } from '@contracts'
+import type { ActionApprovalView, AgentProfile, AgentRunView, ThreadComposerDraftView, ThreadMessageView, ThreadSnapshot, NavigationSnapshot, ProductRuntimeAvailability } from '@contracts'
 import { initialMembers, installations, availability as legacyAvailability } from '../member-editor/data.js'
 
 // Fixed review data, never a claim about locally installed/authenticated Runtime.
@@ -11,22 +11,22 @@ export const availability: ProductRuntimeAvailability[] = legacyAvailability.map
     searchGeneration: 1, observedAt: "2026-09-12T02:30:00Z", diagnosticCode: null }
 }))
 export const now = '2026-09-12T02:30:00Z'
-export const campId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
+export const threadId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
 export const workspacePath = '/review/rovai-workspace'
 export const agents: AgentProfile[] = initialMembers().slice(0, 2).map((agent: AgentProfile, i: number) => ({
   ...agent, agentId: `review-member-${i}`, displayName: i === 0 ? '洛可' : '木瓦',
   professionalResponsibilities: i === 0 ? '梳理当前页面与交互，落实已确认的修改。' : '复核实现与验证证据。',
   avatarRef: null, version: 1, memberOrder: i
 }))
-export function message(sequence: number, body: string, authorType: 'user' | 'agent'): CampMessageView {
+export function message(sequence: number, body: string, authorType: 'user' | 'agent'): ThreadMessageView {
   return { id: `review-message-${sequence}`, sequence, timelineGlobalSequence: sequence, authorType,
     authorId: authorType === 'user' ? 'local_user' : agents[0].agentId, sourceAgentRunId: null,
     body, content: [{ kind: 'text', text: body }], quotes: [], attachments: [],
-    addressMode: 'default', addressedAgentIds: [agents[0].agentId], replyToCampMessageId: null,
-    campTurnId: null, presentation: null, createdAt: now }
+    addressMode: 'default', addressedAgentIds: [agents[0].agentId], replyToThreadMessageId: null,
+    threadTurnId: null, presentation: null, createdAt: now }
 }
 export const run: AgentRunView = {
-  id: 'review-run', campTurnId: 'review-turn', conversationId: 'review-conversation', agentId: agents[0].agentId,
+  id: 'review-run', threadTurnId: 'review-turn', conversationId: 'review-conversation', agentId: agents[0].agentId,
   taskId: null, responsibilityKey: 'review', responsibilityGeneration: 1, purpose: '验证 Camp 页面共享', completionRole: 'required',
   status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null,
   terminalResolutionSource: null, terminalReasonCode: null, failure: null, runtimeModel: null,
@@ -49,14 +49,14 @@ export const approval: ActionApprovalView = {
   ].map(option => ({ ...option, kind: option.kind as ActionApprovalView['options'][number]['kind'],
     consequence: 'Review fixture only', nativeResponseDigest: `review-${option.optionId}` }))
 }
-export const initialDraft: CampComposerDraftView = {
-  campId, revision: 1, body: '继续核对审批和文件预览，保留现有交互。',
+export const initialDraft: ThreadComposerDraftView = {
+  threadId, revision: 1, body: '继续核对审批和文件预览，保留现有交互。',
   content: { version: 2, segments: [{ kind: 'text', text: '继续核对审批和文件预览，保留现有交互。' }] },
   attachments: [], quotes: [], replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null
 }
-export const initial: CampSnapshot = {
-  schemaVersion: 34, throughGlobalSequence: 3,
-  camp: { id: campId, title: 'Camp 页面与审批流程核对', activationState: 'active', projectBindingKind: 'directory',
+export const initial: ThreadSnapshot = {
+  schemaVersion: 35, throughGlobalSequence: 3,
+  thread: { id: threadId, title: 'Camp 页面与审批流程核对', activationState: 'active', projectBindingKind: 'directory',
     projectPath: workspacePath, defaultLeadAgentId: agents[0].agentId, membershipGeneration: 1, version: 1, createdAt: now, updatedAt: now },
   members: agents.map((agent, index) => ({ agentId: agent.agentId, displayName: agent.displayName, avatarRef: agent.avatarRef,
     teamRole: agent.teamRole, accent: agent.accent ?? '', membershipStatus: 'active', leaveRequestedAt: null,
@@ -71,15 +71,15 @@ export const initial: CampSnapshot = {
   membershipReconciliations: [], tasks: [], messageDeliveries: [], turns: [], agentRuns: [],
   executionEvidence: [], agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: []
 }
-export function navigation(snapshot: CampSnapshot): NavigationSnapshot {
-  const item = { id: snapshot.camp.id, defaultLead: { agentId: snapshot.camp.defaultLeadAgentId!, displayName: agents.find(a => a.agentId === snapshot.camp.defaultLeadAgentId)?.displayName ?? '' },
-    title: snapshot.camp.title, projectBindingKind: snapshot.camp.projectBindingKind, projectPath: snapshot.camp.projectPath,
-    activationState: snapshot.camp.activationState, marker: 'none' as const, lastActivityAt: now,
-    lastActivityGlobalSequence: 3, latestCompletionGlobalSequence: 0, version: snapshot.camp.version }
+export function navigation(snapshot: ThreadSnapshot): NavigationSnapshot {
+  const item = { id: snapshot.thread.id, defaultLead: { agentId: snapshot.thread.defaultLeadAgentId!, displayName: agents.find(a => a.agentId === snapshot.thread.defaultLeadAgentId)?.displayName ?? '' },
+    title: snapshot.thread.title, projectBindingKind: snapshot.thread.projectBindingKind, projectPath: snapshot.thread.projectPath,
+    activationState: snapshot.thread.activationState, marker: 'none' as const, lastActivityAt: now,
+    lastActivityGlobalSequence: 3, latestCompletionGlobalSequence: 0, version: snapshot.thread.version }
   return { schemaVersion: 3, throughGlobalSequence: snapshot.throughGlobalSequence,
-    projects: snapshot.camp.projectBindingKind === 'directory' ? [{ projectKey: 'review-project', name: 'rovai-workspace', projectPath: workspacePath,
-      lastActivityAt: now, lastActivityGlobalSequence: 3, totalCount: 1, recentCamps: [item] }] : [],
-    quickChat: { totalCount: snapshot.camp.projectBindingKind === 'quick_chat' ? 1 : 0,
-      recentCamps: snapshot.camp.projectBindingKind === 'quick_chat' ? [item] : [] } }
+    projects: snapshot.thread.projectBindingKind === 'directory' ? [{ projectKey: 'review-project', name: 'rovai-workspace', projectPath: workspacePath,
+      lastActivityAt: now, lastActivityGlobalSequence: 3, totalCount: 1, recentThreads: [item] }] : [],
+    quickChat: { totalCount: snapshot.thread.projectBindingKind === 'quick_chat' ? 1 : 0,
+      recentThreads: snapshot.thread.projectBindingKind === 'quick_chat' ? [item] : [] } }
 }
-export const fileText = '# 交互核对\n\n本文件是宽屏对照稿中的固定示例，不来自真实工作区。\n\n## 本次检查\n\n| 路径 | 预期 |\n|---|---|\n| Camp | 导航、正文、Composer 共用生产组件 |\n| 审批 | 展示 Runtime 提供的选项，提交时防止重复点击 |\n| 文件 | 按受授权资源读取，显示来源与失效状态 |\n\n```ts\nconst client = useCampClient()\n```\n'
+export const fileText = '# 交互核对\n\n本文件是宽屏对照稿中的固定示例，不来自真实工作区。\n\n## 本次检查\n\n| 路径 | 预期 |\n|---|---|\n| Camp | 导航、正文、Composer 共用生产组件 |\n| 审批 | 展示 Runtime 提供的选项，提交时防止重复点击 |\n| 文件 | 按受授权资源读取，显示来源与失效状态 |\n\n```ts\nconst client = useThreadClient()\n```\n'

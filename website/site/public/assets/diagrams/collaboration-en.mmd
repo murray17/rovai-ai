@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant U as User
+  participant R as Rovai
+  participant I as Implementer
+  participant V as Reviewer
+  participant F as Project files
+    U->>R: Select implementer + send scope
+    R->>I: Deliver request; claim execution
+    I->>F: Edit + check files
+    I->>U: Implementation summary and limits
+    U->>V: Select reviewer + send review request
+    V->>F: Inspect the same files (read-only)
+    V->>U: Actual findings or no findings
+  opt A verified finding needs a fix
+    U->>I: Optional: request a bounded fix
+  end
+    U->>F: Inspect the final page and changes

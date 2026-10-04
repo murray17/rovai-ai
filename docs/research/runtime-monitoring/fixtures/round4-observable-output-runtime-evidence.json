@@ -1,0 +1,5030 @@
+{
+  "kind": "real_native_shapes_to_observable_output",
+  "algorithmVersion": "observable-output-heuristic-v3",
+  "reviewedAt": "2026-09-30",
+  "scope": "Native framing, actual Core readback and display-state-machine witness; Renderer proof is recorded separately.",
+  "privacy": "No thought text, content hash, provider credential, raw diagnostic body or native history is included.",
+  "cases": [
+    {
+      "runtime": "codex-cli",
+      "version": "codex-cli 0.159.2",
+      "models": {
+        "model": {
+          "source": "explicit",
+          "modelId": "gpt-6.1-sol",
+          "options": {
+            "reasoning_effort": "high"
+          }
+        }
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "ce1e33f06281f85d329103820fa6c1136c4707dc1ccd827f9594963d459200f2",
+      "rawGroups": {
+        "": {
+          "count": 10,
+          "textScalars": 0,
+          "firstAtMs": 104,
+          "lastAtMs": 1415
+        },
+        "configWarning": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 104,
+          "lastAtMs": 120
+        },
+        "remoteControl/status/changed": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 104,
+          "lastAtMs": 120
+        },
+        "thread/started": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 857,
+          "lastAtMs": 857
+        },
+        "warning": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 857,
+          "lastAtMs": 857
+        },
+        "mcpServer/startupStatus/updated": {
+          "count": 12,
+          "textScalars": 0,
+          "firstAtMs": 857,
+          "lastAtMs": 4054
+        },
+        "account/updated": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1363,
+          "lastAtMs": 1363
+        },
+        "thread/settings/updated": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1411,
+          "lastAtMs": 1411
+        },
+        "thread/status/changed": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 1439,
+          "lastAtMs": 177994
+        },
+        "turn/started": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1442,
+          "lastAtMs": 1442
+        },
+        "item/started": {
+          "count": 16,
+          "textScalars": 0,
+          "firstAtMs": 5082,
+          "lastAtMs": 176688
+        },
+        "item/completed": {
+          "count": 16,
+          "textScalars": 0,
+          "firstAtMs": 5086,
+          "lastAtMs": 177903
+        },
+        "item/agentMessage/delta": {
+          "count": 2929,
+          "textScalars": 16905,
+          "firstAtMs": 24585,
+          "lastAtMs": 177804
+        },
+        "thread/tokenUsage/updated": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 39137,
+          "lastAtMs": 177987
+        },
+        "account/rateLimits/updated": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 39137,
+          "lastAtMs": 177987
+        },
+        "item/reasoning/summaryPartAdded": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 57035,
+          "lastAtMs": 108684
+        },
+        "item/reasoning/summaryTextDelta": {
+          "count": 378,
+          "textScalars": 2143,
+          "firstAtMs": 57035,
+          "lastAtMs": 109552
+        },
+        "turn/completed": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 177994,
+          "lastAtMs": 177994
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 104,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 39137,
+          "method": "account/rateLimits/updated",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "rateLimits"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1363,
+          "method": "account/updated",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "authMode",
+            "planType"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 104,
+          "method": "configWarning",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "details",
+            "summary"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 24585,
+          "method": "item/agentMessage/delta",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "delta",
+            "itemId",
+            "threadId",
+            "turnId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": "identity-4",
+          "turnId": "identity-2",
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 1,
+          "scalars": 1
+        },
+        {
+          "atMs": 5086,
+          "method": "item/completed",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "completedAtMs",
+            "item",
+            "threadId",
+            "turnId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": "identity-2",
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 57035,
+          "method": "item/reasoning/summaryPartAdded",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "itemId",
+            "summaryIndex",
+            "threadId",
+            "turnId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": "identity-7",
+          "turnId": "identity-2",
+          "summaryIndex": 0,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 57035,
+          "method": "item/reasoning/summaryTextDelta",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "delta",
+            "itemId",
+            "summaryIndex",
+            "threadId",
+            "turnId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": "identity-7",
+          "turnId": "identity-2",
+          "summaryIndex": 0,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 32,
+          "scalars": 32
+        },
+        {
+          "atMs": 5082,
+          "method": "item/started",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "item",
+            "startedAtMs",
+            "threadId",
+            "turnId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": "identity-2",
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 857,
+          "method": "mcpServer/startupStatus/updated",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "error",
+            "failureReason",
+            "name",
+            "status",
+            "threadId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 104,
+          "method": "remoteControl/status/changed",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "environmentId",
+            "installationId",
+            "serverName",
+            "status"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1411,
+          "method": "thread/settings/updated",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "threadId",
+            "threadSettings"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 857,
+          "method": "thread/started",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "thread"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1439,
+          "method": "thread/status/changed",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "status",
+            "threadId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 39137,
+          "method": "thread/tokenUsage/updated",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "threadId",
+            "tokenUsage",
+            "turnId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": "identity-2",
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 177994,
+          "method": "turn/completed",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "threadId",
+            "turn"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1442,
+          "method": "turn/started",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "threadId",
+            "turn"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 857,
+          "method": "warning",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "emittedAtMs",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "message",
+            "threadId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.reasoning.summary.delta",
+        "mode": "stream_summary"
+      },
+      "observedReadback": {
+        "agentRunId": "ceffb1f6-1633-43b6-bb34-d7d09dca16dc",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "300ded86-7e98-46ee-91d7-d3332de8439d",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 184219,
+        "publicTextUnits": 359925,
+        "reasoningSource": "stream_summary",
+        "reasoningUnits": 45475,
+        "sampledAtMs": 184247,
+        "sequence": 302,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 84,
+      "traceArtifact": "codex-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "grok-build",
+      "version": "grok 1.0.44 (5b807183dd79)",
+      "models": {
+        "model": "gpt-6.1-sol"
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "ce1e33f06281f85d329103820fa6c1136c4707dc1ccd827f9594963d459200f2",
+      "rawGroups": {
+        "": {
+          "count": 9,
+          "textScalars": 0,
+          "firstAtMs": 2330,
+          "lastAtMs": 235706
+        },
+        "_x.ai/session/setup": {
+          "count": 22,
+          "textScalars": 0,
+          "firstAtMs": 2564,
+          "lastAtMs": 785
+        },
+        "_x.ai/mcp/servers_updated": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 2564,
+          "lastAtMs": 415
+        },
+        "_x.ai/mcp/init_progress": {
+          "count": 12,
+          "textScalars": 0,
+          "firstAtMs": 2772,
+          "lastAtMs": 1704
+        },
+        "session/update/available_commands_update": {
+          "count": 10,
+          "textScalars": 0,
+          "firstAtMs": 2780,
+          "lastAtMs": 235621
+        },
+        "_x.ai/session_notification/hook_execution": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 2857,
+          "lastAtMs": 889
+        },
+        "_x.ai/mcp/server_status": {
+          "count": 21,
+          "textScalars": 0,
+          "firstAtMs": 2868,
+          "lastAtMs": 21952
+        },
+        "_x.ai/session_notification/background_tasks": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 2918,
+          "lastAtMs": 2918
+        },
+        "_x.ai/session_notification/model_changed": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 2921,
+          "lastAtMs": 2926
+        },
+        "session/update/config_option_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 2926,
+          "lastAtMs": 2926
+        },
+        "_x.ai/sessions/changed": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 866,
+          "lastAtMs": 235705
+        },
+        "_x.ai/queue/changed": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 877,
+          "lastAtMs": 235705
+        },
+        "_x.ai/mcp_initialized": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1704,
+          "lastAtMs": 1704
+        },
+        "_x.ai/session_notification/session_summary_generated": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 5953,
+          "lastAtMs": 5953
+        },
+        "session/update/session_info_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 5953,
+          "lastAtMs": 5953
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 37,
+          "textScalars": 353,
+          "firstAtMs": 18057,
+          "lastAtMs": 169084
+        },
+        "session/update/agent_message_chunk": {
+          "count": 2977,
+          "textScalars": 17046,
+          "firstAtMs": 42241,
+          "lastAtMs": 235225
+        },
+        "_x.ai/session_notification/tool_call_delta_chunk": {
+          "count": 191,
+          "textScalars": 0,
+          "firstAtMs": 88923,
+          "lastAtMs": 228235
+        },
+        "_x.ai/session_notification/response_completed": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 90317,
+          "lastAtMs": 235621
+        },
+        "session/update/tool_call": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 90317,
+          "lastAtMs": 228636
+        },
+        "_x.ai/session_notification/pending_interaction": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 90317,
+          "lastAtMs": 228636
+        },
+        "_x.ai/session_notification/interaction_resolved": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 90318,
+          "lastAtMs": 228636
+        },
+        "_x.ai/session_notification/turn_completed": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 235705,
+          "lastAtMs": 235705
+        },
+        "_x.ai/session/prompt_complete": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 235705,
+          "lastAtMs": 235705
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 2330,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2772,
+          "method": "_x.ai/mcp/init_progress",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "connected",
+            "sessionId",
+            "total"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2868,
+          "method": "_x.ai/mcp/server_status",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "detail",
+            "name",
+            "reason",
+            "sessionId",
+            "source",
+            "status",
+            "tools"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2564,
+          "method": "_x.ai/mcp/servers_updated",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "mcpServers"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1704,
+          "method": "_x.ai/mcp_initialized",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "elapsedMs",
+            "mcpToolCount",
+            "sessionId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 877,
+          "method": "_x.ai/queue/changed",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "entries",
+            "sessionId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 235705,
+          "method": "_x.ai/session/prompt_complete",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "agentResult",
+            "promptId",
+            "sessionId",
+            "stopReason"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2564,
+          "method": "_x.ai/session/setup",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "method",
+            "phase",
+            "sessionId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2918,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "background_tasks",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "tasks"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2857,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "hook_execution",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "event_name",
+            "runs",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 90318,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "interaction_resolved",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "tool_call_id"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2921,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "model_changed",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "model_id",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 90317,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "pending_interaction",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "kind",
+            "sessionUpdate",
+            "tool_call_id"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 90317,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "response_completed",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "signature",
+            "usage"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 5953,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "session_summary_generated",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "session_summary"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 88923,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "tool_call_delta_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "name",
+            "sessionUpdate",
+            "tool_call_id",
+            "tool_index"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 235705,
+          "method": "_x.ai/session_notification",
+          "type": null,
+          "sessionUpdate": "turn_completed",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "elapsed_ms",
+            "prompt_id",
+            "sessionUpdate",
+            "stop_reason",
+            "usage"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 866,
+          "method": "_x.ai/sessions/changed",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "removed",
+            "upserted"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 42241,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 18057,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_thought_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 40,
+          "scalars": 40
+        },
+        {
+          "atMs": 2780,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "available_commands_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "availableCommands",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2926,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "config_option_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "configOptions",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 5953,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "session_info_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "title"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 90317,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "rawInput",
+            "sessionUpdate",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "67a93c1a-7fb5-4b8d-a3c7-ad40144cfb42",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "8b403837-855e-4697-b36a-53308c40089a",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 240090,
+        "publicTextUnits": 363925,
+        "reasoningSource": "stream_text",
+        "reasoningUnits": 7775,
+        "sampledAtMs": 240299,
+        "sequence": 428,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 154,
+      "traceArtifact": "grok-build/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "pi",
+      "version": "0.84.4",
+      "models": {
+        "model": "pi://runtime-default",
+        "requestedModel": {
+          "source": "runtime_default",
+          "modelId": "pi://runtime-default",
+          "options": {}
+        },
+        "observedModel": "pi://runtime-default"
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {
+        "setStatus/extension_ui_request": {
+          "count": 8,
+          "textScalars": 0,
+          "firstAtMs": 295,
+          "lastAtMs": 393
+        },
+        "response": {
+          "count": 12,
+          "textScalars": 0,
+          "firstAtMs": 309,
+          "lastAtMs": 393
+        },
+        "agent_start": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 377,
+          "lastAtMs": 377
+        },
+        "turn_start": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 377,
+          "lastAtMs": 172641
+        },
+        "message_start": {
+          "count": 10,
+          "textScalars": 0,
+          "firstAtMs": 378,
+          "lastAtMs": 175659
+        },
+        "message_end": {
+          "count": 10,
+          "textScalars": 0,
+          "firstAtMs": 378,
+          "lastAtMs": 178818
+        },
+        "message_update/thinking_start": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 2877,
+          "lastAtMs": 118027
+        },
+        "message_update/thinking_delta": {
+          "count": 84,
+          "textScalars": 439,
+          "firstAtMs": 5799,
+          "lastAtMs": 6503
+        },
+        "message_update/thinking_end": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 6503,
+          "lastAtMs": 118768
+        },
+        "message_update/text_start": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 6508,
+          "lastAtMs": 175670
+        },
+        "message_update/text_delta": {
+          "count": 2897,
+          "textScalars": 17522,
+          "firstAtMs": 6508,
+          "lastAtMs": 178454
+        },
+        "message_update/text_end": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 50744,
+          "lastAtMs": 178715
+        },
+        "message_update/toolcall_start": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 50745,
+          "lastAtMs": 169344
+        },
+        "message_update/toolcall_delta": {
+          "count": 96,
+          "textScalars": 430,
+          "firstAtMs": 50745,
+          "lastAtMs": 172223
+        },
+        "message_update/toolcall_end": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 51368,
+          "lastAtMs": 172437
+        },
+        "tool_execution_start": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 51469,
+          "lastAtMs": 172487
+        },
+        "tool_execution_update": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 51471,
+          "lastAtMs": 172640
+        },
+        "tool_execution_end": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 57490,
+          "lastAtMs": 172640
+        },
+        "turn_end": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 57493,
+          "lastAtMs": 178818
+        },
+        "agent_end": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 178819,
+          "lastAtMs": 178819
+        },
+        "agent_settled": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 178819,
+          "lastAtMs": 178819
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 178819,
+          "method": null,
+          "type": "agent_end",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "messages",
+            "type",
+            "willRetry"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 178819,
+          "method": null,
+          "type": "agent_settled",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 377,
+          "method": null,
+          "type": "agent_start",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 378,
+          "method": null,
+          "type": "message_end",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "message",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 378,
+          "method": null,
+          "type": "message_start",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "message",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 6508,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "text_delta",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 1,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 50744,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "text_end",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 1,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 6508,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "text_start",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 1,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 5799,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "thinking_delta",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 0,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 34,
+          "scalars": 34
+        },
+        {
+          "atMs": 6503,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "thinking_end",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 0,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2877,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "thinking_start",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 0,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 50745,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "toolcall_delta",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 2,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 51368,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "toolcall_end",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 2,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 50745,
+          "method": null,
+          "type": "message_update",
+          "sessionUpdate": null,
+          "deltaType": "toolcall_start",
+          "keys": [
+            "assistantMessageEvent",
+            "type",
+            "usage"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": 2,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 352,
+          "method": null,
+          "type": "response",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "command",
+            "data",
+            "id",
+            "success",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 337,
+          "method": "setStatus",
+          "type": "extension_ui_request",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "method",
+            "statusKey",
+            "statusText",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 57490,
+          "method": null,
+          "type": "tool_execution_end",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "isError",
+            "result",
+            "toolCallId",
+            "toolName",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 51469,
+          "method": null,
+          "type": "tool_execution_start",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "args",
+            "toolCallId",
+            "toolName",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 51471,
+          "method": null,
+          "type": "tool_execution_update",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "args",
+            "partialResult",
+            "toolCallId",
+            "toolName",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 57493,
+          "method": null,
+          "type": "turn_end",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "message",
+            "toolResults",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 377,
+          "method": null,
+          "type": "turn_start",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "ead4dce5-0e80-4755-8e5b-a154875b0e63",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "798df2c1-19e7-41b7-9472-cf678cba1442",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 180124,
+        "publicTextUnits": 376900,
+        "reasoningSource": "stream_text",
+        "reasoningUnits": 9125,
+        "sampledAtMs": 180180,
+        "sequence": 339,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 147,
+      "traceArtifact": "pi/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "zcode-app",
+      "version": "0.16.9",
+      "models": {
+        "model": "new-provider/gpt-6-sol"
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "ce1e33f06281f85d329103820fa6c1136c4707dc1ccd827f9594963d459200f2",
+      "rawGroups": {},
+      "rawCapture": "not_independently_captured",
+      "representativeSanitizedRawShapes": [],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "f7de91d2-77d8-41bd-9471-d79d59ce0b51",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "2986392f-5169-4246-b1ed-af15799bb32d",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 253037,
+        "publicTextUnits": 363050,
+        "reasoningSource": "stream_text",
+        "reasoningUnits": 4275,
+        "sampledAtMs": 253544,
+        "sequence": 445,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 171,
+      "traceArtifact": "zcode-app/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "claude-code-cli",
+      "version": "2.1.280 (Claude Code)",
+      "models": {},
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": null,
+      "rawGroups": {
+        "object": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 112,
+          "lastAtMs": 112
+        },
+        "system": {
+          "count": 15,
+          "textScalars": 0,
+          "firstAtMs": 413,
+          "lastAtMs": 354098
+        },
+        "control_response": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 489,
+          "lastAtMs": 489
+        },
+        "stream_event": {
+          "count": 50,
+          "textScalars": 0,
+          "firstAtMs": 2299,
+          "lastAtMs": 367344
+        },
+        "stream_event/signature_delta": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 28629,
+          "lastAtMs": 364468
+        },
+        "assistant": {
+          "count": 15,
+          "textScalars": 0,
+          "firstAtMs": 28630,
+          "lastAtMs": 367286
+        },
+        "stream_event/text_delta": {
+          "count": 4847,
+          "textScalars": 7337,
+          "firstAtMs": 53655,
+          "lastAtMs": 367026
+        },
+        "stream_event/input_json_delta": {
+          "count": 171,
+          "textScalars": 0,
+          "firstAtMs": 127027,
+          "lastAtMs": 353711
+        },
+        "user": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 133463,
+          "lastAtMs": 354094
+        },
+        "result": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 367392,
+          "lastAtMs": 367392
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 28630,
+          "method": null,
+          "type": "assistant",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "message",
+            "parent_tool_use_id",
+            "session_id",
+            "timestamp",
+            "type",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 489,
+          "method": null,
+          "type": "control_response",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "response",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 112,
+          "method": null,
+          "type": "object",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "properties",
+            "required",
+            "type"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 367392,
+          "method": null,
+          "type": "result",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "api_error_status",
+            "duration_api_ms",
+            "duration_ms",
+            "fast_mode_disabled_reason",
+            "fast_mode_state",
+            "first_content_frame_ms",
+            "is_error",
+            "modelUsage",
+            "num_turns",
+            "permission_denials",
+            "queued_turn_count",
+            "result",
+            "result_index",
+            "session_id",
+            "stop_reason",
+            "subagent_stats",
+            "subtype",
+            "terminal_reason",
+            "time_to_request_ms",
+            "total_cost_usd",
+            "ttft_ms",
+            "ttft_stream_ms",
+            "type",
+            "usage",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 2299,
+          "method": null,
+          "type": "stream_event",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "event",
+            "parent_tool_use_id",
+            "session_id",
+            "ttft_ms",
+            "type",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [
+            "message",
+            "type"
+          ],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 127027,
+          "method": null,
+          "type": "stream_event",
+          "sessionUpdate": null,
+          "deltaType": "input_json_delta",
+          "keys": [
+            "event",
+            "parent_tool_use_id",
+            "session_id",
+            "type",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [
+            "delta",
+            "index",
+            "type"
+          ],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 28629,
+          "method": null,
+          "type": "stream_event",
+          "sessionUpdate": null,
+          "deltaType": "signature_delta",
+          "keys": [
+            "event",
+            "parent_tool_use_id",
+            "session_id",
+            "type",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [
+            "delta",
+            "index",
+            "type"
+          ],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 53655,
+          "method": null,
+          "type": "stream_event",
+          "sessionUpdate": null,
+          "deltaType": "text_delta",
+          "keys": [
+            "event",
+            "parent_tool_use_id",
+            "session_id",
+            "type",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [
+            "delta",
+            "index",
+            "type"
+          ],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 413,
+          "method": null,
+          "type": "system",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "hook_event",
+            "hook_id",
+            "hook_name",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 133463,
+          "method": null,
+          "type": "user",
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "message",
+            "parent_tool_use_id",
+            "session_id",
+            "timestamp",
+            "tool_use_result",
+            "type",
+            "uuid"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "189cd0b9-325d-4ceb-932c-b0b203b69e73",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "e8b4f81e-cafb-4fe9-a625-b90af52c5d3e",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 376285,
+        "publicTextUnits": 408195,
+        "reasoningSource": "none",
+        "reasoningUnits": 0,
+        "sampledAtMs": 376695,
+        "sequence": 623,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 242,
+      "traceArtifact": "claude-code-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.32",
+      "models": {},
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": null,
+      "rawGroups": {
+        "": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 700,
+          "lastAtMs": 187903
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 848,
+          "lastAtMs": 848
+        },
+        "session/update/agent_message_chunk": {
+          "count": 2902,
+          "textScalars": 18032,
+          "firstAtMs": 9317,
+          "lastAtMs": 187762
+        },
+        "session/update/tool_call": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 56888,
+          "lastAtMs": 177753
+        },
+        "session/update/tool_call_update": {
+          "count": 8,
+          "textScalars": 0,
+          "firstAtMs": 57268,
+          "lastAtMs": 180290
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 700,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 9317,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "messageId",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 848,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "available_commands_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "availableCommands",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 56888,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "kind",
+            "locations",
+            "rawInput",
+            "sessionUpdate",
+            "status",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 57268,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "kind",
+            "locations",
+            "rawInput",
+            "sessionUpdate",
+            "status",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "3e4f2e75-48cc-407e-ad53-2508f90d150d",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "aa767d83-fb01-4011-9e09-8ec9bb7e3314",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 192153,
+        "publicTextUnits": 389000,
+        "reasoningSource": "none",
+        "reasoningUnits": 0,
+        "sampledAtMs": 192175,
+        "sequence": 354,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 155,
+      "traceArtifact": "opencode-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "qwen-code",
+      "version": "0.24.6",
+      "models": {
+        "model": "gpt-5.6-sol(openai)"
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": null,
+      "rawGroups": {
+        "": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 1193,
+          "lastAtMs": 203346
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 956,
+          "lastAtMs": 956
+        },
+        "session/update/agent_message_chunk": {
+          "count": 3636,
+          "textScalars": 21046,
+          "firstAtMs": 8050,
+          "lastAtMs": 203232
+        },
+        "session/update/usage_update": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 36030,
+          "lastAtMs": 203232
+        },
+        "craft/drainMidTurnQueue": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 36035,
+          "lastAtMs": 36035
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 1193,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 36035,
+          "method": "craft/drainMidTurnQueue",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "todoStopGuardWatchQueuedPrompt"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 8050,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 956,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "available_commands_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "availableCommands",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 36030,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "usage_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "size",
+            "used"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "e04d5c1b-29e0-4481-84ee-2d9414a7bb80",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "73d7bf9e-ed0f-444d-ae1e-fcabcc1cce93",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 207303,
+        "publicTextUnits": 453275,
+        "reasoningSource": "none",
+        "reasoningUnits": 0,
+        "sampledAtMs": 207339,
+        "sequence": 383,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 163,
+      "traceArtifact": "qwen-code/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "codebuddy-cli",
+      "version": "2.133.1",
+      "models": {
+        "model": "gpt-6.1-sol",
+        "requestedModel": {
+          "source": "runtime_default",
+          "modelId": "codebuddy-cli://runtime-default",
+          "options": {}
+        },
+        "observedModel": "gpt-6.1-sol"
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {
+        "": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 821,
+          "lastAtMs": 233911
+        },
+        "session/update/config_option_update": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 938,
+          "lastAtMs": 1795
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 944,
+          "lastAtMs": 944
+        },
+        "_codebuddy.ai/command": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 944,
+          "lastAtMs": 944
+        },
+        "session/update/session_info_update": {
+          "count": 35,
+          "textScalars": 0,
+          "firstAtMs": 1064,
+          "lastAtMs": 233908
+        },
+        "session/update/tool_call": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 23591,
+          "lastAtMs": 224086
+        },
+        "session/update/tool_call_update": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 24926,
+          "lastAtMs": 228612
+        },
+        "session/update/agent_message_chunk": {
+          "count": 3091,
+          "textScalars": 16990,
+          "firstAtMs": 51821,
+          "lastAtMs": 233421
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 1643,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 944,
+          "method": "_codebuddy.ai/command",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "action",
+            "params",
+            "sessionId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 51821,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "content",
+            "messageId",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 944,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "available_commands_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "availableCommands",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1795,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "config_option_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "configOptions",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1064,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "session_info_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 23591,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "input",
+            "kind",
+            "messageId",
+            "rawInput",
+            "sessionUpdate",
+            "status",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 24926,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "messageId",
+            "rawOutput",
+            "sessionUpdate",
+            "status",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "5d679b65-fb8a-43a9-8399-4470ae9f869a",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "c88eea24-6995-4a41-badc-5a60634203a2",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 237015,
+        "publicTextUnits": 362450,
+        "reasoningSource": "none",
+        "reasoningUnits": 0,
+        "sampledAtMs": 237118,
+        "sequence": 357,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 152,
+      "traceArtifact": "codebuddy-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "version": "2.1.1",
+      "models": {
+        "model": "__kimi_env_model__"
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {
+        "": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 678,
+          "lastAtMs": 217031
+        },
+        "session/update/available_commands_update": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 819,
+          "lastAtMs": 973
+        },
+        "session/update/current_mode_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 975,
+          "lastAtMs": 975
+        },
+        "session/update/config_option_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 975,
+          "lastAtMs": 975
+        },
+        "session/update/session_info_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1380,
+          "lastAtMs": 1380
+        },
+        "session/update/agent_message_chunk": {
+          "count": 3098,
+          "textScalars": 17709,
+          "firstAtMs": 31237,
+          "lastAtMs": 216614
+        },
+        "terminal/create": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 77600,
+          "lastAtMs": 208655
+        },
+        "terminal/wait_for_exit": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 77602,
+          "lastAtMs": 208662
+        },
+        "terminal/output": {
+          "count": 51,
+          "textScalars": 0,
+          "firstAtMs": 77854,
+          "lastAtMs": 208817
+        },
+        "terminal/release": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 83613,
+          "lastAtMs": 208817
+        },
+        "session/update/usage_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 217031,
+          "lastAtMs": 217031
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 678,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 31237,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 2,
+          "scalars": 2
+        },
+        {
+          "atMs": 819,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "available_commands_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "availableCommands",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 975,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "config_option_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "configOptions",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 975,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "current_mode_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "currentModeId",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 1380,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "session_info_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "title"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 217031,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "usage_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "size",
+            "used"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 77600,
+          "method": "terminal/create",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "args",
+            "command",
+            "cwd",
+            "env",
+            "outputByteLimit",
+            "sessionId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 77854,
+          "method": "terminal/output",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "terminalId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 83613,
+          "method": "terminal/release",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "terminalId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 77602,
+          "method": "terminal/wait_for_exit",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "terminalId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "a8e66583-e9c8-4471-a7fe-41e2c55358b2",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "245b7cdf-424f-499a-8254-cc22225c5b90",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 220978,
+        "publicTextUnits": 378850,
+        "reasoningSource": "none",
+        "reasoningUnits": 0,
+        "sampledAtMs": 221130,
+        "sequence": 366,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 158,
+      "traceArtifact": "kimi-code-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "kiro-cli",
+      "version": "kiro-cli 2.21.1",
+      "models": {
+        "model": "auto"
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {
+        "": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 571,
+          "lastAtMs": 111825
+        },
+        "_kiro.dev/subagent/list_update": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 1939,
+          "lastAtMs": 6281
+        },
+        "_kiro.dev/commands/available": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 1940,
+          "lastAtMs": 6286
+        },
+        "_kiro.dev/metadata": {
+          "count": 16,
+          "textScalars": 0,
+          "firstAtMs": 1941,
+          "lastAtMs": 111824
+        },
+        "_kiro.dev/session/update/tool_call_chunk": {
+          "count": 11,
+          "textScalars": 0,
+          "firstAtMs": 4564,
+          "lastAtMs": 107122
+        },
+        "session/update/tool_call": {
+          "count": 10,
+          "textScalars": 0,
+          "firstAtMs": 6931,
+          "lastAtMs": 108050
+        },
+        "session/update/tool_call_update": {
+          "count": 11,
+          "textScalars": 0,
+          "firstAtMs": 6939,
+          "lastAtMs": 108052
+        },
+        "session/update/agent_message_chunk": {
+          "count": 1901,
+          "textScalars": 18237,
+          "firstAtMs": 8590,
+          "lastAtMs": 111823
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 4748,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 6286,
+          "method": "_kiro.dev/commands/available",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "commands",
+            "mcpServers",
+            "prompts",
+            "sessionId",
+            "tools"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 6287,
+          "method": "_kiro.dev/metadata",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "contextUsagePercentage",
+            "sessionId"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 4564,
+          "method": "_kiro.dev/session/update",
+          "type": null,
+          "sessionUpdate": "tool_call_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "kind",
+            "sessionUpdate",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 6281,
+          "method": "_kiro.dev/subagent/list_update",
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "pendingStages",
+            "subagents"
+          ],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 8590,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 3,
+          "scalars": 3
+        },
+        {
+          "atMs": 6931,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "rawInput",
+            "sessionUpdate",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 6939,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "kind",
+            "rawInput",
+            "rawOutput",
+            "sessionUpdate",
+            "status",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "28887cc6-fa4e-4ad6-b011-b073a3ee05d9",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "c47c756d-8de4-4ecc-9b8a-c8e5dba7a1d8",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 121413,
+        "publicTextUnits": 375625,
+        "reasoningSource": "none",
+        "reasoningUnits": 0,
+        "sampledAtMs": 121740,
+        "sequence": 204,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 87,
+      "traceArtifact": "kiro-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "qoder-cli",
+      "version": "1.1.64",
+      "models": {
+        "model": "qoder-custom/gpt-6.1-sol",
+        "requestedModel": {
+          "source": "runtime_default",
+          "modelId": "qoder-cli://runtime-default",
+          "options": {}
+        },
+        "observedModel": "qoder-custom/gpt-6.1-sol"
+      },
+      "runOutcome": "running",
+      "failure": "acceptance_deadline",
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {
+        "": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 3193,
+          "lastAtMs": 8269
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 8285,
+          "lastAtMs": 8285
+        },
+        "session/update/agent_message_chunk": {
+          "count": 2000,
+          "textScalars": 10972,
+          "firstAtMs": 12329,
+          "lastAtMs": 474513
+        },
+        "session/update/tool_call_update": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 44073,
+          "lastAtMs": 479461
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 274,
+          "textScalars": 1530,
+          "firstAtMs": 234722,
+          "lastAtMs": 350355
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 3429,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 12329,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 1,
+          "scalars": 1
+        },
+        {
+          "atMs": 234722,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_thought_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 42,
+          "scalars": 42
+        },
+        {
+          "atMs": 8285,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "available_commands_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "availableCommands",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 44073,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "status",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "b3e2f3d5-c020-4105-966f-ad035f79bb0b",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "fd5d15c5-7c12-49a9-961b-0d8d77e71dc9",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 483061,
+        "publicTextUnits": 233800,
+        "reasoningSource": "stream_text",
+        "reasoningUnits": 32250,
+        "sampledAtMs": 488199,
+        "sequence": 918,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 111,
+      "traceArtifact": "qoder-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "trae-cn-cli",
+      "version": "trae-cli version 0.120.52",
+      "models": {
+        "model": "GLM-5.3",
+        "requestedModel": {
+          "source": "runtime_default",
+          "modelId": "trae-cn-cli://runtime-default",
+          "options": {}
+        },
+        "observedModel": "GLM-5.3"
+      },
+      "runOutcome": "running",
+      "failure": "acceptance_deadline",
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {
+        "": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 399,
+          "lastAtMs": 581
+        },
+        "session/update/tool_call": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 754,
+          "lastAtMs": 781
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 937,
+          "lastAtMs": 937
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 1235,
+          "textScalars": 93804,
+          "firstAtMs": 10094,
+          "lastAtMs": 479673
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 399,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 10094,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_thought_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "content",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 3,
+          "scalars": 3
+        },
+        {
+          "atMs": 937,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "available_commands_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "availableCommands",
+            "sessionUpdate"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 754,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "_meta",
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "_meta",
+            "kind",
+            "locations",
+            "rawInput",
+            "sessionUpdate",
+            "status",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "stream_text"
+      },
+      "observedReadback": {
+        "agentRunId": "67d3870e-1036-45ed-b941-c549d3ed756a",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "2a4d4bd7-6732-405a-99c8-09637df9f17e",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 481349,
+        "publicTextUnits": 0,
+        "reasoningSource": "stream_text",
+        "reasoningUnits": 1978380,
+        "sampledAtMs": 481555,
+        "sequence": 922,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 460,
+      "traceArtifact": "trae-cn-cli/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "antigravity-app",
+      "version": "1.2.12",
+      "models": {
+        "model": {
+          "source": "runtime_default",
+          "modelId": "antigravity://runtime-default",
+          "options": {}
+        },
+        "requestedModel": {
+          "source": "runtime_default",
+          "modelId": "antigravity://runtime-default",
+          "options": {}
+        }
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {},
+      "rawCapture": "not_independently_captured",
+      "representativeSanitizedRawShapes": [],
+      "expectedParsing": {
+        "textEvent": "agent.text.completed",
+        "thoughtEvent": null,
+        "mode": "none"
+      },
+      "observedReadback": null,
+      "rendererVerified": false,
+      "meterDisplayCount": 0,
+      "traceArtifact": "antigravity-app/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "deepseek-harness-regression",
+      "version": "0.1.5-rc.3",
+      "models": {
+        "model": {
+          "source": "explicit",
+          "modelId": "[\"sub2api\",\"gpt-6.1-sol\"]",
+          "options": {
+            "reasoning_effort": "high"
+          }
+        },
+        "requestedModel": {
+          "source": "explicit",
+          "modelId": "[\"sub2api\",\"gpt-6.1-sol\"]",
+          "options": {
+            "reasoning_effort": "high"
+          }
+        }
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "5bdecf2a36009c6c1a6d94fa7b462a260859e6f1a90901a0b17e3c60ec01d8d6",
+      "rawGroups": {
+        "": {
+          "count": 7,
+          "textScalars": 0,
+          "firstAtMs": 821,
+          "lastAtMs": 418978
+        },
+        "session/update/agent_message_chunk": {
+          "count": 4,
+          "textScalars": 18240,
+          "firstAtMs": 127481,
+          "lastAtMs": 418977
+        },
+        "session/update/usage_update": {
+          "count": 17,
+          "textScalars": 0,
+          "firstAtMs": 127481,
+          "lastAtMs": 418978
+        },
+        "session/update/tool_call": {
+          "count": 16,
+          "textScalars": 0,
+          "firstAtMs": 127482,
+          "lastAtMs": 332387
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 3,
+          "textScalars": 1332,
+          "firstAtMs": 147547,
+          "lastAtMs": 332387
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 1369,
+          "method": null,
+          "type": null,
+          "sessionUpdate": null,
+          "deltaType": null,
+          "keys": [
+            "id",
+            "jsonrpc",
+            "result"
+          ],
+          "paramsKeys": [],
+          "updateKeys": [],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 127481,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "messageId",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 5658,
+          "scalars": 5650
+        },
+        {
+          "atMs": 147547,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_thought_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "messageId",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": "identity-2",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 456,
+          "scalars": 454
+        },
+        {
+          "atMs": 127482,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "tool_call",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "kind",
+            "rawInput",
+            "sessionUpdate",
+            "status",
+            "title",
+            "toolCallId"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        },
+        {
+          "atMs": 127481,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "usage_update",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "sessionUpdate",
+            "size",
+            "used"
+          ],
+          "contentKeys": [],
+          "eventKeys": [],
+          "itemId": null,
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 0,
+          "scalars": 0
+        }
+      ],
+      "expectedParsing": {
+        "textEvent": "agent.text.delta",
+        "thoughtEvent": "agent.thought.delta",
+        "mode": "none",
+        "qualification": "complete_committed_blocks_excluded_after_regression_fix"
+      },
+      "observedReadback": {
+        "agentRunId": "ea8ab9f2-3e7f-413c-a21b-efae4aed5c69",
+        "algorithmVersion": "observable-output-heuristic-v3",
+        "counterGeneration": "711c2af2-47fb-4eae-b369-5090055cf70d",
+        "executionEpoch": 1,
+        "lastOutputAtMs": 335574,
+        "publicTextUnits": 239075,
+        "reasoningSource": "stream_text",
+        "reasoningUnits": 28000,
+        "sampledAtMs": 421966,
+        "sequence": 568,
+        "streamConfirmed": true,
+        "unicodeDataVersion": "icu4x-2.2.0"
+      },
+      "rendererVerified": false,
+      "meterDisplayCount": 0,
+      "traceArtifact": "deepseek-harness-regression/evidence.json",
+      "note": "Numeric values are temporary observed display estimates; not native Usage or final Run accounting."
+    },
+    {
+      "runtime": "deepseek-harness-final",
+      "version": "0.1.5-rc.3",
+      "models": {
+        "model": {
+          "source": "explicit",
+          "modelId": "[\"sub2api\",\"gpt-6.1-sol\"]",
+          "options": {
+            "reasoning_effort": "high"
+          }
+        },
+        "requestedModel": {
+          "source": "explicit",
+          "modelId": "[\"sub2api\",\"gpt-6.1-sol\"]",
+          "options": {
+            "reasoning_effort": "high"
+          }
+        },
+        "observedModel": null
+      },
+      "runOutcome": "succeeded",
+      "failure": null,
+      "coreDigest": "fea695ac99185111f34918ed626e33d93ed95379211ba6e876805f8059ff471f",
+      "rawGroups": {
+        "": {
+          "count": 7,
+          "textScalars": 0,
+          "firstAtMs": 645,
+          "lastAtMs": 145171
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 2,
+          "textScalars": 882,
+          "firstAtMs": 49142,
+          "lastAtMs": 136571
+        },
+        "session/update/agent_message_chunk": {
+          "count": 2,
+          "textScalars": 5036,
+          "firstAtMs": 49142,
+          "lastAtMs": 145171
+        },
+        "session/update/usage_update": {
+          "count": 11,
+          "textScalars": 0,
+          "firstAtMs": 49142,
+          "lastAtMs": 145171
+        },
+        "session/update/tool_call": {
+          "count": 10,
+          "textScalars": 0,
+          "firstAtMs": 49142,
+          "lastAtMs": 136572
+        }
+      },
+      "rawCapture": "captured_shapes_only",
+      "representativeSanitizedRawShapes": [
+        {
+          "atMs": 49142,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_thought_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "messageId",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 465,
+          "scalars": 463
+        },
+        {
+          "atMs": 49142,
+          "method": "session/update",
+          "type": null,
+          "sessionUpdate": "agent_message_chunk",
+          "deltaType": null,
+          "keys": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "paramsKeys": [
+            "sessionId",
+            "update"
+          ],
+          "updateKeys": [
+            "content",
+            "messageId",
+            "sessionUpdate"
+          ],
+          "contentKeys": [
+            "text",
+            "type"
+          ],
+          "eventKeys": [],
+          "itemId": "identity-1",
+          "turnId": null,
+          "summaryIndex": null,
+          "contentIndex": null,
+          "textOffset": null,
+          "parentPresent": false,
+          "bytes": 4694,
+          "scalars": 4692
+        }
+      ],
+      "expectedParsing": {
+        "mode": "none",
+        "qualification": "committed_complete_blocks_not_live"
+      },
+      "observedReadback": null,
+      "rendererVerified": false,
+      "meterDisplayCount": 0,
+      "traceArtifact": "deepseek-harness-final/evidence.json",
+      "note": "145s successful real turn after the exclusion fix. All 500ms numeric reads were null, despite two whole thought blocks and two whole public blocks. No current speed was manufactured."
+    }
+  ]
+}

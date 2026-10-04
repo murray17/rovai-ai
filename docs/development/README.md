@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-09-21
+last_updated: 2026-09-27
 ---
 
 # Rovai-ai 开发者指南
@@ -100,6 +100,9 @@ Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:
 成功值和结构化拒绝；临时目录与 headless CI 说明见[Electron 隔离世界回归](testing.md#electron-隔离世界回归)。
 修改 macOS 独立关窗 Draft fence 时运行 `pnpm test:window-close`：隔离 Electron 验证等待准备、失败重试、关窗不退出
 及重新开窗，不启动 Core 或 Runtime；该项属于 `test:desktop:integration`，headless Linux 使用 `xvfb-run -a`。
+修改 Windows 关闭选择、记忆或托盘生命周期时运行 `pnpm test:windows-close`：使用生产 Main owner、preload 与设置/Dialog
+组件，在隔离 Electron 中验证隐藏、恢复、保存失败和显式退出。非 Windows 主机只证明控制流；Windows 主机额外创建
+真实 Tray。`Full check` 的 `desktop-windows` scope 可单独运行 Windows Desktop 自动化，不代表 Windows 10/11 交互验收。
 修改 Desktop 历史导航、侧栏按钮或平台输入时运行 `pnpm test:navigation-shell` 与 `pnpm test:startup-presentation`，
 并运行 `desktop-navigation` / `window-navigation` 定向 Vitest；历史只在内存中保存，复用既有隔离 Electron 夹具。
 修改启动页面、Supervisor Renderer gate 或 400ms 反馈时运行 `pnpm test:startup-presentation`：真实 Electron 中挂载生产
@@ -107,6 +110,9 @@ App，以受控本机 API 和时钟验证页面框架、截止时间与 authorit
 修改审批 Dock 的焦点、原生选项或 Reason 展示时运行 `pnpm test:approval-dock`，使用生产组件的隔离 Electron
 夹具验证键盘操作与动态布局，不启动 Core 或模型。
 修改消息选文引用时运行 `pnpm test:message-quotes`：隔离 Electron 使用生产正文、引用组件与共享投影样例，验证选区排除、原生悬浮、键盘、完整选文和整行定位。验收窗口使用独立 userData，不启动 Core 或模型；其他会争用 OS 焦点的 Electron 验收应顺序运行。
+修改发布说明语言分段或更新页语言选择时运行 `pnpm test:release-notes-ui`：隔离 Electron 挂载正式更新页，验证即时中英文切换、当前/新版本 tab 保留、历史与单语回退、引用链接及安全 Markdown，不启动 Core 或模型；`ROVAI_KEEP_RELEASE_NOTES_FIXTURE=1` 保留截图。
+修改用户消息锚点时运行 `pnpm test:message-anchors`：隔离 Electron 使用生产 CampWorkspace，验证用户数量阈值、日夜主题、原生悬浮、可见范围、首条回复、长轨道与内部滚动、键盘定位、历史加载和草稿保留；不启动 Core 或模型。
+修改队员运行配置批量应用时运行 `pnpm test:member-runtime-apply`：隔离 Electron 挂载正式 MembersView，验证选择、覆盖、逐人版本校验、部分失败重试、未知回执核对、两部分草稿、提交中的离开保护、中英文、手机横竖屏和缩放。使用显式 transport fixture，不启动 Core 或模型；`ROVAI_KEEP_MEMBER_RUNTIME_APPLY_FIXTURE=1` 保留截图及验证记录。原有 `node --test scripts/lib/member-editor.test.mjs` 仍保护队员编辑主流程。
 修改飞书接口扫码时运行 `pnpm test:feishu-login`：隔离 Electron 使用生产 Session HTTP、被动 HTML bootstrap、Cookie
 恢复和 QR Dialog 验证登录没有隐藏窗口、进度与本地提交的取消边界。默认使用受控响应；
 `ROVAI_FEISHU_LIVE_PROBE=1 pnpm test:feishu-login` 另做匿名真实 init/poll，不替代真人扫码与 Bot 发布。
@@ -119,12 +125,16 @@ App，以受控本机 API 和时钟验证页面框架、截止时间与 authorit
 真实 Runtime Smoke、完整 macOS 打包、Windows 打包/安装和 UI 截图验收耗时更长，且部分命令会调用上游
 模型。它们保持独立，不进入普通 commit 门禁；运行前先阅读对应文档。
 
+修改执行台指标读取生命周期时运行 `pnpm test:execution-metrics-ui`：使用生产 CampWorkspace 和 CSS、
+隔离 Electron 与 500 个合成 Run，验证视口范围、展开、隐藏／恢复、稳定终态停止轮询、
+迟到 Usage 和 Session Context 换代／失效；不启动 Core 或真实 Runtime。
+
 ## 按任务阅读
 
 | 任务 | 文档 |
 | --- | --- |
 | 启动开发 App、运行打包产物或区分日常/开发数据 | [本地开发与 App 隔离流程](local-workflow.md) |
-| 配置和验收钉钉 Web Session 渠道 | [本地开发与 App 隔离流程：钉钉 Web Session](local-workflow.md#钉钉-web-session-验收前置)、[DingTalk Channel v13](../contracts/dingtalk-channel-v13.md)、[Channel Storage v3](../contracts/channel-storage-v3.md) |
+| 配置和验收钉钉 Web Session 渠道 | [本地开发与 App 隔离流程：钉钉 Web Session](local-workflow.md#钉钉-web-session-验收前置)、[DingTalk Channel v14](../contracts/dingtalk-channel-v14.md)、[Channel Storage v3](../contracts/channel-storage-v3.md) |
 | 创建、复用、交接、合入或清理 Git worktree | [Git Worktree 生命周期与清理](worktrees.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
 | 新增 Product Runtime、建立真实 Probe 或完成逐平台准入 | [Agent Runtime 接入与准入 Checklist](runtime-integration-checklist.md) |

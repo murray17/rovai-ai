@@ -87,12 +87,12 @@ try {
     address: { mode: 'explicit', agentIds: targetIds },
     purpose: 'Independently return a multi-Agent smoke token and your Agent ID without tools',
   })
-  const campId = result.payload?.campId
-  if (result.status !== 'accepted' || !campId || result.payload.agentRunIds?.length !== 2) {
+  const threadId = result.payload?.threadId
+  if (result.status !== 'accepted' || !threadId || result.payload.agentRunIds?.length !== 2) {
     throw new Error(`Two-Agent command was not atomically accepted: ${JSON.stringify(result)}`)
   }
   const commandResult = result
-  const initial = await request('camps.snapshot', { campId })
+  const initial = await request('camps.snapshot', { threadId })
   for (const targetId of targetIds) {
     if (!initial.members.some((member) => member.agentId === targetId)) {
       throw new Error(`Camp is missing ${targetId}`)
@@ -102,7 +102,7 @@ try {
   let snapshot
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
-    snapshot = await request('camps.snapshot', { campId })
+    snapshot = await request('camps.snapshot', { threadId })
     const runs = snapshot.agentRuns.filter((candidate) => commandResult.payload.agentRunIds.includes(candidate.id))
     if (runs.some((run) => run.status === 'failed' || run.status === 'cancelled')) {
       throw new Error(`One AgentRun failed: ${JSON.stringify(runs)}`)
@@ -117,7 +117,7 @@ try {
   if (new Set(runs.map((run) => run.conversationId)).size !== 2) {
     throw new Error(`AgentRuns shared one Conversation: ${JSON.stringify(runs)}`)
   }
-  const turn = snapshot.turns.find((candidate) => candidate.id === commandResult.payload.campTurnId)
+  const turn = snapshot.turns.find((candidate) => candidate.id === commandResult.payload.threadTurnId)
   if (turn?.status !== 'completed') {
     throw new Error(`CampTurn did not complete: ${JSON.stringify(turn)}`)
   }

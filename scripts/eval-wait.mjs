@@ -11,7 +11,7 @@ for (;;) {
   try { receipt = JSON.parse(await readFile(join(root, 'automation', `${args[1]}.json`), 'utf8')) }
   catch (error) { if (error.code !== 'ENOENT') throw error }
   if (receipt) {
-    if (receipt.schemaVersion !== 1 || receipt.campId !== args[1] || receipt.output !== root || !['running', 'completed', 'failed', 'interrupted'].includes(receipt.state)) throw new Error('Evaluation receipt does not belong to this Camp and workspace')
+    if (receipt.schemaVersion !== 1 || receipt.threadId !== args[1] || receipt.output !== root || !['running', 'completed', 'failed', 'interrupted'].includes(receipt.state)) throw new Error('Evaluation receipt does not belong to this Camp and workspace')
     if (receipt.state !== 'running') {
       console.log(JSON.stringify(receipt, null, 2))
       process.exitCode = receipt.state === 'completed' ? 0 : 2

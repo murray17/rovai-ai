@@ -1,6 +1,6 @@
-import type { CampWorldMapNodeId } from './camp-world-map-model'
+import type { ThreadWorldMapNodeId } from './camp-world-map-model'
 
-export type CampWorldMapAmbientTopic =
+export type ThreadWorldMapAmbientTopic =
   | 'wayfinding'
   | 'trace'
   | 'light'
@@ -11,65 +11,65 @@ export type CampWorldMapAmbientTopic =
   | 'weather'
   | 'water'
 
-export type CampWorldMapAmbientEnvironment = 'any' | 'indoor' | 'outdoor'
-export type CampWorldMapAmbientMotion = 'stationary' | 'moving'
+export type ThreadWorldMapAmbientEnvironment = 'any' | 'indoor' | 'outdoor'
+export type ThreadWorldMapAmbientMotion = 'stationary' | 'moving'
 
-type CampWorldMapAmbientBase = {
+type ThreadWorldMapAmbientBase = {
   id: string
-  topic: CampWorldMapAmbientTopic
+  topic: ThreadWorldMapAmbientTopic
   text: string
 }
 
-export type CampWorldMapNodeSoloBeat = CampWorldMapAmbientBase & {
+export type ThreadWorldMapNodeSoloBeat = ThreadWorldMapAmbientBase & {
   kind: 'solo'
   scope: 'node'
-  node: CampWorldMapNodeId
+  node: ThreadWorldMapNodeId
   motion: 'stationary'
 }
 
-export type CampWorldMapGenericStationarySoloBeat = CampWorldMapAmbientBase & {
+export type ThreadWorldMapGenericStationarySoloBeat = ThreadWorldMapAmbientBase & {
   kind: 'solo'
   scope: 'generic'
-  environment: CampWorldMapAmbientEnvironment
+  environment: ThreadWorldMapAmbientEnvironment
   motion: 'stationary'
 }
 
-export type CampWorldMapMovingSoloBeat = CampWorldMapAmbientBase & {
+export type ThreadWorldMapMovingSoloBeat = ThreadWorldMapAmbientBase & {
   kind: 'solo'
   scope: 'generic'
   environment: 'any'
   motion: 'moving'
 }
 
-export type CampWorldMapNodeEncounterBeat = CampWorldMapAmbientBase & {
+export type ThreadWorldMapNodeEncounterBeat = ThreadWorldMapAmbientBase & {
   kind: 'encounter'
   scope: 'node'
-  node: CampWorldMapNodeId
+  node: ThreadWorldMapNodeId
   motion: 'stationary'
 }
 
-export type CampWorldMapGenericEncounterBeat = CampWorldMapAmbientBase & {
+export type ThreadWorldMapGenericEncounterBeat = ThreadWorldMapAmbientBase & {
   kind: 'encounter'
   scope: 'generic'
-  environment: CampWorldMapAmbientEnvironment
+  environment: ThreadWorldMapAmbientEnvironment
   motion: 'stationary'
 }
 
-export type CampWorldMapAmbientBeat =
-  | CampWorldMapNodeSoloBeat
-  | CampWorldMapGenericStationarySoloBeat
-  | CampWorldMapMovingSoloBeat
-  | CampWorldMapNodeEncounterBeat
-  | CampWorldMapGenericEncounterBeat
+export type ThreadWorldMapAmbientBeat =
+  | ThreadWorldMapNodeSoloBeat
+  | ThreadWorldMapGenericStationarySoloBeat
+  | ThreadWorldMapMovingSoloBeat
+  | ThreadWorldMapNodeEncounterBeat
+  | ThreadWorldMapGenericEncounterBeat
 
 export const CAMP_WORLD_MAP_NODE_ENVIRONMENT: Readonly<
-  Record<CampWorldMapNodeId, Exclude<CampWorldMapAmbientEnvironment, 'any'>>
+  Record<ThreadWorldMapNodeId, Exclude<ThreadWorldMapAmbientEnvironment, 'any'>>
 > = {
   research: 'outdoor',
   explore: 'outdoor',
   remote: 'outdoor',
   review: 'indoor',
-  camp: 'indoor',
+  'camp': 'indoor',
   approval: 'outdoor',
   build: 'indoor',
   a2a: 'outdoor',
@@ -1174,4 +1174,4 @@ export const CAMP_WORLD_MAP_AMBIENT_BEATS = [
     motion: 'stationary',
     text: '两人分别数过远处的船灯，最后报出了不同的数字。'
   },
-] as const satisfies readonly CampWorldMapAmbientBeat[]
+] as const satisfies readonly ThreadWorldMapAmbientBeat[]

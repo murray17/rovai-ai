@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { RuntimeUsageChart, USAGE_CHART_SERIES } from './RuntimeUsageChart'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -13,6 +13,7 @@ import type {
 } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { revealInFileManagerLabel } from './renderer-platform'
+import { UiText, uiAttribute } from './interface-language'
 
 export const MONITORING_POLL_INTERVAL_MS = 12_000
 export const MONITORING_EVENT_DEBOUNCE_MS = 300
@@ -74,7 +75,7 @@ export function RuntimeMonitoring({
 }: {
   platform?: NodeJS.Platform
 } = {}): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const [exported, setExported] = useState(false)
   const [filter, setFilter] = useState<MonitoringFilter>({ range: '24h' })
   const [snapshot, setSnapshot] = useState<RuntimeUsageSnapshot | null>(null)
@@ -259,16 +260,16 @@ export function RuntimeMonitoring({
   return (
     <div className="runtime-monitoring">
       <SettingsPageHeader
-        eyebrow="Settings / Runtime Usage"
-        title="运行监控"
-        description="汇总 Runtime 实际上报的 Token、Cache 与成本；未上报字段显示为未知。"
+        eyebrow="Settings / Agent Usage"
+        title={uiAttribute("运行监控")}
+        description={uiAttribute("汇总智能体实际报告的 Token、Cache 与成本；未报告字段显示为未知。")}
         aside={(
           <>
             <button className="quiet-button" type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading}>
-              {loading ? '正在刷新…' : '刷新'}
+              {loading ? uiAttribute("正在刷新…") : uiAttribute("刷新")}
             </button>
             <button className="primary-button" type="button" onClick={() => void exportData()} disabled={loading || exporting}>
-              {exporting ? '正在导出…' : '导出 JSON'}
+              {exporting ? uiAttribute("正在导出…") : uiAttribute("导出 JSON")}
             </button>
           </>
         )}
@@ -283,28 +284,28 @@ export function RuntimeMonitoring({
         />
         {exported && (
           <div className="monitoring-export-notice" role="status">
-            <span>{exportPath ? '导出已保存。' : '下载已开始。'}</span>
+            <span>{exportPath ? uiAttribute("导出已保存。") : uiAttribute("下载已开始。")}</span>
             <>{exportPath && client.revealMonitoringExport && <button className="quiet-button compact" type="button" onClick={() => void client.revealMonitoringExport?.(exportPath)}>{revealInFileManagerLabel(platform)}</button>}</>
           </div>
         )}
         {exportError && (
           <div className="monitoring-operation-error" role="alert">
-            <span>导出失败：{exportError}</span>
-            <button className="quiet-button compact" type="button" onClick={() => setExportError(null)}>关闭</button>
+            <span><UiText zh={"导出失败："} />{exportError}</span>
+            <button className="quiet-button compact" type="button" onClick={() => setExportError(null)}><UiText zh={"关闭"} /></button>
           </div>
         )}
         {refreshError && snapshot && (
           <div className="monitoring-stale-notice" role="status">
-            <span>刷新失败，正在显示截至 {formatTimestamp(snapshot.range.to)} 的数据。</span>
-            <button className="quiet-button compact" type="button" onClick={() => setRefreshKey((value) => value + 1)}>重试</button>
+            <span><UiText zh={"刷新失败，正在显示截至 "} />{formatTimestamp(snapshot.range.to)}<UiText zh={" 的数据。"} /></span>
+            <button className="quiet-button compact" type="button" onClick={() => setRefreshKey((value) => value + 1)}><UiText zh={"重试"} /></button>
           </div>
         )}
         <main aria-busy={loading}>
           {loading && <MonitoringLoading />}
           {!loading && error && (
             <section className="monitoring-state is-error" role="alert">
-              <div><h2>无法读取运行监控</h2><p>{error}</p></div>
-              <button className="quiet-button" type="button" onClick={() => setRefreshKey((value) => value + 1)}>重试</button>
+              <div><h2><UiText zh={"无法读取运行监控"} /></h2><p>{error}</p></div>
+              <button className="quiet-button" type="button" onClick={() => setRefreshKey((value) => value + 1)}><UiText zh={"重试"} /></button>
             </section>
           )}
           {!loading && !error && isEmpty && <RuntimeUsageEmpty />}
@@ -336,27 +337,27 @@ function MonitoringFilters({
   ])
   return (
     <div className="monitoring-toolbar">
-      <p>用量</p>
-      <div className="monitoring-filters" aria-label="运行监控筛选">
-        <Filter label="范围" value={filter.range} disabled={disabled} onChange={(value) => onChange('range', value as MonitoringRange)}>
-          <option value="24h">过去 24 小时</option>
-          <option value="7d">过去 7 天</option>
-          <option value="30d">过去 30 天</option>
+      <p><UiText zh={"用量"} /></p>
+      <div className="monitoring-filters" aria-label={uiAttribute("运行监控筛选")}>
+        <Filter label={uiAttribute("范围")} value={filter.range} disabled={disabled} onChange={(value) => onChange('range', value as MonitoringRange)}>
+          <option value="24h"><UiText zh={"过去 24 小时"} /></option>
+          <option value="7d"><UiText zh={"过去 7 天"} /></option>
+          <option value="30d"><UiText zh={"过去 30 天"} /></option>
         </Filter>
-        <Filter label="Runtime" value={filter.runtimeKind ?? ''} disabled={disabled} onChange={(value) => onChange('runtimeKind', value ? value as AdapterKind : undefined)}>
-          <option value="">全部</option>
+        <Filter label={uiAttribute("智能体")} value={filter.runtimeKind ?? ''} disabled={disabled} onChange={(value) => onChange('runtimeKind', value ? value as AdapterKind : undefined)}>
+          <option value=""><UiText zh={"全部"} /></option>
           {ADAPTERS.map((adapter) => <option key={adapter.value} value={adapter.value}>{adapter.label}</option>)}
         </Filter>
         <Filter label="Provider" value={filter.providerKey ?? ''} disabled={disabled} onChange={(value) => onChange('providerKey', value || undefined)}>
-          <option value="">全部</option>
+          <option value=""><UiText zh={"全部"} /></option>
           {providerOptions.map((value) => <option key={value} value={value}>{value}</option>)}
         </Filter>
-        <Filter label="模型" value={filter.modelKey ?? ''} disabled={disabled} onChange={(value) => onChange('modelKey', value || undefined)}>
-          <option value="">全部</option>
+        <Filter label={uiAttribute("模型")} value={filter.modelKey ?? ''} disabled={disabled} onChange={(value) => onChange('modelKey', value || undefined)}>
+          <option value=""><UiText zh={"全部"} /></option>
           {modelOptions.map((value) => <option key={value} value={value}>{value}</option>)}
         </Filter>
-        <Filter label="成本" value={filter.costKind ?? ''} disabled={disabled} onChange={(value) => onChange('costKind', value || undefined)}>
-          <option value="">全部</option>
+        <Filter label={uiAttribute("成本")} value={filter.costKind ?? ''} disabled={disabled} onChange={(value) => onChange('costKind', value || undefined)}>
+          <option value=""><UiText zh={"全部"} /></option>
           <option value="model_call">Model Call</option>
           <option value="turn">Turn</option>
           <option value="run">Run</option>
@@ -388,10 +389,10 @@ export function RuntimeUsageView({ snapshot }: { snapshot: RuntimeUsageSnapshot 
       <dl className="monitoring-keyline">
         {SUMMARY_METRICS.map(([key, label, kind]) => {
           const value = snapshot.summary[key]
-          return <Metric key={key} label={label} value={value} kind={kind} />
+          return <Metric key={key} label={uiAttribute(label)} value={value} kind={kind} />
         })}
         <div>
-          <dt>最佳可用成本</dt>
+          <dt><UiText zh={"最佳可用成本"} /></dt>
           <dd className="monitoring-metric-value is-compact">
             {snapshot.summary.cost?.run.length
               ? snapshot.summary.cost.run.map(formatMoney).join(' · ')
@@ -401,12 +402,12 @@ export function RuntimeUsageView({ snapshot }: { snapshot: RuntimeUsageSnapshot 
       </dl>
 
       <section className="monitoring-section" aria-labelledby="monitoring-trend-heading">
-        <SectionHeading id="monitoring-trend-heading" title="用量趋势" description="24 小时按小时汇总，较长范围按天汇总。" />
+        <SectionHeading id="monitoring-trend-heading" title={uiAttribute("用量趋势")} description={uiAttribute("24 小时按小时汇总，较长范围按天汇总。")} />
         <UsageTrend points={snapshot.trend} />
       </section>
 
-      <BreakdownTable id="monitoring-runtime-heading" title="Runtime" description="按 Runtime 汇总 Token、Cache、成本与数据覆盖。" rows={snapshot.byRuntime} mode="runtime" />
-      <BreakdownTable id="monitoring-model-heading" title="模型" description="最多展示用量最高的 10 组，其余合并为“其他”。" rows={snapshot.byModel} mode="model" />
+      <BreakdownTable id="monitoring-runtime-heading" title={uiAttribute("智能体")} description={uiAttribute("按智能体汇总 Token、Cache、成本与数据覆盖。")} rows={snapshot.byRuntime} mode="runtime" />
+      <BreakdownTable id="monitoring-model-heading" title={uiAttribute("模型")} description={uiAttribute("最多展示用量最高的 10 组，其余合并为“其他”。")} rows={snapshot.byModel} mode="model" />
 
       {snapshot.summary.cost?.reconciliation.length ? <Reconciliation snapshot={snapshot} /> : null}
     </div>
@@ -432,14 +433,14 @@ function UsageTrend({ points }: { points: RuntimeUsageTrendPoint[] }): React.JSX
   const costPoints = points.filter((point) => point.cost?.length)
   const hasTokens = points.some((point) => USAGE_CHART_SERIES.some((series) => point[series.key] !== null))
   if (!hasTokens && costPoints.length === 0) {
-    return <p className="monitoring-inline-unavailable">当前范围没有可展示的用量趋势。</p>
+    return <p className="monitoring-inline-unavailable"><UiText zh={"当前范围没有可展示的用量趋势。"} /></p>
   }
   return (
-    <div className="monitoring-usage-trend" role="group" aria-label="Token 与 Cache 用量趋势">
+    <div className="monitoring-usage-trend" role="group" aria-label={uiAttribute("Token 与 Cache 用量趋势")}>
       {hasTokens && <RuntimeUsageChart points={points} />}
       {costPoints.length > 0 && (
-        <div className="monitoring-trend-cost" aria-label="成本趋势">
-          <span>成本</span>
+        <div className="monitoring-trend-cost" aria-label={uiAttribute("成本趋势")}>
+          <span><UiText zh={"成本"} /></span>
           {costPoints.map((point) => (
             <span key={point.bucketStartAt}>
               <time dateTime={point.bucketStartAt}>{formatTimestamp(point.bucketStartAt)}</time>
@@ -463,16 +464,16 @@ function BreakdownTable({ id, title, description, rows, mode }: {
     <section className="monitoring-section" aria-labelledby={id}>
       <SectionHeading id={id} title={title} description={description} />
       {rows.length === 0 ? (
-        <p className="monitoring-inline-unavailable">当前范围没有可汇总的数据。</p>
+        <p className="monitoring-inline-unavailable"><UiText zh={"当前范围没有可汇总的数据。"} /></p>
       ) : (
         <div className="monitoring-table-wrap">
           <table>
-            <thead><tr><th>{mode === 'runtime' ? 'Runtime' : 'Runtime / Provider / 模型'}</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Write</th><th>Read 占比</th><th>成本</th><th>覆盖</th></tr></thead>
+            <thead><tr><th>{mode === 'runtime' ? uiAttribute("智能体") : uiAttribute("智能体 / Provider / 模型")}</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Write</th><th><UiText zh={"Read 占比"} /></th><th><UiText zh={"成本"} /></th><th><UiText zh={"覆盖"} /></th></tr></thead>
             <tbody>{rows.map((row, index) => (
               <tr key={`${row.runtimeKind}:${row.providerKey}:${row.modelKey}:${index}`}>
                 <th scope="row">
                   <strong>{adapterLabel(row.runtimeKind)}</strong>
-                  {mode === 'model' && <small>{[row.providerKey, row.modelKey].filter(Boolean).join(' / ') || '未知模型'}</small>}
+                  {mode === 'model' && <small>{[row.providerKey, row.modelKey].filter(Boolean).join(' / ') || uiAttribute('未知模型')}</small>}
                 </th>
                 <td>{formatInteger(row.promptInputTotalTokens)}</td>
                 <td>{formatInteger(row.outputTokens)}</td>
@@ -495,12 +496,12 @@ function Reconciliation({ snapshot }: { snapshot: RuntimeUsageSnapshot }): React
   if (!cost) return <></>
   return (
     <section className="monitoring-section" aria-labelledby="monitoring-reconciliation-heading">
-      <SectionHeading id="monitoring-reconciliation-heading" title="Provider 成本对账" description="Provider 聚合账单与 Run 可归因成本分开保存，不拆分成伪造的单 Run 费用。" />
+      <SectionHeading id="monitoring-reconciliation-heading" title={uiAttribute("Provider 成本对账")} description={uiAttribute("Provider 聚合账单与 Run 可归因成本分开保存，不拆分成伪造的单 Run 费用。")} />
       <dl className="monitoring-reconciliation">
-        <div><dt>Run 最佳可用成本</dt><dd>{cost.run.map(formatMoney).join(' · ') || '—'}</dd></div>
-        <div><dt>Provider 对账成本</dt><dd>{cost.reconciliation.map(formatMoney).join(' · ')}</dd></div>
-        <div><dt>差额（Provider − Run）</dt><dd>{cost.difference.map((value) => `${value.currency} ${value.amount}`).join(' · ') || '—'}</dd></div>
-        <div><dt>对账截止</dt><dd>{cost.latestReconciledAt ? formatTimestamp(cost.latestReconciledAt) : '—'}</dd></div>
+        <div><dt><UiText zh={"Run 最佳可用成本"} /></dt><dd>{cost.run.map(formatMoney).join(' · ') || '—'}</dd></div>
+        <div><dt><UiText zh={"Provider 对账成本"} /></dt><dd>{cost.reconciliation.map(formatMoney).join(' · ')}</dd></div>
+        <div><dt><UiText zh={"差额（Provider − Run）"} /></dt><dd>{cost.difference.map((value) => `${value.currency} ${value.amount}`).join(' · ') || '—'}</dd></div>
+        <div><dt><UiText zh={"对账截止"} /></dt><dd>{cost.latestReconciledAt ? formatTimestamp(cost.latestReconciledAt) : '—'}</dd></div>
       </dl>
     </section>
   )
@@ -511,11 +512,11 @@ function SectionHeading({ id, title, description }: { id: string; title: string;
 }
 
 function MonitoringLoading(): React.JSX.Element {
-  return <div className="monitoring-loading"><span className="spinner" aria-hidden="true" /><div><strong>正在读取用量</strong><p>汇总已保存的 Run Summary 与小时数据。</p></div></div>
+  return <div className="monitoring-loading"><span className="spinner" aria-hidden="true" /><div><strong><UiText zh={"正在读取用量"} /></strong><p><UiText zh={"汇总已保存的 Run Summary 与小时数据。"} /></p></div></div>
 }
 
 export function RuntimeUsageEmpty(): React.JSX.Element {
-  return <section className="monitoring-state is-empty"><span aria-hidden="true" /><div><h2>暂无运行数据</h2><p>新 AgentRun 纳管后会显示在这里。</p></div></section>
+  return <section className="monitoring-state is-empty"><span aria-hidden="true" /><div><h2><UiText zh={"暂无运行数据"} /></h2><p><UiText zh={"新 AgentRun 纳管后会显示在这里。"} /></p></div></section>
 }
 
 export function hasRuntimeUsage(snapshot: RuntimeUsageSnapshot): boolean {

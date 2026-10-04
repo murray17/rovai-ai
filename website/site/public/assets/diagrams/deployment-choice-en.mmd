@@ -1,0 +1,12 @@
+flowchart TB
+  desktop["Desktop Web 0.4.3: existing workspace"]
+  server["Server 0.4.3: separate instance"]
+  choice{"Choose connection route"}
+  desktop --> choice
+  server --> choice
+  choice --> lan["Trusted LAN HTTP: Desktop or Server"]
+  choice --> ts["Tailscale: Desktop direct IP / Server Serve HTTPS"]
+  choice --> public["Public HTTPS: Server + reverse proxy"]
+  lan --> login["Log into the chosen instance; files stay on its host"]
+  ts --> login
+  public --> login

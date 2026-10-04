@@ -39,7 +39,7 @@ pub fn output_contract_mismatch_agent_error(operation: &str) -> Value {
 /// those exceptions and is never a recursive field filter.
 pub fn agent_output_schema(operation: &str) -> Result<Value> {
     match operation {
-        "camp.message.send" => Ok(json!({
+        "thread.message.send" => Ok(json!({
             "type": "object",
             "additionalProperties": false,
             "required": ["messageId", "agentAddressingMode", "effectiveRecipients", "deliveryIds"],
@@ -106,9 +106,10 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
             }
         })),
         "member.create"
-        | "camp.list"
-        | "camp.search"
-        | "camp.read"
+        | "thread.list"
+        | "thread.search"
+        | "thread.read"
+        | "thread.runs"
         | "history.search"
         | "memory.view"
         | "memory.search"
@@ -142,8 +143,10 @@ pub fn project_envelope(envelope: BuiltinToolInvocationEnvelope) -> Result<Value
         error,
         ..
     } = envelope;
+    let operation = crate::thread_compat::canonical_operation(&operation);
     let projected = if ok {
-        let result = result.context("successful Built-in Tool envelope has no result")?;
+        let mut result = result.context("successful Built-in Tool envelope has no result")?;
+        crate::thread_compat::project_builtin_result(operation, &mut result)?;
         project_success(&operation, result)?
     } else {
         let error = error.context("rejected Built-in Tool envelope has no error")?;
@@ -155,23 +158,23 @@ pub fn project_envelope(envelope: BuiltinToolInvocationEnvelope) -> Result<Value
 
 fn project_success(operation: &str, result: Value) -> Result<Value> {
     match operation {
-        "camp.message.send" => {
+        "thread.message.send" => {
             let object = result
                 .as_object()
                 .context("Canonical Operation Result must be an object")?;
             let mut projected = json!({
             "messageId": object
                 .get("messageId")
-                .context("camp.message.send result has no messageId")?,
+                .context("thread.message.send result has no messageId")?,
             "agentAddressingMode": object
                 .get("agentAddressingMode")
-                .context("camp.message.send result has no agentAddressingMode")?,
+                .context("thread.message.send result has no agentAddressingMode")?,
             "effectiveRecipients": object
                 .get("effectiveRecipients")
-                .context("camp.message.send result has no effectiveRecipients")?,
+                .context("thread.message.send result has no effectiveRecipients")?,
             "deliveryIds": object
                 .get("deliveryIds")
-                .context("camp.message.send result has no deliveryIds")?,
+                .context("thread.message.send result has no deliveryIds")?,
             });
             if let Some(attachments) = object
                 .get("attachments")
@@ -233,9 +236,10 @@ fn project_success(operation: &str, result: Value) -> Result<Value> {
                 .context("Canonical Operation Result must be an object")?,
         ),
         "member.create"
-        | "camp.list"
-        | "camp.search"
-        | "camp.read"
+        | "thread.list"
+        | "thread.search"
+        | "thread.read"
+        | "thread.runs"
         | "history.search"
         | "memory.view"
         | "memory.search"
@@ -597,14 +601,14 @@ mod tests {
     #[test]
     fn compact_projections_are_not_reduced_envelopes() {
         let envelope = BuiltinToolInvocationEnvelope::success(
-            "camp.message.send",
+            "thread.message.send",
             "7b5db24c-4a43-4cab-9217-d982b08f7691",
             json!({
                 "status": "accepted",
                 "messageId": "msg_123",
                 "agentAddressingMode": "automatic",
                 "visibility": "camp_public",
-                "campTurnId": "turn_1",
+                "threadTurnId": "turn_1",
                 "effectiveRecipients": ["agent_27"],
                 "recipientPresentation": {},
                 "recipientSetDigest": "sha256:digest",
@@ -627,13 +631,13 @@ mod tests {
     #[test]
     fn indeterminate_projection_drops_hidden_identity_details() {
         let envelope = BuiltinToolInvocationEnvelope::rejected(
-            "camp.message.send",
+            "thread.message.send",
             "7b5db24c-4a43-4cab-9217-d982b08f7691",
             BuiltinToolError {
                 code: "builtin_tool.outcome_indeterminate".to_string(),
                 message: "unsafe transport diagnostic with private identity".to_string(),
                 recovery: crate::builtin_tool_transport::BuiltinToolRecovery::ConfirmOutcome,
-                details: Some(json!({"requestId": "hidden", "operation": "camp.message.send"})),
+                details: Some(json!({"requestId": "hidden", "operation": "thread.message.send"})),
             },
         )
         .unwrap();
@@ -650,7 +654,7 @@ mod tests {
     #[test]
     fn output_contract_mismatch_is_closed_and_non_retryable() {
         let completed_core_result = json!({
-            "campId": "camp_123",
+            "threadId": "camp_123",
             "mode": "item",
             "items": [{
                 "messageId": "msg_123",
@@ -676,14 +680,14 @@ mod tests {
             }]
         });
         let envelope = BuiltinToolInvocationEnvelope::success(
-            "camp.read",
+            "thread.read",
             "7b5db24c-4a43-4cab-9217-d982b08f7691",
             completed_core_result,
         )
         .unwrap();
         assert!(project_envelope(envelope).is_err());
 
-        let projected = output_contract_mismatch_agent_error("camp.read");
+        let projected = output_contract_mismatch_agent_error("thread.read");
         validate_schema(&projected, &agent_error_schema()).unwrap();
         assert_eq!(
             projected,
@@ -691,7 +695,7 @@ mod tests {
                 "code": "builtin_tool.output_contract_mismatch",
                 "message": "The operation completed, but its result could not be safely projected.",
                 "recovery": "stop",
-                "details": {"operation": "camp.read"}
+                "details": {"operation": "thread.read"}
             }})
         );
     }
@@ -709,7 +713,7 @@ mod tests {
 
     #[test]
     fn closed_agent_output_schemas_reject_extra_and_invalid_fields() {
-        let schema = agent_output_schema("camp.message.send").unwrap();
+        let schema = agent_output_schema("thread.message.send").unwrap();
         assert!(
             validate_schema(
                 &json!({
@@ -729,7 +733,7 @@ mod tests {
             &json!({
                 "missions": [{
                     "missionId": "rvm_example",
-                    "campId": "rvcamp_example",
+                    "threadId": "rvcamp_example",
                     "title": "使命",
                     "status": "in_progress",
                     "updatedAt": "2026-09-19T00:00:00Z"
@@ -818,7 +822,7 @@ mod tests {
         ] {
             let mut canonical = json!({
                 "taskId": "task_123",
-                "campId": "camp_123",
+                "threadId": "camp_123",
                 "title": "Task",
                 "description": "Scope and requirements",
                 "status": status,
@@ -850,7 +854,7 @@ mod tests {
             assert_eq!(projected[note_key], note_value);
             assert_eq!(projected.as_object().unwrap().len(), 6);
             for unrelated in [
-                "campId",
+                "threadId",
                 "createdById",
                 "blockedReason",
                 "completionSummary",
@@ -865,10 +869,81 @@ mod tests {
 
     #[test]
     fn every_operation_has_a_schema_valid_golden_projection() {
+        // v8 adds execution queries and addressing to collection items.
         let golden: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/builtin-tool-agent-output-v8.json"
+        ))
+        .unwrap();
+        // Old receipts must validate their original digest before live-name projection.
+        let legacy: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/builtin-tool-agent-output-v5.json"
         ))
         .unwrap();
+        for (operation, fixture) in legacy.as_object().unwrap() {
+            let envelope = BuiltinToolInvocationEnvelope::success(
+                operation,
+                "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                fixture["canonicalResult"].clone(),
+            )
+            .unwrap();
+            let projected = project_envelope(envelope).unwrap();
+            validate_schema(
+                &projected,
+                &agent_output_schema(crate::thread_compat::canonical_operation(operation)).unwrap(),
+            )
+            .unwrap();
+        }
+        let mut quoted = legacy["camp.read"]["canonicalResult"].clone();
+        quoted["items"][0]["quotes"] = json!([{"kind":"message_excerpt","source":{"scope":"camp_messages","messageId":"quote-message","author":{"type":"user","displayName":"User"}},"text":"campId and Thread are quoted verbatim"}]);
+        let projected = project_envelope(
+            BuiltinToolInvocationEnvelope::success(
+                "camp.read",
+                "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                quoted,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            projected["items"][0]["quotes"][0]["source"]["scope"],
+            "thread_messages"
+        );
+        assert_eq!(
+            projected["items"][0]["quotes"][0]["text"],
+            "campId and Thread are quoted verbatim"
+        );
+        let mut old_result = golden["thread.read"]["canonicalResult"].clone();
+        old_result["items"][0]["body"] = json!("@Principal old successful result");
+        let old_envelope = BuiltinToolInvocationEnvelope::success(
+            "thread.read",
+            "7b5db24c-4a43-4cab-9217-d982b08f7691",
+            old_result,
+        )
+        .unwrap();
+        assert_eq!(
+            project_envelope(old_envelope.clone()).unwrap()["items"][0]["body"],
+            "@Principal old successful result"
+        );
+        let mut tampered = old_envelope;
+        tampered.result.as_mut().unwrap()["items"][0]["body"] = json!("@User rewritten result");
+        assert!(project_envelope(tampered).is_err());
+        let executions = &golden["thread.runs"]["canonicalResult"];
+        for (field, value) in [
+            ("status", json!("running")),
+            ("kind", json!("pending_batch")),
+            ("waitReason", json!("busy")),
+            ("messageCount", json!(0)),
+        ] {
+            let mut invalid = executions.clone();
+            invalid["items"][0][field] = value;
+            let envelope = BuiltinToolInvocationEnvelope::success(
+                "thread.runs",
+                "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                invalid,
+            )
+            .unwrap();
+            assert!(project_envelope(envelope).is_err(), "{field}");
+        }
         let documents = golden.as_object().unwrap();
         assert_eq!(documents.len(), builtin_tool_definitions().len());
         for definition in builtin_tool_definitions() {

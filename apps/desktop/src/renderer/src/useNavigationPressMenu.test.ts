@@ -85,4 +85,12 @@ describe('mobile navigation press gesture', () => {
     gesture.cancel()
     expect(gesture.consumeClick()).toBe(false)
   })
+
+  it('opens a mouse context menu without consuming the next left click', () => {
+    const open = vi.fn()
+    const gesture = createNavigationPressGesture(open)
+    gesture.openContext(false)
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(gesture.consumeClick()).toBe(false)
+  })
 })

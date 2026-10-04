@@ -79,7 +79,7 @@ export function seedCompletedOnboardingForAcceptance(
     completedAt: '1970-01-01T00:00:00.000Z',
     selectedMemberRole: null,
     memberAgentId: null,
-    quickChatCampId: null
+    quickChatThreadId: null
   }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
   return filePath
 }

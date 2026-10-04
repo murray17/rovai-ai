@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type {
   AgentProfile,
   GeneralPreferencesSnapshot,
-  NavigationCampItem,
+  NavigationThreadItem,
   NavigationSnapshot
 } from '@contracts'
 import {
   currentProjectAccessDecision,
-  currentProjectForCamp,
+  currentProjectForThread,
   currentProjectWorkspace,
   defaultsNeedInvalidation,
   navigationIncludingCurrentWorkspace,
@@ -31,18 +31,18 @@ describe('new conversation preferences', () => {
       .toEqual({ kind: 'quick_chat' })
   })
 
-  it('derives the current Project from a Camp without coupling it to disclosure state', () => {
-    expect(currentProjectForCamp(camp('directory', '/repo')))
+  it('derives the current Project from a Thread without coupling it to disclosure state', () => {
+    expect(currentProjectForThread(thread('directory', '/repo')))
       .toEqual({ kind: 'directory', projectPath: '/repo' })
-    expect(currentProjectForCamp(camp('quick_chat', '/quick-chat')))
+    expect(currentProjectForThread(thread('quick_chat', '/quick-chat')))
       .toEqual({ kind: 'quick_chat' })
   })
 
-  it('keeps a validated current workspace visible when it has no navigable Camps', () => {
+  it('keeps a validated current workspace visible when it has no navigable Threads', () => {
     const navigation: NavigationSnapshot = {
       schemaVersion: 3,
       throughGlobalSequence: 7,
-      quickChat: { totalCount: 0, recentCamps: [] },
+      quickChat: { totalCount: 0, recentThreads: [] },
       projects: []
     }
     const currentProject = { kind: 'directory', projectPath: '/repo/empty-project' } as const
@@ -59,7 +59,7 @@ describe('new conversation preferences', () => {
       lastActivityAt: '',
       lastActivityGlobalSequence: 0,
       totalCount: 0,
-      recentCamps: []
+      recentThreads: []
     }])
     expect(currentProjectWorkspace(displayed, currentProject)).toEqual({
       name: 'empty-project',
@@ -75,7 +75,7 @@ describe('new conversation preferences', () => {
     const navigation: NavigationSnapshot = {
       schemaVersion: 3,
       throughGlobalSequence: 7,
-      quickChat: { totalCount: 1, recentCamps: [] },
+      quickChat: { totalCount: 1, recentThreads: [] },
       projects: [
         project('/repo/a'),
         project('/repo/b')
@@ -96,7 +96,7 @@ describe('new conversation preferences', () => {
     const navigation: NavigationSnapshot = {
       schemaVersion: 3,
       throughGlobalSequence: 7,
-      quickChat: { totalCount: 0, recentCamps: [] },
+      quickChat: { totalCount: 0, recentThreads: [] },
       projects: [project('/repo/c'), project('/repo/a'), project('/repo/b')]
     }
 
@@ -116,7 +116,7 @@ describe('new conversation preferences', () => {
     const navigation: NavigationSnapshot = {
       schemaVersion: 3,
       throughGlobalSequence: 7,
-      quickChat: { totalCount: 0, recentCamps: [] },
+      quickChat: { totalCount: 0, recentThreads: [] },
       projects: [project('/repo/existing')]
     }
     const displayed = navigationIncludingCurrentWorkspace(
@@ -133,7 +133,7 @@ describe('new conversation preferences', () => {
     const navigation: NavigationSnapshot = {
       schemaVersion: 3,
       throughGlobalSequence: 7,
-      quickChat: { totalCount: 1, recentCamps: [] },
+      quickChat: { totalCount: 1, recentThreads: [] },
       projects: [project('/repo/a'), project('/repo/b')]
     }
 
@@ -149,7 +149,7 @@ describe('new conversation preferences', () => {
     const navigation: NavigationSnapshot = {
       schemaVersion: 3,
       throughGlobalSequence: 7,
-      quickChat: { totalCount: 0, recentCamps: [] },
+      quickChat: { totalCount: 0, recentThreads: [] },
       projects: []
     }
     const currentProject = { kind: 'directory', projectPath: '/Users/person/Downloads' } as const
@@ -232,7 +232,8 @@ describe('new conversation preferences', () => {
 
 function configuredPreferences(): GeneralPreferencesSnapshot {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
+    interfaceLanguage: 'zh-CN',
     startupLocationMode: 'last_location',
     lastSettingsSection: 'general',
     executionConsolePlacement: 'bottom',
@@ -269,10 +270,10 @@ function profile(agentId: string, presence: AgentProfile['presence']): AgentProf
   }
 }
 
-function camp(
-  projectBindingKind: NavigationCampItem['projectBindingKind'],
+function thread(
+  projectBindingKind: NavigationThreadItem['projectBindingKind'],
   projectPath: string
-): Pick<NavigationCampItem, 'projectBindingKind' | 'projectPath'> {
+): Pick<NavigationThreadItem, 'projectBindingKind' | 'projectPath'> {
   return { projectBindingKind, projectPath }
 }
 
@@ -284,6 +285,6 @@ function project(projectPath: string): NavigationSnapshot['projects'][number] {
     lastActivityAt: '2026-08-09T00:00:00Z',
     lastActivityGlobalSequence: 1,
     totalCount: 0,
-    recentCamps: []
+    recentThreads: []
   }
 }

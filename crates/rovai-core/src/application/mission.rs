@@ -664,15 +664,14 @@ impl Core {
         if verified_worktree
             .as_ref()
             .is_some_and(|verified| verified.requires_managed_branch())
+            && expected_oid.is_none()
         {
-            if expected_oid.is_none() {
-                timings.identity_and_safety_ms = identity_started_at.elapsed().as_millis();
-                return Err(MissionWorkspaceCleanupFailure::new(
-                    anyhow::anyhow!("mission.workspace_branch_missing"),
-                    false,
-                    &timings,
-                ));
-            }
+            timings.identity_and_safety_ms = identity_started_at.elapsed().as_millis();
+            return Err(MissionWorkspaceCleanupFailure::new(
+                anyhow::anyhow!("mission.workspace_branch_missing"),
+                false,
+                &timings,
+            ));
         }
         workspace.cleanup_expected_branch_oid = expected_oid.clone();
         workspace.cleanup_branch_removed |= expected_oid.is_none();
@@ -866,7 +865,7 @@ impl Core {
                 .lock()
                 .await
                 .release(&workspace.mission_id);
-            emit_navigation_invalidated(
+            emit_missions_invalidated(
                 &self.output,
                 "mission.workspace.cleanup.finished",
                 Some(&workspace.camp_id),
@@ -993,7 +992,7 @@ impl Core {
                     ))
                 })?;
                 let scheduled = execution.result.payload["scheduled"] == json!(true);
-                let camp_id = execution.result.payload["campId"]
+                let camp_id = execution.result.payload["threadId"]
                     .as_str()
                     .map(str::to_string);
                 drop(database);
@@ -1002,7 +1001,7 @@ impl Core {
                         .lock()
                         .await
                         .release(&mission_id);
-                    emit_navigation_invalidated(
+                    emit_missions_invalidated(
                         &self.output,
                         "missions.workspace.cleanup",
                         camp_id.as_deref(),
@@ -1060,7 +1059,7 @@ impl Core {
                     (scheduled, camp_id, pending)
                 };
                 if scheduled {
-                    emit_navigation_invalidated(
+                    emit_missions_invalidated(
                         &self.output,
                         "missions.cleanup.retry",
                         camp_id.as_deref(),
@@ -1303,15 +1302,15 @@ impl Core {
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 if execution.result.status == CommandResultStatus::Applied
-                    && let Some(camp_id) = execution.result.payload["campId"].as_str()
+                    && let Some(camp_id) = execution.result.payload["threadId"].as_str()
                 {
                     self.attachment_views
                         .ensure_empty_camp_ready(&mut database, camp_id)?;
                 }
-                emit_navigation_invalidated(
+                emit_missions_invalidated(
                     &self.output,
                     "missions.create",
-                    execution.result.payload["campId"].as_str(),
+                    execution.result.payload["threadId"].as_str(),
                 );
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -1379,7 +1378,7 @@ impl Core {
                 if super::command_result_has_delivery_work(&execution.result.payload) {
                     self.delivery_batch_scheduler_notify.notify_one();
                 }
-                emit_navigation_invalidated(&self.output, &request.method, None);
+                emit_missions_invalidated(&self.output, &request.method, None);
                 Ok(serde_json::to_value(execution.result)?)
             }
             _ => anyhow::bail!("Unsupported Mission operation"),

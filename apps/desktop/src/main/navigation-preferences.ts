@@ -1,9 +1,10 @@
-import { isCampId } from '@contracts'
-import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isStableId, isTimestamp, isRecord } from '../shared/navigation-preferences-model'
+import { isThreadId } from '@contracts'
+import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isStableId, isTimestamp, isRecord, isNavigationThreadReadState } from '../shared/navigation-preferences-model'
 import { readFile } from 'node:fs/promises'
 import type {
   NavigationPin,
   NavigationPreferencesSnapshot,
+  NavigationThreadReadState,
   RemovedNavigationProject,
   StructuredError
 } from '@contracts'
@@ -68,6 +69,12 @@ function sourceMatchesSupportedSnapshot(
       projectOrder: snapshot.projectOrder
     })
   }
+  if (source.schemaVersion === 4) {
+    return JSON.stringify(source) === JSON.stringify({
+      schemaVersion: 4, pins: snapshot.pins, removedProjects: snapshot.removedProjects,
+      projectOrder: snapshot.projectOrder, projectNames: snapshot.projectNames
+    })
+  }
   return JSON.stringify(source) === JSON.stringify(snapshot)
 }
 
@@ -125,6 +132,23 @@ export class NavigationPreferencesStore {
     })
   }
 
+  setThreadReadState(threadId: string, state: NavigationThreadReadState | null): Promise<NavigationPreferencesSnapshot> {
+    if (!isThreadId(threadId) || (state !== null && !isNavigationThreadReadState(state))) {
+      return Promise.reject(new Error('Invalid Thread read state'))
+    }
+    return this.#enqueue(async () => {
+      const threadReadStates = { ...this.#snapshot.threadReadStates }
+      if (state === null) delete threadReadStates[threadId]
+      else threadReadStates[threadId] = {
+        manualUnread: state.manualUnread,
+        readThroughGlobalSequence: Math.max(state.readThroughGlobalSequence,
+          threadReadStates[threadId]?.readThroughGlobalSequence ?? 0)
+      }
+      await this.#commit({ ...this.#snapshot, threadReadStates })
+      return this.get()
+    })
+  }
+
   setProjectName(targetKey: string, name: string | null): Promise<NavigationPreferencesSnapshot> {
     if (!isProjectTargetKey(targetKey)) {
       return Promise.reject(new Error('Unsupported Project navigation key'))
@@ -172,16 +196,16 @@ export class NavigationPreferencesStore {
 
   removeProject(
     targetKey: string,
-    relatedCampIds: string[]
+    relatedThreadIds: string[]
   ): Promise<NavigationPreferencesSnapshot> {
     if (!isProjectTargetKey(targetKey)) {
       return Promise.reject(new Error('Unsupported Project navigation key'))
     }
-    if (!Array.isArray(relatedCampIds) || !relatedCampIds.every(isCampId)) {
-      return Promise.reject(new Error('Related Camp IDs are invalid'))
+    if (!Array.isArray(relatedThreadIds) || !relatedThreadIds.every(isThreadId)) {
+      return Promise.reject(new Error('Related Thread IDs are invalid'))
     }
     return this.#enqueue(async () => {
-      const relatedCampIdSet = new Set(relatedCampIds)
+      const relatedThreadIdSet = new Set(relatedThreadIds)
       const existing = this.#snapshot.removedProjects.find(
         (project) => project.targetKey === targetKey
       )
@@ -189,7 +213,7 @@ export class NavigationPreferencesStore {
         ...this.#snapshot,
         pins: this.#snapshot.pins.filter((pin) => !(
           (pin.kind === 'project' && pin.targetKey === targetKey)
-          || (pin.kind === 'camp' && relatedCampIdSet.has(pin.targetKey))
+          || (pin.kind === 'camp' && relatedThreadIdSet.has(pin.targetKey))
         )),
         removedProjects: [
           ...this.#snapshot.removedProjects.filter(

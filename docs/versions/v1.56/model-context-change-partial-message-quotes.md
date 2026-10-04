@@ -356,7 +356,7 @@ Draft / Pending owner revision
 
 原有回复条同样位于输入框内部，沿用当前 `.composer-reply-region / .composer-reply-line`：作者和有界摘要占一行，末尾“取消”，不增加边框、底色、阴影或回复图标。与部分引用同时存在时，框内顺序是“回复摘要 → 引用胶囊 → 问题 → 工具栏”；不在两者之间画分隔线。取消回复不删除选文引用，移除选文也不取消回复。
 
-框外的 `.composer-route-slot` 仅承担默认 Lead / continuation 等接收者提示，不能用它呈现回复摘要。有显式 Reply 时隐藏重复的路由文字并保留现有空白占位；不能把所有接收者提示一并移入框内。原型此前把 reply author 写进框外路由行，这是还原错误，revision 5 已纠正。依据为 [CampWorkspace.tsx](../../../apps/desktop/src/renderer/src/CampWorkspace.tsx) 与 [当前会话 UI 合同](../../ui/components/conversation-workspace.md#消息回复与父引用)。
+框外的 `.composer-route-slot` 仅承担默认 Lead / continuation 等接收者提示，不能用它呈现回复摘要。有显式 Reply 时隐藏重复的路由文字并保留现有空白占位；不能把所有接收者提示一并移入框内。原型此前把 reply author 写进框外路由行，这是还原错误，revision 5 已纠正。依据为 [CampWorkspace.tsx](../../../apps/desktop/src/renderer/src/ThreadWorkspace.tsx) 与 [当前会话 UI 合同](../../ui/components/conversation-workspace.md#消息回复与父引用)。
 
 左侧引用图标和总数可打开完整列表；默认展示前两段“作者 · 短摘要 ×”，超出的数量用“+N 段”表示。摘要单行省略，点击即可查看完整快照；作者是来源回跳入口；× 只移除对应 quoteId。对键盘和触摸同样开放这些动作，不把完整内容仅藏在 hover tooltip。即使是一段长代码，也不拉高输入框。
 

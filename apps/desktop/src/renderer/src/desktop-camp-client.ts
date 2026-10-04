@@ -1,7 +1,7 @@
-import type { CampClient } from './camp-client'
+import type { ThreadClient } from './camp-client'
 
 /** Lazy Desktop-only compatibility adapter; importing it never accesses Electron. */
-export const desktopCampClient: CampClient = {
+export const desktopThreadClient: ThreadClient = {
   exportMonitoring: async filter => { const path = await window.rovai.exportMonitoring(filter); return { exported: Boolean(path), ...(path ? { path } : {}) } },
   revealMonitoringExport: path => window.rovai.revealMonitoringExport(path),
   exportDiagnostics: async () => { const path = await window.rovai.exportDiagnostics(); return { exported: Boolean(path), ...(path ? { path } : {}) } },
@@ -31,7 +31,7 @@ export const desktopCampClient: CampClient = {
       const path = await window.rovai.composerAttachments.location?.(locator)
       return path ? { path, location: 'local' } : null
     }
-    const path = await window.rovai.request<string | null>('camp.attachments.location', locator)
+    const path = await window.rovai.request<string | null>('thread.attachments.location', locator)
     return path ? { path, location: 'local' } : null
   },
   attachments: { kind: 'native',

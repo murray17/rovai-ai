@@ -2,7 +2,7 @@ import { isNewConversationMemberAvailable } from './new-conversation-availabilit
 import type {
   AgentProfile,
   GeneralPreferencesSnapshot,
-  NavigationCampItem,
+  NavigationThreadItem,
   NavigationSnapshot,
   NewConversationDefaults,
   ProjectNavigationGroup,
@@ -77,9 +77,9 @@ export function persistCurrentProject(currentProject: CurrentProject): void {
   }
 }
 
-export function currentProjectForCamp(camp: Pick<NavigationCampItem, 'projectBindingKind' | 'projectPath'>): CurrentProject {
-  return camp.projectBindingKind === 'directory'
-    ? { kind: 'directory', projectPath: camp.projectPath }
+export function currentProjectForThread(thread: Pick<NavigationThreadItem, 'projectBindingKind' | 'projectPath'>): CurrentProject {
+  return thread.projectBindingKind === 'directory'
+    ? { kind: 'directory', projectPath: thread.projectPath }
     : { kind: 'quick_chat' }
 }
 
@@ -125,7 +125,7 @@ export function navigationWithProjectOrder(
     : { ...navigation, projects }
 }
 
-// Display overrides never mutate Core snapshots, workspace bindings, or Camp identity.
+// Display overrides never mutate Core snapshots, workspace bindings, or Thread identity.
 export function navigationWithProjectNames(
   navigation: NavigationSnapshot | null,
   projectNames: Readonly<Record<string, string>>
@@ -212,7 +212,7 @@ export function navigationIncludingCurrentWorkspace(
     lastActivityAt: '',
     lastActivityGlobalSequence: 0,
     totalCount: 0,
-    recentCamps: []
+    recentThreads: []
   }
   return {
     ...navigation,

@@ -33,6 +33,7 @@ uuid = { version = "1", features = ["serde", "v4", "v7"] }
 url = "2"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 rusqlite = { version = "0.40.2", features = ["hooks"] }
 
 [target.'cfg(unix)'.dependencies]

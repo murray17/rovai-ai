@@ -102,7 +102,7 @@ describe('DiagnosticsCenter projections', () => {
       code: 'runtime_missing'
     }))).toEqual({
       kind: 'open_runtime',
-      label: '前往 Agent 运行时',
+      label: '前往智能体',
       runtimeKind: 'codex-cli'
     })
     expect(diagnosticActionForCheck(check({

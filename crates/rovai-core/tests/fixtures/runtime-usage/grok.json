@@ -1,0 +1,50 @@
+{
+  "runtimeVersion": "grok 1.0.41 (4220f3b224a6)",
+  "responseCompleted": {
+    "method": "_x.ai/session_notification",
+    "params": {
+      "sessionId": "session-redacted",
+      "update": {
+        "sessionUpdate": "response_completed",
+        "usage": {
+          "input_tokens": 16799,
+          "output_tokens": 13,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "reasoning_tokens": 0
+        }
+      }
+    }
+  },
+  "turnCompleted": {
+    "method": "_x.ai/session_notification",
+    "params": {
+      "sessionId": "session-redacted",
+      "update": {
+        "sessionUpdate": "turn_completed",
+        "prompt_id": "prompt-redacted",
+        "stop_reason": "end_turn",
+        "usage": {
+          "inputTokens": 16799,
+          "outputTokens": 13,
+          "totalTokens": 16812,
+          "cachedReadTokens": 0,
+          "cacheCreationTokens": 0,
+          "reasoningTokens": 0,
+          "modelCalls": 1,
+          "modelUsage": {
+            "gpt-6-sol": {
+              "inputTokens": 16799,
+              "outputTokens": 13,
+              "totalTokens": 16812,
+              "cachedReadTokens": 0,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 0,
+              "modelCalls": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

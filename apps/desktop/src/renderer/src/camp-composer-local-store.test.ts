@@ -1,12 +1,12 @@
-import type { CampComposerDraftView, CampSnapshot } from '@contracts'
+import type { ThreadComposerDraftView, ThreadSnapshot } from '@contracts'
 import { describe, expect, it } from 'vitest'
 import {
-  clearLocalCampComposerDraft,
-  emptyLocalCampComposerDraft,
-  loadLocalCampComposerDraft,
+  clearLocalThreadComposerDraft,
+  emptyLocalThreadComposerDraft,
+  loadLocalThreadComposerDraft,
   materializeLocalContinuation,
-  nextLocalCampComposerDraftAfterSend,
-  saveLocalCampComposerDraft
+  nextLocalThreadComposerDraftAfterSend,
+  saveLocalThreadComposerDraft
 } from './camp-composer-local-store'
 
 class MemoryStorage implements Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
@@ -25,13 +25,13 @@ const members = [
     agentId: 'reviewer', displayName: '审查员', isDefaultLead: false,
     membershipStatus: 'active', profilePresence: 'present'
   }
-] as CampSnapshot['members']
+] as ThreadSnapshot['members']
 
-describe('local Camp Composer drafts', () => {
-  it('keeps independent unsent state for each Camp and clears only the selected Camp', () => {
+describe('local Thread Composer drafts', () => {
+  it('keeps independent unsent state for each Thread and clears only the selected Thread', () => {
     const storage = new MemoryStorage()
-    const campA: CampComposerDraftView = {
-      ...emptyLocalCampComposerDraft('camp-a'),
+    const campA: ThreadComposerDraftView = {
+      ...emptyLocalThreadComposerDraft('camp-a'),
       body: '@审查员 检查迁移',
       content: {
         version: 2,
@@ -58,39 +58,39 @@ describe('local Camp Composer drafts', () => {
         snapshotDigest: 'sha256:snapshot'
       }],
       replyIntent: {
-        replyToCampMessageId: 'message-old', targetState: 'available',
+        replyToThreadMessageId: 'message-old', targetState: 'available',
         author: { authorType: 'agent', authorId: 'reviewer', displayName: '审查员', recipientAvailability: 'available' },
         excerpt: '旧消息', recipientSelectionRequired: false
       }
     }
     const campB = {
-      ...emptyLocalCampComposerDraft('camp-b'),
+      ...emptyLocalThreadComposerDraft('camp-b'),
       body: '另一个会话',
       content: { version: 2 as const, segments: [{ kind: 'text' as const, text: '另一个会话' }] }
     }
-    saveLocalCampComposerDraft(campA, storage)
-    saveLocalCampComposerDraft(campB, storage)
+    saveLocalThreadComposerDraft(campA, storage)
+    saveLocalThreadComposerDraft(campB, storage)
 
-    expect(loadLocalCampComposerDraft('camp-a', storage)).toEqual(campA)
-    expect(loadLocalCampComposerDraft('camp-b', storage)).toEqual(campB)
+    expect(loadLocalThreadComposerDraft('camp-a', storage)).toEqual(campA)
+    expect(loadLocalThreadComposerDraft('camp-b', storage)).toEqual(campB)
 
-    clearLocalCampComposerDraft('camp-a', storage)
-    expect(loadLocalCampComposerDraft('camp-a', storage)).toBeNull()
-    expect(loadLocalCampComposerDraft('camp-b', storage)).toEqual(campB)
+    clearLocalThreadComposerDraft('camp-a', storage)
+    expect(loadLocalThreadComposerDraft('camp-a', storage)).toBeNull()
+    expect(loadLocalThreadComposerDraft('camp-b', storage)).toEqual(campB)
   })
 
   it('rejects malformed local records instead of partially restoring them', () => {
     const storage = new MemoryStorage()
     storage.setItem('rovai.camp-composer-draft.v1:camp-a', JSON.stringify({
-      ...emptyLocalCampComposerDraft('camp-a'),
+      ...emptyLocalThreadComposerDraft('camp-a'),
       content: { version: 2, segments: [{ kind: 'atom', atom: { type: 'member' } }] }
     }))
-    expect(loadLocalCampComposerDraft('camp-a', storage)).toBeNull()
+    expect(loadLocalThreadComposerDraft('camp-a', storage)).toBeNull()
   })
 
   it('continues only the last accepted unique explicit non-Lead route', () => {
-    const sent: CampComposerDraftView = {
-      ...emptyLocalCampComposerDraft('camp-a', 4),
+    const sent: ThreadComposerDraftView = {
+      ...emptyLocalThreadComposerDraft('camp-a', 4),
       body: '@审查员 检查迁移',
       content: {
         version: 2,
@@ -100,14 +100,14 @@ describe('local Camp Composer drafts', () => {
         ]
       }
     }
-    const next = nextLocalCampComposerDraftAfterSend({
+    const next = nextLocalThreadComposerDraftAfterSend({
       sent,
-      campMessageId: 'message-1',
+      threadMessageId: 'message-1',
       addressedAgentIds: ['reviewer'],
       members
     })
     expect(next.continuationIntent).toMatchObject({
-      sourceCampMessageId: 'message-1',
+      sourceThreadMessageId: 'message-1',
       recipient: { agentId: 'reviewer', displayName: '审查员' }
     })
 
@@ -128,8 +128,8 @@ describe('local Camp Composer drafts', () => {
       ...sent,
       content: { version: 2 as const, segments: [{ kind: 'atom' as const, atom: { type: 'member' as const, agentId: 'lead' } }] }
     }
-    expect(nextLocalCampComposerDraftAfterSend({
-      sent: lead, campMessageId: 'message-2', addressedAgentIds: ['lead'], members
+    expect(nextLocalThreadComposerDraftAfterSend({
+      sent: lead, threadMessageId: 'message-2', addressedAgentIds: ['lead'], members
     }).continuationIntent).toBeNull()
   })
 })

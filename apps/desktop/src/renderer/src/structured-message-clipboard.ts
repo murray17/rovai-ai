@@ -1,4 +1,4 @@
-import type { StructuredCampMessageContent } from '@contracts'
+import type { StructuredThreadMessageContent } from '@contracts'
 
 const CLIPBOARD_ATTRIBUTE = 'data-rovai-structured-camp-message-v1'
 const CLIPBOARD_VERSION = 1
@@ -111,7 +111,7 @@ function privatePayloadFromHtml(html: string): PrivateClipboardPayload | null {
 }
 
 export function createStructuredMessageClipboardData(
-  content: StructuredCampMessageContent | null,
+  content: StructuredThreadMessageContent | null,
   members: readonly StructuredClipboardMember[],
   currentUserName = '你'
 ): StructuredMessageClipboardData | null {
@@ -167,7 +167,7 @@ export function readStructuredMessageClipboardContent(
   html: string,
   plainText: string,
   members: readonly StructuredClipboardMember[]
-): StructuredCampMessageContent | null {
+): StructuredThreadMessageContent | null {
   const payload = privatePayloadFromHtml(html)
   if (!payload || payload.content.map(privateSegmentText).join('') !== plainText) return null
   const mentionableMemberIds = new Set(

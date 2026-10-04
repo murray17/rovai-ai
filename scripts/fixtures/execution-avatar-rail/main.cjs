@@ -842,6 +842,55 @@ app.whenReady().then(async () => {
     assert.ok(!terminal.text.includes('正在停止') && !terminal.text.includes('等待执行结束'), JSON.stringify(terminal))
     assert.equal(terminal.stopCount, 0, 'Terminal Run cannot be stopped again')
 
+    await run('window.configureRunInterruption()')
+    window.setContentSize(1440, 920)
+    await settle()
+    const interruption = '[data-interrupted-run-id="run-agent-1"] .run-interruption-trigger'
+    for (const theme of ['day', 'night']) {
+      await run(`document.documentElement.dataset.theme = '${theme}'`)
+      await settle()
+      const marker = await run(`(() => {
+        const button = document.querySelector('${interruption}')
+        const row = button.parentElement.getBoundingClientRect()
+        const card = button.closest('.run-artifact-output').querySelector('.run-file-changes-card').getBoundingClientRect()
+        const rect = button.getBoundingClientRect(), style = getComputedStyle(button)
+        return { count: document.querySelectorAll('.run-interruption-trigger').length, text: button.textContent,
+          centered: Math.abs(rect.x + rect.width / 2 - card.x - card.width / 2) < 1,
+          gap: row.top - card.bottom, height: rect.height, fontSize: style.fontSize,
+          square: button.querySelector('svg rect').getAttribute('width'),
+          overflow: document.documentElement.scrollWidth > innerWidth }
+      })()`)
+      assert.equal(marker.count, 1)
+      assert.equal(marker.text, '你已中断')
+      assert.ok(marker.centered && !marker.overflow && marker.height >= 24, JSON.stringify(marker))
+      assert.equal(marker.gap, 8)
+      assert.equal(marker.fontSize, '11.5px')
+      assert.equal(marker.square, '4')
+      await capture(`interruption-d3-${theme}`)
+    }
+    for (const placement of ['inspector', 'bottom', 'right']) {
+      await click(interruption)
+      if (await run("document.querySelector('.execution-drawer')?.dataset.placement") !== placement) {
+        await click('.execution-placement-button')
+        await click(`.execution-placement-option[data-placement="${placement}"]`)
+      }
+      if (placement === 'right') await run('window.executionNotificationTest.hideExecution()')
+      else await key('Escape')
+      await run(`document.querySelector('${interruption}').focus()`)
+      await key('Enter')
+      await settle()
+      const focused = await run(`({ runId: document.activeElement?.getAttribute('data-agent-run-id'),
+        expanded: document.querySelector('[data-agent-run-id="run-agent-1"] .execution-run-toggle')?.getAttribute('aria-expanded') })`)
+      assert.equal(focused.runId, 'run-agent-1', 'The marker targets the stopped Run even with a running successor')
+      assert.equal(focused.expanded, 'true')
+      if (placement === 'bottom') {
+        await key('Escape')
+        assert.equal(await run(`document.activeElement === document.querySelector('${interruption}')`), true,
+          'Closing bottom execution detail restores marker focus')
+        assert.equal(await run(`getComputedStyle(document.querySelector('${interruption}')).outlineWidth`), '2px')
+      }
+    }
+
     console.log(JSON.stringify({ ok: true, cases: ['0/1/2/3/5 running entry members and duplicate runs', 'two equal brand orbits',
       'idle history with executed member count', 'entry names and keyboard focus', 'collapsed running state',
       '12/20-member overflow', '176px steps and overlap', 'mouse wheel/trackpad', 'keyboard and long-name tooltip',
@@ -854,7 +903,9 @@ app.whenReady().then(async () => {
       'overflow list keyboard scrolling and focus return', 'nested Escape', 'recipient resize and placement preservation',
       'four-grid overview and centering in three placements', 'shared execution icon geometry',
       'sticky title in three placements and two themes/sizes', 'default elapsed/title-only hover/bordered controls/red stop',
-      'terminal cancellation precedence', 'focus not obscured', 'Run-bounded sticky and exact stop'] }))
+      'terminal cancellation precedence', 'focus not obscured', 'Run-bounded sticky and exact stop',
+      'D3 interruption geometry in Day/Night', 'interrupted Run with a running successor in three placements',
+      'interruption keyboard activation and bottom detail focus return'] }))
     window.destroy()
     app.quit()
   } catch (error) {

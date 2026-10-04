@@ -54,6 +54,7 @@ pub struct PendingExecutionIntent {
 pub struct PendingExecutionIntentView {
     pub id: String,
     pub request_method: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: Option<String>,
     pub status: PendingExecutionIntentStatus,
     pub diagnostic_code: Option<String>,

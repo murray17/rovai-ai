@@ -28,7 +28,7 @@ export async function materializeRegressionFixture(request, fixture = { campMess
     })
     const result = response.commandResult ?? response
     if (!['applied', 'accepted'].includes(result.status)) throw new Error('Regression history fixture was not accepted')
-    entities.push({ kind: 'camp_message', id: result.payload.campMessageId ?? result.payload.messageId, digest: digestJson(body) })
+    entities.push({ kind: 'camp_message', id: (result.payload.threadMessageId ?? result.payload.campMessageId) ?? result.payload.messageId, digest: digestJson(body) })
   }
   for (const memory of fixture.memories) {
     const result = await request('memory.create', { commandId: randomUUID(), command: memory })

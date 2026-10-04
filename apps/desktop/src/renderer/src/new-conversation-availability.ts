@@ -1,7 +1,8 @@
-import type { CampCreationPreflight } from '@contracts'
+import type { ThreadCreationPreflight } from '@contracts'
+import { uiAttribute } from './interface-language'
 
 type ConversationCandidate = Pick<
-  CampCreationPreflight['presentMembers'][number],
+  ThreadCreationPreflight['presentMembers'][number],
   'runtimeConfigured' | 'runtimeReadiness'
 >
 
@@ -12,7 +13,7 @@ export function isNewConversationMemberAvailable(member: ConversationCandidate):
 
 export function newConversationMemberStatus(member: ConversationCandidate): string {
   if (!member.runtimeConfigured || member.runtimeReadiness === 'runtime_not_configured') {
-    return '未配置运行时'
+    return uiAttribute('未配置智能体')
   }
-  return isNewConversationMemberAvailable(member) ? '可用' : '运行时不可用'
+  return isNewConversationMemberAvailable(member) ? uiAttribute('可用') : uiAttribute('智能体不可用')
 }

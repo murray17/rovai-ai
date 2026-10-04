@@ -2,12 +2,101 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DINGTALK_AI_CARD_TEMPLATE_ID,
   DingTalkOpenApiClient,
+  DingTalkOpenApiError,
+  MAX_DINGTALK_MEDIA_UPLOAD_BYTES,
   decodeDingTalkCardActionId,
   dingtalkCardParams
 } from './dingtalk-open-api'
 
 describe('DingTalk OpenAPI client', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('uploads file bytes with the legacy media API and sends a native robot file', async () => {
+    const calls: Array<{ url: string; body: BodyInit | null | undefined }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, body: init?.body })
+      return Response.json(url.endsWith('/oauth2/accessToken')
+        ? { accessToken: 'token', expireIn: 7200 }
+        : new URL(url).pathname === '/media/upload'
+          ? { errcode: 0, media_id: 'media-file-1' }
+          : { processQueryKey: 'delivery-file-1' })
+    }))
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+    const mediaId = await client.uploadFile(Buffer.from('PDF bytes'), '报告.pdf', 'application/pdf')
+    await expect(client.sendPrivateAttachment({
+      robotCode: 'robot-1', userId: 'owner-1',
+      attachment: { kind: 'file', mediaId, fileName: '报告.pdf' }
+    })).resolves.toBe('delivery-file-1')
+
+    const uploadUrl = new URL(calls[1]?.url ?? '')
+    expect(uploadUrl.origin + uploadUrl.pathname).toBe('https://oapi.dingtalk.com/media/upload')
+    expect(uploadUrl.searchParams.get('access_token')).toBe('token')
+    expect(uploadUrl.searchParams.get('type')).toBe('file')
+    const data = calls[1]?.body as FormData
+    expect(await (data.get('media') as Blob).text()).toBe('PDF bytes')
+    expect(JSON.parse(String(calls[2]?.body))).toEqual({
+      robotCode: 'robot-1', userIds: ['owner-1'], msgKey: 'sampleFile',
+      msgParam: JSON.stringify({ mediaId: '@media-file-1', fileName: '报告.pdf', fileType: 'pdf' })
+    })
+  })
+
+  it('sends an uploaded image as a native group image message', async () => {
+    const calls: Array<{ url: string; body: BodyInit | null | undefined }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, body: init?.body })
+      return Response.json(url.endsWith('/oauth2/accessToken')
+        ? { accessToken: 'token', expireIn: 7200 }
+        : new URL(url).pathname === '/media/upload'
+          ? { errcode: 0, media_id: 'media-image-1' }
+          : { processQueryKey: 'delivery-image-1' })
+    }))
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+    const mediaId = await client.uploadImage(Buffer.from('image bytes'), '图.png', 'image/png')
+    await expect(client.sendGroupAttachment({
+      openConversationId: 'group-1', robotCode: 'robot-1',
+      attachment: { kind: 'image', mediaId }
+    })).resolves.toBe('delivery-image-1')
+
+    const uploadUrl = new URL(calls[1]?.url ?? '')
+    expect(uploadUrl.origin + uploadUrl.pathname).toBe('https://oapi.dingtalk.com/media/upload')
+    expect(uploadUrl.searchParams.get('type')).toBe('image')
+    expect(JSON.parse(String(calls[2]?.body))).toEqual({
+      openConversationId: 'group-1', robotCode: 'robot-1', msgKey: 'sampleImageMsg',
+      msgParam: JSON.stringify({ photoURL: '@media-image-1' })
+    })
+  })
+
+  it('rejects oversized media before requesting a token or uploading', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+    await expect(client.uploadFile(
+      Buffer.alloc(MAX_DINGTALK_MEDIA_UPLOAD_BYTES + 1), 'report.pdf', 'application/pdf'
+    )).rejects.toThrow('dingtalk_attachment_size_unsupported')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('reports HTTP 429 and transport failures as typed retryable errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+      if (String(input).endsWith('/oauth2/accessToken')) {
+        return Response.json({ accessToken: 'token', expireIn: 7200 })
+      }
+      return Response.json({ code: 'rate.limited' }, { status: 429 })
+    }))
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+    await expect(client.sendGroupMarkdown({
+      openConversationId: 'group-1', robotCode: 'robot-1', title: 'Rovai', text: 'hello'
+    })).rejects.toMatchObject({ status: 429, retryable: true })
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed') }))
+    await expect(new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+      .sendGroupMarkdown({
+        openConversationId: 'group-1', robotCode: 'robot-1', title: 'Rovai', text: 'hello'
+      })).rejects.toMatchObject({ status: 0, retryable: true })
+    expect(new DingTalkOpenApiError('dingtalk_open_api_http_400', 400).retryable).toBe(false)
+  })
 
   it('creates a non-forwardable STREAM card and delivers it to a private Bot space', async () => {
     const calls: Array<{ url: string; body: any }> = []

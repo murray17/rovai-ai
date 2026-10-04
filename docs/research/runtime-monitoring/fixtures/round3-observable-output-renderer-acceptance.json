@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-29",
+  "mode": "controlled-execution-metrics-live-renderer",
+  "app": "isolated packaged macOS App with its own userData, Core, Skill Library and controlled ACP executable",
+  "fixtureScope": "Synthetic Qwen-shaped ACP frames; not evidence that the installed Qwen Provider emits thought offsets",
+  "expectation": {
+    "eligibleThought": "messageId plus native UTF-16 textOffset is counted",
+    "unqualifiedThought": "a 1000-character thought without native textOffset is excluded",
+    "privacy": "the valid private marker is absent from Evidence, Renderer, and every regular file in isolated userData",
+    "timing": "live speed updates at most once per second, hides after silence and at terminal, and restarts after new output",
+    "history": "historical Run card selection does not change the current header speed",
+    "lateUsage": "terminal Usage written after Run completion updates the existing card and popover"
+  },
+  "observed": {
+    "numericSample": {
+      "algorithmVersion": "observable-output-heuristic-v3",
+      "unicodeDataVersion": "icu4x-2.2.0",
+      "publicTextUnits": 13300,
+      "reasoningUnits": 3780,
+      "reasoningSource": "stream_text",
+      "streamConfirmed": true
+    },
+    "privateMarkerInEvidenceRows": 0,
+    "privateMarkerInRenderer": false,
+    "privateMarkerInIsolatedFiles": [],
+    "midstreamReentry": {
+      "speed": null,
+      "duration": "0分 03秒"
+    },
+    "historySwitch": {
+      "activeSpeed": "28.9 tok/s",
+      "activeDuration": "0分 05秒",
+      "sameLine": true,
+      "activeExpanded": false,
+      "historyExpanded": true,
+      "historyHasSpeed": false,
+      "historyVisible": true
+    },
+    "speedChanges": [
+      {
+        "elapsedMs": 0,
+        "speed": "28.9 tok/s"
+      },
+      {
+        "elapsedMs": 1000,
+        "speed": "47.0 tok/s"
+      },
+      {
+        "elapsedMs": 2006,
+        "speed": "46.8 tok/s"
+      },
+      {
+        "elapsedMs": 3500,
+        "speed": "22.4 tok/s"
+      },
+      {
+        "elapsedMs": 4999,
+        "speed": "11.5 tok/s"
+      },
+      {
+        "elapsedMs": 6000,
+        "speed": "7.5 tok/s"
+      },
+      {
+        "elapsedMs": 7500,
+        "speed": null
+      },
+      {
+        "elapsedMs": 10000,
+        "speed": "38.1 tok/s"
+      },
+      {
+        "elapsedMs": 11000,
+        "speed": "38.0 tok/s"
+      },
+      {
+        "elapsedMs": 12703,
+        "speed": null
+      }
+    ],
+    "usageRows": [
+      [
+        "Input Token",
+        "1.5k"
+      ],
+      [
+        "Output Token",
+        "0.5k"
+      ],
+      [
+        "Cache Read",
+        "0.3k"
+      ],
+      [
+        "Cache Write",
+        "0k"
+      ],
+      [
+        "执行耗时",
+        "0分 18秒"
+      ]
+    ]
+  },
+  "screenshots": {
+    "steady": "execution-metrics-stream-steady.png",
+    "idle": "execution-metrics-stream-tool-idle.png",
+    "resumed": "execution-metrics-stream-resumed.png",
+    "terminal": "execution-metrics-stream-late-usage.png"
+  },
+  "screenshotDirectoryAtRun": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-runtime-activity-ui-captures-bHczDr",
+  "command": "ROVAI_RUNTIME_ACTIVITY_ACCEPT_METRICS_STREAM_ONLY=1 pnpm accept:runtime-activity-ui",
+  "lateUsageMethod": "After the controlled Run reached succeeded, the script updated its existing empty runtime_usage_run_summary row. This verifies readback and Renderer polling, not native Qwen Usage emission."
+}

@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.70
 authority: decision-rationale
-lifecycle: current
+lifecycle: historical
 last_updated: 2026-09-25
 ---
 
@@ -111,3 +111,29 @@ Windows 旧投递是目录副本。真实旧记录中有缺少 operation/file id
 
 - 扫描所有项目 Skills 目录按名称删除：会扩大到没有旧 observation 的入口。
 - 把名称规则用于普通投影 reconcile：会让新 Run 覆盖项目自有目录。
+
+<a id="v1-70-d05"></a>
+## V1.70-D05：Windows 旧入口清理补足无 observation 的固定名称目录
+
+- 状态：accepted
+- 日期：2026-09-25
+- 当前权威：[Skills 架构](../../architecture/skills.md)、[Skills Rebuild v2](../../contracts/skills-rebuild-v2.md)、[Diagnostics Center v2](../../contracts/diagnostics-center-v2.md)、[Windows Skill Projection v2](../../contracts/windows-skill-projection-v2.md)
+
+### 背景
+
+本机已登记项目的 `.dsh/skills` 留有 `cli-operations` 和 `memory-stewardship` 普通目录，但旧投影 observation 为零。D04 只处理 observation，因此诊断显示零入口、显式清理也无法触达这些目录。名称规则已确定这九个目录名属于 Rovai 旧发布集合；继续要求 observation 会让记录先于文件消失的副本永久漏扫。
+
+### 选择
+
+Windows 诊断在只读模式下，仅检查已登记 `active` 项目根、已知 Skill 组路径和九个固定名称的精确路径。用户显式清理时，对无 observation 的现存候选复用 root access、active Run、路径与 no-reparse 门禁，并只删除该 Skill 目录。已有 observation 的路径优先走原规则，不能重复计数或删除。启动、升级和普通 reconcile 不执行该扫描或名称删除；macOS 不变。
+
+### 后果
+
+- `.dsh` 等组中失去 observation 的旧副本重新出现在唯一诊断问题中，并可由用户统一清理。
+- Windows 诊断增加有界项目文件元数据读取；名称匹配不证明目录内容未被改写，显式清理会删除这些固定名称目录。
+- 未登记项目、未知名称、运行中或路径无法确认的目录仍保留。
+
+### 未选择方案
+
+- 只做一次性本机手工删除：不会修复其他 Windows 安装上的相同漏扫。
+- 扫描磁盘所有项目或任意 Skill 名称：无法限定受影响的项目和目标路径。

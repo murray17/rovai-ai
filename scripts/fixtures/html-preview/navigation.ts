@@ -41,7 +41,7 @@ export async function navigationAcceptance(window: BrowserWindow, userData: stri
   await run(`(${installHostClock.toString()})()`)
   await run(`window.previewRootHandshakes=0;window.addEventListener('message',event=>{if(event.source===${stage}?.querySelector('iframe')?.contentWindow && event.data?.type==='connected'){window.previewLastRoot=event.data;window.previewRootHandshakes++}})`)
   const open = async (name: string) => {
-    await run(`window.previewAcceptance.open({kind:'camp_workspace',campId:'preview-test',rawReference:${JSON.stringify(name)}})`)
+    await run(`window.previewAcceptance.open({kind:'camp_workspace',threadId:'preview-test',rawReference:${JSON.stringify(name)}})`)
     await wait(async () => activeFrame()?.url.includes('/' + name) && await activeFrame().executeJavaScript('document.readyState !== "loading" && Boolean(document.body)').catch(() => false) && (await snapshot()).document === 'loaded' && (await snapshot()).channel === 'connected')
   }
   const close = () => run('window.previewAcceptance.close(window.previewAcceptance.activeTabId)')

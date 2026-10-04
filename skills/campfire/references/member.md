@@ -1,101 +1,35 @@
-# Campfire 参与者指南
+# Contribute to Campfire
 
-收到用户广播，或当前 AgentRun 由 Default Lead 的独立观点或定向回应请求触发时读取本文件。
+Only the current Default Lead may start a discussion from the user's direct request.
 
-## 新讨论启动边界
+On a user broadcast, all-members mention, or call that also reaches the Lead or several members, end without publishing a view or control message. If the Runtime requires final text, say in the user's language: "Waiting for the Default Lead to start the discussion."
 
-只有当前 Default Lead 能响应用户的直接请求并开始 Campfire。普通成员不得自行启动或组织讨论。
+If the user addresses only you and asks for a group discussion, explain that they should request it directly from the current Default Lead; do not forward a request on their behalf.
 
-用户向全体广播、使用 `@所有队员`、同时触达 Default Lead 或同时点名多位成员时，不提前发表观点、不发送控制消息、不组织讨论，直接结束当前 Run。若环境要求最终文本，只输出：
+## Answer a formal invitation
 
-```text
-等待 Default Lead 发起讨论。
-```
-
-用户只触达当前普通成员并要求多人讨论时，明确告知需要由当前 Default Lead 直接发起，不代为发送请求。
-
-## 回复正式请求
-
-处理本批中属于本场讨论的独立观点或定向回应请求；其它输入正常处理。使用 Runtime 提供的可信请求发送者 Agent ID，不根据显示名猜测，不改投其它成员，也不使用 `--to-user`。
-
-完成思考后只发送一次：
+Handle this discussion's requests in the current batch; process other inputs normally. Use the Runtime's trusted requester Agent ID, not a guessed display name. Send the complete result once to that requester:
 
 ```text
-rovai send --to <请求发送者 Agent ID> --body <完整结果>
+rovai send --to <requester-agent-id> --body <complete-result>
 ```
 
-失败时按 CLI 返回指示处理，不盲目重发；当前 Run 的最终输出仍保留同一份完整观点。
+Follow the reply contract in `SKILL.md`. Follow CLI recovery on failure; do not blindly resend. If a Runtime final response is required, keep the same complete view there. Do not request User attention.
 
-## 回复限制
+For an independent view, use only the requested topic, shared facts and assigned perspective. Do not cite, follow or rebut views already on the public screen.
 
-每条结果必须一次完整提交，正文目标为 200–250 个中文字符，最多 300 个中文字符，只保留：
+For a focused response, address only the named disagreement. Explicitly retain, revise or qualify your judgment as the evidence warrants; do not restate the other side or rewrite the first-round report.
 
-- 核心判断；
-- 两项主要依据；
-- 一项风险或限制；
-- 改变判断的条件；
-- 置信度。
-
-不要重复题目、背景或其它成员观点，不发送“收到”、分析进度、初步结论、分段修订或“请主持人继续”。
-
-## 独立观点
-
-只根据请求中的用户话题、共同事实和分配视角判断。即使公屏已有其它结果，也不引用、跟随或反驳。
+Use this compact structure, localizing its labels:
 
 ```markdown
-### 篝火讨论 · 独立观点
-
-#### 核心判断
-
-<1–2 句>
-
-#### 两项主要依据
-
+Judgment: <1-2 sentences; retain/revise/qualify for a response>
+Reasons:
 - ...
 - ...
-
-#### 风险或限制
-
-...
-
-#### 改变判断的条件
-
-...
-
-#### 置信度
-
-高 | 中 | 低
+Risk or limit: ...
+Would change my view: ...
+Confidence: high | medium | low
 ```
 
-## 定向回应
-
-只回应请求中的唯一关键分歧，不复述对方观点或重写第一轮报告；证据改变判断时明确修正。
-
-```markdown
-### 篝火讨论 · 定向回应
-
-#### 核心判断
-
-维持 | 修正 | 条件化：<更新结论>
-
-#### 两项主要依据
-
-- ...
-- ...
-
-#### 风险或限制
-
-...
-
-#### 改变判断的条件
-
-...
-
-#### 置信度
-
-高 | 中 | 低
-```
-
-## 参与者边界
-
-参与者只完成本批中属于本场讨论的请求，向请求发送者返回一条完整结果；其它输入正常处理。不要组织他人、总结全场或自行开启下一轮。
+Return your result without organizing members, asking the host to continue, or adding another round.

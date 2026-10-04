@@ -4,10 +4,16 @@ import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Popover from '@radix-ui/react-popover'
 import { MemberAvatar } from './MemberAvatar'
 import { NavigationIcon } from './NavigationIcon'
+import { useMobileLayout } from './MobileLayout'
 import { missionLabelColorToken } from './theme'
 import { DialogControlIcon } from './AppDialog'
 import type { AgentProfile, MissionRecord as Mission, MissionStatus as Status } from '@contracts'
-export const statuses: {id: Status; label: string}[] = [{id:'needs_you',label:'需要你'},{id:'not_started',label:'未开始'},{id:'in_progress',label:'进行中'},{id:'completed',label:'已完成'}]
+import { UiText, uiAttribute, useUiText } from './interface-language'
+const statusDefinitions: {id: Status; label: string}[] = [{id:'needs_you',label:"需要你"},{id:'not_started',label:"未开始"},{id:'in_progress',label:"进行中"},{id:'completed',label:"已完成"}]
+export function useMissionStatuses(): { id: Status; label: string }[] {
+  const translate = useUiText()
+  return statusDefinitions.map(status => ({ ...status, label: translate(status.label) }))
+}
 const People = createContext<AgentProfile[]>([])
 export function MissionPeopleProvider({agents,children}:{agents:AgentProfile[];children:ReactNode}) {return <People.Provider value={agents}>{children}</People.Provider>}
 function usePeople() {const agents=useContext(People);return (id:string)=>agents.find(agent=>agent.agentId===id) ?? {avatarRef:null,displayName:id,teamRole:''}}
@@ -28,8 +34,10 @@ export function StatusIcon({ status }: { status: Status }) {
   return <span className={`mission-state-glyph is-${status}`} aria-hidden="true">{status === 'needs_you' ? '!' : status === 'completed' ? <Icon name="check"/> : ''}</span>
 }
 export function StatusMenu({ m, onStatus, compact = false }: { m: Mission; onStatus: (status: Status) => void; compact?: boolean }) {
-  return <Menu.Root><Menu.Trigger asChild><button className={`mission-status ${compact ? 'is-compact' : ''}`} aria-label={`修改 ${m.title} 的状态，当前${statuses.find(s => s.id === m.status)?.label}`} title="修改状态"><StatusIcon status={m.status}/>{!compact && <span>{statuses.find(s => s.id === m.status)?.label}</span>}<Icon name="chevron"/></button></Menu.Trigger>
-    <Menu.Portal><Menu.Content className="compact-menu mission-status-menu" align="end" sideOffset={6} collisionPadding={12} loop><Menu.Label className="mission-menu-label">使命状态</Menu.Label><Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem key={s.id} value={s.id} className="compact-option"><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup></Menu.Content></Menu.Portal></Menu.Root>
+  const statuses = useMissionStatuses()
+  const currentStatus = statuses.find(status => status.id === m.status)?.label ?? ''
+  return <Menu.Root><Menu.Trigger asChild><button className={`mission-status ${compact ? 'is-compact' : ''}`} aria-label={uiAttribute("修改 {0} 的状态，当前{1}", String(m.title), currentStatus)} title={uiAttribute("修改状态")}><StatusIcon status={m.status}/>{!compact && <span>{currentStatus}</span>}<Icon name="chevron"/></button></Menu.Trigger>
+    <Menu.Portal><Menu.Content className="compact-menu mission-status-menu" align="end" sideOffset={6} collisionPadding={12} loop><Menu.Label className="mission-menu-label"><UiText zh={"使命状态"} /></Menu.Label><Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem key={s.id} value={s.id} className="compact-option"><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup></Menu.Content></Menu.Portal></Menu.Root>
 }
 
 export const orderedMembers = (m: Mission) => [...(m.defaultLeadAgentId ? [m.defaultLeadAgentId] : []), ...m.memberAgentIds.filter(id => id !== m.defaultLeadAgentId)]
@@ -107,10 +115,10 @@ export function MissionAvatars({ m, onClick, compact = false }: { m: Mission; on
 
   const visibleIds = compact ? memberIds.slice(0, Math.min(visibleCount, maximum)) : memberIds
   const overflow = memberIds.length - visibleIds.length
-  const names = memberIds.map(id => `${person(id).displayName}${id === m.defaultLeadAgentId ? '（队长）' : ''}`)
-  const label = `查看队员：${names.join('、')}${compact && overflow ? `；当前显示 ${visibleIds.length} 位，另有 ${overflow} 位收起` : ''}`
+  const names = memberIds.map(id => `${person(id).displayName}${id === m.defaultLeadAgentId ? uiAttribute('（队长）') : ''}`)
+  const label = uiAttribute("查看队员：{0}{1}", names.join(uiAttribute('、')), compact && overflow ? uiAttribute('；当前显示 {0} 位，另有 {1} 位收起', visibleIds.length, overflow) : '')
   const title = `${names.join('、')}${compact && overflow ? `\n+${overflow}：${memberIds.slice(visibleIds.length).map(id => person(id).displayName).join('、')}` : ''}`
-  const portraits = visibleIds.map(id => <span key={id} className="mission-avatar-item" title={`${person(id).displayName}${id === m.defaultLeadAgentId ? ' · 队长' : ''}`} data-member-id={id}><Avatar id={id}/></span>)
+  const portraits = visibleIds.map(id => <span key={id} className="mission-avatar-item" title={`${person(id).displayName}${id === m.defaultLeadAgentId ? uiAttribute(" · 队长") : ''}`} data-member-id={id}><Avatar id={id}/></span>)
   const content = <>{portraits}{overflow > 0 && <span className="mission-avatar-overflow" aria-hidden="true"><span className="mission-overflow-label">+{overflow}</span></span>}</>
   const className = `mission-avatars${compact ? ' is-card-roster' : ''}`
   const data = compact ? { 'data-visible-count': visibleIds.length, 'data-member-count': memberIds.length, 'data-overflow-count': overflow } : {}
@@ -118,8 +126,8 @@ export function MissionAvatars({ m, onClick, compact = false }: { m: Mission; on
     : <span ref={node => { groupRef.current = node }} className={className} role="img" aria-label={label} title={title} {...data}>{content}</span>
 }
 export function MissionTags({ tags, onEdit }: { tags: string[]; onEdit?: AnchorAction }) {
-  return <div className="mission-tags" aria-label="使命标签">{tags.map(tag => <span className="mission-tag is-colored" style={tagStyle(tag)} key={tag} title={tag}>{tag}</span>)}
-    {onEdit && <button className="mission-edit-tags" onClick={onEdit} aria-label="编辑标签" title="编辑标签"><Icon name="tag"/>{tags.length ? <Icon name="plus"/> : '添加标签'}</button>}
+  return <div className="mission-tags" aria-label={uiAttribute("使命标签")}>{tags.map(tag => <span className="mission-tag is-colored" style={tagStyle(tag)} key={tag} title={tag}>{tag}</span>)}
+    {onEdit && <button className="mission-edit-tags" onClick={onEdit} aria-label={uiAttribute("编辑标签")} title={uiAttribute("编辑标签")}><Icon name="tag"/>{tags.length ? <Icon name="plus"/> : uiAttribute("添加标签")}</button>}
   </div>
 }
 export function MissionFilter({ label, icon, options, values, onChange, searchable = true }: {
@@ -141,16 +149,16 @@ export function MissionFilter({ label, icon, options, values, onChange, searchab
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : index < 0 ? (event.key === 'ArrowDown' ? 0 : buttons.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
     buttons[next].focus()
   }
-  return <Popover.Root open={open} onOpenChange={value => { setOpen(value); if (!value) setQuery('') }}><Popover.Trigger asChild><button className={`mission-filter ${values.length ? 'selected' : ''}`} aria-label={`${label}筛选${summary ? `：${selected.map(o => o.label).join('、')}` : ''}`} title={selected.map(o => o.label).join('、') || `${label}筛选`}>
+  return <Popover.Root open={open} onOpenChange={value => { setOpen(value); if (!value) setQuery('') }}><Popover.Trigger asChild><button className={`mission-filter ${values.length ? 'selected' : ''}`} aria-label={uiAttribute("{0}筛选{1}", String(label), String(summary ? `：${selected.map(o => o.label).join('、')}` : ''))} title={selected.map(o => o.label).join('、') || uiAttribute("{0}筛选", String(label))}>
     {icon}<span className="mission-filter-label">{label}</span>{summary && <span className="mission-filter-value">{summary}</span>}<Icon name="chevron"/>
-  </button></Popover.Trigger><Popover.Portal><Popover.Content className="compact-menu mission-unified-filter" aria-label={`${label}筛选`} sideOffset={6} align="start" collisionPadding={12} onKeyDown={navigate}
+  </button></Popover.Trigger><Popover.Portal><Popover.Content className="compact-menu mission-unified-filter" aria-label={uiAttribute("{0}筛选", String(label))} sideOffset={6} align="start" collisionPadding={12} onKeyDown={navigate}
     onOpenAutoFocus={event => { if (searchable) { event.preventDefault(); searchRef.current?.focus() } }}>
-    {searchable && <label className="mission-filter-search"><NavigationIcon name="search"/><input ref={searchRef} aria-label={`搜索${label}`} placeholder={`搜索${label}…`} value={query} onChange={event => setQuery(event.target.value)}/></label>}
-    <div className="mission-filter-options" role="group" aria-label={`选择${label}`}>
+    {searchable && <label className="mission-filter-search"><NavigationIcon name="search"/><input ref={searchRef} aria-label={uiAttribute("搜索{0}", String(label))} placeholder={uiAttribute("搜索{0}…", String(label))} value={query} onChange={event => setQuery(event.target.value)}/></label>}
+    <div className="mission-filter-options" role="group" aria-label={uiAttribute("选择{0}", String(label))}>
       {found.map(option => <button type="button" role="checkbox" aria-checked={values.includes(option.id)} className="compact-option" key={option.id} onClick={() => onChange(values.includes(option.id) ? values.filter(id => id !== option.id) : [...values, option.id])}>
         {option.icon ?? icon}<span>{option.label}</span>{option.count !== undefined && <small>{option.count}</small>}<span className="mission-filter-check">{values.includes(option.id) && <Icon name="check"/>}</span>
       </button>)}
-      {!found.length && <p className="mission-filter-empty">没有匹配的{label}</p>}
+      {!found.length && <p className="mission-filter-empty"><UiText zh={"没有匹配的"} />{label}</p>}
     </div>
   </Popover.Content></Popover.Portal></Popover.Root>
 }
@@ -160,10 +168,20 @@ export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onSt
   catalog: string[]; onEdit(): void; onLead(id: string): void; onSaveTags(tags: string[]): Promise<void>; onCleanup(): void; onDelete(): void
 }) {
   const person=usePeople();
+  const mobile=useMobileLayout()
+  const statuses = useMissionStatuses()
   const [panel, setPanel] = useState<string | null>(null)
   const triggers = useRef(new Map<string, HTMLDivElement>())
+  const panels = m ? [
+    {id:'status',label:uiAttribute("状态"),className:'',content:<Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem className="compact-option" value={s.id} key={s.id}><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
+    {id:'members',label:uiAttribute("查看队员"),className:'mission-members-popover',content:<MissionRoster m={m}/>},
+    {id:'lead',label:uiAttribute("队长"),className:'',content:<Menu.RadioGroup value={m.defaultLeadAgentId ?? ''} onValueChange={onLead}>{orderedMembers(m).map(id => <Menu.RadioItem className="compact-option" key={id} value={id}><Avatar id={id}/><span>{person(id).displayName}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
+    {id:'tags',label:uiAttribute("标签"),className:'mission-label-popover',content:<LabelsEditor m={m} catalog={catalog} onSave={onSaveTags}/>}
+  ] : []
+  const currentPanel = mobile ? panels.find(item => item.id === panel) : undefined
   function submenu(id: string, label: string, children: ReactNode, className = '') {
-    return <Menu.Sub open={panel === id} onOpenChange={open => { if (!open) setPanel(current => current === id ? null : current) }}>
+    if (mobile) return <Menu.Item key={id} className="compact-option" onSelect={event => { event.preventDefault(); setPanel(id) }}><span>{label}</span><Icon name="chevron-right"/></Menu.Item>
+    return <Menu.Sub key={id} open={panel === id} onOpenChange={open => { if (!open) setPanel(current => current === id ? null : current) }}>
       <Menu.SubTrigger ref={node => { if (node) triggers.current.set(id, node); else triggers.current.delete(id) }} className="compact-option" onPointerMove={event => event.preventDefault()} onPointerLeave={event => event.preventDefault()}
         onClick={event => { event.preventDefault(); setPanel(current => current === id ? null : id) }}
         onKeyDown={event => { if (['Enter', ' ', 'ArrowRight'].includes(event.key)) { event.preventDefault(); setPanel(id) } }}>
@@ -175,24 +193,26 @@ export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onSt
       </Menu.SubContent></Menu.Portal>
     </Menu.Sub>
   }
-  return <Menu.Root open={!!m && !!position} onOpenChange={open => { if (!open) onClose() }}><Menu.Trigger asChild><span className="attachment-context-anchor" style={{ left: position?.x ?? 0, top: position?.y ?? 0 }}/></Menu.Trigger>
-    {m && <Menu.Portal><Menu.Content className="compact-menu mission-action-menu" aria-label={`${m.title}的操作`} align="start" side="right" sideOffset={4} collisionPadding={10} loop
-      onCloseAutoFocus={event => event.preventDefault()} onEscapeKeyDown={() => requestAnimationFrame(() => position?.origin?.isConnected && position.origin.focus())}>
-      <Menu.Item className="compact-option" onSelect={onEdit}><span>编辑</span></Menu.Item>
-      {submenu('status', '状态', <Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem className="compact-option" value={s.id} key={s.id}><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>)}
-      {submenu('members', '查看队员', <MissionRoster m={m}/>, 'mission-members-popover')}
-      {submenu('lead', '队长', <Menu.RadioGroup value={m.defaultLeadAgentId ?? ''} onValueChange={onLead}>{orderedMembers(m).map(id => <Menu.RadioItem className="compact-option" key={id} value={id}><Avatar id={id}/><span>{person(id).displayName}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>)}
-      {submenu('tags', '标签', <LabelsEditor m={m} catalog={catalog} onSave={onSaveTags}/>, 'mission-label-popover')}
-      {m.cleanupAvailable && <Menu.Item className="compact-option" onSelect={onCleanup}><span>清理使命 Worktree</span></Menu.Item>}
+  return <Menu.Root open={!!m && !!position} onOpenChange={open => { if (!open) { setPanel(null); onClose() } }}><Menu.Trigger asChild><span className="attachment-context-anchor" style={{ left: position?.x ?? 0, top: position?.y ?? 0 }}/></Menu.Trigger>
+    {m && <Menu.Portal><Menu.Content className={`compact-menu mission-action-menu${currentPanel ? ` mission-action-submenu ${currentPanel.className}` : ''}`} aria-label={currentPanel?.label ?? uiAttribute("{0}的操作", String(m.title))} align="start" side="right" sideOffset={4} collisionPadding={10} loop
+      onCloseAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => {
+        if (currentPanel) { event.preventDefault(); setPanel(null) }
+        else requestAnimationFrame(() => position?.origin?.isConnected && position.origin.focus())
+      }}>
+      {currentPanel ? <><Menu.Item className="compact-option mission-mobile-menu-back" onSelect={event => { event.preventDefault(); setPanel(null) }}><NavigationIcon name="arrow-left"/><span>{currentPanel.label}</span></Menu.Item><Menu.Separator className="sidebar-action-menu-separator"/>{currentPanel.content}</> : <>
+      <Menu.Item className="compact-option" onSelect={onEdit}><span><UiText zh={"编辑"} /></span></Menu.Item>
+      {panels.map(item => submenu(item.id, item.label, item.content, item.className))}
+      {m.cleanupAvailable && <Menu.Item className="compact-option" onSelect={onCleanup}><span><UiText zh={"清理使命 Worktree"} /></span></Menu.Item>}
       <Menu.Separator className="sidebar-action-menu-separator"/>
-      <Menu.Item className="compact-option mission-danger-item" onSelect={onDelete}><span>删除</span></Menu.Item>
+      <Menu.Item className="compact-option mission-danger-item" onSelect={onDelete}><span><UiText zh={"删除"} /></span></Menu.Item>
+      </>}
     </Menu.Content></Menu.Portal>}
   </Menu.Root>
 }
 export function CompactDialog({ title, children, footer, onClose, className = '' }: { title: string; children: ReactNode; footer?: ReactNode; onClose(): void; className?: string }) {
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className={`compact-dialog ${className}`} aria-describedby={undefined}>
-    <header className="compact-header"><Dialog.Title>{title}</Dialog.Title><Dialog.Close asChild><button className="compact-close" aria-label="关闭"><DialogControlIcon name="close"/></button></Dialog.Close></header>
-    <div className="compact-body">{children}</div><footer className="compact-footer">{footer ?? <button className="compact-cancel" onClick={onClose}>关闭</button>}</footer>
+    <header className="compact-header"><Dialog.Title>{title}</Dialog.Title><Dialog.Close asChild><button className="compact-close" aria-label={uiAttribute("关闭")}><DialogControlIcon name="close"/></button></Dialog.Close></header>
+    <div className="compact-body">{children}</div><footer className="compact-footer">{footer ?? <button className="compact-cancel" onClick={onClose}><UiText zh={"关闭"} /></button>}</footer>
   </Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 export function LabelsEditor({ m, catalog, onSave }: { m: Mission; catalog: string[]; onSave(tags: string[]): Promise<void> }) {
@@ -206,7 +226,7 @@ export function LabelsEditor({ m, catalog, onSave }: { m: Mission; catalog: stri
   async function save(next: string[]) { if (busy) return; pending.current = next; setBusy(true); setError(''); try { await onSave(next); pending.current = null; setQuery('') } catch (e) { setError(String(e instanceof Error ? e.message : e)) } finally { setBusy(false) } }
   function toggle(tag: string) { void save(m.tags.includes(tag) ? m.tags.filter(t => t !== tag) : [...m.tags, tag]) }
   function create() { if (!normalized || exact || tooLong) return; void save([...m.tags, normalized]) }
-  return <div className="mission-label-editor" aria-label="编辑标签" aria-busy={busy} onKeyDown={event => {
+  return <div className="mission-label-editor" aria-label={uiAttribute("编辑标签")} aria-busy={busy} onKeyDown={event => {
     // Text editing and normal Tab navigation belong to this small form, not menu typeahead.
     if (event.key !== 'Escape') event.stopPropagation()
     if (event.key === 'Tab') {
@@ -215,16 +235,16 @@ export function LabelsEditor({ m, catalog, onSave }: { m: Mission; catalog: stri
       if (event.shiftKey && index === 0 || !event.shiftKey && index === controls.length - 1) { event.preventDefault(); controls[event.shiftKey ? controls.length - 1 : 0]?.focus() }
     }
   }}>
-    <label className="mission-tag-search"><NavigationIcon name="search"/><input autoFocus value={query} onChange={e => setQuery(e.target.value)} aria-label="搜索或新建标签" placeholder="搜索或新建标签…" onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); create() } }}/></label>
-    <div className="mission-tag-options" role="group" aria-label="可选标签">{found.map(tag => <button type="button" className="compact-option" key={tag} role="checkbox" aria-checked={m.tags.includes(tag)} disabled={busy} onPointerDown={event => event.stopPropagation()} onClick={event => { event.preventDefault(); event.stopPropagation(); toggle(tag) }}><TagColorDot tag={tag}/><span>{tag}</span>{m.tags.includes(tag) && <Icon name="check"/>}</button>)}
-      {normalized && !exact && <button type="button" className="compact-option" onPointerDown={event => event.stopPropagation()} onClick={event => { event.preventDefault(); event.stopPropagation(); create() }} disabled={tooLong || busy}><Icon name="plus"/><span>新建“{normalized}”</span></button>}
-      {tooLong && <p className="compact-inline-error" role="alert">标签最多 24 个字符。</p>}
-    </div>{error && <div className="mission-tag-error" role="alert"><p>{error}</p><button onClick={() => pending.current && void save(pending.current)} disabled={busy}>重试</button></div>}
+    <label className="mission-tag-search"><NavigationIcon name="search"/><input autoFocus value={query} onChange={e => setQuery(e.target.value)} aria-label={uiAttribute("搜索或新建标签")} placeholder={uiAttribute("搜索或新建标签…")} onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); create() } }}/></label>
+    <div className="mission-tag-options" role="group" aria-label={uiAttribute("可选标签")}>{found.map(tag => <button type="button" className="compact-option" key={tag} role="checkbox" aria-checked={m.tags.includes(tag)} disabled={busy} onPointerDown={event => event.stopPropagation()} onClick={event => { event.preventDefault(); event.stopPropagation(); toggle(tag) }}><TagColorDot tag={tag}/><span>{tag}</span>{m.tags.includes(tag) && <Icon name="check"/>}</button>)}
+      {normalized && !exact && <button type="button" className="compact-option" onPointerDown={event => event.stopPropagation()} onClick={event => { event.preventDefault(); event.stopPropagation(); create() }} disabled={tooLong || busy}><Icon name="plus"/><span><UiText zh={"新建“"} />{normalized}”</span></button>}
+      {tooLong && <p className="compact-inline-error" role="alert"><UiText zh={"标签最多 24 个字符。"} /></p>}
+    </div>{error && <div className="mission-tag-error" role="alert"><p>{error}</p><button onClick={() => pending.current && void save(pending.current)} disabled={busy}><UiText zh={"重试"} /></button></div>}
   </div>
 }
 export function MissionRoster({ m }: { m: Mission }) {
   const person=usePeople();
-  return <div className="mission-roster" aria-label="使命队员">{orderedMembers(m).map(id => <div key={id}><Avatar id={id} size="list"/><span><strong>{person(id).displayName}</strong><small>{person(id).teamRole}</small></span>{id === m.defaultLeadAgentId && <span className="mission-tag">队长</span>}</div>)}</div>
+  return <div className="mission-roster" aria-label={uiAttribute("使命队员")}>{orderedMembers(m).map(id => <div key={id}><Avatar id={id} size="list"/><span><strong>{person(id).displayName}</strong><small>{person(id).teamRole}</small></span>{id === m.defaultLeadAgentId && <span className="mission-tag"><UiText zh={"队长"} /></span>}</div>)}</div>
 }
 export function MissionPopover({ position, title, children, onClose, className = '' }: { position: ContextPosition; title: string; children: ReactNode; onClose(): void; className?: string }) {
   return <Popover.Root open onOpenChange={open => { if (!open) onClose() }}><Popover.Anchor asChild><span className="attachment-context-anchor" style={{ left: position.x, top: position.y }}/></Popover.Anchor><Popover.Portal>

@@ -9,7 +9,7 @@ const attachmentReview = mode === '--attachment-review'
 mkdirSync(userData, { recursive: true })
 app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
-// Production CampWorkspace + adapter, with a closed draft/Skill API. No Core or daily data.
+// Production ThreadWorkspace + adapter, with a closed draft/Skill API. No Core or daily data.
 app.whenReady().then(async () => {
   const window = new BrowserWindow({
     show: attachmentReview || process.platform === 'linux',
@@ -40,6 +40,13 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--block-pagination') {
+      const report = await require('../assert-block-pagination.cjs')(window, run, capture)
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, report }))
+      app.exit(0)
+      return
+    }
     if (mode === '--command-interaction') {
       const report = await require('../assert-command-interaction.cjs')(window, run, capture)
       assert.equal(errors.length, 0, errors.join('\n'))
@@ -115,8 +122,8 @@ app.whenReady().then(async () => {
         await state()
         await run('document.querySelector("button[aria-label^=打开][aria-label*=执行过程]").click()')
         await state()
-        assert.equal(await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded")'), 'false')
-        await run('document.querySelector(".execution-history-toggle").click()')
+        assert.equal(await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded")'), 'true',
+          'opening a terminal Run selects its history and reveals the focused Run')
         await state()
         await run(`[...document.querySelectorAll('.execution-history-list .execution-run-toggle')]
           .filter(button => button.getAttribute('aria-expanded') === 'false').forEach(button => button.click())`)
@@ -228,12 +235,13 @@ app.whenReady().then(async () => {
           assert.ok(position.top > 0 && position.gap < 8, `${placement} sample ${sample}: asynchronous first page and full bodies follow latest: ${JSON.stringify(position)}`)
           initialPositions.push({ placement, sample, ...position })
           if (sample === 1) {
+            await run('new Promise(resolve => setTimeout(resolve, 450))')
             const initial = await run(`(() => { const root = document.querySelector('.process-content'); return {
               count: Number(root.dataset.executionLoadedCount), first: root.dataset.executionFirstSequence,
               pages: window.campOpenTest.executionWindowState().requests.length
             }; })()`)
             await run('window.campOpenTest.appendExecution(513)')
-            await waitFor(`Number(document.querySelector('.process-content').dataset.executionLoadedCount) === ${initial.count + 513}`)
+            await waitFor(`Number(document.querySelector('.process-content').dataset.executionLoadedCount) === ${initial.count + 129}`)
             assert.equal(await run("document.querySelector('.process-content').dataset.executionFirstSequence"), initial.first,
               'live append retains the original loaded prefix')
             assert.equal((await run('window.campOpenTest.executionWindowState()')).requests.length, initial.pages,
@@ -245,7 +253,7 @@ app.whenReady().then(async () => {
             await run(`window.campOpenTest.showRunningExecution('${placement}', 1)`)
             await settle()
             await run('document.querySelector("button[aria-label^=打开][aria-label*=执行过程]").click()')
-            await waitFor(`Number(document.querySelector('.process-content')?.dataset.executionLoadedCount) === ${initial.count + 513}`)
+            await waitFor(`Number(document.querySelector('.process-content')?.dataset.executionLoadedCount) === ${initial.count + 129}`)
             assert.equal((await run('window.campOpenTest.executionWindowState()')).requests.length, 0,
               'remount restores cached execution without initial or historical page reads')
             await waitFor('document.querySelector(".execution-drawer-body").scrollHeight - document.querySelector(".execution-drawer-body").clientHeight - document.querySelector(".execution-drawer-body").scrollTop < 8')

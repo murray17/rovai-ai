@@ -12,8 +12,8 @@ last_updated: 2026-08-21
 | Component | Responsibility |
 | --- | --- |
 | Core diagnostics module | Owns public status/group DTOs, summary aggregation, read-only SQLite quick check and the final v5 centralized redaction pass. |
-| Core router | Composes current Core/Git/data-dir facts, stored Skill projection state, strict-read MCP inspection, persistent member Runtime selections and cached Runtime evidence into one `DiagnosticsReport`; Git is resolved to an absolute executable through the shared Runtime search environment before the managed health process starts. |
-| Skill projection reconciler | Exposes stored observation/root-access/dirty diagnostics without reading execution roots; explicit user reconcile remains a separate filesystem mutation and may retire only strictly recognized recorded `.lumen` broken links. |
+| Core router | Composes current Core/Git/data-dir facts, stored Skill projection state, Windows fixed-name legacy entry presence, strict-read MCP inspection, persistent member Runtime selections and cached Runtime evidence into one `DiagnosticsReport`; Git is resolved to an absolute executable through the shared Runtime search environment before the managed health process starts. |
+| Skill projection reconciler | Exposes stored observation/root-access/dirty diagnostics; on Windows it also checks only the nine fixed names under known Skill group paths of registered active roots. Explicit user cleanup remains a separate filesystem mutation. |
 | MCP config store | Exposes `inspect` that never materializes a missing file; `get` and permission repair remain separate user-authorized operations. |
 | Runtime platform admission + health cache | Supplies platform rows for the complete Product Runtime Catalog, but machine observations only for qualified Adapters and without rescan/probe scheduling. Runtime check remains an explicit qualified-product command. |
 | Renderer Diagnostics Center | Owns Loading/Running/Partial/Error/Success/Disabled/Recovery presentation, attention-only issue projection, filters and the explicit action-to-Core mapping. |
@@ -49,8 +49,9 @@ export
 - No Renderer-derived health calculation can replace Core statuses or summary counts.
 - `diagnostics.check` never invokes an operation whose purpose is reconcile, repair, rescan, probe, login,
   replacement or data mutation.
-- `diagnostics.check` never resolves, canonicalizes, stats, or enumerates a historical Skill execution root;
-  Observation is evidence, not filesystem access authority.
+- Except for the Windows fixed-name legacy check, `diagnostics.check` never resolves, canonicalizes,
+  stats, or enumerates a historical Skill execution root. That check only inspects exact paths under
+  registered active roots and never writes project files or database records.
 - `unknown` is evidence insufficiency and never enters the attention issue list.
 - Runtime Catalog visibility and Runtime issue eligibility are different: all supported Adapters are visible, only selected
   platform-qualified unavailable products become attention. Not-qualified/unsupported rows never become machine health.
@@ -64,5 +65,5 @@ export
 ## References
 
 - [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)
-- [Diagnostics Center v1](../contracts/diagnostics-center-v1.md)
+- [Diagnostics Center v2](../contracts/diagnostics-center-v2.md)
 - [v0.51 production design](../versions/v0.51/production-design.md)

@@ -1,90 +1,33 @@
-# 篝火纪要写作指南
+# Final notes
 
-由主持人使用每位成员最后一次有效表达，发布本场唯一终止输出。
+Publish once, using each member's last valid position. Use complete round-2 views where available; otherwise retain confirmed round-1 views and mark incomplete responses. Mark missing contributors incomplete without writing their views for them.
 
-## 综合规则
+Call a position consensus only when all valid contributors explicitly support it or earlier opponents have revised their view. Label a majority preference as a current tendency. Record why no response round was needed rather than inventing opposition.
 
-1. 进入回应轮的成员使用完整回应后的立场；未进入者使用第一轮完整观点。
-2. 回应失败、截断或不完整时保留当前上下文中可确认的第一轮立场，并标记“未完成定向回应”。
-3. 没有完整观点的成员标记为未完成，不替其补写。
-4. 只有所有有效成员明确支持，或原反对者已经修正，才能写成共识；多数意见只写“当前倾向”。
-5. 没有实质分歧时说明未开启回应轮，不强行制造反方。
-6. 只有用户要求建议或主持人看法时，才加入“Default Lead 综合判断”；它不代表全体共识。
-7. 纪要不自动创建 Task、Memory 或版本决策记录，也不开始实施。
-8. 发布后讨论结束，迟到消息不自动更新纪要。
-
-## 纪要模板
+Use the user's language for this structure:
 
 ```markdown
-### 篝火纪要
+### Campfire notes
+Topic: <preserve the user's request>
 
-#### 话题
+Participants:
+- <member>: <perspective>; complete | incomplete | response incomplete
 
-> <尽量保留用户原话>
+Final views:
+- <member>: <1-2 sentence judgment>; main evidence; key limit; confidence
 
-#### 参与成员与状态
+Consensus: <agreed points, or none>
+Current tendency: <majority preference, or none>
+Remaining disagreement:
+- <issue; each position; fact/prediction/boundary/value; evidence or user decision needed>
 
-- <成员 A>：<视角>；已完成
-- <成员 B>：<视角>；未完成 | 未完成定向回应
+Applicability: <conditions that change the recommendation; unresolved facts>
+Process: <no response round and why, or the one disagreement and invited members>
 
-#### 各自最终判断
-
-##### <成员 A>
-
-> <1–2 句准确结论>
-
-- 主要依据：...
-- 关键限制：...
-- 置信度：高 | 中 | 低
-
-#### 达成的共识
-
-1. ...
-
-没有共识时写“未形成共识”。
-
-#### 当前倾向
-
-- <多数倾向；没有则写“无”>
-
-#### 仍然存在的分歧
-
-- 分歧：...
-- 各方最终立场：...
-- 类型：事实 | 预测 | 边界 | 价值取舍
-- 继续所需的证据或用户决定：...
-
-#### 关键适用边界
-
-- 当 <条件> 时，结论更偏向 <方案>，因为……
-- 当前尚未确认：……
-
-#### 讨论过程
-
-- 回应轮：未启动，因为没有会改变结论的实质分歧。
-
-或：
-
-- 回应轮：已围绕“<关键分歧>”邀请 <成员> 定向回应。
-
-#### Default Lead 综合判断
-
-<!-- 仅在用户要求时出现 -->
-
-**建议：** ...
-**建议强度：** 强 | 中 | 弱
-**可能改变建议的条件：** ...
-
-#### 建议下一步
-
-1. ...
-
-#### 需要用户决定的事项
-
-- <没有则写“无”>
+Next steps: ...
+User decisions needed: <items, or none>
 ```
 
-## 发布
+Add a separate Default Lead judgment only when requested: recommendation, strength, and what could change it. It is not group consensus.
 
-用 public-only `rovai send --body <纪要正文>` 发布。发送成功后本场讨论结束，
-不再邀请成员，迟到观点不自动续跑。
+Publish with `rovai send --public-only --body <notes>`. Publication ends the discussion. Notes do not automatically create Tasks, Memory, version decisions or implementation work; late messages do not restart it.

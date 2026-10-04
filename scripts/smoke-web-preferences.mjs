@@ -47,7 +47,7 @@ try {
       const response = await original(...args);
       if (!String(args[0]).endsWith('/api/v1/request')) return response;
       const operation = JSON.parse(args[1]?.body ?? '{}').operation;
-      if (operation === 'camps.create') { const reply = await response.clone().json(); if(reply.result?.payload?.campId) window.__createdPreferenceCamps.push(reply.result.payload.campId); }
+      if (operation === 'camps.create') { const reply = await response.clone().json(); if(reply.result?.payload?.threadId) window.__createdPreferenceCamps.push(reply.result.payload.threadId); }
       if(operation !== 'members.list' || !response.ok) return response;
       const body = await response.clone().json();
       body.result = body.result.map(member => ({ ...member, runtimeConfiguration: { adapterKind:'codex-cli', model:{mode:'runtime_default'}, permissions:{adapterKind:'codex-cli',schemaVersion:1,values:{sandbox_mode:'workspace-write',approval_policy:'on-request'}} }, runtimeReadiness:{...member.runtimeReadiness,status:'light_ready'} }));
@@ -121,9 +121,9 @@ try {
   await browser.click(`document.querySelector('button[aria-label="新对话"]')`)
   await browser.wait(`Boolean(window.__createdPreferenceCamps.length===2 && !document.querySelector('.new-camp-dialog'))`)
   const created = await browser.evaluate('window.__createdPreferenceCamps')
-  const pending = await app.evaluate(`window.rovai.request('camps.open',{traceId:crypto.randomUUID(),campId:${JSON.stringify(created[1])}})`)
-  assert.equal(pending.camp.activationState, 'pending')
-  assert.equal(pending.camp.defaultLeadAgentId, 'agent_1')
+  const pending = await app.evaluate(`window.rovai.request('camps.open',{traceId:crypto.randomUUID(),threadId:${JSON.stringify(created[1])}})`)
+  assert.equal(pending.thread.activationState, 'pending')
+  assert.equal(pending.thread.defaultLeadAgentId, 'agent_1')
   await settings(browser, '通用')
   const timeOrigin = await browser.evaluate('performance.timeOrigin')
   await browser.send('Page.reload')

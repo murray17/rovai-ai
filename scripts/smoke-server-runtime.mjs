@@ -63,8 +63,8 @@ async function request(operation, params = {}) {
     return result.result
   }
 }
-async function execution(campId, agentRunId) {
-  const page = await request('agentRunExecution.page', { campId, agentRunId, limit: 96 })
+async function execution(threadId, agentRunId) {
+  const page = await request('agentRunExecution.page', { threadId, agentRunId, limit: 96 })
   return [...page.evidence, ...(page.activeEvidence ?? [])]
 }
 async function fixtureProcesses(program) {
@@ -81,10 +81,10 @@ async function fixtureProcesses(program) {
   }
   return matches
 }
-async function send(campId, body) {
-  const draft = await request('camp.composerDraft.get', { campId })
-  const saved = await request('camp.composerDraft.save', { campId, expectedRevision: draft.revision, content: { version: 2, segments: [{ kind: 'text', text: body }] } })
-  const sent = await request('camp.messages.send', { commandId: randomUUID(), campId, draftRevision: saved.revision, execution: { taskId: null, purpose: 'Linux Server Runtime acceptance', completionRole: 'required' } })
+async function send(threadId, body) {
+  const draft = await request('camp.composerDraft.get', { threadId })
+  const saved = await request('camp.composerDraft.save', { threadId, expectedRevision: draft.revision, content: { version: 2, segments: [{ kind: 'text', text: body }] } })
+  const sent = await request('camp.messages.send', { commandId: randomUUID(), threadId, draftRevision: saved.revision, execution: { taskId: null, purpose: 'Linux Server Runtime acceptance', completionRole: 'required' } })
   assert.equal(sent.commandResult?.status, 'accepted')
   return sent.commandResult.payload.agentRunIds[0]
 }
@@ -95,10 +95,10 @@ function binding(conversationId) {
     return db.prepare('SELECT native_session_id, native_binding_id, native_binding_generation FROM conversation WHERE id = ?').get(conversationId)
   } finally { db.close() }
 }
-async function waitRun(campId, id, marker) {
+async function waitRun(threadId, id, marker) {
   const deadline = Date.now() + 150000
   while (Date.now() < deadline) {
-    const camp = await request('camps.open', { campId, traceId: randomUUID() })
+    const camp = await request('camps.open', { threadId, traceId: randomUUID() })
     const run = camp.agentRuns.find(run => run.id === id)
     if (run && ['failed', 'cancelled', 'interrupted', 'rejected'].includes(run.status)) {
       report.failedRun = run
@@ -153,25 +153,25 @@ try {
   const workspace = await request('workspaces.inspect', { path: project })
   const first = await createConfiguredCampAndSend(request, { commandId: randomUUID(), name: 'Linux Runtime acceptance', workspace, memberAgentIds: ['agent_2'], defaultLeadAgentId: 'agent_2', body: `Use tools to write runtime-marker.txt in the current workspace with the single line ${marker}, then read it back. Reply with ${marker}. Do not read files outside this workspace.`, purpose: 'Linux Server tool execution' })
   assert.equal(first.status, 'accepted')
-  const campId = first.payload.campId
-  const one = await waitRun(campId, first.payload.agentRunIds[0], marker)
+  const threadId = first.payload.threadId
+  const one = await waitRun(threadId, first.payload.agentRunIds[0], marker)
   assert.equal((await readFile(join(project, 'runtime-marker.txt'), 'utf8')).trim(), marker)
-  const firstEvidence = await execution(campId, one.run.id)
+  const firstEvidence = await execution(threadId, one.run.id)
   assert.ok(firstEvidence.some(item => ['command', 'tool_call', 'tool_result', 'file_change'].includes(item.kind)), 'Native tools must appear in the public execution projection')
   report.toolEvidence = firstEvidence.filter(item => item.canonical).map(item => ({ kind: item.kind, phase: item.phase, toolName: item.canonical.toolName, outcome: item.canonical.outcome }))
   checks.push('http_send_native_tool_write_read_and_final_projection')
-  await waitRun(campId, await send(campId, 'Repeat the exact marker from your previous response. Do not use tools.'), marker)
+  await waitRun(threadId, await send(threadId, 'Repeat the exact marker from your previous response. Do not use tools.'), marker)
   assert.equal(runFacts[1].conversationId, runFacts[0].conversationId)
   assert.deepEqual(runFacts[1].nativeBinding, runFacts[0].nativeBinding)
   checks.push('warm_conversation_continuation')
   await stop(); await start()
-  await waitRun(campId, await send(campId, 'Repeat the exact marker from this conversation again. Do not use tools.'), marker)
+  await waitRun(threadId, await send(threadId, 'Repeat the exact marker from this conversation again. Do not use tools.'), marker)
   assert.equal(runFacts[2].conversationId, runFacts[0].conversationId)
   assert.deepEqual(runFacts[2].nativeBinding, runFacts[0].nativeBinding)
   checks.push('server_restart_persisted_auth_and_cold_conversation_continuation')
   const publicMarker = 'ROVAI_BUILTIN_' + randomUUID().replaceAll('-', '')
-  const builtin = await waitRun(campId, await send(campId, `Use the built-in rovai CLI to send a public Camp message containing exactly ${publicMarker}. Follow the CLI instructions already provided by Rovai. Do not write workspace files. A plain final answer alone is insufficient for this test.`), publicMarker)
-  const builtinEvidence = await execution(campId, builtin.run.id)
+  const builtin = await waitRun(threadId, await send(threadId, `Use the built-in rovai CLI to send a public Camp message containing exactly ${publicMarker}. Follow the CLI instructions already provided by Rovai. Do not write workspace files. A plain final answer alone is insufficient for this test.`), publicMarker)
+  const builtinEvidence = await execution(threadId, builtin.run.id)
   assert.ok(builtinEvidence.some(item => ['command', 'tool_call', 'tool_result'].includes(item.kind) && JSON.stringify(item.payload).includes('rovai')), 'Built-in public send must have native CLI execution evidence')
   checks.push('builtin_cli_public_camp_message')
   // Observe a real, uniquely identifiable child. Some native tools prohibit a
@@ -181,13 +181,13 @@ try {
   const cancelStarted = join(project, 'cancel-started.txt')
   const cancelFinished = join(project, 'cancel-finished.txt')
   await writeFile(cancelProgram, `import pathlib, time\np = pathlib.Path(__file__).parent\n(p / 'cancel-started.txt').write_text('started')\ntime.sleep(120)\n(p / 'cancel-finished.txt').write_text('unexpected completion')\n`)
-  const cancelId = await send(campId, `Run python3 ${JSON.stringify(cancelProgram)} with your shell tool in the foreground, with a timeout of at least 150 seconds. This is an intentional process cancellation test. Do not modify the program, run it in the background, or reply until it finishes.`)
+  const cancelId = await send(threadId, `Run python3 ${JSON.stringify(cancelProgram)} with your shell tool in the foreground, with a timeout of at least 150 seconds. This is an intentional process cancellation test. Do not modify the program, run it in the background, or reply until it finishes.`)
   const deadline = Date.now() + 60000
   let cancelRun, toolStarted = false
   while (Date.now() < deadline) {
-    const camp = await request('camps.open', { campId, traceId: randomUUID() }); cancelRun = camp.agentRuns.find(run => run.id === cancelId)
+    const camp = await request('camps.open', { threadId, traceId: randomUUID() }); cancelRun = camp.agentRuns.find(run => run.id === cancelId)
     if (cancelRun?.status === 'running') {
-      const evidence = await execution(campId, cancelId)
+      const evidence = await execution(threadId, cancelId)
       const activeTool = evidence.some(item => ['command', 'tool_call'].includes(item.kind))
       const processIds = await fixtureProcesses(cancelProgram)
       const started = await readFile(cancelStarted, 'utf8').catch(error => {
@@ -204,10 +204,10 @@ try {
   }
   assert.equal(cancelRun?.status, 'running')
   assert.ok(toolStarted, 'Cancel only after both native tool evidence and the real fixture child are observed')
-  const cancel = await request('agentRuns.cancel', { commandId: randomUUID(), command: { campId, agentRunId: cancelId, expectedVersion: cancelRun.version } })
+  const cancel = await request('agentRuns.cancel', { commandId: randomUUID(), command: { threadId, agentRunId: cancelId, expectedVersion: cancelRun.version } })
   assert.notEqual(cancel.status, 'rejected')
   for (let i = 0; i < 80; i++) {
-    cancelRun = (await request('camps.open', { campId, traceId: randomUUID() })).agentRuns.find(run => run.id === cancelId)
+    cancelRun = (await request('camps.open', { threadId, traceId: randomUUID() })).agentRuns.find(run => run.id === cancelId)
     if (cancelRun.status === 'cancelled') break
     await pause(250)
   }

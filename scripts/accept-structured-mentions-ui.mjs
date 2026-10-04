@@ -228,22 +228,22 @@ try {
     collaborationMode: 'peer'
   })
   assert(created.status === 'applied', `Three-member Camp creation failed: ${JSON.stringify(created)}`)
-  const campId = created.payload?.campId
-  assert(typeof campId === 'string' && campId.length > 0, 'Camp creation returned no campId')
+  const threadId = created.payload?.threadId
+  assert(typeof threadId === 'string' && threadId.length > 0, 'Camp creation returned no threadId')
 
-  // The Core request above bypasses App.createCamp, so reload before selecting
+  // The Core request above bypasses App.createThread, so reload before selecting
   // the newly materialized navigation row.
   await reloadRenderer(running.cdp)
-  await openCamp(running.cdp, campId)
+  await openCamp(running.cdp, threadId)
   await mouseClick(running.cdp, '.camp-conversation-view-controls button:first-child')
   await waitForExpression(running.cdp, `(() => {
     const button = document.querySelector('.camp-conversation-view-controls button:first-child')
     const timeline = document.querySelector('.camp-timeline')
     return button?.getAttribute('aria-pressed') === 'true' && !timeline?.hidden
   })()`)
-  const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 34,
-    `Camp snapshot schema is not v34: ${initialSnapshot.schemaVersion}`)
+  const initialSnapshot = await request(running.cdp, 'camps.snapshot', { threadId })
+  assert(initialSnapshot.schemaVersion === 35,
+    `Thread snapshot schema is not v35: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -254,11 +254,11 @@ try {
     `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'`)
   if (cutOnly) {
     clipboardTouched = true
-    const composerCutInspection = await acceptComposerCutRegression(running.cdp, campId)
+    const composerCutInspection = await acceptComposerCutRegression(running.cdp, threadId)
     result = {
       acceptance: 'composer-cut-ui',
       appPath,
-      campId,
+      threadId,
       ...composerCutInspection,
       clipboardItemCountBeforeTest: clipboardArchive.length,
       clipboardRestored: false,
@@ -267,11 +267,11 @@ try {
     break acceptance
   }
   if (imeNewlineOnly) {
-    const imeNewlineInspection = await acceptImeNewlineRegression(running.cdp, campId)
+    const imeNewlineInspection = await acceptImeNewlineRegression(running.cdp, threadId)
     result = {
       acceptance: 'composer-ime-newline-ui',
       appPath,
-      campId,
+      threadId,
       ...imeNewlineInspection,
       clipboardItemCountBeforeTest: clipboardArchive.length,
       clipboardRestored: false,
@@ -280,8 +280,8 @@ try {
     break acceptance
   }
   clipboardTouched = true
-  await acceptComposerCutRegression(running.cdp, campId)
-  const inlineSkillInspection = await acceptInlineSkillQueries(running.cdp, campId, selectableSkill)
+  await acceptComposerCutRegression(running.cdp, threadId)
+  const inlineSkillInspection = await acceptInlineSkillQueries(running.cdp, threadId, selectableSkill)
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: '/' })
   await waitForExpression(running.cdp, `(() => {
@@ -369,7 +369,7 @@ try {
     { kind: 'text', text: ' ' }
   ]
   const selectedSkillDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
     deepEqual(draft.content, selectedSkillContent), 10_000)
   assert(selectedSkillDraft.body === selectedSkillText,
     `Selected Skill identity or body projection was not persisted: ${JSON.stringify(selectedSkillDraft)}`)
@@ -383,19 +383,19 @@ try {
       { kind: 'skill_mention', skillId: selectableSkill.id, nameAtSend: selectableSkill.name },
       { kind: 'text', text: ` ${smokeSuffix}` }
     ]
-    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
       (draft) => draft.body === smokeBody && deepEqual(draft.content, smokeContent), 10_000)
     await mouseClick(running.cdp, '.composer:has(#camp-message) .composer-send')
 
     const smokeSnapshot = await waitForValue(async () =>
-      request(running.cdp, 'camps.snapshot', { campId }), (snapshot) => {
+      request(running.cdp, 'camps.snapshot', { threadId }), (snapshot) => {
       const message = snapshot.messages.find((candidate) =>
         candidate.authorType === 'user' && deepEqual(candidate.content, smokeContent))
       const turn = message
         ? snapshot.turns.find((candidate) => candidate.triggerId === message.id)
         : null
       const run = turn
-        ? snapshot.agentRuns.find((candidate) => candidate.campTurnId === turn.id)
+        ? snapshot.agentRuns.find((candidate) => candidate.threadTurnId === turn.id)
         : null
       const manifest = run
         ? snapshot.contextManifests.find((candidate) => candidate.agentRunId === run.id)
@@ -410,7 +410,7 @@ try {
     const smokeTurn = smokeSnapshot.turns.find((candidate) =>
       candidate.triggerId === smokeMessage?.id)
     const smokeRun = smokeSnapshot.agentRuns.find((candidate) =>
-      candidate.campTurnId === smokeTurn?.id)
+      candidate.threadTurnId === smokeTurn?.id)
     const smokeManifest = smokeSnapshot.contextManifests.find((candidate) =>
       candidate.agentRunId === smokeRun?.id)
     assert(smokeMessage?.body === smokeBody,
@@ -479,7 +479,7 @@ try {
       appPath,
       outputDir,
       captures: { skillPicker: skillPickerCapture, sent: sentSkillCapture },
-      campId,
+      threadId,
       messageId: smokeMessage.id,
       agentRunId: smokeRun.id,
       selectedSkillName: selectableSkill.name,
@@ -499,7 +499,7 @@ try {
       appPath,
       outputDir,
       captures: { skillPicker: skillPickerCapture },
-      campId,
+      threadId,
       selectedSkillName: selectableSkill.name,
       selectedSkillText,
       skillPickerInspection,
@@ -514,15 +514,15 @@ try {
     await pressKey(running.cdp, {
       key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
     })
-    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
       (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.replyIntent === null, 10_000)
 
     await closeApp(running)
     running = null
-    await insertCurrentUserMentionFixture(databasePath, campId)
+    await insertCurrentUserMentionFixture(databasePath, threadId)
     running = await launchApp(dataDir, debugPort, 1440, 920)
     await setTheme(running.cdp, 'day')
-    await openCamp(running.cdp, campId)
+    await openCamp(running.cdp, threadId)
     await mouseClick(running.cdp, '.camp-conversation-view-controls button:first-child')
     await waitForSelector(running.cdp,
       `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`, 30_000)
@@ -531,8 +531,8 @@ try {
     await mouseClick(running.cdp,
       `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`)
     const availableReplyDraft = await waitForValue(async () =>
-      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-      draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+      request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
+      draft.replyIntent?.replyToThreadMessageId === currentUserMentionMessageId
         && draft.replyIntent.author?.authorId === targetMemberIds[0]
         && draft.replyIntent.recipientSelectionRequired === false
         && composerHasMember(draft.content, targetMemberIds[0]), 10_000)
@@ -542,7 +542,7 @@ try {
       key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
     })
     const cancelledReplyDraft = await waitForValue(async () =>
-      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+      request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
       draft.replyIntent === null && deepEqual(draft.content, availableReplyDraft.content), 10_000)
     await waitForExpression(running.cdp, `(() => {
       const editor = document.querySelector('#camp-message')
@@ -585,7 +585,7 @@ try {
     result = {
       acceptance: 'composer-reply-backspace-ui',
       appPath,
-      campId,
+      threadId,
       availableReplyDraft,
       cancelledReplyDraft,
       keyboardInspection,
@@ -598,7 +598,7 @@ try {
     await pressKey(running.cdp, {
       key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
     })
-    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
       (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
     await waitForExpression(running.cdp, `(() => {
       const rail = document.querySelector('.composer:has(#camp-message) .composer-route-rail')
@@ -675,7 +675,7 @@ try {
     const continuationMessageText = '继续发送验收'
     await running.cdp.send('Input.insertText', { text: continuationMessageText })
     const addressedDraft = await waitForValue(async () =>
-      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+      request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
       draft.body === `@${targetMembers[1].displayName} ${continuationMessageText}`
         && deepEqual(draft.content, composerDocumentFromStructured([
           { kind: 'member_mention', agentId: targetMemberIds[1] },
@@ -693,7 +693,7 @@ try {
     })()`, 5_000)
     const continuationVisibleAfterAcceptedSendMs = Date.now() - continuationStartedAt
     const continuedDraft = await waitForValue(async () =>
-      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+      request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
       composerIsEmpty(draft.content)
         && draft.replyIntent === null
         && draft.continuationIntent?.recipient.agentId === targetMemberIds[1], 5_000)
@@ -738,7 +738,7 @@ try {
     result = {
       acceptance: 'composer-continuation-ui',
       appPath,
-      campId,
+      threadId,
       addressedDraft,
       continuedDraft,
       defaultRouteInspection,
@@ -756,7 +756,7 @@ try {
   })
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.textContent === ''`)
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
   // Lexical owns the editing tree. Native input must update that tree without
@@ -800,7 +800,7 @@ try {
   await pressKey(running.cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
   await focusEditorAtEnd(running.cdp)
@@ -833,17 +833,17 @@ try {
       && firstNativeCompositionInspection.caretOffset === 1,
     `Native IME composition did not remain in Lexical: ${JSON.stringify(firstNativeCompositionInspection)}`
   )
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content,
       composerDocumentFromStructured([{ kind: 'text', text: '你' }])), 10_000)
   await selectWholeEditor(running.cdp)
   await pressKey(running.cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
-  const imeNewlineInspection = await acceptImeNewlineRegression(running.cdp, campId)
+  const imeNewlineInspection = await acceptImeNewlineRegression(running.cdp, threadId)
 
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: expectedContent[0].text })
@@ -986,7 +986,7 @@ try {
   )
 
   const durableDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
     draft.revision >= 1 && deepEqual(draft.content, expectedComposerDocument), 10_000)
   assert(durableDraft.body === expectedBody,
     `Core did not project the current names into the Draft body: ${JSON.stringify(durableDraft)}`)
@@ -1013,14 +1013,14 @@ try {
   await waitForExpression(running.cdp, `!document.querySelector('.mention-profile-popover')`)
   await waitForExpression(running.cdp,
     `document.activeElement?.id === 'camp-message'`, 3_000)
-  const draftAfterPopover = await request(running.cdp, 'camp.composerDraft.get', { campId })
+  const draftAfterPopover = await request(running.cdp, 'camp.composerDraft.get', { threadId })
   assert(deepEqual(draftAfterPopover.content, expectedComposerDocument),
     `Opening the Composer popover changed the durable Draft: ${JSON.stringify(draftAfterPopover)}`)
 
   // Settle any earlier Runtime before testing direct-send auto-open; a private
   // queued publication has no synchronous Run receipt and intentionally does
   // not move selection.
-  await waitForValue(() => request(running.cdp, 'camps.snapshot', { campId }),
+  await waitForValue(() => request(running.cdp, 'camps.snapshot', { threadId }),
     (snapshot) => snapshot.agentRuns.every((run) =>
       ['succeeded', 'failed', 'cancelled'].includes(run.status)), 30_000)
   await waitForExpression(running.cdp,
@@ -1028,12 +1028,12 @@ try {
   await mouseClick(running.cdp, '.composer:has(#camp-message) .composer-send')
 
   const sent = await waitForValue(async () => {
-    const snapshot = await request(running.cdp, 'camps.snapshot', { campId })
+    const snapshot = await request(running.cdp, 'camps.snapshot', { threadId })
     const message = snapshot.messages
       .filter((candidate) => candidate.authorType === 'user')
       .findLast((candidate) => deepEqual(candidate.content, expectedContent))
-    if (!message?.campTurnId) return null
-    const runs = snapshot.agentRuns.filter((run) => run.campTurnId === message.campTurnId)
+    if (!message?.threadTurnId) return null
+    const runs = snapshot.agentRuns.filter((run) => run.threadTurnId === message.threadTurnId)
     return runs.length === targetMemberIds.length ? { snapshot, message, runs } : null
   }, Boolean, 30_000)
 
@@ -1225,11 +1225,11 @@ try {
   // App then exercises the real read model, copy bridge, and Composer paste.
   await closeApp(running)
   running = null
-  await insertAgentMemberMentionFixtures(databasePath, campId)
-  await insertCurrentUserMentionFixture(databasePath, campId)
+  await insertAgentMemberMentionFixtures(databasePath, threadId)
+  await insertCurrentUserMentionFixture(databasePath, threadId)
   running = await launchApp(dataDir, debugPort, 1440, 920)
   await setTheme(running.cdp, 'night')
-  await openCamp(running.cdp, campId)
+  await openCamp(running.cdp, threadId)
   const agentMemberMentionInspection = await acceptAgentMemberMention(running.cdp)
   await waitForExpression(running.cdp, `(() => {
     const message = document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}]')
@@ -1330,7 +1330,7 @@ try {
   await focusEditorAtEnd(running.cdp)
   await pasteWithMetaV(running.cdp)
   const downgradedDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
     deepEqual(draft.content,
       composerDocumentFromStructured([{ kind: 'text', text: currentUserMentionBody }])), 10_000)
   assert(downgradedDraft.body === currentUserMentionBody,
@@ -1356,11 +1356,11 @@ try {
   await pressKey(running.cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.replyIntent === null, 10_000)
   await reloadRenderer(running.cdp)
   await setTheme(running.cdp, 'day')
-  await openCamp(running.cdp, campId)
+  await openCamp(running.cdp, threadId)
   await waitForSelector(running.cdp,
     `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`, 30_000)
   await moveMouseToElement(running.cdp,
@@ -1368,8 +1368,8 @@ try {
   await mouseClick(running.cdp,
     `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`)
   const availableReplyDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-    draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
+    draft.replyIntent?.replyToThreadMessageId === currentUserMentionMessageId
       && draft.replyIntent.author?.authorId === targetMemberIds[0]
       && draft.replyIntent.author.recipientAvailability === 'available'
       && draft.replyIntent.recipientSelectionRequired === false
@@ -1419,7 +1419,7 @@ try {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   const replyCancelledFromBodyStart = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
     draft.replyIntent === null && deepEqual(draft.content, availableReplyDraft.content), 10_000)
   assert(deepEqual(replyCancelledFromBodyStart.content, availableReplyDraft.content),
     `Backspace at body start changed reply-authored content: ${JSON.stringify(replyCancelledFromBodyStart)}`)
@@ -1443,7 +1443,7 @@ try {
   await pressKey(running.cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.replyIntent === null, 10_000)
   const originalAuthorProfile = await request(running.cdp, 'members.get', {
     agentId: targetMemberIds[0]
@@ -1460,12 +1460,12 @@ try {
     `Could not make the reply author unavailable: ${JSON.stringify(awayResult)}`)
   await reloadRenderer(running.cdp)
   await setTheme(running.cdp, 'night')
-  await openCamp(running.cdp, campId)
+  await openCamp(running.cdp, threadId)
   await mouseClick(running.cdp,
     `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`)
   const unavailableReplyDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-    draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
+    draft.replyIntent?.replyToThreadMessageId === currentUserMentionMessageId
       && draft.replyIntent.author?.authorId === targetMemberIds[0]
       && draft.replyIntent.author.recipientAvailability === 'unavailable'
       && draft.replyIntent.recipientSelectionRequired === true, 10_000)
@@ -1484,7 +1484,7 @@ try {
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: '请基于上述引用继续。' })
   const unresolvedReplyDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
     draft.body.includes('请基于上述引用继续。')
       && draft.replyIntent?.recipientSelectionRequired === true, 10_000)
   const unresolvedReplyInspection = await evaluate(running.cdp, `(() => ({
@@ -1504,12 +1504,12 @@ try {
   await capture(running.cdp, unavailableReplyCapture)
 
   const messageSequenceBeforeRecipientRepair = Math.max(0,
-    ...(await request(running.cdp, 'camps.snapshot', { campId })).messages
+    ...(await request(running.cdp, 'camps.snapshot', { threadId })).messages
       .map((message) => message.sequence))
   await mouseClick(running.cdp, '.reply-recipient-options button:nth-child(2)')
   const resolvedReplyDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-    draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
+    draft.replyIntent?.replyToThreadMessageId === currentUserMentionMessageId
       && draft.replyIntent.recipientSelectionRequired === false
       && composerHasMember(draft.content, targetMemberIds[2])
       && !composerHasMember(draft.content, targetMemberIds[0]), 10_000)
@@ -1529,20 +1529,20 @@ try {
   })()`, 5_000)
   const continuationVisibleAfterAcceptedSendMs = Date.now() - continuationStartedAt
   const continuedDraft = await waitForValue(async () =>
-    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    request(running.cdp, 'camp.composerDraft.get', { threadId }), (draft) =>
     composerIsEmpty(draft.content)
       && draft.replyIntent === null
       && draft.continuationIntent?.recipient.agentId === targetMemberIds[2], 5_000)
   const sentReplySnapshot = await waitForValue(async () =>
-    request(running.cdp, 'camps.snapshot', { campId }), (snapshot) =>
+    request(running.cdp, 'camps.snapshot', { threadId }), (snapshot) =>
     snapshot.messages.some((message) => message.sequence > messageSequenceBeforeRecipientRepair)
       && snapshot.messages.some((message) =>
         message.authorType === 'user'
-          && message.replyToCampMessageId === currentUserMentionMessageId
+          && message.replyToThreadMessageId === currentUserMentionMessageId
           && deepEqual(message.addressedAgentIds, [targetMemberIds[2]])), 30_000)
   const sentReplyMessage = sentReplySnapshot.messages.find((message) =>
     message.authorType === 'user'
-      && message.replyToCampMessageId === currentUserMentionMessageId
+      && message.replyToThreadMessageId === currentUserMentionMessageId
       && deepEqual(message.addressedAgentIds, [targetMemberIds[2]]))
   assert(sentReplyMessage,
     `Resolved reply did not create the expected message: ${JSON.stringify(sentReplySnapshot.messages)}`)
@@ -1603,8 +1603,8 @@ try {
     `[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .message-bubble`)
   await mouseClick(running.cdp,
     `[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .message-reply-button`)
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => draft.replyIntent?.replyToCampMessageId === sentReplyMessage.id
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
+    (draft) => draft.replyIntent?.replyToThreadMessageId === sentReplyMessage.id
       && draft.replyIntent.author?.authorType === 'user'
       && draft.replyIntent.recipientSelectionRequired === false, 10_000)
   await emulateDesktopZoom(running.cdp, 1040, 700, 2)
@@ -1666,7 +1666,7 @@ try {
   await capture(running.cdp, zoom200ReplyCapture)
 
   await mouseClick(running.cdp, '.composer-reply-cancel')
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => draft.replyIntent === null, 10_000)
   // The Core receipt can arrive before cancelReply's Renderer focus callback.
   // Finish that interaction before moving focus to the keyboard Reply action.
@@ -1713,7 +1713,7 @@ try {
       sentReply: sentReplyCapture,
       zoom200Reply: zoom200ReplyCapture
     },
-    campId,
+    threadId,
     selectedSkillName: selectableSkill.name,
     selectedSkillText,
     skillPickerInspection,
@@ -1721,8 +1721,8 @@ try {
     firstNativeInputInspection,
     firstNativeCompositionInspection,
     imeNewlineInspection,
-    campMessageId: sent.message.id,
-    campTurnId: sent.message.campTurnId,
+    threadMessageId: sent.message.id,
+    threadTurnId: sent.message.threadTurnId,
     agentRunIds: sent.runs.map((run) => run.id),
     agentRunTargets: sent.runs.map((run) => run.agentId),
     agentRunCreatedAt: sent.runs[0].createdAt,
@@ -1874,7 +1874,7 @@ async function installAcceptanceRuntime(path, agentIds) {
   `)
 }
 
-async function insertCurrentUserMentionFixture(path, campId) {
+async function insertCurrentUserMentionFixture(path, threadId) {
   const contentJson = JSON.stringify(currentUserMentionContent)
   await runSql(path, `
     BEGIN IMMEDIATE;
@@ -1882,7 +1882,7 @@ async function insertCurrentUserMentionFixture(path, campId) {
     SET last_message_sequence = last_message_sequence + 1,
         version = version + 1,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE id = ${sqlLiteral(campId)};
+    WHERE id = ${sqlLiteral(threadId)};
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, body,
       structured_content_json, content_digest, address_mode,
@@ -1895,12 +1895,12 @@ async function insertCurrentUserMentionFixture(path, campId) {
       'default', '[]', 1,
       strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
       strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    FROM camp WHERE id = ${sqlLiteral(campId)};
+    FROM camp WHERE id = ${sqlLiteral(threadId)};
     COMMIT;
   `)
 }
 
-async function insertAgentMemberMentionFixtures(path, campId) {
+async function insertAgentMemberMentionFixtures(path, threadId) {
   // These are inert presentation fixtures: no Delivery, Run or model invocation.
   for (const message of [
     { id: agentMemberMentionMessageId, body: agentMemberMentionBody, content: agentMemberMentionContent, recipients: ['agent_1'] },
@@ -1909,7 +1909,7 @@ async function insertAgentMemberMentionFixtures(path, campId) {
     await runSql(path, `
       BEGIN IMMEDIATE;
       UPDATE camp SET last_message_sequence = last_message_sequence + 1, version = version + 1
-      WHERE id = ${sqlLiteral(campId)};
+      WHERE id = ${sqlLiteral(threadId)};
       INSERT INTO camp_message(
         id, camp_id, sequence, author_type, author_id, body, structured_content_json,
         content_digest, address_mode, addressed_agent_ids_json, effective_recipient_ids_json,
@@ -1921,7 +1921,7 @@ async function insertAgentMemberMentionFixtures(path, campId) {
         ${sqlLiteral(message.recipients.length ? 'explicit' : 'default')},
         ${sqlLiteral(JSON.stringify(message.recipients))}, ${sqlLiteral(JSON.stringify(message.recipients))},
         'automatic', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-      FROM camp WHERE id = ${sqlLiteral(campId)};
+      FROM camp WHERE id = ${sqlLiteral(threadId)};
       COMMIT;
     `)
   }
@@ -2169,30 +2169,30 @@ async function reloadRenderer(cdp) {
     45_000)
 }
 
-async function openCamp(cdp, campId) {
+async function openCamp(cdp, threadId) {
   await waitForExpression(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     return [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === target)
   })()`, 30_000)
   const opened = await evaluate(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     const menu = [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .find((element) => element.dataset.sidebarMenuTarget === target)
     const button = menu?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')
     button?.click()
     return Boolean(button)
   })()`)
-  assert(opened, `Could not open Camp ${campId}`)
+  assert(opened, `Could not open Camp ${threadId}`)
   await waitForSelector(cdp, '.camp-workspace', 30_000)
 }
 
-async function acceptImeNewlineRegression(cdp, campId) {
+async function acceptImeNewlineRegression(cdp, threadId) {
   await selectWholeEditor(cdp)
   await pressKey(cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
-  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
   await focusEditorAtEnd(cdp)
@@ -2204,7 +2204,7 @@ async function acceptImeNewlineRegression(cdp, campId) {
   })
   await cdp.send('Input.insertText', { text: '你好' })
   const composedDraft = await waitForValue(
-    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content,
       composerDocumentFromStructured([{ kind: 'text', text: '你好' }])),
     10_000
@@ -2214,7 +2214,7 @@ async function acceptImeNewlineRegression(cdp, campId) {
     key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36, modifiers: 8
   })
   const trailingNewlineDraft = await waitForValue(
-    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content,
       composerDocumentFromStructured([{ kind: 'text', text: '你好\n' }])),
     10_000
@@ -2238,7 +2238,7 @@ async function acceptImeNewlineRegression(cdp, campId) {
 
   await cdp.send('Input.insertText', { text: 'n' })
   const draft = await waitForValue(
-    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (value) => deepEqual(value.content,
       composerDocumentFromStructured([{ kind: 'text', text: '你好\nn' }])),
     10_000
@@ -2263,7 +2263,7 @@ async function acceptImeNewlineRegression(cdp, campId) {
   await pressKey(cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
-  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (value) => deepEqual(value.content, emptyComposerDocument), 10_000)
 
   return {
@@ -2274,13 +2274,13 @@ async function acceptImeNewlineRegression(cdp, campId) {
     draft
   }
 }
-async function acceptInlineSkillQueries(cdp, campId, skill) {
+async function acceptInlineSkillQueries(cdp, threadId, skill) {
   const query = `/${skill.name.slice(0, 4)}`
   const optionSelector = `.skill-picker-menu [data-skill-name=${JSON.stringify(skill.name)}]`
   const skillToken = { kind: 'skill_mention', skillId: skill.id, nameAtSend: skill.name }
-  const before = await request(cdp, 'camps.snapshot', { campId })
+  const before = await request(cdp, 'camps.snapshot', { threadId })
   const expectDraft = (content) => waitForValue(
-    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, content), 10_000)
   const expectOpen = () => waitForSelector(cdp, optionSelector)
   const expectClosed = () => waitForExpression(cdp,
@@ -2436,7 +2436,7 @@ async function acceptInlineSkillQueries(cdp, campId, skill) {
   await setTheme(cdp, 'day')
   await setViewport(cdp, 1440, 920)
   await replaceText('')
-  const after = await request(cdp, 'camps.snapshot', { campId })
+  const after = await request(cdp, 'camps.snapshot', { threadId })
   assert(after.messages.length === before.messages.length
     && after.agentRuns.length === before.agentRuns.length,
   'Typing or selecting an inline Skill must not send a message or start a Run')
@@ -2450,17 +2450,17 @@ async function acceptInlineSkillQueries(cdp, campId, skill) {
   }
 }
 
-async function acceptComposerCutRegression(cdp, campId) {
+async function acceptComposerCutRegression(cdp, threadId) {
   await selectWholeEditor(cdp)
   await pressKey(cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
-  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.body === '', 10_000)
 
   await focusEditorAtEnd(cdp)
   await cdp.send('Input.insertText', { text: '123' })
-  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content,
       composerDocumentFromStructured([{ kind: 'text', text: '123' }]))
       && draft.body === '123', 10_000)
@@ -2485,7 +2485,7 @@ async function acceptComposerCutRegression(cdp, campId) {
     3_000
   )
   const emptyDraft = await waitForValue(
-    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.body === '',
     10_000
   )
@@ -2519,7 +2519,7 @@ async function acceptComposerCutRegression(cdp, campId) {
 
   await cdp.send('Input.insertText', { text: '7' })
   const nextDraft = await waitForValue(
-    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content,
       composerDocumentFromStructured([{ kind: 'text', text: '7' }])) && draft.body === '7',
     10_000
@@ -2552,7 +2552,7 @@ async function acceptComposerCutRegression(cdp, campId) {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   const afterKeyboardEmptyDraft = await waitForValue(
-    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    () => request(cdp, 'camp.composerDraft.get', { threadId }),
     (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.body === '',
     10_000
   )

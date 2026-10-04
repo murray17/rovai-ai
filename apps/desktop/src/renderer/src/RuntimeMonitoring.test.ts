@@ -105,7 +105,7 @@ describe('RuntimeMonitoring', () => {
   it('renders one concise Usage surface without legacy monitoring tabs', () => {
     const markup = renderToStaticMarkup(createElement(RuntimeMonitoring))
     expect(markup).toContain('<h1>运行监控</h1>')
-    expect(markup).toContain('汇总 Runtime 实际上报的 Token、Cache 与成本')
+    expect(markup).toContain('汇总智能体实际报告的 Token、Cache 与成本')
     expect(markup).toContain('导出 JSON')
     expect(markup).toContain('正在读取用量')
     expect(markup).not.toContain('性能与可靠性')

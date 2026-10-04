@@ -132,7 +132,7 @@ try {
     'ROVAI_ANTIGRAVITY_RUN_ONE',
     workspace
   )
-  const camp = { id: first.campId, defaultLeadAgentId: profile.agentId }
+  const camp = { id: first.threadId, defaultLeadAgentId: profile.agentId }
   const firstBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === first.agentRunId
   )
@@ -226,7 +226,7 @@ async function executeToken(request, camp, agentId, token, workspace = null) {
   const body = `Do not call tools or inspect files. Reply with exactly ${token} and nothing else.`
   const purpose = 'Verify the Antigravity non-interactive CLI process integration without tools'
   const sent = camp
-    ? await sendCampMessage(request, camp.id, agentId, body, purpose)
+    ? await sendThreadMessage(request, camp.id, agentId, body, purpose)
     : await createConfiguredCampAndSend(request, {
         commandId: crypto.randomUUID(),
         workspace,
@@ -235,19 +235,19 @@ async function executeToken(request, camp, agentId, token, workspace = null) {
         purpose
       })
   const commandResult = sent.commandResult ?? sent
-  const campId = camp?.id ?? commandResult.payload?.campId
+  const threadId = camp?.id ?? commandResult.payload?.threadId
   const agentRunId = commandResult.payload?.agentRunIds?.[0]
-  if (commandResult.status !== 'accepted' || !campId || !agentRunId) {
+  if (commandResult.status !== 'accepted' || !threadId || !agentRunId) {
     throw new Error(`Antigravity AgentRun intake failed: ${JSON.stringify(sent)}`)
   }
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
-    const snapshot = await request('camps.snapshot', { campId })
+    const snapshot = await request('camps.snapshot', { threadId })
     const agentRun = snapshot.agentRuns.find((value) => value.id === agentRunId)
     if (agentRun?.status === 'succeeded') {
       const output = snapshot.messages.find((message) => message.sourceAgentRunId === agentRunId)?.body
       if (!output?.includes(token)) throw new Error(`Antigravity output is missing ${token}: ${JSON.stringify(output)}`)
-      return { campId, agentRunId, agentRun, output }
+      return { threadId, agentRunId, agentRun, output }
     }
     if (agentRun?.status === 'failed' || agentRun?.status === 'cancelled') {
       throw new Error(`Antigravity AgentRun entered ${agentRun.status}: ${JSON.stringify({ agentRun, timeline: snapshot.timeline.slice(-12) })}`)
@@ -259,7 +259,7 @@ async function executeToken(request, camp, agentId, token, workspace = null) {
 
 async function executeCommandOutput(request, camp, agentId, events) {
   const marker = 'ROVAI_AGY_PRINTF_OK'
-  const sent = await sendCampMessage(
+  const sent = await sendThreadMessage(
     request,
     camp.id,
     agentId,
@@ -273,7 +273,7 @@ async function executeCommandOutput(request, camp, agentId, events) {
   }
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
-    const snapshot = await request('camps.snapshot', { campId: camp.id })
+    const snapshot = await request('camps.snapshot', { threadId: camp.id })
     const agentRun = snapshot.agentRuns.find((value) => value.id === agentRunId)
     if (agentRun?.status === 'succeeded') {
       const commandOutputEvent = events.find((event) =>
@@ -311,10 +311,10 @@ async function executeCommandOutput(request, camp, agentId, events) {
   throw new Error(`Antigravity command-output AgentRun timed out: ${agentRunId}`)
 }
 
-async function sendCampMessage(request, campId, agentId, body, purpose) {
-  const draft = await request('camp.composerDraft.get', { campId })
+async function sendThreadMessage(request, threadId, agentId, body, purpose) {
+  const draft = await request('camp.composerDraft.get', { threadId })
   const saved = await request('camp.composerDraft.save', {
-    campId,
+    threadId,
     expectedRevision: draft.revision,
     content: [
       { kind: 'member_mention', agentId },
@@ -323,7 +323,7 @@ async function sendCampMessage(request, campId, agentId, body, purpose) {
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId,
+    threadId,
     draftRevision: saved.revision,
     execution: {
       taskId: null,

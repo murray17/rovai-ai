@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type { ProjectNavigationGroup } from '@contracts'
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { displayProjectPath, normalizeProjectDisplayName, projectDirectoryName, projectDisplayNameError } from '../../shared/project-display-name'
+import { UiText, uiAttribute } from './interface-language'
 
 export function ProjectRenameDialog({ project, onClose, onSave }: {
   project: ProjectNavigationGroup
@@ -31,7 +32,7 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
       await onSave(project, restoreDirectoryName || normalized === directoryName ? null : normalized)
       onClose()
     } catch {
-      setSaveError('名称未能保存，请重试。')
+      setSaveError(uiAttribute('名称未能保存，请重试。'))
     } finally {
       submitting.current = false
       setBusy(false)
@@ -47,16 +48,15 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
         input.current?.select()
       }} onEscapeKeyDown={(event) => { if (submitting.current) event.preventDefault() }}
       onPointerDownOutside={(event) => { if (submitting.current) event.preventDefault() }}>
-        <AppDialogHeader title="重命名项目" description="修改此设备上的项目显示名称。" hideDescription closeDisabled={busy} />
+        <AppDialogHeader title={uiAttribute("重命名项目")} description={uiAttribute("修改此设备上的项目显示名称。")} hideDescription closeDisabled={busy} />
         <form className="app-dialog-form" onSubmit={(event) => void save(event)}>
           <AppDialogBody>
-            <label className="field-label" htmlFor="rename-project-name">项目名称
-              <input id="rename-project-name" ref={input} data-dialog-autofocus value={name} disabled={busy}
+            <label className="field-label" htmlFor="rename-project-name"><UiText zh={"项目名称"} /><input id="rename-project-name" ref={input} data-dialog-autofocus value={name} disabled={busy}
                 autoComplete="off" aria-invalid={Boolean(error)} aria-describedby="rename-project-context rename-project-error"
                 onChange={(event) => { setName(event.target.value); setRestoreDirectoryName(false); setSaveError(null) }}
                 onKeyDown={(event) => { if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault() }} />
             </label>
-            <div className="rename-project-context" id="rename-project-context"><span>工作目录</span><code>{displayProjectPath(project.projectPath)}</code></div>
+            <div className="rename-project-context" id="rename-project-context"><span><UiText zh={"工作目录"} /></span><code>{displayProjectPath(project.projectPath)}</code></div>
             <p className="rename-project-error" id="rename-project-error" role="alert">{error}</p>
           </AppDialogBody>
           <AppDialogFooter leading={project.name !== directoryName
@@ -65,10 +65,10 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
                 setRestoreDirectoryName(true)
                 setSaveError(null)
                 input.current?.focus()
-              }}>使用目录名</button>
+              }}><UiText zh={"使用目录名"} /></button>
             : undefined}>
-            <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close>
-            <button className="primary-button conversation-primary-button" type="submit" disabled={Boolean(validationError) || busy}>{busy ? '保存中…' : '保存名称'}</button>
+            <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}><UiText zh={"取消"} /></button></Dialog.Close>
+            <button className="primary-button conversation-primary-button" type="submit" disabled={Boolean(validationError) || busy}>{busy ? uiAttribute("保存中…") : uiAttribute("保存名称")}</button>
           </AppDialogFooter>
         </form>
       </AppDialogContent>

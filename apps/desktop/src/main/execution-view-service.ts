@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
+import { resolve } from 'node:path'
 import type {
   AgentRunExecutionEvidenceView,
   CoreEvent,
@@ -10,9 +12,7 @@ import {
   activityStatusForAgentRun,
   buildLiveExecutionProgress,
   liveRuntimeEventFromCore,
-  liveRuntimeEventFromExecutionEvidence,
-  type ActivityIconKind,
-  type ActivityStatus
+  liveRuntimeEventFromExecutionEvidence
 } from '../shared/execution-presentation'
 import {
   createExecutionPublicResultProjector,
@@ -22,6 +22,11 @@ import {
   groupConsecutiveToolItems,
   toolActivityGroupPresentation
 } from '../shared/execution-presentation/tool-grouping'
+import type {
+  PublicExecutionItem,
+  PublicExecutionSnapshot,
+  PublicExecutionRunStatus
+} from '../shared/execution-presentation/web-snapshot'
 import type { CoreClient } from './core-client'
 import { EXECUTION_VIEW_PAGE } from './execution-view-page'
 import {
@@ -38,7 +43,7 @@ const PREFERRED_INTERFACE = /^(?:en[01]|wlan|wifi|ethernet|eth)/iu
 export type ExecutionViewScope = {
   channelConversationId: string
   targetAppId: string
-  campId: string
+  threadId: string
   agentId: string
   focusRunId: string
   maxRunCreatedAt: string
@@ -46,10 +51,10 @@ export type ExecutionViewScope = {
 
 type CoreExecutionWebRun = {
   id: string
-  campTurnId: string
+  threadTurnId: string
   purpose: string
   invocationKind: string
-  status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
+  status: PublicExecutionRunStatus
   waitReason: string | null
   terminalReasonCode: string | null
   version: number
@@ -76,54 +81,9 @@ type CoreExecutionWebRun = {
 type CoreExecutionWebSnapshot = {
   schemaVersion: 1
   focusRunId: string
-  camp: { id: string; title: string }
+  thread: { id: string; title: string }
   agent: { id: string; displayName: string }
   runs: CoreExecutionWebRun[]
-}
-
-type PublicExecutionActivity = {
-  iconKind: ActivityIconKind
-  title: string
-  status: ActivityStatus
-  statusLabel: string
-  result: string | null
-  files: Array<{ path: string; additions: number | null; deletions: number | null }>
-}
-
-type PublicExecutionItem =
-  | { kind: 'narration'; body: string }
-  | {
-    kind: 'activityGroup'
-    status: ActivityStatus
-    statusLabel: string
-    primary: string
-    currentTitle: string | null
-    accessibleLabel: string
-    activities: PublicExecutionActivity[]
-  }
-
-type PublicExecutionSnapshot = {
-  schemaVersion: 1
-  focusRunId: string
-  terminal: boolean
-  camp: { id: string; title: string }
-  agent: { id: string; displayName: string }
-  runs: Array<{
-    id: string
-    status: CoreExecutionWebRun['status']
-    createdAt: string
-    startedAt: string | null
-    endedAt: string | null
-    purpose: string
-    trigger: {
-      authorKind: 'user' | 'agent'
-      summary: string
-      authorDisplayName: string
-      channelLabel: string
-      createdAt: string
-    }
-    items: PublicExecutionItem[]
-  }>
 }
 
 type Grant = {
@@ -141,6 +101,7 @@ export type ExecutionViewServiceDependencies = {
   resolveAddress?: () => string | null
   randomToken?: () => string
   createHttpServer?: typeof createServer
+  assetsDirectory?: string
 }
 
 export class ExecutionViewService {
@@ -356,6 +317,22 @@ export class ExecutionViewService {
         'Connection': 'close'
       })
       response.end(EXECUTION_VIEW_PAGE)
+      return
+    }
+    const asset = url.pathname.match(/^\/assets\/(execution\.(?:js|css)|file-find\.worker-[A-Za-z0-9_-]+\.js)$/u)?.[1]
+    if (asset) {
+      const directory = this.#dependencies.assetsDirectory
+        ?? resolve(import.meta.dirname, '../execution-web/assets')
+      try {
+        const body = await readFile(resolve(directory, asset))
+        response.writeHead(200, {
+          'Content-Type': asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8',
+          'Connection': 'close'
+        })
+        response.end(body)
+      } catch {
+        sendEmpty(response, 503)
+      }
       return
     }
     const endpoint = url.pathname.match(/^\/api\/execution\/([A-Za-z0-9_-]{1,200})\/(snapshot|events)$/u)
@@ -629,7 +606,7 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
     schemaVersion: 1,
     focusRunId: raw.focusRunId,
     terminal: Boolean(focus && isTerminal(focus.status)),
-    camp: { id: raw.camp.id, title: bounded(raw.camp.title, 120) },
+    thread: { id: raw.thread.id, title: bounded(raw.thread.title, 120) },
     agent: { id: raw.agent.id, displayName: bounded(raw.agent.displayName, 80) },
     runs
   }
@@ -654,7 +631,7 @@ function hashToken(token: string): string {
 
 function applySecurityHeaders(response: ServerResponse): void {
   response.setHeader('Cache-Control', 'no-store')
-  response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+  response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; worker-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
   response.setHeader('Referrer-Policy', 'no-referrer')
   response.setHeader('X-Content-Type-Options', 'nosniff')
   response.setHeader('X-Frame-Options', 'DENY')

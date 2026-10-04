@@ -87,4 +87,4 @@ last_updated: 2026-08-16
 
 - [实施与验收计划](implementation-plan.md)
 - [Camp 会话工作区 UI 合同](../../ui/components/conversation-workspace.md)
-- [世界地图组件](../../../apps/desktop/src/renderer/src/CampWorldMap.tsx)
+- [世界地图组件](../../../apps/desktop/src/renderer/src/ThreadWorldMap.tsx)

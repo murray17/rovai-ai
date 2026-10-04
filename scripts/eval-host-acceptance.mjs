@@ -26,7 +26,7 @@ await build({ stdin: { contents: `export {EvaluationHostService} from ${JSON.str
 const { EvaluationHostService, UserAutomationServer } = await import(pathToFileURL(join(root, 'host-services.mjs')).href)
 const core = startQualificationCore({ coreExecutable: product.core, dataDirectory: data, workingDirectory: workspace, runtimeCacheDirectory: join(root, 'runtime-cache'), mcpConfigPath: join(data, 'mcp.json') })
 const ownerRoot = join(data, 'automation-v1'), host = new EvaluationHostService(ownerRoot, core)
-const server = new UserAutomationServer(ownerRoot, { core, evaluation: host, appVersion: 'evaluation-host-acceptance', openCamp: async campId => ({ campId, opened: true }) })
+const server = new UserAutomationServer(ownerRoot, { core, evaluation: host, appVersion: 'evaluation-host-acceptance', openCamp: async threadId => ({ threadId, opened: true }) })
 const pause = ms => new Promise(resolveWait => setTimeout(resolveWait, ms))
 let lastSummary = null
 async function cli(id, args, env = {}) {
@@ -70,12 +70,12 @@ try {
     await host.tick()
     const automation = await core.request('automations.get', { automationId })
     const run = automation.lastRun
-    const job = run?.campId ? await host.status({ jobId: run.runId }).catch(() => null) : null
+    const job = run?.threadId ? await host.status({ jobId: run.runId }).catch(() => null) : null
     const summary = { automation: run?.status ?? 'waiting', job: job?.state ?? null, reportStatus: job?.reportStatus ?? null }
     if (JSON.stringify(summary) !== lastSummary) { console.log(JSON.stringify(summary)); lastSummary = JSON.stringify(summary) }
     if (run && ['completed', 'failed', 'skipped'].includes(run.status)) {
       await writePrivateJsonExclusive(join(root, 'automation-result.json'), { automation, job, observedAt: new Date().toISOString() })
-      if (run.campId) await writePrivateJsonExclusive(join(root, 'analysis-camp.json'), await core.request('camps.snapshot', { campId: run.campId }))
+      if (run.threadId) await writePrivateJsonExclusive(join(root, 'analysis-camp.json'), await core.request('camps.snapshot', { threadId: run.threadId }))
       console.log(JSON.stringify({ stage: 'finished', ...summary, root }))
       process.exitCode = run.status === 'completed' && job?.state === 'completed' ? 0 : 2
       break

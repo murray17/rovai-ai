@@ -1,3 +1,4 @@
+import { uiAttribute } from './interface-language'
 import { parseFileReference } from '../../file-preview-reference'
 import { newCommandId } from '../../shared/command-id'
 import type { FilePreviewApi, AgentRunFileChangesDetailView, AgentRunFileChangesView, FileLocationTarget, FilePreviewErrorPayload, FilePreviewHtmlSite, FilePreviewOperationResult, FilePreviewPageContent, OpenFilePreviewRequest, OpenFilePreviewResult, ResolvedFilePreview, ResolvedTheme } from '@contracts'
@@ -43,7 +44,7 @@ export interface FilePreviewTabModel {
 export interface FileChangesPreviewTabModel {
   kind: 'file_change'
   id: string
-  campId: string
+  threadId: string
   changes: AgentRunFileChangesView
   selectedEvidenceFileId: string | null
   reading?: FilePreviewReadingState
@@ -80,7 +81,7 @@ export interface FilePreviewOpenOptions {
 }
 
 export interface FilePreviewContextValue {
-  isCurrentCamp?: boolean
+  isCurrentThread?: boolean
   tabs: PreviewTabModel[]
   activeTab: PreviewTabModel | null
   activeTabId: string | null
@@ -93,8 +94,8 @@ export interface FilePreviewContextValue {
     presentation?: FilePreviewPresentationHint,
     options?: FilePreviewOpenOptions
   ): Promise<FilePreviewOpenOutcome>
-  openFileChanges(campId: string, changes: AgentRunFileChangesView, evidenceFileId?: string): string | undefined
-  syncFileChanges(campId: string, changes: readonly AgentRunFileChangesView[]): void
+  openFileChanges(threadId: string, changes: AgentRunFileChangesView, evidenceFileId?: string): string | undefined
+  syncFileChanges(threadId: string, changes: readonly AgentRunFileChangesView[]): void
   openMissionActivity(missionId: string): void
   openExecution(): void
   loadChanges(tabId: string, read: () => Promise<AgentRunFileChangesDetailView>, retry?: boolean): Promise<void>
@@ -124,30 +125,30 @@ export interface FilePreviewContextValue {
 function errorFromUnknown(): FilePreviewErrorPayload {
   return {
     code: 'read_failed',
-    message: '暂时无法读取文件',
+    message: uiAttribute('暂时无法读取文件'),
     retryable: true
   }
 }
 
 export function filePreviewErrorMessage(error: Pick<FilePreviewErrorPayload, 'code'>): string {
   switch (error.code) {
-    case 'preview_timeout': return '未收到预览服务响应，请重试。'
-    case 'file_not_found': return '找不到这个文件'
-    case 'attachment_missing': return '找不到这个附件'
+    case 'preview_timeout': return uiAttribute('未收到预览服务响应，请重试。')
+    case 'file_not_found': return uiAttribute('找不到这个文件')
+    case 'attachment_missing': return uiAttribute('找不到这个附件')
     case 'source_not_authorized':
     case 'authorization_required':
-    case 'outside_authorized_root': return '文件访问已失效'
-    case 'evidence_identity_unavailable': return '无法定位这个历史记录对应的当前文件'
-    case 'read_failed': return '暂时无法读取文件'
-    case 'attachment_unreadable': return '暂时无法读取这个附件'
-    case 'attachment_kind_changed': return '这个附件的类型已变化'
-    case 'decode_failed': return '无法读取这个文件的内容'
-    case 'file_too_large': return '这个文件太大，无法预览'
-    case 'too_many_open_files': return '打开的文件太多'
+    case 'outside_authorized_root': return uiAttribute('文件访问已失效')
+    case 'evidence_identity_unavailable': return uiAttribute('无法定位这个历史记录对应的当前文件')
+    case 'read_failed': return uiAttribute('暂时无法读取文件')
+    case 'attachment_unreadable': return uiAttribute('暂时无法读取这个附件')
+    case 'attachment_kind_changed': return uiAttribute('这个附件的类型已变化')
+    case 'decode_failed': return uiAttribute('无法读取这个文件的内容')
+    case 'file_too_large': return uiAttribute('这个文件太大，无法预览')
+    case 'too_many_open_files': return uiAttribute('打开的文件太多')
     case 'not_regular_file':
-    case 'reference_not_clickable': return '无法在这里预览这个文件'
-    case 'open_failed': return '暂时无法打开这个文件'
-    case 'reveal_failed': return '暂时无法显示这个文件的位置'
+    case 'reference_not_clickable': return uiAttribute('无法在这里预览这个文件')
+    case 'open_failed': return uiAttribute('暂时无法打开这个文件')
+    case 'reveal_failed': return uiAttribute('暂时无法显示这个文件的位置')
   }
 }
 
@@ -172,7 +173,7 @@ function errorLoadState(
 function unavailableSourceError(): FilePreviewErrorPayload {
   return {
     code: 'source_not_authorized',
-    message: '文件访问已失效',
+    message: uiAttribute('文件访问已失效'),
     retryable: false
   }
 }
@@ -214,18 +215,18 @@ export interface PreviewSessionOwner {
   admit(session: FilePreviewSession): boolean
   changed(): void
   touch(session: FilePreviewSession, tabId?: string): void
-  isCurrent(campId: string): boolean
+  isCurrent(threadId: string): boolean
   sync(): Promise<void>
   reserveHtml(session: FilePreviewSession, tabId: string): Promise<(() => void) | null>
 }
 export type FilePreviewSession = ReturnType<typeof createFilePreviewSession>
-export function createFilePreviewSession(api: FilePreviewApi, campId: string, owner: PreviewSessionOwner) {
+export function createFilePreviewSession(api: FilePreviewApi, threadId: string, owner: PreviewSessionOwner) {
   const id = newCommandId()
-  const initial = filePreviewSessionStore.get(campId)
+  const initial = filePreviewSessionStore.get(threadId)
   const tabsRef = { current: initial?.tabs.map(restoredTab) ?? [] as PreviewTabModel[] }
   const activeTabIdRef = { current: initial?.activeTabId ?? null as string | null }
   const paneVisibleRef = { current: initial?.paneVisible ?? false }
-  const campIdRef = { current: campId }
+  const campIdRef = { current: threadId }
   const scopeGenerationRef = { current: 0 }
   const bindingPromiseRef = { current: Promise.resolve() }
   const objectUrls = { current: new Set<string>() }
@@ -238,7 +239,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
   const notify = (): void => {
     if (disposed) return
     snapshot = { tabs: tabsRef.current, activeTabId: activeTabIdRef.current, paneVisible: paneVisibleRef.current, openFeedback }
-    saveSession(campId)
+    saveSession(threadId)
     owner.changed()
   }
   const setTabs = (update: (tabs: PreviewTabModel[]) => PreviewTabModel[]): void => { tabsRef.current = update(tabsRef.current); notify() }
@@ -252,10 +253,10 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
     objectUrls.current.delete(content.url)
   }
 
-  const saveSession = (targetCampId: string) => {
+  const saveSession = (targetThreadId: string) => {
     const snapshot: FilePreviewSessionSnapshot = {
       tabs: tabsRef.current.map((tab) => tab.kind === 'mission_activity' || tab.kind === 'execution' ? { ...tab } : tab.kind === 'file_change'
-        ? { kind: 'file_change', id: tab.id, campId: tab.campId, changes: tab.changes, selectedEvidenceFileId: tab.selectedEvidenceFileId, reading: tab.reading }
+        ? { kind: 'file_change', id: tab.id, threadId: tab.threadId, changes: tab.changes, selectedEvidenceFileId: tab.selectedEvidenceFileId, reading: tab.reading }
         : {
           kind: 'file',
           id: tab.id,
@@ -268,7 +269,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
       activeTabId: activeTabIdRef.current,
       paneVisible: paneVisibleRef.current
     }
-    filePreviewSessionStore.set(targetCampId, snapshot)
+    filePreviewSessionStore.set(targetThreadId, snapshot)
   }
 
   const loadContent = async (file: ResolvedFilePreview, reading?: FilePreviewReadingState): Promise<
@@ -363,7 +364,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
     const before = tabsRef.current.find(tab => tab.id === tabId)
     const reservation = file.kind === 'html' ? await owner.reserveHtml(session, tabId) : () => undefined
     const loaded = reservation ? await loadContent(file, before?.kind === 'file' ? before.reading : undefined)
-      : { ok: false as const, error: { code: 'too_many_open_files' as const, message: '预览资源不足', retryable: true } }
+      : { ok: false as const, error: { code: 'too_many_open_files' as const, message: uiAttribute('预览资源不足'), retryable: true } }
     reservation?.()
     const current = tabsRef.current.find((tab) => tab.id === tabId)
     if (
@@ -396,19 +397,19 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
   }
 
   const showOpenedTab = (tabId: string, isNew: boolean, focusTab = false) => {
-    if (!owner.isCurrent(campId)) return
+    if (!owner.isCurrent(threadId)) return
     setActiveTabId(tabId)
     setPaneVisible(true)
     setOpenFeedback((previous) => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew, focusTab }))
   }
 
   const openFileChanges = (
-    targetCampId: string,
+    targetThreadId: string,
     changes: AgentRunFileChangesView,
     evidenceFileId?: string
   ) => {
-    if (targetCampId !== campIdRef.current) return
-    const id = `file-change:${encodeURIComponent(targetCampId)}:${encodeURIComponent(changes.agentRunId)}:${changes.executionEpoch}`
+    if (targetThreadId !== campIdRef.current) return
+    const id = `file-change:${encodeURIComponent(targetThreadId)}:${encodeURIComponent(changes.agentRunId)}:${changes.executionEpoch}`
     const existing = tabsRef.current.find((tab) => tab.id === id)
     if (existing?.kind === 'file_change'
       && ((changes.revision ?? 0) < (existing.changes.revision ?? 0)
@@ -429,7 +430,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
     const selectedEvidenceFileId = selectedFile?.evidenceFileId ?? null
     const tab: FileChangesPreviewTabModel = {
       ...(existing?.kind === 'file_change' ? existing : {}),
-      kind: 'file_change', id, campId: targetCampId, changes, selectedEvidenceFileId,
+      kind: 'file_change', id, threadId: targetThreadId, changes, selectedEvidenceFileId,
       ...(projectionChanged ? { detail: undefined, detailBytes: undefined, detailStatus: undefined } : {})
     }
     setTabs((current) => existing ? current.map((entry) => entry.id === id ? tab : entry) : [...current, tab])
@@ -445,13 +446,13 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
       : tab))
   }
 
-  const syncFileChanges = (targetCampId: string, changes: readonly AgentRunFileChangesView[]): void => {
-    if (targetCampId !== campIdRef.current) return
+  const syncFileChanges = (targetThreadId: string, changes: readonly AgentRunFileChangesView[]): void => {
+    if (targetThreadId !== campIdRef.current) return
     const byRun = new Map(changes.map(item => [`${item.agentRunId}:${item.executionEpoch}`, item]))
     setTabs(current => {
       let changed = false
       const nextTabs = current.map(tab => {
-      if (tab.kind !== 'file_change' || tab.campId !== targetCampId) return tab
+      if (tab.kind !== 'file_change' || tab.threadId !== targetThreadId) return tab
       const next = byRun.get(`${tab.changes.agentRunId}:${tab.changes.executionEpoch}`)
       if (!next
         || (next.revision ?? 0) < (tab.changes.revision ?? 0)
@@ -700,7 +701,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
         } else {
           failTabRequest(tabId, scopeGeneration, requestGeneration, {
             code: 'reference_not_clickable',
-            message: '无法在这里预览这个文件',
+            message: uiAttribute('无法在这里预览这个文件'),
             retryable: false
           })
         }
@@ -724,7 +725,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
   ): Promise<FilePreviewOpenOutcome> => {
     const interaction = session.lastUsed
     const scopeGeneration = scopeGenerationRef.current
-    if (!owner.admit(session)) return { kind: 'error', error: { code: 'too_many_open_files', message: '预览资源不足', retryable: true } }
+    if (!owner.admit(session)) return { kind: 'error', error: { code: 'too_many_open_files', message: uiAttribute('预览资源不足'), retryable: true } }
     const load = Symbol()
     committedLoads.add(load)
     owner.changed()
@@ -751,7 +752,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
 
       const file = target ? { ...result.value.file, target } : result.value.file
       const reservation = file.kind === 'html' ? await owner.reserveHtml(session, '') : () => undefined
-      if (!reservation) { void api.release({ handleId: file.handleId }); return { kind: 'error', error: { code: 'too_many_open_files', message: '预览资源不足', retryable: true } } }
+      if (!reservation) { void api.release({ handleId: file.handleId }); return { kind: 'error', error: { code: 'too_many_open_files', message: uiAttribute('预览资源不足'), retryable: true } } }
       const loaded = await loadContent(file)
       reservation()
       if (!loaded.ok) {
@@ -785,7 +786,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
         pageIndex: 0
       }
       setTabs((entries) => [...entries, tab])
-      if (owner.isCurrent(campId) && session.lastUsed === interaction) showOpenedTab(tabId, true)
+      if (owner.isCurrent(threadId) && session.lastUsed === interaction) showOpenedTab(tabId, true)
       return installResolvedFile(
         tabId,
         request,
@@ -794,7 +795,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
         0,
         true,
         Boolean(document.activeElement?.closest('.file-preview-pane')),
-        owner.isCurrent(campId) && session.lastUsed === interaction,
+        owner.isCurrent(threadId) && session.lastUsed === interaction,
         loaded
       )
     } catch {
@@ -810,7 +811,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
     options?: FilePreviewOpenOptions
   ): Promise<FilePreviewOpenOutcome> => {
     target ??= 'rawReference' in request ? parseFileReference(request.rawReference)?.target : undefined
-    if (!campId || !owner.isCurrent(campId)) return { kind: 'error', error: unavailableSourceError() }
+    if (!threadId || !owner.isCurrent(threadId)) return { kind: 'error', error: unavailableSourceError() }
     const cached = tabsRef.current.find(tab => tab.kind === 'file' && (tab.sourceKey === filePreviewSourceKey(request) || tab.sourceAliases?.includes(filePreviewSourceKey(request))))
     owner.touch(session, cached?.id)
     if (cached?.kind === 'file' && (cached.content || cached.loadState === 'opening')) {
@@ -937,7 +938,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
   const hidePane = () => setPaneVisible(false)
 
   const openMissionActivity = (missionId: string): void => {
-    if (disposed || !campId) return
+    if (disposed || !threadId) return
     const existing = tabsRef.current.find(tab => tab.kind === 'mission_activity')
     const tabId = existing?.id ?? newCommandId()
     if (!existing) setTabs(tabs => [{ kind: 'mission_activity', id: tabId, missionId }, ...tabs])
@@ -946,7 +947,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
   }
 
   const openExecution = (): void => {
-    if (disposed || !campId) return
+    if (disposed || !threadId) return
     const existing = tabsRef.current.find(tab => tab.kind === 'execution')
     const tabId = existing?.id ?? newCommandId()
     if (!existing) setTabs(tabs => [{ kind: 'execution', id: tabId }, ...tabs])
@@ -994,7 +995,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
         void api.release({ handleId: tab.file.handleId })
       }
     }
-    if (nextActiveTabId && owner.isCurrent(campId) && paneVisibleRef.current) restoreTab(nextActiveTabId, true)
+    if (nextActiveTabId && owner.isCurrent(threadId) && paneVisibleRef.current) restoreTab(nextActiveTabId, true)
   }
 
   const close = (tabId: string) => closeMany([tabId])
@@ -1087,10 +1088,10 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
         if (!result.ok) throw new Error(filePreviewErrorMessage(result.error))
         candidate = result.value
       } else candidate = await restoreHandle(tab)
-      if (!candidate) throw new Error('无法重新取得文件，已保留当前预览。')
+      if (!candidate) throw new Error(uiAttribute('无法重新取得文件，已保留当前预览。'))
       if (!current()) return
       reservation = candidate.kind === 'html' ? await owner.reserveHtml(session, tabId) : () => undefined
-      if (!reservation) throw new Error('预览资源不足，旧预览已保留。')
+      if (!reservation) throw new Error(uiAttribute('预览资源不足，旧预览已保留。'))
       const content = await loadContent(candidate)
       if (!content.ok) throw new Error(filePreviewErrorMessage(content.error))
       loaded = content
@@ -1106,7 +1107,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
     } catch (error) {
       if (current()) setTabs(tabs => tabs.map(entry => entry.id !== tabId ? entry : {
         ...entry, isRefreshing: false,
-        refreshError: error instanceof Error ? error.message : '重新加载失败'
+        refreshError: error instanceof Error ? error.message : uiAttribute('重新加载失败')
       }))
     } finally {
       reservation?.()
@@ -1140,7 +1141,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
           || file.contentVersion.size !== version.size || file.contentVersion.mtimeMs !== version.mtimeMs) {
           void api.release({ handleId: file.handleId })
           if (current?.kind === 'file' && current.requestGeneration === requestGeneration) setTabs(tabs => tabs.map(entry => entry.id === tabId
-            ? { ...current, hasExternalUpdate: true, refreshError: '文件已变化，请刷新后读取新分页。当前内容已保留。' } : entry))
+            ? { ...current, hasExternalUpdate: true, refreshError: uiAttribute('文件已变化，请刷新后读取新分页。当前内容已保留。') } : entry))
           return
         }
         const acquired = file
@@ -1170,7 +1171,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
   const saveReading = (tabId: string, state: Partial<FilePreviewReadingState>): void => {
     // Scroll samples update the lightweight snapshot without causing a Renderer render or touching LRU.
     const tab = tabsRef.current.find(tab => tab.id === tabId)
-    if (tab) { tab.reading = { ...tab.reading, ...state }; saveSession(campId) }
+    if (tab) { tab.reading = { ...tab.reading, ...state }; saveSession(threadId) }
   }
   const saveHtmlSource = (tabId: string, value: FilePreviewTabModel['htmlSource']): void => {
     setTabs(tabs => tabs.map(tab => tab.kind === 'file' && tab.id === tabId ? { ...tab, htmlSource: value } : tab))
@@ -1258,7 +1259,7 @@ export function createFilePreviewSession(api: FilePreviewApi, campId: string, ow
     return operation
   }
   const session = {
-    id, campId, lastUsed: 0, get pendingOpens() { return committedLoads.size }, tabUsage: new Map<string, number>(),
+    id, threadId, lastUsed: 0, get pendingOpens() { return committedLoads.size }, tabUsage: new Map<string, number>(),
     getSnapshot: () => snapshot,
     retired,
     cool: () => { scopeGenerationRef.current += 1; committedLoads.clear(); for (const tab of tabsRef.current) session.evict(tab.id); session.id = newCommandId(); bindingPromiseRef.current = owner.sync() },

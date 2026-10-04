@@ -1,4 +1,5 @@
 import type { AppUpdateSnapshot } from '@contracts'
+import { uiAttribute } from './interface-language'
 
 export type AppUpdateBadgePresentation = {
   kind: 'available' | 'downloading' | 'ready' | 'installing' | 'failed'
@@ -16,47 +17,47 @@ export function appUpdateBadgePresentation(
     case 'available':
       return {
         kind: 'available',
-        label: '更新可用',
-        accessibleLabel: `Rovai AI ${displayedVersion} 更新可用`
+        label: uiAttribute('更新可用'),
+        accessibleLabel: uiAttribute('Rovai AI {0} 更新可用', displayedVersion)
       }
     case 'checking':
     case 'check_failed':
       return {
         kind: snapshot.status === 'checking' ? 'downloading' : 'failed',
-        label: snapshot.status === 'checking' ? '检查中' : '检查失败',
+        label: snapshot.status === 'checking' ? uiAttribute('检查中') : uiAttribute('检查失败'),
         accessibleLabel: snapshot.status === 'checking'
-          ? `正在重新检查 Rovai AI 更新，已知 ${displayedVersion} 可用`
-          : `Rovai AI ${displayedVersion} 仍可用，本次检查失败`
+          ? uiAttribute('正在重新检查 Rovai AI 更新，已知 {0} 可用', displayedVersion)
+          : uiAttribute('Rovai AI {0} 仍可用，本次检查失败', displayedVersion)
       }
     case 'downloading':
       return {
         kind: 'downloading',
         label: `${Math.round(snapshot.downloadPercent ?? 0)}%`,
-        accessibleLabel: `正在下载 Rovai AI ${displayedVersion}，${Math.round(snapshot.downloadPercent ?? 0)}%`
+        accessibleLabel: uiAttribute('正在下载 Rovai AI {0}，{1}%', displayedVersion, Math.round(snapshot.downloadPercent ?? 0))
       }
     case 'ready_to_install':
       return {
         kind: 'ready',
-        label: '可安装',
-        accessibleLabel: `Rovai AI ${displayedVersion} 已下载，可以安装并重启`
+        label: uiAttribute('可安装'),
+        accessibleLabel: uiAttribute('Rovai AI {0} 已下载，可以安装并重启', displayedVersion)
       }
     case 'installing':
       return {
         kind: 'installing',
-        label: '重启中',
-        accessibleLabel: `Rovai AI ${displayedVersion} 正在准备安装并重启`
+        label: uiAttribute('重启中'),
+        accessibleLabel: uiAttribute('Rovai AI {0} 正在准备安装并重启', displayedVersion)
       }
     case 'download_failed':
       return {
         kind: 'failed',
-        label: '重试下载',
-        accessibleLabel: `Rovai AI ${displayedVersion} 下载失败，需要重试`
+        label: uiAttribute('重试下载'),
+        accessibleLabel: uiAttribute('Rovai AI {0} 下载失败，需要重试', displayedVersion)
       }
     case 'install_failed':
       return {
         kind: 'failed',
-        label: '重试安装',
-        accessibleLabel: `Rovai AI ${displayedVersion} 安装失败，需要重试`
+        label: uiAttribute('重试安装'),
+        accessibleLabel: uiAttribute('Rovai AI {0} 安装失败，需要重试', displayedVersion)
       }
     case 'idle':
     case 'up_to_date':

@@ -1,0 +1,2188 @@
+{
+  "kind": "real_packaged_app_acceptance",
+  "date": "2026-10-03",
+  "baseCommit": "8dee908be685df91fe6f9d6dab33024e7d86029d",
+  "runtimeCount": 15,
+  "excluded": [
+    "cursor-agent"
+  ],
+  "thread": "one isolated Thread containing all 15 fixture members",
+  "runs": {
+    "succeeded": 18,
+    "failedConfigurationAttemptsRetained": 5
+  },
+  "candidate": {
+    "baseCommit": "8dee908be685df91fe6f9d6dab33024e7d86029d",
+    "change": "collect Grok context on catalog notifications before dropping their content",
+    "sha256": {
+      "rovai-core": "cdf9c3d703546221eeef0183056306d7e07e1dc60cd20ea19b5921d7210783cd",
+      "rovai-host": "bb0c8a598bdb2a12b250fdaafe2296d7a38a4af963f661ebd59ce3c83c682941",
+      "rovai": "40844e3580b0cbd2bc4c7d00a74fac8242497ef5289118bbc15df63fdd9cfbc5"
+    },
+    "codesign": "passed"
+  },
+  "limits": [
+    "Actual numbers from this installed Runtime/provider/model only; absence is source-specific.",
+    "Unknown values remain null; no speed collection or tokenizer estimate.",
+    "CodeBuddy cache read and Qoder custom cache classifications are partial observations.",
+    "Context windows are native-reported/configured limits, not independently measured provider capacity.",
+    "Grok and DSH were re-run on the corrected package; remaining 13 histories were preserved and their UI checked again.",
+    "UI numeric checks used CDP focus emulation while the desktop window was occluded.",
+    "DSH final sample had two successful file reads and eleven rejected shell tool calls; final model text was published through missing-send recovery. This does not verify a fully successful DSH tool workflow."
+  ],
+  "entries": [
+    {
+      "runtime": "codex-cli",
+      "version": "codex-cli 0.159.2",
+      "providerModel": "configured gpt-6.1-sol; local native provider",
+      "runAlias": "run-1",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T15:58:44.759109+00:00",
+      "endedAt": "2026-10-02T16:00:57.204156+00:00",
+      "nativeCalls": 5,
+      "rawNumericWitness": [
+        {
+          "method": "thread/tokenUsage/updated",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/tokenUsage/total/totalTokens": 96949,
+            "/params/tokenUsage/total/inputTokens": 93459,
+            "/params/tokenUsage/total/cachedInputTokens": 83328,
+            "/params/tokenUsage/total/cacheWriteInputTokens": 0,
+            "/params/tokenUsage/total/outputTokens": 3490,
+            "/params/tokenUsage/last/totalTokens": 22084,
+            "/params/tokenUsage/last/inputTokens": 21718,
+            "/params/tokenUsage/last/cachedInputTokens": 18816,
+            "/params/tokenUsage/last/cacheWriteInputTokens": 0,
+            "/params/tokenUsage/last/outputTokens": 366,
+            "/params/tokenUsage/modelContextWindow": 258400
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 93459,
+        "outputTokens": 3490,
+        "cacheReadTokens": 83328,
+        "cacheWriteTokens": 0
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 93459,
+        "outputTokens": 3490,
+        "cacheReadTokens": 83328,
+        "cacheWriteTokens": 0
+      },
+      "context": {
+        "usedTokens": 22084,
+        "windowTokens": 258400,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "96.9k",
+        "usageRows": [
+          [
+            "Input Token",
+            "93.5k"
+          ],
+          [
+            "Output Token",
+            "3.5k"
+          ],
+          [
+            "Cache Read",
+            "83.3k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "2分 12秒"
+          ]
+        ],
+        "contextRows": [
+          "22.1k / 258.4k",
+          "8.5%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "claude-code-cli",
+      "version": "2.1.280 (Claude Code)",
+      "providerModel": "sub2api; selected opus, native reported gpt-6.1-sol",
+      "runAlias": "run-2",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T15:58:44.756278+00:00",
+      "endedAt": "2026-10-02T16:00:03.507007+00:00",
+      "nativeCalls": 5,
+      "rawNumericWitness": [
+        {
+          "type": "result",
+          "nativeStep": {},
+          "usageFields": {
+            "/usage/input_tokens": 63773,
+            "/usage/cache_creation_input_tokens": 0,
+            "/usage/cache_read_input_tokens": 0,
+            "/usage/output_tokens": 1863,
+            "/usage/output_tokens_details/thinking_tokens": 0,
+            "/modelUsage/gpt-6.1-sol/inputTokens": 63773,
+            "/modelUsage/gpt-6.1-sol/outputTokens": 1863,
+            "/modelUsage/gpt-6.1-sol/contextWindow": 200000
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 63773,
+        "outputTokens": 1863,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 63773,
+        "outputTokens": 1863,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "context": {
+        "usedTokens": 13634,
+        "windowTokens": 200000,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "65.6k",
+        "usageRows": [
+          [
+            "Input Token",
+            "63.8k"
+          ],
+          [
+            "Output Token",
+            "1.9k"
+          ],
+          [
+            "Cache Read",
+            "0k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 18秒"
+          ]
+        ],
+        "contextRows": [
+          "13.6k / 200k",
+          "6.8%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.32",
+      "providerModel": "opencode / mimo-v2.6-flash-free",
+      "runAlias": "run-3",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "file.write",
+          "outcome": "succeeded",
+          "count": 1
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T15:58:44.752631+00:00",
+      "endedAt": "2026-10-02T15:59:56.472815+00:00",
+      "nativeCalls": 6,
+      "rawNumericWitness": [
+        {
+          "usage": {
+            "total": 11497,
+            "input": 9396,
+            "output": 45,
+            "reasoning": 8,
+            "cache": {
+              "write": 0,
+              "read": 2048
+            }
+          },
+          "model": "mimo-v2.6-flash-free",
+          "provider": "opencode"
+        },
+        {
+          "usage": {
+            "total": 11714,
+            "input": 270,
+            "output": 45,
+            "reasoning": 7,
+            "cache": {
+              "write": 0,
+              "read": 11392
+            }
+          },
+          "model": "mimo-v2.6-flash-free",
+          "provider": "opencode"
+        },
+        {
+          "usage": {
+            "total": 12488,
+            "input": 250,
+            "output": 23,
+            "reasoning": 567,
+            "cache": {
+              "write": 0,
+              "read": 11648
+            }
+          },
+          "model": "mimo-v2.6-flash-free",
+          "provider": "opencode"
+        },
+        {
+          "usage": {
+            "total": 13562,
+            "input": 1303,
+            "output": 410,
+            "reasoning": 9,
+            "cache": {
+              "write": 0,
+              "read": 11840
+            }
+          },
+          "model": "mimo-v2.6-flash-free",
+          "provider": "opencode"
+        },
+        {
+          "usage": {
+            "total": 13667,
+            "input": 454,
+            "output": 62,
+            "reasoning": 31,
+            "cache": {
+              "write": 0,
+              "read": 13120
+            }
+          },
+          "model": "mimo-v2.6-flash-free",
+          "provider": "opencode"
+        },
+        {
+          "usage": {
+            "total": 13903,
+            "input": 162,
+            "output": 167,
+            "reasoning": 6,
+            "cache": {
+              "write": 0,
+              "read": 13568
+            }
+          },
+          "model": "mimo-v2.6-flash-free",
+          "provider": "opencode"
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 75451,
+        "outputTokens": 1380,
+        "cacheReadTokens": 63616,
+        "cacheWriteTokens": 0
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 75451,
+        "outputTokens": 1380,
+        "cacheReadTokens": 63616,
+        "cacheWriteTokens": 0
+      },
+      "context": {
+        "usedTokens": 13730,
+        "windowTokens": 200000,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "76.8k",
+        "usageRows": [
+          [
+            "Input Token",
+            "75.5k"
+          ],
+          [
+            "Output Token",
+            "1.4k"
+          ],
+          [
+            "Cache Read",
+            "63.6k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 11秒"
+          ]
+        ],
+        "contextRows": [
+          "13.7k / 200k",
+          "6.9%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "copilot-cli",
+      "version": "GitHub Copilot CLI 1.0.83.",
+      "providerModel": "GitHub Copilot / claude-opus-5 (native reported)",
+      "runAlias": "run-4",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 3
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:02:47.617486+00:00",
+      "endedAt": "2026-10-02T16:03:25.732343+00:00",
+      "nativeCalls": 6,
+      "rawNumericWitness": [
+        {
+          "method": "github.com/copilot/sessionEvent",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/data/inputTokens": 28485,
+            "/params/data/outputTokens": 106,
+            "/params/data/cacheReadTokens": 0,
+            "/params/data/cacheWriteTokens": 28483,
+            "/params/data/reasoningTokens": 0
+          },
+          "model": "claude-opus-5",
+          "timestamp": "2026-10-02T16:02:55.161Z"
+        },
+        {
+          "method": "github.com/copilot/sessionEvent",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/data/inputTokens": 28737,
+            "/params/data/outputTokens": 109,
+            "/params/data/cacheReadTokens": 28483,
+            "/params/data/cacheWriteTokens": 252,
+            "/params/data/reasoningTokens": 0
+          },
+          "model": "claude-opus-5",
+          "timestamp": "2026-10-02T16:02:57.595Z"
+        },
+        {
+          "method": "github.com/copilot/sessionEvent",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/data/inputTokens": 28955,
+            "/params/data/outputTokens": 1305,
+            "/params/data/cacheReadTokens": 28735,
+            "/params/data/cacheWriteTokens": 218,
+            "/params/data/reasoningTokens": 32
+          },
+          "model": "claude-opus-5",
+          "timestamp": "2026-10-02T16:03:17.360Z"
+        },
+        {
+          "method": "github.com/copilot/sessionEvent",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/data/inputTokens": 30335,
+            "/params/data/outputTokens": 80,
+            "/params/data/cacheReadTokens": 28953,
+            "/params/data/cacheWriteTokens": 1380,
+            "/params/data/reasoningTokens": 0
+          },
+          "model": "claude-opus-5",
+          "timestamp": "2026-10-02T16:03:19.502Z"
+        },
+        {
+          "method": "github.com/copilot/sessionEvent",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/data/inputTokens": 31462,
+            "/params/data/outputTokens": 300,
+            "/params/data/cacheReadTokens": 30333,
+            "/params/data/cacheWriteTokens": 1127,
+            "/params/data/reasoningTokens": 0
+          },
+          "model": "claude-opus-5",
+          "timestamp": "2026-10-02T16:03:23.182Z"
+        },
+        {
+          "method": "github.com/copilot/sessionEvent",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/data/inputTokens": 31853,
+            "/params/data/outputTokens": 74,
+            "/params/data/cacheReadTokens": 31460,
+            "/params/data/cacheWriteTokens": 391,
+            "/params/data/reasoningTokens": 0
+          },
+          "model": "claude-opus-5",
+          "timestamp": "2026-10-02T16:03:25.664Z"
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 179827,
+        "outputTokens": 1974,
+        "cacheReadTokens": 147964,
+        "cacheWriteTokens": 31851
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 179827,
+        "outputTokens": 1974,
+        "cacheReadTokens": 147964,
+        "cacheWriteTokens": 31851
+      },
+      "context": {
+        "usedTokens": 24693,
+        "windowTokens": 200000,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "181.8k",
+        "usageRows": [
+          [
+            "Input Token",
+            "179.8k"
+          ],
+          [
+            "Output Token",
+            "2k"
+          ],
+          [
+            "Cache Read",
+            "148k"
+          ],
+          [
+            "Cache Write",
+            "31.9k"
+          ],
+          [
+            "执行耗时",
+            "0分 38秒"
+          ]
+        ],
+        "contextRows": [
+          "24.7k / 200k",
+          "12.3%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "codebuddy-cli",
+      "version": "2.133.1",
+      "providerModel": "sub2api / gpt-6.1-sol",
+      "runAlias": "run-5",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:02:47.614207+00:00",
+      "endedAt": "2026-10-02T16:03:32.891783+00:00",
+      "nativeCalls": 5,
+      "rawNumericWitness": [
+        {
+          "call": 1,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 22250,
+            "completion_tokens": 47,
+            "total_tokens": 22297
+          }
+        },
+        {
+          "call": 2,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 22428,
+            "completion_tokens": 47,
+            "total_tokens": 22475,
+            "prompt_tokens_details": {
+              "cached_tokens": 22144
+            }
+          }
+        },
+        {
+          "call": 3,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 22626,
+            "completion_tokens": 360,
+            "total_tokens": 22986,
+            "prompt_tokens_details": {
+              "cached_tokens": 22272
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 16
+            }
+          }
+        },
+        {
+          "call": 4,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 23654,
+            "completion_tokens": 128,
+            "total_tokens": 23782,
+            "prompt_tokens_details": {
+              "cached_tokens": 22528
+            }
+          }
+        },
+        {
+          "call": 5,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 23953,
+            "completion_tokens": 29,
+            "total_tokens": 23982,
+            "prompt_tokens_details": {
+              "cached_tokens": 23552
+            }
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 114911,
+        "outputTokens": 611,
+        "cacheReadTokens": 90496,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 114911,
+        "outputTokens": 611,
+        "cacheReadTokens": 90496,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": 23953,
+        "windowTokens": null,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "115.5k",
+        "usageRows": [
+          [
+            "Input Token",
+            "114.9k"
+          ],
+          [
+            "Output Token",
+            "0.6k"
+          ],
+          [
+            "Cache Read",
+            "90.5k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 45秒"
+          ]
+        ],
+        "contextRows": [
+          "24k / —",
+          "—"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "qwen-code",
+      "version": "0.24.6",
+      "providerModel": "native gpt-5.6-sol(openai)",
+      "runAlias": "run-6",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 1
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:02:47.620980+00:00",
+      "endedAt": "2026-10-02T16:03:35.598785+00:00",
+      "nativeCalls": 4,
+      "rawNumericWitness": [
+        {
+          "method": "session/update",
+          "sessionUpdate": "agent_message_chunk",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/update/_meta/usage/inputTokens": 18857,
+            "/params/update/_meta/usage/outputTokens": 147,
+            "/params/update/_meta/usage/totalTokens": 19004,
+            "/params/update/_meta/usage/thoughtTokens": 51,
+            "/params/update/_meta/usage/cachedReadTokens": 0
+          }
+        },
+        {
+          "method": "session/update",
+          "sessionUpdate": "agent_message_chunk",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/update/_meta/usage/inputTokens": 19054,
+            "/params/update/_meta/usage/outputTokens": 91,
+            "/params/update/_meta/usage/totalTokens": 19145,
+            "/params/update/_meta/usage/thoughtTokens": 0,
+            "/params/update/_meta/usage/cachedReadTokens": 18688
+          }
+        },
+        {
+          "method": "session/update",
+          "sessionUpdate": "agent_message_chunk",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/update/_meta/usage/inputTokens": 19233,
+            "/params/update/_meta/usage/outputTokens": 998,
+            "/params/update/_meta/usage/totalTokens": 20231,
+            "/params/update/_meta/usage/thoughtTokens": 451,
+            "/params/update/_meta/usage/cachedReadTokens": 18944
+          }
+        },
+        {
+          "method": "session/update",
+          "sessionUpdate": "agent_message_chunk",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/update/_meta/usage/inputTokens": 19968,
+            "/params/update/_meta/usage/outputTokens": 67,
+            "/params/update/_meta/usage/totalTokens": 20035,
+            "/params/update/_meta/usage/thoughtTokens": 0,
+            "/params/update/_meta/usage/cachedReadTokens": 19072
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 77112,
+        "outputTokens": 1303,
+        "cacheReadTokens": 56704,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 77112,
+        "outputTokens": 1303,
+        "cacheReadTokens": 56704,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": 19968,
+        "windowTokens": 272000,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "78.4k",
+        "usageRows": [
+          [
+            "Input Token",
+            "77.1k"
+          ],
+          [
+            "Output Token",
+            "1.3k"
+          ],
+          [
+            "Cache Read",
+            "56.7k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 47秒"
+          ]
+        ],
+        "contextRows": [
+          "20k / 272k",
+          "7.3%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "pi",
+      "version": "0.84.4",
+      "providerModel": "sub2api / gpt-6.1-sol",
+      "runAlias": "run-7",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:02:47.611226+00:00",
+      "endedAt": "2026-10-02T16:03:24.765143+00:00",
+      "nativeCalls": 5,
+      "rawNumericWitness": [
+        {
+          "type": "message_end",
+          "nativeStep": {},
+          "usageFields": {
+            "/message/usage/input": 8683,
+            "/message/usage/output": 27,
+            "/message/usage/cacheRead": 0,
+            "/message/usage/cacheWrite": 0,
+            "/message/usage/totalTokens": 8710,
+            "/message/usage/cost/input": 0,
+            "/message/usage/cost/output": 0,
+            "/message/usage/cost/cacheRead": 0,
+            "/message/usage/cost/cacheWrite": 0
+          },
+          "model": "gpt-6.1-sol"
+        },
+        {
+          "type": "message_end",
+          "nativeStep": {},
+          "usageFields": {
+            "/message/usage/input": 236,
+            "/message/usage/output": 27,
+            "/message/usage/cacheRead": 8576,
+            "/message/usage/cacheWrite": 0,
+            "/message/usage/totalTokens": 8839,
+            "/message/usage/cost/input": 0,
+            "/message/usage/cost/output": 0,
+            "/message/usage/cost/cacheRead": 0,
+            "/message/usage/cost/cacheWrite": 0
+          },
+          "model": "gpt-6.1-sol"
+        },
+        {
+          "type": "message_end",
+          "nativeStep": {},
+          "usageFields": {
+            "/message/usage/input": 8926,
+            "/message/usage/output": 338,
+            "/message/usage/cacheRead": 0,
+            "/message/usage/cacheWrite": 0,
+            "/message/usage/totalTokens": 9264,
+            "/message/usage/cost/input": 0,
+            "/message/usage/cost/output": 0,
+            "/message/usage/cost/cacheRead": 0,
+            "/message/usage/cost/cacheWrite": 0
+          },
+          "model": "gpt-6.1-sol"
+        },
+        {
+          "type": "message_end",
+          "nativeStep": {},
+          "usageFields": {
+            "/message/usage/input": 1087,
+            "/message/usage/output": 126,
+            "/message/usage/cacheRead": 8832,
+            "/message/usage/cacheWrite": 0,
+            "/message/usage/totalTokens": 10045,
+            "/message/usage/cost/input": 0,
+            "/message/usage/cost/output": 0,
+            "/message/usage/cost/cacheRead": 0,
+            "/message/usage/cost/cacheWrite": 0
+          },
+          "model": "gpt-6.1-sol"
+        },
+        {
+          "type": "message_end",
+          "nativeStep": {},
+          "usageFields": {
+            "/message/usage/input": 1397,
+            "/message/usage/output": 39,
+            "/message/usage/cacheRead": 8704,
+            "/message/usage/cacheWrite": 0,
+            "/message/usage/totalTokens": 10140,
+            "/message/usage/cost/input": 0,
+            "/message/usage/cost/output": 0,
+            "/message/usage/cost/cacheRead": 0,
+            "/message/usage/cost/cacheWrite": 0
+          },
+          "model": "gpt-6.1-sol"
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 46441,
+        "outputTokens": 557,
+        "cacheReadTokens": 26112,
+        "cacheWriteTokens": 0
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 46441,
+        "outputTokens": 557,
+        "cacheReadTokens": 26112,
+        "cacheWriteTokens": 0
+      },
+      "context": {
+        "usedTokens": 10140,
+        "windowTokens": 1050000,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "47k",
+        "usageRows": [
+          [
+            "Input Token",
+            "46.4k"
+          ],
+          [
+            "Output Token",
+            "0.6k"
+          ],
+          [
+            "Cache Read",
+            "26.1k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "0分 37秒"
+          ]
+        ],
+        "contextRows": [
+          "10.1k / 1050k",
+          "1.0%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "zcode-app",
+      "version": "0.16.9",
+      "providerModel": "new-provider / gpt-6-sol (native model-io)",
+      "runAlias": "run-8",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:04:45.644480+00:00",
+      "endedAt": "2026-10-02T16:05:43.219033+00:00",
+      "nativeCalls": 5,
+      "rawNumericWitness": [
+        {
+          "call": 1,
+          "model": {
+            "modelId": "gpt-6-sol",
+            "providerId": "new-provider"
+          },
+          "usage": {
+            "inputTokens": 15987,
+            "outputTokens": 103,
+            "totalTokens": 16090,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        {
+          "call": 2,
+          "model": {
+            "modelId": "gpt-6-sol",
+            "providerId": "new-provider"
+          },
+          "usage": {
+            "inputTokens": 16185,
+            "outputTokens": 47,
+            "totalTokens": 16232,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        {
+          "call": 3,
+          "model": {
+            "modelId": "gpt-6-sol",
+            "providerId": "new-provider"
+          },
+          "usage": {
+            "inputTokens": 16337,
+            "outputTokens": 205,
+            "totalTokens": 16542,
+            "cacheReadTokens": 16000,
+            "cacheWriteTokens": 0
+          }
+        },
+        {
+          "call": 4,
+          "model": {
+            "modelId": "gpt-6-sol",
+            "providerId": "new-provider"
+          },
+          "usage": {
+            "inputTokens": 17083,
+            "outputTokens": 683,
+            "totalTokens": 17766,
+            "cacheReadTokens": 16256,
+            "cacheWriteTokens": 0
+          }
+        },
+        {
+          "call": 5,
+          "model": {
+            "modelId": "gpt-6-sol",
+            "providerId": "new-provider"
+          },
+          "usage": {
+            "inputTokens": 17574,
+            "outputTokens": 49,
+            "totalTokens": 17623,
+            "cacheReadTokens": 15872,
+            "cacheWriteTokens": 0
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 83166,
+        "outputTokens": 1087,
+        "cacheReadTokens": 48128,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 83166,
+        "outputTokens": 1087,
+        "cacheReadTokens": 48128,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": null,
+        "windowTokens": null,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "84.3k",
+        "usageRows": [
+          [
+            "Input Token",
+            "83.2k"
+          ],
+          [
+            "Output Token",
+            "1.1k"
+          ],
+          [
+            "Cache Read",
+            "48.1k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 57秒"
+          ]
+        ],
+        "contextRows": [
+          "— / —",
+          "—"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "deepseek-harness",
+      "version": "0.1.5-rc.3",
+      "providerModel": "sub2api / gpt-6.1-sol; isolated high reasoning mapping",
+      "runAlias": "run-9",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "failed",
+          "count": 11
+        }
+      ],
+      "startedAt": "2026-10-02T16:19:09.093285+00:00",
+      "endedAt": "2026-10-02T16:21:09.742488+00:00",
+      "nativeCalls": 14,
+      "rawNumericWitness": [
+        {
+          "seq": 10,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 11855,
+            "outputTokens": 28,
+            "totalTokens": 11883
+          }
+        },
+        {
+          "seq": 15,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 284,
+            "outputTokens": 28,
+            "totalTokens": 12088,
+            "cacheReadTokens": 11776
+          }
+        },
+        {
+          "seq": 20,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 361,
+            "outputTokens": 445,
+            "totalTokens": 12710,
+            "cacheReadTokens": 11904
+          }
+        },
+        {
+          "seq": 25,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 570,
+            "outputTokens": 117,
+            "totalTokens": 12847,
+            "cacheReadTokens": 12160
+          }
+        },
+        {
+          "seq": 30,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 339,
+            "outputTokens": 124,
+            "totalTokens": 13007,
+            "cacheReadTokens": 12544
+          }
+        },
+        {
+          "seq": 35,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 243,
+            "outputTokens": 106,
+            "totalTokens": 13149,
+            "cacheReadTokens": 12800
+          }
+        },
+        {
+          "seq": 40,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 257,
+            "outputTokens": 124,
+            "totalTokens": 13309,
+            "cacheReadTokens": 12928
+          }
+        },
+        {
+          "seq": 45,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 258,
+            "outputTokens": 115,
+            "totalTokens": 13429,
+            "cacheReadTokens": 13056
+          }
+        },
+        {
+          "seq": 50,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 250,
+            "outputTokens": 113,
+            "totalTokens": 13547,
+            "cacheReadTokens": 13184
+          }
+        },
+        {
+          "seq": 58,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 285,
+            "outputTokens": 112,
+            "totalTokens": 13709,
+            "cacheReadTokens": 13312
+          }
+        },
+        {
+          "seq": 63,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 274,
+            "outputTokens": 119,
+            "totalTokens": 13833,
+            "cacheReadTokens": 13440
+          }
+        },
+        {
+          "seq": 68,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 13838,
+            "outputTokens": 113,
+            "totalTokens": 13951
+          }
+        },
+        {
+          "seq": 73,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 418,
+            "outputTokens": 119,
+            "totalTokens": 14105,
+            "cacheReadTokens": 13568
+          }
+        },
+        {
+          "seq": 78,
+          "sourceEvent": "assistant/message",
+          "usage": {
+            "inputTokens": 302,
+            "outputTokens": 193,
+            "totalTokens": 14319,
+            "cacheReadTokens": 13824
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": null,
+        "outputTokens": 1856,
+        "cacheReadTokens": 154496,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": null,
+        "outputTokens": 1856,
+        "cacheReadTokens": 154496,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": 14319,
+        "windowTokens": 262144,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "—",
+        "usageRows": [
+          [
+            "Input Token",
+            "—"
+          ],
+          [
+            "Output Token",
+            "1.9k"
+          ],
+          [
+            "Cache Read",
+            "154.5k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "2分 00秒"
+          ]
+        ],
+        "contextRows": [
+          "14.3k / 262.1k",
+          "5.5%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "qoder-cli",
+      "version": "1.1.64",
+      "providerModel": "local custom sub2api / gpt-6.1-sol",
+      "runAlias": "run-10",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:06:49.658733+00:00",
+      "endedAt": "2026-10-02T16:09:26.808271+00:00",
+      "nativeCalls": 5,
+      "rawNumericWitness": [
+        {
+          "call": 1,
+          "model": "custom",
+          "usage": {
+            "input_tokens": 25413,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 453,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "context_usage_ratio": 0.024202857142857144
+          }
+        },
+        {
+          "call": 2,
+          "model": "custom",
+          "usage": {
+            "input_tokens": 25982,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 25216,
+            "output_tokens": 60,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "context_usage_ratio": 0.024744761904761905
+          }
+        },
+        {
+          "call": 3,
+          "model": "custom",
+          "usage": {
+            "input_tokens": 26147,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 25856,
+            "output_tokens": 2647,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "context_usage_ratio": 0.02490190476190476
+          }
+        },
+        {
+          "call": 4,
+          "model": "custom",
+          "usage": {
+            "input_tokens": 29449,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 25984,
+            "output_tokens": 185,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "context_usage_ratio": 0.028046666666666668
+          }
+        },
+        {
+          "call": 5,
+          "model": "custom",
+          "usage": {
+            "input_tokens": 29692,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 29312,
+            "output_tokens": 166,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "context_usage_ratio": 0.028278095238095238
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 136683,
+        "outputTokens": 3511,
+        "cacheReadTokens": 106368,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 136683,
+        "outputTokens": 3511,
+        "cacheReadTokens": 106368,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": null,
+        "windowTokens": null,
+        "nativeRatio": 0.02827809523809524
+      },
+      "ui": {
+        "entry": "140.2k",
+        "usageRows": [
+          [
+            "Input Token",
+            "136.7k"
+          ],
+          [
+            "Output Token",
+            "3.5k"
+          ],
+          [
+            "Cache Read",
+            "106.4k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "2分 37秒"
+          ]
+        ],
+        "contextRows": [
+          "— / —",
+          "2.8%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "version": "2.1.1",
+      "providerModel": "isolated sub2api / gpt-6.1-sol; wire model alias __kimi_env_model__",
+      "runAlias": "run-11",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:10:57.077701+00:00",
+      "endedAt": "2026-10-02T16:11:45.639802+00:00",
+      "nativeCalls": 5,
+      "rawNumericWitness": [
+        {
+          "call": 1,
+          "model": null,
+          "usage": {
+            "inputOther": 21802,
+            "output": 18,
+            "inputCacheRead": 0,
+            "inputCacheCreation": 0
+          }
+        },
+        {
+          "call": 2,
+          "model": null,
+          "usage": {
+            "inputOther": 343,
+            "output": 18,
+            "inputCacheRead": 21632,
+            "inputCacheCreation": 0
+          }
+        },
+        {
+          "call": 3,
+          "model": null,
+          "usage": {
+            "inputOther": 251,
+            "output": 22,
+            "inputCacheRead": 21888,
+            "inputCacheCreation": 0
+          }
+        },
+        {
+          "call": 4,
+          "model": null,
+          "usage": {
+            "inputOther": 809,
+            "output": 437,
+            "inputCacheRead": 22016,
+            "inputCacheCreation": 0
+          }
+        },
+        {
+          "call": 5,
+          "model": null,
+          "usage": {
+            "inputOther": 630,
+            "output": 344,
+            "inputCacheRead": 22656,
+            "inputCacheCreation": 0
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 112027,
+        "outputTokens": 839,
+        "cacheReadTokens": 88192,
+        "cacheWriteTokens": 0
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 112027,
+        "outputTokens": 839,
+        "cacheReadTokens": 88192,
+        "cacheWriteTokens": 0
+      },
+      "context": {
+        "usedTokens": 23630,
+        "windowTokens": 262144,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "112.9k",
+        "usageRows": [
+          [
+            "Input Token",
+            "112k"
+          ],
+          [
+            "Output Token",
+            "0.8k"
+          ],
+          [
+            "Cache Read",
+            "88.2k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "0分 48秒"
+          ]
+        ],
+        "contextRows": [
+          "23.6k / 262.1k",
+          "9.0%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "grok-build",
+      "version": "grok 1.0.44 (5b807183dd79)",
+      "providerModel": "sub2api / gpt-6.1-sol",
+      "runAlias": "run-12",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 1
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:31:16.141134+00:00",
+      "endedAt": "2026-10-02T16:31:52.556153+00:00",
+      "nativeCalls": null,
+      "rawNumericWitness": [
+        {
+          "method": "_x.ai/session_notification",
+          "sessionUpdate": "turn_completed",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/update/usage/inputTokens": 87447,
+            "/params/update/usage/outputTokens": 588,
+            "/params/update/usage/totalTokens": 88035,
+            "/params/update/usage/cachedReadTokens": 84096,
+            "/params/update/usage/cacheCreationTokens": 0,
+            "/params/update/usage/reasoningTokens": 0,
+            "/params/update/usage/modelUsage/gpt-6.1-sol/inputTokens": 87447,
+            "/params/update/usage/modelUsage/gpt-6.1-sol/outputTokens": 588,
+            "/params/update/usage/modelUsage/gpt-6.1-sol/totalTokens": 88035,
+            "/params/update/usage/modelUsage/gpt-6.1-sol/cachedReadTokens": 84096,
+            "/params/update/usage/modelUsage/gpt-6.1-sol/cacheCreationTokens": 0,
+            "/params/update/usage/modelUsage/gpt-6.1-sol/reasoningTokens": 0
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 87447,
+        "outputTokens": 588,
+        "cacheReadTokens": 84096,
+        "cacheWriteTokens": 0
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 87447,
+        "outputTokens": 588,
+        "cacheReadTokens": 84096,
+        "cacheWriteTokens": 0
+      },
+      "context": {
+        "usedTokens": 22409,
+        "windowTokens": 1050000,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "88k",
+        "usageRows": [
+          [
+            "Input Token",
+            "87.4k"
+          ],
+          [
+            "Output Token",
+            "0.6k"
+          ],
+          [
+            "Cache Read",
+            "84.1k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "0分 36秒"
+          ]
+        ],
+        "contextRows": [
+          "22.4k / 1050k",
+          "2.1%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "antigravity-app",
+      "version": "1.2.14",
+      "providerModel": "selected gemini-3.7-flash-medium; native account, actual model not independently reported",
+      "runAlias": "run-13",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 2
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "failed",
+          "count": 1
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 3
+        }
+      ],
+      "startedAt": "2026-10-02T16:05:32.466600+00:00",
+      "endedAt": "2026-10-02T16:06:10.491707+00:00",
+      "nativeCalls": 6,
+      "rawNumericWitness": [
+        {
+          "nativeStep": {
+            "step_index": 1,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "usageFields": {
+            "/step_update/usage/input_tokens": 14494,
+            "/step_update/usage/output_tokens": 469,
+            "/step_update/usage/thinking_tokens": 341,
+            "/step_update/usage/cache_read_tokens": 0,
+            "/step_update/usage/total_tokens": 14963
+          }
+        },
+        {
+          "nativeStep": {
+            "step_index": 3,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "usageFields": {
+            "/step_update/usage/input_tokens": 15178,
+            "/step_update/usage/output_tokens": 337,
+            "/step_update/usage/thinking_tokens": 264,
+            "/step_update/usage/cache_read_tokens": 0,
+            "/step_update/usage/total_tokens": 15515
+          }
+        },
+        {
+          "nativeStep": {
+            "step_index": 5,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "usageFields": {
+            "/step_update/usage/input_tokens": 15832,
+            "/step_update/usage/output_tokens": 148,
+            "/step_update/usage/thinking_tokens": 75,
+            "/step_update/usage/cache_read_tokens": 0,
+            "/step_update/usage/total_tokens": 15980
+          }
+        },
+        {
+          "nativeStep": {
+            "step_index": 7,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "usageFields": {
+            "/step_update/usage/input_tokens": 16327,
+            "/step_update/usage/output_tokens": 329,
+            "/step_update/usage/thinking_tokens": 181,
+            "/step_update/usage/cache_read_tokens": 0,
+            "/step_update/usage/total_tokens": 16656
+          }
+        },
+        {
+          "nativeStep": {
+            "step_index": 9,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "usageFields": {
+            "/step_update/usage/input_tokens": 5242,
+            "/step_update/usage/output_tokens": 1366,
+            "/step_update/usage/thinking_tokens": 1188,
+            "/step_update/usage/cache_read_tokens": 12195,
+            "/step_update/usage/total_tokens": 6608
+          }
+        },
+        {
+          "nativeStep": {
+            "step_index": 11,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "usageFields": {
+            "/step_update/usage/input_tokens": 2682,
+            "/step_update/usage/output_tokens": 570,
+            "/step_update/usage/thinking_tokens": 180,
+            "/step_update/usage/cache_read_tokens": 16262,
+            "/step_update/usage/total_tokens": 3252
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": null,
+        "outputTokens": 3219,
+        "cacheReadTokens": 28457,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": null,
+        "outputTokens": 3219,
+        "cacheReadTokens": 28457,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": null,
+        "windowTokens": null,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "—",
+        "usageRows": [
+          [
+            "Input Token",
+            "—"
+          ],
+          [
+            "Output Token",
+            "3.2k"
+          ],
+          [
+            "Cache Read",
+            "28.5k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 38秒"
+          ]
+        ],
+        "contextRows": [
+          "— / —",
+          "—"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "kiro-cli",
+      "version": "kiro-cli 2.21.1",
+      "providerModel": "selected minimax-m2.5; native account, actual model not independently reported",
+      "runAlias": "run-14",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 1
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 4
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:05:32.433829+00:00",
+      "endedAt": "2026-10-02T16:06:09.269523+00:00",
+      "nativeCalls": null,
+      "rawNumericWitness": [
+        {
+          "method": "_kiro.dev/metadata",
+          "nativeStep": {},
+          "usageFields": {
+            "/params/contextUsagePercentage": 7.699999809265137
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": null,
+        "windowTokens": null,
+        "nativeRatio": 0.07699999809265137
+      },
+      "ui": {
+        "entry": null,
+        "usageRows": [],
+        "contextRows": [
+          "— / —",
+          "7.7%"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    },
+    {
+      "runtime": "trae-cn-cli",
+      "version": "trae-cli version 0.120.52",
+      "providerModel": "selected GLM-5.3; native account",
+      "runAlias": "run-15",
+      "status": "succeeded",
+      "toolOutcomes": [
+        {
+          "kind": "file.read",
+          "outcome": "succeeded",
+          "count": 4
+        },
+        {
+          "kind": "shell.execute",
+          "outcome": "succeeded",
+          "count": 3
+        },
+        {
+          "kind": "tool.call",
+          "outcome": "succeeded",
+          "count": 1
+        }
+      ],
+      "startedAt": "2026-10-02T16:05:32.469031+00:00",
+      "endedAt": "2026-10-02T16:06:05.011782+00:00",
+      "nativeCalls": 6,
+      "rawNumericWitness": [
+        {
+          "call": 1,
+          "model": null,
+          "usage": {
+            "prompt_tokens": 16402,
+            "prompt_token_details": {
+              "cached_tokens": 7808
+            },
+            "completion_tokens": 38,
+            "total_tokens": 16440,
+            "completion_token_details": {}
+          }
+        },
+        {
+          "call": 2,
+          "model": null,
+          "usage": {
+            "prompt_tokens": 16555,
+            "prompt_token_details": {
+              "cached_tokens": 16384
+            },
+            "completion_tokens": 38,
+            "total_tokens": 16593,
+            "completion_token_details": {}
+          }
+        },
+        {
+          "call": 3,
+          "model": null,
+          "usage": {
+            "prompt_tokens": 16738,
+            "prompt_token_details": {
+              "cached_tokens": 16512
+            },
+            "completion_tokens": 756,
+            "total_tokens": 17494,
+            "completion_token_details": {}
+          }
+        },
+        {
+          "call": 4,
+          "model": null,
+          "usage": {
+            "prompt_tokens": 17557,
+            "prompt_token_details": {
+              "cached_tokens": 16704
+            },
+            "completion_tokens": 42,
+            "total_tokens": 17599,
+            "completion_token_details": {}
+          }
+        },
+        {
+          "call": 5,
+          "model": null,
+          "usage": {
+            "prompt_tokens": 18284,
+            "prompt_token_details": {
+              "cached_tokens": 17536
+            },
+            "completion_tokens": 141,
+            "total_tokens": 18425,
+            "completion_token_details": {}
+          }
+        },
+        {
+          "call": 6,
+          "model": null,
+          "usage": {
+            "prompt_tokens": 18509,
+            "prompt_token_details": {
+              "cached_tokens": 18240
+            },
+            "completion_tokens": 199,
+            "total_tokens": 18708,
+            "completion_token_details": {}
+          }
+        }
+      ],
+      "expectedUsage": {
+        "promptInputTotalTokens": 104045,
+        "outputTokens": 1214,
+        "cacheReadTokens": 93184,
+        "cacheWriteTokens": null
+      },
+      "readbackUsage": {
+        "promptInputTotalTokens": 104045,
+        "outputTokens": 1214,
+        "cacheReadTokens": 93184,
+        "cacheWriteTokens": null
+      },
+      "context": {
+        "usedTokens": null,
+        "windowTokens": null,
+        "nativeRatio": null
+      },
+      "ui": {
+        "entry": "105.3k",
+        "usageRows": [
+          [
+            "Input Token",
+            "104k"
+          ],
+          [
+            "Output Token",
+            "1.2k"
+          ],
+          [
+            "Cache Read",
+            "93.2k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 32秒"
+          ]
+        ],
+        "contextRows": [
+          "— / —",
+          "—"
+        ]
+      },
+      "checks": {
+        "nativeUsageEqualsReadback": true,
+        "nativeContextEqualsReadback": true,
+        "usage": true,
+        "context": true
+      }
+    }
+  ],
+  "grokRegression": {
+    "rawBeforeFix": {
+      "method": "session/update",
+      "params": {
+        "sessionId": "grok-session-before",
+        "_meta": {
+          "totalTokens": 19724
+        },
+        "update": {
+          "sessionUpdate": "available_commands_update"
+        }
+      }
+    },
+    "readbackBeforeFix": {
+      "usedTokens": 19636,
+      "windowTokens": 1050000
+    },
+    "rawAfterFix": {
+      "method": "session/update",
+      "params": {
+        "sessionId": "grok-session-after",
+        "_meta": {
+          "totalTokens": 22409
+        },
+        "update": {
+          "sessionUpdate": "available_commands_update"
+        }
+      }
+    },
+    "readbackAfterFix": {
+      "usedTokens": 22409,
+      "windowTokens": 1050000
+    },
+    "freshRealRun": true,
+    "publicCatalogEvents": 0,
+    "publicCatalogEvidence": 0
+  }
+}

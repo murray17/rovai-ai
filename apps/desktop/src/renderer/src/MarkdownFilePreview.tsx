@@ -1,6 +1,7 @@
 import { useId, useMemo, type ComponentProps } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
 import { parseMarkdownFrontMatter, type MarkdownFrontMatter } from './markdown-front-matter'
+import { UiText } from './interface-language'
 
 type MarkdownFilePreviewProps = Omit<ComponentProps<typeof SafeMarkdown>, 'children' | 'mode'> & {
   source: string
@@ -17,7 +18,7 @@ function MarkdownMetadata({ frontMatter }: { frontMatter: MarkdownFrontMatter })
             <circle cx="8" cy="8" r="6.25" />
             <path d="M8 7.25v3.5M8 4.75v.1" />
           </svg>
-          <span>元数据格式有误，已保留原始文件头。</span>
+          <span><UiText zh={"元数据格式有误，已保留原始文件头。"} /></span>
         </p>
         <pre className="file-preview-metadata-raw"><code>{frontMatter.raw}</code></pre>
       </> : (

@@ -1,0 +1,118 @@
+[
+  {
+    "command": "rovai send --body hello",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "/bin/zsh -lc 'rovai send --body hello'",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "env MODE=test npx --yes rovai send --body 'hello world'",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "rovai send <<'JSON'\n{\"body\":\"$(not executed)\"}\nJSON",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "rovai send <<JSON\n{\"body\":\"hello\"}\nJSON",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "rovai send <<<'{\"body\":\"hello\"}'",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "\u001b[32mrovai\u001b[0m send --body hello",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'rovai send --body hello'",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "ROVAI send --body hello",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "rovai send --body hello;",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "rovai send --body \"中文🙂\"",
+    "operation": "thread.message.send"
+  },
+  {
+    "command": "rovai send --help",
+    "operation": null
+  },
+  {
+    "command": "rovai send --body hello && git status",
+    "operation": null
+  },
+  {
+    "command": "rovai send > output.json",
+    "operation": null
+  },
+  {
+    "command": "rovai send --body \"$(pwd)\"",
+    "operation": null
+  },
+  {
+    "command": "rovai send <<JSON\n{\"body\":\"$(pwd)\"}\nJSON",
+    "operation": null
+  },
+  {
+    "command": "rovai send <<JSON\n{\"body\":\"missing terminator\"}",
+    "operation": null
+  },
+  {
+    "command": "echo 'rovai send'",
+    "operation": null
+  },
+  {
+    "command": "rovai send --body 'unclosed",
+    "operation": null
+  },
+  {
+    "command": "rovai send --body hello; git status",
+    "operation": null
+  },
+  {
+    "command": "rovai send --body `pwd`",
+    "operation": null
+  },
+  {
+    "command": "rovai send --body hello | cat",
+    "operation": null
+  },
+  {
+    "command": "rovai task nope",
+    "operation": null
+  },
+  {
+    "command": "rovai camp read",
+    "operation": null
+  },
+  {
+    "command": "pwsh -File 'rovai send'",
+    "operation": null
+  },
+  {
+    "command": "rovai task get --task-id task",
+    "operation": "team.get_task"
+  },
+  {
+    "command": "rovai thread read",
+    "operation": "thread.read"
+  },
+  {
+    "command": "rovai member create",
+    "operation": "member.create"
+  },
+  {
+    "command": "rovai mission status",
+    "operation": "mission.status"
+  }
+]

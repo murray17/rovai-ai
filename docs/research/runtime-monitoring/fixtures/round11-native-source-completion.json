@@ -1,0 +1,2022 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-03T07:09:27.032Z",
+  "threadId": "rvcamp_01m3ynbhzxe0s9rstfra7x1efm",
+  "scope": "Five missing native sources; all 15 retained Renderer projections checked; Cursor excluded; speed retired.",
+  "coreSha256": "43d017671326597d3e4bc696684d70adbc68bef67c84f4dcf30e99452a4fec53",
+  "overallComplete": false,
+  "availability": {
+    "runTotal": 14,
+    "fourUsageFields": 8,
+    "contextRatio": 14,
+    "contextQuantities": 13
+  },
+  "rawAndExpected": {
+    "antigravity-app": {
+      "calls": [
+        {
+          "step": {
+            "step_index": 84,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "streamUsage": {
+            "input_tokens": 41111,
+            "output_tokens": 72,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 41183
+          },
+          "nativeAtArrival": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 41111,
+              "output": 72,
+              "write": 0,
+              "read": 0
+            },
+            "context": {
+              "used": 46919,
+              "window": 256000,
+              "generatorIndex": 37
+            }
+          },
+          "nativeAfterCompletion": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 41111,
+              "output": 72,
+              "write": 0,
+              "read": 0
+            },
+            "context": {
+              "used": 46919,
+              "window": 256000,
+              "generatorIndex": 37
+            }
+          }
+        },
+        {
+          "step": {
+            "step_index": 86,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "streamUsage": {
+            "input_tokens": 5055,
+            "output_tokens": 73,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 36445,
+            "total_tokens": 5128
+          },
+          "nativeAtArrival": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 5055,
+              "output": 73,
+              "write": 0,
+              "read": 36445
+            },
+            "context": null
+          },
+          "nativeAfterCompletion": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 5055,
+              "output": 73,
+              "write": 0,
+              "read": 36445
+            },
+            "context": {
+              "used": 47326,
+              "window": 256000,
+              "generatorIndex": 38
+            }
+          }
+        },
+        {
+          "step": {
+            "step_index": 88,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "streamUsage": {
+            "input_tokens": 5480,
+            "output_tokens": 504,
+            "thinking_tokens": 324,
+            "cache_read_tokens": 36440,
+            "total_tokens": 5984
+          },
+          "nativeAtArrival": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 5480,
+              "output": 504,
+              "write": 0,
+              "read": 36440
+            },
+            "context": null
+          },
+          "nativeAfterCompletion": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 5480,
+              "output": 504,
+              "write": 0,
+              "read": 36440
+            },
+            "context": {
+              "used": 47694,
+              "window": 256000,
+              "generatorIndex": 39
+            }
+          }
+        },
+        {
+          "step": {
+            "step_index": 90,
+            "state": "DONE",
+            "step_type": "agent_response"
+          },
+          "streamUsage": {
+            "input_tokens": 2078,
+            "output_tokens": 449,
+            "thinking_tokens": 5,
+            "cache_read_tokens": 40487,
+            "total_tokens": 2527
+          },
+          "nativeAtArrival": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 2078,
+              "output": 449,
+              "write": 0,
+              "read": 40487
+            },
+            "context": null
+          },
+          "nativeAfterCompletion": {
+            "status": "ok",
+            "matchesStream": true,
+            "usage": {
+              "input": 2078,
+              "output": 449,
+              "write": 0,
+              "read": 40487
+            },
+            "context": {
+              "used": 48287,
+              "window": 256000,
+              "generatorIndex": 40
+            }
+          }
+        }
+      ],
+      "expectedRunUsage": {
+        "promptInputTotalTokens": 167096,
+        "outputTokens": 1098,
+        "cacheReadTokens": 113372,
+        "cacheWriteTokens": 0
+      },
+      "expectedContext": {
+        "used": 48287,
+        "window": 256000,
+        "generatorIndex": 40
+      },
+      "sameSessionVerified": true,
+      "historicalResultUsageExcluded": true,
+      "status": "verified_available"
+    },
+    "qoder-cli": {
+      "calls": [
+        {
+          "timestamp": "2026-10-03T07:07:11.879Z",
+          "modelSource": "custom",
+          "model": "fixture-custom-provider/gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 30418,
+            "output_tokens": 504,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "context_usage_ratio": 0.02896952380952381
+          }
+        },
+        {
+          "timestamp": "2026-10-03T07:07:19.328Z",
+          "modelSource": "custom",
+          "model": "fixture-custom-provider/gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 31130,
+            "output_tokens": 60,
+            "cache_read_input_tokens": 30336,
+            "cache_creation_input_tokens": 0,
+            "context_usage_ratio": 0.029647619047619048
+          }
+        },
+        {
+          "timestamp": "2026-10-03T07:07:55.672Z",
+          "modelSource": "custom",
+          "model": "fixture-custom-provider/gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 31295,
+            "output_tokens": 987,
+            "cache_read_input_tokens": 30976,
+            "cache_creation_input_tokens": 0,
+            "context_usage_ratio": 0.029804761904761903
+          }
+        },
+        {
+          "timestamp": "2026-10-03T07:08:01.203Z",
+          "modelSource": "custom",
+          "model": "fixture-custom-provider/gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 32339,
+            "output_tokens": 65,
+            "cache_read_input_tokens": 31104,
+            "cache_creation_input_tokens": 0,
+            "context_usage_ratio": 0.030799047619047618
+          }
+        }
+      ],
+      "configuredWindow": 1050000,
+      "expectedRunUsage": {
+        "promptInputTotalTokens": 125182,
+        "outputTokens": 1616,
+        "cacheReadTokens": 92416,
+        "cacheWriteTokens": null
+      },
+      "sameSessionVerified": true,
+      "status": "verified_available",
+      "cacheZeroInterpretation": "Native normalization can synthesize zeros; absent original presence flags keep write unknown."
+    },
+    "codebuddy-cli": {
+      "calls": [
+        {
+          "timestamp": 1791011207273,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 24482,
+            "completion_tokens": 47,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          }
+        },
+        {
+          "timestamp": 1791011211628,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 24660,
+            "completion_tokens": 47,
+            "prompt_tokens_details": {
+              "cached_tokens": 24320
+            },
+            "completion_tokens_details": null
+          }
+        },
+        {
+          "timestamp": 1791011232552,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 24858,
+            "completion_tokens": 475,
+            "prompt_tokens_details": {
+              "cached_tokens": 24576
+            },
+            "completion_tokens_details": null
+          }
+        },
+        {
+          "timestamp": 1791011236831,
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "prompt_tokens": 25524,
+            "completion_tokens": 29,
+            "prompt_tokens_details": {
+              "cached_tokens": 24704
+            },
+            "completion_tokens_details": null
+          }
+        }
+      ],
+      "acpCatalog": [
+        {
+          "modelId": "hy3",
+          "window": 192000
+        },
+        {
+          "modelId": "glm-5.2",
+          "window": 1000000
+        },
+        {
+          "modelId": "glm-5.1",
+          "window": 200000
+        },
+        {
+          "modelId": "glm-5.0",
+          "window": 200000
+        },
+        {
+          "modelId": "glm-5.0-turbo",
+          "window": 200000
+        },
+        {
+          "modelId": "glm-5v-turbo",
+          "window": 200000
+        },
+        {
+          "modelId": "glm-4.7",
+          "window": 200000
+        },
+        {
+          "modelId": "minimax-m3",
+          "window": 512000
+        },
+        {
+          "modelId": "minimax-m2.7",
+          "window": 200000
+        },
+        {
+          "modelId": "kimi-k3-1",
+          "window": 1000000
+        },
+        {
+          "modelId": "kimi-k2.7",
+          "window": 256000
+        },
+        {
+          "modelId": "kimi-k2.6",
+          "window": 256000
+        },
+        {
+          "modelId": "kimi-k2.5",
+          "window": 164000
+        },
+        {
+          "modelId": "deepseek-v4-pro",
+          "window": 1000000
+        },
+        {
+          "modelId": "deepseek-v4-flash",
+          "window": 1000000
+        },
+        {
+          "modelId": "deepseek-v3-2-volc",
+          "window": 96000
+        }
+      ],
+      "currentModelWindowFound": false,
+      "nativeModelsFileExists": false,
+      "usedStatus": "verified_available",
+      "windowStatus": "raw_absent",
+      "reason": "Selected custom model has no maxInputTokens in native catalog or explicit models.json; provider catalog also lacks its context limit.",
+      "expectedRunUsage": {
+        "promptInputTotalTokens": 99524,
+        "outputTokens": 598,
+        "cacheReadTokens": 73600,
+        "cacheWriteTokens": null
+      }
+    },
+    "kiro-cli": {
+      "metadata": [
+        {
+          "/params/contextUsagePercentage": 5.7704081535339355
+        },
+        {
+          "/params/contextUsagePercentage": 8.155611991882324
+        },
+        {
+          "/params/contextUsagePercentage": 8.389286041259766
+        },
+        {
+          "/params/contextUsagePercentage": 8.460204124450684
+        },
+        {
+          "/params/contextUsagePercentage": 8.46479606628418
+        },
+        {
+          "/params/contextUsagePercentage": 8.46479606628418
+        }
+      ],
+      "modelInfo": {
+        "model_id": "minimax-m2.5",
+        "context_window_tokens": 196000
+      },
+      "sessionAndCwdMatch": true,
+      "commandProbe": [
+        {
+          "request": {
+            "command": "stats",
+            "args": {}
+          },
+          "result": {
+            "success": true,
+            "message": "1 request recorded",
+            "data": {
+              "stats": [
+                {
+                  "request_id": "[string]",
+                  "timestamp": "[string]",
+                  "duration_ms": 15508.395,
+                  "ttfc_ms": 9510.752790999999,
+                  "input_tokens": null,
+                  "output_tokens": null,
+                  "status_code": null,
+                  "had_tool_use": false,
+                  "error": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "request": {
+            "command": "context",
+            "args": {}
+          },
+          "result": {
+            "success": true,
+            "message": "[string]",
+            "data": {
+              "model": "minimax-m2.5",
+              "contextUsagePercentage": 7.822958946228027,
+              "verbose": false,
+              "initialExpanded": false
+            }
+          }
+        }
+      ],
+      "windowAndRatioStatus": "verified_available",
+      "usedAndTokensStatus": "raw_absent",
+      "noRatioBackCalculation": true
+    },
+    "trae-cn-cli": {
+      "calls": [
+        {
+          "created_at": "2026-10-03T14:54:44.362188+08:00",
+          "sourceModel": "GLM-5.3",
+          "usage": {
+            "prompt_tokens": 21184,
+            "completion_tokens": 269,
+            "total_tokens": 21453,
+            "prompt_token_details": {
+              "cached_tokens": 19008
+            }
+          }
+        },
+        {
+          "created_at": "2026-10-03T14:54:48.893745+08:00",
+          "sourceModel": "GLM-5.3",
+          "usage": {
+            "prompt_tokens": 21568,
+            "completion_tokens": 38,
+            "total_tokens": 21606,
+            "prompt_token_details": {
+              "cached_tokens": 21120
+            }
+          }
+        },
+        {
+          "created_at": "2026-10-03T14:55:07.920257+08:00",
+          "sourceModel": "GLM-5.3",
+          "usage": {
+            "prompt_tokens": 21751,
+            "completion_tokens": 561,
+            "total_tokens": 22312,
+            "prompt_token_details": {
+              "cached_tokens": 21504
+            }
+          }
+        },
+        {
+          "created_at": "2026-10-03T14:55:15.10147+08:00",
+          "sourceModel": "GLM-5.3",
+          "usage": {
+            "prompt_tokens": 22393,
+            "completion_tokens": 174,
+            "total_tokens": 22567,
+            "prompt_token_details": {
+              "cached_tokens": 21696
+            }
+          }
+        }
+      ],
+      "nativeCalibration": {
+        "runtime": "trae-cn-cli",
+        "version": "0.120.52",
+        "model": "GLM-5.3",
+        "method": "native interactive /context after a completed response; native models --json; exact Session root message Usage",
+        "observations": [
+          {
+            "promptTokens": 19670,
+            "outputTokens": 224,
+            "nativeDisplay": "19.6k/168k tokens (12%, calibrated)"
+          },
+          {
+            "promptTokens": 19913,
+            "outputTokens": 3223,
+            "nativeDisplay": "19.9k/168k tokens (12%, calibrated)"
+          }
+        ],
+        "nativeWindow": 168000,
+        "sourceModelMatches": true,
+        "acpContextCommandAdvertised": false,
+        "acpSlashProbe": "ordinary model prompt; not used as numeric evidence",
+        "contentRetained": false
+      },
+      "contextStatus": "verified_available",
+      "expectedRunUsage": {
+        "promptInputTotalTokens": 86896,
+        "outputTokens": 1042,
+        "cacheReadTokens": 83328,
+        "cacheWriteTokens": null
+      }
+    }
+  },
+  "rows": [
+    {
+      "runtime": "codex-cli",
+      "version": "codex-cli 0.159.2",
+      "model": "gpt-6.1-sol",
+      "runId": "d1f37e3b-fff5-4c69-9771-5b75b6dc56fd",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T15:58:44.759109+00:00",
+      "endedAt": "2026-10-02T16:00:57.204156+00:00",
+      "readback": {
+        "agentRunId": "d1f37e3b-fff5-4c69-9771-5b75b6dc56fd",
+        "cacheReadTokens": 83328,
+        "cacheWriteTokens": 0,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T16:00:57.204156+00:00",
+        "lastObservedAt": "2026-10-02T16:00:57.160182+00:00",
+        "outputTokens": 3490,
+        "promptInputTotalTokens": 93459
+      },
+      "database": {
+        "prompt_input_total_tokens": 93459,
+        "output_tokens": 3490,
+        "cache_read_tokens": 83328,
+        "cache_write_tokens": 0,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_event"
+      },
+      "context": {
+        "agentId": "agent_5",
+        "conversationId": "2e28e052-aa45-4f8c-a25a-1d071a22c020",
+        "dialectId": "codex-thread-context-v2",
+        "modelKey": "gpt-6.1-sol",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T16:00:57.160200+00:00",
+        "runtimeKind": "codex-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_event",
+        "usedTokens": 22084,
+        "windowTokens": 258400
+      },
+      "renderer": {
+        "runtime": "codex-cli",
+        "runId": "d1f37e3b-fff5-4c69-9771-5b75b6dc56fd",
+        "status": "succeeded",
+        "actual": {
+          "card": "96.9k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：22.1k / 258.4k，8.5%",
+          "contextText": "8.5%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "93.5k"
+          ],
+          [
+            "Output Token",
+            "3.5k"
+          ],
+          [
+            "Cache Read",
+            "83.3k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "2分 12秒"
+          ]
+        ],
+        "contextRows": [
+          "22.1k / 258.4k",
+          "8.5%"
+        ],
+        "expectedUsage": [
+          "93.5k",
+          "3.5k",
+          "83.3k",
+          "0k"
+        ],
+        "expectedTotal": "96.9k",
+        "expectedContext": [
+          "22.1k / 258.4k",
+          "8.5%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "claude-code-cli",
+      "version": "2.1.280 (Claude Code)",
+      "model": "opus",
+      "runId": "ea770137-49f8-448d-87a9-eddcf7646d5a",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T15:58:44.756278+00:00",
+      "endedAt": "2026-10-02T16:00:03.507007+00:00",
+      "readback": {
+        "agentRunId": "ea770137-49f8-448d-87a9-eddcf7646d5a",
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T16:00:03.507007+00:00",
+        "lastObservedAt": "2026-10-02T16:00:03.456641+00:00",
+        "outputTokens": 1863,
+        "promptInputTotalTokens": 63773
+      },
+      "database": {
+        "prompt_input_total_tokens": 63773,
+        "output_tokens": 1863,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "exclusive_buckets",
+        "usage_source": "mixed"
+      },
+      "context": {
+        "agentId": "agent_6",
+        "conversationId": "5959df67-c5d5-445b-90bb-8995dc1be3d2",
+        "dialectId": "claude-last-call-context-input-v1",
+        "modelKey": "opus",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T16:00:03.362950+00:00",
+        "runtimeKind": "claude-code-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": 13634,
+        "windowTokens": 200000
+      },
+      "renderer": {
+        "runtime": "claude-code-cli",
+        "runId": "ea770137-49f8-448d-87a9-eddcf7646d5a",
+        "status": "succeeded",
+        "actual": {
+          "card": "65.6k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：13.6k / 200k，6.8%",
+          "contextText": "6.8%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "63.8k"
+          ],
+          [
+            "Output Token",
+            "1.9k"
+          ],
+          [
+            "Cache Read",
+            "0k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 18秒"
+          ]
+        ],
+        "contextRows": [
+          "13.6k / 200k",
+          "6.8%"
+        ],
+        "expectedUsage": [
+          "63.8k",
+          "1.9k",
+          "0k",
+          "0k"
+        ],
+        "expectedTotal": "65.6k",
+        "expectedContext": [
+          "13.6k / 200k",
+          "6.8%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.32",
+      "model": "opencode/mimo-v2.6-flash-free",
+      "runId": "cebaae9e-6caf-4e98-b192-b638155e6742",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T15:58:44.752631+00:00",
+      "endedAt": "2026-10-02T15:59:56.472815+00:00",
+      "readback": {
+        "agentRunId": "cebaae9e-6caf-4e98-b192-b638155e6742",
+        "cacheReadTokens": 63616,
+        "cacheWriteTokens": 0,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T15:59:56.472815+00:00",
+        "lastObservedAt": "2026-10-02T15:59:56.002+00:00",
+        "outputTokens": 1380,
+        "promptInputTotalTokens": 75451
+      },
+      "database": {
+        "prompt_input_total_tokens": 75451,
+        "output_tokens": 1380,
+        "cache_read_tokens": 63616,
+        "cache_write_tokens": 0,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "exclusive_buckets",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_7",
+        "conversationId": "b1814fdd-5811-4331-91d7-de074f799ec9",
+        "dialectId": "acp-session-context-gauge-v1",
+        "modelKey": "opencode/mimo-v2.6-flash-free",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T15:59:56.020676+00:00",
+        "runtimeKind": "opencode-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_event",
+        "usedTokens": 13730,
+        "windowTokens": 200000
+      },
+      "renderer": {
+        "runtime": "opencode-cli",
+        "runId": "cebaae9e-6caf-4e98-b192-b638155e6742",
+        "status": "succeeded",
+        "actual": {
+          "card": "76.8k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：13.7k / 200k，6.9%",
+          "contextText": "6.9%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "75.5k"
+          ],
+          [
+            "Output Token",
+            "1.4k"
+          ],
+          [
+            "Cache Read",
+            "63.6k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "1分 11秒"
+          ]
+        ],
+        "contextRows": [
+          "13.7k / 200k",
+          "6.9%"
+        ],
+        "expectedUsage": [
+          "75.5k",
+          "1.4k",
+          "63.6k",
+          "0k"
+        ],
+        "expectedTotal": "76.8k",
+        "expectedContext": [
+          "13.7k / 200k",
+          "6.9%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "copilot-cli",
+      "version": "GitHub Copilot CLI 1.0.83.",
+      "model": "claude-opus-5",
+      "runId": "7acd3bda-7acc-4291-a80e-96814d049be5",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T16:02:47.617486+00:00",
+      "endedAt": "2026-10-02T16:03:25.732343+00:00",
+      "readback": {
+        "agentRunId": "7acd3bda-7acc-4291-a80e-96814d049be5",
+        "cacheReadTokens": 147964,
+        "cacheWriteTokens": 31851,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T16:03:25.732343+00:00",
+        "lastObservedAt": "2026-10-02T16:03:25.664Z",
+        "outputTokens": 1974,
+        "promptInputTotalTokens": 179827
+      },
+      "database": {
+        "prompt_input_total_tokens": 179827,
+        "output_tokens": 1974,
+        "cache_read_tokens": 147964,
+        "cache_write_tokens": 31851,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_8",
+        "conversationId": "6be5a528-dcf8-477c-ae98-d921756f6cfb",
+        "dialectId": "acp-session-context-gauge-v1",
+        "modelKey": "claude-opus-5",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T16:03:23.268330+00:00",
+        "runtimeKind": "copilot-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_event",
+        "usedTokens": 24693,
+        "windowTokens": 200000
+      },
+      "renderer": {
+        "runtime": "copilot-cli",
+        "runId": "7acd3bda-7acc-4291-a80e-96814d049be5",
+        "status": "succeeded",
+        "actual": {
+          "card": "181.8k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：24.7k / 200k，12.3%",
+          "contextText": "12.3%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "179.8k"
+          ],
+          [
+            "Output Token",
+            "2k"
+          ],
+          [
+            "Cache Read",
+            "148k"
+          ],
+          [
+            "Cache Write",
+            "31.9k"
+          ],
+          [
+            "执行耗时",
+            "0分 38秒"
+          ]
+        ],
+        "contextRows": [
+          "24.7k / 200k",
+          "12.3%"
+        ],
+        "expectedUsage": [
+          "179.8k",
+          "2k",
+          "148k",
+          "31.9k"
+        ],
+        "expectedTotal": "181.8k",
+        "expectedContext": [
+          "24.7k / 200k",
+          "12.3%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "codebuddy-cli",
+      "version": "2.133.1",
+      "model": "gpt-6.1-sol",
+      "runId": "39cf8065-1cbc-4ff0-94b6-e99349180b59",
+      "status": "succeeded",
+      "startedAt": "2026-10-03T07:06:38.858906+00:00",
+      "endedAt": "2026-10-03T07:07:17.341712+00:00",
+      "readback": {
+        "agentRunId": "39cf8065-1cbc-4ff0-94b6-e99349180b59",
+        "cacheReadTokens": 73600,
+        "cacheWriteTokens": null,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-03T07:07:17.341712+00:00",
+        "lastObservedAt": "2026-10-03T07:07:16.831+00:00",
+        "outputTokens": 598,
+        "promptInputTotalTokens": 99524
+      },
+      "database": {
+        "prompt_input_total_tokens": 99524,
+        "output_tokens": 598,
+        "cache_read_tokens": 73600,
+        "cache_write_tokens": null,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_9",
+        "conversationId": "94b1c6d5-7c8c-40ee-9091-c34dbcfb47d5",
+        "dialectId": "codebuddy-native-call-context-v1",
+        "modelKey": "gpt-6.1-sol",
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T07:07:16.831+00:00",
+        "runtimeKind": "codebuddy-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": 25524,
+        "windowTokens": null
+      },
+      "renderer": {
+        "runtime": "codebuddy-cli",
+        "runId": "39cf8065-1cbc-4ff0-94b6-e99349180b59",
+        "status": "succeeded",
+        "actual": {
+          "card": "100.1k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：25.5k / —，比例未知",
+          "contextText": "—"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "99.5k"
+          ],
+          [
+            "Output Token",
+            "0.6k"
+          ],
+          [
+            "Cache Read",
+            "73.6k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 38秒"
+          ]
+        ],
+        "contextRows": [
+          "25.5k / —",
+          "—"
+        ],
+        "expectedUsage": [
+          "99.5k",
+          "0.6k",
+          "73.6k",
+          "—"
+        ],
+        "expectedTotal": "100.1k",
+        "expectedContext": [
+          "25.5k / —",
+          "—"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": false,
+          "contextRatio": false,
+          "contextQuantities": false
+        }
+      }
+    },
+    {
+      "runtime": "qwen-code",
+      "version": "0.24.6",
+      "model": "gpt-5.6-sol(openai)",
+      "runId": "b741f1fa-1d56-477f-833a-6e2a11bbf9ce",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T16:02:47.620980+00:00",
+      "endedAt": "2026-10-02T16:03:35.598785+00:00",
+      "readback": {
+        "agentRunId": "b741f1fa-1d56-477f-833a-6e2a11bbf9ce",
+        "cacheReadTokens": 56704,
+        "cacheWriteTokens": null,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T16:03:35.598785+00:00",
+        "lastObservedAt": "2026-10-02T16:03:35.440202+00:00",
+        "outputTokens": 1303,
+        "promptInputTotalTokens": 77112
+      },
+      "database": {
+        "prompt_input_total_tokens": 77112,
+        "output_tokens": 1303,
+        "cache_read_tokens": 56704,
+        "cache_write_tokens": null,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_10",
+        "conversationId": "317f9aa5-abc1-49b7-a86d-0956c4468c9e",
+        "dialectId": "acp-session-context-gauge-v1",
+        "modelKey": "gpt-5.6-sol(openai)",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T16:03:35.440367+00:00",
+        "runtimeKind": "qwen-code",
+        "sessionGeneration": 1,
+        "source": "runtime_event",
+        "usedTokens": 19968,
+        "windowTokens": 272000
+      },
+      "renderer": {
+        "runtime": "qwen-code",
+        "runId": "b741f1fa-1d56-477f-833a-6e2a11bbf9ce",
+        "status": "succeeded",
+        "actual": {
+          "card": "78.4k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：20k / 272k，7.3%",
+          "contextText": "7.3%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "77.1k"
+          ],
+          [
+            "Output Token",
+            "1.3k"
+          ],
+          [
+            "Cache Read",
+            "56.7k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 47秒"
+          ]
+        ],
+        "contextRows": [
+          "20k / 272k",
+          "7.3%"
+        ],
+        "expectedUsage": [
+          "77.1k",
+          "1.3k",
+          "56.7k",
+          "—"
+        ],
+        "expectedTotal": "78.4k",
+        "expectedContext": [
+          "20k / 272k",
+          "7.3%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": false,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "pi",
+      "version": "0.84.4",
+      "model": "pi://model?provider=sub2api&id=gpt-6.1-sol",
+      "runId": "06b0dcf2-5f44-4d44-bd9b-35cb6aa5030d",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T16:02:47.611226+00:00",
+      "endedAt": "2026-10-02T16:03:24.765143+00:00",
+      "readback": {
+        "agentRunId": "06b0dcf2-5f44-4d44-bd9b-35cb6aa5030d",
+        "cacheReadTokens": 26112,
+        "cacheWriteTokens": 0,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T16:03:24.765143+00:00",
+        "lastObservedAt": "2026-10-02T16:03:24.714450+00:00",
+        "outputTokens": 557,
+        "promptInputTotalTokens": 46441
+      },
+      "database": {
+        "prompt_input_total_tokens": 46441,
+        "output_tokens": 557,
+        "cache_read_tokens": 26112,
+        "cache_write_tokens": 0,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "exclusive_buckets",
+        "usage_source": "runtime_event"
+      },
+      "context": {
+        "agentId": "agent_11",
+        "conversationId": "2a8ddbb6-7365-4b80-b223-51970d6f6273",
+        "dialectId": "pi-native-context-estimate-v1",
+        "modelKey": "pi://model?provider=sub2api&id=gpt-6.1-sol",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T16:03:24.715846+00:00",
+        "runtimeKind": "pi",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": 10140,
+        "windowTokens": 1050000
+      },
+      "renderer": {
+        "runtime": "pi",
+        "runId": "06b0dcf2-5f44-4d44-bd9b-35cb6aa5030d",
+        "status": "succeeded",
+        "actual": {
+          "card": "47k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：10.1k / 1050k，1.0%",
+          "contextText": "1.0%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "46.4k"
+          ],
+          [
+            "Output Token",
+            "0.6k"
+          ],
+          [
+            "Cache Read",
+            "26.1k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "0分 37秒"
+          ]
+        ],
+        "contextRows": [
+          "10.1k / 1050k",
+          "1.0%"
+        ],
+        "expectedUsage": [
+          "46.4k",
+          "0.6k",
+          "26.1k",
+          "0k"
+        ],
+        "expectedTotal": "47k",
+        "expectedContext": [
+          "10.1k / 1050k",
+          "1.0%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "zcode-app",
+      "version": "0.16.9",
+      "model": "new-provider/gpt-6-sol",
+      "runId": "71bde44e-75a0-46c7-9416-75a0c931ea33",
+      "status": "succeeded",
+      "startedAt": "2026-10-03T05:15:46.774620+00:00",
+      "endedAt": "2026-10-03T05:16:25.522072+00:00",
+      "readback": {
+        "agentRunId": "71bde44e-75a0-46c7-9416-75a0c931ea33",
+        "cacheReadTokens": 54144,
+        "cacheWriteTokens": null,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-03T05:16:25.522072+00:00",
+        "lastObservedAt": "2026-10-03T05:16:25.172697+00:00",
+        "outputTokens": 732,
+        "promptInputTotalTokens": 73396
+      },
+      "database": {
+        "prompt_input_total_tokens": 73396,
+        "output_tokens": 732,
+        "cache_read_tokens": 54144,
+        "cache_write_tokens": null,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_12",
+        "conversationId": "1a42b63e-baa1-411f-8d86-1b6069edec25",
+        "dialectId": "zcode-native-session-context-v1",
+        "modelKey": "new-provider/gpt-6-sol",
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T05:16:25.486962+00:00",
+        "runtimeKind": "zcode-app",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": 18807,
+        "windowTokens": 200000
+      },
+      "renderer": {
+        "runtime": "zcode-app",
+        "runId": "71bde44e-75a0-46c7-9416-75a0c931ea33",
+        "status": "succeeded",
+        "actual": {
+          "card": "74.1k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：18.8k / 200k，9.4%",
+          "contextText": "9.4%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "73.4k"
+          ],
+          [
+            "Output Token",
+            "0.7k"
+          ],
+          [
+            "Cache Read",
+            "54.1k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 38秒"
+          ]
+        ],
+        "contextRows": [
+          "18.8k / 200k",
+          "9.4%"
+        ],
+        "expectedUsage": [
+          "73.4k",
+          "0.7k",
+          "54.1k",
+          "—"
+        ],
+        "expectedTotal": "74.1k",
+        "expectedContext": [
+          "18.8k / 200k",
+          "9.4%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": false,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "deepseek-harness",
+      "version": "0.1.5-rc.3",
+      "model": "[\"sub2api\",\"gpt-6.1-sol\"]",
+      "runId": "af9afb2c-4954-4af9-a7f6-391d75d2c68e",
+      "status": "succeeded",
+      "startedAt": "2026-10-03T05:15:46.772051+00:00",
+      "endedAt": "2026-10-03T05:16:42.720423+00:00",
+      "readback": {
+        "agentRunId": "af9afb2c-4954-4af9-a7f6-391d75d2c68e",
+        "cacheReadTokens": 75904,
+        "cacheWriteTokens": null,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-03T05:16:42.720423+00:00",
+        "lastObservedAt": "2026-10-03T05:16:42.654253+00:00",
+        "outputTokens": 932,
+        "promptInputTotalTokens": 92636
+      },
+      "database": {
+        "prompt_input_total_tokens": 92636,
+        "output_tokens": 932,
+        "cache_read_tokens": 75904,
+        "cache_write_tokens": null,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_event"
+      },
+      "context": {
+        "agentId": "agent_13",
+        "conversationId": "77db774f-4512-4be1-91f6-db2354881e3a",
+        "dialectId": "dsh-acp-context-gauge-v1",
+        "modelKey": "[\"sub2api\",\"gpt-6.1-sol\"]",
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T05:16:42.654263+00:00",
+        "runtimeKind": "deepseek-harness",
+        "sessionGeneration": 5,
+        "source": "runtime_event",
+        "usedTokens": 16193,
+        "windowTokens": 262144
+      },
+      "renderer": {
+        "runtime": "deepseek-harness",
+        "runId": "af9afb2c-4954-4af9-a7f6-391d75d2c68e",
+        "status": "succeeded",
+        "actual": {
+          "card": "93.6k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：16.2k / 262.1k，6.2%",
+          "contextText": "6.2%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "92.6k"
+          ],
+          [
+            "Output Token",
+            "0.9k"
+          ],
+          [
+            "Cache Read",
+            "75.9k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 55秒"
+          ]
+        ],
+        "contextRows": [
+          "16.2k / 262.1k",
+          "6.2%"
+        ],
+        "expectedUsage": [
+          "92.6k",
+          "0.9k",
+          "75.9k",
+          "—"
+        ],
+        "expectedTotal": "93.6k",
+        "expectedContext": [
+          "16.2k / 262.1k",
+          "6.2%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": false,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "qoder-cli",
+      "version": "1.1.65",
+      "model": "fixture-custom-provider/gpt-6.1-sol",
+      "runId": "c261a673-a5a9-481a-831d-f905d9f8c777",
+      "status": "succeeded",
+      "startedAt": "2026-10-03T07:06:38.821765+00:00",
+      "endedAt": "2026-10-03T07:08:01.745500+00:00",
+      "readback": {
+        "agentRunId": "c261a673-a5a9-481a-831d-f905d9f8c777",
+        "cacheReadTokens": 92416,
+        "cacheWriteTokens": null,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-03T07:08:01.745500+00:00",
+        "lastObservedAt": "2026-10-03T07:08:01.203Z",
+        "outputTokens": 1616,
+        "promptInputTotalTokens": 125182
+      },
+      "database": {
+        "prompt_input_total_tokens": 125182,
+        "output_tokens": 1616,
+        "cache_read_tokens": 92416,
+        "cache_write_tokens": null,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_14",
+        "conversationId": "7b5cb3b6-acdc-4a5f-9559-a60abd78e9d7",
+        "dialectId": "qoder-native-call-context-v1",
+        "modelKey": "fixture-custom-provider/gpt-6.1-sol",
+        "nativeRatio": 0.030799047619047615,
+        "observedAt": "2026-10-03T07:08:01.203Z",
+        "runtimeKind": "qoder-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": 32339,
+        "windowTokens": 1050000
+      },
+      "renderer": {
+        "runtime": "qoder-cli",
+        "runId": "c261a673-a5a9-481a-831d-f905d9f8c777",
+        "status": "succeeded",
+        "actual": {
+          "card": "126.8k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：32.3k / 1050k，3.1%",
+          "contextText": "3.1%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "125.2k"
+          ],
+          [
+            "Output Token",
+            "1.6k"
+          ],
+          [
+            "Cache Read",
+            "92.4k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "1分 22秒"
+          ]
+        ],
+        "contextRows": [
+          "32.3k / 1050k",
+          "3.1%"
+        ],
+        "expectedUsage": [
+          "125.2k",
+          "1.6k",
+          "92.4k",
+          "—"
+        ],
+        "expectedTotal": "126.8k",
+        "expectedContext": [
+          "32.3k / 1050k",
+          "3.1%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": false,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "version": "2.1.1",
+      "model": "__kimi_env_model__",
+      "runId": "f3d2be6c-a24d-4495-a49d-248421b68db7",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T16:10:57.077701+00:00",
+      "endedAt": "2026-10-02T16:11:45.639802+00:00",
+      "readback": {
+        "agentRunId": "f3d2be6c-a24d-4495-a49d-248421b68db7",
+        "cacheReadTokens": 88192,
+        "cacheWriteTokens": 0,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T16:11:45.639802+00:00",
+        "lastObservedAt": "2026-10-02T16:11:45.213+00:00",
+        "outputTokens": 839,
+        "promptInputTotalTokens": 112027
+      },
+      "database": {
+        "prompt_input_total_tokens": 112027,
+        "output_tokens": 839,
+        "cache_read_tokens": 88192,
+        "cache_write_tokens": 0,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "exclusive_buckets",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_15",
+        "conversationId": "94da5576-edc5-43eb-b2c4-5a371c5f730d",
+        "dialectId": "acp-session-context-gauge-v1",
+        "modelKey": "__kimi_env_model__",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T16:11:45.647062+00:00",
+        "runtimeKind": "kimi-code-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_event",
+        "usedTokens": 23630,
+        "windowTokens": 262144
+      },
+      "renderer": {
+        "runtime": "kimi-code-cli",
+        "runId": "f3d2be6c-a24d-4495-a49d-248421b68db7",
+        "status": "succeeded",
+        "actual": {
+          "card": "112.9k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：23.6k / 262.1k，9.0%",
+          "contextText": "9.0%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "112k"
+          ],
+          [
+            "Output Token",
+            "0.8k"
+          ],
+          [
+            "Cache Read",
+            "88.2k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "0分 48秒"
+          ]
+        ],
+        "contextRows": [
+          "23.6k / 262.1k",
+          "9.0%"
+        ],
+        "expectedUsage": [
+          "112k",
+          "0.8k",
+          "88.2k",
+          "0k"
+        ],
+        "expectedTotal": "112.9k",
+        "expectedContext": [
+          "23.6k / 262.1k",
+          "9.0%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "grok-build",
+      "version": "grok 1.0.44 (5b807183dd79)",
+      "model": "gpt-6.1-sol",
+      "runId": "13b20333-00d1-4fb3-bbdc-77fabd12e7ac",
+      "status": "succeeded",
+      "startedAt": "2026-10-02T16:31:16.141134+00:00",
+      "endedAt": "2026-10-02T16:31:52.556153+00:00",
+      "readback": {
+        "agentRunId": "13b20333-00d1-4fb3-bbdc-77fabd12e7ac",
+        "cacheReadTokens": 84096,
+        "cacheWriteTokens": 0,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-02T16:31:52.556153+00:00",
+        "lastObservedAt": "2026-10-02T16:31:52.519396+00:00",
+        "outputTokens": 588,
+        "promptInputTotalTokens": 87447
+      },
+      "database": {
+        "prompt_input_total_tokens": 87447,
+        "output_tokens": 588,
+        "cache_read_tokens": 84096,
+        "cache_write_tokens": 0,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_16",
+        "conversationId": "0e2ee184-5a37-4911-9e32-27ed26cd1e11",
+        "dialectId": "grok-acp-meta-context-v1",
+        "modelKey": "gpt-6.1-sol",
+        "nativeRatio": null,
+        "observedAt": "2026-10-02T16:31:52.421369+00:00",
+        "runtimeKind": "grok-build",
+        "sessionGeneration": 1,
+        "source": "runtime_event",
+        "usedTokens": 22409,
+        "windowTokens": 1050000
+      },
+      "renderer": {
+        "runtime": "grok-build",
+        "runId": "13b20333-00d1-4fb3-bbdc-77fabd12e7ac",
+        "status": "succeeded",
+        "actual": {
+          "card": "88k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：22.4k / 1050k，2.1%",
+          "contextText": "2.1%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "87.4k"
+          ],
+          [
+            "Output Token",
+            "0.6k"
+          ],
+          [
+            "Cache Read",
+            "84.1k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "0分 36秒"
+          ]
+        ],
+        "contextRows": [
+          "22.4k / 1050k",
+          "2.1%"
+        ],
+        "expectedUsage": [
+          "87.4k",
+          "0.6k",
+          "84.1k",
+          "0k"
+        ],
+        "expectedTotal": "88k",
+        "expectedContext": [
+          "22.4k / 1050k",
+          "2.1%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "antigravity-app",
+      "version": "1.2.16",
+      "model": "gemini-3.7-flash-medium",
+      "runId": "7a2e0895-43af-425f-b76f-dfdaed6636e0",
+      "status": "succeeded",
+      "startedAt": "2026-10-03T07:06:38.817342+00:00",
+      "endedAt": "2026-10-03T07:06:57.986160+00:00",
+      "readback": {
+        "agentRunId": "7a2e0895-43af-425f-b76f-dfdaed6636e0",
+        "cacheReadTokens": 113372,
+        "cacheWriteTokens": 0,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-03T07:06:57.986160+00:00",
+        "lastObservedAt": "2026-10-03T07:06:56.372494+00:00",
+        "outputTokens": 1098,
+        "promptInputTotalTokens": 167096
+      },
+      "database": {
+        "prompt_input_total_tokens": 167096,
+        "output_tokens": 1098,
+        "cache_read_tokens": 113372,
+        "cache_write_tokens": 0,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "exclusive_buckets",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_17",
+        "conversationId": "ceebd7a3-a178-48e0-b127-a34f35337c14",
+        "dialectId": "antigravity-native-context-v1",
+        "modelKey": "gemini-3.7-flash-medium",
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T07:06:56.372503+00:00",
+        "runtimeKind": "antigravity-app",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": 48287,
+        "windowTokens": 256000
+      },
+      "renderer": {
+        "runtime": "antigravity-app",
+        "runId": "7a2e0895-43af-425f-b76f-dfdaed6636e0",
+        "status": "succeeded",
+        "actual": {
+          "card": "168.2k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：48.3k / 256k，18.9%",
+          "contextText": "18.9%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "167.1k"
+          ],
+          [
+            "Output Token",
+            "1.1k"
+          ],
+          [
+            "Cache Read",
+            "113.4k"
+          ],
+          [
+            "Cache Write",
+            "0k"
+          ],
+          [
+            "执行耗时",
+            "0分 19秒"
+          ]
+        ],
+        "contextRows": [
+          "48.3k / 256k",
+          "18.9%"
+        ],
+        "expectedUsage": [
+          "167.1k",
+          "1.1k",
+          "113.4k",
+          "0k"
+        ],
+        "expectedTotal": "168.2k",
+        "expectedContext": [
+          "48.3k / 256k",
+          "18.9%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": true,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    },
+    {
+      "runtime": "kiro-cli",
+      "version": "kiro-cli 2.21.1",
+      "model": "minimax-m2.5",
+      "runId": "df6fbe25-e386-4a4d-9968-446594807739",
+      "status": "succeeded",
+      "startedAt": "2026-10-03T07:06:38.856504+00:00",
+      "endedAt": "2026-10-03T07:07:03.173087+00:00",
+      "readback": {
+        "agentRunId": "df6fbe25-e386-4a4d-9968-446594807739",
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-03T07:07:03.173087+00:00",
+        "lastObservedAt": null,
+        "outputTokens": null,
+        "promptInputTotalTokens": null
+      },
+      "database": {
+        "prompt_input_total_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "usage_quality": null,
+        "input_semantics": "unknown",
+        "usage_source": null
+      },
+      "context": {
+        "agentId": "agent_18",
+        "conversationId": "070e7479-8208-49be-9916-a643492bf09f",
+        "dialectId": "kiro-acp-context-percentage-v1",
+        "modelKey": "minimax-m2.5",
+        "nativeRatio": 0.0846479606628418,
+        "observedAt": "2026-10-03T07:07:02.999156+00:00",
+        "runtimeKind": "kiro-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": null,
+        "windowTokens": 196000
+      },
+      "renderer": {
+        "runtime": "kiro-cli",
+        "runId": "df6fbe25-e386-4a4d-9968-446594807739",
+        "status": "succeeded",
+        "actual": {
+          "card": null,
+          "hasDuration": true,
+          "context": "当前原生会话上下文：— / 196k，8.5%",
+          "contextText": "8.5%"
+        },
+        "usageRows": [],
+        "contextRows": [
+          "— / 196k",
+          "8.5%"
+        ],
+        "expectedUsage": [
+          "—",
+          "—",
+          "—",
+          "—"
+        ],
+        "expectedTotal": "—",
+        "expectedContext": [
+          "— / 196k",
+          "8.5%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": false,
+          "fourUsageFields": false,
+          "contextRatio": true,
+          "contextQuantities": false
+        }
+      }
+    },
+    {
+      "runtime": "trae-cn-cli",
+      "version": "trae-cli version 0.120.52",
+      "model": "GLM-5.3",
+      "runId": "db9bd250-8ccf-443a-bff8-22066a6e704c",
+      "status": "succeeded",
+      "startedAt": "2026-10-03T06:54:29.652571+00:00",
+      "endedAt": "2026-10-03T06:55:15.582247+00:00",
+      "readback": {
+        "agentRunId": "db9bd250-8ccf-443a-bff8-22066a6e704c",
+        "cacheReadTokens": 83328,
+        "cacheWriteTokens": null,
+        "executionEpoch": 1,
+        "finalizedAt": "2026-10-03T06:55:15.582247+00:00",
+        "lastObservedAt": "2026-10-03T06:55:15.101+00:00",
+        "outputTokens": 1042,
+        "promptInputTotalTokens": 86896
+      },
+      "database": {
+        "prompt_input_total_tokens": 86896,
+        "output_tokens": 1042,
+        "cache_read_tokens": 83328,
+        "cache_write_tokens": null,
+        "usage_quality": "runtime_reported",
+        "input_semantics": "cache_inclusive_total",
+        "usage_source": "runtime_private_extension"
+      },
+      "context": {
+        "agentId": "agent_19",
+        "conversationId": "291f4c78-28e2-4306-a159-0d824b96562c",
+        "dialectId": "trae-native-calibrated-context-v1",
+        "modelKey": "GLM-5.3",
+        "nativeRatio": null,
+        "observedAt": "2026-10-03T06:55:15.101+00:00",
+        "runtimeKind": "trae-cn-cli",
+        "sessionGeneration": 1,
+        "source": "runtime_private_extension",
+        "usedTokens": 22393,
+        "windowTokens": 168000
+      },
+      "renderer": {
+        "runtime": "trae-cn-cli",
+        "runId": "db9bd250-8ccf-443a-bff8-22066a6e704c",
+        "status": "succeeded",
+        "actual": {
+          "card": "87.9k",
+          "hasDuration": false,
+          "context": "当前原生会话上下文：22.4k / 168k，13.3%",
+          "contextText": "13.3%"
+        },
+        "usageRows": [
+          [
+            "Input Token",
+            "86.9k"
+          ],
+          [
+            "Output Token",
+            "1k"
+          ],
+          [
+            "Cache Read",
+            "83.3k"
+          ],
+          [
+            "Cache Write",
+            "—"
+          ],
+          [
+            "执行耗时",
+            "0分 45秒"
+          ]
+        ],
+        "contextRows": [
+          "22.4k / 168k",
+          "13.3%"
+        ],
+        "expectedUsage": [
+          "86.9k",
+          "1k",
+          "83.3k",
+          "—"
+        ],
+        "expectedTotal": "87.9k",
+        "expectedContext": [
+          "22.4k / 168k",
+          "13.3%"
+        ],
+        "verified": {
+          "usage": true,
+          "context": true,
+          "contextHeader": true
+        },
+        "availability": {
+          "runTotal": true,
+          "fourUsageFields": false,
+          "contextRatio": true,
+          "contextQuantities": true
+        }
+      }
+    }
+  ]
+}

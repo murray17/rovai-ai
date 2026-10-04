@@ -1,47 +1,25 @@
-# 正文与 Retrieval Keys
+# Body and retrieval keys
 
 ## Body
 
-一条 Body 应：
+Write one durable understanding, usable without this conversation, as specific guidance for future collaboration. Preserve the user's meaning or observed lesson. Remove incidental dates, paths, IDs and event details unless they are part of the lasting rule. Maximum: 2,048 UTF-8 bytes.
 
-- 只表达一个持久理解；
-- 在未来 AgentRun 中脱离当前对话仍可读；
-- 写成未来协作指导，而非当前事件复述；
-- 具体到足以改变行为，并忠实保留用户意思或真实经验；
-- 去掉临时日期、路径、ID 与偶然细节，除非它们本身就是长期规则；
-- 不超过 2,048 UTF-8 bytes。
+Examples:
 
-合适的表达：
+- Preference: Distinguish confirmed decisions, assumptions and open questions in implementation plans.
+- Agreement: Include the goal, verified state, evidence, open issues and next action in durable Task handoffs.
+- Lesson: Once requirements are clear, produce a verifiable implementation without reopening resolved questions.
 
-```text
-Preference:
-实现方案应明确区分已经确认的决定、当前假设与仍待回答的问题。
-```
+A one-time reaction is not automatically a stable rule. Write actual Memory content in the user's language.
 
-```text
-Agreement:
-交接持久任务时，应包含目标、已验证状态、证据、未决问题与下一步行动。
-```
+## Retrieval keys
 
-```text
-Lesson:
-当需求已经足够明确时，应先完成可验证的最佳实现，不重新询问已经解决的问题。
-```
+Each revision supplies the complete desired key set; old keys are not retained automatically:
 
-“用户今天因为我问了太多问题而不高兴”只是一次情境解释，不是稳定规则；无法从事实可靠抽象时不写。
+- 1-3 keys;
+- 2-24 UTF-8 bytes per key;
+- at most 48 UTF-8 bytes in total.
 
-## Retrieval Keys
+Use specific searchable concepts, such as `["plan format", "confirmed", "open questions"]` or `["handoff", "verified state", "next action"]`. Avoid generic words such as `memory`, `important`, `user` or `lesson`.
 
-每个新 Revision 都提交完整的新 retrieval-key 集合，旧集合不会自动保留：
-
-- 1–3 个 key；
-- 每个 key 为 2–24 UTF-8 bytes；
-- 全部 key 合计不超过 48 UTF-8 bytes；
-- 使用具体、易检索的概念；
-- 不使用 `memory`、`important`、`user`、`lesson` 等过度泛化的词。
-
-示例：`["方案格式", "确认事项", "未决问题"]` 或
-`["任务交接", "已验证状态", "下一步行动"]`。
-
-Retrieval key 是搜索元数据，不是隐藏指令，也不是正文的第二份副本。修订时重新提交期望保留的完整
-集合。
+Keys are search metadata, not hidden instructions or a duplicate body.

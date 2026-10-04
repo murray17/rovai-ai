@@ -69,11 +69,11 @@ try {
   // ACP-family compatibility includes the Camp attachment authorization root.
   // Exercise different member Sessions inside that same authorized scope.
   const follow = async (agentId, body) => {
-    const draft = await core.request('camp.composerDraft.get', { campId: a.campId })
-    const saved = await core.request('camp.composerDraft.save', { campId: a.campId, expectedRevision: draft.revision,
+    const draft = await core.request('camp.composerDraft.get', { threadId: a.threadId })
+    const saved = await core.request('camp.composerDraft.save', { threadId: a.threadId, expectedRevision: draft.revision,
       content: composerDocumentForAddress({ mode: 'explicit', agentIds: Array.isArray(agentId) ? agentId : [agentId] }, body) })
-    return accepted(await core.request('camp.messages.send', { commandId: crypto.randomUUID(), campId: a.campId,
-      draftRevision: saved.revision, execution: { taskId: null, purpose: 'Verify exact member Session switching.', completionRole: 'required' } }), a.campId)
+    return accepted(await core.request('camp.messages.send', { commandId: crypto.randomUUID(), threadId: a.threadId,
+      draftRevision: saved.revision, execution: { taskId: null, purpose: 'Verify exact member Session switching.', completionRole: 'required' } }), a.threadId)
   }
   const b = await follow('agent_3', `For this reply only, no tools are needed. The project label assigned to your session is ${tokenB}. Confirm the label.`)
   const second = await finish(b)
@@ -89,7 +89,7 @@ try {
   // user message would correctly enter the Camp's pending-input FIFO instead.
   const parallel = await follow(['agent_2', 'agent_3'], "Please check the shell runner in this temporary Git project: execute Bash once with sleep 10; printf 'SHELL_OK\\n'. Report the stdout.")
   assert.equal(parallel.agentRunIds.length, 2)
-  const [third, fourth] = await Promise.all(parallel.agentRunIds.map((agentRunId) => finish({ campId: a.campId, agentRunId })))
+  const [third, fourth] = await Promise.all(parallel.agentRunIds.map((agentRunId) => finish({ threadId: a.threadId, agentRunId })))
   assert.notEqual(third.start.hostInstanceId, fourth.start.hostInstanceId)
   assert.notEqual(third.start.nativeThreadId, fourth.start.nativeThreadId)
   assert(third.output.includes('SHELL_OK'))
@@ -139,10 +139,10 @@ try {
 function accepted(result, knownCampId) {
   const command = result.commandResult ?? result
   assert.equal(command.status, 'accepted')
-  const campId = knownCampId ?? command.payload?.campId
+  const threadId = knownCampId ?? command.payload?.threadId
   const agentRunId = command.payload?.agentRunIds?.[0]
-  assert(campId && agentRunId)
-  return { campId, agentRunId, agentRunIds: command.payload.agentRunIds }
+  assert(threadId && agentRunId)
+  return { threadId, agentRunId, agentRunIds: command.payload.agentRunIds }
 }
 
 function start(agentRunId) {
@@ -158,11 +158,11 @@ async function until(check, timeout) {
   throw new Error('ZCode fleet observation timed out')
 }
 
-async function finish({ campId, agentRunId }) {
+async function finish({ threadId, agentRunId }) {
   let snapshot
   let run
   await until(async () => {
-    snapshot = await core.request('camps.snapshot', { campId })
+    snapshot = await core.request('camps.snapshot', { threadId })
     run = snapshot.agentRuns.find((run) => run.id === agentRunId)
     return run && ['succeeded', 'failed', 'cancelled'].includes(run.status)
   }, 300_000)

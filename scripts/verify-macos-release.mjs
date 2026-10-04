@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   rmdirSync,
   statSync,
   writeFileSync
@@ -23,7 +24,9 @@ import {
 } from './lib/release-notes.mjs'
 
 const EXPECTED_APP_ID = MACOS_SIGNING_POLICY.appId
-const EXPECTED_AUTHORITY = MACOS_SIGNING_POLICY.authority
+const EXPECTED_TEAM_ID = process.env.MAC_RELEASE_TEAM_ID
+const EXPECTED_CERT_SHA256 = process.env.MAC_RELEASE_CERT_SHA256
+const EXPECTED_AUTHORITY = MACOS_SIGNING_POLICY.authorityPrefix
 const EXPECTED_ARCHITECTURES = {
   arm64: 'arm64',
   x64: 'x86_64'
@@ -44,6 +47,7 @@ const executableName = packageMetadata.build.mac.executableName ?? productName
 const appName = `${productName}.app`
 const expectedArchitecture = EXPECTED_ARCHITECTURES[arch]
 const mountPoint = mkdtempSync(join(tmpdir(), `rovai-release-${arch}-`))
+let zipExtractDirectory = null
 const report = [
   'Rovai macOS signing verification',
   `Architecture: ${arch}`,
@@ -110,8 +114,16 @@ function verifyUpdateArtifacts() {
   if (Number(zipEntry.size) !== statSync(zipPath).size) {
     throw new Error(`latest-mac.yml has the wrong size for ${zipName}`)
   }
+  const actualSha512 = Buffer.from(
+    run('/usr/bin/shasum', ['-a', '512', zipPath]).split(/\s+/)[0],
+    'hex'
+  ).toString('base64')
+  if (zipEntry.sha512 !== actualSha512) {
+    throw new Error(`latest-mac.yml has the wrong SHA-512 for ${zipName}`)
+  }
   report.push(`Update ZIP: ${relative(root, zipPath)}`)
-  report.push('latest-mac.yml: version, release notes, sha512 and size passed')
+  report.push('latest-mac.yml: version, release notes, actual sha512 and size passed')
+  return zipPath
 }
 
 function artifactName(extension) {
@@ -171,12 +183,49 @@ function signatureDetails(label, targetPath, expectedIdentifier = null) {
   assertStableMacosSignature(label, {
     details,
     designatedRequirement,
-    expectedIdentifier
+    expectedIdentifier,
+    expectedTeamId: EXPECTED_TEAM_ID
   })
+  if (!/^[A-F0-9]{64}$/.test(EXPECTED_CERT_SHA256 ?? '')) {
+    throw new Error('MAC_RELEASE_CERT_SHA256 must be the pinned certificate SHA-256')
+  }
+  const certificateDirectory = mkdtempSync(join(tmpdir(), 'rovai-signing-cert-'))
+  try {
+    const certificatePrefix = join(certificateDirectory, 'certificate')
+    run('/usr/bin/codesign', [
+      '-d', `--extract-certificates=${certificatePrefix}`, targetPath
+    ])
+    const actualSha256 = run('/usr/bin/shasum', [
+      '-a', '256', `${certificatePrefix}0`
+    ]).split(/\s+/)[0].toUpperCase()
+    if (actualSha256 !== EXPECTED_CERT_SHA256) {
+      throw new Error(`${label} uses a different Developer ID certificate`)
+    }
+  } finally {
+    rmSync(certificateDirectory, { recursive: true })
+  }
 
   report.push(`${label} authority: ${EXPECTED_AUTHORITY}`)
+  report.push(`${label} Team ID: ${EXPECTED_TEAM_ID}`)
+  report.push(`${label} certificate SHA-256: ${EXPECTED_CERT_SHA256}`)
   report.push(`${label} designated requirement: ${designatedRequirement}`)
   return { details, designatedRequirement }
+}
+
+function assertAppMetadata(label, appPath) {
+  const infoPath = join(appPath, 'Contents', 'Info.plist')
+  for (const [key, expected] of [
+    ['CFBundleIdentifier', EXPECTED_APP_ID],
+    ['CFBundleShortVersionString', packageMetadata.version]
+  ]) {
+    const actual = run('/usr/bin/plutil', [
+      '-extract', key, 'raw', '-o', '-', infoPath
+    ])
+    if (actual !== expected) {
+      throw new Error(`${label} ${key} is ${actual}, expected ${expected}`)
+    }
+  }
+  report.push(`${label} Bundle ID and version: passed`)
 }
 
 function detachDmg() {
@@ -205,7 +254,7 @@ try {
   if (dmgSize <= 0) throw new Error('DMG is empty')
 
   const packagedAppPath = findPackagedApp()
-  verifyUpdateArtifacts()
+  const zipPath = verifyUpdateArtifacts()
   const updateConfiguration = parseYaml(readFileSync(
     join(packagedAppPath, 'Contents', 'Resources', 'app-update.yml'),
     'utf8'
@@ -235,38 +284,54 @@ try {
 
   const appExecutable = join(appPath, 'Contents', 'MacOS', executableName)
   const corePath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core')
+  const hostPath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai-host')
   const cliPath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai')
-  for (const requiredPath of [appExecutable, corePath, cliPath]) {
+  for (const requiredPath of [appExecutable, corePath, hostPath, cliPath]) {
     if (!existsSync(requiredPath)) throw new Error(`required binary is missing: ${requiredPath}`)
   }
 
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath])
   run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', corePath])
+  run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', hostPath])
   run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', cliPath])
   report.push('App codesign verification: passed')
   report.push('rovai-core codesign verification: passed')
+  report.push('rovai-host codesign verification: passed')
   report.push('rovai codesign verification: passed')
 
   assertArchitecture('App', appExecutable)
   assertArchitecture('rovai-core', corePath)
+  assertArchitecture('rovai-host', hostPath)
   assertArchitecture('rovai', cliPath)
 
-  const bundleId = run('/usr/bin/plutil', [
-    '-extract',
-    'CFBundleIdentifier',
-    'raw',
-    '-o',
-    '-',
-    join(appPath, 'Contents', 'Info.plist')
-  ])
-  if (bundleId !== EXPECTED_APP_ID) {
-    throw new Error(`Bundle ID is ${bundleId}, expected ${EXPECTED_APP_ID}`)
-  }
-  report.push(`Bundle ID: ${bundleId}`)
+  assertAppMetadata('DMG App', appPath)
 
   signatureDetails('App', appPath, EXPECTED_APP_ID)
   signatureDetails('rovai-core', corePath)
+  signatureDetails('rovai-host', hostPath)
   signatureDetails('rovai', cliPath)
+  run('/usr/bin/xcrun', ['stapler', 'validate', appPath])
+  run('/usr/bin/xcrun', ['stapler', 'validate', dmgPath])
+  run('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath])
+  report.push('App and DMG notarization tickets: valid')
+  report.push('Gatekeeper app assessment: passed')
+
+  zipExtractDirectory = mkdtempSync(join(tmpdir(), `rovai-update-${arch}-`))
+  run('/usr/bin/ditto', ['-x', '-k', zipPath, zipExtractDirectory])
+  const zipAppPath = join(zipExtractDirectory, appName)
+  if (!existsSync(zipAppPath)) throw new Error(`${appName} is missing from the update ZIP`)
+  run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', zipAppPath])
+  signatureDetails('Update ZIP App', zipAppPath, EXPECTED_APP_ID)
+  assertArchitecture('Update ZIP App', join(zipAppPath, 'Contents', 'MacOS', executableName))
+  assertAppMetadata('Update ZIP App', zipAppPath)
+  for (const binaryName of ['rovai-core', 'rovai-host', 'rovai']) {
+    const binaryPath = join(zipAppPath, 'Contents', 'Resources', 'bin', binaryName)
+    run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', binaryPath])
+    signatureDetails(`Update ZIP ${binaryName}`, binaryPath)
+    assertArchitecture(`Update ZIP ${binaryName}`, binaryPath)
+  }
+  run('/usr/bin/xcrun', ['stapler', 'validate', zipAppPath])
+  report.push('Update ZIP App signature and notarization ticket: valid')
   report.push('CDHash-only signature found: no')
   report.push('Result: passed')
 } catch (error) {
@@ -286,6 +351,14 @@ try {
       rmdirSync(mountPoint)
     } catch {
       // The verification result already records any meaningful mount failure.
+    }
+  }
+  if (zipExtractDirectory) {
+    try {
+      rmSync(zipExtractDirectory, { recursive: true, force: true })
+    } catch (error) {
+      if (!failure) failure = error instanceof Error ? error : new Error(String(error))
+      report.push(`Update ZIP cleanup: failed - ${failure.message}`)
     }
   }
 

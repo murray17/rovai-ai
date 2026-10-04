@@ -28,7 +28,7 @@ export function parseCoreFilePreviewAuthorityResult(
   value: unknown,
   request: Exclude<OpenFilePreviewRequest, { kind: 'child_of_handle' | 'authorized_root' | 'attachment' }>
 ): FilePreviewAuthorityResult | null {
-  if (!isObject(value) || value.campId !== request.campId) return null
+  if (!isObject(value) || value.threadId !== request.threadId) return null
   if (value.kind === 'evidence_review' && request.kind === 'run_evidence') {
     if (
       value.agentRunId !== request.agentRunId
@@ -37,7 +37,7 @@ export function parseCoreFilePreviewAuthorityResult(
     ) return null
     return {
       kind: 'evidence_review',
-      campId: request.campId,
+      threadId: request.threadId,
       agentRunId: request.agentRunId,
       executionEpoch: request.executionEpoch,
       evidenceFileId: request.evidenceFileId
@@ -51,7 +51,7 @@ export function parseCoreFilePreviewAuthorityResult(
     ) return null
     return {
       kind: 'evidence_identity_unavailable',
-      campId: request.campId,
+      threadId: request.threadId,
       agentRunId: request.agentRunId,
       executionEpoch: request.executionEpoch,
       evidenceFileId: request.evidenceFileId
@@ -72,7 +72,7 @@ export function parseCoreFilePreviewAuthorityResult(
   } else if (value.rawReference !== request.rawReference) return null
   return {
     kind: 'file_target',
-    campId: request.campId,
+    threadId: request.threadId,
     sourceKind: request.kind,
     sourceIdentity: value.sourceIdentity,
     rootPath: value.rootPath,
@@ -100,7 +100,7 @@ function attachmentAuthorityTarget(
             : locator.owner
   return {
     kind: 'file_target',
-    campId: request.campId,
+    threadId: request.threadId,
     sourceKind: request.kind,
     sourceIdentity: `attachment:${ownerIdentity}:${target.attachmentId}`,
     rootPath: dirname(target.path),
@@ -130,7 +130,7 @@ export class CoreFilePreviewSourceAuthority implements FilePreviewSourceAuthorit
         return target ? attachmentAuthorityTarget(request, target) : null
       }
       const value = await this.core.request<unknown>(
-        'camp.attachments.desktopOpenTarget' as CoreMethod,
+        'thread.attachments.desktopOpenTarget' as CoreMethod,
         request.locator
       )
       const target = parseDesktopAttachmentTarget(value, request.locator.attachmentRefId)

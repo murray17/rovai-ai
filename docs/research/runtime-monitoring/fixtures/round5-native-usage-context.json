@@ -1,0 +1,2027 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-30",
+  "branchBase": "0e23f6fc6f7f6943ce93e4e1f083efb68b453f2b",
+  "privacy": "Numeric necessary native metadata only; native session/message IDs aliased; no text, arguments, signatures, endpoints or credentials. Existing native journals remain owned by their Runtime.",
+  "entries": [
+    {
+      "runtime": "codebuddy-cli",
+      "version": "2.133.1",
+      "providerModel": "gpt-6.1-sol",
+      "coreDigest": "dd4ab925f9d6ab63897aaf907511ac36ed1a5aa6dc8e86e13ecf30cf4223c702",
+      "startMode": "ACP managed Session",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 1306,
+          "lastAtMs": 155455
+        },
+        "session/update/config_option_update": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 1466,
+          "lastAtMs": 1837
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1473,
+          "lastAtMs": 1473
+        },
+        "_codebuddy.ai/command": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1474,
+          "lastAtMs": 1474
+        },
+        "session/update/session_info_update": {
+          "count": 50,
+          "textScalars": 0,
+          "firstAtMs": 1613,
+          "lastAtMs": 155454
+        },
+        "session/update/agent_message_chunk": {
+          "count": 1415,
+          "textScalars": 8532,
+          "firstAtMs": 10365,
+          "lastAtMs": 154970
+        },
+        "session/update/tool_call": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 28682,
+          "lastAtMs": 144878
+        },
+        "session/update/tool_call_update": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 34263,
+          "lastAtMs": 148038
+        }
+      },
+      "publicUnits": 129525,
+      "reasoningUnits": 0,
+      "reasoningSources": [
+        "none"
+      ],
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "at": 1790780121897,
+              "raw": {
+                "type": "function_call",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780121897,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-1",
+                  "rawUsage": {
+                    "prompt_tokens": 21313,
+                    "completion_tokens": 417,
+                    "completion_tokens_details": {
+                      "reasoning_tokens": 65
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 21313,
+                "outputTokens": 417,
+                "cacheReadTokens": null,
+                "cacheWriteTokens": null
+              }
+            },
+            {
+              "at": 1790780155026,
+              "raw": {
+                "type": "function_call",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780155026,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-2",
+                  "rawUsage": {
+                    "prompt_tokens": 21703,
+                    "completion_tokens": 406,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 21120
+                    },
+                    "completion_tokens_details": {
+                      "reasoning_tokens": 32
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 21703,
+                "outputTokens": 406,
+                "cacheReadTokens": 21120,
+                "cacheWriteTokens": null
+              }
+            },
+            {
+              "at": 1790780185901,
+              "raw": {
+                "type": "function_call",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780185901,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-3",
+                  "rawUsage": {
+                    "prompt_tokens": 22115,
+                    "completion_tokens": 382,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 21504
+                    },
+                    "completion_tokens_details": {
+                      "reasoning_tokens": 12
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 22115,
+                "outputTokens": 382,
+                "cacheReadTokens": 21504,
+                "cacheWriteTokens": null
+              }
+            },
+            {
+              "at": 1790780196354,
+              "raw": {
+                "type": "function_call",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780196354,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-4",
+                  "rawUsage": {
+                    "prompt_tokens": 23173,
+                    "completion_tokens": 66,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 22016
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 23173,
+                "outputTokens": 66,
+                "cacheReadTokens": 22016,
+                "cacheWriteTokens": null
+              }
+            },
+            {
+              "at": 1790780202927,
+              "raw": {
+                "type": "message",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780202927,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-5",
+                  "rawUsage": {
+                    "prompt_tokens": 23356,
+                    "completion_tokens": 37,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 23040
+                    }
+                  }
+                },
+                "role": "assistant"
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 23356,
+                "outputTokens": 37,
+                "cacheReadTokens": 23040,
+                "cacheWriteTokens": null
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 111660,
+            "outputTokens": 1308,
+            "cacheReadTokens": 87680,
+            "cacheWriteTokens": null
+          },
+          "sessionReadback": [],
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 5,
+              "totalObservedCalls": 5
+            },
+            "outputTokens": {
+              "reportedCalls": 5,
+              "totalObservedCalls": 5
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 5
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 0,
+              "totalObservedCalls": 5
+            }
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "at": 1790780225452,
+              "raw": {
+                "type": "function_call",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780225452,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-6",
+                  "rawUsage": {
+                    "prompt_tokens": 23790,
+                    "completion_tokens": 352,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 23168
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 23790,
+                "outputTokens": 352,
+                "cacheReadTokens": 23168,
+                "cacheWriteTokens": null
+              }
+            },
+            {
+              "at": 1790780239611,
+              "raw": {
+                "type": "function_call",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780239611,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-7",
+                  "rawUsage": {
+                    "prompt_tokens": 24182,
+                    "completion_tokens": 147,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 23680
+                    }
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24182,
+                "outputTokens": 147,
+                "cacheReadTokens": 23680,
+                "cacheWriteTokens": null
+              }
+            },
+            {
+              "at": 1790780247070,
+              "raw": {
+                "type": "message",
+                "sessionId": "session-1",
+                "cwd": "/workspace",
+                "timestamp": 1790780247070,
+                "providerData": {
+                  "agent": "cli",
+                  "messageId": "call-8",
+                  "rawUsage": {
+                    "prompt_tokens": 24447,
+                    "completion_tokens": 26,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 24064
+                    }
+                  }
+                },
+                "role": "assistant"
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 24447,
+                "outputTokens": 26,
+                "cacheReadTokens": 24064,
+                "cacheWriteTokens": null
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 72419,
+            "outputTokens": 525,
+            "cacheReadTokens": 70912,
+            "cacheWriteTokens": null
+          },
+          "sessionReadback": [],
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "outputTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 0,
+              "totalObservedCalls": 3
+            }
+          }
+        }
+      ],
+      "source": "Native projects/<workspace>/<session>.jsonl providerData.rawUsage, root cli only"
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "version": "2.1.1",
+      "providerModel": "__kimi_env_model__",
+      "coreDigest": "f6805851627e32f41abb8b1b1c6de2fb5e6fe53544582eb495870fb83ccfcfe3",
+      "startMode": "ACP managed Session",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 8,
+          "textScalars": 0,
+          "firstAtMs": 1076,
+          "lastAtMs": 92346
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1323,
+          "lastAtMs": 1323
+        },
+        "session/update/current_mode_update": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 1324,
+          "lastAtMs": 49672
+        },
+        "session/update/config_option_update": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 1325,
+          "lastAtMs": 49672
+        },
+        "session/update/session_info_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1544,
+          "lastAtMs": 1544
+        },
+        "session/update/agent_message_chunk": {
+          "count": 863,
+          "textScalars": 5135,
+          "firstAtMs": 5122,
+          "lastAtMs": 91887
+        },
+        "terminal/create": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 16942,
+          "lastAtMs": 85554
+        },
+        "terminal/wait_for_exit": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 16947,
+          "lastAtMs": 85561
+        },
+        "terminal/output": {
+          "count": 35,
+          "textScalars": 0,
+          "firstAtMs": 17196,
+          "lastAtMs": 86150
+        },
+        "terminal/release": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 20045,
+          "lastAtMs": 86152
+        },
+        "session/update/usage_update": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 48726,
+          "lastAtMs": 92346
+        }
+      },
+      "publicUnits": 56275,
+      "reasoningUnits": 0,
+      "reasoningSources": [
+        "none"
+      ],
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "at": 1790782095638,
+              "raw": {
+                "type": "context.append_loop_event",
+                "agentId": "main",
+                "time": 1790782095638,
+                "event": {
+                  "type": "step.end",
+                  "uuid": "call-1",
+                  "turnId": "0",
+                  "usage": {
+                    "inputOther": 20280,
+                    "output": 241,
+                    "inputCacheRead": 0,
+                    "inputCacheCreation": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 20280,
+                "outputTokens": 241,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790782112511,
+              "raw": {
+                "type": "context.append_loop_event",
+                "agentId": "main",
+                "time": 1790782112511,
+                "event": {
+                  "type": "step.end",
+                  "uuid": "call-2",
+                  "turnId": "0",
+                  "usage": {
+                    "inputOther": 449,
+                    "output": 250,
+                    "inputCacheRead": 20096,
+                    "inputCacheCreation": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 20545,
+                "outputTokens": 250,
+                "cacheReadTokens": 20096,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790782118462,
+              "raw": {
+                "type": "context.append_loop_event",
+                "agentId": "main",
+                "time": 1790782118462,
+                "event": {
+                  "type": "step.end",
+                  "uuid": "call-3",
+                  "turnId": "0",
+                  "usage": {
+                    "inputOther": 1111,
+                    "output": 49,
+                    "inputCacheRead": 20352,
+                    "inputCacheCreation": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 21463,
+                "outputTokens": 49,
+                "cacheReadTokens": 20352,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790782124292,
+              "raw": {
+                "type": "context.append_loop_event",
+                "agentId": "main",
+                "time": 1790782124292,
+                "event": {
+                  "type": "step.end",
+                  "uuid": "call-4",
+                  "turnId": "0",
+                  "usage": {
+                    "inputOther": 201,
+                    "output": 20,
+                    "inputCacheRead": 21376,
+                    "inputCacheCreation": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 21577,
+                "outputTokens": 20,
+                "cacheReadTokens": 21376,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 83865,
+            "outputTokens": 560,
+            "cacheReadTokens": 61824,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "55276699-62a3-4a36-9cba-c577f3e60cbb",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "__kimi_env_model__",
+              "observedAt": "2026-09-30T15:28:44.817332+00:00",
+              "runtimeKind": "kimi-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 21597,
+              "windowTokens": 262144
+            }
+          ],
+          "contextSourceRecords": [
+            {
+              "raw": {
+                "method": "session/update",
+                "params": {
+                  "sessionId": "session-1",
+                  "update": {
+                    "sessionUpdate": "usage_update",
+                    "used": 21597,
+                    "size": 262144
+                  }
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 21597,
+                "windowTokens": 262144
+              }
+            }
+          ],
+          "contextMatchesReadback": true,
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "outputTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            }
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "at": 1790782150578,
+              "raw": {
+                "type": "context.append_loop_event",
+                "agentId": "main",
+                "time": 1790782150578,
+                "event": {
+                  "type": "step.end",
+                  "uuid": "call-5",
+                  "turnId": "1",
+                  "usage": {
+                    "inputOther": 608,
+                    "output": 329,
+                    "inputCacheRead": 21376,
+                    "inputCacheCreation": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 21984,
+                "outputTokens": 329,
+                "cacheReadTokens": 21376,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790782161727,
+              "raw": {
+                "type": "context.append_loop_event",
+                "agentId": "main",
+                "time": 1790782161727,
+                "event": {
+                  "type": "step.end",
+                  "uuid": "call-6",
+                  "turnId": "1",
+                  "usage": {
+                    "inputOther": 449,
+                    "output": 153,
+                    "inputCacheRead": 21888,
+                    "inputCacheCreation": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 22337,
+                "outputTokens": 153,
+                "cacheReadTokens": 21888,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790782167916,
+              "raw": {
+                "type": "context.append_loop_event",
+                "agentId": "main",
+                "time": 1790782167916,
+                "event": {
+                  "type": "step.end",
+                  "uuid": "call-7",
+                  "turnId": "1",
+                  "usage": {
+                    "inputOther": 412,
+                    "output": 20,
+                    "inputCacheRead": 22144,
+                    "inputCacheCreation": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 22556,
+                "outputTokens": 20,
+                "cacheReadTokens": 22144,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 66877,
+            "outputTokens": 502,
+            "cacheReadTokens": 65408,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "55276699-62a3-4a36-9cba-c577f3e60cbb",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "__kimi_env_model__",
+              "observedAt": "2026-09-30T15:29:28.565621+00:00",
+              "runtimeKind": "kimi-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_event",
+              "usedTokens": 22576,
+              "windowTokens": 262144
+            }
+          ],
+          "contextSourceRecords": [
+            {
+              "raw": {
+                "method": "session/update",
+                "params": {
+                  "sessionId": "session-1",
+                  "update": {
+                    "sessionUpdate": "usage_update",
+                    "used": 22576,
+                    "size": 262144
+                  }
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 22576,
+                "windowTokens": 262144
+              }
+            }
+          ],
+          "contextMatchesReadback": true,
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "outputTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            }
+          }
+        }
+      ],
+      "source": "Native agents/main/wire.jsonl context.append_loop_event step.end; usage.record restatements excluded",
+      "cacheWriteEvidence": "Explicit installed OpenAI adapter inputCacheCreation=0; positive provider writes are unverified"
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.30",
+      "providerModel": "sub2api/gpt-6.1-sol",
+      "coreDigest": "dd4ab925f9d6ab63897aaf907511ac36ed1a5aa6dc8e86e13ecf30cf4223c702",
+      "startMode": "ACP managed Session",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 1728,
+          "lastAtMs": 143550
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 2197,
+          "lastAtMs": 2197
+        },
+        "session/update/agent_message_chunk": {
+          "count": 1447,
+          "textScalars": 8763,
+          "firstAtMs": 8833,
+          "lastAtMs": 143149
+        },
+        "session/update/tool_call": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 29193,
+          "lastAtMs": 135833
+        },
+        "session/update/tool_call_update": {
+          "count": 12,
+          "textScalars": 0,
+          "firstAtMs": 29364,
+          "lastAtMs": 137234
+        }
+      },
+      "publicUnits": 132675,
+      "reasoningUnits": 0,
+      "reasoningSources": [
+        "none"
+      ],
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "at": 1790780123556,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780123556
+                },
+                "tokens": {
+                  "input": 7848,
+                  "output": 344,
+                  "reasoning": 45,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 7848,
+                "outputTokens": 389,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790780153585,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780153585
+                },
+                "tokens": {
+                  "input": 524,
+                  "output": 356,
+                  "reasoning": 23,
+                  "cache": {
+                    "write": 0,
+                    "read": 7680
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 8204,
+                "outputTokens": 379,
+                "cacheReadTokens": 7680,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790780175787,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780175787
+                },
+                "tokens": {
+                  "input": 508,
+                  "output": 362,
+                  "reasoning": 12,
+                  "cache": {
+                    "write": 0,
+                    "read": 8064
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 8572,
+                "outputTokens": 374,
+                "cacheReadTokens": 8064,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790780182248,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780182248
+                },
+                "tokens": {
+                  "input": 1143,
+                  "output": 62,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 8448
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 9591,
+                "outputTokens": 62,
+                "cacheReadTokens": 8448,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790780188411,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780188411
+                },
+                "tokens": {
+                  "input": 235,
+                  "output": 44,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 9472
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 9707,
+                "outputTokens": 44,
+                "cacheReadTokens": 9472,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 43922,
+            "outputTokens": 1248,
+            "cacheReadTokens": 33664,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [],
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 5,
+              "totalObservedCalls": 5
+            },
+            "outputTokens": {
+              "reportedCalls": 5,
+              "totalObservedCalls": 5
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 5,
+              "totalObservedCalls": 5
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 5,
+              "totalObservedCalls": 5
+            }
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "at": 1790780216879,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780216879
+                },
+                "tokens": {
+                  "input": 10140,
+                  "output": 339,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10140,
+                "outputTokens": 339,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790780227564,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780227564
+                },
+                "tokens": {
+                  "input": 509,
+                  "output": 137,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 9984
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10493,
+                "outputTokens": 137,
+                "cacheReadTokens": 9984,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "at": 1790780233695,
+              "raw": {
+                "role": "assistant",
+                "time": {
+                  "completed": 1790780233695
+                },
+                "tokens": {
+                  "input": 315,
+                  "output": 49,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 10368
+                  }
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10683,
+                "outputTokens": 49,
+                "cacheReadTokens": 10368,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 31316,
+            "outputTokens": 525,
+            "cacheReadTokens": 20352,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [],
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "outputTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            }
+          }
+        }
+      ],
+      "source": "Native read-only opencode.db root Session assistant message metadata; completed calls only",
+      "contextEvidence": {
+        "installedModel": "sub2api/gpt-6.1-sol",
+        "configuredLimit": null,
+        "nativeGauge": "raw_absent"
+      }
+    },
+    {
+      "runtime": "claude-code-cli",
+      "version": "2.1.280 (Claude Code)",
+      "providerModel": "gpt-6.1-sol",
+      "coreDigest": "3b49042275b977a7ce674086b1288a70e9334b2693c69627d9132c8f906b924d",
+      "startMode": "Claude stream-json with partial events",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "object": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 498,
+          "lastAtMs": 498
+        },
+        "system": {
+          "count": 183,
+          "textScalars": 0,
+          "firstAtMs": 267,
+          "lastAtMs": 130248
+        },
+        "control_response": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 574,
+          "lastAtMs": 1055
+        },
+        "command_lifecycle": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 612,
+          "lastAtMs": 130248
+        },
+        "stream_event": {
+          "count": 57,
+          "textScalars": 0,
+          "firstAtMs": 3249,
+          "lastAtMs": 130240
+        },
+        "stream_event/signature_delta": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 23475,
+          "lastAtMs": 128557
+        },
+        "assistant": {
+          "count": 17,
+          "textScalars": 0,
+          "firstAtMs": 23478,
+          "lastAtMs": 130188
+        },
+        "stream_event/input_json_delta": {
+          "count": 183,
+          "textScalars": 0,
+          "firstAtMs": 32859,
+          "lastAtMs": 122195
+        },
+        "user": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 35771,
+          "lastAtMs": 122617
+        },
+        "stream_event/text_delta": {
+          "count": 1350,
+          "textScalars": 2111,
+          "firstAtMs": 23494,
+          "lastAtMs": 129915
+        },
+        "stream_event/thinking_delta": {
+          "count": 158,
+          "textScalars": 862,
+          "firstAtMs": 57695,
+          "lastAtMs": 128511
+        },
+        "result": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 74227,
+          "lastAtMs": 130245
+        }
+      },
+      "publicUnits": 60645,
+      "reasoningUnits": 10375,
+      "reasoningSources": [
+        "none",
+        "stream_text"
+      ],
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "raw": {
+                "messageId": "identity-1",
+                "usage": {
+                  "input_tokens": 11089,
+                  "output_tokens": 552,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 11089,
+                "outputTokens": 552,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "messageId": "identity-2",
+                "usage": {
+                  "input_tokens": 11908,
+                  "output_tokens": 882,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 11908,
+                "outputTokens": 882,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "messageId": "identity-3",
+                "usage": {
+                  "input_tokens": 12307,
+                  "output_tokens": 593,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 12307,
+                "outputTokens": 593,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "messageId": "identity-4",
+                "usage": {
+                  "input_tokens": 6931,
+                  "output_tokens": 91,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 5888
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 12819,
+                "outputTokens": 91,
+                "cacheReadTokens": 5888,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 48123,
+            "outputTokens": 2118,
+            "cacheReadTokens": 5888,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "9c85c250-04ee-456a-bd46-2677d785c246",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "observedAt": "2026-09-30T15:09:55.878605+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 12819,
+              "windowTokens": 200000
+            }
+          ],
+          "contextSourceRecords": [
+            {
+              "raw": {
+                "latestRootCall": {
+                  "messageId": "identity-4",
+                  "usage": {
+                    "input_tokens": 6931,
+                    "output_tokens": 91,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 5888
+                  }
+                },
+                "result": {
+                  "type": "result",
+                  "modelUsage": {
+                    "gpt-6.1-sol": {
+                      "contextWindow": 200000
+                    }
+                  }
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 12819,
+                "windowTokens": 200000
+              }
+            }
+          ],
+          "contextMatchesReadback": true,
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "outputTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            }
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "raw": {
+                "messageId": "identity-1",
+                "usage": {
+                  "input_tokens": 13604,
+                  "output_tokens": 869,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 13604,
+                "outputTokens": 869,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "messageId": "identity-2",
+                "usage": {
+                  "input_tokens": 8323,
+                  "output_tokens": 290,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 5888
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 14211,
+                "outputTokens": 290,
+                "cacheReadTokens": 5888,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "messageId": "identity-3",
+                "usage": {
+                  "input_tokens": 2347,
+                  "output_tokens": 49,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 12160
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 14507,
+                "outputTokens": 49,
+                "cacheReadTokens": 12160,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 42322,
+            "outputTokens": 1208,
+            "cacheReadTokens": 18048,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "9c85c250-04ee-456a-bd46-2677d785c246",
+              "dialectId": "claude-last-call-context-input-v1",
+              "modelKey": "gpt-6.1-sol",
+              "observedAt": "2026-09-30T15:11:17.100366+00:00",
+              "runtimeKind": "claude-code-cli",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 14507,
+              "windowTokens": 200000
+            }
+          ],
+          "contextSourceRecords": [
+            {
+              "raw": {
+                "latestRootCall": {
+                  "messageId": "identity-3",
+                  "usage": {
+                    "input_tokens": 2347,
+                    "output_tokens": 49,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 12160
+                  }
+                },
+                "result": {
+                  "type": "result",
+                  "modelUsage": {
+                    "gpt-6.1-sol": {
+                      "contextWindow": 200000
+                    }
+                  }
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 14507,
+                "windowTokens": 200000
+              }
+            }
+          ],
+          "contextMatchesReadback": true,
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "outputTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            }
+          }
+        }
+      ],
+      "source": "Root stream_event message_delta + exact latest native modelUsage contextWindow"
+    },
+    {
+      "runtime": "pi",
+      "version": "0.84.4",
+      "providerModel": "pi://model?provider=sub2api&id=gpt-6.1-sol",
+      "coreDigest": "3b49042275b977a7ce674086b1288a70e9334b2693c69627d9132c8f906b924d",
+      "startMode": "Pi RPC + managed host v8",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "setStatus/extension_ui_request": {
+          "count": 17,
+          "textScalars": 0,
+          "firstAtMs": 399,
+          "lastAtMs": 98344
+        },
+        "response": {
+          "count": 16,
+          "textScalars": 0,
+          "firstAtMs": 414,
+          "lastAtMs": 55220
+        },
+        "agent_start": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 501,
+          "lastAtMs": 55220
+        },
+        "turn_start": {
+          "count": 7,
+          "textScalars": 0,
+          "firstAtMs": 501,
+          "lastAtMs": 90767
+        },
+        "message_start": {
+          "count": 14,
+          "textScalars": 0,
+          "firstAtMs": 501,
+          "lastAtMs": 95623
+        },
+        "message_end": {
+          "count": 14,
+          "textScalars": 0,
+          "firstAtMs": 501,
+          "lastAtMs": 98340
+        },
+        "message_update/thinking_start": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 3737,
+          "lastAtMs": 3737
+        },
+        "message_update/thinking_delta": {
+          "count": 86,
+          "textScalars": 486,
+          "firstAtMs": 5702,
+          "lastAtMs": 6359
+        },
+        "message_update/thinking_end": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 6359,
+          "lastAtMs": 6359
+        },
+        "message_update/text_start": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 6359,
+          "lastAtMs": 95674
+        },
+        "message_update/text_delta": {
+          "count": 898,
+          "textScalars": 5345,
+          "firstAtMs": 6378,
+          "lastAtMs": 97977
+        },
+        "message_update/text_end": {
+          "count": 6,
+          "textScalars": 0,
+          "firstAtMs": 21054,
+          "lastAtMs": 98204
+        },
+        "message_update/toolcall_start": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 21056,
+          "lastAtMs": 89668
+        },
+        "message_update/toolcall_delta": {
+          "count": 121,
+          "textScalars": 524,
+          "firstAtMs": 21056,
+          "lastAtMs": 90093
+        },
+        "message_update/toolcall_end": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 21419,
+          "lastAtMs": 90357
+        },
+        "tool_execution_start": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 21528,
+          "lastAtMs": 90425
+        },
+        "tool_execution_update": {
+          "count": 8,
+          "textScalars": 0,
+          "firstAtMs": 21532,
+          "lastAtMs": 90761
+        },
+        "tool_execution_end": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 24549,
+          "lastAtMs": 90762
+        },
+        "turn_end": {
+          "count": 7,
+          "textScalars": 0,
+          "firstAtMs": 24550,
+          "lastAtMs": 98345
+        },
+        "agent_end": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 54610,
+          "lastAtMs": 98345
+        },
+        "agent_settled": {
+          "count": 2,
+          "textScalars": 0,
+          "firstAtMs": 54610,
+          "lastAtMs": 98345
+        }
+      },
+      "publicUnits": 62600,
+      "reasoningUnits": 10125,
+      "reasoningSources": [
+        "stream_text",
+        "none"
+      ],
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "message_end",
+                "usage": {
+                  "input": 7824,
+                  "output": 297,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "totalTokens": 8121
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 7824,
+                "outputTokens": 297,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "type": "message_end",
+                "usage": {
+                  "input": 455,
+                  "output": 259,
+                  "cacheRead": 7680,
+                  "cacheWrite": 0,
+                  "totalTokens": 8394
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 8135,
+                "outputTokens": 259,
+                "cacheReadTokens": 7680,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "type": "message_end",
+                "usage": {
+                  "input": 1117,
+                  "output": 56,
+                  "cacheRead": 7936,
+                  "cacheWrite": 0,
+                  "totalTokens": 9109
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 9053,
+                "outputTokens": 56,
+                "cacheReadTokens": 7936,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "type": "message_end",
+                "usage": {
+                  "input": 205,
+                  "output": 46,
+                  "cacheRead": 8960,
+                  "cacheWrite": 0,
+                  "totalTokens": 9211
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 9165,
+                "outputTokens": 46,
+                "cacheReadTokens": 8960,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 34177,
+            "outputTokens": 658,
+            "cacheReadTokens": 24576,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "b973da7c-5607-40d5-9b57-3d7e1bc085b1",
+              "dialectId": "pi-native-context-estimate-v1",
+              "modelKey": "pi://model?provider=sub2api&id=gpt-6.1-sol",
+              "observedAt": "2026-09-30T15:08:36.219402+00:00",
+              "runtimeKind": "pi",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 9211,
+              "windowTokens": 1050000
+            }
+          ],
+          "contextSourceRecords": [
+            {
+              "raw": {
+                "type": "extension_ui_request",
+                "method": "setStatus",
+                "statusKey": "rovai-managed-context-usage",
+                "numericStatus": {
+                  "usedTokens": 8124,
+                  "windowTokens": 1050000,
+                  "provider": "sub2api",
+                  "modelId": "gpt-6.1-sol"
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 8124,
+                "windowTokens": 1050000
+              }
+            },
+            {
+              "raw": {
+                "type": "extension_ui_request",
+                "method": "setStatus",
+                "statusKey": "rovai-managed-context-usage",
+                "numericStatus": {
+                  "usedTokens": 9206,
+                  "windowTokens": 1050000,
+                  "provider": "sub2api",
+                  "modelId": "gpt-6.1-sol"
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 9206,
+                "windowTokens": 1050000
+              }
+            },
+            {
+              "raw": {
+                "type": "extension_ui_request",
+                "method": "setStatus",
+                "statusKey": "rovai-managed-context-usage",
+                "numericStatus": {
+                  "usedTokens": 9142,
+                  "windowTokens": 1050000,
+                  "provider": "sub2api",
+                  "modelId": "gpt-6.1-sol"
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 9142,
+                "windowTokens": 1050000
+              }
+            },
+            {
+              "raw": {
+                "type": "extension_ui_request",
+                "method": "setStatus",
+                "statusKey": "rovai-managed-context-usage",
+                "numericStatus": {
+                  "usedTokens": 9211,
+                  "windowTokens": 1050000,
+                  "provider": "sub2api",
+                  "modelId": "gpt-6.1-sol"
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 9211,
+                "windowTokens": 1050000
+              }
+            }
+          ],
+          "contextMatchesReadback": true,
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "outputTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 4,
+              "totalObservedCalls": 4
+            }
+          }
+        },
+        {
+          "runOrdinal": 2,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [
+            {
+              "raw": {
+                "type": "message_end",
+                "usage": {
+                  "input": 631,
+                  "output": 331,
+                  "cacheRead": 8960,
+                  "cacheWrite": 0,
+                  "totalTokens": 9922
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 9591,
+                "outputTokens": 331,
+                "cacheReadTokens": 8960,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "type": "message_end",
+                "usage": {
+                  "input": 464,
+                  "output": 131,
+                  "cacheRead": 9472,
+                  "cacheWrite": 0,
+                  "totalTokens": 10067
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 9936,
+                "outputTokens": 131,
+                "cacheReadTokens": 9472,
+                "cacheWriteTokens": 0
+              }
+            },
+            {
+              "raw": {
+                "type": "message_end",
+                "usage": {
+                  "input": 268,
+                  "output": 41,
+                  "cacheRead": 9856,
+                  "cacheWrite": 0,
+                  "totalTokens": 10165
+                }
+              },
+              "expectedParsed": {
+                "promptInputTotalTokens": 10124,
+                "outputTokens": 41,
+                "cacheReadTokens": 9856,
+                "cacheWriteTokens": 0
+              }
+            }
+          ],
+          "readback": {
+            "promptInputTotalTokens": 29651,
+            "outputTokens": 503,
+            "cacheReadTokens": 28288,
+            "cacheWriteTokens": 0
+          },
+          "sessionReadback": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "b973da7c-5607-40d5-9b57-3d7e1bc085b1",
+              "dialectId": "pi-native-context-estimate-v1",
+              "modelKey": "pi://model?provider=sub2api&id=gpt-6.1-sol",
+              "observedAt": "2026-09-30T15:09:19.951734+00:00",
+              "runtimeKind": "pi",
+              "sessionGeneration": 1,
+              "source": "runtime_private_extension",
+              "usedTokens": 10165,
+              "windowTokens": 1050000
+            }
+          ],
+          "contextSourceRecords": [
+            {
+              "raw": {
+                "type": "extension_ui_request",
+                "method": "setStatus",
+                "statusKey": "rovai-managed-context-usage",
+                "numericStatus": {
+                  "usedTokens": 9925,
+                  "windowTokens": 1050000,
+                  "provider": "sub2api",
+                  "modelId": "gpt-6.1-sol"
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 9925,
+                "windowTokens": 1050000
+              }
+            },
+            {
+              "raw": {
+                "type": "extension_ui_request",
+                "method": "setStatus",
+                "statusKey": "rovai-managed-context-usage",
+                "numericStatus": {
+                  "usedTokens": 10100,
+                  "windowTokens": 1050000,
+                  "provider": "sub2api",
+                  "modelId": "gpt-6.1-sol"
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 10100,
+                "windowTokens": 1050000
+              }
+            },
+            {
+              "raw": {
+                "type": "extension_ui_request",
+                "method": "setStatus",
+                "statusKey": "rovai-managed-context-usage",
+                "numericStatus": {
+                  "usedTokens": 10165,
+                  "windowTokens": 1050000,
+                  "provider": "sub2api",
+                  "modelId": "gpt-6.1-sol"
+                }
+              },
+              "expectedParsedContext": {
+                "usedTokens": 10165,
+                "windowTokens": 1050000
+              }
+            }
+          ],
+          "contextMatchesReadback": true,
+          "sumMatchesReadback": true,
+          "fieldPresence": {
+            "promptInputTotalTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "outputTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheReadTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            },
+            "cacheWriteTokens": {
+              "reportedCalls": 3,
+              "totalObservedCalls": 3
+            }
+          }
+        }
+      ],
+      "source": "Root RPC assistant message_end + native ctx.getContextUsage estimate"
+    },
+    {
+      "runtime": "qoder-cli",
+      "version": "1.1.64",
+      "providerModel": "qoder-custom-d5cadd17-bcd2-482b-8f14-da1839a542d2/gpt-6.1-sol",
+      "coreDigest": "dd4ab925f9d6ab63897aaf907511ac36ed1a5aa6dc8e86e13ecf30cf4223c702",
+      "startMode": "ACP managed Session",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 3307,
+          "lastAtMs": 109618
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 8557,
+          "lastAtMs": 8557
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 290,
+          "textScalars": 1664,
+          "firstAtMs": 49274,
+          "lastAtMs": 64648
+        },
+        "session/update/agent_message_chunk": {
+          "count": 401,
+          "textScalars": 2296,
+          "firstAtMs": 64673,
+          "lastAtMs": 109003
+        },
+        "session/update/tool_call_update": {
+          "count": 3,
+          "textScalars": 0,
+          "firstAtMs": 79884,
+          "lastAtMs": 96919
+        }
+      },
+      "publicUnits": 48925,
+      "reasoningUnits": 35625,
+      "reasoningSources": [
+        "stream_text"
+      ],
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [],
+          "readback": {
+            "promptInputTotalTokens": null,
+            "outputTokens": null,
+            "cacheReadTokens": null,
+            "cacheWriteTokens": null
+          },
+          "sessionReadback": []
+        }
+      ],
+      "source": "Healthy ACP raw witness; no Usage/Context candidate in this channel"
+    },
+    {
+      "runtime": "trae-cn-cli",
+      "version": "trae-cli version 0.120.52",
+      "providerModel": "GLM-5.3",
+      "coreDigest": "dd4ab925f9d6ab63897aaf907511ac36ed1a5aa6dc8e86e13ecf30cf4223c702",
+      "startMode": "ACP managed Session",
+      "sameNativeSessionAcrossRuns": true,
+      "rawGroups": {
+        "": {
+          "count": 5,
+          "textScalars": 0,
+          "firstAtMs": 483,
+          "lastAtMs": 60014
+        },
+        "session/update/tool_call": {
+          "count": 4,
+          "textScalars": 0,
+          "firstAtMs": 882,
+          "lastAtMs": 52055
+        },
+        "session/update/available_commands_update": {
+          "count": 1,
+          "textScalars": 0,
+          "firstAtMs": 1031,
+          "lastAtMs": 1031
+        },
+        "session/update/agent_thought_chunk": {
+          "count": 120,
+          "textScalars": 9331,
+          "firstAtMs": 5918,
+          "lastAtMs": 57593
+        },
+        "session/update/agent_message_chunk": {
+          "count": 34,
+          "textScalars": 2439,
+          "firstAtMs": 45650,
+          "lastAtMs": 60002
+        }
+      },
+      "publicUnits": 55625,
+      "reasoningUnits": 196695,
+      "reasoningSources": [
+        "stream_text"
+      ],
+      "runs": [
+        {
+          "runOrdinal": 1,
+          "nativeGeneration": 1,
+          "status": "succeeded",
+          "sourceRecords": [],
+          "readback": {
+            "promptInputTotalTokens": null,
+            "outputTokens": null,
+            "cacheReadTokens": null,
+            "cacheWriteTokens": null
+          },
+          "sessionReadback": []
+        }
+      ],
+      "source": "Healthy ACP raw witness; no Usage/Context candidate in this channel"
+    }
+  ]
+}

@@ -5,7 +5,7 @@ authority: execution-evidence-lifecycle-and-persisted-tool-output
 status: accepted
 version: 42
 source_version: v1.66
-last_updated: 2026-09-22
+last_updated: 2026-09-25
 ---
 
 # Run Process Detail Surface v42
@@ -51,6 +51,16 @@ UTF-8 前缀，不拆分字符，不追加伪造的省略后缀；外层 Evidenc
 
 互斥终态冲突继续保留先前已接受的文本与标记并把 outcome 保持为 `unsettled`。迟到 started、interruption 补齐和其他
 纯元数据更新都不能清除已确认的截断事实。
+
+## Built-in CLI 载体在单记录生命周期中的关联
+
+本条修正继承自 v34 的 Shell 起止序号严格包围 Core 操作条件。v41 起 Shell started/completed 合为一条
+Evidence，Shell 只有一个展示序号，无法形成包围区间；它可能先于或晚于 Core 调用落库。
+这类单记录 Shell 只在同一 AgentRun、同一 execution epoch、同一 CLI operation、Core 和 Shell
+各只有一个展示序号且两个序号紧邻时，才可使用既有 Agent-facing 结果 digest 的精确相等和
+唯一匹配来折叠展示。旧多记录 Shell 仍使用严格包围条件和完整结果／digest 的既有比较。混合命令、
+失败、结果不同、重复或不确定的匹配保持独立。跨页窗口可保存这个已验证的关联标记；Renderer 仍须确认
+Shell 是纯 CLI 命令。该关联只影响展示，不更改 Evidence、Canonical 身份或持久化结果。
 
 ## Wire、历史与界面
 

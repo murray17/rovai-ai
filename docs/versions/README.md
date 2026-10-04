@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.70
-last_updated: 2026-09-25
+current_version: v1.72
+last_updated: 2026-09-27
 ---
 
 # Rovai-ai 版本记录
@@ -222,4 +222,7 @@ last_updated: 2026-09-25
 | v1.67 | `historical` | Task 去版本化、Agent Task 输出精简与模型上下文技术字段清理 | [v1.67/README.md](v1.67/README.md) |
 | v1.68 | `historical` | 公共历史按需读取、执行边界提示与分页上限 100 | [v1.68/README.md](v1.68/README.md) |
 | v1.69 | `historical` | Camp 主动读取、搜索与撤回占位 | [v1.69/README.md](v1.69/README.md) |
-| v1.70 | `current` | Skills 资源与模型索引重构；公开 Camp historyHint 冻结额外可见消息判断 | [v1.70/README.md](v1.70/README.md) |
+| v1.70 | `historical` | Skills 资源与模型索引重构；公开 Camp historyHint 冻结额外可见消息判断 | [v1.70/README.md](v1.70/README.md) |
+
+| v1.71 | `historical` | 会话、使命与任务提醒；消息关联完成与真实状态来源 | [v1.71/README.md](v1.71/README.md) |
+| v1.72 | `current` | Lark 独立渠道自动化验收完成、真实租户逐项验收进行中；并行交付侧栏范围读取与 Skills 目录缓存 | [v1.72/README.md](v1.72/README.md) |

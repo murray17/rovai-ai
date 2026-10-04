@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useMobileLayout } from './MobileLayout'
 import { AutomationGlyph } from './AutomationControls'
 import './automation-schedule-pickers.css'
+import { UiText, getInterfaceLanguage, useInterfaceLanguage, uiAttribute } from './interface-language'
 
 // The same calendar/time fields and schedule validation serve both surfaces.
 function SchedulePopover({ open, onOpenChange, trigger, children, label, className, onOpenAutoFocus }: {
@@ -15,7 +16,7 @@ function SchedulePopover({ open, onOpenChange, trigger, children, label, classNa
     <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
     <Dialog.Portal><Dialog.Overlay className="mobile-sheet-overlay" />
       <Dialog.Content className={`automation-schedule-popover mobile-schedule-sheet ${className}`} aria-describedby={undefined}>
-        <header className="mobile-sheet-heading"><Dialog.Title>{label}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭日期时间选择">×</Dialog.Close></header>
+        <header className="mobile-sheet-heading"><Dialog.Title>{label}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label={uiAttribute("关闭日期时间选择")}>×</Dialog.Close></header>
         {children}
       </Dialog.Content>
     </Dialog.Portal>
@@ -63,27 +64,27 @@ export function AutomationTimePicker({ value, onChange, disabled }: {
     if (next) updateParts(value.split(':'))
     else commit()
     setOpen(next)
-  }} trigger={<button type="button" className="automation-picker automation-schedule-value" aria-label={`时间：${value}`} disabled={disabled}><AutomationGlyph name="clock" /><span>{value}</span><AutomationGlyph name="chevron" /></button>} className="automation-time-popover" label="选择运行时间" onOpenAutoFocus={(event) => { event.preventDefault(); hourInput.current?.focus(); hourInput.current?.select() }}>
-      <div className="automation-time-heading"><strong>选择时间</strong><span>24 小时制</span></div>
+  }} trigger={<button type="button" className="automation-picker automation-schedule-value" aria-label={uiAttribute("时间：{0}", String(value))} disabled={disabled}><AutomationGlyph name="clock" /><span>{value}</span><AutomationGlyph name="chevron" /></button>} className="automation-time-popover" label={uiAttribute("选择运行时间")} onOpenAutoFocus={(event) => { event.preventDefault(); hourInput.current?.focus(); hourInput.current?.select() }}>
+      <div className="automation-time-heading"><strong><UiText zh={"选择时间"} /></strong><span><UiText zh={"24 小时制"} /></span></div>
       <div className="automation-time-editor">
         {(['hour', 'minute'] as const).map((unit, index) => <div className="automation-time-column" key={unit}>
-          <label htmlFor={`${id}-${unit}`}>{index ? '分钟' : '小时'}</label>
+          <label htmlFor={`${id}-${unit}`}>{index ? uiAttribute("分钟") : uiAttribute("小时")}</label>
           <div className="automation-time-stepper">
-            <button type="button" disabled={disabled} aria-label={index ? '分钟加五' : '小时加一'} onClick={() => step(unit, index ? 5 : 1)}><AutomationGlyph name="chevron" /></button>
+            <button type="button" disabled={disabled} aria-label={index ? uiAttribute("分钟加五") : uiAttribute("小时加一")} onClick={() => step(unit, index ? 5 : 1)}><AutomationGlyph name="chevron" /></button>
             <input ref={index ? undefined : hourInput} id={`${id}-${unit}`} role="spinbutton" aria-valuemin={0} aria-valuemax={index ? 59 : 23} aria-valuenow={Number(parts[index]) || 0} inputMode="numeric" maxLength={2} autoComplete="off" value={parts[index]} disabled={disabled}
               onFocus={(event) => event.target.select()} onChange={(event) => { const next = [...partsRef.current]; next[index] = event.target.value.replace(/\D/g, ''); updateParts(next) }}
               onBlur={() => commit()} onKeyDown={(event) => {
                 if (event.key === 'Enter') { event.preventDefault(); commit(); setOpen(false) }
                 else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); step(unit, (index ? 5 : 1) * (event.key === 'ArrowUp' ? 1 : -1)); event.currentTarget.select() }
               }} />
-            <button type="button" disabled={disabled} aria-label={index ? '分钟减五' : '小时减一'} onClick={() => step(unit, index ? -5 : -1)}><AutomationGlyph name="chevron" /></button>
+            <button type="button" disabled={disabled} aria-label={index ? uiAttribute("分钟减五") : uiAttribute("小时减一")} onClick={() => step(unit, index ? -5 : -1)}><AutomationGlyph name="chevron" /></button>
           </div>
         </div>)}
         <span className="automation-time-colon" aria-hidden="true">:</span>
       </div>
-      <p className="automation-time-presets-label">快捷时间</p>
+      <p className="automation-time-presets-label"><UiText zh={"快捷时间"} /></p>
       <div className="automation-time-presets">{presets.map((preset) => <button type="button" key={preset} disabled={disabled} aria-pressed={normalizeAutomationTime(parts[0], parts[1]) === preset} onClick={() => { commit(preset); setOpen(false) }}>{preset}</button>)}</div>
-      <div className="automation-time-footer"><span>可直接输入时间</span><button className="primary-button" type="button" disabled={disabled} onClick={() => { commit(); setOpen(false) }}>完成</button></div>
+      <div className="automation-time-footer"><span><UiText zh={"可直接输入时间"} /></span><button className="primary-button" type="button" disabled={disabled} onClick={() => { commit(); setOpen(false) }}><UiText zh={"完成"} /></button></div>
   </SchedulePopover>
 }
 
@@ -94,13 +95,14 @@ function localDate(value: string): Date {
 export function automationDateKey(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
-const dateLabel = (date: Date): string => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(date)
+const dateLabel = (date: Date): string => new Intl.DateTimeFormat(getInterfaceLanguage() === 'en' ? 'en-US' : 'zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(date)
 
 export function AutomationDatePicker({ value, onChange, disabled }: {
   value: string
   onChange(value: string): void
   disabled: boolean
 }): React.JSX.Element {
+  const language = useInterfaceLanguage()
   const [open, setOpen] = useState(false)
   const selected = localDate(value)
   const safeDate = Number.isNaN(selected.getTime()) ? new Date() : selected
@@ -123,13 +125,13 @@ export function AutomationDatePicker({ value, onChange, disabled }: {
   return <SchedulePopover open={open} onOpenChange={(next) => {
     if (next) { setMonth(new Date(safeDate.getFullYear(), safeDate.getMonth(), 1, 12)); setFocusedDate(automationDateKey(safeDate)) }
     setOpen(next)
-  }} trigger={<button type="button" className="automation-picker automation-schedule-value" aria-label={`日期：${value}`} disabled={disabled}><AutomationGlyph name="calendar" /><span>{Number.isNaN(selected.getTime()) ? '选择日期' : dateLabel(selected)}</span><AutomationGlyph name="chevron" /></button>} className="automation-date-popover" label="选择运行日期" onOpenAutoFocus={(event) => { event.preventDefault(); buttons.current.get(automationDateKey(safeDate))?.focus() }}>
+  }} trigger={<button type="button" className="automation-picker automation-schedule-value" aria-label={uiAttribute("日期：{0}", String(value))} disabled={disabled}><AutomationGlyph name="calendar" /><span>{Number.isNaN(selected.getTime()) ? uiAttribute("选择日期") : dateLabel(selected)}</span><AutomationGlyph name="chevron" /></button>} className="automation-date-popover" label={uiAttribute("选择运行日期")} onOpenAutoFocus={(event) => { event.preventDefault(); buttons.current.get(automationDateKey(safeDate))?.focus() }}>
       <div className="automation-calendar-heading">
-        <button type="button" aria-label="上个月" onClick={() => { const next = new Date(month.getFullYear(), month.getMonth() - 1, 1, 12); setMonth(next); setFocusedDate(automationDateKey(next)) }}><AutomationGlyph name="back" /></button>
-        <strong aria-live="polite">{month.getFullYear()} 年 {month.getMonth() + 1} 月</strong>
-        <button type="button" aria-label="下个月" onClick={() => { const next = new Date(month.getFullYear(), month.getMonth() + 1, 1, 12); setMonth(next); setFocusedDate(automationDateKey(next)) }}><AutomationGlyph name="back" /></button>
+        <button type="button" aria-label={uiAttribute("上个月")} onClick={() => { const next = new Date(month.getFullYear(), month.getMonth() - 1, 1, 12); setMonth(next); setFocusedDate(automationDateKey(next)) }}><AutomationGlyph name="back" /></button>
+        <strong aria-live="polite">{language === 'en' ? new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'long' }).format(month) : <>{month.getFullYear()}<UiText zh={" 年 "} />{month.getMonth() + 1}<UiText zh={" 月"} /></>}</strong>
+        <button type="button" aria-label={uiAttribute("下个月")} onClick={() => { const next = new Date(month.getFullYear(), month.getMonth() + 1, 1, 12); setMonth(next); setFocusedDate(automationDateKey(next)) }}><AutomationGlyph name="back" /></button>
       </div>
-      <div className="automation-calendar-weekdays" aria-hidden="true">{['一', '二', '三', '四', '五', '六', '日'].map(day => <span key={day}>{day}</span>)}</div>
+      <div className="automation-calendar-weekdays" aria-hidden="true">{(language === 'en' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['一', '二', '三', '四', '五', '六', '日']).map((day, index) => <span key={index}>{day}</span>)}</div>
       <div className="automation-calendar-grid">{days.map((day) => {
         const key = automationDateKey(day)
         return <button ref={(node) => { if (node) buttons.current.set(key, node); else buttons.current.delete(key) }} type="button" key={key} className={`automation-calendar-day ${day.getMonth() !== month.getMonth() ? 'outside' : ''}`} aria-label={dateLabel(day)} aria-pressed={key === value} aria-current={key === today ? 'date' : undefined} tabIndex={key === focusedDate ? 0 : -1} disabled={disabled} onClick={() => { onChange(key); setOpen(false) }} onKeyDown={(event) => {

@@ -1,35 +1,136 @@
 import { randomUUID } from 'node:crypto'
 
 const DEFAULT_API_ORIGIN = 'https://api.dingtalk.com'
+const DEFAULT_OAPI_ORIGIN = 'https://oapi.dingtalk.com'
 export const DINGTALK_AI_CARD_TEMPLATE_ID = '382e4302-551d-4880-bf29-a30acfab2e71.schema'
 const DINGTALK_CARD_ACTION_PREFIX = 'rovai.v1.'
 const MAX_DINGTALK_CARD_ACTION_BYTES = 4_096
+export const MAX_DINGTALK_MEDIA_UPLOAD_BYTES = 20 * 1024 * 1024
 
 export type DingTalkCardDeliveryIdentity = {
   outTrackId: string
   recallMessageId: string
 }
 
+export type DingTalkRobotAttachment =
+  | { kind: 'image'; mediaId: string }
+  | { kind: 'file'; mediaId: string; fileName: string }
+
+const DINGTALK_ROBOT_FILE_TYPES = new Set(['xlsx', 'pdf', 'zip', 'rar', 'doc', 'docx'])
+
+export function isSupportedDingTalkRobotFileName(fileName: string): boolean {
+  const fileType = fileName.match(/\.([a-z0-9]+)$/iu)?.[1]?.toLowerCase()
+  return Boolean(fileType && DINGTALK_ROBOT_FILE_TYPES.has(fileType))
+}
+
+export function isSupportedDingTalkRobotImage(fileName: string, mediaType: string): boolean {
+  const extension = fileName.match(/\.([a-z0-9]+)$/iu)?.[1]?.toLowerCase()
+  switch (mediaType.toLowerCase()) {
+    case 'image/jpeg': return extension === 'jpg' || extension === 'jpeg'
+    case 'image/png': return extension === 'png'
+    case 'image/gif': return extension === 'gif'
+    case 'image/bmp': return extension === 'bmp'
+    default: return false
+  }
+}
+
+function attachmentMessage(attachment: DingTalkRobotAttachment): {
+  msgKey: 'sampleImageMsg' | 'sampleFile'
+  msgParam: Record<string, string>
+} {
+  if (attachment.kind === 'image') {
+    return { msgKey: 'sampleImageMsg', msgParam: { photoURL: attachment.mediaId } }
+  }
+  const fileType = attachment.fileName.match(/\.([a-z0-9]+)$/iu)?.[1]?.toLowerCase()
+  if (!fileType || !isSupportedDingTalkRobotFileName(attachment.fileName)) {
+    throw new Error('dingtalk_attachment_type_unsupported')
+  }
+  return {
+    msgKey: 'sampleFile',
+    msgParam: { mediaId: attachment.mediaId, fileName: attachment.fileName, fileType }
+  }
+}
+
+export class DingTalkOpenApiError extends Error {
+  constructor(message: string, readonly status: number, readonly remoteCode: string | null = null) {
+    super(message)
+  }
+
+  get retryable(): boolean {
+    return this.status === 0 || this.status === 429 || this.status >= 500
+      || this.remoteCode === '90002' || this.remoteCode === '15' || this.remoteCode === '88'
+  }
+}
+
 export class DingTalkOpenApiClient {
   readonly #appKey: string
   readonly #appSecret: string
   readonly #apiOrigin: string
+  readonly #oapiOrigin: string
   #accessToken: { value: string; expiresAt: number } | null = null
 
-  constructor(input: { appKey: string; appSecret: string; apiOrigin?: string }) {
+  constructor(input: { appKey: string; appSecret: string; apiOrigin?: string; oapiOrigin?: string }) {
     this.#appKey = input.appKey
     this.#appSecret = input.appSecret
     this.#apiOrigin = input.apiOrigin ?? DEFAULT_API_ORIGIN
+    this.#oapiOrigin = input.oapiOrigin ?? DEFAULT_OAPI_ORIGIN
   }
 
-  async uploadImage(bytes: Buffer, fileName: string): Promise<string> {
-    const data = new FormData()
-    data.append('media', new Blob([Uint8Array.from(bytes)], { type: 'image/png' }), fileName)
-    const response = await this.#request('/v1.0/media/upload?mediaType=image', {
+  async messageFileDownloadUrl(input: {
+    robotCode: string
+    downloadCode: string
+    signal: AbortSignal
+  }): Promise<string> {
+    const response = await this.#request('/v1.0/robot/messageFiles/download', {
       method: 'POST',
-      body: data
+      body: JSON.stringify({ robotCode: input.robotCode, downloadCode: input.downloadCode }),
+      signal: input.signal
     })
-    return requiredString(response, 'mediaId')
+    return requiredString(response, 'downloadUrl')
+  }
+
+  async uploadImage(bytes: Buffer, fileName: string, mediaType: string): Promise<string> {
+    return this.#uploadMedia(bytes, fileName, mediaType, 'image')
+  }
+
+  async uploadFile(bytes: Buffer, fileName: string, mediaType: string): Promise<string> {
+    return this.#uploadMedia(bytes, fileName, mediaType, 'file')
+  }
+
+  async #uploadMedia(
+    bytes: Buffer, fileName: string, mediaType: string, kind: 'image' | 'file'
+  ): Promise<string> {
+    if (bytes.byteLength > MAX_DINGTALK_MEDIA_UPLOAD_BYTES) {
+      throw new Error('dingtalk_attachment_size_unsupported')
+    }
+    const token = await this.#token()
+    const data = new FormData()
+    data.append('media', new Blob([Uint8Array.from(bytes)], { type: mediaType }), fileName)
+    const url = new URL('/media/upload', this.#oapiOrigin)
+    url.searchParams.set('access_token', token)
+    url.searchParams.set('type', kind)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST', body: data, signal: AbortSignal.timeout(30_000)
+      })
+    } catch {
+      throw new DingTalkOpenApiError('dingtalk_media_upload_network', 0)
+    }
+    const body = await response.json().catch(() => null)
+    if (!response.ok || !body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new DingTalkOpenApiError(`dingtalk_media_upload_http_${response.status}`, response.status)
+    }
+    const value = body as Record<string, unknown>
+    if (value.errcode !== 0) {
+      const remoteCode = typeof value.errcode === 'number' || typeof value.errcode === 'string'
+        ? String(value.errcode)
+        : null
+      const retryCode = remoteCode === '88' && value.sub_code ? null : remoteCode
+      throw new DingTalkOpenApiError('dingtalk_media_upload_failed', response.status, retryCode)
+    }
+    const mediaId = requiredString(value, 'media_id')
+    return mediaId.startsWith('@') ? mediaId : `@${mediaId}`
   }
 
   async groupRobotCodes(openConversationId: string): Promise<string[]> {
@@ -81,6 +182,42 @@ export class DingTalkOpenApiClient {
         userIds: [input.userId],
         msgKey: 'sampleMarkdown',
         msgParam: JSON.stringify({ title: input.title, text: input.text })
+      })
+    })
+    return deliveryIdentity(response)
+  }
+
+  async sendGroupAttachment(input: {
+    openConversationId: string
+    robotCode: string
+    attachment: DingTalkRobotAttachment
+  }): Promise<string> {
+    const { msgKey, msgParam } = attachmentMessage(input.attachment)
+    const response = await this.#request('/v1.0/robot/groupMessages/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        openConversationId: input.openConversationId,
+        robotCode: input.robotCode,
+        msgKey,
+        msgParam: JSON.stringify(msgParam)
+      })
+    })
+    return deliveryIdentity(response)
+  }
+
+  async sendPrivateAttachment(input: {
+    robotCode: string
+    userId: string
+    attachment: DingTalkRobotAttachment
+  }): Promise<string> {
+    const { msgKey, msgParam } = attachmentMessage(input.attachment)
+    const response = await this.#request('/v1.0/robot/oToMessages/batchSend', {
+      method: 'POST',
+      body: JSON.stringify({
+        robotCode: input.robotCode,
+        userIds: [input.userId],
+        msgKey,
+        msgParam: JSON.stringify(msgParam)
       })
     })
     return deliveryIdentity(response)
@@ -200,42 +337,54 @@ export class DingTalkOpenApiClient {
   }
 
   async #request(path: string, init: RequestInit): Promise<Record<string, unknown>> {
-    const token = await this.#token()
+    const token = await this.#token(init.signal ?? undefined)
     const headers = new Headers(init.headers)
     if (!(init.body instanceof FormData)) headers.set('content-type', 'application/json')
     headers.set('x-acs-dingtalk-access-token', token)
-    const response = await fetch(new URL(path, this.#apiOrigin), {
-      ...init,
-      headers,
-      signal: AbortSignal.timeout(30_000)
-    })
+    let response: Response
+    try {
+      response = await fetch(new URL(path, this.#apiOrigin), {
+        ...init,
+        headers,
+        signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(init.signal ? [init.signal] : [])])
+      })
+    } catch (error) {
+      if (init.signal?.aborted) throw error
+      throw new DingTalkOpenApiError('dingtalk_open_api_network', 0)
+    }
     const body = await response.json().catch(() => null)
     if (!response.ok || !body || typeof body !== 'object' || Array.isArray(body)) {
-      throw new Error(`dingtalk_open_api_http_${response.status}`)
+      throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status)
     }
     const value = body as Record<string, unknown>
     if (containsBusinessFailure(value)) {
       const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode') ?? 'failed'
-      throw new Error(`dingtalk_open_api_${code}`)
+      throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, code)
     }
     if (value.code && value.code !== '0' && value.code !== 0) {
-      throw new Error(`dingtalk_open_api_${String(value.code)}`)
+      throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, String(value.code))
     }
     return value
   }
 
-  async #token(): Promise<string> {
+  async #token(signal?: AbortSignal): Promise<string> {
     if (this.#accessToken && this.#accessToken.expiresAt > Date.now() + 60_000) {
       return this.#accessToken.value
     }
-    const response = await fetch(new URL('/v1.0/oauth2/accessToken', this.#apiOrigin), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ appKey: this.#appKey, appSecret: this.#appSecret }),
-      signal: AbortSignal.timeout(20_000)
-    })
+    let response: Response
+    try {
+      response = await fetch(new URL('/v1.0/oauth2/accessToken', this.#apiOrigin), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ appKey: this.#appKey, appSecret: this.#appSecret }),
+        signal: AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])])
+      })
+    } catch (error) {
+      if (signal?.aborted) throw error
+      throw new DingTalkOpenApiError('dingtalk_app_access_token_network', 0)
+    }
     const body = await response.json().catch(() => null) as Record<string, unknown> | null
-    if (!response.ok || !body) throw new Error('dingtalk_app_access_token_failed')
+    if (!response.ok || !body) throw new DingTalkOpenApiError('dingtalk_app_access_token_failed', response.status)
     const value = requiredString(body, 'accessToken')
     const expiresIn = typeof body.expireIn === 'number' ? body.expireIn : 7_200
     this.#accessToken = { value, expiresAt: Date.now() + expiresIn * 1_000 }

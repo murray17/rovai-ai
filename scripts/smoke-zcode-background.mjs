@@ -18,7 +18,7 @@ const trace = join(root, 'native-methods.jsonl')
 const hook = join(root, 'trace.cjs')
 const events = []
 const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms))
-let core, campId, passed = false
+let core, threadId, passed = false
 let report = {}
 await mkdir(project)
 await writeFile(join(project, 'README.md'), '# Isolated background acceptance\n')
@@ -66,7 +66,7 @@ try {
     address: { mode: 'explicit', agentIds: ['agent_2'] }, purpose: 'Verify foreground completion while native background service remains managed.' })
   const accepted = sent.commandResult ?? sent
   assert.equal(accepted.status, 'accepted')
-  campId = accepted.payload.campId
+  threadId = accepted.payload.threadId
   const original = accepted.payload.agentRunIds[0]
   await finish(original)
   const foregroundFinishedAt = Date.now()
@@ -103,10 +103,10 @@ try {
   }, 90000)
   assert.equal(start(cancelled).hostInstanceId, start(original).hostInstanceId, 'Active native Session must remain on its background Host')
   const currentPid = Number(await readFile(currentPidFile, 'utf8')); process.kill(currentPid, 0)
-  const snapshot = await core.request('camps.snapshot', { campId })
+  const snapshot = await core.request('camps.snapshot', { threadId })
   const run = snapshot.agentRuns.find((r) => r.id === cancelled)
-  const turn = snapshot.turns.find((t) => t.id === run.campTurnId)
-  const cancellation = await core.request('campTurns.cancel', { commandId: crypto.randomUUID(), command: { campId, campTurnId: turn.id, expectedVersion: turn.version } })
+  const turn = snapshot.turns.find((t) => t.id === run.threadTurnId)
+  const cancellation = await core.request('campTurns.cancel', { commandId: crypto.randomUUID(), command: { threadId, threadTurnId: turn.id, expectedVersion: turn.version } })
   assert.notEqual(cancellation.status, 'rejected')
   await until(() => events.some((e) => e.method === 'agent_run.runtime_cleanup_completed' && e.params.agentRunId === cancelled), 30000)
   process.kill(pid, 0)
@@ -162,17 +162,17 @@ function query(sql) { return JSON.parse(execFileSync('sqlite3', ['-json', join(d
 function start(id) { return events.find((e) => e.method === 'agent_run.started' && e.params?.agentRunId === id)?.params }
 async function until(check, timeout) { const end = Date.now() + timeout; while (Date.now() < end) { if (await check()) return; await wait(250) } throw new Error('ZCode background acceptance timed out') }
 async function follow(agentId, body) {
-  const draft = await core.request('camp.composerDraft.get', { campId })
-  const saved = await core.request('camp.composerDraft.save', { campId, expectedRevision: draft.revision, content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] }, body) })
-  const result = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), campId, draftRevision: saved.revision,
+  const draft = await core.request('camp.composerDraft.get', { threadId })
+  const saved = await core.request('camp.composerDraft.save', { threadId, expectedRevision: draft.revision, content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] }, body) })
+  const result = await core.request('camp.messages.send', { commandId: crypto.randomUUID(), threadId, draftRevision: saved.revision,
     execution: { taskId: null, purpose: 'Verify native task ownership across Runs.', completionRole: 'required' } })
   const command = result.commandResult ?? result; assert.equal(command.status, 'accepted'); return command.payload.agentRunIds[0]
 }
 async function approve(id) {
-  const snapshot = await core.request('camps.snapshot', { campId })
+  const snapshot = await core.request('camps.snapshot', { threadId })
   for (const approval of snapshot.approvals.filter((a) => a.status === 'pending' && snapshot.actions.some((v) => v.id === a.actionId && v.agentRunId === id))) {
     const option = approval.options.find((v) => v.kind === 'allow_once'); assert(option)
-    const result = await core.request('action.approvals.resolve', { commandId: crypto.randomUUID(), campId, approvalId: approval.id, expectedVersion: approval.version, optionId: option.optionId, reason: 'Isolated native background lifecycle acceptance' })
+    const result = await core.request('action.approvals.resolve', { commandId: crypto.randomUUID(), threadId, approvalId: approval.id, expectedVersion: approval.version, optionId: option.optionId, reason: 'Isolated native background lifecycle acceptance' })
     assert.notEqual(result.status, 'rejected')
   }
   return snapshot
@@ -185,6 +185,6 @@ async function finish(id) {
     assert.equal(run.status, 'succeeded', JSON.stringify(run.failure))
     // The Run terminal precedes CampTurn settlement. A follow-up sent between
     // them is legitimately queued and has no agentRunIds in its acceptance.
-    return snapshot.turns.find((turn) => turn.id === run.campTurnId)?.status === 'completed'
+    return snapshot.turns.find((turn) => turn.id === run.threadTurnId)?.status === 'completed'
   }, 120000)
 }

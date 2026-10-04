@@ -25,7 +25,7 @@ import {
   coreStartupRetryDelay,
   coreLaunchArguments,
   desktopSkillLibraryRoot,
-  runtimeCampFilesRoot,
+  runtimeThreadFilesRoot,
   sidecarExecutableName,
   sidecarTargetKey
 } from './core-client'
@@ -267,12 +267,12 @@ printf '%s\\n' '${JSON.stringify({ kind: 'core_startup', schemaVersion: 1, ...re
       '/daily/runtime-files',
       '--use-default-skill-library'
     ])
-    expect(runtimeCampFilesRoot(
+    expect(runtimeThreadFilesRoot(
       'C:\\Rovai AI\\Core',
       'C:\\Users\\test',
       'win32'
     )).toBe('C:\\Rovai AI\\Core\\runtime-files')
-    const macRoot = runtimeCampFilesRoot(
+    const macRoot = runtimeThreadFilesRoot(
       '/tmp/rovai-accept/user-data',
       '/tmp/rovai-home',
       'darwin'
@@ -671,7 +671,7 @@ while IFS= read -r request; do :; done
       writeFileSync(fakeCore, `#!/bin/sh
 printf '%s\n' '{"kind":"core_startup","schemaVersion":1,"status":"ready","authorityState":{"kind":"current"}}'
 while IFS= read -r request; do
-  printf '%s\n' '{"id":1,"error":{"kind":"domain_rejection","code":"camp_not_open","message":"Camp must be opened first","retryable":false,"details":{"campId":"camp-1"}}}'
+  printf '%s\n' '{"id":1,"error":{"kind":"domain_rejection","code":"camp_not_open","message":"Thread must be opened first","retryable":false,"details":{"threadId":"camp-1"}}}'
 done
 `)
       chmodSync(fakeCore, 0o700)
@@ -690,7 +690,7 @@ done
         code: 'camp_not_open',
         retryable: false,
         generation: 1,
-        details: { campId: 'camp-1' }
+        details: { threadId: 'camp-1' }
       })
       client.stop()
     }

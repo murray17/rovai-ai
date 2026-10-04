@@ -166,6 +166,11 @@ app.whenReady().then(async () => {
     await run("document.documentElement.dataset.theme='day'")
     assert.equal(await run("document.querySelectorAll('.general-save-row .dialog-glyph').length"), 1)
     assert.equal(await run("document.querySelectorAll('.general-save-state').length"), 0)
+    await click('[aria-label="一键创建新对话"]')
+    await click('.one-click-confirm-dialog .primary-button')
+    await waitFor('!!document.querySelector(".general-effective-summary")')
+    await capture('general-defaults-summary')
+    await click('[aria-label="一键创建新对话"]')
     await click('.general-default-member-picker > summary')
     assert.equal(await run("document.querySelectorAll('.general-default-member').length"), 24)
     assert.ok(await run("document.querySelector('.general-default-member-list').clientHeight <= 280"))
@@ -227,7 +232,7 @@ app.whenReady().then(async () => {
     await run('window.settingsTest.resetZoom(121)'); await settle()
     assert.equal(await run("document.querySelector('#appearance-zoom').value"), '121')
     await navigate('notifications')
-    assert.equal(await run("document.querySelectorAll('input[role=switch]').length"), 5)
+    assert.equal(await run("document.querySelectorAll('input[role=switch]').length"), 9)
 
     await navigate('monitoring', 'partial')
     assert.equal(await run("document.querySelectorAll('.monitoring-coverage').length"), 0)
@@ -266,7 +271,7 @@ app.whenReady().then(async () => {
     await capture('about-download-error')
 
     await navigate('about', 'server_download_failed')
-    const serverReleaseLink = 'https://github.com/murray17/rovai-ai/releases/tag/server-v0.0.7'
+    const serverReleaseLink = 'https://github.com/murray17/rovai-ai/releases/tag/v0.0.7'
     assert.equal(await run("document.querySelector('.about-update-fallback-actions a').href"), serverReleaseLink)
     await click('[data-app-update-release-tab="current"]')
     assert.equal(await run("document.querySelector('.about-release-section').dataset.appUpdateReleaseVersion"), '0.0.6')

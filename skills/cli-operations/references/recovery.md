@@ -1,21 +1,19 @@
-# Recovery：按业务指令恢复
+# Recovery
 
-把 CLI 的 `error.recovery` 当作下一步分类，不要仅凭错误文案猜测或盲目重试：
+Follow `error.recovery`, not guesses based on error wording:
 
-- `fix_input`：查看目标 operation 的精确 `--help`，修正闭合输入；不要尝试未声明字段。
-- `refresh_then_decide`：重新读取权威对象，比较当前状态，再决定是否提交一项新的 mutation。
-- `retry_same_request`：只按返回指示，用同一 request identity 做有界重试。
-- `stop`：停止该操作并准确报告未提交。
-- `confirm_outcome`：先判断返回是否包含可验证本次结果的权威 locator。
+| Recovery | Next action |
+| --- | --- |
+| `fix_input` | Read exact help and correct supported fields |
+| `refresh_then_decide` | Read authoritative state, then decide whether a new mutation is needed |
+| `retry_same_request` | Retry within the returned bounds using the same request identity |
+| `stop` | Stop the operation and report that it did not commit |
+| `confirm_outcome` | Check for an authoritative locator for this invocation |
 
-## `confirm_outcome`
+## Uncertain outcome
 
-有权威 CampMessage locator 时，查看 `rovai camp read --help`，用 stable message ID 做 exact item read，
-再根据权威状态决定后续动作。当前 AgentRun 可以核验自己已提交的这条精确消息；该例外不允许
-读取边界后的邻域、thread、timeline、search 或其他作者/Run 的消息。成功 Send 只证明消息与冻结
-效果已提交；缺少下游完成不能反推 Send 失败。
+With an authoritative ThreadMessage locator, read that stable message ID exactly and decide from its current state. The current Run may verify its own committed message; this exception does not allow a later neighborhood, reply chain, timeline, search, or another author/Run's messages. Missing downstream completion does not imply Send failure.
 
-没有 locator 时，公开说明 outcome 不确定并停止该 mutation。不得按正文、作者、时间或相似内容搜索，
-不得猜测 request identity，也不得换 request identity 重发。近似命中既不能证明成功，也不能证明失败。
+Without a locator, report the uncertain outcome and stop the mutation. Do not search by similar content, author or time, guess request identity, or resend with a new identity. Approximate matches prove neither success nor failure.
 
-恢复之后仍要分别验证后续业务目标；CLI success 不证明测试、评审、交付或用户意图已经满足。
+After recovery, verify the remaining business objective separately; CLI success does not prove tests, review or delivery.

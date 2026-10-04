@@ -56,7 +56,7 @@ function normalizeOperationProjection(payload) {
     'projectionDigest', 'resultDigest', 'schemaVersion'
   ].sort()
   if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)
-      || ![1, 2].includes(projection.schemaVersion)
+      || ![1, 2, 3, 4].includes(projection.schemaVersion)
       || typeof projection.operation !== 'string'
       || projection.operation !== payload.canonicalTool
       || typeof projection.inputDigest !== 'string'
@@ -147,14 +147,14 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
   const deliveries = deliveriesAvailable
     ? batchTrial
       ? trialAgentDeliveries(snapshot, dispatchBoundary)
-      : snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId && isBudgetedPublicA2aDelivery(snapshot, delivery))
+      : snapshot.messageDeliveries.filter((delivery) => (delivery.threadTurnId ?? delivery.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId) && isBudgetedPublicA2aDelivery(snapshot, delivery))
     : []
   const deliveryIds = new Set(deliveries.map(delivery => delivery.id))
   const receiptEvents = (Array.isArray(snapshot.timeline) ? snapshot.timeline : []).filter((event) => (
     batchTrial
       ? event.eventType === 'camp_message_delivery.waiting' && deliveryIds.has(event.entityId)
       : event.eventType === 'message_delivery.accepted'
-        && event.payload?.campTurnId === dispatchBoundary.campTurnId
+        && (event.payload?.threadTurnId ?? event.payload?.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId)
         && deliveryIds.has(event.payload?.deliveryId)
   ))
   const receiptByDeliveryId = new Map(receiptEvents.flatMap((event) => (
@@ -247,7 +247,7 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
     }
   })
   const turn = (Array.isArray(snapshot.turns) ? snapshot.turns : [])
-    .find((candidate) => candidate.id === dispatchBoundary.campTurnId)
+    .find((candidate) => candidate.id === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId))
   const authoritativeAcceptedA2a = batchTrial ? deliveries.length : turn?.executionBudget?.acceptedA2a
   const acceptanceCoverageComplete = deliveriesAvailable
     && Number.isInteger(authoritativeAcceptedA2a)
@@ -311,22 +311,22 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
 }
 
 function deriveLegacyCollaborationEvidence(snapshot, dispatchBoundary) {
-  const runs = snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
+  const runs = snapshot.agentRuns.filter((run) => (run.threadTurnId ?? run.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId))
   const runIds = new Set(runs.map((run) => run.id))
   const inbox = (Array.isArray(snapshot.inboxMessages) ? snapshot.inboxMessages : []).filter((message) => (
     runs.some((run) => run.id === message.sourceAgentRunId || run.id === message.targetAgentRunId)
   ))
   const inputs = (Array.isArray(snapshot.conversationInputs) ? snapshot.conversationInputs : []).filter((input) => (
-    input.campTurnId === dispatchBoundary.campTurnId
+    (input.threadTurnId ?? input.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId)
   ))
   const inputByInboxId = new Map(inputs.flatMap((input) => (
     input.sourceInboxMessageId ? [[input.sourceInboxMessageId, input]] : []
   )))
-  const turn = snapshot.turns?.find((candidate) => candidate.id === dispatchBoundary.campTurnId)
+  const turn = snapshot.turns?.find((candidate) => candidate.id === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId))
   const authoritativeAcceptedA2a = turn?.executionBudget?.acceptedA2a
   const receiptEvents = (snapshot.timeline ?? []).filter((event) => (
     event.eventType === 'member_call.accepted'
-    && event.payload?.campTurnId === dispatchBoundary.campTurnId
+    && (event.payload?.threadTurnId ?? event.payload?.campTurnId) === (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId)
   ))
   const receiptByInboxId = new Map(receiptEvents.flatMap((event) => (
     event.payload?.inboxMessageId ? [[event.payload.inboxMessageId, event]] : []

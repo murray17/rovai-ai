@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseControlledMemberAvatarRef } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
@@ -12,6 +12,7 @@ import {
 import { defaultAvatarCrop } from './member-avatar-crop'
 import { readErrorMessage } from './error-message'
 import type { PendingMemberAvatarSource } from './member-avatar-submit'
+import { UiText, uiAttribute } from './interface-language'
 
 export function MemberAvatarEditor({
   value,
@@ -28,7 +29,7 @@ export function MemberAvatarEditor({
   onClose(): void
   onPendingChange(pending: boolean): void
 }): React.JSX.Element {
-  const client = useCampClient()
+  const client = useThreadClient()
   const [source, setSource] = useState<PendingMemberAvatarSource | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -76,7 +77,7 @@ export function MemberAvatarEditor({
       .then((image) => {
         if (attempt !== generation.current) return
         if (!image)
-          throw new Error('原角色图片不可读取。可以替换图片或移除当前图片。')
+          throw new Error(uiAttribute('原角色图片不可读取。可以替换图片或移除当前图片。'))
         setSource({
           sourcePng: Uint8Array.from(image.bytes),
           width: image.width,
@@ -148,14 +149,14 @@ export function MemberAvatarEditor({
     <div
       className="member-editor-avatar-editor"
       hidden={!open}
-      aria-label="页内角色图片编辑"
+      aria-label={uiAttribute("页内角色图片编辑")}
     >
       <div className="member-editor-subheading">
-        <span>角色图片</span>
+        <span><UiText zh={"角色图片"} /></span>
         <button
           className="member-editor-icon-button"
           type="button"
-          aria-label="收起角色图片编辑"
+          aria-label={uiAttribute("收起角色图片编辑")}
           disabled={busy}
           onClick={onClose}
         >
@@ -168,7 +169,7 @@ export function MemberAvatarEditor({
             key={preset.role}
             type="button"
             className="member-editor-avatar-option"
-            aria-label={`使用${preset.displayName}的角色图片`}
+            aria-label={uiAttribute("使用{0}的角色图片", String(preset.displayName))}
             aria-pressed={value === preset.avatarRef}
             disabled={disabled || busy}
             onClick={() => choose(preset.avatarRef)}
@@ -190,9 +191,9 @@ export function MemberAvatarEditor({
             disabled={disabled || busy}
             onClick={() => void chooseImage()}
           >
-            {busy ? '正在处理…' : '上传图片'}
+            {busy ? uiAttribute("正在处理…") : uiAttribute("上传图片")}
           </button>
-          <small>PNG / JPEG · 最大 10 MiB</small>
+          <small><UiText zh={"PNG / JPEG · 最大 10 MiB"} /></small>
         </div>
       </div>
       {source && sourceUrl && (
@@ -211,17 +212,13 @@ export function MemberAvatarEditor({
               className="member-editor-cancel"
               disabled={busy}
               onClick={() => setSource(null)}
-            >
-              取消裁剪
-            </button>
+            ><UiText zh={"取消裁剪"} /></button>
             <button
               type="button"
               className="member-editor-secondary"
               disabled={disabled || busy}
               onClick={() => void applyCrop()}
-            >
-              使用这张图片
-            </button>
+            ><UiText zh={"使用这张图片"} /></button>
           </div>
         </div>
       )}
@@ -231,9 +228,7 @@ export function MemberAvatarEditor({
           type="button"
           disabled={disabled || busy}
           onClick={() => choose(null)}
-        >
-          移除角色图片
-        </button>
+        ><UiText zh={"移除角色图片"} /></button>
       )}
       {error && (
         <p className="member-editor-field-error" role="alert">

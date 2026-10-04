@@ -2,14 +2,15 @@ use serde_json::{Value, json};
 
 pub const NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION: &str = "native_session_bootstrap_v5";
 pub const BOOTSTRAP_FORMATTER_VERSION: i64 = 5;
-pub const SESSION_CHARTER_REVISION: i64 = 14;
-const NATIVE_BINDING_CHARTER_COMPATIBILITY_REVISION: i64 = 13;
+pub const SESSION_CHARTER_REVISION: i64 = 19;
+const NATIVE_BINDING_CHARTER_COMPATIBILITY_REVISION: i64 = 16;
 pub const CODEX_SESSION_GUIDANCE_REVISION: i64 = 1;
-pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 27;
-pub const CONTEXT_MANIFEST_VERSION: i64 = 27;
-pub const PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION: i64 = 31;
-pub const PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION: i64 = 31;
+pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 28;
+pub const CONTEXT_MANIFEST_VERSION: i64 = 28;
+pub const PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION: i64 = 32;
+pub const PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION: i64 = 32;
 
+#[cfg(test)]
 pub(crate) fn native_binding_context_contract() -> Value {
     json!({
         "nativeSessionBootstrap": NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,
@@ -20,8 +21,8 @@ pub(crate) fn native_binding_context_contract() -> Value {
     })
 }
 
-/// Keep the v1.68 context axes in Native Binding identity so the additional
-/// history hint and new Charter do not replace an existing Session's Bootstrap.
+/// Thread and User naming changes are compatible with existing Native Sessions. New bindings use
+/// the current Charter; existing bindings keep their frozen Bootstrap evidence.
 pub(crate) fn native_binding_compatibility_context_contract() -> Value {
     json!({
         "nativeSessionBootstrap": "native_session_bootstrap_v4",
@@ -44,7 +45,7 @@ mod tests {
     }
 
     #[test]
-    fn binding_contract_keeps_compatible_charter_separate_from_new_bootstrap_revision() {
+    fn binding_contract_rotates_existing_sessions_for_new_charter() {
         let fixture = shared_fixture();
         let legacy = json!({
             "nativeSessionBootstrap": fixture["nativeSessionBootstrap"],
@@ -55,17 +56,18 @@ mod tests {
         });
         let current = native_binding_context_contract();
         let compatibility = native_binding_compatibility_context_contract();
-        assert_eq!(SESSION_CHARTER_REVISION, 14);
-        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION, 31);
-        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION, 31);
+        assert_eq!(SESSION_CHARTER_REVISION, 19);
+        assert_eq!(compatibility["sessionCharterRevision"], json!(16));
+        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION, 32);
+        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION, 32);
         assert_eq!(
             current,
             json!({
                 "nativeSessionBootstrap": "native_session_bootstrap_v5",
                 "bootstrapFormatterVersion": 5,
                 "sessionCharterRevision": SESSION_CHARTER_REVISION,
-                "agentRunContextFormatterVersion": 27,
-                "contextManifestVersion": 27,
+                "agentRunContextFormatterVersion": 28,
+                "contextManifestVersion": 28,
             })
         );
         assert_eq!(
@@ -83,17 +85,23 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("sessionCharterRevision");
-        let new_charter_as_compatibility_revision = json!({
+        let previous_compatible_charter = json!({
             "nativeSessionBootstrap": fixture["nativeSessionBootstrap"],
             "bootstrapFormatterVersion": fixture["bootstrapFormatterVersion"],
-            "sessionCharterRevision": SESSION_CHARTER_REVISION,
+            "sessionCharterRevision": 13,
             "agentRunContextFormatterVersion": fixture["agentRunContextFormatterVersion"],
             "contextManifestVersion": fixture["contextManifestVersion"],
         });
+        let mut previous_new_charter = compatibility.clone();
+        previous_new_charter["sessionCharterRevision"] = json!(14);
+        let mut previous_reply_stop_charter = compatibility.clone();
+        previous_reply_stop_charter["sessionCharterRevision"] = json!(15);
         for old_contract in [
             legacy,
             unversioned_charter,
-            new_charter_as_compatibility_revision,
+            previous_compatible_charter,
+            previous_new_charter,
+            previous_reply_stop_charter,
         ] {
             assert_ne!(
                 crate::command::canonical_json_digest(&compatibility).unwrap(),

@@ -1,5 +1,5 @@
 ---
-version: 16
+version: 18
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -41,11 +41,13 @@ scroll and focus.
 
 ## 通用
 
-General owns stable startup location, world-map availability and window reset. Stable choices commit immediately through the
+General owns stable startup location, world-map availability and window reset. Windows Desktop also owns the local
+close-behavior selector (ask every time / system tray / quit); its close dialog and remembered choice share Main authority
+under [Windows Window Close v1](../../../../docs/contracts/windows-window-close-v1.md). macOS and Web expose neither this selector nor a tray. Stable choices commit immediately through the
 narrow Desktop bridge. The App does not expose or enable an OS login-start item on either supported
 platform; packaged macOS startup only makes a best-effort removal of any retired registration, while
 the first Windows release creates no Startup task or Run-key entry. General does not add hidden/background
-launch, default Project, recovery or update policy.
+launch, default Project, recovery or update policy. Hiding an already open Windows window is separate from startup policy.
 
 The shared General page receives its preference API explicitly from either entry. Creation team, Lead and
 one-click flag come from the same Host-owned record; Desktop legacy choices are imported once. Web stores only client
@@ -61,6 +63,8 @@ for the selected member and candidates. More than eight selected members enables
 bounded and follows available viewport space. Invalid members stay recognizable and cannot become a new Lead.
 Keep existing invalid-default validation. The local draft/error/save row uses the shared save icon and “保存”;
 there is no duplicate saved-state message in the page header.
+The one-click creation summary shows only the saved teammate count and Lead, such as “4 位默认队员 · 队长 爱丽丝”.
+Omit “当前生效” and the currently selected project: the project follows the creation entry, independently of these saved defaults.
 
 World-map availability appears in a 会话 section immediately after 新对话 and before 窗口. A new profile
 with no preferences source starts disabled. Exact schema-v4 saved values remain authoritative, while
@@ -112,17 +116,14 @@ Reminder settings control only accepted transient heads-up categories. The produ
 not mount the persistent notification drawer, global bell or unread total; the Core notification read
 model stays durable while the visible controller uses only a lightweight high-water baseline.
 
-Notification settings contain one master heads-up switch and exactly four default-on categories:
-待审批、提到你、本轮完成、执行未完成. The last category controls both `turn_failed` and
-`turn_incomplete`, while cards keep their honest distinct copy. Ordinary Agent messages have no
-notification category or setting.
-
-The master heads-up control is the dominant panel. Its four child categories sit below in two open
-scenario groups: “需要响应” contains 待审批 and 提到你; “本轮结果” contains 本轮完成 and
-执行未完成. Turning the master off disables delivery without erasing child choices, and group
-counts describe those choices as retained rather than active. Do not add an “打开通知中心” action or
-repeat the persistence explanation in a separate boundary card. Explain instead that signals arriving
-while the App is not attentive are retained in memory and shown after the user returns.
+Notification settings use one master switch and three business-object groups: 会话, 使命, 任务.
+Conversation contains 待审批、提到你、本轮完成、单聊回复、执行未完成. Mission contains 使命需要你 and
+使命状态变更; Task contains 任务状态变更. Task status is default-off with completed/blocked/cancelled selected;
+Mission status is default-on with completed selected. Status choices expand inline and persist with the same CAS save.
+Conversation spans the two left rows on wide layouts; Mission and Task stack on the right. Stack all three below 960px.
+Master/category disabling retains values and filters. Save errors restore current values, focus and scroll and allow retry.
+The attentive foreground Camp stays quiet for its conversation, Mission and Tasks; leaving does not replay suppressed cards.
+Mission needs-you question copy comes only from an explicit source message. Never invent a question or infer it from an @mention.
 
 Current User Mention creates one immutable Occurrence per source message. Occurrences in one CampTurn
 share a durable Episode card but remain independently acknowledged; the earliest unacknowledged
@@ -160,7 +161,7 @@ uses compact whole-card buttons with real avatars. Like Skill groups, selected c
 secret values stay masked and out of ordinary errors. Conflicts retain the JSON draft and require
 refresh/review before retrying. Do not display source file paths as routine configuration content.
 
-## Agent 运行时与诊断
+## 智能体与诊断
 
 Missing and authentication-required Runtimes expose a quiet, initially collapsed installation or login
 guide inside their catalog row. Only one guide is open at a time. On admitted macOS platforms, Claude
@@ -274,12 +275,19 @@ ready/installing and failed states use different icon/copy and accessible names,
 
 The page keeps the installed version visible through idle, checking, available, downloading, up-to-date,
 ready-to-install, installing and recoverable check/download/install failure states. Its bundled, version-matched
-release notes remain visible offline after an install. A known newer release is a separate fact and remains visible
+release notes and publication date remain visible offline after an install. A known newer release is a separate fact and remains visible
 when a later check fails. When a newer release exists, the page defaults to its notes and offers keyboard-accessible
 tabs to switch between new and installed versions; the switch does not start a network request. An absent source has
 an explicit empty state. A duplicate first version heading is removed only from the display copy; long notes scroll
 within a bounded region, and all notes use the shared safe Markdown renderer. Renderer receives no remote HTML, local
 installer path or updater credential.
+
+更新日志正文跟随当前界面语言即时切换，中文与英文不并列重复展示。保持当前/新版本 tab 选择，
+不增加语言选择器、额外请求或冗长提示。历史无标记说明保留完整原文；缺少当前语言则显示一个
+可用语言版本，全空或歧义格式保留全文。分段、隐藏空容器准入、回退与文档级链接/完整脚注规则由
+[App Update v7](../../../../docs/contracts/app-update-v7.md)拥有，组件职责见
+[更新架构](../../../../docs/architecture/desktop-app-updates.md#多语言发布与展示)。最终仍通过共享
+`SafeMarkdown`，不改写发布快照；语言变化不重挂载页面或改变更新资格。
 
 Downloading shows determinate percent, transferred/total bytes and speed without blocking navigation or
 ordinary App use. Repeated download requests visibly remain one operation. Download completion changes the

@@ -9,10 +9,10 @@ import '../../desktop/src/renderer/src/remote-connection.css'
 import type { WorkspaceSelection } from '@contracts'
 import { createRoot } from 'react-dom/client'
 import { BusinessApp } from '../../desktop/src/renderer/src/BusinessApp'
-import { CampClientProvider } from '../../desktop/src/renderer/src/camp-client'
+import { ThreadClientProvider } from '../../desktop/src/renderer/src/camp-client'
 import { CurrentUserProfileProvider } from '../../desktop/src/renderer/src/CurrentUserProfile'
 import { ConsoleClient, type ConnectionState } from './client'
-import { createCampAdapter, browserPlatform } from './camp-adapter'
+import { createThreadAdapter, browserPlatform } from './camp-adapter'
 import '../../desktop/src/renderer/src/styles.css'
 import '../../desktop/src/renderer/src/member-editor.css'
 import './styles.css'
@@ -58,7 +58,7 @@ function WebEntry() {
     return new Promise(resolve => setWorkspaceChoice({ resolve }))
   }
   const finishWorkspace = (value: WorkspaceSelection | null): void => { workspaceChoice?.resolve(value); setWorkspaceChoice(null) }
-  const [adapter, setAdapter] = useState<ReturnType<typeof createCampAdapter> | null>(null)
+  const [adapter, setAdapter] = useState<ReturnType<typeof createThreadAdapter> | null>(null)
   const [authenticated, setAuthenticated] = useState(false)
   const [authGeneration, setAuthGeneration] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -85,7 +85,7 @@ function WebEntry() {
     void recovery.then(restored => {
       if (cancelled) return
       if (restored && transport.authenticated) {
-        setAdapter(current => current ?? createCampAdapter(transport, selectWorkspace))
+        setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace))
         setAuthenticated(true)
       }
     }).catch(e => { if (!cancelled) setError(e instanceof TypeError ? '暂时无法连接，网络恢复后会重试。' : e instanceof Error ? e.message : '恢复失败，请重试。') })
@@ -102,7 +102,7 @@ function WebEntry() {
         const restored = await retryStartup()
         retryStartup = null
         if (active && restored && transport.authenticated) {
-          setAdapter(current => current ?? createCampAdapter(transport, selectWorkspace))
+          setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace))
           setAuthenticated(true); setError(null)
         }
       } catch { /* Keep credentials and the visible connection error for retry. */ }
@@ -136,7 +136,7 @@ function WebEntry() {
       // already separated by startup recovery before this handler can sign in.
       void recovery.catch(() => false).then(() => transport.loginTicket(ticket!)).then(() => {
         if (!active) return
-        setAdapter(current => current ?? createCampAdapter(transport, selectWorkspace)); setAuthenticated(true)
+        setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace)); setAuthenticated(true)
       }).catch(e => { if (active) setError(e instanceof Error ? e.message : '扫码登录失败。') })
         .finally(() => { ticket = null; if (active) { setBusy(false); setScanning(false) } })
     }
@@ -149,20 +149,20 @@ function WebEntry() {
     retryStartup = null
     try {
       await transport.login(token)
-      setAdapter(current => current ?? createCampAdapter(transport, selectWorkspace))
+      setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace))
       setAuthenticated(true)
     } catch (e) { setError(e instanceof TypeError ? '暂时无法连接，请检查网络后重试。' : e instanceof Error ? e.message : '登录失败，请重试。') }
     finally { setBusy(false) }
   }
   const current = adapter
   return <>
-    {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><CampClientProvider client={current.environment.client}>
+    {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><ThreadClientProvider client={current.environment.client}>
       <CurrentUserProfileProvider api={current.profile}>
         <BusinessApp environment={current.environment} remoteConnection={<RemoteConnectionStatus origin={transport.origin} state={authenticated ? connection : 'expired'} onLogout={() => { setError(null); void transport.logout().catch(e => setError(e instanceof Error ? e.message : '退出未完成，请重试。')) }} />} sidebarFooter={authenticated && connection === 'offline' ? <div className="web-connection" role="status">
           <span>连接中断，编辑保留</span>
         </div> : undefined} />
       </CurrentUserProfileProvider>
-    </CampClientProvider></div>}
+    </ThreadClientProvider></div>}
     {authenticated && error && <div className="web-recovery-error" role="alert">{error}<button type="button" className="quiet-button compact" onClick={() => setError(null)}>关闭</button></div>}
     {workspaceChoice && <HostWorkspacePicker transport={transport} onSelect={finishWorkspace} />}
     {!authenticated && <WebLogin hostKind={hostKind}

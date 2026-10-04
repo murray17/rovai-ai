@@ -287,7 +287,8 @@ pub async fn refresh_model_catalog(path: &Path, kind: AdapterKind) -> Result<Vec
         }
         _ => {
             let (_, session, _) = run_acp_probe_with_scope(path, kind, true, purpose, true).await?;
-            let mut models = rovai_core::agent_runtime_adapter::acp_model_catalog_from_session(
+            let mut models = rovai_core::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                kind,
                 session
                     .as_ref()
                     .context("ACP catalog did not create a Session")?,

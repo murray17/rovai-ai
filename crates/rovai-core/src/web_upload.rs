@@ -14,6 +14,7 @@ pub struct UploadIntent {
     #[serde(default, skip_serializing_if = "UploadTarget::is_camp")]
     pub target: UploadTarget,
     pub command_id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub expected_revision: i64,
     pub display_name: String,
@@ -89,7 +90,7 @@ fn envelope(client: &DraftClient, intent: UploadIntent) -> Result<CommandEnvelop
         !client.is_desktop(),
         "upload requires a verified Web editor"
     );
-    crate::camp_id::CampId::parse(&intent.camp_id)?;
+    crate::camp_id::ThreadId::parse(&intent.camp_id)?;
     uuid::Uuid::parse_str(&intent.command_id)?;
     ensure!(
         intent.sha256.len() == 64 && intent.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()),

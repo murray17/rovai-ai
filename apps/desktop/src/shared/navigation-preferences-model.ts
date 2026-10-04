@@ -1,31 +1,33 @@
-import { isCampId } from '@contracts'
-import type { NavigationPin, NavigationPreferencesSnapshot, RemovedNavigationProject } from '@contracts'
+import { isThreadId } from '@contracts'
+import type { NavigationPin, NavigationPreferencesSnapshot, NavigationThreadReadState, RemovedNavigationProject } from '@contracts'
 import { normalizeProjectDisplayName, projectDisplayNameError } from './project-display-name'
 
 export const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   pins: [],
   removedProjects: [],
   projectOrder: null,
-  projectNames: {}
+  projectNames: {},
+  threadReadStates: {}
 }
 
 export function sanitizeSnapshot(source: unknown): NavigationPreferencesSnapshot {
   if (!isRecord(source)) return structuredClone(EMPTY_SNAPSHOT)
   const pins = sanitizePins(source)
-  const removedProjects = source.schemaVersion === 2 || source.schemaVersion === 3 || source.schemaVersion === 4
+  const removedProjects = source.schemaVersion === 2 || source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5
     ? sanitizeRemovedProjects(source.removedProjects)
     : []
-  const projectOrder = source.schemaVersion === 3 || source.schemaVersion === 4
+  const projectOrder = source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5
     ? sanitizeProjectOrder(source.projectOrder)
     : null
-  const projectNames = source.schemaVersion === 4 ? sanitizeProjectNames(source.projectNames) : {}
-  return { schemaVersion: 4, pins, removedProjects, projectOrder, projectNames }
+  const projectNames = (source.schemaVersion === 4 || source.schemaVersion === 5) ? sanitizeProjectNames(source.projectNames) : {}
+  const threadReadStates = source.schemaVersion === 5 ? sanitizeThreadReadStates(source.threadReadStates) : {}
+  return { schemaVersion: 5, pins, removedProjects, projectOrder, projectNames, threadReadStates }
 }
 
 export function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
   if (
-    (source.schemaVersion !== 1 && source.schemaVersion !== 2 && source.schemaVersion !== 3 && source.schemaVersion !== 4)
+    (source.schemaVersion !== 1 && source.schemaVersion !== 2 && source.schemaVersion !== 3 && source.schemaVersion !== 4 && source.schemaVersion !== 5)
     || !Array.isArray(source.pins)
   ) return []
   const seen = new Set<string>()
@@ -38,7 +40,7 @@ export function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
       (kind !== 'camp' && kind !== 'project')
       || typeof targetKey !== 'string'
       || (kind === 'camp'
-        ? !isCampId(targetKey)
+        ? !isThreadId(targetKey)
         : !isProjectTargetKey(targetKey))
       || !isTimestamp(candidate.pinnedAt)
     ) continue
@@ -119,4 +121,19 @@ export function isTimestamp(value: unknown): value is string {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function isNavigationThreadReadState(value: unknown): value is NavigationThreadReadState {
+  return isRecord(value) && typeof value.manualUnread === 'boolean'
+    && Number.isSafeInteger(value.readThroughGlobalSequence)
+    && (value.readThroughGlobalSequence as number) >= 0
+}
+
+export function sanitizeThreadReadStates(source: unknown): Record<string, NavigationThreadReadState> {
+  if (!isRecord(source)) return {}
+  return Object.fromEntries(Object.entries(source).flatMap(([id, state]) =>
+    isThreadId(id) && isNavigationThreadReadState(state)
+      ? [[id, { manualUnread: state.manualUnread, readThroughGlobalSequence: state.readThroughGlobalSequence }]]
+      : []
+  ))
 }

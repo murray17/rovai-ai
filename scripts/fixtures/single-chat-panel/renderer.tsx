@@ -4,20 +4,20 @@ import type {
   AgentRunExecutionEvidenceView,
   AgentRunView,
   CoreEvent,
-  CampMemberView,
+  ThreadMemberView,
   CanonicalRuntimeActivityView,
   SingleChatSnapshot,
   NotificationSingleChatSource,
   StoredCommandResult
 } from '@contracts'
-import { RunExecutionDisclosure } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { RunExecutionDisclosure } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { buildLiveExecutionProgress, liveRuntimeEventFromExecutionEvidence } from '../../../apps/desktop/src/renderer/src/ui-model'
 import { SingleChatPanel } from '../../../apps/desktop/src/renderer/src/SingleChatPanel'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
-const campId = 'rvcamp_01m1jkkpkzfvgraw1p4r9zfb7v'
+const threadId = 'rvcamp_01m1jkkpkzfvgraw1p4r9zfb7v'
 const conversationId = 'single-chat-fixture-conversation'
-const members: CampMemberView[] = [
+const members: ThreadMemberView[] = [
   {
     agentId: 'agent_1', displayName: '爱丽丝', avatarRef: null, teamRole: '五号街卖花女', accent: '',
     membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present', memberOrder: 0,
@@ -96,7 +96,7 @@ function command(
 const terminalSnapshot: SingleChatSnapshot = {
   approvals: [],
   conversation: {
-    id: conversationId, campId, agentId: 'agent_1', version: 4, status: 'active', lastMessageSequence: 3,
+    id: conversationId, threadId, agentId: 'agent_1', version: 4, status: 'active', lastMessageSequence: 3,
     lastAcceptedPublicBoundarySequence: 19, activeAgentRunId: null,
     createdAt: '2026-09-03T09:58:00.000Z', updatedAt: '2026-09-03T11:05:38.000Z', endedAt: null
   },
@@ -127,13 +127,13 @@ const terminalSnapshot: SingleChatSnapshot = {
   pendingInputs: { executionActive: false, items: [], editSession: null },
   agentRuns: [
     {
-      id: 'run-complete', campTurnId: 'turn-run-complete', triggerConversationMessageId: 'message-user-1', status: 'succeeded', version: 3,
+      id: 'run-complete', threadTurnId: 'turn-run-complete', triggerConversationMessageId: 'message-user-1', status: 'succeeded', version: 3,
       executionEpoch: 1, cancelRequestedAt: null, lastErrorCode: null, createdAt: '2026-09-03T10:00:00.000Z',
       startedAt: '2026-09-03T10:00:00.000Z', endedAt: '2026-09-03T10:39:17.000Z',
       finalConversationMessageId: 'message-agent-1', executionEvidenceCount: 4
     },
     {
-      id: 'run-cancelled', campTurnId: 'turn-run-cancelled', triggerConversationMessageId: 'message-user-2', status: 'cancelled', version: 3,
+      id: 'run-cancelled', threadTurnId: 'turn-run-cancelled', triggerConversationMessageId: 'message-user-2', status: 'cancelled', version: 3,
       executionEpoch: 1, cancelRequestedAt: '2026-09-03T11:05:38.000Z', lastErrorCode: null,
       createdAt: '2026-09-03T11:00:00.000Z', startedAt: '2026-09-03T11:00:00.000Z',
       endedAt: '2026-09-03T11:05:38.000Z', finalConversationMessageId: null, executionEvidenceCount: 1
@@ -164,7 +164,7 @@ function runningSnapshot(): SingleChatSnapshot {
       createdAt: '2026-09-03T12:00:00.000Z'
     }],
     agentRuns: [...terminalSnapshot.agentRuns, {
-      id: 'run-running', campTurnId: 'turn-run-running', triggerConversationMessageId: 'message-user-3', status: 'running', version: 2,
+      id: 'run-running', threadTurnId: 'turn-run-running', triggerConversationMessageId: 'message-user-3', status: 'running', version: 2,
       executionEpoch: 1, cancelRequestedAt: null, lastErrorCode: null, createdAt: '2026-09-03T12:00:00.000Z',
       startedAt: '2026-09-03T12:00:00.000Z', endedAt: null, finalConversationMessageId: null,
       executionEvidenceCount: 2
@@ -244,7 +244,7 @@ function setMode(phase: Phase, notify = true): void {
 
 function emitChange(): void {
   for (const listener of eventListeners) listener({
-    method: 'single_chat.changed', params: { campId, conversationId, reason: 'run_updated' }
+    method: 'single_chat.changed', params: { threadId, conversationId, reason: 'run_updated' }
   })
 }
 
@@ -253,7 +253,7 @@ function PublicExecutionFixture({ phase }: { phase: Phase }): React.JSX.Element 
     : phase === 'failed' ? 'failed' : phase === 'waiting' ? 'waiting'
       : phase === 'queued' ? 'queued' : 'running'
   const run: AgentRunView = {
-    id: 'public-run', campTurnId: 'public-turn', conversationId: 'public-conversation', agentId: 'public-agent',
+    id: 'public-run', threadTurnId: 'public-turn', conversationId: 'public-conversation', agentId: 'public-agent',
     taskId: null, responsibilityKey: 'direct:public-agent', responsibilityGeneration: 0,
     purpose: '检查公共项目类型', completionRole: 'required', status, waitReason: null,
     cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
@@ -277,7 +277,7 @@ function PublicExecutionFixture({ phase }: { phase: Phase }): React.JSX.Element 
   if (['continuation', 'complete'].includes(phase)) events.push(narration('public-boundary', run.id, 3, '正在整理类型检查结论。'))
   return <section className="public-execution-fixture" style={{ width: 440, margin: '36px 24px', padding: 16 }}>
     <p style={{ color: 'var(--muted)', fontSize: 12 }}>执行台 · 独立合成公共任务</p>
-    <RunExecutionDisclosure run={run} campId={campId} focused
+    <RunExecutionDisclosure run={run} threadId={threadId} focused
       progress={buildLiveExecutionProgress(events.map(liveRuntimeEventFromExecutionEvidence), run.id)} />
   </section>
 }
@@ -316,7 +316,7 @@ Object.assign(window, {
           pendingInputs: { ...currentSnapshot.pendingInputs, items: currentSnapshot.pendingInputs.items.filter(entry => entry.id !== item.id) } }
         pendingReturnReceipts.set(commandId, { status: 'applied', code: 'single_chat.pending_input_returned_to_composer',
           payload: { pendingInputId: item.id, body: item.body, draft: structuredClone(currentSnapshot.draft) } } as unknown as StoredCommandResult)
-        for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { campId, conversationId, reason: 'pending_input_edited' } })
+        for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { threadId, conversationId, reason: 'pending_input_edited' } })
         throw new Error('Fixture lost the successful withdrawal response')
       }
       if (method === 'singleChat.open') return {
@@ -342,7 +342,7 @@ Object.assign(window, {
           conversationId,
           conversationVersion: currentSnapshot.conversation.version + 1,
           conversationMessageId: 'message-keyboard-fixture',
-          campTurnId: 'turn-keyboard-fixture',
+          threadTurnId: 'turn-keyboard-fixture',
           agentRunId: 'run-keyboard-fixture'
         }
       } satisfies StoredCommandResult
@@ -404,9 +404,9 @@ function Fixture(): React.JSX.Element {
         target={notificationTarget}
         notificationFocus={notificationTarget ? { requestId: notificationTarget.requestId,
           kind: 'single_chat', conversationId: notificationTarget.conversationId, agentRunId: notificationTarget.agentRunId,
-          campTurnId: 'turn-run-complete', active: true } : null}
+          threadTurnId: 'turn-run-complete', active: true } : null}
         onNotificationFocusPresented={requestId => { if (!notificationPresentations.includes(requestId)) notificationPresentations.push(requestId) }}
-        campId={campId}
+        threadId={threadId}
         members={members}
         entryHost={entryHost}
         visible={visible}
@@ -437,7 +437,7 @@ Object.assign(window, {
             triggerConversationMessageId: userId, finalConversationMessageId: finalId, executionEvidenceCount: 0 }]
         }
       }
-      for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { campId, conversationId } })
+      for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { threadId, conversationId } })
     },
     showPendingQueue: () => {
       currentSnapshot = { ...terminalSnapshot, pendingInputs: { executionActive: true, editSession: null,
@@ -445,7 +445,7 @@ Object.assign(window, {
           enqueueSequence: index + 1, revision: 1, state: 'queued', body: `私聊 ${name}：移回后继续编辑。`,
           lastAttemptErrorCode: null, attachments: [], quotes: [] })) } }
       pendingReturnGate = new Promise<void>(resolve => { releasePendingReturn = resolve })
-      for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { campId, conversationId, reason: 'pending_input_edited' } })
+      for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { threadId, conversationId, reason: 'pending_input_edited' } })
     },
     releasePendingReturn: () => { pendingReturnGate = null; releasePendingReturn?.() },
     tryLeave: () => {

@@ -12,7 +12,7 @@ import type {
   CoreMethod,
   CreateAgentProfileCommand,
   ModelSelection,
-  SendCampMessageResult,
+  SendThreadMessageResult,
   SetMemberRuntimeConfigurationCommand,
   StoredCommandResult
 } from '@contracts'
@@ -30,7 +30,7 @@ type CoreRequester = {
 
 type AutomationDependencies = {
   core: CoreRequester
-  openCamp(campId: string): Promise<{ campId: string; opened: true }>
+  openThread(threadId: string): Promise<{ threadId: string; opened: true }>
   appVersion: string
   dailyAnalysis?: {
     configure(params: unknown): Promise<unknown>
@@ -224,7 +224,7 @@ function clearMemberRuntimeCommand(input: RecordValue): ClearMemberRuntimeConfig
   }
 }
 
-function launchResult(result: SendCampMessageResult): RecordValue {
+function launchResult(result: SendThreadMessageResult): RecordValue {
   if (result.pendingExecution !== null) {
     throw new UserAutomationError(
       'automation_contract_upgrade_required',
@@ -236,7 +236,7 @@ function launchResult(result: SendCampMessageResult): RecordValue {
     return {
       status: 'rejected',
       code: 'camp_send_result_unavailable',
-      message: 'The Camp send result is unavailable.',
+      message: 'The Thread send result is unavailable.',
       preflight: result.preflight,
       replayed: result.replayed
     }
@@ -251,13 +251,13 @@ function launchResult(result: SendCampMessageResult): RecordValue {
     }
   }
   const payload = command.payload
-  const campMessageId = payload.campMessageId
-  const campTurnId = payload.campTurnId
+  const threadMessageId = payload.threadMessageId
+  const threadTurnId = payload.threadTurnId
   const agentRunIds = payload.agentRunIds
   const executionBudget = payload.executionBudget
   if (
-    typeof campMessageId !== 'string'
-    || typeof campTurnId !== 'string'
+    typeof threadMessageId !== 'string'
+    || typeof threadTurnId !== 'string'
     || !Array.isArray(agentRunIds)
     || agentRunIds.some((id) => typeof id !== 'string')
     || !executionBudget
@@ -265,34 +265,34 @@ function launchResult(result: SendCampMessageResult): RecordValue {
   ) {
     throw new UserAutomationError(
       'automation_contract_upgrade_required',
-      'The Camp send result does not match Automation V1.'
+      'The Thread send result does not match Automation V1.'
     )
   }
   return {
     status: 'dispatched',
-    campMessageId,
-    campTurnId,
+    threadMessageId,
+    threadTurnId,
     agentRunIds,
     executionBudget,
     replayed: result.replayed
   }
 }
 
-async function sendCampMessage(
+async function sendThreadMessage(
   dependencies: AutomationDependencies,
   input: RecordValue
 ): Promise<RecordValue> {
-  const campId = stringField(input, 'campId')
+  const threadId = stringField(input, 'threadId')
   const agentId = stringField(input, 'agentId')
   const body = stringField(input, 'body')
   const commandId = stringField(input, 'commandId')
   const budget = input.executionBudget === undefined
     ? null
     : record(input.executionBudget, 'executionBudget')
-  const result = await dependencies.core.request<SendCampMessageResult>(
-    'userAutomation.camp.send', {
+  const result = await dependencies.core.request<SendThreadMessageResult>(
+    'userAutomation.thread.send', {
     commandId,
-    campId,
+    threadId,
     agentId,
     body,
     execution: {
@@ -333,7 +333,16 @@ export async function dispatchUserAutomation(
   params: unknown,
   dependencies: AutomationDependencies
 ): Promise<unknown> {
-  const input = record(params ?? {}, 'params')
+  const input = { ...record(params ?? {}, 'params') }
+  if (['camp.create', 'camp.send', 'camp.open'].includes(operation)) operation = operation.replace('camp.', 'thread.')
+  const aliases = ['thread.send', 'thread.open'].includes(operation)
+    ? [['campId', 'threadId']]
+    : operation.startsWith('trace.') ? [['campIds', 'threadIds'], ['excludeCampIds', 'excludeThreadIds']] : []
+  for (const [old, current] of aliases) {
+    if (!(old in input)) continue
+    if (current in input) throw new UserAutomationError('automation_invalid_input', `${old} and ${current} cannot be supplied together`)
+    input[current] = input[old]; delete input[old]
+  }
   switch (operation) {
     case 'status': {
       const core = await dependencies.core.request<RecordValue>('app.info')
@@ -387,26 +396,26 @@ export async function dispatchUserAutomation(
       })
     case 'workspace.inspect':
       return dependencies.core.request('workspaces.inspect', { path: stringField(input, 'path') })
-    case 'camp.create':
-      return dependencies.core.request<StoredCommandResult>('camps.create', input)
-    case 'camp.send':
-      return sendCampMessage(dependencies, input)
-    case 'camp.open':
-      return dependencies.openCamp(stringField(input, 'campId'))
+    case 'thread.create':
+      return dependencies.core.request<StoredCommandResult>('threads.create', input)
+    case 'thread.send':
+      return sendThreadMessage(dependencies, input)
+    case 'thread.open':
+      return dependencies.openThread(stringField(input, 'threadId'))
     case 'agentRun.diagnostic':
       return dependencies.core.request<AgentRunDiagnosticView>('agentRuns.diagnostic.get', {
         agentRunId: stringField(input, 'agentRunId')
       })
     case 'trace.export': {
-      const allowed = ['since', 'until', 'campIds', 'excludeCampIds', 'excludeAutomationIds']
+      const allowed = ['since', 'until', 'threadIds', 'excludeThreadIds', 'excludeAutomationIds']
       if (Object.keys(input).some((key) => !allowed.includes(key))) {
         throw new UserAutomationError('automation_invalid_input', 'Unsupported trace export option')
       }
       return dependencies.core.request('executionTrace.export', {
         since: stringField(input, 'since'),
         until: stringField(input, 'until'),
-        campIds: input.campIds === undefined ? [] : stringArrayField(input, 'campIds'),
-        excludeCampIds: input.excludeCampIds === undefined ? [] : stringArrayField(input, 'excludeCampIds'),
+        threadIds: input.threadIds === undefined ? [] : stringArrayField(input, 'threadIds'),
+        excludeThreadIds: input.excludeThreadIds === undefined ? [] : stringArrayField(input, 'excludeThreadIds'),
         excludeAutomationIds: input.excludeAutomationIds === undefined ? [] : stringArrayField(input, 'excludeAutomationIds')
       })
     }
@@ -432,13 +441,13 @@ export async function dispatchUserAutomation(
     }
     case 'domain.events':
       return dependencies.core.request('events.subscribe', {
-        campId: stringField(input, 'campId'),
+        threadId: stringField(input, 'threadId'),
         afterGlobalSequence: input.afterGlobalSequence ?? 0,
         limit: input.limit ?? 500
       })
     case 'evidence.list':
       return dependencies.core.request('agentRunEvidence.list', {
-        campId: stringField(input, 'campId'),
+        threadId: stringField(input, 'threadId'),
         agentRunId: stringField(input, 'agentRunId'),
         afterSequence: input.afterSequence ?? 0,
         limit: input.limit ?? 500
@@ -452,7 +461,7 @@ export async function dispatchUserAutomation(
       return dependencies.core.request<StoredCommandResult>('agentRuns.cancel', {
         commandId: stringField(input, 'commandId'),
         command: {
-          campId: diagnostic.campId,
+          threadId: diagnostic.threadId,
           agentRunId,
           expectedVersion: diagnostic.version
         }

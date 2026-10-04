@@ -7,7 +7,7 @@ assert.ok(isAbsolute(renderer) && isAbsolute(userData))
 mkdirSync(userData, { recursive: true })
 app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
-// Production CampWorkspace, closed metadata/draft API. No Core, Runtime or daily data is opened.
+// Production ThreadWorkspace, closed metadata/draft API. No Core, Runtime or daily data is opened.
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: process.platform === 'linux' || process.env.ROVAI_SHOW_FAST_FIXTURE === '1', width: 1280, height: 720, useContentSize: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
@@ -37,7 +37,7 @@ app.whenReady().then(async () => {
     state = await click('.camp-detail-entry[data-detail="members"]')
     assert.ok(state.panel.height > 0, 'Native input opens the production member popover')
     assert.deepEqual(state.checks.map(check => check.agentId).sort(), ['agent-1', 'agent-3', 'agent-4', 'agent-4'], 'Only uncached Claude/Codex members are checked, with failures retried on opening')
-    assert.ok(state.checks.every(check => check.campId === 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'))
+    assert.ok(state.checks.every(check => check.threadId === 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'))
     assert.equal(state.memberFast['agent-1'], false, 'Pending checks have no placeholder control')
     assert.equal(state.memberFast['agent-4'], true, 'Opening retries a failed background check')
     assert.equal(state.notice, '', 'Automatic checks and failures are silent')

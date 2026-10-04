@@ -16,6 +16,55 @@ afterEach(async () => {
 })
 
 describe('navigation preferences', () => {
+  it('upgrades valid schema 4 without a degradation or rewriting the old file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-read-'))
+    cleanup.push(directory)
+    const path = join(directory, 'navigation.json')
+    const original = JSON.stringify({ schemaVersion: 4, pins: [], removedProjects: [], projectOrder: [], projectNames: {} })
+    await writeFile(path, original)
+    const store = await NavigationPreferencesStore.load(path)
+    expect(store.loadDegradation).toBeNull()
+    expect(store.get().threadReadStates).toEqual({})
+    expect(await readFile(path, 'utf8')).toBe(original)
+  })
+
+  it('persists manual reminders, merges concurrent pin writes and keeps read boundaries monotonic', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-read-'))
+    cleanup.push(directory)
+    const path = join(directory, 'navigation.json')
+    const store = NavigationPreferencesStore.defaults(path)
+    await Promise.all([
+      store.setThreadReadState(CAMP_A, { manualUnread: true, readThroughGlobalSequence: 20 }),
+      store.replacePins([{ kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-10-01T00:00:00Z' }]),
+      store.setThreadReadState(CAMP_B, { manualUnread: false, readThroughGlobalSequence: 12 })
+    ])
+    const restarted = await NavigationPreferencesStore.load(path)
+    expect(restarted.loadDegradation).toBeNull()
+    expect(restarted.get().threadReadStates[CAMP_A].manualUnread).toBe(true)
+    expect(restarted.get().pins).toHaveLength(1)
+    await restarted.setThreadReadState(CAMP_A, { manualUnread: false, readThroughGlobalSequence: 3 })
+    expect(restarted.get().threadReadStates[CAMP_A]).toEqual({ manualUnread: false, readThroughGlobalSequence: 20 })
+    await restarted.setThreadReadState(CAMP_B, null)
+    expect(restarted.get().threadReadStates[CAMP_B]).toBeUndefined()
+  })
+
+  it('rejects invalid read state and retains the previous snapshot when saving fails', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-read-'))
+    cleanup.push(directory)
+    const path = join(directory, 'navigation.json')
+    const store = NavigationPreferencesStore.defaults(path)
+    for (const sequence of [-1, NaN, Infinity, 1.5]) {
+      await expect(store.setThreadReadState(CAMP_A, { manualUnread: true, readThroughGlobalSequence: sequence })).rejects.toThrow()
+    }
+    await expect(store.setThreadReadState('invalid', { manualUnread: true, readThroughGlobalSequence: 0 })).rejects.toThrow()
+    await mkdir(path)
+    await expect(store.setThreadReadState(CAMP_A, { manualUnread: true, readThroughGlobalSequence: 0 })).rejects.toThrow()
+    expect(store.get().threadReadStates).toEqual({})
+    await rm(path, { recursive: true })
+    await store.setThreadReadState(CAMP_A, { manualUnread: true, readThroughGlobalSequence: 0 })
+    expect((await readNavigationPreferences(path)).threadReadStates[CAMP_A].manualUnread).toBe(true)
+  })
+
   it('upgrades valid schema 3 without a degradation or rewriting the old file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-project-name-'))
     cleanup.push(directory)
@@ -24,7 +73,7 @@ describe('navigation preferences', () => {
     await writeFile(filePath, source)
     const store = await NavigationPreferencesStore.load(filePath)
     expect(store.loadDegradation).toBeNull()
-    expect(store.get()).toEqual({ schemaVersion: 4, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'], projectNames: {} })
+    expect(store.get()).toEqual({ schemaVersion: 5, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'], projectNames: {}, threadReadStates: {} })
     expect(await readFile(filePath, 'utf8')).toBe(source)
   })
 
@@ -110,8 +159,9 @@ describe('navigation preferences', () => {
     const snapshot = await readNavigationPreferences(filePath)
 
     expect(snapshot).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       projectNames: {},
+      threadReadStates: {},
       pins: [
         { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T10:00:00Z' },
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-07-30T12:00:00Z' }
@@ -125,7 +175,7 @@ describe('navigation preferences', () => {
     expect(store.loadDegradation?.code).toBe('navigation_preferences_invalid')
   })
 
-  it('removes one project locally and atomically clears its Project and Camp pins', async () => {
+  it('removes one project locally and atomically clears its Project and Thread pins', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-preferences-'))
     cleanup.push(directory)
     const filePath = join(directory, 'navigation.json')
@@ -144,8 +194,9 @@ describe('navigation preferences', () => {
     const snapshot = await store.removeProject('directory:/work/a', [CAMP_A])
 
     expect(snapshot).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       projectNames: {},
+      threadReadStates: {},
       pins: [
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-08-11T07:01:00Z' },
         { kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }
@@ -177,8 +228,9 @@ describe('navigation preferences', () => {
     const snapshot = await store.restoreProject('directory:/work/a')
 
     expect(snapshot).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       projectNames: {},
+      threadReadStates: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
       removedProjects: [],
       projectOrder: ['directory:/work/b']
@@ -209,8 +261,9 @@ describe('navigation preferences', () => {
     const snapshot = await store.reinstateRemovedProject(removedProject)
 
     expect(snapshot).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       projectNames: {},
+      threadReadStates: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
       removedProjects: [removedProject],
       projectOrder: ['directory:/work/b']
@@ -303,8 +356,9 @@ describe('navigation preferences', () => {
       'directory:/work/c'
     ])
     expect(synchronized).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       projectNames: {},
+      threadReadStates: {},
       pins: [],
       removedProjects: [],
       projectOrder: ['directory:/work/a', 'directory:/work/c']

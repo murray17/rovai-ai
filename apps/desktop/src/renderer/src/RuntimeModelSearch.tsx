@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import type { ModelDescriptor } from '@contracts'
 import { RuntimePickerCheck, RuntimePickerChevron } from './RuntimeParameterSelect'
+import { UiText, uiAttribute } from './interface-language'
 
 const DEFAULT_MODEL = 'runtime_default'
 const normalize = (text: string): string => text.normalize('NFKC').trim().toLocaleLowerCase()
@@ -90,7 +91,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
   return <Popover.Root open={open} onOpenChange={changeOpen}>
     <Popover.Trigger asChild>
       <button ref={trigger} className="runtime-model-picker-trigger" type="button" disabled={disabled}
-        aria-label={`模型，${label}`} title={label}
+        aria-label={uiAttribute("模型，{0}", String(label))} title={label}
         onKeyDown={event => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); changeOpen(true) }
@@ -99,27 +100,27 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
       </button>
     </Popover.Trigger>
     <Popover.Portal><Popover.Content ref={content} className="runtime-model-picker-menu runtime-model-search-menu"
-      align="start" sideOffset={5} collisionPadding={10} aria-label="模型选项"
+      align="start" sideOffset={5} collisionPadding={10} aria-label={uiAttribute("模型选项")}
       onOpenAutoFocus={event => { event.preventDefault(); search.current?.focus() }}
       onCloseAutoFocus={event => { if (tabDismissed.current) event.preventDefault() }}
       onEscapeKeyDown={event => { if (composing.current || event.isComposing) event.preventDefault() }} onKeyDown={handleKey}>
       <div className="runtime-model-search">
         <svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input ref={search} role="combobox" aria-label="搜索模型" aria-expanded={open}
+        <input ref={search} role="combobox" aria-label={uiAttribute("搜索模型")} aria-expanded={open}
           aria-controls={`${id}-list`} aria-autocomplete="list" aria-activedescendant={activeDescendant}
-          placeholder="搜索模型名称或 ID…" value={query}
+          placeholder={uiAttribute("搜索模型名称或 ID…")} value={query}
           onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }}
           onChange={event => { setQuery(event.target.value); setActiveId('') }} />
-        {query && <button className="runtime-model-search-clear" type="button" aria-label="清除模型搜索"
+        {query && <button className="runtime-model-search-clear" type="button" aria-label={uiAttribute("清除模型搜索")}
           onClick={() => { setQuery(''); setActiveId(value); search.current?.focus() }}>
           <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M4 12l8-8" /></svg>
         </button>}
       </div>
       {notice && <div className="runtime-model-picker-notice" role="status">
         <span>{notice}</span>
-        <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}>重试</button>
+        <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}><UiText zh={"重试"} /></button>
       </div>}
-      <div id={`${id}-list`} role="listbox" aria-label="模型" className="runtime-picker-options">
+      <div id={`${id}-list`} role="listbox" aria-label={uiAttribute("模型")} className="runtime-picker-options">
         <div ref={scroll} className="runtime-picker-scroll">
           {missingLabel && <div role="option" aria-selected="true" aria-disabled="true" className="runtime-model-picker-item" data-disabled="">
             <span className="runtime-model-picker-copy"><strong>{missingLabel}</strong></span>
@@ -136,15 +137,15 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
             <span className="runtime-model-picker-check">{value === model.id && <RuntimePickerCheck />}</span>
           </button>)}
           {!filtered.length && <p className="runtime-model-picker-empty" role="status">
-            {query ? '没有匹配的模型，请尝试其他名称或 ID。' : loading ? '正在获取模型列表…' : failed ? '暂时无法获取模型列表。' : '当前没有可选的固定模型。'}
+            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在获取模型列表…") : failed ? uiAttribute("暂时无法获取模型列表。") : uiAttribute("当前没有可选的固定模型。")}
           </p>}
         </div>
         <div className="runtime-picker-default">
           <button type="button" tabIndex={-1} role="option" aria-selected={value === DEFAULT_MODEL}
             id={`${id}-option-${filtered.length}`} className="runtime-model-picker-item"
-            data-highlighted={active === DEFAULT_MODEL ? '' : undefined} title="跟随 Agent 运行时默认"
+            data-highlighted={active === DEFAULT_MODEL ? '' : undefined} title={uiAttribute("跟随智能体默认")}
             onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(DEFAULT_MODEL)} onClick={() => choose(DEFAULT_MODEL)}>
-            <span className="runtime-model-picker-copy"><strong>默认</strong></span>
+            <span className="runtime-model-picker-copy"><strong><UiText zh={"默认"} /></strong></span>
             <span className="runtime-model-picker-check">{value === DEFAULT_MODEL && <RuntimePickerCheck />}</span>
           </button>
         </div>

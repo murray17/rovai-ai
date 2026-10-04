@@ -52,10 +52,10 @@ const expectedOperations = [
   'automation.list',
   'automation.run',
   'automation.update',
-  'camp.list',
-  'camp.message.send',
-  'camp.read',
-  'camp.search',
+  'thread.list',
+  'thread.message.send',
+  'thread.read',
+  'thread.search',
   'history.search',
   'member.create',
   'memory.read',
@@ -158,7 +158,7 @@ try {
     assertBuiltinCliCapability(specification.adapterKind, specification.installation, true)
   }
 
-  const historyCampId = await createCamp(core.request, {
+  const historyCampId = await createThread(core.request, {
     name: 'Built-in CLI Shared History',
     projectPath: workspace.projectPath,
     memberAgentIds: runtimeSpecifications.flatMap((value) => [
@@ -167,8 +167,8 @@ try {
     ]),
     defaultLeadAgentId: runtimeSpecifications[0].agentId
   })
-  await sendCampMessage(core.request, {
-    campId: historyCampId,
+  await sendThreadMessage(core.request, {
+    threadId: historyCampId,
     body: `${historyMarker}: shared historical evidence for all ${runtimeSpecifications.length} Runtime qualifications.`,
     execution: null
   })
@@ -189,7 +189,7 @@ try {
   await chmod(historySeedScriptPath, 0o755)
   const historicalPublicA2a = await seedHistoricalPublicA2a(core, {
     specification: historySeedSpecification,
-    campId: historyCampId,
+    threadId: historyCampId,
     scriptPath: historySeedScriptPath,
     evidencePath: historySeedEvidencePath,
     marker: historyPublicA2aMarker,
@@ -208,7 +208,7 @@ try {
     { mode: 0o600 }
   )
   const historicalAttachment = await createHistoricalAttachmentMessage(core.request, {
-    campId: historyCampId,
+    threadId: historyCampId,
     sourcePath: historyAttachmentSourcePath,
     marker: historyAttachmentMarker
   })
@@ -225,14 +225,14 @@ try {
     specification.diagnosticPath = join(projectRoot, `.diagnostic-${specification.slug}`)
     specification.memberCreationKey = crypto.randomUUID()
     specification.memberDisplayName = `${specification.label} Created Member`
-    specification.campId = await createCamp(core.request, {
+    specification.threadId = await createThread(core.request, {
       name: `${specification.label} Built-in CLI`,
       projectPath: workspace.projectPath,
       memberAgentIds: [specification.agentId, specification.recipientProfileId],
       defaultLeadAgentId: specification.agentId
     })
-    await sendCampMessage(core.request, {
-      campId: specification.campId,
+    await sendThreadMessage(core.request, {
+      threadId: specification.threadId,
       body: `${specification.currentMarker}: current-Camp evidence for ${specification.adapterKind}.`,
       execution: null
     })
@@ -266,18 +266,18 @@ try {
   for (const specification of runtimeSpecifications) {
     process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full ${expectedOperations.length}-operation Run\n`)
     const source = await startVerificationRun(core, specification, false)
-    const sourceSnapshot = await waitForRun(core, specification.campId, source.agentRunId, {
+    const sourceSnapshot = await waitForRun(core, specification.threadId, source.agentRunId, {
       marker: specification.successMarker,
       timeoutMs: 720_000
     })
     const sourceManifest = sourceSnapshot.contextManifests.find((manifest) =>
       manifest.agentRunId === source.agentRunId
     )
-    if (specification.campId === historyCampId
+    if (specification.threadId === historyCampId
         || !sourceManifest
-        || !sourceManifest.historyCamps.some((camp) => camp.campId === historyCampId)) {
+        || !sourceManifest.historyThreads.some((camp) => camp.threadId === historyCampId)) {
       throw new Error(`${specification.adapterKind} did not freeze the historical Camp in the querying Run Manifest: ${JSON.stringify({
-        queryingCampId: specification.campId,
+        queryingCampId: specification.threadId,
         historyCampId,
         sourceManifest
       })}`)
@@ -290,7 +290,7 @@ try {
     assertBuiltinCliCapability(specification.adapterKind, specification.installation)
     const evidence = await builtinEvidence(
       core.request,
-      specification.campId,
+      specification.threadId,
       source.agentRunId
     )
     const terminalEvidence = evidence.filter((entry) =>
@@ -347,18 +347,18 @@ try {
 
     process.stderr.write(`[builtin-cli] ${specification.adapterKind}: resumed/new-lease Run\n`)
     const resumed = await startVerificationRun(core, specification, true)
-    const resumedSnapshot = await waitForRun(core, specification.campId, resumed.agentRunId, {
+    const resumedSnapshot = await waitForRun(core, specification.threadId, resumed.agentRunId, {
       marker: specification.resumeMarker,
       completionFile: specification.resumeCompletionFile,
       timeoutMs: 480_000
     })
     const resumedEvidence = await builtinEvidence(
       core.request,
-      specification.campId,
+      specification.threadId,
       resumed.agentRunId
     )
     if (!resumedEvidence.some((entry) =>
-      entry.payload?.canonicalTool === 'camp.list'
+      entry.payload?.canonicalTool === 'thread.list'
         && entry.payload?.status === 'completed'
         && entry.payload?.sourceAuthority === 'core'
     )) {
@@ -371,7 +371,7 @@ try {
       sendEvidence.stdinUserOnlyMessageId
     ])
     const successorExactReads = resumedEvidence.filter((entry) =>
-      entry.payload?.canonicalTool === 'camp.read'
+      entry.payload?.canonicalTool === 'thread.read'
         && entry.payload?.status === 'completed'
         && entry.payload?.sourceAuthority === 'core'
         && expectedSendMessageIds.has(
@@ -469,7 +469,7 @@ try {
     operationCountPerRuntime: expectedOperations.length,
     expectedOperations,
     historyEvidence: {
-      campId: historyCampId,
+      threadId: historyCampId,
       seedAdapterKind: historySeedSpecification.adapterKind,
       publicA2aMessageId: historicalPublicA2a.messageId,
       publicA2aDeliveryId: historicalPublicA2a.deliveryId,
@@ -559,7 +559,7 @@ async function selectExplicitModel(request, agentId, adapterKind, modelId) {
   }
 }
 
-async function createCamp(request, input) {
+async function createThread(request, input) {
   const result = await request('camps.create', {
     commandId: crypto.randomUUID(),
     name: input.name,
@@ -568,15 +568,15 @@ async function createCamp(request, input) {
     defaultLeadAgentId: input.defaultLeadAgentId,
     collaborationMode: 'peer'
   })
-  const campId = result.payload?.campId
-  if (result.status !== 'applied' || !campId) {
+  const threadId = result.payload?.threadId
+  if (result.status !== 'applied' || !threadId) {
     throw new Error(`Camp creation failed: ${JSON.stringify(result)}`)
   }
-  return campId
+  return threadId
 }
 
-async function sendCampMessage(request, input) {
-  const draft = await request('camp.composerDraft.get', { campId: input.campId })
+async function sendThreadMessage(request, input) {
+  const draft = await request('camp.composerDraft.get', { threadId: input.threadId })
   const content = input.agentId
     ? [
         { kind: 'atom', atom: { type: 'member', agentId: input.agentId } },
@@ -584,21 +584,21 @@ async function sendCampMessage(request, input) {
       ]
     : [{ kind: 'text', text: input.body }]
   const saved = await request('camp.composerDraft.save', {
-    campId: input.campId,
+    threadId: input.threadId,
     expectedRevision: draft.revision,
     content: { version: 2, segments: content }
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId: input.campId,
+    threadId: input.threadId,
     draftRevision: saved.revision,
     execution: input.execution
   })
 }
 
 async function seedHistoricalPublicA2a(coreClient, input) {
-  const sent = await sendCampMessage(coreClient.request, {
-    campId: input.campId,
+  const sent = await sendThreadMessage(coreClient.request, {
+    threadId: input.threadId,
     agentId: input.specification.agentId,
     body: [
       'Run the generated historical Public A2A seed script with your native shell tool.',
@@ -618,7 +618,7 @@ async function seedHistoricalPublicA2a(coreClient, input) {
   if (commandResult.status !== 'accepted' || !agentRunId) {
     throw new Error(`Historical Public A2A seed Run was not accepted: ${JSON.stringify(sent)}`)
   }
-  const snapshot = await waitForRun(coreClient, input.campId, agentRunId, {
+  const snapshot = await waitForRun(coreClient, input.threadId, agentRunId, {
     marker: input.completionMarker,
     timeoutMs: 480_000
   })
@@ -649,9 +649,9 @@ async function seedHistoricalPublicA2a(coreClient, input) {
 }
 
 async function createHistoricalAttachmentMessage(request, input) {
-  const draft = await request('camp.composerDraft.get', { campId: input.campId })
+  const draft = await request('camp.composerDraft.get', { threadId: input.threadId })
   const referenced = await request('camp.sourceAttachments.addFromPath', {
-    campId: input.campId,
+    threadId: input.threadId,
     expectedRevision: draft.revision,
     sourcePath: input.sourcePath,
     displayName: 'historical-attachment.txt'
@@ -663,18 +663,18 @@ async function createHistoricalAttachmentMessage(request, input) {
     throw new Error(`Historical source attachment reference failed: ${JSON.stringify(referenced)}`)
   }
   const saved = await request('camp.composerDraft.save', {
-    campId: input.campId,
+    threadId: input.threadId,
     expectedRevision: referenced.revision,
     content: { version: 2, segments: [{ kind: 'text', text: input.marker }] }
   })
   const sent = await request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId: input.campId,
+    threadId: input.threadId,
     draftRevision: saved.revision,
     execution: null
   })
-  const messageId = sent.commandResult?.payload?.campMessageId
-  const snapshot = await request('camps.snapshot', { campId: input.campId })
+  const messageId = sent.commandResult?.payload?.threadMessageId
+  const snapshot = await request('camps.snapshot', { threadId: input.threadId })
   const message = snapshot.messages.find((candidate) => candidate.id === messageId)
   const projectedAttachment = message?.attachments?.find((candidate) => candidate.id === attachment.id)
   if (!message
@@ -722,8 +722,8 @@ async function startVerificationRun(coreClient, specification, resumed) {
         runtimeShellCommand(scriptPath),
         `If it exits 0 and prints ${marker}, reply with exactly ${marker}.`
       ].join('\n')
-  const sent = await sendCampMessage(coreClient.request, {
-    campId: specification.campId,
+  const sent = await sendThreadMessage(coreClient.request, {
+    threadId: specification.threadId,
     agentId: specification.agentId,
     body,
     execution: {
@@ -742,11 +742,11 @@ async function startVerificationRun(coreClient, specification, resumed) {
   return { agentRunId }
 }
 
-async function waitForRun(coreClient, campId, agentRunId, options) {
+async function waitForRun(coreClient, threadId, agentRunId, options) {
   const deadline = Date.now() + options.timeoutMs
   const resolvedApprovals = new Set()
   while (Date.now() < deadline) {
-    const snapshot = await coreClient.request('camps.snapshot', { campId })
+    const snapshot = await coreClient.request('camps.snapshot', { threadId })
     await resolvePendingApprovals(coreClient.request, snapshot, agentRunId, resolvedApprovals)
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (run?.status === 'succeeded') {
@@ -774,11 +774,11 @@ async function waitForRun(coreClient, campId, agentRunId, options) {
   throw new Error(`Timed out waiting for AgentRun ${agentRunId}`)
 }
 
-async function waitForHistoricalDeliveryTerminal(coreClient, campId, deliveryId) {
+async function waitForHistoricalDeliveryTerminal(coreClient, threadId, deliveryId) {
   const deadline = Date.now() + 480_000
   let cancellationRequested = false
   while (Date.now() < deadline) {
-    const snapshot = await coreClient.request('camps.snapshot', { campId })
+    const snapshot = await coreClient.request('camps.snapshot', { threadId })
     const delivery = snapshot.messageDeliveries.find((candidate) => candidate.id === deliveryId)
     const targetRun = delivery?.targetAgentRunId
       ? snapshot.agentRuns.find((candidate) => candidate.id === delivery.targetAgentRunId)
@@ -796,7 +796,7 @@ async function waitForHistoricalDeliveryTerminal(coreClient, campId, deliveryId)
         const cancellation = await coreClient.request('agentRuns.cancel', {
           commandId: crypto.randomUUID(),
           command: {
-            campId,
+            threadId,
             agentRunId: targetRun.id,
             expectedVersion: targetRun.version
           }
@@ -819,7 +819,7 @@ async function waitForRecipientRun(coreClient, specification, recipientProfileId
   const deadline = Date.now() + 480_000
   const resolvedApprovals = new Set()
   while (Date.now() < deadline) {
-    const snapshot = await coreClient.request('camps.snapshot', { campId: specification.campId })
+    const snapshot = await coreClient.request('camps.snapshot', { threadId: specification.threadId })
     const candidates = snapshot.agentRuns.filter((run) => run.agentId === recipientProfileId)
     for (const candidate of candidates) {
       await resolvePendingApprovals(coreClient.request, snapshot, candidate.id, resolvedApprovals)
@@ -837,7 +837,7 @@ async function waitForGatherCompletion(coreClient, specification, gatherId, sour
   const deadline = Date.now() + 720_000
   const resolvedApprovals = new Set()
   while (Date.now() < deadline) {
-    const snapshot = await coreClient.request('camps.snapshot', { campId: specification.campId })
+    const snapshot = await coreClient.request('camps.snapshot', { threadId: specification.threadId })
     const gatherDeliveries = snapshot.messageDeliveries.filter((delivery) =>
       delivery.gatherId === gatherId
     )
@@ -909,7 +909,7 @@ async function resolvePendingApprovals(request, snapshot, agentRunId, resolvedAp
     if (!option) throw new Error(`No bounded allow option for ${approval.id}`)
     const result = await request('action.approvals.resolve', {
       commandId: crypto.randomUUID(),
-      campId: snapshot.camp.id,
+      threadId: snapshot.thread.id,
       approvalId: approval.id,
       expectedVersion: approval.version,
       optionId: option.optionId,
@@ -922,13 +922,13 @@ async function resolvePendingApprovals(request, snapshot, agentRunId, resolvedAp
   }
 }
 
-async function builtinEvidence(request, campId, agentRunId) {
+async function builtinEvidence(request, threadId, agentRunId) {
   const collected = []
   let afterSequence = 0
   let throughSequence = null
   while (true) {
     const page = await request('agentRunEvidence.list', {
-      campId,
+      threadId,
       agentRunId,
       afterSequence,
       limit: 1_000
@@ -986,7 +986,7 @@ function projectEnvelopeForMeasurement(envelope) {
     return { error: envelope.error }
   }
   switch (envelope.operation) {
-    case 'camp.message.send':
+    case 'thread.message.send':
       return {
         messageId: envelope.result.messageId,
         agentAddressingMode: envelope.result.agentAddressingMode,
@@ -1029,9 +1029,9 @@ function projectEnvelopeForMeasurement(envelope) {
         nextCursor: envelope.result.nextCursor,
         truncated: envelope.result.truncated
       }
-    case 'camp.list':
-    case 'camp.read':
-    case 'camp.search':
+    case 'thread.list':
+    case 'thread.read':
+    case 'thread.search':
     case 'history.search':
     case 'memory.view':
     case 'memory.read':
@@ -1155,7 +1155,7 @@ assert_success() {
     and (has("receipt") | not)
     and (has("result") | not)
     and (has("error") | not)
-    and (if $operation == "camp.message.send"
+    and (if $operation == "thread.message.send"
          then (.messageId | type) == "string"
            and (.agentAddressingMode == "automatic" or .agentAddressingMode == "public_only")
            and (.effectiveRecipients | type) == "array"
@@ -1193,7 +1193,7 @@ printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'
 if printf '%s\n' "$send_help" | grep -Fq -- '--to-user'; then
   exit 1
 fi
-printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary public Camp messages are already visible to the Principal.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary public Thread messages are already visible to the Principal.'
 printf '%s\n' "$send_help" | grep -Fq -- 'Guarantee that this public message wakes no Agent.'
 printf '%s\n' "$send_help" | grep -Fq -- 'Agent addressing schedules concrete continuing work, not CC.'
 printf '%s\n' "$send_help" | grep -Fq -- 'Always inspect agentAddressingMode, effectiveRecipients, and deliveryIds.'
@@ -1214,14 +1214,13 @@ printf '%s\n' "$member_help" | grep -Fq -- '--creation-key'
 printf '%s\n' "$member_help" | grep -Fq -- '--avatar-file'
 printf '%s\n' "$member_help" | grep -Fq -- 'user explicitly confirms'
 camp_search_help="$("$CLI" camp search --help)"
-printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai camp search --query 'amount'"
-printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai camp search --camp-id '<camp-id>' --query 'amount'"
+printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai thread search --query 'amount'"
+printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai thread search --thread-id '<thread-id>' --query 'amount'"
 camp_read_help="$("$CLI" camp read --help)"
-printf '%s\n' "$camp_read_help" | grep -Fq -- 'rovai camp read --limit 20'
-printf '%s\n' "$camp_read_help" | grep -Fq -- 'rovai camp read --before 123'
-printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --camp-id '<camp-id>'"
-printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --message-id '<message-id>'"
-printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --thread '<message-id>' --limit 20"
+printf '%s\n' "$camp_read_help" | grep -Fq -- 'rovai thread read --limit 20'
+printf '%s\n' "$camp_read_help" | grep -Fq -- 'rovai thread read --before 123'
+printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai thread read --message-id '<message-id>'"
+printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai thread read --reply-chain '<message-id>' --limit 20"
 ! printf '%s\n' "$camp_read_help" | grep -Fq -- '--mode'
 ! printf '%s\n' "$camp_read_help" | grep -Fq -- '--direction'
 history_search_help="$("$CLI" history search --help)"
@@ -1245,7 +1244,7 @@ assert_fix_input "$legacy_flag"
 
 STEP=legacy_send_json
 set +e
-legacy_json="$(printf '%s\n' '{"campId":"camp-legacy","body":"rejected"}' | "$CLI" send 2>"$RUN_TMP/legacy-json.err")"
+legacy_json="$(printf '%s\n' '{"threadId":"camp-legacy","body":"rejected"}' | "$CLI" send 2>"$RUN_TMP/legacy-json.err")"
 legacy_json_status=$?
 set -e
 test "$legacy_json_status" -eq 2
@@ -1320,7 +1319,7 @@ STEP=automation_run
 automation_run="$("$CLI" automation run --automation-id "$automation_id")"
 assert_success "$automation_run" 'automation.run'
 printf '%s\n' "$automation_run" | "$JQ" -e '
-  .status == "failed" and .reason == "runtime_not_ready" and .campId == null
+  .status == "failed" and .reason == "runtime_not_ready" and .threadId == null
 ' >/dev/null
 
 STEP=automation_close
@@ -1387,72 +1386,72 @@ printf '%s\n' "$patched_task" | "$JQ" -e '.title == "field-patch-title" and .sta
 
 STEP=camp_list
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
-assert_success "$camp_list" 'camp.list'
-printf '%s\n' "$camp_list" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} '.camps | any(.campId == $campId)' >/dev/null
+assert_success "$camp_list" 'thread.list'
+printf '%s\n' "$camp_list" | "$JQ" -e --arg threadId ${shellQuote(input.historyCampId)} '.threads | any(.threadId == $threadId)' >/dev/null
 
 STEP=camp_search
 camp_search="$("$CLI" camp search --query ${shellQuote(input.currentMarker)} --limit 5)"
-assert_success "$camp_search" 'camp.search'
+assert_success "$camp_search" 'thread.search'
 message_id="$(printf '%s\n' "$camp_search" | "$JQ" -er '.results[0].messageId')"
 STEP=camp_search_explicit_current
-camp_search_explicit_current="$("$CLI" camp search --camp-id ${shellQuote(input.campId)} --query ${shellQuote(input.currentMarker)} --limit 5)"
-assert_success "$camp_search_explicit_current" 'camp.search'
+camp_search_explicit_current="$("$CLI" camp search --camp-id ${shellQuote(input.threadId)} --query ${shellQuote(input.currentMarker)} --limit 5)"
+assert_success "$camp_search_explicit_current" 'thread.search'
 test "$(printf '%s\n' "$camp_search_explicit_current" | "$JQ" -er '.results[0].messageId')" = "$message_id"
 STEP=camp_read_default_current
 camp_read_default_current="$("$CLI" camp read </dev/null)"
-assert_success "$camp_read_default_current" 'camp.read'
-printf '%s\n' "$camp_read_default_current" | "$JQ" -e --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" '
-  .campId == $campId
+assert_success "$camp_read_default_current" 'thread.read'
+printf '%s\n' "$camp_read_default_current" | "$JQ" -e --arg threadId ${shellQuote(input.threadId)} --arg messageId "$message_id" '
+  .threadId == $threadId
   and .mode == "timeline"
   and .direction == "before"
   and (.items | any(.messageId == $messageId))
 ' >/dev/null
 STEP=camp_read_default_explicit
-camp_read_default_explicit="$("$CLI" camp read --camp-id ${shellQuote(input.campId)})"
-assert_success "$camp_read_default_explicit" 'camp.read'
+camp_read_default_explicit="$("$CLI" camp read --camp-id ${shellQuote(input.threadId)})"
+assert_success "$camp_read_default_explicit" 'thread.read'
 printf '%s\n' "$camp_read_default_explicit" | "$JQ" -e --arg messageId "$message_id" '
   .mode == "timeline"
   and .direction == "before"
   and (.items | any(.messageId == $messageId))
 ' >/dev/null
 STEP=camp_read_default_stdin
-camp_read_default_stdin="$(printf '%s\n' ${shellQuote(JSON.stringify({ campId: input.campId, limit: 5 }))} | "$CLI" camp read)"
-assert_success "$camp_read_default_stdin" 'camp.read'
+camp_read_default_stdin="$(printf '%s\n' ${shellQuote(JSON.stringify({ threadId: input.threadId, limit: 5 }))} | "$CLI" camp read)"
+assert_success "$camp_read_default_stdin" 'thread.read'
 printf '%s\n' "$camp_read_default_stdin" | "$JQ" -e '.mode == "timeline" and .direction == "before"' >/dev/null
 cat > "$RUN_TMP/camp-read-default.json" <<'ROVAI_JSON'
-${JSON.stringify({ campId: input.campId, limit: 5 })}
+${JSON.stringify({ threadId: input.threadId, limit: 5 })}
 ROVAI_JSON
 STEP=camp_read_default_input_file
 camp_read_default_input_file="$("$CLI" camp read --input-file "$RUN_TMP_NATIVE/camp-read-default.json")"
-assert_success "$camp_read_default_input_file" 'camp.read'
+assert_success "$camp_read_default_input_file" 'thread.read'
 printf '%s\n' "$camp_read_default_input_file" | "$JQ" -e '.mode == "timeline" and .direction == "before"' >/dev/null
 STEP=camp_read
 ${campRead('$message_id')} > "$RUN_TMP/camp-read.json"
 camp_read="$("$CLI" camp read --input-file "$RUN_TMP_NATIVE/camp-read.json")"
-assert_success "$camp_read" 'camp.read'
-printf '%s\n' "$camp_read" | "$JQ" -e --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" '.campId == $campId and .items[0].messageId == $messageId' >/dev/null
+assert_success "$camp_read" 'thread.read'
+printf '%s\n' "$camp_read" | "$JQ" -e --arg threadId ${shellQuote(input.threadId)} --arg messageId "$message_id" '.threadId == $threadId and .items[0].messageId == $messageId' >/dev/null
 
 STEP=history_search_public_a2a
 history_search="$("$CLI" history search --query ${shellQuote(input.historyPublicA2aMarker)} --limit 5)"
 assert_success "$history_search" 'history.search'
 printf '%s\n' "$history_search" | "$JQ" -e \
-  --arg campId ${shellQuote(input.historyCampId)} \
+  --arg threadId ${shellQuote(input.historyCampId)} \
   --arg messageId ${shellQuote(input.historyPublicA2aMessageId)} \
-  '.results | any(.campId == $campId and .messageId == $messageId)' >/dev/null
+  '.results | any(.threadId == $threadId and .messageId == $messageId)' >/dev/null
 STEP=camp_search_historical_public_a2a
 camp_search_historical="$("$CLI" camp search --camp-id ${shellQuote(input.historyCampId)} --query ${shellQuote(input.historyPublicA2aMarker)} --limit 5)"
-assert_success "$camp_search_historical" 'camp.search'
-printf '%s\n' "$camp_search_historical" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} --arg messageId ${shellQuote(input.historyPublicA2aMessageId)} '
-  .results | any(.campId == $campId and .messageId == $messageId and (has("campTitle") | not))
+assert_success "$camp_search_historical" 'thread.search'
+printf '%s\n' "$camp_search_historical" | "$JQ" -e --arg threadId ${shellQuote(input.historyCampId)} --arg messageId ${shellQuote(input.historyPublicA2aMessageId)} '
+  .results | any(.threadId == $threadId and .messageId == $messageId and (has("threadTitle") | not))
 ' >/dev/null
 STEP=camp_read_historical_public_a2a
 camp_read_historical="$("$CLI" camp read --camp-id ${shellQuote(input.historyCampId)} --message-id ${shellQuote(input.historyPublicA2aMessageId)})"
-assert_success "$camp_read_historical" 'camp.read'
+assert_success "$camp_read_historical" 'thread.read'
 printf '%s\n' "$camp_read_historical" | "$JQ" -e \
-  --arg campId ${shellQuote(input.historyCampId)} \
+  --arg threadId ${shellQuote(input.historyCampId)} \
   --arg messageId ${shellQuote(input.historyPublicA2aMessageId)} \
   --arg body ${shellQuote(input.historyPublicA2aMarker)} '
-  .campId == $campId
+  .threadId == $threadId
   and .items[0].messageId == $messageId
   and .items[0].authorType == "agent"
   and .items[0].body == $body
@@ -1460,19 +1459,19 @@ printf '%s\n' "$camp_read_historical" | "$JQ" -e \
 
 STEP=camp_search_historical_attachment
 camp_search_historical_attachment="$("$CLI" camp search --camp-id ${shellQuote(input.historyCampId)} --query ${shellQuote(input.historyAttachmentMarker)} --limit 5)"
-assert_success "$camp_search_historical_attachment" 'camp.search'
+assert_success "$camp_search_historical_attachment" 'thread.search'
 printf '%s\n' "$camp_search_historical_attachment" | "$JQ" -e --arg messageId ${shellQuote(input.historyAttachmentMessageId)} '
-  .results | any(.messageId == $messageId and (has("campTitle") | not))
+  .results | any(.messageId == $messageId and (has("threadTitle") | not))
 ' >/dev/null
 STEP=camp_read_historical_attachment
 camp_read_historical_attachment="$("$CLI" camp read --camp-id ${shellQuote(input.historyCampId)} --message-id ${shellQuote(input.historyAttachmentMessageId)})"
-assert_success "$camp_read_historical_attachment" 'camp.read'
+assert_success "$camp_read_historical_attachment" 'thread.read'
 printf '%s\n' "$camp_read_historical_attachment" | "$JQ" -e \
-  --arg campId ${shellQuote(input.historyCampId)} \
+  --arg threadId ${shellQuote(input.historyCampId)} \
   --arg messageId ${shellQuote(input.historyAttachmentMessageId)} \
   --arg attachmentId ${shellQuote(input.historyAttachmentId)} \
   --arg body ${shellQuote(input.historyAttachmentMarker)} '
-  .campId == $campId
+  .threadId == $threadId
   and .items[0].messageId == $messageId
   and .items[0].body == $body
   and .items[0].attachmentCount == 1
@@ -1491,7 +1490,7 @@ ${publicSend}
 ROVAI_JSON
 STEP=camp_message_send
 public_send="$("$CLI" send --input-file "$RUN_TMP_NATIVE/public-send.json")"
-assert_success "$public_send" 'camp.message.send'
+assert_success "$public_send" 'thread.message.send'
 printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
   (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
   and .agentAddressingMode == "automatic"
@@ -1514,7 +1513,7 @@ gather_id="$(printf '%s\n' "$gather_result" | "$JQ" -er '.gatherId')"
 
 STEP=camp_message_send_direct_public_only_principal
 user_only="$("$CLI" send --public-only --to-principal --body ${shellQuote(`Direct Principal decision ${input.adapterKind}`)})"
-assert_success "$user_only" 'camp.message.send'
+assert_success "$user_only" 'thread.message.send'
 printf '%s\n' "$user_only" | "$JQ" -e '
   (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
   and .agentAddressingMode == "public_only"
@@ -1525,7 +1524,7 @@ user_only_id="$(printf '%s\n' "$user_only" | "$JQ" -er '.messageId')"
 
 STEP=camp_message_send_stdin_public_only_principal
 stdin_user_only="$(printf '%s\n' ${shellQuote(JSON.stringify({ body: `Stdin Principal decision ${input.adapterKind}`, mentionUser: true, publicOnly: true }))} | "$CLI" send)"
-assert_success "$stdin_user_only" 'camp.message.send'
+assert_success "$stdin_user_only" 'thread.message.send'
 printf '%s\n' "$stdin_user_only" | "$JQ" -e '
   .agentAddressingMode == "public_only"
   and .effectiveRecipients == []
@@ -1619,12 +1618,12 @@ JQ="$(command -v jq)"
     : input.sendEvidencePath)}
 printf '%s\n' "$CONTEXT" > ${shellQuote(shellPath(input.resumeContextPathFile))}
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
-printf '%s\n' "$camp_list" | jq -e '((has("contractVersion") | not) and (.camps | type) == "array")' >/dev/null
+printf '%s\n' "$camp_list" | jq -e '((has("contractVersion") | not) and (.threads | type) == "array")' >/dev/null
 
 read_item() {
   local message_id="$1"
-  "$JQ" -n --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" \
-    '{campId:$campId,messageId:$messageId}' | "$CLI" camp read
+  "$JQ" -n --arg threadId ${shellQuote(input.threadId)} --arg messageId "$message_id" \
+    '{threadId:$threadId,messageId:$messageId}' | "$CLI" camp read
 }
 
 public_message_id="$("$JQ" -er '.publicMessageId' "$SEND_EVIDENCE")"

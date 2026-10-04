@@ -1,0 +1,64 @@
+/* The production Renderer owns Run, Tool, Markdown and Evidence styling. */
+html, body, #root { height: auto; min-height: 100dvh; overflow: visible; }
+html, body { background: var(--conversation-surface); }
+body { font-size: 13px; line-height: 1.6; }
+button, summary { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.skip-link { position: fixed; z-index: 99; top: 8px; left: 8px; padding: 8px 12px; transform: translateY(-180%); color: var(--ink); background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 6px; }
+.skip-link:focus { transform: none; }
+:where(button, summary, a, [tabindex]):focus-visible { outline: 2px solid var(--conversation-focus); outline-offset: -2px; }
+.web-app-bar { height: 50px; position: sticky; top: 0; z-index: 10; background: var(--conversation-surface); border-bottom: 1px solid var(--line); }
+.web-app-bar > div { width: min(960px, 100%); height: 100%; margin: auto; display: flex; align-items: center; gap: 9px; padding: 0 20px; }
+.brand-mark { width: 22px; height: 22px; flex: 0 0 22px; color: var(--rail-logo); }
+.web-app-bar h1 { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; margin: 0; }
+.web-readonly { color: var(--muted); font-size: 10.5px; border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.web-content { width: min(960px, 100%); margin: auto; padding: 24px 20px max(48px, env(safe-area-inset-bottom)); }
+.web-trigger { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; margin: 0 0 24px; min-height: 58px; align-items: start; }
+.web-trigger > div { min-width: 0; }
+.web-message-meta { display: flex; align-items: center; gap: 8px; min-height: 20px; margin-bottom: 3px; }
+.web-message-meta strong { font-size: 12px; font-weight: 600; color: var(--ink); }
+.web-message-meta time { color: var(--muted); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.web-trigger p { max-width: 76ch; margin: 0; font-size: 13px; line-height: 1.68; overflow-wrap: anywhere; white-space: pre-wrap; }
+.web-console.execution-drawer { display: grid; height: auto; max-height: none; border: 1px solid var(--line); border-radius: 10px; overflow: clip; grid-template-rows: auto auto; }
+.web-console .execution-drawer-header { min-height: 54px; align-items: center; padding: 10px 16px; gap: 12px; background: var(--conversation-surface); }
+.web-console .execution-drawer-agent { align-items: center; }
+.web-console .execution-drawer-body { overflow: visible; padding: 0 16px 12px; scroll-padding-top: 110px; }
+.web-console .execution-process-node { top: 67px; }
+.web-console .execution-run-card-header { top: 50px; }
+.web-console .execution-process-card :is(button, summary, [tabindex]) { scroll-margin-block: 110px 16px; }
+.web-console .process-copy { max-width: 76ch; }
+.web-connection { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.web-connection.is-reconnecting { color: var(--attention); }
+.web-reconnect { padding: 8px 16px; background: var(--attention-soft); color: var(--attention); font-size: 11.5px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.web-reconnect button { border: 0; border-radius: 4px; padding: 4px; background: transparent; color: inherit; cursor: pointer; white-space: nowrap; text-decoration: underline; text-underline-offset: 3px; }
+.web-state { min-height: 60dvh; display: grid; place-items: center; text-align: center; padding: 28px; color: var(--muted); }
+.web-state h2 { font-size: 14px; font-weight: 600; color: var(--ink); margin: 12px 0 6px; }
+.web-state p { font-size: 12px; margin: 0; }
+.web-state .process-spinner { display: inline-block; }
+.web-retry { min-height: 36px; margin-top: 18px; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-raised); color: var(--ink); cursor: pointer; font-size: 12px; }
+.web-retry:hover { background: var(--surface-hover); }
+.web-public-file { padding: 8px 9px; margin: 3px 0 8px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 10px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.modified-file-title > .web-file-name { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) {
+  .web-app-bar > div { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  .web-content { padding: 20px max(12px, env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .web-trigger { margin-bottom: 20px; }
+  .web-console.execution-drawer { width: calc(100% + 24px); margin-left: -12px; margin-right: -12px; border-right: 0; border-left: 0; border-radius: 0; }
+  .web-console .execution-drawer-header { padding: 10px 12px; }
+  .web-console .execution-drawer-body { padding: 0 12px 12px; }
+  .web-console .execution-process-stage { gap: 6px; }
+  .web-console .tool-group-summary, .web-console .tool-call-summary, .web-console .execution-history-toggle, .web-console .modified-file-summary { min-height: 44px; }
+  .web-console .tool-call-title[title] { height: auto; min-height: 28px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; display: flex; padding: 7px 0; }
+  .web-console .execution-run-trailing { gap: 4px; padding-right: 4px; }
+  .web-console .execution-run-operations button { width: 44px; height: 44px; border: 0; background: transparent; }
+  .web-console .execution-process-stage.status-running .execution-run-trailing { width: auto; }
+  .web-console .execution-process-stage.status-running .execution-run-operations { position: static; opacity: 1; pointer-events: auto; }
+  .web-console .execution-process-stage.status-running .execution-run-card-header:is(:hover, :has(:focus-visible)) .execution-run-metric { opacity: 1; }
+  .web-console .command-expand-cue { opacity: 1; }
+  .web-console .tool-call-result { max-width: 100%; }
+  .web-reconnect button, .web-retry { min-width: 44px; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

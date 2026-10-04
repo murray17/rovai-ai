@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentRunExecutionEvidenceView } from '@contracts'
 import { ExecutionWindow } from '../../desktop/src/renderer/src/execution-window'
 import { ConsoleClient } from './client'
-import { createCampAdapter } from './camp-adapter'
+import { createThreadAdapter } from './camp-adapter'
 
 // Owns the production Web adapter + execution window seam. A Host-only HTTP
 // test bypasses this adapter's allowlist; a populated page hides missing deltas.
@@ -21,33 +21,38 @@ it('loads a command after an initially empty Web Run and refreshes its completio
     if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 4, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     const { operation, params } = JSON.parse(String(options?.body))
     operations.push(operation)
+    expect(params.projection).toBe('blocks')
+    const blocks = evidence.map(item => ({
+      key: 'tools:1', kind: 'toolGroup', sequence: 1, lastSequence: 1, changeSequence,
+      toolCount: 1, counts: { completed: Number(item.phase === 'completed'), running: Number(item.phase !== 'completed'),
+        failed: 0, stopped: 0, waiting: 0, recorded: 0 }, evidence: [item]
+    }))
     const common = {
-      schemaVersion: 2,
-      campId: 'camp',
+      schemaVersion: 3,
+      threadId: 'camp',
       agentRunId: 'run',
       throughSequence: evidence.at(-1)?.sequence ?? 0,
       throughChangeSequence: changeSequence,
       hasMore: false
     }
     if (operation === 'agentRunExecution.page') return Response.json({ result: {
-      ...common, requestedBeforeSequence: params.beforeSequence, nextBeforeSequence: null, evidence
+      ...common, requestedBeforeSequence: params.beforeSequence, nextBeforeSequence: null, blocks
     } })
     if (operation === 'agentRunExecution.changes') return Response.json({ result: {
       ...common,
       requestedAfterChangeSequence: params.afterChangeSequence,
       nextAfterChangeSequence: changeSequence,
-      evidence: evidence.filter(item => (item.changeSequence ?? item.sequence) > params.afterChangeSequence),
-      refreshedEvidence: evidence.filter(item => params.refreshEvidenceIds.includes(item.id))
+      blocks: blocks.filter(item => item.changeSequence > params.afterChangeSequence)
     } })
     throw Error(`Unexpected request: ${operation}`)
   })
   const transport = new ConsoleClient('http://127.0.0.1:8766', fetcher)
   await transport.login('b'.repeat(64))
-  const adapter = createCampAdapter(transport, async () => null)
+  const adapter = createThreadAdapter(transport, async () => null)
   const client = adapter.environment.client
   const current = new ExecutionWindow('camp', 'run', 12,
-    params => client.request('agentRunExecution.page', params), () => undefined,
-    params => client.request('agentRunExecution.changes', params))
+    params => client.request('agentRunExecution.page', { ...params, projection: 'blocks' }), () => undefined,
+    params => client.request('agentRunExecution.changes', { ...params, projection: 'blocks' }))
   try {
     await current.latest()
     expect(current.loaded).toBe(true)
@@ -87,10 +92,10 @@ it('polls changes only while files are open and resumes after reopening', async 
   })
   const transport = new ConsoleClient('http://127.0.0.1:8766', fetcher)
   await transport.login('b'.repeat(64))
-  const adapter = createCampAdapter(transport, async () => null)
+  const adapter = createThreadAdapter(transport, async () => null)
   const files = adapter.environment.files
   const unsubscribe = files.onExternalUpdate(() => undefined)
-  const open = () => files.open({ kind: 'camp_workspace', campId: 'camp', rawReference: 'file.txt' })
+  const open = () => files.open({ kind: 'camp_workspace', threadId: 'camp', rawReference: 'file.txt' })
   try {
     adapter.invalidate()
     await vi.advanceTimersByTimeAsync(6000)
@@ -139,8 +144,8 @@ it('confirms uploaded image bindings before reusing local bytes and falls back f
   })
   const transport = new ConsoleClient('http://127.0.0.1:8766', fetcher)
   await transport.login('b'.repeat(64))
-  const adapter = createCampAdapter(transport, async () => null)
-  const preview = () => adapter.environment.client.composerAttachments.preview({ owner: 'composer', campId: 'camp', attachmentRefId: 'attachment' })
+  const adapter = createThreadAdapter(transport, async () => null)
+  const preview = () => adapter.environment.client.composerAttachments.preview({ owner: 'composer', threadId: 'camp', attachmentRefId: 'attachment' })
   try {
     await transport.uploadFile('camp', 1, file)
     expect((await preview()).preview).toEqual({ blob: file })

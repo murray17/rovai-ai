@@ -505,6 +505,7 @@
 }
 .member-editor-runtime-fields .runtime-parameter-switch {
   height: 36px;
+  min-height: 36px;
 }
 .member-editor-new-runtime,
 .member-editor-unconfigured {

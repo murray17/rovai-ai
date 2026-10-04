@@ -1,6 +1,6 @@
 import { createBrowserHtmlPreview } from './html-preview'
 import { browserMemberAvatars } from './member-avatars'
-import type { CampClient } from '../../desktop/src/renderer/src/camp-client'
+import type { ThreadClient } from '../../desktop/src/renderer/src/camp-client'
 import type { BusinessEnvironment } from '../../desktop/src/renderer/src/business-environment'
 import type { SingleChatSnapshot, CoreMethod, FilePreviewApi, FilePreviewExternalUpdateEvent, FilePreviewOperationResult, OpenFilePreviewResult, RestoreFilePreviewRequest } from '@contracts'
 import { ConsoleClient, WEB_OPERATIONS, type WebOperation } from './client'
@@ -12,16 +12,16 @@ import { restorableFilePreviewRequest } from '../../desktop/src/renderer/src/fil
 import { parseFileReference } from '../../desktop/src/file-preview-reference'
 import { writeClipboardText } from '../../desktop/src/renderer/src/clipboard'
 
-export function browserPlatform(): CampClient['platform'] {
+export function browserPlatform(): ThreadClient['platform'] {
   const platform = navigator.platform.toLowerCase()
   return platform.includes('mac') ? 'darwin' : platform.includes('win') ? 'win32' : 'linux'
 }
 
-export function createCampAdapter(transport: ConsoleClient, selectWorkspaceDirectory: BusinessEnvironment['selectWorkspaceDirectory']) {
+export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDirectory: BusinessEnvironment['selectWorkspaceDirectory']) {
   if (!transport.editingScope || !transport.presentationScope) throw new Error('必须先认证才能建立编辑作用域。')
   const listeners = new Set<() => void>()
   const unimplemented = async (): Promise<never> => { throw new Error('此操作的 Web 适配尚未接通。') }
-  const channelAdapter: NonNullable<CampClient['channels']> = {
+  const channelAdapter: NonNullable<ThreadClient['channels']> = {
     native: null,
     get: () => transport.channel({ operation: 'get' }),
     // Main-owned channel progress is read by the mounted shared page, including
@@ -31,7 +31,7 @@ export function createCampAdapter(transport: ConsoleClient, selectWorkspaceDirec
     retryMemberBot: (agentId, kind = 'feishu') => transport.channel({ operation: 'retry', agentId, kind }),
     selectPublicationApprover: (agentId, userId, kind = 'feishu') => transport.channel({ operation: 'selectApprover', agentId, userId, kind })
   }
-  const client: CampClient = {
+  const client: ThreadClient = {
     platform: browserPlatform(),
     missionAttachments: null,
     editingRecovery: browserEditingRecovery(transport.editingScope),
@@ -57,13 +57,13 @@ export function createCampAdapter(transport: ConsoleClient, selectWorkspaceDirec
       prepare: async (conversationId, revision, file) => {
         const snapshot = await transport.request<SingleChatSnapshot | null>('singleChat.get', { conversationId })
         if (!snapshot) throw new Error('单聊已不在当前会话中。')
-        return transport.uploadTo(snapshot.conversation.campId, revision, file, { kind: 'single_chat', conversationId })
+        return transport.uploadTo(snapshot.conversation.threadId, revision, file, { kind: 'single_chat', conversationId })
       },
-      preparePending: (input, file) => transport.uploadTo(input.campId, input.expectedRevision, file, { kind: 'single_chat_pending', conversationId: input.conversationId, pendingInputId: input.pendingInputId, editToken: input.editToken }),
+      preparePending: (input, file) => transport.uploadTo(input.threadId, input.expectedRevision, file, { kind: 'single_chat_pending', conversationId: input.conversationId, pendingInputId: input.pendingInputId, editToken: input.editToken }),
       remove: (conversationId, expectedDraftRevision, attachmentRefId) => transport.request('singleChat.composerDraft.removeAttachment', { conversationId, expectedDraftRevision, attachmentRefId })
     },
     composerAttachments: {
-      prepare: (campId, revision, file) => transport.uploadFile(campId, revision, file),
+      prepare: (threadId, revision, file) => transport.uploadFile(threadId, revision, file),
       preview: unimplemented
     },
     attachments: { kind: 'download', download: unimplemented }
@@ -112,7 +112,7 @@ export function createCampAdapter(transport: ConsoleClient, selectWorkspaceDirec
     return result
   }
   const files: FilePreviewApi = {
-    bindCamp: async () => { /* Camp tab state stays in the shared React provider; every resource carries an exact source. */ },
+    bindThread: async () => { /* Thread tab state stays in the shared React provider; every resource carries an exact source. */ },
     open: request => opened('open', request), restore: request => opened('restore', request), reopen: request => opened('reopen', request),
     readText: request => transport.files('readText', request),
     readPage: request => transport.files('readPage', request), resolveLine: request => transport.files('resolveLine', request),
@@ -163,7 +163,7 @@ export function createCampAdapter(transport: ConsoleClient, selectWorkspaceDirec
     }
   }
   client.composerAttachments.preview = async locator => {
-    const result = await opened('open', { kind: 'attachment', campId: locator.campId, locator })
+    const result = await opened('open', { kind: 'attachment', threadId: locator.threadId, locator })
     if (!result.ok) return { preview: null, availability: result.error.code === 'file_not_found' ? 'missing' : 'unreadable' }
     if (result.value.kind !== 'file_preview') return { preview: null, availability: 'unreadable' }
     const file = result.value.file
@@ -171,7 +171,7 @@ export function createCampAdapter(transport: ConsoleClient, selectWorkspaceDirec
       if (file.kind !== 'image') return { preview: null, availability: 'available' }
       // Open has just reauthorized the exact binding and hashed the Host source.
       // Local bytes are usable only when that confirmation matches the upload.
-      const local = transport.confirmedUpload(locator.campId, file.contentGeneration, file.size)
+      const local = transport.confirmedUpload(locator.threadId, file.contentGeneration, file.size)
       if (local) return { preview: { blob: local }, availability: 'available' }
       const image = await transport.fileBytes('readBinary', { handleId: file.handleId, expectedGeneration: file.contentGeneration })
       return image.ok ? { preview: { blob: image.value.blob }, availability: 'available' } : { preview: null, availability: 'unreadable' }

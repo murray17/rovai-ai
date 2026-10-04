@@ -19,7 +19,7 @@ const outputDir = process.env.ROVAI_CONVERSATION_FIND_ACCEPT_OUTPUT_DIR
 const runtimeTempDir = process.env.ROVAI_CONVERSATION_FIND_ACCEPT_RUNTIME_TMP
   ?? await mkdtemp('/tmp/rv-find-')
 const databasePath = join(dataDir, 'rovai.sqlite')
-const campTitle = '当前会话查找验收'
+const threadTitle = '当前会话查找验收'
 const query = 'orbit-needle'
 
 await mkdir(dataDir, { recursive: true })
@@ -60,13 +60,13 @@ try {
   )
   const mapReturn = await verifyMapShortcutReturn(app.cdp)
   const mapButtonFocus = await verifyMapButtonRetainsFocus(app.cdp)
-  const nonCampBoundary = await verifyNonCampBoundary(app.cdp, fixture.campId)
+  const nonCampBoundary = await verifyNonCampBoundary(app.cdp, fixture.threadId)
   await closeApp(app)
   app = null
 
   compactApp = await launchApp(await availableLoopbackPort(), 1040, 700, true)
   await setTheme(compactApp.cdp, 'night')
-  await openCamp(compactApp.cdp, fixture.campId)
+  await openCamp(compactApp.cdp, fixture.threadId)
   await chooseConversationView(compactApp.cdp, 'conversation')
   await focusTimeline(compactApp.cdp)
   await pressShortcut(compactApp.cdp)
@@ -113,7 +113,7 @@ try {
 
 async function createFixture() {
   const core = startCore(canonicalDataDir)
-  let campId
+  let threadId
   let leadAgentId
   try {
     const health = await core.request('health.check')
@@ -123,15 +123,15 @@ async function createFixture() {
     assert(leadAgentId, `Acceptance fixture has no Default Lead: ${JSON.stringify(preflight)}`)
     const created = await core.request('camps.create', {
       commandId: randomUUID(),
-      name: campTitle,
+      name: threadTitle,
       workspace: null,
       memberAgentIds: [leadAgentId],
       defaultLeadAgentId: leadAgentId,
       collaborationMode: 'peer',
       activationState: 'active'
     })
-    campId = created?.payload?.campId
-    assert(created?.status === 'applied' && campId,
+    threadId = created?.payload?.threadId
+    assert(created?.status === 'applied' && threadId,
       `Could not create conversation find Camp: ${JSON.stringify(created)}`)
   } finally {
     await core.stop()
@@ -166,7 +166,7 @@ async function createFixture() {
       ].join('\n')
     }
     rows.push(`(
-      ${sqlLiteral(`find-message-${sequence}`)}, ${sqlLiteral(campId)}, ${sequence},
+      ${sqlLiteral(`find-message-${sequence}`)}, ${sqlLiteral(threadId)}, ${sequence},
       ${sqlLiteral(authorType)}, ${sqlLiteral(authorId)}, ${sqlLiteral(body)},
       ${sqlLiteral(JSON.stringify([{ kind: 'text', text: body }]))},
       'default', '[]', 1,
@@ -183,14 +183,14 @@ async function createFixture() {
     ) VALUES ${rows.join(',\n')};
     UPDATE camp
     SET activation_state = 'active', updated_at = '2026-08-18T09:05:00Z'
-    WHERE id = ${sqlLiteral(campId)};
+    WHERE id = ${sqlLiteral(threadId)};
     COMMIT;
   `)
-  return { campId, leadAgentId }
+  return { threadId, leadAgentId }
 }
 
 async function verifyConversationMessageActions(cdp, fixture, context, screenshotPath) {
-  await openCamp(cdp, fixture.campId)
+  await openCamp(cdp, fixture.threadId)
   await chooseConversationView(cdp, 'conversation')
   await waitForExpression(cdp,
     `document.querySelectorAll('.camp-timeline [data-message-id]').length === 20`)
@@ -270,7 +270,7 @@ async function verifyConversationMessageActions(cdp, fixture, context, screensho
 }
 
 async function verifyConversationFind(cdp, fixture, context, screenshotPath) {
-  await openCamp(cdp, fixture.campId)
+  await openCamp(cdp, fixture.threadId)
   await chooseConversationView(cdp, 'conversation')
   await waitForExpression(cdp,
     `document.querySelectorAll('.camp-timeline [data-message-id]').length === 20`)
@@ -483,7 +483,7 @@ async function verifyMapButtonRetainsFocus(cdp) {
   return state
 }
 
-async function verifyNonCampBoundary(cdp, campId) {
+async function verifyNonCampBoundary(cdp, threadId) {
   const clicked = await evaluate(cdp, `(() => {
     const button = document.querySelector('.rail-button[aria-label="队员"]')
     button?.click()
@@ -501,7 +501,7 @@ async function verifyNonCampBoundary(cdp, campId) {
   })`)
   assert(state.membersVisible && !state.campMounted && !state.findVisible,
     `Non-Camp page summoned conversation find: ${JSON.stringify(state)}`)
-  await openCamp(cdp, campId)
+  await openCamp(cdp, threadId)
   return state
 }
 
@@ -604,21 +604,21 @@ async function chooseConversationView(cdp, view) {
     `document.querySelector('.camp-conversation-view-controls button[aria-pressed="true"]')?.textContent?.trim() === ${JSON.stringify(label)}`)
 }
 
-async function openCamp(cdp, campId) {
+async function openCamp(cdp, threadId) {
   await waitForExpression(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     return [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === target)
   })()`, 30_000)
   const opened = await evaluate(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     const menu = [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .find((element) => element.dataset.sidebarMenuTarget === target)
     const button = menu?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')
     button?.click()
     return Boolean(button)
   })()`)
-  assert(opened, `Could not open Camp ${campId}`)
+  assert(opened, `Could not open Camp ${threadId}`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
 }
 

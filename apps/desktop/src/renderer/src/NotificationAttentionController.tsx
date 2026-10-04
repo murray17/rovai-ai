@@ -1,4 +1,4 @@
-import { useCampClient } from './camp-client'
+import { useThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -13,8 +13,10 @@ import type {
   NotificationSemantic,
   StoredCommandResult
 } from '@contracts'
-import type { VisibleNotificationSources } from './CampWorkspace'
-import { formatCampTitle } from './camp-title'
+import type { VisibleNotificationSources } from './ThreadWorkspace'
+import { preferenceFromUnknown } from './NotificationSettings'
+import { formatThreadTitle } from './camp-title'
+import { UiText, uiAttribute } from './interface-language'
 
 export const NOTIFICATION_RECOVERY_INTERVAL_MS = 30_000
 
@@ -35,8 +37,9 @@ export type NotificationNavigationResult =
 
 interface NotificationAttentionControllerProps {
   enabled: boolean
-  activeCampId: string | null
-  activeCampVisible: boolean
+  activeThreadId: string | null
+  firstRunThreadId?: string | null
+  activeThreadVisible: boolean
   navigationActive: boolean
   onNavigate(
     episode: NotificationEpisodeView,
@@ -47,7 +50,7 @@ interface NotificationAttentionControllerProps {
     action: NotificationActionView
   ): Promise<boolean>
   onCancelNavigation(): void
-  onRefreshVisibleCamp(
+  onRefreshVisibleThread(
     episode: NotificationEpisodeView,
     action: NotificationActionView
   ): Promise<boolean>
@@ -98,6 +101,22 @@ export function applyNotificationHeadsUpChanges(
       signal: change.headsUpSignal,
       changeSequence: change.changeSequence
     }
+    const dominatedBy = (higher: NotificationHeadsUpEntry, lower: NotificationHeadsUpEntry): boolean => {
+      if (higher.episode.thread.id !== lower.episode.thread.id) return false
+      if (higher.signal.semantic === 'mission_needs_you' && lower.signal.semantic === 'user_mention') {
+        return Boolean(higher.signal.action.subject?.sourceMessageId
+          && higher.signal.action.subject.sourceMessageId === lower.signal.action.messageId)
+      }
+      if (higher.signal.semantic === 'mission_status_changed' && higher.signal.action.subject?.status === 'completed'
+        && lower.signal.semantic === 'round_completed') {
+        return Boolean(higher.signal.action.subject.sourceAgentRunId
+          && lower.signal.action.subject?.relatedRunIds.includes(higher.signal.action.subject.sourceAgentRunId))
+      }
+      return false
+    }
+    if ([...nextEntries, ...overflowEntries].some(entry => dominatedBy(entry, next))) continue
+    nextEntries = nextEntries.filter(entry => !dominatedBy(next, entry))
+    overflowEntries = overflowEntries.filter(entry => !dominatedBy(next, entry))
     const identity = next.signal.action.acknowledgementId
     const existingIndex = nextEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
     const existingOverflowIndex = overflowEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
@@ -117,28 +136,28 @@ export function applyNotificationHeadsUpChanges(
 }
 
 function headsUpPriority(semantic: NotificationSemantic): number {
-  return { approval_pending: 5, turn_failed: 4, turn_incomplete: 3, user_mention: 2, turn_completed: 1 }[semantic]
+  return { approval_pending: 5, mission_needs_you: 5, turn_failed: 4, turn_incomplete: 3, user_mention: 2, turn_completed: 1, round_completed: 1, single_chat_reply: 1, mission_status_changed: 2, task_status_changed: 1 }[semantic]
 }
 
 export function filterVisibleNotificationHeadsUp(
   current: NotificationHeadsUpState,
   sources: readonly VisibleNotificationSources[],
   attentive: boolean,
-  quietCampId: string | null = null
+  quietThreadId: string | null = null
 ): NotificationHeadsUpState {
   if (!attentive) return current
   const retain = (entry: NotificationHeadsUpEntry): boolean => {
     const action = entry.signal.action
     if (!action.available) return false
-    if (quietCampId !== null && entry.episode.camp.id === quietCampId) return false
-    return !sources.some((source) => source.campId === action.campId
+    if (quietThreadId !== null && entry.episode.thread.id === quietThreadId) return false
+    return !sources.some((source) => source.threadId === action.threadId
       && source.surfaceVisible !== false
       && (source.conversationId ?? null) === (action.singleChat?.conversationId ?? null)
       && ((entry.signal.semantic === 'approval_pending' && action.approvalId !== null && source.approvalIds.includes(action.approvalId))
         || (entry.signal.semantic === 'user_mention' && action.messageId !== null && source.messageIds.includes(action.messageId))
-        || (['turn_completed', 'turn_failed', 'turn_incomplete'].includes(entry.signal.semantic)
+        || (['turn_completed', 'round_completed', 'single_chat_reply', 'turn_failed', 'turn_incomplete'].includes(entry.signal.semantic)
           && ((action.agentRunId !== null && source.agentRunIds.includes(action.agentRunId))
-            || (action.campTurnId !== null && source.campTurnIds.includes(action.campTurnId))))))
+            || (action.threadTurnId !== null && source.campTurnIds.includes(action.threadTurnId))))))
   }
   const entries = current.entries.filter(retain)
   const overflowEntries = current.overflowEntries.filter(retain)
@@ -175,7 +194,7 @@ function filterHeadsUpByPreference(
   preference: NotificationPreference
 ): NotificationHeadsUpState {
   const retainsSignal = (entry: NotificationHeadsUpEntry): boolean => (
-    shouldShowHeadsUp(entry.signal.semantic, preference)
+    shouldShowHeadsUp(entry.signal, preference)
   )
   return {
     entries: current.entries.filter(retainsSignal),
@@ -196,9 +215,9 @@ export async function readNotificationChangePages(
   let candidateCursor = startCursor
   for (let page = 0; page < maximumPages; page += 1) {
     const batch = await requestPage(candidateCursor)
-    if (batch.schemaVersion !== 8) throw new Error('提醒增量合同不兼容。')
+    if (batch.schemaVersion !== 9) throw new Error(uiAttribute('提醒增量合同不兼容。'))
     if (batch.requestedAfterChangeSequence !== candidateCursor) {
-      throw new Error('提醒增量游标边界不一致。')
+      throw new Error(uiAttribute('提醒增量游标边界不一致。'))
     }
     if (batch.resetRequired) {
       return {
@@ -211,7 +230,7 @@ export async function readNotificationChangePages(
       batch.nextChangeSequence < candidateCursor
       || batch.nextChangeSequence > batch.throughChangeSequence
       || (batch.hasMore && batch.nextChangeSequence === candidateCursor)
-    ) throw new Error('提醒增量游标没有单调推进。')
+    ) throw new Error(uiAttribute('提醒增量游标没有单调推进。'))
     changes.push(...batch.changes)
     candidateCursor = batch.nextChangeSequence
     if (!batch.hasMore) break
@@ -229,19 +248,34 @@ export function notificationHeadsUpPresentation(
 ): { label: string; message: string } {
   switch (signal.semantic) {
     case 'approval_pending':
-      return { label: '待审批', message: '有操作等待你审批' }
+      return { label:uiAttribute("待审批"), message:uiAttribute("有操作等待你审批") }
     case 'turn_failed':
-      return { label: '执行失败', message: '本轮执行失败，请查看详情' }
+      return { label:uiAttribute("执行失败"), message:uiAttribute("本轮执行失败，请查看详情") }
     case 'turn_incomplete':
-      return { label: '执行未完成', message: '本轮未完成，请查看详情' }
+      return { label:uiAttribute("执行未完成"), message:uiAttribute("本轮未完成，请查看详情") }
     case 'turn_completed':
-      return { label: '等待你的下一步', message: '本轮已完成' }
+    case 'round_completed':
+      return { label:uiAttribute("本轮完成"), message:uiAttribute("本轮已完成") }
+    case 'single_chat_reply':
+      return { label:uiAttribute("单聊回复"), message: uiAttribute("{0}已回复", String(signal.action.singleChat?.agentDisplayName ?? uiAttribute('队员'))) }
+    case 'mission_needs_you': {
+      const title = signal.action.subject?.title || uiAttribute('使命')
+      const question = signal.mention?.available && signal.action.subject?.sourceMessageId === signal.mention.messageId ? signal.mention.summary : null
+      return { label:uiAttribute("使命需要你"), message: uiAttribute("使命「{0}」需要你{1}", String(title), question ? `${uiAttribute('：')}${question}` : '') }
+    }
+    case 'mission_status_changed':
+    case 'task_status_changed': {
+      const kind = signal.semantic === 'mission_status_changed' ?uiAttribute("使命") :uiAttribute("任务")
+      const subject = signal.action.subject
+      const status = { completed: uiAttribute('已完成'), in_progress: uiAttribute('进行中'), not_started: uiAttribute('未开始'), pending: uiAttribute('待开始'), blocked: uiAttribute('受阻'), cancelled: uiAttribute('已取消') }[subject?.status ?? ''] ?? uiAttribute('状态已更新')
+      return { label: uiAttribute("{0}状态变更", String(kind)), message: uiAttribute('{0}「{1}」{2}', kind, subject?.title || kind, status) }
+    }
     case 'user_mention':
       return {
-        label: '提到你',
+        label:uiAttribute("提到你"),
         message: signal.mention?.available
-          ? signal.mention.summary ?? '有消息明确提到你'
-          : '原消息来源不可用'
+          ? signal.mention.summary ?? uiAttribute('有消息明确提到你')
+          :uiAttribute("原消息来源不可用")
       }
   }
 }
@@ -249,8 +283,8 @@ export function notificationHeadsUpPresentation(
 type VisibleAcknowledgementIntent = {
   key: string
   request: { commandId: string; command: {
-    campId: string; observedThroughChangeSequence: number; visibleMessageIds: string[];
-    visibleCampTurnIds: string[]; visibleAgentRunIds: string[]; visibleApprovalIds: string[]
+    threadId: string; observedThroughChangeSequence: number; visibleMessageIds: string[];
+    visibleThreadTurnIds: string[]; visibleAgentRunIds: string[]; visibleApprovalIds: string[]
   } }
 }
 
@@ -261,14 +295,14 @@ export function visibleAcknowledgementIntent(
   previous: VisibleAcknowledgementIntent | null,
   newId: () => string = () => newCommandId()
 ): VisibleAcknowledgementIntent {
-  // Both cursors are global fences, not changes to this Camp's visible sources.
-  const key = JSON.stringify({ campId: sources.campId, admittedThrough,
+  // Both cursors are global fences, not changes to this Thread's visible sources.
+  const key = JSON.stringify({ threadId: sources.threadId, admittedThrough,
     messageIds: sources.messageIds, campTurnIds: sources.campTurnIds,
     agentRunIds: sources.agentRunIds, approvalIds: sources.approvalIds })
   if (previous?.key === key) return previous
   return { key, request: { commandId: newId(), command: {
-    campId: sources.campId, observedThroughChangeSequence,
-    visibleMessageIds: [...sources.messageIds], visibleCampTurnIds: [...sources.campTurnIds],
+    threadId: sources.threadId, observedThroughChangeSequence,
+    visibleMessageIds: [...sources.messageIds], visibleThreadTurnIds: [...sources.campTurnIds],
     visibleAgentRunIds: [...sources.agentRunIds],
     visibleApprovalIds: [...sources.approvalIds]
   } } }
@@ -276,25 +310,26 @@ export function visibleAcknowledgementIntent(
 
 export function NotificationAttentionController({
   enabled,
-  activeCampId,
-  activeCampVisible,
+  activeThreadId,
+  firstRunThreadId = null,
+  activeThreadVisible,
   navigationActive,
   onNavigate,
   onPresentNavigation,
   onCancelNavigation,
-  onRefreshVisibleCamp,
+  onRefreshVisibleThread,
   onError,
   visibleSources: publicSources,
   singleChatSources = null,
   onHeadsUpVisibleChange
 }: NotificationAttentionControllerProps): React.JSX.Element {
-  const client = useCampClient()
-  const readingSources = useMemo(() => activeCampVisible
+  const client = useThreadClient()
+  const readingSources = useMemo(() => activeThreadVisible
     ? [publicSources, singleChatSources].filter((source): source is VisibleNotificationSources => (
-      source !== null && source.campId === activeCampId && source.surfaceVisible !== false
-    )) : [], [activeCampVisible, activeCampId, publicSources, singleChatSources])
+      source !== null && source.threadId === activeThreadId && source.surfaceVisible !== false
+    )) : [], [activeThreadVisible, activeThreadId, publicSources, singleChatSources])
   const visibleSources = useMemo(() => readingSources.length === 0 ? null : {
-    campId: readingSources[0].campId,
+    threadId: readingSources[0].threadId,
     snapshotSequence: Math.max(...readingSources.map((source) => source.snapshotSequence)),
     messageIds: [...new Set(readingSources.flatMap((source) => source.messageIds))].sort(),
     campTurnIds: [...new Set(readingSources.flatMap((source) => source.campTurnIds))].sort(),
@@ -323,7 +358,7 @@ export function NotificationAttentionController({
   const visibleAcknowledgementRunning = useRef(false)
   const visibleRetryTimer = useRef<number | null>(null)
   const mounted = useRef(false)
-  const visibleCampAdmissions = useRef(new Map<string, number>())
+  const visibleThreadAdmissions = useRef(new Map<string, number>())
   const visibleCommands = useRef(new Map<string, VisibleAcknowledgementIntent>())
 
   useEffect(() => {
@@ -338,7 +373,7 @@ export function NotificationAttentionController({
     const next = await client.request<NotificationPreference>(
       'notifications.preference.get'
     )
-    if (!validPreference(next)) throw new Error('提醒设置合同不兼容。')
+    if (!validPreference(next)) throw new Error(uiAttribute('提醒设置合同不兼容。'))
     setPreference(next)
     setHeadsUpState((current) => filterHeadsUpByPreference(current, next))
     return next
@@ -349,7 +384,7 @@ export function NotificationAttentionController({
       'notifications.inbox',
       { filter: 'unread', limit: 1 }
     )
-    if (inbox.schemaVersion !== 8) throw new Error('提醒基线合同不兼容。')
+    if (inbox.schemaVersion !== 9) throw new Error(uiAttribute('提醒基线合同不兼容。'))
     setHasUnreadAttention(inbox.unreadCount > 0)
     return inbox
   }, [])
@@ -362,7 +397,7 @@ export function NotificationAttentionController({
     changeCursor.current = inbox.throughChangeSequence
     visibleAcknowledgementKeys.current.clear()
     visibleCommands.current.clear()
-    visibleCampAdmissions.current.clear()
+    visibleThreadAdmissions.current.clear()
     setObservedThroughChangeSequence(inbox.throughChangeSequence)
     baselineReady.current = true
     pollFailureCount.current = 0
@@ -439,7 +474,7 @@ export function NotificationAttentionController({
       const changes = collected.changes
       for (const change of changes) {
         if (change.changeCause === 'occurrence_admitted' && change.episode) {
-          visibleCampAdmissions.current.set(change.episode.camp.id, change.changeSequence)
+          visibleThreadAdmissions.current.set(change.episode.thread.id, change.changeSequence)
         }
       }
       const hasHeadsUpSignal = changes.some((change) => change.headsUpSignal !== null)
@@ -464,12 +499,12 @@ export function NotificationAttentionController({
           : null
         const exactSourceMayBeVisible = exactMentionAction
           && exactMentionAction.messageId
-          && episode.camp.id === activeCampId
-          && activeCampVisible
+          && episode.thread.id === activeThreadId
+          && activeThreadVisible
           && windowAttentive
           && readingSources.some((source) => !source.conversationId)
         if (exactSourceMayBeVisible) {
-          const rendered = await onRefreshVisibleCamp(episode, exactMentionAction)
+          const rendered = await onRefreshVisibleThread(episode, exactMentionAction)
           if (rendered && document.visibilityState === 'visible' && document.hasFocus()) {
             try {
               await acknowledgeAction(episode, exactMentionAction)
@@ -480,13 +515,13 @@ export function NotificationAttentionController({
             }
           }
         }
-        const quietCurrentCamp = activeCampVisible
+        const quietCurrentThread = activeThreadVisible
           && windowAttentive
-          && episode.camp.id === activeCampId
+          && episode.thread.id === activeThreadId
         headsUpChanges.push(
-          !quietCurrentCamp
+          !quietCurrentThread
             && effectivePreference
-            && shouldShowHeadsUp(signal.semantic, effectivePreference)
+            && shouldShowHeadsUp(signal, effectivePreference)
             ? change
             : { ...change, headsUpSignal: null }
         )
@@ -518,11 +553,11 @@ export function NotificationAttentionController({
     }
   }, [
     acknowledgeAction,
-    activeCampId,
-    activeCampVisible,
+    activeThreadId,
+    activeThreadVisible,
     establishBaseline,
     loadPreference,
-    onRefreshVisibleCamp,
+    onRefreshVisibleThread,
     preference,
     readingSources,
     windowAttentive
@@ -572,9 +607,9 @@ export function NotificationAttentionController({
       current,
       readingSources,
       windowAttentive,
-      activeCampVisible ? activeCampId : null
+      activeThreadVisible ? activeThreadId : null
     ))
-  }, [activeCampId, activeCampVisible, readingSources, windowAttentive, observedThroughChangeSequence])
+  }, [activeThreadId, activeThreadVisible, readingSources, windowAttentive, observedThroughChangeSequence])
 
   useEffect(() => {
     if (
@@ -582,9 +617,9 @@ export function NotificationAttentionController({
       || !baselineReady.current
       || !hasUnreadAttention
       || navigationActive
-      || !activeCampVisible
+      || !activeThreadVisible
       || !visibleSources
-      || visibleSources.campId !== activeCampId
+      || visibleSources.threadId !== activeThreadId
       || !windowAttentive
     ) return undefined
     const sourceCount = visibleSources.messageIds.length
@@ -593,15 +628,15 @@ export function NotificationAttentionController({
       + visibleSources.approvalIds.length
     if (sourceCount === 0) return undefined
     const intent = visibleAcknowledgementIntent(visibleSources,
-      visibleCampAdmissions.current.get(visibleSources.campId) ?? 0,
-      observedThroughChangeSequence, visibleCommands.current.get(visibleSources.campId) ?? null)
+      visibleThreadAdmissions.current.get(visibleSources.threadId) ?? 0,
+      observedThroughChangeSequence, visibleCommands.current.get(visibleSources.threadId) ?? null)
     const key = intent.key
     if (visibleAcknowledgementRunning.current
-      || visibleAcknowledgementKeys.current.get(visibleSources.campId) === key) {
+      || visibleAcknowledgementKeys.current.get(visibleSources.threadId) === key) {
       return undefined
     }
     visibleAcknowledgementRunning.current = true
-    visibleCommands.current.set(visibleSources.campId, intent)
+    visibleCommands.current.set(visibleSources.threadId, intent)
     const generation = baselineGeneration.current
     let applied = false
     void client.request<StoredCommandResult>(
@@ -611,7 +646,7 @@ export function NotificationAttentionController({
       if (result.status !== 'applied') throw new Error(commandFailure(result))
       applied = true
       if (!mounted.current || generation !== baselineGeneration.current) return
-      visibleAcknowledgementKeys.current.set(visibleSources.campId, key)
+      visibleAcknowledgementKeys.current.set(visibleSources.threadId, key)
       // A failed refresh does not make the already-acknowledged command uncertain.
       await Promise.all([pollChanges(), readUnreadStatus()]).catch(() => undefined)
     }).catch(() => {
@@ -627,8 +662,8 @@ export function NotificationAttentionController({
     // Dependency churn must not cancel receipt handling or an uncertain retry.
     return undefined
   }, [
-    activeCampId,
-    activeCampVisible,
+    activeThreadId,
+    activeThreadVisible,
     enabled,
     hasUnreadAttention,
     navigationActive,
@@ -664,7 +699,7 @@ export function NotificationAttentionController({
       if (result.status === 'failed') {
         onCancelNavigation()
         onError(acknowledgementPersisted
-          ? `${result.message} 这条提醒已标记为已读。`
+          ? uiAttribute("{0} 这条提醒已标记为已读。", String(result.message))
           : result.message)
         return
       }
@@ -676,15 +711,15 @@ export function NotificationAttentionController({
       if (!presented) {
         onCancelNavigation()
         onError(acknowledgementPersisted
-          ? '已打开会话，但未能定位到目标；这条提醒已标记为已读。'
-          : '已打开会话，但暂时无法定位到目标。')
+          ?uiAttribute("已打开会话，但未能定位到目标；这条提醒已标记为已读。")
+          :uiAttribute("已打开会话，但暂时无法定位到目标。"))
       }
     } catch (nextError) {
       onCancelNavigation()
       if (generation !== navigationGeneration.current) return
       onError(acknowledgementPersisted
-        ? `提醒已标记为已读，但打开失败：${errorMessage(nextError)}`
-        : `提醒操作未完成：${errorMessage(nextError)}`)
+        ? uiAttribute("提醒已标记为已读，但打开失败：{0}", String(errorMessage(nextError)))
+        : uiAttribute("提醒操作未完成：{0}", String(errorMessage(nextError))))
     } finally {
       setBusyAcknowledgementId(null)
     }
@@ -694,7 +729,7 @@ export function NotificationAttentionController({
     headsUpState,
     readingSources,
     windowAttentive,
-    activeCampVisible ? activeCampId : null
+    activeThreadVisible ? activeThreadId : null
   )
   const currentHeadsUp = presentableState.entries[0] ?? null
   const headsUpOverflow = presentableState.overflowEntries.length
@@ -710,6 +745,7 @@ export function NotificationAttentionController({
           key={`${currentHeadsUp.episode.id}:${currentHeadsUp.signal.action.singleChat?.conversationId ?? 'public'}`}
           active={windowAttentive && foregroundReady}
           entry={currentHeadsUp}
+          firstRunThreadId={firstRunThreadId}
           busy={busyAcknowledgementId !== null}
           onOpen={() => void openAction(
             currentHeadsUp.episode,
@@ -741,12 +777,14 @@ export function NotificationAttentionController({
 export function NotificationHeadsUp({
   active = true,
   entry,
+  firstRunThreadId = null,
   busy,
   onOpen,
   onDismiss
 }: {
   active?: boolean
   entry: NotificationHeadsUpEntry
+  firstRunThreadId?: string | null
   busy: boolean
   onOpen(): void
   onDismiss(): void
@@ -754,8 +792,8 @@ export function NotificationHeadsUp({
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
   const presentation = notificationHeadsUpPresentation(entry.signal)
-  const campTitle = formatCampTitle(entry.episode.camp)
-  const privateTitle = entry.signal.action.singleChat ? ` · 与${entry.signal.action.singleChat.agentDisplayName}单聊` : ''
+  const threadTitle = formatThreadTitle(entry.episode.thread, firstRunThreadId)
+  const privateTitle = entry.signal.action.singleChat ? uiAttribute(" · 与{0}单聊", String(entry.signal.action.singleChat.agentDisplayName)) : ''
   useHeadsUpLifetime(!active || hovered || focused || busy, onDismiss, entry.signal.action.acknowledgementId)
   return (
     <aside
@@ -777,13 +815,13 @@ export function NotificationHeadsUp({
         aria-busy={busy ? 'true' : undefined}
         onClick={onOpen}
       >
-        <strong className="notification-heads-up-source" title={`${campTitle}${privateTitle}`}><i className="notification-heads-up-dot" aria-hidden="true" /><span>{campTitle}</span>{privateTitle && <b>{privateTitle}</b>}</strong>
+        <strong className="notification-heads-up-source" title={`${threadTitle}${privateTitle}`}><i className="notification-heads-up-dot" aria-hidden="true" /><span>{threadTitle}</span>{privateTitle && <b>{privateTitle}</b>}</strong>
         <span className="notification-heads-up-message">{presentation.message}</span>
       </button>
       <button
         className="notification-heads-up-close"
         type="button"
-        aria-label="关闭本次提醒"
+        aria-label={uiAttribute("关闭本次提醒")}
         onClick={onDismiss}
       ><CloseIcon /></button>
     </aside>
@@ -817,12 +855,12 @@ function NotificationHeadsUpSummary({
       }}
     >
       <button className="notification-heads-up-open" type="button" onClick={onOpen}>
-        <span>还有 {count} 条提醒</span><span>查看下一条</span>
+        <span><UiText zh={"还有 "} />{count}<UiText zh={" 条提醒"} /></span><span><UiText zh={"查看下一条"} /></span>
       </button>
       <button
         className="notification-heads-up-close"
         type="button"
-        aria-label="关闭这些提醒"
+        aria-label={uiAttribute("关闭这些提醒")}
         onClick={onDismiss}
       ><CloseIcon /></button>
     </aside>
@@ -871,25 +909,28 @@ function useWindowAttentive(): boolean {
   return attentive
 }
 
-function shouldShowHeadsUp(
-  semantic: NotificationSemantic,
+export function shouldShowHeadsUp(
+  signal: NotificationHeadsUpSignal,
   preference: NotificationPreference
 ): boolean {
   if (!preference.headsUpEnabled) return false
-  if (semantic === 'approval_pending') return preference.approvalHeadsUpEnabled
-  if (semantic === 'user_mention') return preference.userMentionHeadsUpEnabled
-  if (semantic === 'turn_completed') return preference.turnCompletedHeadsUpEnabled
-  return preference.turnIncompleteHeadsUpEnabled
+  switch (signal.semantic) {
+    case 'approval_pending': return preference.approvalHeadsUpEnabled
+    case 'user_mention': return preference.userMentionHeadsUpEnabled
+    case 'turn_completed':
+    case 'round_completed': return preference.turnCompletedHeadsUpEnabled
+    case 'single_chat_reply': return preference.singleChatHeadsUpEnabled
+    case 'mission_needs_you': return preference.missionNeedsYouHeadsUpEnabled
+    case 'mission_status_changed': return preference.missionStatusHeadsUpEnabled
+      && (preference.missionStatuses as string[]).includes(signal.action.subject?.status ?? '')
+    case 'task_status_changed': return preference.taskStatusHeadsUpEnabled
+      && (preference.taskStatuses as string[]).includes(signal.action.subject?.status ?? '')
+    default: return preference.turnIncompleteHeadsUpEnabled
+  }
 }
 
 function validPreference(value: NotificationPreference): boolean {
-  return typeof value.headsUpEnabled === 'boolean'
-    && typeof value.approvalHeadsUpEnabled === 'boolean'
-    && typeof value.userMentionHeadsUpEnabled === 'boolean'
-    && typeof value.turnCompletedHeadsUpEnabled === 'boolean'
-    && typeof value.turnIncompleteHeadsUpEnabled === 'boolean'
-    && typeof value.version === 'number'
-    && typeof value.updatedAt === 'string'
+  return preferenceFromUnknown(value) !== null
 }
 
 function commandFailure(result: StoredCommandResult): string {

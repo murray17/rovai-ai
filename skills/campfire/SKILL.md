@@ -1,48 +1,33 @@
 ---
 name: campfire
-description: 当用户希望 Camp 中多位成员共同讨论、从不同角度分析、比较方案、评估利弊或讨论后形成建议时使用。主持人发起和继续整理讨论，成员在收到本次讨论任务时也使用。普通单人问题、无关发言、迟到补充和已经结束的讨论不使用。
+description: Run a Thread discussion with several members to compare perspectives, options or tradeoffs and produce shared notes. Applies to the host and invited contributors throughout that discussion; excludes solo work, unrelated messages and closed discussions.
 ---
 
-# 篝火讨论
+# Campfire
 
-Campfire 由当前 Default Lead 主持。成员先独立判断；只有一个会改变结论的关键分歧可以进入定向回应；最后发布一份统一纪要。
+The current Default Lead hosts independent views, at most one focused response round, then one final set of notes. Public messages make this an independent discussion, not a blind review. Use the user's language for prose and template headings.
 
-## 使用边界
+## Roles
 
-用于多人讨论、不同视角分析、方案比较、利弊评估或讨论后建议。不用于普通单人任务、持续双人追问、严格信息隔离，或不足两位成员的场景。CampMessage 公开可见，因此独立作答不是盲评。
-
-只有用户直接请求当前 Default Lead 才能开始新讨论。普通成员收到用户的召集请求时不得自行启动；成员只在收到本场正式讨论任务时参与。
-
-## 角色路由
-
-| 当前角色与输入 | 动作 |
+| Current input | Action |
 | --- | --- |
-| 当前 Default Lead 收到用户直接请求 | 读取 [Default Lead 指南](references/lead.md)，开始第一轮 |
-| 普通成员处于用户广播或同时触达 Default Lead 的阶段 | 读取 [参与者指南](references/member.md)，保持静默 |
-| 普通成员的当前 AgentRun 由正式独立观点或定向回应请求触发 | 读取 [参与者指南](references/member.md)，返回一条完整结果 |
-| 主持人收到本轮受邀成员的普通回复 | 读取 [Default Lead 指南](references/lead.md)，继续收集、综合或收口 |
-| 任意角色收到纪要、迟到意见或无关发言 | 不自动续跑 |
+| User directly asks the current Default Lead to host | Follow [Lead](references/lead.md) |
+| Ordinary member receives a user broadcast or a call that also reaches the Lead | Follow [Member](references/member.md); wait for a formal invitation |
+| Member receives this discussion's independent-view or response request | Follow [Member](references/member.md); return one complete result |
+| Host receives an invited member's current-round reply | Follow [Lead](references/lead.md) |
+| Notes, late contributions or unrelated messages | Do not restart the discussion |
 
-按当前角色、请求来源和本轮完成结果判断，不凭消息标题推进流程。
+Use trusted roles and request/reply relationships, not message titles. One Lead may host only one unfinished Campfire per Thread. This workflow needs at least two contributors and is not for sustained two-person questioning or strict information isolation.
 
-## 公共规则
+## Discussion bounds
 
-1. 同一 Default Lead 在一个 Camp 中一次只推进一场未结束的 Campfire。
-2. 第一轮用一条普通多目标消息邀请 2–3 位成员独立作答；只有关键分歧可以触发一次邀请 1–2 人的回应消息。
-3. 每场最多两轮，每位成员每轮只返回一条完整结果。
-4. 第二轮完成后必须发布唯一《篝火纪要》，不追加澄清轮；迟到观点不自动更新纪要。
-5. 用户的停止、替换话题、移除成员或立即总结始终优先。
+- Round 1: invite 2-3 members in one multi-recipient message.
+- Round 2: optional, once, with 1-2 members addressing one disagreement that could change the conclusion.
+- Each member returns one complete result per round. After round 2, publish the final [Notes](references/notes.md); no extra clarification round.
+- User requests to stop, replace the topic, remove a member or summarize now take precedence. Late views do not reopen published notes.
 
-## 流程
+## Member reply contract
 
-```text
-用户请求 Default Lead
-    → 第一轮普通多目标消息：邀请 2–3 位成员
-    → 成员用普通消息分别回复主持人
-    → 少于两份有效观点：部分纪要或终止
-    → 无关键分歧：发布纪要
-    → 有关键分歧：一次定向回应邀请
-    → 发布纪要
-```
+Include a core judgment, two main reasons, the most important risk/limit, what would change the judgment, and confidence. For Chinese, aim for 200-250 characters, at most 300; use comparable brevity in other languages.
 
-不要为展示讨论感强行制造反方。准备终止输出时读取 [篝火纪要写作指南](references/notes.md)。
+Return the full result to the requester once. Omit repeated background, other members' views, acknowledgements and progress. Contributors do not recruit others, summarize the whole discussion or start another round.

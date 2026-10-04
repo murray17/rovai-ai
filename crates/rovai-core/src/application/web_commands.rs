@@ -65,11 +65,11 @@ pub(super) fn reconcile(
         "missions.status" => user!(crate::mission::StatusMissionCommand),
         "missions.start" => user!(crate::mission::StartMissionCommand),
         "missions.linkPr" => user!(crate::mission::LinkMissionPrCommand),
-        "camps.rename" => camp!(RenameCampCommand),
-        "camps.delete" => camp!(DeleteCampCommand),
-        "camps.retryDeletion" => user!(RetryCampDeletionCommand),
-        "camps.discardPending" => camp!(DiscardPendingCampCommand),
-        "camps.members.fast.set" => camp!(rovai_core::camp_fast::SetCampMemberFastCommand),
+        "camps.rename" => camp!(RenameThreadCommand),
+        "camps.delete" => camp!(DeleteThreadCommand),
+        "camps.retryDeletion" => user!(RetryThreadDeletionCommand),
+        "camps.discardPending" => camp!(DiscardPendingThreadCommand),
+        "camps.members.fast.set" => camp!(rovai_core::camp_fast::SetThreadMemberFastCommand),
         "members.remove" => user!(RemoveMemberCommand),
         "members.reorder" => user!(ReorderAgentProfilesCommand),
         "notifications.preference.update" => user!(UpdateNotificationPreferenceCommand),
@@ -176,22 +176,22 @@ pub(super) fn reconcile(
         }
 
         "camp.messages.send" => {
-            let params: SendCampMessageParams = serde_json::from_value(query.params)?;
+            let params: SendThreadMessageParams = serde_json::from_value(query.params)?;
             let mut value = receipt(database, params.envelope())?;
             if value["state"] == "recorded" {
                 value["result"] = json!({"commandResult":value["result"].take(), "replayed":true, "preflight":null, "pendingExecution":null});
             }
             Ok(value)
         }
-        "camp.messages.withdraw" => camp!(WithdrawCampMessageCommand),
+        "camp.messages.withdraw" => camp!(WithdrawThreadMessageCommand),
         "action.approvals.resolve" => {
             let params: ResolveActionApprovalParams = serde_json::from_value(query.params)?;
             receipt(database, params.envelope())
         }
         "agentRuns.cancel" => camp!(CancelAgentRunCommand),
         "camps.changeDefaultLead" => camp!(ChangeDefaultLeadCommand),
-        "camps.members.add" => camp!(AddCampMemberCommand),
-        "camps.members.remove" => camp!(RemoveCampMemberCommand),
+        "camps.members.add" => camp!(AddThreadMemberCommand),
+        "camps.members.remove" => camp!(RemoveThreadMemberCommand),
         "members.create" => user!(CreateAgentProfileCommand),
         "members.update" => user!(UpdateAgentProfileCommand),
         "members.avatar.set" => user!(SetAgentProfileAvatarCommand),
@@ -226,7 +226,7 @@ pub(super) fn reconcile(
                     )?
                 } else {
                     serde_json::to_value(
-                        CampAttachmentStore::for_client(data_dir, client.clone())
+                        ThreadAttachmentStore::for_client(data_dir, client.clone())
                             .load_draft(database, &params.command.camp_id)?,
                     )?
                 };
@@ -236,7 +236,7 @@ pub(super) fn reconcile(
             }
         }
         "camps.create" => {
-            let params: CreateCampParams = serde_json::from_value(query.params)?;
+            let params: CreateThreadParams = serde_json::from_value(query.params)?;
             let (project_binding_kind, path) = match params.workspace {
                 Some(workspace) => (
                     ProjectBindingKind::Directory,
@@ -255,7 +255,7 @@ pub(super) fn reconcile(
                 database,
                 user_command_envelope(
                     params.command_id,
-                    CreateCampCommand {
+                    CreateThreadCommand {
                         name: params.name,
                         project_binding_kind,
                         project_path: path.to_string_lossy().into_owned(),
@@ -279,7 +279,7 @@ mod tests {
     fn task_reconciliation_rejects_removed_input_fields() {
         let create = serde_json::from_value::<CreateTaskParams>(json!({
             "commandId": "command-old-create",
-            "campId": "camp-old",
+            "threadId": "camp-old",
             "title": "Old create",
             "description": "Old payload",
             "acceptanceCriteria": ["legacy"],
@@ -289,7 +289,7 @@ mod tests {
 
         let update = serde_json::from_value::<UpdateTaskParams>(json!({
             "commandId": "command-old-update",
-            "campId": "camp-old",
+            "threadId": "camp-old",
             "taskId": "task-old",
             "expectedVersion": 1,
             "clearAcceptanceCriteria": true

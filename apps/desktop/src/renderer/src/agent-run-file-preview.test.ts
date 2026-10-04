@@ -59,7 +59,7 @@ describe('AgentRun file preview routing', () => {
 
     await expect(openAgentRunCurrentFilePreview({
       filePreview: { open },
-      campId: 'camp-1',
+      threadId: 'camp-1',
       changes,
       evidenceFileId: 'operation-only',
       onError
@@ -67,7 +67,7 @@ describe('AgentRun file preview routing', () => {
 
     expect(open).toHaveBeenCalledWith({
       kind: 'run_evidence',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       agentRunId: 'run-files',
       executionEpoch: 3,
       evidenceFileId: 'operation-only',
@@ -82,7 +82,7 @@ describe('AgentRun file preview routing', () => {
 
     await expect(openAgentRunActivityFilePreview({
       filePreview: { open },
-      campId: 'camp-1',
+      threadId: 'camp-1',
       evidence: {
         agentRunId: 'run-mission',
         executionEpoch: 4,
@@ -94,7 +94,7 @@ describe('AgentRun file preview routing', () => {
 
     expect(open).toHaveBeenCalledWith({
       kind: 'run_activity_file',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       agentRunId: 'run-mission',
       executionEpoch: 4,
       evidenceId: 'diff-evidence-7',
@@ -125,14 +125,14 @@ describe('AgentRun file preview routing', () => {
 
       await expect(openAgentRunActivityFilePreview({
         filePreview: { open },
-        campId: 'camp-1',
+        threadId: 'camp-1',
         evidence,
         path: 'src/operation-only.ts',
         onError
       })).resolves.toBe(true)
       expect(open).toHaveBeenCalledWith({
         kind: 'run_activity_file',
-        campId: 'camp-1',
+        threadId: 'camp-1',
         agentRunId: 'run-mission',
         executionEpoch: 4,
         evidenceId: evidence.id,
@@ -146,7 +146,7 @@ describe('AgentRun file preview routing', () => {
       open.mockClear()
       await expect(openAgentRunActivityFilePreview({
         filePreview: { open },
-        campId: 'camp-1',
+        threadId: 'camp-1',
         evidence,
         path: 'src/other.ts',
         onError
@@ -156,11 +156,11 @@ describe('AgentRun file preview routing', () => {
     }
   )
 
-  it('keeps the Camp workspace fallback for legacy Command rows without evidence identity', async () => {
+  it('keeps the Thread workspace fallback for legacy Command rows without evidence identity', async () => {
     const open = vi.fn().mockResolvedValue({ kind: 'preview', tabId: 'legacy-file' })
     await expect(openAgentRunActivityFilePreview({
       filePreview: { open },
-      campId: 'camp-1',
+      threadId: 'camp-1',
       evidence: {
         agentRunId: 'run-legacy',
         executionEpoch: 1,
@@ -172,17 +172,17 @@ describe('AgentRun file preview routing', () => {
     })).resolves.toBe(true)
     expect(open).toHaveBeenCalledWith({
       kind: 'camp_workspace',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       rawReference: 'src/legacy.ts'
     }, undefined, { fileName: 'src/legacy.ts' }, { commitOnSuccess: true, previewOnly: true })
   })
 
-  it('does not fall back to a same-named Camp file when a typed operation lacks Evidence', async () => {
+  it('does not fall back to a same-named Thread file when a typed operation lacks Evidence', async () => {
     const open = vi.fn()
     const onError = vi.fn()
     await expect(openAgentRunActivityFilePreview({
       filePreview: { open },
-      campId: 'mission-camp',
+      threadId: 'mission-camp',
       path: 'src/worktree-only.ts',
       onError
     })).resolves.toBe(false)
@@ -190,12 +190,12 @@ describe('AgentRun file preview routing', () => {
     expect(onError).toHaveBeenCalledWith('无法打开该文件')
   })
 
-  it('does not downgrade a malformed canonical diff to the Camp workspace', async () => {
+  it('does not downgrade a malformed canonical diff to the Thread workspace', async () => {
     const open = vi.fn()
     const onError = vi.fn()
     await expect(openAgentRunActivityFilePreview({
       filePreview: { open },
-      campId: 'camp-1',
+      threadId: 'camp-1',
       evidence: {
         agentRunId: 'run-mission',
         executionEpoch: 4,
@@ -216,7 +216,7 @@ describe('AgentRun file preview routing', () => {
     const onError = vi.fn()
     await expect(openAgentRunCurrentFilePreview({
       filePreview,
-      campId: 'camp-1',
+      threadId: 'camp-1',
       changes,
       evidenceFileId: 'operation-only',
       onError

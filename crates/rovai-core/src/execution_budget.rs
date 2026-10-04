@@ -54,13 +54,13 @@ fn reconcile_execution_budget_time(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CampTurnExecutionBudgetExhaustionReason {
+pub enum ThreadTurnExecutionBudgetExhaustionReason {
     Elapsed,
     AgentRunResponsibilities,
     AcceptedA2a,
 }
 
-impl CampTurnExecutionBudgetExhaustionReason {
+impl ThreadTurnExecutionBudgetExhaustionReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Elapsed => "elapsed",
@@ -72,14 +72,14 @@ impl CampTurnExecutionBudgetExhaustionReason {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CampTurnExecutionBudgetRequest {
+pub struct ThreadTurnExecutionBudgetRequest {
     #[serde(deserialize_with = "deserialize_required_time_limit")]
     pub elapsed_seconds: Option<i64>,
     pub max_agent_run_responsibilities: i64,
     pub max_accepted_a2a: i64,
 }
 
-impl CampTurnExecutionBudgetRequest {
+impl ThreadTurnExecutionBudgetRequest {
     pub fn validate(&self) -> Result<()> {
         if self.elapsed_seconds.is_some_and(|seconds| seconds < 1) {
             anyhow::bail!("Execution Budget elapsedSeconds must be positive");
@@ -96,7 +96,7 @@ impl CampTurnExecutionBudgetRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FrozenCampTurnExecutionBudget {
+pub struct FrozenThreadTurnExecutionBudget {
     pub schema_version: i64,
     pub accepted_at: String,
     pub deadline_at: Option<String>,
@@ -107,10 +107,10 @@ pub struct FrozenCampTurnExecutionBudget {
 }
 
 pub fn freeze_camp_turn_execution_budget(
-    requested: Option<&CampTurnExecutionBudgetRequest>,
+    requested: Option<&ThreadTurnExecutionBudgetRequest>,
     accepted_at: DateTime<Utc>,
     root_agent_run_responsibilities: i64,
-) -> Result<FrozenCampTurnExecutionBudget> {
+) -> Result<FrozenThreadTurnExecutionBudget> {
     if let Some(requested) = requested {
         requested.validate()?;
     }
@@ -139,7 +139,7 @@ pub fn freeze_camp_turn_execution_budget(
                 .ok_or_else(|| anyhow::anyhow!("Execution Budget deadline overflow"))
         })
         .transpose()?;
-    Ok(FrozenCampTurnExecutionBudget {
+    Ok(FrozenThreadTurnExecutionBudget {
         schema_version: if elapsed_seconds.is_none() {
             UNBOUNDED_EXECUTION_BUDGET_SCHEMA_VERSION
         } else {
@@ -203,7 +203,7 @@ mod tests {
     fn requested_budget_is_clamped_by_product_safety_maxima() {
         let accepted_at = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
         let frozen = freeze_camp_turn_execution_budget(
-            Some(&CampTurnExecutionBudgetRequest {
+            Some(&ThreadTurnExecutionBudgetRequest {
                 elapsed_seconds: Some(PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS + 1),
                 max_agent_run_responsibilities: PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES + 1,
                 max_accepted_a2a: PRODUCT_MAX_ACCEPTED_A2A + 1,
@@ -226,7 +226,7 @@ mod tests {
             frozen.deadline_at.as_deref(),
             Some("2026-08-04T00:00:00+00:00")
         );
-        let unbounded: CampTurnExecutionBudgetRequest = serde_json::from_value(serde_json::json!({"elapsedSeconds":null,"maxAgentRunResponsibilities":32,"maxAcceptedA2a":16})).unwrap();
+        let unbounded: ThreadTurnExecutionBudgetRequest = serde_json::from_value(serde_json::json!({"elapsedSeconds":null,"maxAgentRunResponsibilities":32,"maxAcceptedA2a":16})).unwrap();
         let frozen = freeze_camp_turn_execution_budget(Some(&unbounded), accepted_at, 1).unwrap();
         assert_eq!(frozen.schema_version, 2);
         assert_eq!(frozen.elapsed_seconds, None);
@@ -239,7 +239,7 @@ mod tests {
             .unwrap()
         );
         assert!(
-            serde_json::from_value::<CampTurnExecutionBudgetRequest>(
+            serde_json::from_value::<ThreadTurnExecutionBudgetRequest>(
                 serde_json::json!({"maxAgentRunResponsibilities":32,"maxAcceptedA2a":16})
             )
             .is_err()
@@ -250,7 +250,7 @@ mod tests {
     fn budget_rejects_a_root_execution_that_cannot_fit() {
         let accepted_at = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
         let error = freeze_camp_turn_execution_budget(
-            Some(&CampTurnExecutionBudgetRequest {
+            Some(&ThreadTurnExecutionBudgetRequest {
                 elapsed_seconds: Some(60),
                 max_agent_run_responsibilities: 1,
                 max_accepted_a2a: 0,

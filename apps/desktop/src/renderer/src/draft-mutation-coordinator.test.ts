@@ -1,4 +1,4 @@
-import type { CampComposerDraftView, CampMessageView, ComposerDocument } from '@contracts'
+import type { ThreadComposerDraftView, ThreadMessageView, ComposerDocument } from '@contracts'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DraftMutationCoordinator,
@@ -14,10 +14,10 @@ function document(text: string): ComposerDocument {
   }
 }
 
-function draft(campId: string, revision: number, text = ''): CampComposerDraftView {
+function draft(threadId: string, revision: number, text = ''): ThreadComposerDraftView {
   return {
     quotes: [],
-    campId,
+    threadId,
     body: text,
     content: document(text),
     revision,
@@ -29,8 +29,8 @@ function draft(campId: string, revision: number, text = ''): CampComposerDraftVi
   }
 }
 
-function message(id: string): CampMessageView {
-  return { id } as CampMessageView
+function message(id: string): ThreadMessageView {
+  return { id } as ThreadMessageView
 }
 
 describe('DraftMutationCoordinator', () => {
@@ -73,19 +73,19 @@ describe('DraftMutationCoordinator', () => {
     expect(coordinator.getCurrentDraft()).toMatchObject({ revision: 12, content: document('new') })
   })
 
-  it('returns a queued input after earlier saves and fences late results from another Camp', async () => {
+  it('returns a queued input after earlier saves and fences late results from another Thread', async () => {
     const originalCrypto = globalThis.crypto
     vi.stubGlobal('crypto', { getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto) })
     try {
     let release!: () => void
     const waiting = new Promise<void>((resolve) => { release = resolve })
-    const mutations: Array<{ draft: CampComposerDraftView; mutation: DraftMutation }> = []
+    const mutations: Array<{ draft: ThreadComposerDraftView; mutation: DraftMutation }> = []
     const coordinator = new DraftMutationCoordinator({
       load: async () => draft('camp-a', 1),
       mutate: async (current, mutation) => {
         mutations.push({ draft: current, mutation })
         if (mutation.kind === 'return_pending_input') await waiting
-        return draft(current.campId, current.revision + 1, mutation.kind === 'return_pending_input' ? 'queued' : 'typed')
+        return draft(current.threadId, current.revision + 1, mutation.kind === 'return_pending_input' ? 'queued' : 'typed')
       }
     })
     coordinator.beginEpoch('camp-a', draft('camp-a', 1))
@@ -98,13 +98,13 @@ describe('DraftMutationCoordinator', () => {
     coordinator.beginEpoch('camp-b', draft('camp-b', 4, 'keep this'))
     release()
     await expect(returned).rejects.toBeInstanceOf(StaleDraftEpochError)
-    expect(coordinator.getCurrentDraft()).toMatchObject({ campId: 'camp-b', content: document('keep this') })
+    expect(coordinator.getCurrentDraft()).toMatchObject({ threadId: 'camp-b', content: document('keep this') })
     } finally { vi.stubGlobal('crypto', originalCrypto) }
   })
 
   it('waits for earlier mutations before deciding that a content snapshot is unchanged', async () => {
     const changes: string[] = []
-    const mutate = vi.fn(async (current: CampComposerDraftView, mutation: DraftMutation) => ({
+    const mutate = vi.fn(async (current: ThreadComposerDraftView, mutation: DraftMutation) => ({
       ...current,
       revision: current.revision + 1,
       content: mutation.kind === 'save_content' ? mutation.content : current.content
@@ -186,9 +186,9 @@ describe('DraftMutationCoordinator', () => {
     let releaseOld!: () => void
     const oldPending = new Promise<void>((resolve) => { releaseOld = resolve })
     const coordinator = new DraftMutationCoordinator({
-      load: async (campId) => draft(campId, 1),
+      load: async (threadId) => draft(threadId, 1),
       mutate: async (current) => {
-        if (current.campId === 'camp-a') await oldPending
+        if (current.threadId === 'camp-a') await oldPending
         return { ...current, revision: current.revision + 1 }
       }
     })
@@ -200,7 +200,7 @@ describe('DraftMutationCoordinator', () => {
     releaseOld()
 
     await expect(oldOperation).rejects.toBeInstanceOf(StaleDraftEpochError)
-    expect(coordinator.getCurrentDraft()).toMatchObject({ campId: 'camp-b', revision: 20 })
+    expect(coordinator.getCurrentDraft()).toMatchObject({ threadId: 'camp-b', revision: 20 })
   })
 
   it('refreshes authority after a failed mutation without hiding the original failure', async () => {

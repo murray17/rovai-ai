@@ -6,7 +6,7 @@ import { dailyWindow, digest, runDaily } from '../packages/evaluation/src/daily.
 
 const args = process.argv.slice(2)
 if (args.includes('--help') || args.length === 0) {
-  console.log('Usage: node scripts/eval-daily.mjs --config <json> [--date YYYY-MM-DD] [--trace <exported-trace.json>]\n  node scripts/eval-daily.mjs prepared --output <report-root> --timezone <IANA-zone>\n  node scripts/eval-daily.mjs analysis --report <directory> --input <analysis-submission.json>\nConfig: { timezone, output, cli, scope: { campIds, excludeCampIds, excludeAutomationIds } }. Defaults to the previous local calendar day. No task replay or model call.')
+  console.log('Usage: node scripts/eval-daily.mjs --config <json> [--date YYYY-MM-DD] [--trace <exported-trace.json>]\n  node scripts/eval-daily.mjs prepared --output <report-root> --timezone <IANA-zone>\n  node scripts/eval-daily.mjs analysis --report <directory> --input <analysis-submission.json>\nConfig: { timezone, output, cli, scope: { threadIds, excludeThreadIds, excludeAutomationIds } }. Defaults to the previous local calendar day. No task replay or model call.')
 } else if (args[0] === 'analysis') {
   const options = {}
   for (let index = 1; index < args.length; index += 2) {
@@ -53,7 +53,7 @@ if (args.includes('--help') || args.length === 0) {
     const { join } = await import('node:path')
     const root = await mkdtemp(join(tmpdir(), 'rovai-trace-export-'))
     const argv = ['app', 'trace', 'export', '--since', params.since, '--until', params.until, '--output', join(root, 'export'), '--json']
-    for (const [key, flag] of [['campIds', '--camp-id'], ['excludeCampIds', '--exclude-camp-id'], ['excludeAutomationIds', '--exclude-automation-id']]) for (const id of params[key]) argv.push(flag, id)
+    for (const [key, flag] of [['threadIds', '--camp-id'], ['excludeThreadIds', '--exclude-camp-id'], ['excludeAutomationIds', '--exclude-automation-id']]) for (const id of params[key]) argv.push(flag, id)
     try {
       const execution = await runCaptured(config.cli, argv, { timeoutMs: 60_000 })
       if (execution.code !== 0 || execution.timedOut) throw new Error(`Trace export unavailable (exit ${execution.code}); check the local App and user CLI boundary`)

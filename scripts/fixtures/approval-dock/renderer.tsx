@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ActionApprovalView } from '@contracts'
-import { ApprovalDock } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import type { ActionApprovalView, GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
+import { ApprovalDock } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { MobileLayoutProvider } from '../../../apps/desktop/src/renderer/src/MobileLayout'
+import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/mobile.css'
 
@@ -33,6 +35,12 @@ let setTarget: (id: string | null) => void
 let setMobile: (value: boolean) => void
 let reset: () => void
 let manyOptions: () => void
+type OptionsSource = 'core' | 'claude' | 'claude-remember' | 'native'
+let setOptionsSource: (source: OptionsSource) => void
+let longRememberRule: () => void
+let nativeResponseDigests: () => string[]
+const rememberLabel = 'Yes, and don’t ask again for: rovai send *'
+const rememberScope = 'Bash(rovai send *)\nlocalSettings · .claude/settings.local.json'
 let focusSerial = 0
 const presented: number[] = []
 
@@ -42,11 +50,33 @@ function Fixture() {
   const [busy, setBusy] = useState(false)
   const [focus, setFocus] = useState<{ id: string | null; serial: number } | null>(null)
   const dockRef = useRef<HTMLElement>(null)
+  nativeResponseDigests = () => approvals[0]?.options.map(option => option.nativeResponseDigest) ?? []
   refresh = () => setApprovals(previous => previous.map(item => ({ ...item })))
   setTarget = id => setFocus({ id, serial: ++focusSerial })
   setMobile = updateMobile
   reset = () => { setApprovals(initial); setBusy(false); setFocus(null); requests.length = 0 }
   manyOptions = () => setApprovals(previous => previous.map(item => ({ ...item, options: Array.from({ length: 12 }, (_, index) => ({ ...item.options[0], optionId: `extended-${index}`, label: `Runtime custom decision ${index + 1} with its complete native label` })) })))
+  setOptionsSource = source => {
+    const prefix = source === 'core' ? 'core' : 'claude'
+    setApprovals([{
+      ...initial[0], actionSummary: '允许一次', reason: '拒绝',
+      adapterKind: source === 'core' ? 'unknown' : 'claude-code-cli',
+      nativeMethod: source === 'core' ? null : source.startsWith('claude') ? 'claude/permission_request' : 'session/request_permission',
+      permissionSemantics: source === 'core' ? 'core_enforced_v1' : 'runtime_managed_v2',
+      options: [
+        { optionId: `${prefix}.deny`, kind: 'deny', label: source === 'claude-remember' ? 'No' : '拒绝', consequence: 'Internal consequence must not be displayed', nativeResponseDigest: 'deny-digest' },
+        { optionId: `${prefix}.allow_once`, kind: 'allow_once', label: source === 'claude-remember' ? 'Yes' : '允许一次', consequence: 'Internal consequence must not be displayed', nativeResponseDigest: 'allow-digest' },
+        ...(source === 'claude-remember' ? [{ optionId: 'claude.allow_remember.rule-digest', kind: 'other' as const,
+          label: rememberLabel, consequence: rememberScope, nativeResponseDigest: 'remember-digest' }] : [])
+      ]
+    }])
+    setBusy(false); setFocus(null); requests.length = 0
+  }
+  longRememberRule = () => setApprovals(items => items.map(item => ({ ...item, options: item.options.map(option =>
+    option.optionId.startsWith('claude.allow_remember.') ? { ...option,
+      label: `Yes, and don’t ask again for: ${'/a-long-project-directory'.repeat(12)}/*`,
+      consequence: `Read(${ '/a-long-project-directory'.repeat(12)}/*)\nprojectSettings · .claude/settings.json`
+    } : option) })))
   return <MobileLayoutProvider value={mobile}><div className={mobile ? 'app-shell' : undefined} style={mobile ? undefined : { height: '100vh' }}>
     <div className="camp-workspace" style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
     <div style={{ display: 'flex', gap: 12, padding: 12 }}>
@@ -77,6 +107,11 @@ Object.assign(window, { approvalTest: {
   complete: () => complete(), refresh: () => refresh(), locate: (id: string) => setTarget(id),
   setMobile: (value: boolean) => setMobile(value), reset: () => reset(),
   manyOptions: () => manyOptions(),
+  setOptionsSource: (source: OptionsSource) => setOptionsSource(source),
+  longRememberRule: () => longRememberRule(),
+  setLanguage: (language: InterfaceLanguage) => changeInterfaceLanguage({
+    setInterfaceLanguage: async interfaceLanguage => ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
+  } as GeneralPreferencesApi, language),
   setWidth: (width: number) => { document.getElementById('approval-layout')!.style.width = `${width}px` },
   settle: () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 20)))) ,
   snapshot: () => {
@@ -93,6 +128,12 @@ Object.assign(window, { approvalTest: {
       decisionFocused: buttons.includes(document.activeElement as HTMLButtonElement),
       nextDisabled: document.querySelector('[aria-label="下一项审批"]')?.getAttribute('aria-disabled'),
       labels: buttons.map(button => button.textContent), disabled: buttons.every(button => button.disabled),
+      titles: buttons.map(button => button.title), accessibleLabels: buttons.map(button => button.getAttribute('aria-label')),
+      optionIds: buttons.map(button => button.dataset.optionId),
+      nativeResponseDigests: nativeResponseDigests(),
+      optionBounds: buttons.map(button => button.getBoundingClientRect().toJSON()),
+      configurationVisible: /localSettings|projectSettings|\.claude\/settings/.test(document.querySelector('.approval-dock')?.textContent ?? ''),
+      summary: summary?.querySelector('strong')?.textContent,
       reason: reasonNode?.textContent ?? null, expectedReason: reason,
       reasonHeight: reasonNode?.clientHeight, reasonScrollHeight: reasonNode?.scrollHeight,
       reasonToggle: Boolean(toggle), expanded: toggle?.getAttribute('aria-expanded'),

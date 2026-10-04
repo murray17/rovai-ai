@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { HostWebApi, AppearanceSnapshot, GeneralPreferencesApi, GeneralPreferencesSnapshot, WindowControlsApi } from '@contracts'
-import { CampNavigation, SETTINGS_SIDEBAR_GROUPS, SettingsSidebarNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
+import { ThreadNavigation, SETTINGS_SIDEBAR_GROUPS, SettingsSidebarNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/BusinessApp'
 import { GeneralSettings } from '../../../apps/desktop/src/renderer/src/GeneralSettings'
 import { AppearanceSettings } from '../../../apps/desktop/src/renderer/src/AppearanceSettings'
 import { HostWebSettings } from '../../../apps/desktop/src/renderer/src/HostWebSettings'
 import { RemoteConnectionStatus } from '../../../apps/desktop/src/renderer/src/RemoteConnectionStatus'
 import { AppDialogContent, AppDialogHeader, AppDialogBody, AppDialogFooter } from '../../../apps/desktop/src/renderer/src/AppDialog'
-import { CampClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
+import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
 import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
@@ -73,9 +73,9 @@ function Review() {
   const [loginOpen, setLoginOpen] = useState(false)
   const desktop = surface === 'desktop'
   useEffect(() => { applyAppearanceSnapshot(document.documentElement, appearance) }, [appearance])
-  return <CampClientProvider client={model.client}><CurrentUserProfileContext.Provider value={{ profile: { displayName: '维护者', avatarDataUrl: null }, ready: true, error: null, reload: () => note('模拟资料'), save: async profile => profile }}><div className="app-shell">
+  return <ThreadClientProvider client={model.client}><CurrentUserProfileContext.Provider value={{ profile: { displayName: '维护者', avatarDataUrl: null }, ready: true, error: null, reload: () => note('模拟资料'), save: async profile => profile }}><div className="app-shell">
     <WindowDragStrip page="settings" />
-    <CampNavigation navigation={null} view="settings" state="ready" activeCampId={null} pendingMemoryCount={0}
+    <ThreadNavigation navigation={null} view="settings" state="ready" activeThreadId={null} pendingMemoryCount={0}
       settingsNavigation={<SettingsSidebarNavigation groups={SETTINGS_SIDEBAR_GROUPS} section={page} updateBadge={null} onSectionChange={value => { if (['general', 'appearance', 'remote'].includes(value)) setPage(value) }} onBack={() => note('模拟：返回 App')} />}
       onNewConversation={() => {}} onMembers={() => {}} onMemory={() => {}} onSettings={() => {}} onOpenProject={() => {}}
       onCamp={() => {}} onRemoveProject={async () => {}} onRename={async () => {}} onDelete={async () => {}} onError={error => note(String(error))} />
@@ -85,6 +85,6 @@ function Review() {
       {page === 'remote' && (desktop ? <HostWebSettings portDraft={remotePort} onPortDraftChange={setRemotePort} api={hostApi} /> : <RemoteConnectionStatus origin={hostStatus.origin} state={connection} onLogout={() => setConnection('expired')} onLogin={() => setLoginOpen(true)} />)}
     </div></div></main>
     <Dialog.Root open={loginOpen} onOpenChange={setLoginOpen}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><AppDialogContent><AppDialogHeader title="重新登录" description="模拟登录，保留页面内编辑。" /><form onSubmit={event => { event.preventDefault(); setConnection('live'); setLoginOpen(false) }}><AppDialogBody><label>登录 Token<input type="password" required /></label></AppDialogBody><AppDialogFooter><button type="submit" className="primary-button">登录</button></AppDialogFooter></form></AppDialogContent></Dialog.Portal></Dialog.Root>
-  </div></CurrentUserProfileContext.Provider></CampClientProvider>
+  </div></CurrentUserProfileContext.Provider></ThreadClientProvider>
 }
 createRoot(document.getElementById('root')!).render(<Review />)

@@ -27,7 +27,7 @@ try {
  const bytes=Buffer.alloc(20*1024*1024,97);for(let i=4095;i<bytes.length;i+=4096)bytes[i]=10
  await writeFile(join(workspace,'large.txt'),bytes)
  const start=performance.now()
- const opened=await (await call('open',{kind:'camp_workspace',campId:camp.payload.campId,rawReference:'large.txt'})).json()
+ const opened=await (await call('open',{kind:'camp_workspace',threadId:camp.payload.threadId,rawReference:'large.txt'})).json()
  assert.equal(opened.ok,true,JSON.stringify(opened))
  const file=opened.value.file,request={handleId:file.handleId,expectedGeneration:file.contentGeneration}
  const openMs=performance.now()-start

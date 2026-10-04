@@ -1,8 +1,11 @@
 import { RemoteConnectionStatus } from './RemoteConnectionStatus'
 import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 import { DEFAULT_APPEARANCE } from '../../shared/appearance'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
+import { changeInterfaceLanguage } from './interface-language'
 import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
-import { CampDetailEntries } from './CampDetailPopover'
+import { agentRunFileChangesSummaryLabel, agentRunFileChangeModeLabel, agentRunFilePathParts } from './file-changes-presentation'
+import { ThreadDetailEntries } from './ThreadDetailPopover'
 import { createElement, type ComponentProps } from 'react'
 import { ExecutionToolGroupStateContext } from './ExecutionToolGroup'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -16,13 +19,14 @@ import type {
   AgentRunView,
   AgentRunExecutionEvidenceView,
   AppUpdateSnapshot,
-  CampComposerDraftView,
-  CampMessageView,
-  CampOpenProjection,
-  CampSnapshot,
+  ThreadComposerDraftView,
+  ThreadMessageView,
+  ThreadOpenProjection,
+  ThreadSnapshot,
   StoredCommandResult,
   CanonicalRuntimeActivityView,
   CoreMethod,
+  GeneralPreferencesApi,
   HealthStatus,
   MessageDeliveryView,
   NotificationActionView,
@@ -31,7 +35,7 @@ import type {
   SupervisorSnapshot
 } from '@contracts'
 import {
-  activeCampSurfaceNeedsLeaveGuard,
+  activeThreadSurfaceNeedsLeaveGuard,
   App,
   AppToast,
   applyCancellationResult,
@@ -41,7 +45,7 @@ import {
   SHUTDOWN_FEEDBACK_DELAY_MS,
   STARTUP_FEEDBACK_DELAY_MS,
   WindowDragStrip,
-  allNavigationCamps,
+  allNavigationThreads,
   authoritativeWorkspaceIsAvailable,
   bootstrapAuthorityCopy,
   campActivationPreview,
@@ -56,28 +60,29 @@ import {
   campSnapshotWithCurrentAnchor,
   campSnapshotWithAnchoredMessages,
   commandFailureMessage,
-  createActiveCampRefreshCoordinator,
+  createActiveThreadRefreshCoordinator,
   effectiveCancellingRunIds,
   effectiveCancellingTurnIds,
   notificationFocusMatchesAction,
+  resolveNotificationAgentRun,
   missionDrawerSuppressesExecutionAutoOpen,
-  navigationWithoutDeletedCamps,
-  optimisticCampMessage,
+  navigationWithoutDeletedThreads,
+  optimisticThreadMessage,
   prepareActiveAutomationForAppQuit,
-  prepareActiveCampForAppQuit,
+  prepareActiveThreadForAppQuit,
   rectanglesIntersect,
-  recentCampSnapshot,
+  recentThreadSnapshot,
   reconcileCancellingTurnIds,
   reconcileRunCancellationIds,
-  refreshActiveCampForCoreEvent,
-  rememberCampSnapshot,
-  requestAuthoritativeCampOpenProjection,
+  refreshActiveThreadForCoreEvent,
+  rememberThreadSnapshot,
+  requestAuthoritativeThreadOpenProjection,
   runtimeRecoveryFromCommandResult,
   runAutomationLeaveTransition,
   selectProjectDirectory,
   SettingsView,
   shouldRefreshNavigationForCoreEvent,
-  shouldRefreshActiveCampForCoreEvent,
+  shouldRefreshActiveThreadForCoreEvent,
   StartupRouteLoading,
   shouldLoadRuntimeHealth,
   startupFeedbackShouldBeVisible,
@@ -85,21 +90,21 @@ import {
   windowDragStripPage
 } from './App'
 import {
-  CampNavigation,
+  ThreadNavigation,
   campNavigationMenuLabels,
-  copyCampIdToClipboard,
+  copyThreadIdToClipboard,
   projectNavigationMenuLabels,
   toggleNavigationGroup,
   type NavigationSettingsSection
-} from './CampNavigation'
+} from './ThreadNavigation'
 import {
-  CampWorkspace,
+  ThreadWorkspace,
   QuickChatWorkspace,
   RunExecutionDisclosure,
   TaskPanel,
   AgentRunFileChangesTimelineCard,
   agentExecutionProcesses,
-  runningCampMembers,
+  runningThreadMembers,
   agentRunTerminalNote,
   agentRunCountsAsExecuting,
   agentRunShowsUnsettledWarning,
@@ -122,7 +127,7 @@ import {
   defaultExecutionDrawerMaxHeight,
   dataTransferContainsFiles,
   droppedAttachmentInputs,
-  emptyCampRuntimeSummary,
+  emptyThreadRuntimeSummary,
   executionDrawerHeightBounds,
   executionDrawerHeightFromStoredValue,
   executionDrawerIsNearBottom,
@@ -151,15 +156,15 @@ import {
   runningAgentRunForWorkspaceEntry,
   runPulseMemberNameLines,
   taskCreationBlocksSubmittedRunAutoFocus
-} from './CampWorkspace'
+} from './ThreadWorkspace'
 import { MobileLayoutProvider } from './MobileLayout'
 import {
-  initialCampSelection,
+  initialThreadSelection,
   limitDraftNameInput,
   normalizeDraftName,
-  planInitialCampSelection,
+  planInitialThreadSelection,
   projectWorkspaceActionsDisabled,
-  toggleCampMemberSelection,
+  toggleThreadMemberSelection,
   workspaceInspectionShouldStart,
   workspaceSubmissionBlocked,
   workspaceGitPresentation
@@ -291,8 +296,8 @@ describe('application toast semantics', () => {
   })
 })
 
-describe('accepted Camp deletion tombstone', () => {
-  it('removes a Camp from stale navigation snapshots and adjusts its group count', () => {
+describe('accepted Thread deletion tombstone', () => {
+  it('removes a Thread from stale navigation snapshots and adjusts its group count', () => {
     const deleted = {
       id: 'camp-delete', title: '待删除', activationState: 'active' as const,
       projectBindingKind: 'quick_chat' as const, projectPath: '', defaultLead: null,
@@ -303,14 +308,14 @@ describe('accepted Camp deletion tombstone', () => {
     const snapshot: NavigationSnapshot = {
       schemaVersion: 3,
       throughGlobalSequence: 2,
-      quickChat: { totalCount: 2, recentCamps: [deleted, kept] },
+      quickChat: { totalCount: 2, recentThreads: [deleted, kept] },
       projects: []
     }
 
-    const filtered = navigationWithoutDeletedCamps(snapshot, new Set(['camp-delete']))
+    const filtered = navigationWithoutDeletedThreads(snapshot, new Set(['camp-delete']))
 
     expect(filtered.quickChat.totalCount).toBe(1)
-    expect(filtered.quickChat.recentCamps.map((camp) => camp.id)).toEqual(['camp-keep'])
+    expect(filtered.quickChat.recentThreads.map((thread) => thread.id)).toEqual(['camp-keep'])
   })
 })
 
@@ -391,27 +396,31 @@ describe('availability-first workspace gate', () => {
   })
 })
 
-describe('active Camp event invalidation', () => {
-  it('refreshes the active Camp when a persisted AgentRun reaches terminal', () => {
-    expect(shouldRefreshActiveCampForCoreEvent({
+describe('active Thread event invalidation', () => {
+  it('refreshes the active Thread when a persisted AgentRun reaches terminal', () => {
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'agent_run.terminal',
       params: { agentRunId: 'run-1' }
     }, 'camp-1')).toBe(true)
   })
 
-  it('keeps Camp-scoped invalidations on their target Camp', () => {
-    expect(shouldRefreshActiveCampForCoreEvent({
+  it('keeps Thread-scoped invalidations on their target Thread', () => {
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'agent_run.terminal',
-      params: { campId: 'camp-2', agentRunId: 'run-2' }
+      params: { threadId: 'camp-2', agentRunId: 'run-2' }
     }, 'camp-1')).toBe(false)
-    expect(shouldRefreshActiveCampForCoreEvent({
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'agent_run.cancelled',
-      params: { campId: 'camp-1', agentRunId: 'run-1' }
+      params: { threadId: 'camp-1', agentRunId: 'run-1' }
     }, 'camp-1')).toBe(true)
-    const images = { method: 'agent_run.images.updated', params: { campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 } }
-    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-1')).toBe(true)
-    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-2')).toBe(false)
-    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-1', true)).toBe(false)
+    const images = { method: 'agent_run.images.updated', params: { threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 } }
+    expect(shouldRefreshActiveThreadForCoreEvent(images, 'camp-1')).toBe(true)
+    expect(shouldRefreshActiveThreadForCoreEvent(images, 'camp-2')).toBe(false)
+    expect(shouldRefreshActiveThreadForCoreEvent(images, 'camp-1', true)).toBe(false)
+    const created = { method: 'thread.memberCreated', params: { threadId: 'camp-1' } }
+    expect(shouldRefreshActiveThreadForCoreEvent(created, 'camp-1')).toBe(true)
+    expect(shouldRefreshActiveThreadForCoreEvent(created, 'camp-2')).toBe(false)
+    expect(shouldRefreshActiveThreadForCoreEvent(created, 'camp-1', true)).toBe(false)
   })
 
   it('refreshes membership cutover and reconciliation projections', () => {
@@ -421,39 +430,39 @@ describe('active Camp event invalidation', () => {
       'camp.membership_reconciliation_started',
       'camp.membership_reconciliation_completed'
     ]) {
-      expect(shouldRefreshActiveCampForCoreEvent({
+      expect(shouldRefreshActiveThreadForCoreEvent({
         method,
-        params: { campId: 'camp-1' }
+        params: { threadId: 'camp-1' }
       }, 'camp-1')).toBe(true)
     }
   })
 
-  it('requires an exact Camp for runtime model observation events', () => {
-    expect(shouldRefreshActiveCampForCoreEvent({
+  it('requires an exact Thread for runtime model observation events', () => {
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'agent_run.runtime_model_observed',
       params: { agentRunId: 'run-1' }
     }, 'camp-1')).toBe(false)
-    expect(shouldRefreshActiveCampForCoreEvent({
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'agent_run.runtime_model_observed',
-      params: { campId: 'camp-1', agentRunId: 'run-1' }
+      params: { threadId: 'camp-1', agentRunId: 'run-1' }
     }, 'camp-1')).toBe(true)
   })
 
-  it('ignores unrelated events and missing active Camps', () => {
-    expect(shouldRefreshActiveCampForCoreEvent({
+  it('ignores unrelated events and missing active Threads', () => {
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'monitoring.changed',
       params: {}
     }, 'camp-1')).toBe(false)
-    expect(shouldRefreshActiveCampForCoreEvent({
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'agent_run.terminal',
       params: { agentRunId: 'run-1' }
     }, null)).toBe(false)
   })
 
   it('does not start a projection refresh after shutdown begins', () => {
-    expect(shouldRefreshActiveCampForCoreEvent({
+    expect(shouldRefreshActiveThreadForCoreEvent({
       method: 'agent_run.cancelled',
-      params: { campId: 'camp-1', agentRunId: 'run-1' }
+      params: { threadId: 'camp-1', agentRunId: 'run-1' }
     }, 'camp-1', true)).toBe(false)
   })
 
@@ -465,7 +474,7 @@ describe('active Camp event invalidation', () => {
     const refreshOnce = vi.fn()
       .mockImplementationOnce(() => firstRead)
       .mockResolvedValue(undefined)
-    const coordinator = createActiveCampRefreshCoordinator(refreshOnce)
+    const coordinator = createActiveThreadRefreshCoordinator(refreshOnce)
 
     const first = coordinator.refresh('camp-1')
     await Promise.resolve()
@@ -493,7 +502,7 @@ describe('active Camp event invalidation', () => {
     const refreshOnce = vi.fn()
       .mockImplementationOnce(() => firstRead)
       .mockResolvedValue(undefined)
-    const coordinator = createActiveCampRefreshCoordinator(refreshOnce)
+    const coordinator = createActiveThreadRefreshCoordinator(refreshOnce)
 
     const first = coordinator.refresh('camp-1')
     await Promise.resolve()
@@ -505,8 +514,8 @@ describe('active Camp event invalidation', () => {
     expect(refreshOnce).toHaveBeenCalledTimes(2)
   })
 
-  it('refreshes terminal state from camps.open and replaces the running Camp surface', async () => {
-    const projection = (status: AgentRunView['status']): CampOpenProjection => {
+  it('refreshes terminal state from threads.open and replaces the running Thread surface', async () => {
+    const projection = (status: AgentRunView['status']): ThreadOpenProjection => {
       const terminal = status === 'succeeded'
       const complete = {
         loadedCount: 0,
@@ -517,7 +526,7 @@ describe('active Camp event invalidation', () => {
       return {
         schemaVersion: 8,
         throughGlobalSequence: terminal ? 12 : 10,
-        camp: {
+        thread: {
           id: 'camp-terminal-refresh', title: '终态刷新', activationState: 'active',
           projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
           defaultLeadAgentId: 'agent_2', membershipGeneration: 1, version: 1,
@@ -536,8 +545,8 @@ describe('active Camp event invalidation', () => {
           id: 'message-terminal-refresh', sequence: 1, timelineGlobalSequence: null,
           authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
           body: '完成验收', content: [{ kind: 'text', text: '完成验收' }], attachments: [],
-          addressMode: 'default', addressedAgentIds: [], replyToCampMessageId: null,
-          campTurnId: 'turn-terminal-refresh', presentation: null,
+          addressMode: 'default', addressedAgentIds: [], replyToThreadMessageId: null,
+          threadTurnId: 'turn-terminal-refresh', presentation: null,
           createdAt: '2026-08-25T00:00:00Z'
         }],
         messageDeliveries: [],
@@ -550,7 +559,7 @@ describe('active Camp event invalidation', () => {
           endedAt: terminal ? '2026-08-25T00:00:02Z' : null
         }],
         agentRuns: [{
-          id: 'run-terminal-refresh', campTurnId: 'turn-terminal-refresh',
+          id: 'run-terminal-refresh', threadTurnId: 'turn-terminal-refresh',
           conversationId: 'conversation-terminal-refresh', agentId: 'agent_2', taskId: null,
           responsibilityKey: 'direct:agent_2', responsibilityGeneration: 0,
           purpose: '完成验收', completionRole: 'required', status,
@@ -584,7 +593,7 @@ describe('active Camp event invalidation', () => {
     }
 
     let snapshot = campOpenProjectionAsSnapshot(projection('running'), null)
-    const renderCamp = (): string => renderToStaticMarkup(createElement(CampWorkspace, {
+    const renderThread = (): string => renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
       projectName: null,
       agents: [agentProfile()],
@@ -596,7 +605,7 @@ describe('active Camp event invalidation', () => {
       stopping: false,
       onStop: () => undefined
     }))
-    const runningMarkup = renderCamp()
+    const runningMarkup = renderThread()
     expect(runningMarkup).toContain('执行中')
     expect(runningMarkup).toContain('status-running')
 
@@ -607,15 +616,15 @@ describe('active Camp event invalidation', () => {
         return projection('succeeded') as T
       }
     }
-    const coordinator = createActiveCampRefreshCoordinator(async (campId) => {
-      const refreshed = await requestAuthoritativeCampOpenProjection(
+    const coordinator = createActiveThreadRefreshCoordinator(async (threadId) => {
+      const refreshed = await requestAuthoritativeThreadOpenProjection(
         api,
-        campId,
+        threadId,
         'trace-terminal-refresh'
       )
       snapshot = campOpenProjectionAsSnapshot(refreshed, snapshot)
     })
-    const refresh = refreshActiveCampForCoreEvent({
+    const refresh = refreshActiveThreadForCoreEvent({
       method: 'agent_run.terminal',
       params: { agentRunId: 'run-terminal-refresh' }
     }, 'camp-terminal-refresh', coordinator)
@@ -623,11 +632,11 @@ describe('active Camp event invalidation', () => {
     expect(refresh).not.toBeNull()
     await refresh
 
-    expect(request).toHaveBeenCalledWith('camps.open', {
+    expect(request).toHaveBeenCalledWith('threads.open', {
       traceId: 'trace-terminal-refresh',
-      campId: 'camp-terminal-refresh'
+      threadId: 'camp-terminal-refresh'
     })
-    const refreshedMarkup = renderCamp()
+    const refreshedMarkup = renderThread()
     expect(refreshedMarkup).toContain('已完成')
     expect(refreshedMarkup).toContain('state-completed')
     expect(refreshedMarkup).not.toContain('state-running')
@@ -640,7 +649,7 @@ describe('navigation event invalidation', () => {
   it('refreshes only for the generic Core invalidation', () => {
     expect(shouldRefreshNavigationForCoreEvent({
       method: 'navigation.invalidated',
-      params: { reason: 'agent_run.terminal', campId: 'camp-1' }
+      params: { reason: 'agent_run.terminal', threadId: 'camp-1' }
     })).toBe(true)
     expect(shouldRefreshNavigationForCoreEvent({
       method: 'agent_run.terminal',
@@ -713,11 +722,11 @@ describe('cold startup route presentation', () => {
       startupLocationMode: 'last_location',
       lastSettingsSection: 'general',
       restorableLocationStatus: 'valid',
-      restorableLocation: { kind: 'camp', campId: 'camp-1' }
+      restorableLocation: { kind: 'camp', threadId: 'camp-1' }
     })).toBe(false)
   })
 
-  it('renders delayed Camp opening as a full-window brand canvas with separate recovery', () => {
+  it('renders delayed Thread opening as a full-window brand canvas with separate recovery', () => {
     const loading = renderToStaticMarkup(createElement(StartupRouteLoading, {
       kind: 'camp',
       waiting: false,
@@ -812,19 +821,19 @@ describe('Project directory selection', () => {
   })
 })
 
-describe('Camp snapshot cache', () => {
+describe('Thread snapshot cache', () => {
   it('authorizes physical deletion from the destructive confirmation', () => {
     expect(campDeleteCommand({ id: 'camp-delete', version: 7 })).toEqual({
-      campId: 'camp-delete',
+      threadId: 'camp-delete',
       expectedVersion: 7,
       force: true
     })
   })
 
-  it('retains the current workspace until an uncached Camp projection is ready', () => {
-    const snapshot = (campId: string): CampSnapshot => ({
-      camp: { id: campId }
-    } as CampSnapshot)
+  it('retains the current workspace until an uncached Thread projection is ready', () => {
+    const snapshot = (threadId: string): ThreadSnapshot => ({
+      thread: { id: threadId }
+    } as ThreadSnapshot)
     const current = snapshot('camp-current')
     const cachedTarget = snapshot('camp-target')
 
@@ -835,26 +844,26 @@ describe('Camp snapshot cache', () => {
     expect(CAMP_OPEN_FEEDBACK_DELAY_MS).toBe(400)
   })
 
-  it('keeps a bounded least-recently-used Camp snapshot cache', () => {
-    const snapshot = (campId: string): CampSnapshot => ({
-      camp: { id: campId }
-    } as CampSnapshot)
-    const cache = new Map<string, CampSnapshot>()
+  it('keeps a bounded least-recently-used Thread snapshot cache', () => {
+    const snapshot = (threadId: string): ThreadSnapshot => ({
+      thread: { id: threadId }
+    } as ThreadSnapshot)
+    const cache = new Map<string, ThreadSnapshot>()
     const first = snapshot('camp-1')
     const second = snapshot('camp-2')
     const third = snapshot('camp-3')
 
-    rememberCampSnapshot(cache, first, 2)
-    rememberCampSnapshot(cache, second, 2)
-    expect(recentCampSnapshot(cache, 'camp-1')).toBe(first)
-    rememberCampSnapshot(cache, third, 2)
+    rememberThreadSnapshot(cache, first, 2)
+    rememberThreadSnapshot(cache, second, 2)
+    expect(recentThreadSnapshot(cache, 'camp-1')).toBe(first)
+    rememberThreadSnapshot(cache, third, 2)
 
     expect([...cache.keys()]).toEqual(['camp-1', 'camp-3'])
-    expect(recentCampSnapshot(cache, 'camp-2')).toBeNull()
+    expect(recentThreadSnapshot(cache, 'camp-2')).toBeNull()
   })
 
   it('adapts the bounded open projection without restoring heavy history', () => {
-    const message = (id: string, sequence: number): CampMessageView => ({
+    const message = (id: string, sequence: number): ThreadMessageView => ({
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id,
@@ -868,14 +877,14 @@ describe('Camp snapshot cache', () => {
       attachments: [],
       addressMode: 'default',
       addressedAgentIds: [],
-      replyToCampMessageId: null,
-      campTurnId: null,
+      replyToThreadMessageId: null,
+      threadTurnId: null,
       presentation: null,
       createdAt: `2026-08-14T00:00:${String(sequence).padStart(2, '0')}Z`
     })
-    const camp = {
+    const thread = {
       id: 'camp-1',
-      title: 'Camp',
+      title: 'Thread',
       activationState: 'active' as const,
       projectBindingKind: 'quick_chat' as const,
       projectPath: '/quick-chat',
@@ -888,7 +897,7 @@ describe('Camp snapshot cache', () => {
     const previous = {
       schemaVersion: 33,
       throughGlobalSequence: 10,
-      camp,
+      thread,
       members: [],
       membershipReconciliations: [],
       tasks: [],
@@ -901,7 +910,7 @@ describe('Camp snapshot cache', () => {
       approvals: [],
       actions: [{ id: 'must-not-survive' }],
       timeline: []
-    } as unknown as CampSnapshot
+    } as unknown as ThreadSnapshot
     const complete = {
       loadedCount: 0,
       totalCount: 0,
@@ -911,7 +920,7 @@ describe('Camp snapshot cache', () => {
     const projection = {
       schemaVersion: 8,
       throughGlobalSequence: 20,
-      camp,
+      thread,
       members: [],
       membershipReconciliations: [],
       tasks: [],
@@ -938,10 +947,11 @@ describe('Camp snapshot cache', () => {
         agentRuns: complete,
         approvals: complete
       }
-    } satisfies CampOpenProjection
+    } satisfies ThreadOpenProjection
 
     const snapshot = campOpenProjectionAsSnapshot(projection, previous)
 
+    expect(snapshot.schemaVersion).toBe(35)
     expect(snapshot.messages.map(({ id }) => id)).toEqual(['older', 'recent'])
     expect(snapshot.timeline).toEqual([])
     expect(snapshot.messages.every((message) => message.timelineGlobalSequence === null)).toBe(true)
@@ -954,7 +964,7 @@ describe('Camp snapshot cache', () => {
 
 describe('task event projections', () => {
   it('shows the complete structured recipient fanout and never infers recipients from a reply', () => {
-    const members: CampSnapshot['members'] = [
+    const members: ThreadSnapshot['members'] = [
       {
         agentId: 'agent_1', displayName: '叮叮', teamRole: 'Lead', avatarRef: null,
         accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null,
@@ -980,9 +990,9 @@ describe('task event projections', () => {
   })
 
   it('requires explicit repair only until an unavailable reply author is visibly replaced', () => {
-    const base: CampComposerDraftView = {
+    const base: ThreadComposerDraftView = {
     quotes: [],
-      campId: 'camp-1', body: '继续', revision: 4, attachments: [],
+      threadId: 'camp-1', body: '继续', revision: 4, attachments: [],
       updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
       content: {
         version: 2,
@@ -990,7 +1000,7 @@ describe('task event projections', () => {
       },
       continuationIntent: null,
       replyIntent: {
-        replyToCampMessageId: 'message-1', targetState: 'available', excerpt: '原消息',
+        replyToThreadMessageId: 'message-1', targetState: 'available', excerpt: '原消息',
         recipientSelectionRequired: false,
         author: {
           authorType: 'agent', authorId: 'agent_2', displayName: '芝士',
@@ -1112,7 +1122,7 @@ describe('task event projections', () => {
   it('projects one live Task card at creation and suppresses legacy status cards', () => {
     const task = {
       taskId: 'task-live-card',
-      campId: 'camp-live-card',
+      threadId: 'camp-live-card',
       title: '更新后的任务标题',
       description: '只在任务详情显示',
       status: 'completed',
@@ -1130,13 +1140,13 @@ describe('task event projections', () => {
       updatedAt: '2026-08-05T02:10:00Z',
       closedAt: '2026-08-05T02:10:00Z',
       availableActions: []
-    } satisfies CampSnapshot['tasks'][number]
+    } satisfies ThreadSnapshot['tasks'][number]
     const message = (
       id: string,
       sequence: number,
       createdAt: string,
-      presentation: CampSnapshot['messages'][number]['presentation'] = null
-    ): CampSnapshot['messages'][number] => ({
+      presentation: ThreadSnapshot['messages'][number]['presentation'] = null
+    ): ThreadSnapshot['messages'][number] => ({
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id,
@@ -1150,15 +1160,15 @@ describe('task event projections', () => {
       attachments: [],
       addressMode: presentation ? 'broadcast' : 'default',
       addressedAgentIds: [],
-      replyToCampMessageId: null,
-      campTurnId: null,
+      replyToThreadMessageId: null,
+      threadTurnId: null,
       presentation,
       createdAt
     })
     const legacyTaskPresentation = (
       fromStatus: 'pending' | 'in_progress',
       toStatus: 'in_progress' | 'completed'
-    ): CampSnapshot['messages'][number]['presentation'] => ({
+    ): ThreadSnapshot['messages'][number]['presentation'] => ({
       kind: 'task_event',
       taskId: task.taskId,
       titleAtEvent: task.title,
@@ -1240,7 +1250,7 @@ describe('task event projections', () => {
   it('renders a Task card directly from its business projection', () => {
     const task = {
       taskId: 'task-old',
-      campId: 'camp-old',
+      threadId: 'camp-old',
       title: '较早的任务',
       description: '',
       status: 'pending',
@@ -1258,7 +1268,7 @@ describe('task event projections', () => {
       updatedAt: '2026-07-01T00:00:00Z',
       closedAt: null,
       availableActions: ['update']
-    } satisfies CampSnapshot['tasks'][number]
+    } satisfies ThreadSnapshot['tasks'][number]
 
     expect(campConversationTimeline([], [], [], [task])).toMatchObject([{
       id: 'task:task-old',
@@ -1266,22 +1276,22 @@ describe('task event projections', () => {
       createdAt: task.createdAt
     }])
 
-    const message = (sequence: number, createdAt = task.createdAt): CampMessageView => ({
+    const message = (sequence: number, createdAt = task.createdAt): ThreadMessageView => ({
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id: `message-${sequence}`, sequence, timelineGlobalSequence: null,
       authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
       body: 'message', content: [{ kind: 'text', text: 'message' }], attachments: [],
-      addressMode: 'default', addressedAgentIds: [], replyToCampMessageId: null,
-      campTurnId: null, presentation: null, createdAt
+      addressMode: 'default', addressedAgentIds: [], replyToThreadMessageId: null,
+      threadTurnId: null, presentation: null, createdAt
     })
-    const stop: CampSnapshot['turns'][number] = {
+    const stop: ThreadSnapshot['turns'][number] = {
       id: 'same-time-stop', triggerType: 'camp_message', triggerId: 'message-1',
       status: 'cancelled', cancelRequestedAt: task.createdAt, aggregateReasonCode: null,
       executionBudget: TEST_EXECUTION_BUDGET, version: 1, createdAt: task.createdAt,
       updatedAt: task.createdAt, endedAt: task.createdAt
     }
-    const changes: CampSnapshot['agentRunFileChanges'][number] = {
+    const changes: ThreadSnapshot['agentRunFileChanges'][number] = {
       schemaVersion: 2, agentRunId: 'completed-run', executionEpoch: 1,
       files: [{ evidenceFileId: 'same-time-file', path: 'src/app.ts', changeKind: 'update',
         presentationKind: 'operation_history', operationCount: 1 }],
@@ -1315,7 +1325,7 @@ describe('task event projections', () => {
   })
 
   it('projects every completed AgentRun file-change Evidence as its own timeline card', () => {
-    const changes: CampSnapshot['agentRunFileChanges'] = [{
+    const changes: ThreadSnapshot['agentRunFileChanges'] = [{
       schemaVersion: 2,
       agentRunId: 'run-a',
       executionEpoch: 1,
@@ -1356,7 +1366,7 @@ describe('task event projections', () => {
       agentRunId: string,
       authorId: string,
       createdAt: string
-    ): CampSnapshot['messages'][number] => ({
+    ): ThreadSnapshot['messages'][number] => ({
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id,
@@ -1370,15 +1380,15 @@ describe('task event projections', () => {
       attachments: [],
       addressMode: 'default',
       addressedAgentIds: [],
-      replyToCampMessageId: null,
-      campTurnId: 'turn-multi-agent',
+      replyToThreadMessageId: null,
+      threadTurnId: 'turn-multi-agent',
       presentation: null,
       createdAt
     })
     const changes = (
       agentRunId: string,
       completedAt: string
-    ): CampSnapshot['agentRunFileChanges'][number] => ({
+    ): ThreadSnapshot['agentRunFileChanges'][number] => ({
       schemaVersion: 2,
       agentRunId,
       executionEpoch: 1,
@@ -1398,10 +1408,10 @@ describe('task event projections', () => {
       completedAt
     })
     const run = (
-      status: CampSnapshot['agentRuns'][number]['status']
-    ): CampSnapshot['agentRuns'][number] => ({
+      status: ThreadSnapshot['agentRuns'][number]['status']
+    ): ThreadSnapshot['agentRuns'][number] => ({
       id: 'run-claude',
-      campTurnId: 'turn-multi-agent',
+      threadTurnId: 'turn-multi-agent',
       conversationId: 'conversation-claude',
       agentId: 'agent-claude',
       taskId: null,
@@ -1495,6 +1505,30 @@ describe('task event projections', () => {
     expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images))
       .toMatchObject([{ kind: 'run_artifacts', run: { id: 'run-claude', agentId: 'agent-claude' },
         imageGroups: images, fileChanges: [{ agentRunId: 'run-claude' }] }])
+  })
+
+  it('localizes file change summaries and evidence labels in English', async () => {
+    const languageApi = {
+      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
+    } as GeneralPreferencesApi
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      const changes = {
+        schemaVersion: 2, agentRunId: 'run-localized', executionEpoch: 1,
+        files: [], fileCount: 1, operationCount: 1, completedAt: '2026-08-27T00:00:00Z'
+      } satisfies AgentRunFileChangesView
+      expect(agentRunFileChangesSummaryLabel(changes)).toBe('1 file · 1 change')
+      expect(agentRunFileChangesSummaryLabel({ ...changes, fileCount: 4, operationCount: 5 })).toBe('4 files · 5 changes')
+      expect(agentRunFileChangesSummaryLabel({ ...changes, additions: 1, deletions: 2 })).toBe('1 file · +1 −2')
+      expect((['full_net_diff', 'exact_mutations', 'operation_history', 'operation_only'] as const)
+        .map(agentRunFileChangeModeLabel)).toEqual([
+          'Full diff', 'Edit fragments', 'Operation history', 'File operations only'
+        ])
+      expect(agentRunFilePathParts('README.md').directory).toBe('Current directory')
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
   })
 
   it('renders a three-row Files Changed card with a quiet review entry and mixed totals', () => {
@@ -1748,7 +1782,7 @@ describe('task event projections', () => {
   })
 
   it('merges an anchored message window without replacing newer snapshot messages', () => {
-    const campMessage = (id: string, sequence: number, body: string): CampMessageView => ({
+    const campMessage = (id: string, sequence: number, body: string): ThreadMessageView => ({
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id,
@@ -1762,8 +1796,8 @@ describe('task event projections', () => {
       attachments: [],
       addressMode: 'default',
       addressedAgentIds: [],
-      replyToCampMessageId: null,
-      campTurnId: null,
+      replyToThreadMessageId: null,
+      threadTurnId: null,
       presentation: null,
       createdAt: `2026-08-01T00:00:${String(sequence % 60).padStart(2, '0')}Z`
     })
@@ -1772,7 +1806,7 @@ describe('task event projections', () => {
     const neighbor = campMessage('message-neighbor', 2, 'neighbor')
     const snapshot = {
       messages: [latest]
-    } as unknown as CampSnapshot
+    } as unknown as ThreadSnapshot
 
     const merged = campSnapshotWithAnchoredMessages(snapshot, [neighbor, anchor, latest])
 
@@ -1784,11 +1818,11 @@ describe('task event projections', () => {
     expect(merged.messages.filter((entry) => entry.id === latest.id)).toHaveLength(1)
     expect(snapshot.messages).toEqual([latest])
     expect(campSnapshotWithCurrentAnchor(snapshot, 'camp-1', {
-      campId: 'camp-1',
+      threadId: 'camp-1',
       messages: [anchor]
     }).messages.map((entry) => entry.id)).toEqual(['message-anchor', 'message-latest'])
     expect(campSnapshotWithCurrentAnchor(snapshot, 'camp-1', {
-      campId: 'camp-other',
+      threadId: 'camp-other',
       messages: [anchor]
     })).toBe(snapshot)
 
@@ -1796,12 +1830,53 @@ describe('task event projections', () => {
     const historicalRun = { id: 'run-notification-source' } as AgentRunView
     const runSnapshot = { ...snapshot, agentRuns: [recentRun] }
     expect(campSnapshotWithCurrentAnchor(runSnapshot, 'camp-1', {
-      campId: 'camp-1',
+      threadId: 'camp-1',
       agentRuns: [historicalRun]
     }).agentRuns.map(({ id }) => id)).toEqual([
       'run-recent',
       'run-notification-source'
     ])
+  })
+
+  it('resolves an uncached notification Run from the current Core snapshot and preserves exact identity checks', async () => {
+    const run = { id: 'run-notification-source' } as AgentRunView
+    const schemaVersion: ThreadSnapshot['schemaVersion'] = 35
+    const snapshot = {
+      schemaVersion,
+      thread: { id: 'thread-source' },
+      agentRuns: [run]
+    } as unknown as ThreadSnapshot
+    const request = vi.fn().mockResolvedValue(snapshot)
+    const client = { request } as Pick<RovaiApi, 'request'>
+
+    await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, null)).resolves.toBe(run)
+    expect(request).toHaveBeenCalledWith('threads.snapshot', { threadId: 'thread-source' })
+
+    request.mockClear()
+    await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, snapshot)).resolves.toBe(run)
+    expect(request).not.toHaveBeenCalled()
+    await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, {
+      ...snapshot, agentRuns: []
+    })).resolves.toBe(run)
+    await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, {
+      ...snapshot, thread: { ...snapshot.thread, id: 'other-thread' }
+    })).resolves.toBe(run)
+    expect(request).toHaveBeenCalledTimes(2)
+
+    request.mockResolvedValue({ ...snapshot, agentRuns: [] })
+    await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, null)).resolves.toBeNull()
+    for (const incompatible of [
+      { ...snapshot, schemaVersion: 34 },
+      { ...snapshot, schemaVersion: 36 },
+      { ...snapshot, thread: { ...snapshot.thread, id: 'other-thread' } }
+    ]) {
+      request.mockResolvedValue(incompatible)
+      await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, null))
+        .rejects.toThrow('执行定位合同不兼容。')
+    }
+    request.mockRejectedValue(new Error('snapshot unavailable'))
+    await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, null))
+      .rejects.toThrow('snapshot unavailable')
   })
 
   it('requires a message rectangle to intersect the timeline viewport before auto-read', () => {
@@ -1828,49 +1903,49 @@ describe('task event projections', () => {
     const messageAction = {
       kind: 'open_camp_message',
       messageId: 'message-1',
-      campTurnId: 'turn-1',
+      threadTurnId: 'turn-1',
       approvalId: null
     } as NotificationActionView
     expect(notificationFocusMatchesAction({
       requestId: 1,
       kind: 'camp_message',
-      campTurnId: 'turn-1',
+      threadTurnId: 'turn-1',
       messageId: 'message-1'
     }, messageAction)).toBe(true)
     expect(notificationFocusMatchesAction({
       requestId: 2,
       kind: 'camp_message',
-      campTurnId: 'turn-1',
+      threadTurnId: 'turn-1',
       messageId: 'message-stale'
     }, messageAction)).toBe(false)
     expect(notificationFocusMatchesAction({
       requestId: 3,
       kind: 'camp_turn',
-      campTurnId: 'turn-1'
+      threadTurnId: 'turn-1'
     }, { ...messageAction, kind: 'open_camp_turn', messageId: null })).toBe(true)
     const agentRunAction = {
       ...messageAction,
       kind: 'open_agent_run',
       messageId: null,
-      campTurnId: null,
+      threadTurnId: null,
       agentRunId: 'run-1'
     } as NotificationActionView
     expect(notificationFocusMatchesAction({
       requestId: 4,
       kind: 'agent_run',
-      campTurnId: null,
+      threadTurnId: null,
       agentRunId: 'run-1'
     }, agentRunAction)).toBe(true)
     expect(notificationFocusMatchesAction({
       requestId: 5,
       kind: 'agent_run',
-      campTurnId: null,
+      threadTurnId: null,
       agentRunId: 'run-stale'
     }, agentRunAction)).toBe(false)
     expect(notificationFocusMatchesAction({
       requestId: 6,
       kind: 'approval',
-      campTurnId: null,
+      threadTurnId: null,
       approvalId: 'approval-1'
     }, { ...messageAction, kind: 'open_approval', messageId: null, approvalId: 'approval-1' })).toBe(true)
     const privateAction = { ...messageAction, kind: 'open_single_chat', approvalId: null,
@@ -1880,18 +1955,18 @@ describe('task event projections', () => {
       ['private-original', 'private-run', true], ['private-successor', 'private-run', false],
       ['private-original', 'another-run', false]
     ] as const) {
-      expect(notificationFocusMatchesAction({ requestId: 7, kind: 'single_chat', campTurnId: 'turn-1',
+      expect(notificationFocusMatchesAction({ requestId: 7, kind: 'single_chat', threadTurnId: 'turn-1',
         conversationId, agentRunId }, privateAction)).toBe(expected)
     }
   })
 
   it('projects a user message into the conversation before Core acknowledgement', () => {
-    const optimistic = optimisticCampMessage(
+    const optimistic = optimisticThreadMessage(
       null,
       'command-optimistic',
       {
     quotes: [],
-        campId: 'camp-optimistic',
+        threadId: 'camp-optimistic',
         body: '立即显示这条消息',
         content: { version: 2, segments: [
           { kind: 'text', text: '立即显示这条消息 ' },
@@ -1911,7 +1986,7 @@ describe('task event projections', () => {
         }],
         continuationIntent: null,
         replyIntent: {
-          replyToCampMessageId: 'message-parent',
+          replyToThreadMessageId: 'message-parent',
           targetState: 'available',
           author: {
             authorType: 'agent',
@@ -1936,7 +2011,7 @@ describe('task event projections', () => {
       body: '立即显示这条消息',
       addressMode: 'explicit',
       addressedAgentIds: ['agent_2'],
-      replyToCampMessageId: 'message-parent',
+      replyToThreadMessageId: 'message-parent',
       attachments: [{
         id: 'attachment-1',
         displayName: '说明.txt'
@@ -1951,7 +2026,7 @@ describe('task event projections', () => {
   it('submits the current Renderer input without a persistent Core Draft identity', () => {
     const params = campMessageSendParams('command-1', 'camp-1', {
     quotes: [],
-      campId: 'camp-1',
+      threadId: 'camp-1',
       body: '请 @沐瓦 检查',
       content: {
         version: 2,
@@ -1967,14 +2042,14 @@ describe('task event projections', () => {
 
     expect(params).toEqual({
       commandId: 'command-1',
-      campId: 'camp-1',
+      threadId: 'camp-1',
       content: {
         version: 2,
         segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } }]
       },
       sourceAttachments: [],
       quotes: [],
-      replyToCampMessageId: null,
+      replyToThreadMessageId: null,
       execution: {
         taskId: null,
         purpose: '请 @沐瓦 检查',
@@ -2024,27 +2099,27 @@ describe('task event projections', () => {
     })).toBe(true)
   })
 
-  it('guards every transition away from a mounted Camp surface', () => {
-    expect(activeCampSurfaceNeedsLeaveGuard('camp', 'camp-a')).toBe(true)
-    expect(activeCampSurfaceNeedsLeaveGuard('compose', 'camp-a')).toBe(false)
-    expect(activeCampSurfaceNeedsLeaveGuard('members', 'camp-a')).toBe(false)
-    expect(activeCampSurfaceNeedsLeaveGuard('camp', null)).toBe(false)
+  it('guards every transition away from a mounted Thread surface', () => {
+    expect(activeThreadSurfaceNeedsLeaveGuard('camp', 'camp-a')).toBe(true)
+    expect(activeThreadSurfaceNeedsLeaveGuard('compose', 'camp-a')).toBe(false)
+    expect(activeThreadSurfaceNeedsLeaveGuard('members', 'camp-a')).toBe(false)
+    expect(activeThreadSurfaceNeedsLeaveGuard('camp', null)).toBe(false)
   })
 
-  it('prepares only the matching mounted Camp before App quit', async () => {
+  it('prepares only the matching mounted Thread before App quit', async () => {
     const complete = vi.fn()
     const guard = vi.fn(async () => ({ complete }))
-    const registration = { campId: 'camp-a', guard }
+    const registration = { threadId: 'camp-a', guard }
 
-    await prepareActiveCampForAppQuit('camp', 'camp-a', registration)
+    await prepareActiveThreadForAppQuit('camp', 'camp-a', registration)
 
     expect(guard).toHaveBeenCalledOnce()
     expect(complete).toHaveBeenCalledOnce()
     expect(complete).toHaveBeenCalledWith(true)
 
-    await prepareActiveCampForAppQuit('compose', 'camp-a', registration)
-    await prepareActiveCampForAppQuit('camp', 'camp-b', registration)
-    await prepareActiveCampForAppQuit('camp', null, registration)
+    await prepareActiveThreadForAppQuit('compose', 'camp-a', registration)
+    await prepareActiveThreadForAppQuit('camp', 'camp-b', registration)
+    await prepareActiveThreadForAppQuit('camp', null, registration)
     expect(guard).toHaveBeenCalledOnce()
   })
 
@@ -2054,8 +2129,8 @@ describe('task event projections', () => {
       throw failure
     })
 
-    await expect(prepareActiveCampForAppQuit('camp', 'camp-a', {
-      campId: 'camp-a',
+    await expect(prepareActiveThreadForAppQuit('camp', 'camp-a', {
+      threadId: 'camp-a',
       guard
     })).rejects.toBe(failure)
     expect(guard).toHaveBeenCalledOnce()
@@ -2102,9 +2177,9 @@ describe('task event projections', () => {
   })
 
   it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {
-    const draft: CampComposerDraftView = {
+    const draft: ThreadComposerDraftView = {
     quotes: [],
-      campId: 'camp-attachment-only',
+      threadId: 'camp-attachment-only',
       body: '',
       content: { version: 2, segments: [] },
       revision: 4,
@@ -2125,10 +2200,10 @@ describe('task event projections', () => {
       expiresAt: '2026-08-27T00:00:00Z'
     }
 
-    expect(campMessageExecutionPurpose(draft)).toBe('Camp attachment-only message')
-    expect(campMessageSendParams('command-attachment-only', draft.campId, draft)).toEqual({
+    expect(campMessageExecutionPurpose(draft)).toBe('Thread attachment-only message')
+    expect(campMessageSendParams('command-attachment-only', draft.threadId, draft)).toEqual({
       commandId: 'command-attachment-only',
-      campId: draft.campId,
+      threadId: draft.threadId,
       content: { version: 2, segments: [] },
       sourceAttachments: [{
         id: 'attachment-only',
@@ -2139,14 +2214,14 @@ describe('task event projections', () => {
         observedByteSize: 12
       }],
       quotes: [],
-      replyToCampMessageId: null,
+      replyToThreadMessageId: null,
       execution: {
         taskId: null,
-        purpose: 'Camp attachment-only message',
+        purpose: 'Thread attachment-only message',
         completionRole: 'required'
       }
     })
-    expect(optimisticCampMessage(null, 'command-attachment-only', draft)).toMatchObject({
+    expect(optimisticThreadMessage(null, 'command-attachment-only', draft)).toMatchObject({
       body: '',
       content: [],
       attachments: [{ id: 'attachment-only' }]
@@ -2178,10 +2253,10 @@ describe('task event projections', () => {
         status: 'waiting' as const
       }],
       agentRuns: [{
-        campTurnId: 'turn-running',
+        threadTurnId: 'turn-running',
         status: 'running' as const
       }, {
-        campTurnId: 'turn-waiting-for-retry',
+        threadTurnId: 'turn-waiting-for-retry',
         status: 'failed' as const
       }]
     }
@@ -2241,11 +2316,11 @@ describe('task event projections', () => {
     })]).toEqual([])
 
     const snapshot = { agentRuns: [activeRun, { ...activeRun, id: 'unrelated' }],
-      turns: [{ id: 'turn', status: 'running' }] } as CampSnapshot
+      turns: [{ id: 'turn', status: 'running' }] } as ThreadSnapshot
     const result: StoredCommandResult = { commandId: 'stop', commandType: 'agent_run.cancel',
       requestDigest: 'sha256:test', requestDigestVersion: 1, recordedAt: '2026-09-01T00:00:00Z',
       resultEntity: null, status: 'applied', code: 'agent_run.cancelled',
-      payload: { agentRunId: activeRun.id, status: 'cancelled', campTurnId: 'turn', campTurnStatus: 'running' }
+      payload: { agentRunId: activeRun.id, status: 'cancelled', threadTurnId: 'turn', threadTurnStatus: 'running' }
     }
     const settled = applyCancellationResult(snapshot, result)
     expect(settled.agentRuns[0].status).toBe('cancelled')
@@ -2255,7 +2330,7 @@ describe('task event projections', () => {
     expect([...effectiveCancellingRunIds(local, settled)]).toEqual([])
     expect(applyCancellationResult(snapshot, { ...result, status: 'rejected' })).toBe(snapshot)
     const stoppedTurn = applyCancellationResult(snapshot, { ...result, payload: {
-      campTurnId: 'turn', campTurnStatus: 'cancelled', runs: [
+      threadTurnId: 'turn', threadTurnStatus: 'cancelled', runs: [
         { agentRunId: activeRun.id, terminalStatus: 'cancelled', terminalCode: 'agent_run.cancelled' },
         { agentRunId: 'unrelated', terminalStatus: 'failed', terminalCode: 'agent_run.accepted_input_outcome_unknown' }
       ]
@@ -2273,7 +2348,7 @@ describe('task event projections', () => {
 
   it('admits Run Stop only for an active non-blocked Run outside Turn cancellation', () => {
     const run = {
-      campTurnId: 'turn',
+      threadTurnId: 'turn',
       status: 'waiting' as const,
       waitReason: 'runtime_delivery',
       cancelRequestedAt: null
@@ -2288,7 +2363,7 @@ describe('task event projections', () => {
       .toBe(false)
     expect(canStopAgentRun({ ...run, status: 'cancelled' }, turn)).toBe(false)
     expect(canStopAgentRun(run, null)).toBe(false)
-    const batchRun = { ...run, campTurnId: null }
+    const batchRun = { ...run, threadTurnId: null }
     expect(canStopAgentRun(batchRun, null)).toBe(true)
     expect(agentRunStopViewState(batchRun, null, {
       cancelling: false,
@@ -2328,7 +2403,7 @@ describe('task event projections', () => {
   })
 
   it('projects one terminal Stop outcome at the authoritative cancellation boundary', () => {
-    const userMessage: CampMessageView = {
+    const userMessage: ThreadMessageView = {
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id: 'message-stop',
@@ -2342,8 +2417,8 @@ describe('task event projections', () => {
       attachments: [],
       addressMode: 'default' as const,
       addressedAgentIds: ['agent-1'],
-      replyToCampMessageId: null,
-      campTurnId: 'turn-stop',
+      replyToThreadMessageId: null,
+      threadTurnId: 'turn-stop',
       presentation: null,
       createdAt: '2026-07-31T10:00:00Z'
     }
@@ -2361,10 +2436,10 @@ describe('task event projections', () => {
       endedAt: '2026-07-31T10:02:19Z'
     }
     const agentRuns = [{
-      campTurnId: turn.id,
+      threadTurnId: turn.id,
       status: 'cancelled',
       hasUnsettledExternalEffects: false
-    }] as CampSnapshot['agentRuns']
+    }] as ThreadSnapshot['agentRuns']
 
     expect(formatStopElapsed(turn.createdAt, turn.cancelRequestedAt)).toBe('2分18秒')
     expect(formatStopElapsed('invalid', 'invalid')).toBe('0 秒')
@@ -2389,7 +2464,7 @@ describe('task event projections', () => {
   })
 
   it('keeps execution first, exposes the active detail, and only marks actual execution as loading', () => {
-    const entries = (showExecution: boolean, runningCount: number): string => renderToStaticMarkup(createElement(CampDetailEntries, {
+    const entries = (showExecution: boolean, runningCount: number): string => renderToStaticMarkup(createElement(ThreadDetailEntries, {
       activeTab: 'tasks', visible: true, panelId: 'camp-details', showExecution,
       runningMembers: Array.from({ length: runningCount }, (_, index) => ({
         agentId: `agent-${index}`, displayName: `队员 ${index + 1}`, avatarRef: null
@@ -2409,7 +2484,7 @@ describe('task event projections', () => {
   })
 
   it('selects actual running members once in roster order, excluding waits, queued, stopping and terminal runs', () => {
-    const members: CampSnapshot['members'] = Array.from({ length: 7 }, (_, index) => ({
+    const members: ThreadSnapshot['members'] = Array.from({ length: 7 }, (_, index) => ({
       agentId: `agent-${index}`, displayName: `队员 ${index}`, avatarRef: null, teamRole: '队员', accent: '',
       membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present', memberOrder: index,
       isDefaultLead: index === 0, version: 1
@@ -2423,8 +2498,8 @@ describe('task event projections', () => {
       })),
       { agentId: 'agent-0', status: 'running', cancelRequestedAt: '2026-09-14T00:00:00Z' }
     ]
-    expect(runningCampMembers(runs, [...members].reverse()).map(member => member.agentId)).toEqual(['agent-1', 'agent-2'])
-    expect(runningCampMembers(runs.map(run => ({ ...run, status: 'succeeded' })), members)).toEqual([])
+    expect(runningThreadMembers(runs, [...members].reverse()).map(member => member.agentId)).toEqual(['agent-1', 'agent-2'])
+    expect(runningThreadMembers(runs.map(run => ({ ...run, status: 'succeeded' })), members)).toEqual([])
   })
 
   it('shows unsettled external effects only after a failed or cancelled AgentRun', () => {
@@ -2451,18 +2526,18 @@ describe('task event projections', () => {
   })
 
   it('requires continuation repair only after payload exists and never while reply owns routing', () => {
-    const members: CampSnapshot['members'] = [{
+    const members: ThreadSnapshot['members'] = [{
       agentId: 'agent_2', displayName: '芝士', teamRole: 'Reviewer', avatarRef: null,
       accent: '#4F7F9F', membershipStatus: 'active', leaveRequestedAt: null,
       profilePresence: 'away', memberOrder: 1, isDefaultLead: false, version: 1
     }]
-    const draft: CampComposerDraftView = {
+    const draft: ThreadComposerDraftView = {
     quotes: [],
-      campId: 'camp-1', body: '继续', revision: 3, attachments: [],
+      threadId: 'camp-1', body: '继续', revision: 3, attachments: [],
       updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
       content: { version: 2, segments: [{ kind: 'text', text: '继续' }] }, replyIntent: null,
       continuationIntent: {
-        sourceCampMessageId: 'message-1', recipientSelectionRequired: false,
+        sourceThreadMessageId: 'message-1', recipientSelectionRequired: false,
         recipient: {
           agentId: 'agent_2', displayName: '芝士', recipientAvailability: 'available'
         }
@@ -2473,7 +2548,7 @@ describe('task event projections', () => {
     expect(composerDraftNeedsContinuationRepair({
       ...draft,
       replyIntent: {
-        replyToCampMessageId: 'message-2', targetState: 'available', excerpt: '引用',
+        replyToThreadMessageId: 'message-2', targetState: 'available', excerpt: '引用',
         recipientSelectionRequired: false,
         author: {
           authorType: 'user', authorId: 'current-user', displayName: '你',
@@ -2483,16 +2558,16 @@ describe('task event projections', () => {
     }, members, true)).toBe(false)
   })
 
-  it('renders the visible Camp header and limits structural drag strips to overlay pages', () => {
-    const camp = {
-      camp: { activationState: 'active', createdAt: '2026-07-31T00:00:00Z' },
+  it('renders the visible Thread header and limits structural drag strips to overlay pages', () => {
+    const thread = {
+      thread: { activationState: 'active', createdAt: '2026-07-31T00:00:00Z' },
       agentRuns: [{ status: 'running' }],
       approvals: [{ status: 'pending' }]
-    } as unknown as CampSnapshot
+    } as unknown as ThreadSnapshot
     const campMarkup = renderToStaticMarkup(createElement(AppHeader, {
-      campTitle: '会话界面',
+      threadTitle: '会话界面',
       contextLabel: 'Quick Chat',
-      camp,
+      thread,
       onFocusApprovals: () => undefined
     }))
     expect(campMarkup).toContain('Quick Chat')
@@ -2531,7 +2606,7 @@ describe('task event projections', () => {
     expect(windowDragStripPage('camp')).toBeNull()
   })
 
-  it('only acknowledges a Camp as viewed while that exact conversation is visible', () => {
+  it('only acknowledges a Thread as viewed while that exact conversation is visible', () => {
     expect(campViewIsVisibleForReadAcknowledgement(
       'camp', 'camp-1', 'camp-1', 'visible', true
     )).toBe(true)
@@ -2555,11 +2630,11 @@ describe('task event projections', () => {
     expect(memberIdentityTargetAgent('edit', selected)).toBe(selected)
   })
 
-  it('keeps Quick Chat as a durable-Camp entry surface without a direct composer', () => {
+  it('keeps Quick Chat as a durable-Thread entry surface without a direct composer', () => {
     const markup = renderToStaticMarkup(createElement(QuickChatWorkspace, {
       agents: [],
-      recentCamps: [],
-      onOpenCamp: () => undefined,
+      recentThreads: [],
+      onOpenThread: () => undefined,
       onNewConversation: () => undefined,
       onOpenMembers: () => undefined,
       onOpenRuntimeSettings: () => undefined
@@ -2572,7 +2647,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Arctic Dawn')
     expect(markup).not.toContain('在晨光里')
     expect(markup).toContain('前往队员')
-    expect(markup).toContain('查看运行时')
+    expect(markup).toContain('查看智能体')
     expect(markup).not.toContain('<textarea')
     expect(markup).not.toContain('<form')
   })
@@ -2581,7 +2656,7 @@ describe('task event projections', () => {
     const member = { ...agentProfile(), runtimeConfiguration: configuredRuntime('codex-cli'),
       runtimeReadiness: { status: 'light_ready' as const, blockers: [] } }
     const render = (agents: AgentProfile[]) => renderToStaticMarkup(createElement(QuickChatWorkspace, {
-      agents, recentCamps: [], onOpenCamp: () => undefined, onNewConversation: () => undefined,
+      agents, recentThreads: [], onOpenThread: () => undefined, onNewConversation: () => undefined,
       onOpenMembers: () => undefined, onOpenRuntimeSettings: () => undefined
     }))
     expect(render([member])).toContain('开始一段协作')
@@ -2591,11 +2666,11 @@ describe('task event projections', () => {
 
   it('keeps recent conversations accessible when members become unavailable', () => {
     const markup = renderToStaticMarkup(createElement(QuickChatWorkspace, {
-      agents: [], recentCamps: [{ id: 'recent-camp', title: '已有对话', activationState: 'active',
+      agents: [], recentThreads: [{ id: 'recent-camp', title: '已有对话', activationState: 'active',
         projectBindingKind: 'quick_chat', projectPath: '/tmp/quick-chat', defaultLead: null,
         marker: 'unread_completed', lastActivityAt: '2026-09-08T00:00:00Z',
         lastActivityGlobalSequence: 2, latestCompletionGlobalSequence: 2, version: 1 }],
-      onOpenCamp: () => undefined, onNewConversation: () => undefined,
+      onOpenThread: () => undefined, onNewConversation: () => undefined,
       onOpenMembers: () => undefined, onOpenRuntimeSettings: () => undefined
     }))
     expect(markup).toContain('最近对话')
@@ -2605,8 +2680,54 @@ describe('task event projections', () => {
     expect(markup).not.toContain('还没有可用的队员')
   })
 
+  it('shows the localized first-run title in navigation and recent chats across language changes', async () => {
+    const languageApi = {
+      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
+    } as GeneralPreferencesApi
+    const thread = {
+      id: 'camp-first', title: '初次集结', activationState: 'active' as const,
+      projectBindingKind: 'quick_chat' as const, projectPath: '/tmp/quick-chat', defaultLead: null,
+      marker: 'none' as const, lastActivityAt: '2026-09-30T00:00:00Z',
+      lastActivityGlobalSequence: 0, latestCompletionGlobalSequence: 0, version: 1
+    }
+    const recent = () => renderToStaticMarkup(createElement(QuickChatWorkspace, {
+      agents: [], recentThreads: [thread], firstRunThreadId: thread.id,
+      onOpenThread() {}, onNewConversation() {}, onOpenMembers() {}, onOpenRuntimeSettings() {}
+    }))
+    const navigation = (pinned: boolean) => renderToStaticMarkup(createElement(ThreadNavigation, {
+      view: 'camp', state: 'ready', activeThreadId: thread.id, firstRunThreadId: thread.id,
+      navigation: {
+        schemaVersion: 3, throughGlobalSequence: 0, projects: [],
+        quickChat: { totalCount: 1, recentThreads: [thread] }
+      },
+      pins: pinned ? [{ kind: 'camp', targetKey: thread.id, pinnedAt: '' }] : [],
+      pendingMemoryCount: 0, onNewConversation() {}, onMembers() {}, onMemory() {},
+      onSettings() {}, onOpenProject() {}, onThread() {}, onError() {},
+      async onRemoveProject() {}, async onRename() {}, async onDelete() {}
+    }))
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      expect(recent()).toContain('title="First Chat">First Chat</span>')
+      for (const pinned of [false, true]) {
+        const markup = navigation(pinned)
+        expect(markup).toContain('aria-label="First Chat" title="First Chat"')
+        expect(markup).not.toContain('初次集结')
+      }
+      expect(thread.title).toBe('初次集结')
+      thread.title = '我的会话'
+      expect(recent()).toContain('title="我的会话">我的会话</span>')
+      expect(navigation(false)).toContain('aria-label="我的会话" title="我的会话"')
+      thread.title = '初次集结'
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
+    expect(recent()).toContain('title="初次集结">初次集结</span>')
+    expect(navigation(false)).toContain('aria-label="初次集结" title="初次集结"')
+  })
+
   it('defaults to configured usable members without preferring deep readiness', () => {
-    const selection = initialCampSelection({
+    const selection = initialThreadSelection({
       admissible: true,
       presentMembers: [
         {
@@ -2636,7 +2757,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('normalizes optional Camp names before applying the local scalar boundary', () => {
+  it('normalizes optional Thread names before applying the local scalar boundary', () => {
     expect(normalizeDraftName('  重构\n\tMCP  设置页  ')).toBe('重构 MCP 设置页')
     expect(Array.from(normalizeDraftName('😀'.repeat(80))).length).toBe(80)
     expect(Array.from(normalizeDraftName(limitDraftNameInput('😀'.repeat(81)))).length).toBe(80)
@@ -2653,7 +2774,7 @@ describe('task event projections', () => {
       initialLeadAgentId: 'agent-a',
       blockers: []
     }
-    expect(initialCampSelection(preflight, {
+    expect(initialThreadSelection(preflight, {
       memberAgentIds: ['agent-b', 'removed-agent'],
       defaultLeadAgentId: 'removed-agent'
     })).toEqual({ memberIds: ['agent-b'], leadId: 'agent-b' })
@@ -2672,7 +2793,7 @@ describe('task event projections', () => {
       memberAgentIds: ['agent-a', 'agent-b'],
       defaultLeadAgentId: 'agent-b'
     }
-    const plan = planInitialCampSelection(preflight, preferred)
+    const plan = planInitialThreadSelection(preflight, preferred)
 
     expect(plan).toEqual({
       memberIds: ['agent-a'],
@@ -2694,7 +2815,7 @@ describe('task event projections', () => {
       blockers: []
     }
     const preferred = { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }
-    expect(planInitialCampSelection(preflight, preferred)).toEqual({
+    expect(planInitialThreadSelection(preflight, preferred)).toEqual({
       memberIds: ['agent-a'],
       leadId: 'agent-a'
     })
@@ -2710,14 +2831,14 @@ describe('task event projections', () => {
       blockers: []
     }
     const preferred = { memberAgentIds: ['agent-b'], defaultLeadAgentId: 'agent-b' }
-    expect(planInitialCampSelection(preflight, preferred)).toEqual({
+    expect(planInitialThreadSelection(preflight, preferred)).toEqual({
       memberIds: ['agent-a'],
       leadId: 'agent-a'
     })
   })
 
   it('allows clearing the draft, switches a removed Lead, and preserves a manual Lead', () => {
-    const removedLead = toggleCampMemberSelection({
+    const removedLead = toggleThreadMemberSelection({
       memberIds: ['agent-a', 'agent-b'],
       leadId: 'agent-a',
       toggledMemberId: 'agent-a',
@@ -2728,7 +2849,7 @@ describe('task event projections', () => {
       leadId: 'agent-b'
     })
 
-    expect(toggleCampMemberSelection({
+    expect(toggleThreadMemberSelection({
       ...removedLead,
       toggledMemberId: 'agent-b',
       stableMemberOrder: ['agent-a', 'agent-b']
@@ -2737,7 +2858,7 @@ describe('task event projections', () => {
       leadId: ''
     })
 
-    expect(toggleCampMemberSelection({
+    expect(toggleThreadMemberSelection({
       ...removedLead,
       toggledMemberId: 'agent-a',
       stableMemberOrder: ['agent-a', 'agent-b']
@@ -2745,7 +2866,7 @@ describe('task event projections', () => {
       memberIds: ['agent-a', 'agent-b'],
       leadId: 'agent-b'
     })
-    expect(toggleCampMemberSelection({ memberIds: [], leadId: '', toggledMemberId: 'agent-b', stableMemberOrder: ['agent-a', 'agent-b'] }))
+    expect(toggleThreadMemberSelection({ memberIds: [], leadId: '', toggledMemberId: 'agent-b', stableMemberOrder: ['agent-a', 'agent-b'] }))
       .toEqual({ memberIds: ['agent-b'], leadId: 'agent-b' })
   })
 
@@ -2793,20 +2914,20 @@ describe('task event projections', () => {
     })
   })
 
-  it('orders Camp navigation by the authoritative activity sequence', () => {
-    const baseCamp = {
+  it('orders Thread navigation by the authoritative activity sequence', () => {
+    const baseThread = {
       title: '对话', activationState: 'active' as const,
       projectBindingKind: 'directory' as const, projectPath: '/repo',
       defaultLead: null, marker: 'none' as const, lastActivityAt: '2026-07-22T00:00:00Z',
       latestCompletionGlobalSequence: 0, version: 1
     }
-    const camps = allNavigationCamps({
+    const threads = allNavigationThreads({
       schemaVersion: 3,
       throughGlobalSequence: 20,
       quickChat: {
         totalCount: 1,
-        recentCamps: [{
-          ...baseCamp, id: 'older', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        recentThreads: [{
+          ...baseThread, id: 'older', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
           lastActivityGlobalSequence: 9
         }]
       },
@@ -2814,40 +2935,40 @@ describe('task event projections', () => {
         projectKey: 'directory:/repo', name: 'rovai', projectPath: '/repo',
         lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 10,
         totalCount: 1,
-        recentCamps: [{
-          ...baseCamp, id: 'newer',
+        recentThreads: [{
+          ...baseThread, id: 'newer',
           lastActivityGlobalSequence: 10
         }]
       }]
     })
-    expect(camps.map((camp) => camp.id)).toEqual(['newer', 'older'])
+    expect(threads.map((thread) => thread.id)).toEqual(['newer', 'older'])
   })
 
-  it('defines the final unified Camp and Project menu labels', () => {
-    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '重命名', '复制会话 ID', '删除'])
-    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '重命名', '复制会话 ID', '删除'])
-    expect(projectNavigationMenuLabels(false)).toEqual(['置顶项目', '重命名', '移除项目'])
-    expect(projectNavigationMenuLabels(true)).toEqual(['取消置顶项目', '重命名', '移除项目'])
+  it('defines the final unified Thread and Project menu labels', () => {
+    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '删除'])
+    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '删除'])
+    expect(projectNavigationMenuLabels(false)).toEqual(['新建对话', '置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
+    expect(projectNavigationMenuLabels(true)).toEqual(['新建对话', '取消置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
   })
 
-  it('copies only the exact Camp ID and reports clipboard failures', async () => {
+  it('copies only the exact Thread ID and reports clipboard failures', async () => {
     const copied: string[] = []
-    await copyCampIdToClipboard('camp-copy-target', async (text) => {
+    await copyThreadIdToClipboard('camp-copy-target', async (text) => {
       copied.push(text)
       return true
     })
     expect(copied).toEqual(['camp-copy-target'])
 
-    await expect(copyCampIdToClipboard('camp-copy-target', async () => false))
+    await expect(copyThreadIdToClipboard('camp-copy-target', async () => false))
       .rejects.toThrow('无法复制会话 ID，请重试。')
-    await expect(copyCampIdToClipboard('camp-copy-target', async () => {
+    await expect(copyThreadIdToClipboard('camp-copy-target', async () => {
       throw new Error('clipboard unavailable')
     })).rejects.toThrow('无法复制会话 ID，请重试。')
   })
 
-  it('renders Camp-first navigation with unified menus and Quick Chat as the last visual project', () => {
+  it('renders Thread-first navigation with unified menus and Quick Chat as the last visual project', () => {
     const longTitle = '围绕多 Agent 协作控制面梳理一个足够长、必须由真实侧栏宽度裁切的对话标题'
-    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+    const markup = renderToStaticMarkup(createElement(ThreadNavigation, {
       platform: 'win32',
       view: 'camp',
       state: 'ready',
@@ -2856,7 +2977,7 @@ describe('task event projections', () => {
         throughGlobalSequence: 12,
         quickChat: {
           totalCount: 12,
-          recentCamps: [{
+          recentThreads: [{
             id: 'camp-quick-chat', title: '快速对话讨论', activationState: 'active', projectPath: '/quick-chat',
             projectBindingKind: 'quick_chat', defaultLead: null, marker: 'none',
             lastActivityAt: '2026-07-22T00:00:00Z', lastActivityGlobalSequence: 10,
@@ -2867,7 +2988,7 @@ describe('task event projections', () => {
           projectKey: 'directory:/repo', name: 'rovai-ai', projectPath: '/repo',
           lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
           totalCount: 1,
-          recentCamps: [{
+          recentThreads: [{
             id: 'camp-project', title: longTitle, activationState: 'active', projectPath: '/repo',
             channelSource: { provider: 'feishu', conversationKind: 'topic' },
             projectBindingKind: 'directory', defaultLead: null, marker: 'unread_completed',
@@ -2876,7 +2997,7 @@ describe('task event projections', () => {
           }]
         }]
       },
-      activeCampId: 'camp-project',
+      activeThreadId: 'camp-project',
       pins: [
         { kind: 'camp', targetKey: 'camp-quick-chat', pinnedAt: '2026-07-30T10:00:00Z' },
         { kind: 'project', targetKey: 'directory:/repo', pinnedAt: '2026-07-30T11:00:00Z' }
@@ -2889,7 +3010,7 @@ describe('task event projections', () => {
       pendingMemoryCount: 2,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
@@ -2923,7 +3044,7 @@ describe('task event projections', () => {
     expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)
     expect(markup).toContain(`aria-label="【飞书话题】${longTitle}，有新回复"`)
-    expect(markup).toContain(`title="【飞书话题】${longTitle} · 有新回复"`)
+    expect(markup).toContain(`title="【飞书话题】${longTitle} · 未读"`)
     expect(markup).toContain(`class="truncate">【飞书话题】${longTitle}</span>`)
     expect(markup).toContain('管理')
     expect(markup).toContain('aria-label="管理项目“rovai-ai”"')
@@ -2934,7 +3055,7 @@ describe('task event projections', () => {
     expect(markup).toContain('class="project-select-row"')
     expect(markup).not.toContain('class="project-disclosure-button"')
     expect(markup).toContain('data-sidebar-menu-target="project:directory:/repo"')
-    expect(markup).toContain('data-sidebar-menu-target="camp:camp-quick-chat"')
+    expect(markup).toContain('data-sidebar-menu-target="thread:camp-quick-chat"')
     expect(markup).not.toContain('data-sidebar-menu-target="project:quick-chat"')
     expect(markup).not.toContain('row-pin-button')
     expect(markup).not.toContain('group-pin-button')
@@ -2956,13 +3077,13 @@ describe('task event projections', () => {
   })
 
   it('renders the current empty workspace without inventing a pinnable Core project', () => {
-    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+    const markup = renderToStaticMarkup(createElement(ThreadNavigation, {
       view: 'camp',
       state: 'ready',
       navigation: {
         schemaVersion: 3,
         throughGlobalSequence: 1,
-        quickChat: { totalCount: 0, recentCamps: [] },
+        quickChat: { totalCount: 0, recentThreads: [] },
         projects: [{
           projectKey: 'directory:/repo/empty-project',
           name: 'empty-project',
@@ -2970,10 +3091,10 @@ describe('task event projections', () => {
           lastActivityAt: '',
           lastActivityGlobalSequence: 0,
           totalCount: 0,
-          recentCamps: []
+          recentThreads: []
         }]
       },
-      activeCampId: null,
+      activeThreadId: null,
       currentProjectKey: 'directory:/repo/empty-project',
       shellOnlyProjectPath: '/repo/empty-project',
       onNewConversation: () => undefined,
@@ -2982,7 +3103,7 @@ describe('task event projections', () => {
       pendingMemoryCount: 0,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
@@ -3000,7 +3121,7 @@ describe('task event projections', () => {
     const baseProps = {
       state: 'ready' as const,
       navigation: null,
-      activeCampId: null,
+      activeThreadId: null,
       updateSnapshot: testAppUpdateSnapshot(),
       onNewConversation: () => undefined,
       onMembers: () => undefined,
@@ -3009,13 +3130,13 @@ describe('task event projections', () => {
       onSettings: () => undefined,
       onOpenUpdates: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
       onError: () => undefined
     }
-    const ordinary = renderToStaticMarkup(createElement(CampNavigation, {
+    const ordinary = renderToStaticMarkup(createElement(ThreadNavigation, {
       ...baseProps,
       view: 'camp'
     }))
@@ -3024,7 +3145,7 @@ describe('task event projections', () => {
     expect(ordinary).toContain('aria-label="打开关于与更新，Rovai AI v0.0.3 更新可用"')
     expect(ordinary).toContain('>更新可用</span>')
 
-    const settings = renderToStaticMarkup(createElement(CampNavigation, {
+    const settings = renderToStaticMarkup(createElement(ThreadNavigation, {
       ...baseProps,
       view: 'settings',
       settingsSection: 'general'
@@ -3033,8 +3154,8 @@ describe('task event projections', () => {
     expect(settings).toContain('settings-app-update-badge')
   })
 
-  it('keeps one stable trailing status slot with loading ahead of unread', () => {
-    const makeCamp = (id: string, marker: 'none' | 'unread_completed' | 'loading') => ({
+  it('keeps unread and loading together in the stable trailing status lane', () => {
+    const makeThread = (id: string, marker: 'none' | 'unread_completed' | 'loading') => ({
       id,
       title: `${id} 对话`,
       activationState: 'pending' as const,
@@ -3047,13 +3168,13 @@ describe('task event projections', () => {
       latestCompletionGlobalSequence: 0,
       version: 1
     })
-    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+    const markup = renderToStaticMarkup(createElement(ThreadNavigation, {
       view: 'camp',
       state: 'ready',
       navigation: {
         schemaVersion: 3,
         throughGlobalSequence: 1,
-        quickChat: { totalCount: 0, recentCamps: [] },
+        quickChat: { totalCount: 0, recentThreads: [] },
         projects: [{
           projectKey: 'directory:/repo',
           name: 'rovai-ai',
@@ -3061,23 +3182,23 @@ describe('task event projections', () => {
           lastActivityAt: '2026-08-05T00:00:00Z',
           lastActivityGlobalSequence: 1,
           totalCount: 4,
-          recentCamps: [
-            makeCamp('plain', 'none'),
-            makeCamp('unread', 'unread_completed'),
-            makeCamp('opening', 'unread_completed'),
-            makeCamp('running', 'loading')
+          recentThreads: [
+            makeThread('plain', 'none'),
+            makeThread('unread', 'unread_completed'),
+            makeThread('opening', 'unread_completed'),
+            makeThread('running', 'loading')
           ]
         }]
       },
-      activeCampId: 'plain',
-      openingCampId: 'opening',
+      activeThreadId: 'plain',
+      openingThreadId: 'opening',
       onNewConversation: () => undefined,
       onMembers: () => undefined,
       onMemory: () => undefined,
       pendingMemoryCount: 0,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
@@ -3088,12 +3209,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('class="camp-marker-slot"')
     expect(markup).toContain('data-status="none"')
     expect(markup).toContain('data-status="unread"')
-    expect(markup).toContain('data-status="opening"')
+    expect(markup).toContain('data-status="opening-unread"')
     expect(markup).toContain('data-status="loading"')
-    expect(markup.match(/class="camp-unread-dot"/g)).toHaveLength(1)
+    expect(markup.match(/class="camp-unread-dot"/g)).toHaveLength(2)
     expect(markup).toContain('aria-busy="true" aria-label="opening 对话，有新回复，正在打开"')
     expect(markup).toContain('aria-label="running 对话，正在运行"')
-    expect(markup).toContain('title="opening 对话 · 有新回复"')
+    expect(markup).toContain('title="opening 对话 · 未读 · 正在打开"')
     expect(markup).toContain('class="camp-loading-spinner camp-open-spinner"')
     expect(markup).toContain('class="camp-loading-spinner camp-marker-loading"')
     expect(markup).not.toContain('role="img" aria-label="正在运行"')
@@ -3110,8 +3231,8 @@ describe('task event projections', () => {
     expect(createStart).toBeGreaterThan(menuStart)
   })
 
-  it('prefers fresh navigation markers over stale pinned Camp fallbacks', () => {
-    const makeCamp = (marker: 'none' | 'loading') => ({
+  it('prefers fresh navigation markers over stale pinned Thread fallbacks', () => {
+    const makeThread = (marker: 'none' | 'loading') => ({
       id: 'pinned-camp',
       title: '置顶对话',
       activationState: 'active' as const,
@@ -3127,13 +3248,13 @@ describe('task event projections', () => {
     const renderMarkers = (
       navigationMarker: 'none' | 'loading',
       pinnedMarker: 'none' | 'loading'
-    ): string => renderToStaticMarkup(createElement(CampNavigation, {
+    ): string => renderToStaticMarkup(createElement(ThreadNavigation, {
       view: 'camp',
       state: 'ready',
       navigation: {
         schemaVersion: 3,
         throughGlobalSequence: 1,
-        quickChat: { totalCount: 0, recentCamps: [] },
+        quickChat: { totalCount: 0, recentThreads: [] },
         projects: [{
           projectKey: 'directory:/repo',
           name: 'rovai-ai',
@@ -3141,19 +3262,19 @@ describe('task event projections', () => {
           lastActivityAt: '2026-09-05T00:00:00Z',
           lastActivityGlobalSequence: 1,
           totalCount: 1,
-          recentCamps: [makeCamp(navigationMarker)]
+          recentThreads: [makeThread(navigationMarker)]
         }]
       },
-      activeCampId: null,
+      activeThreadId: null,
       pins: [{ kind: 'camp', targetKey: 'pinned-camp', pinnedAt: '2026-09-05T00:00:00Z' }],
-      pinnedCampItems: [makeCamp(pinnedMarker)],
+      pinnedThreadItems: [makeThread(pinnedMarker)],
       onNewConversation: () => undefined,
       onMembers: () => undefined,
       onMemory: () => undefined,
       pendingMemoryCount: 0,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
@@ -3167,7 +3288,7 @@ describe('task event projections', () => {
     expect(completed).not.toContain('camp-loading-spinner camp-marker-loading')
   })
 
-  it('keeps project disclosure state stable without coupling it to Camp pagination', () => {
+  it('keeps project disclosure state stable without coupling it to Thread pagination', () => {
     const collapsed = toggleNavigationGroup(new Set<string>(), 'directory:/repo')
     expect(collapsed.has('directory:/repo')).toBe(true)
     const reopened = toggleNavigationGroup(collapsed, 'directory:/repo')
@@ -3178,11 +3299,11 @@ describe('task event projections', () => {
   })
 
   it('replaces ordinary navigation with the grouped settings category list', () => {
-    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+    const markup = renderToStaticMarkup(createElement(ThreadNavigation, {
       view: 'settings',
       state: 'ready',
       navigation: null,
-      activeCampId: null,
+      activeThreadId: null,
       settingsSection: 'diagnostics',
       onNewConversation: () => undefined,
       onMembers: () => undefined,
@@ -3192,7 +3313,7 @@ describe('task event projections', () => {
       onSettingsSectionChange: () => undefined,
       onSettingsBack: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
@@ -3227,7 +3348,7 @@ describe('task event projections', () => {
     expect(capabilitiesGroup).toContain('<strong>Skills</strong>')
     expect(capabilitiesGroup).toContain('<strong>工具箱</strong>')
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
-    expect(capabilitiesGroup).toContain('<strong>运行时</strong>')
+    expect(capabilitiesGroup).toContain('<strong>智能体</strong>')
     expect(capabilitiesGroup).toContain('<strong>远程连接</strong>')
     expect(capabilitiesGroup).toContain('<strong>渠道</strong>')
     expect(capabilitiesGroup).toContain('data-navigation-icon="sparkles"')
@@ -3236,8 +3357,8 @@ describe('task event projections', () => {
     expect(capabilitiesGroup).toContain('data-navigation-icon="radio-tower"')
     expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Skills</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>工具箱</strong>'))
-    expect(capabilitiesGroup.indexOf('<strong>工具箱</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>运行时</strong>'))
-    expect(capabilitiesGroup.indexOf('<strong>运行时</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>远程连接</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>工具箱</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>智能体</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>智能体</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>远程连接</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>远程连接</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>渠道</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
     expect(supportGroup).toContain('<strong>运行监控</strong>')
@@ -3272,7 +3393,7 @@ describe('task event projections', () => {
       skills: 'Skills',
       toolbox: '工具箱',
       mcp: 'MCP',
-      runtime: '运行时',
+      runtime: '智能体',
       channels: '渠道',
       appearance: '外观',
       notifications: '提醒',
@@ -3355,26 +3476,26 @@ describe('task event projections', () => {
     }))
     const headerEnd = markup.indexOf('</header>')
     const rescan = markup.indexOf('重新检测')
-    const directory = markup.indexOf('运行时目录')
+    const directory = markup.indexOf('智能体目录')
 
     expect(markup.match(/class="settings-page-heading"/g)).toHaveLength(1)
     expect(rescan).toBeGreaterThan(0)
     expect(rescan).toBeLessThan(headerEnd)
     expect(headerEnd).toBeLessThan(directory)
-    expect(markup).toContain('<h1>运行时</h1>')
-    expect(markup).toContain('管理本机 Agent 运行时，只需安装你准备使用的。')
+    expect(markup).toContain('<h1>智能体</h1>')
+    expect(markup).toContain('管理本机智能体，只需安装你准备使用的。')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('高级诊断与自定义启动入口')
   })
 
   it('keeps global project navigation on the members page', () => {
-    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+    const markup = renderToStaticMarkup(createElement(ThreadNavigation, {
       view: 'members',
       state: 'ready',
       navigation: {
         schemaVersion: 3,
         throughGlobalSequence: 1,
-        quickChat: { totalCount: 0, recentCamps: [] },
+        quickChat: { totalCount: 0, recentThreads: [] },
         projects: [{
           projectKey: 'directory:/repo',
           name: 'should-not-render',
@@ -3382,17 +3503,17 @@ describe('task event projections', () => {
           lastActivityAt: '2026-08-01T00:00:00Z',
           lastActivityGlobalSequence: 0,
           totalCount: 0,
-          recentCamps: []
+          recentThreads: []
         }]
       },
-      activeCampId: null,
+      activeThreadId: null,
       onNewConversation: () => undefined,
       onMembers: () => undefined,
       onMemory: () => undefined,
       pendingMemoryCount: 0,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
@@ -3407,18 +3528,18 @@ describe('task event projections', () => {
   })
 
   it('disables the sidebar Project picker while navigation authority is loading', () => {
-    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+    const markup = renderToStaticMarkup(createElement(ThreadNavigation, {
       view: 'compose',
       state: 'loading',
       navigation: null,
-      activeCampId: null,
+      activeThreadId: null,
       onNewConversation: () => undefined,
       onMembers: () => undefined,
       onMemory: () => undefined,
       pendingMemoryCount: 0,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
-      onCamp: () => undefined,
+      onThread: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => undefined,
@@ -3437,10 +3558,10 @@ describe('task event projections', () => {
       runtimeConfiguration: null,
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
-    const snapshot: CampSnapshot = {
-      schemaVersion: 34,
+    const snapshot: ThreadSnapshot = {
+      schemaVersion: 35,
       throughGlobalSequence: 1,
-      camp: {
+      thread: {
         id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
         membershipGeneration: 1,
@@ -3456,7 +3577,7 @@ describe('task event projections', () => {
       contextManifests: [], executionEvidence: [], agentRunFileChanges: [],
       approvals: [], actions: [], timeline: []
     }
-    const workspaceProps: Parameters<typeof CampWorkspace>[0] = {
+    const workspaceProps: Parameters<typeof ThreadWorkspace>[0] = {
       snapshot,
       projectName: null,
       agents: [unreadyProfile],
@@ -3470,7 +3591,7 @@ describe('task event projections', () => {
       inspectorTab: 'members',
       executionPlacement: 'bottom',
       runtimeRecovery: {
-        campId: 'camp-1',
+        threadId: 'camp-1',
         targets: [{
           agentId: 'agent_1',
           blockerCode: 'runtime_not_configured'
@@ -3479,15 +3600,15 @@ describe('task event projections', () => {
       onConfigureRuntime: () => undefined,
       onDismissRuntimeRecovery: () => undefined
     }
-    const markup = renderToStaticMarkup(createElement(CampWorkspace, workspaceProps))
-    const pendingMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const markup = renderToStaticMarkup(createElement(ThreadWorkspace, workspaceProps))
+    const pendingMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       snapshot: {
         ...snapshot,
-        camp: { ...snapshot.camp, activationState: 'pending' }
+        thread: { ...snapshot.thread, activationState: 'pending' }
       }
     }))
-    const readyMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const readyMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       agents: [{
         ...unreadyProfile,
@@ -3496,7 +3617,7 @@ describe('task event projections', () => {
     }))
     const mobileMarkup = renderToStaticMarkup(createElement(
       MobileLayoutProvider,
-      { value: true, children: createElement(CampWorkspace, workspaceProps) }
+      { value: true, children: createElement(ThreadWorkspace, workspaceProps) }
     ))
 
     expect(markup).toContain('给 洛可 发消息')
@@ -3515,7 +3636,7 @@ describe('task event projections', () => {
     expect(markup).toContain('1 位队员')
     expect(markup).not.toContain('负责人 · 洛可')
     expect(markup).not.toContain('1 位队员已在队')
-    expect(markup).toContain('Agent 运行时不可用')
+    expect(markup).toContain('智能体不可用')
     expect(markup).toContain('class="camp-home-runtime"')
     expect(readyMarkup).not.toContain('class="camp-home-runtime"')
     expect(markup).toContain('先了解项目')
@@ -3539,12 +3660,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('上下文投递')
     expect(markup).not.toContain('AgentRun 上下文投递清单')
     expect(markup).not.toContain('value="approvals"')
-    expect(markup).not.toContain('当前 Camp 上下文')
+    expect(markup).not.toContain('当前 Thread 上下文')
     expect(markup).toContain('消息未发送')
     expect(markup).toContain('1 位目标队员暂时不可执行')
     expect(markup).toContain('当前输入已保留')
-    expect(markup).toContain('尚未配置 Agent 运行时')
-    expect(markup).toContain('配置洛可的 Agent 运行时')
+    expect(markup).toContain('尚未配置智能体')
+    expect(markup).toContain('配置洛可的智能体')
     expect(markup.indexOf('class="runtime-recovery-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
     expect(markup).toMatch(
       /<div class="composer-actions"><span class="composer-hint"><span class="sr-only">Enter 发送，Shift\+Enter 换行<\/span><span class="composer-hint-visual" aria-hidden="true"><kbd>↵<\/kbd><span>发送<\/span><span class="composer-hint-separator">·<\/span><kbd>⇧↵<\/kbd><span>换行<\/span><\/span><\/span><button class="composer-primary-action is-send"/
@@ -3559,7 +3680,7 @@ describe('task event projections', () => {
   it('turns runtime admission rejection into a scoped composer recovery', () => {
     const result = {
       commandId: 'command-runtime-recovery',
-      commandType: 'camp.message.send',
+      commandType: 'thread.message.send',
       requestDigest: 'digest',
       requestDigestVersion: 1,
       status: 'rejected' as const,
@@ -3575,13 +3696,13 @@ describe('task event projections', () => {
     }
 
     expect(runtimeRecoveryFromCommandResult('camp-1', result)).toEqual({
-      campId: 'camp-1',
+      threadId: 'camp-1',
       targets: [{
         agentId: 'agent_2',
         blockerCode: 'runtime_authentication_required'
       }]
     })
-    expect(commandFailureMessage(result)).toBe('目标队员的 Agent 运行时暂不可用。')
+    expect(commandFailureMessage(result)).toBe('目标队员的智能体暂不可用。')
     expect(runtimeRecoveryFromCommandResult('camp-1', {
       ...result,
       code: 'camp_message.no_addressable_member'
@@ -3598,7 +3719,7 @@ describe('task event projections', () => {
       .toBe('消息未发送：引用的消息当前不可用。请取消引用后重试。')
   })
 
-  it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
+  it('summarizes empty Thread runtime readiness without inventing Ready state', () => {
     const member = {
       agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
       avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const, leaveRequestedAt: null,
@@ -3623,34 +3744,34 @@ describe('task event projections', () => {
       memberOrder: 1
     }
 
-    expect(emptyCampRuntimeSummary([member], [])).toBe('正在检查 Agent 运行时…')
-    expect(emptyCampRuntimeSummary([member], [ready])).toBe('Agent 运行时可用')
-    expect(emptyCampRuntimeSummary([member, secondMember], [ready, unready])).toBe('1/2 个 Agent 运行时可用')
-    expect(emptyCampRuntimeSummary([{ ...member, profilePresence: 'away' }], [ready])).toBe('暂无在队的队员')
+    expect(emptyThreadRuntimeSummary([member], [])).toBe('正在检查智能体…')
+    expect(emptyThreadRuntimeSummary([member], [ready])).toBe('智能体可用')
+    expect(emptyThreadRuntimeSummary([member, secondMember], [ready, unready])).toBe('1/2 个智能体可用')
+    expect(emptyThreadRuntimeSummary([{ ...member, profilePresence: 'away' }], [ready])).toBe('暂无在队的队员')
   })
 
-  it('projects current Camp members and admits only present members as Default Lead', () => {
-    const present: CampSnapshot['members'][number] = {
+  it('projects current Thread members and admits only present members as Default Lead', () => {
+    const present: ThreadSnapshot['members'][number] = {
       agentId: 'agent_present', displayName: '洛可', teamRole: '协调',
       avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null,
       profilePresence: 'present', memberOrder: 2, isDefaultLead: true, version: 1
     }
-    const away: CampSnapshot['members'][number] = {
+    const away: ThreadSnapshot['members'][number] = {
       ...present,
       agentId: 'agent_away', displayName: '沐瓦', membershipStatus: 'active',
       profilePresence: 'away', memberOrder: 1, isDefaultLead: false
     }
-    const leaving: CampSnapshot['members'][number] = {
+    const leaving: ThreadSnapshot['members'][number] = {
       ...present,
       agentId: 'agent_leaving', displayName: '栖鹿', leaveRequestedAt: '2026-08-11T00:00:00Z',
       memberOrder: 3, isDefaultLead: false
     }
-    const removed: CampSnapshot['members'][number] = {
+    const removed: ThreadSnapshot['members'][number] = {
       ...present,
       agentId: 'agent_removed', displayName: '已移除', profilePresence: 'removed',
       memberOrder: 0, isDefaultLead: false
     }
-    const left: CampSnapshot['members'][number] = {
+    const left: ThreadSnapshot['members'][number] = {
       ...present,
       agentId: 'agent_left', displayName: '已离开', membershipStatus: 'left',
       memberOrder: 4, isDefaultLead: false
@@ -3667,17 +3788,17 @@ describe('task event projections', () => {
     expect(campMemberIsLeadEligible(left)).toBe(false)
   })
 
-  it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
+  it('keeps the Thread composer interactive when reconciliation leaves no Default Lead', () => {
     const profile: AgentProfile = {
       ...agentProfile(),
       agentId: 'agent_1',
       displayName: '洛可',
       presence: 'away'
     }
-    const snapshot: CampSnapshot = {
-      schemaVersion: 34,
+    const snapshot: ThreadSnapshot = {
+      schemaVersion: 35,
       throughGlobalSequence: 1,
-      camp: {
+      thread: {
         id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: null,
         membershipGeneration: 1,
@@ -3693,7 +3814,7 @@ describe('task event projections', () => {
       contextManifests: [], executionEvidence: [], agentRunFileChanges: [],
       approvals: [], actions: [], timeline: []
     }
-    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const markup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
       projectName: null,
       agents: [profile],
@@ -3711,7 +3832,7 @@ describe('task event projections', () => {
     expect(markup).not.toMatch(/id="camp-message"[^>]*\sdisabled(?:=|\s|>)/)
     expect(commandFailureMessage({
       commandId: 'command-1',
-      commandType: 'camp.message.send',
+      commandType: 'thread.message.send',
       requestDigest: 'digest',
       requestDigestVersion: 1,
       status: 'rejected',
@@ -3729,10 +3850,10 @@ describe('task event projections', () => {
       displayName: '沐瓦',
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
-    const snapshot: CampSnapshot = {
-      schemaVersion: 34,
+    const snapshot: ThreadSnapshot = {
+      schemaVersion: 35,
       throughGlobalSequence: 3,
-      camp: {
+      thread: {
         id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
         defaultLeadAgentId: 'agent_2',
         membershipGeneration: 1,
@@ -3759,8 +3880,8 @@ describe('task event projections', () => {
         ],
         addressMode: 'explicit',
         attachments: [],
-        addressedAgentIds: ['agent_2'], replyToCampMessageId: null,
-        campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
+        addressedAgentIds: ['agent_2'], replyToThreadMessageId: null,
+        threadTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
       }],
       turns: [{
         id: 'turn-1', triggerType: 'camp_message', triggerId: 'message-user', status: 'running',
@@ -3769,7 +3890,7 @@ describe('task event projections', () => {
         updatedAt: '2026-07-28T05:01:00Z', endedAt: null
       }],
       agentRuns: [{
-        id: 'run-muwa', campTurnId: 'turn-1', conversationId: 'conversation-muwa',
+        id: 'run-muwa', threadTurnId: 'turn-1', conversationId: 'conversation-muwa',
         inputMessageIds: ['message-user'], anchorMessageId: 'message-user',
         agentId: 'agent_2', taskId: null, responsibilityKey: 'direct:agent_2',
         responsibilityGeneration: 0, purpose: '实现复制',
@@ -3817,8 +3938,8 @@ describe('task event projections', () => {
     const historicalRun = {
       ...snapshot.agentRuns[0],
       id: 'run-muwa-history',
-      campTurnId: null,
-      purpose: 'Handle the claimed Camp message batch',
+      threadTurnId: null,
+      purpose: 'Handle the claimed Thread message batch',
       invocationKind: 'batch' as const,
       status: 'succeeded' as const,
       executionEvidenceCount: 0,
@@ -3881,7 +4002,7 @@ describe('task event projections', () => {
       ...snapshot.agentRuns[0],
       id: 'run-submitted-first',
       agentId: 'agent_3',
-      campTurnId: 'turn-submitted',
+      threadTurnId: 'turn-submitted',
       inputMessageIds: ['message-submitted'],
       status: 'queued' as const,
       createdAt: '2026-07-28T06:00:00Z'
@@ -3889,7 +4010,7 @@ describe('task event projections', () => {
     const submittedSecondRun = {
       ...snapshot.agentRuns[0],
       id: 'run-submitted-second',
-      campTurnId: 'turn-submitted',
+      threadTurnId: 'turn-submitted',
       status: 'queued' as const,
       createdAt: '2026-07-28T06:00:00Z'
     }
@@ -3897,7 +4018,7 @@ describe('task event projections', () => {
     const waitingDelivery: MessageDeliveryView = {
       id: 'delivery-waiting-1',
       messageId: 'message-waiting-1',
-      campTurnId: null,
+      threadTurnId: null,
       taskId: null,
       recipientAgentId: 'agent_2',
       recipientMembershipVersionAtAdmission: 1,
@@ -3955,7 +4076,7 @@ describe('task event projections', () => {
       addressedAgentIds: ['agent_3', 'agent_2']
     }, submittedRuns)?.id).toBe('run-submitted-first')
     expect(firstSubmittedAgentRun({
-      campMessageId: 'message-submitted',
+      threadMessageId: 'message-submitted',
       deliveryIds: ['delivery-1', 'delivery-2'],
       agentRunIds: [],
       addressedAgentIds: ['agent_3', 'agent_2']
@@ -3993,7 +4114,7 @@ describe('task event projections', () => {
     expect(executionEmptyStateShouldRender(0, 0, false)).toBe(false)
     expect(executionQueueBatches([
       submittedSecondRun,
-      { ...submittedSecondRun, id: 'run-submitted-third', campTurnId: 'turn-submitted-later', createdAt: '2026-07-28T06:01:00Z' },
+      { ...submittedSecondRun, id: 'run-submitted-third', threadTurnId: 'turn-submitted-later', createdAt: '2026-07-28T06:01:00Z' },
       submittedFirstRun
     ]).map((batch) => ({
       agentId: batch.agentId,
@@ -4017,7 +4138,7 @@ describe('task event projections', () => {
     expect(campConversationViewFromStoredValue('world')).toBe('world')
     expect(campConversationViewFromStoredValue(null)).toBe('world')
 
-    const workspaceProps: Parameters<typeof CampWorkspace>[0] = {
+    const workspaceProps: Parameters<typeof ThreadWorkspace>[0] = {
       snapshot: groupedSnapshot,
       executionPlacement: 'bottom',
       projectName: 'Rovai',
@@ -4035,13 +4156,13 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined
     }
-    const markup = renderToStaticMarkup(createElement(CampWorkspace, workspaceProps))
-    const suppressedMissionDrawerMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const markup = renderToStaticMarkup(createElement(ThreadWorkspace, workspaceProps))
+    const suppressedMissionDrawerMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       missionBoard: createElement('section', null, 'Mission board'),
       suppressExecutionAutoOpen: true
     }))
-    const queuedMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const queuedMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       snapshot: {
         ...snapshot,
@@ -4054,17 +4175,17 @@ describe('task event projections', () => {
       },
       liveRuntimeEvents: []
     }))
-    const secondInputMessage: CampMessageView = {
+    const secondInputMessage: ThreadMessageView = {
       ...snapshot.messages[0],
       id: 'message-waiting-1',
       sequence: 2,
       timelineGlobalSequence: 2,
       body: '补充第一条排队输入。',
       content: [{ kind: 'text', text: '补充第一条排队输入。' }],
-      campTurnId: null,
+      threadTurnId: null,
       createdAt: '2026-07-28T06:02:00Z'
     }
-    const thirdInputMessage: CampMessageView = {
+    const thirdInputMessage: ThreadMessageView = {
       ...secondInputMessage,
       id: 'message-waiting-2',
       sequence: 3,
@@ -4073,7 +4194,7 @@ describe('task event projections', () => {
       content: [{ kind: 'text', text: '补充第二条排队输入。' }],
       createdAt: '2026-07-28T06:03:00Z'
     }
-    const waitingQueueMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const waitingQueueMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       snapshot: {
         ...snapshot,
@@ -4081,7 +4202,7 @@ describe('task event projections', () => {
         messageDeliveries: [waitingDelivery, secondWaitingDelivery]
       }
     }))
-    const waitingOverHistoryMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const waitingOverHistoryMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       snapshot: {
         ...snapshot,
@@ -4091,7 +4212,7 @@ describe('task event projections', () => {
         executionEvidence: []
       }
     }))
-    const batchedRunMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const batchedRunMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       snapshot: {
         ...snapshot,
@@ -4103,7 +4224,7 @@ describe('task event projections', () => {
         }]
       }
     }))
-    const failedReceiptMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const failedReceiptMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       snapshot: {
         ...snapshot,
@@ -4117,14 +4238,14 @@ describe('task event projections', () => {
       },
       liveRuntimeEvents: []
     }))
-    const failedHistoryMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const failedHistoryMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       snapshot: {
         ...groupedSnapshot,
         agentRuns: [{ ...historicalRun, status: 'failed' }, ...snapshot.agentRuns]
       }
     }))
-    const disabledMapMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const disabledMapMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       worldMapEnabled: false
     }))
@@ -4182,7 +4303,7 @@ describe('task event projections', () => {
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
     expect(markup).not.toContain('<small>执行过程</small>')
     expect(markup).toContain('class="run-pulse-chip-copy"><strong><span>沐瓦</span></strong>')
-    expect(markup).not.toContain('Handle the claimed Camp message batch')
+    expect(markup).not.toContain('Handle the claimed Thread message batch')
     expect(markup).toContain('class="run-pulse-chip-state tone-info state-running" role="img"')
     expect(markup).toMatch(/title="沐瓦 · [^"]+"/)
     expect(markup).not.toMatch(/run-pulse-chip-state[^>]*>[^<]+<\/span>/)
@@ -4220,7 +4341,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('aria-label="停止当前运行"')
     expect(markup).not.toContain('加入待发送')
 
-    const cachedPreviewMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const cachedPreviewMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: groupedSnapshot,
       projectName: 'Rovai',
       agents: [profile],
@@ -4237,7 +4358,7 @@ describe('task event projections', () => {
     expect(cachedPreviewMarkup).not.toContain('class="run-pulse-chip is-selected"')
     expect(cachedPreviewMarkup).not.toContain('execution-disclosure')
 
-    const inspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const inspectorMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: groupedSnapshot,
       projectName: 'Rovai',
       agents: [profile],
@@ -4263,7 +4384,7 @@ describe('task event projections', () => {
     expect(inspectorMarkup).toContain('aria-label="切换执行台位置，当前浮层"')
     expect(inspectorMarkup).not.toContain('class="run-pulse run-pulse-bottom"')
 
-    const terminalInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const terminalInspectorMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: {
         ...groupedSnapshot,
         agentRuns: groupedSnapshot.agentRuns.map((run) => ({
@@ -4286,7 +4407,7 @@ describe('task event projections', () => {
     }))
     expect(terminalInspectorMarkup).toMatch(/data-detail="execution"[^>]*aria-expanded="true"/)
 
-    const ordinaryInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const ordinaryInspectorMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
       executionPlacement: 'bottom',
       projectName: 'Rovai',
@@ -4308,7 +4429,7 @@ describe('task event projections', () => {
       .toBeLessThan(ordinaryTabList.indexOf('>队员</span><small>'))
     expect(ordinaryInspectorMarkup).toMatch(/data-detail="tasks" aria-expanded="true"/)
 
-    const groupedEvidenceMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const groupedEvidenceMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: {
         ...snapshot,
         agentRuns: snapshot.agentRuns.map((run) => ({ ...run, executionEvidenceCount: 5 })),
@@ -4387,7 +4508,7 @@ describe('task event projections', () => {
     expect(groupedEvidenceMarkup).not.toContain('complete-evidence-standalone')
     expect(groupedEvidenceMarkup).not.toContain('完整证据')
 
-    const cancellingMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const cancellingMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
       projectName: 'Rovai',
       agents: [profile],
@@ -4410,7 +4531,7 @@ describe('task event projections', () => {
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
     expect(cancellingMarkup).not.toContain('execution-disclosure is-running')
 
-    const terminalMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const terminalMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: {
         ...snapshot,
         messages: [...snapshot.messages, {
@@ -4419,16 +4540,16 @@ describe('task event projections', () => {
           quotes: [], withdrawn: false, canWithdraw: false, version: 1,
           sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: [{ kind: 'text', text: '复制入口已完成。' }], addressMode: 'broadcast' as const,
           attachments: [],
-          addressedAgentIds: [], replyToCampMessageId: 'message-user',
-          campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
+          addressedAgentIds: [], replyToThreadMessageId: 'message-user',
+          threadTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
         }, {
           id: 'message-user-follow-up', sequence: 3, timelineGlobalSequence: 5,
           authorType: 'user' as const, authorId: 'local_user',
           quotes: [], withdrawn: false, canWithdraw: false, version: 1,
           sourceAgentRunId: null, body: '我再确认一下。', content: [{ kind: 'text', text: '我再确认一下。' }], addressMode: 'default' as const,
           attachments: [],
-          addressedAgentIds: ['agent_2'], replyToCampMessageId: null,
-          campTurnId: null, presentation: null, createdAt: '2026-07-28T05:03:00Z'
+          addressedAgentIds: ['agent_2'], replyToThreadMessageId: null,
+          threadTurnId: null, presentation: null, createdAt: '2026-07-28T05:03:00Z'
         }],
         turns: snapshot.turns.map((turn) => ({
           ...turn,
@@ -4470,7 +4591,7 @@ describe('task event projections', () => {
     expect(terminalMarkup).not.toContain('class="composer-primary-action is-stop"')
     expect(terminalMarkup).toContain('class="composer-primary-action is-send"')
 
-    const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const restoredMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: {
         ...snapshot,
         executionEvidence: [],
@@ -4499,7 +4620,7 @@ describe('task event projections', () => {
     expect(restoredMarkup).toContain('已完成')
     expect(restoredMarkup).not.toContain('处理过程 · 1分59秒')
 
-    const cancelledMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const cancelledMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: {
         ...snapshot,
         throughGlobalSequence: 4,
@@ -4519,7 +4640,7 @@ describe('task event projections', () => {
           globalSequence: 4,
           eventId: 'event-cancel',
           eventType: 'camp_turn.cancel_requested',
-          campId: snapshot.camp.id,
+          threadId: snapshot.thread.id,
           entityType: 'camp_turn',
           entityId: 'turn-1',
           actorType: 'user',
@@ -4548,7 +4669,7 @@ describe('task event projections', () => {
     expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
     expect(cancelledMarkup).not.toContain('pnpm test')
 
-    const plannedStoppedMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const plannedStoppedMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: {
         ...snapshot,
         throughGlobalSequence: 5,
@@ -4585,7 +4706,7 @@ describe('task event projections', () => {
 
   it('keeps Run titles stable when their source message is outside the loaded page', () => {
     const message = { body: '已载入的消息正文', attachments: [] }
-    const run = { inputSummary: '早期触发消息', purpose: 'Handle the claimed Camp message batch' }
+    const run = { inputSummary: '早期触发消息', purpose: 'Handle the claimed Thread message batch' }
     expect(executionMessageSummary(null, run)).toBe('早期触发消息')
     expect(executionMessageSummary(message, run)).toBe('早期触发消息')
     // A null summary is authoritative; cached message text must not revive it.
@@ -4677,10 +4798,10 @@ describe('task event projections', () => {
       configuredRuntime('codex-cli'),
       installation
     )).toEqual({
-      model: 'Agent 运行时默认',
+      model: '智能体默认',
       effort: null,
-      strategy: '跟随 Agent 运行时默认',
-      summary: 'Agent 运行时默认'
+      strategy: '跟随智能体默认',
+      summary: '智能体默认'
     })
 
     expect(memberRuntimeConfigurationPresentation({
@@ -4697,6 +4818,34 @@ describe('task event projections', () => {
       strategy: '固定模型',
       summary: 'claude-sonnet-4-6 · 思考强度 high'
     })
+  })
+
+  it('shows app-owned model and effort labels in English', async () => {
+    const languageApi = {
+      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
+    } as GeneralPreferencesApi
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      expect(memberRuntimeConfigurationPresentation(configuredRuntime('codex-cli'), null)).toEqual({
+        model: 'Agent default',
+        effort: null,
+        strategy: 'Follow the Agent default',
+        summary: 'Agent default'
+      })
+      expect(memberRuntimeConfigurationPresentation({
+        adapterKind: 'claude-code-cli',
+        model: { mode: 'explicit', modelId: 'claude-sonnet-4-6', options: { effort: 'high' } },
+        permissions: { adapterKind: 'claude-code-cli', schemaVersion: 1, values: {} }
+      }, null)).toEqual({
+        model: 'claude-sonnet-4-6',
+        effort: { label: 'Thinking intensity', value: 'high' },
+        strategy: 'Fixed model',
+        summary: 'claude-sonnet-4-6 · Thinking intensity high'
+      })
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
   })
 
   it.each(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])(
@@ -4730,7 +4879,7 @@ describe('task event projections', () => {
       actionKind: 'command',
       actionSummary: index === 0 ? '运行 pnpm test' : '写入构建产物',
       canonicalInput: { command: index === 0 ? 'pnpm test' : 'pnpm build' },
-      reason: 'Agent 运行时需要用户确认。',
+      reason: '智能体需要用户确认。',
       agentRunId: `run-${index + 1}`,
       agentId: profile.agentId,
       adapterKind: 'codex-cli',
@@ -4753,10 +4902,10 @@ describe('task event projections', () => {
       requestedAt: `2026-07-30T03:00:0${index}Z`,
       resolvedAt: null
     }))
-    const snapshot: CampSnapshot = {
-      schemaVersion: 34,
+    const snapshot: ThreadSnapshot = {
+      schemaVersion: 35,
       throughGlobalSequence: 2,
-      camp: {
+      thread: {
         id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
         membershipGeneration: 1,
@@ -4780,7 +4929,7 @@ describe('task event projections', () => {
       contextManifests: [], executionEvidence: [], agentRunFileChanges: [],
       approvals, actions: [], timeline: []
     }
-    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const markup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
       projectName: null,
       agents: profiles,
@@ -4803,7 +4952,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
     expect((markup.match(/class="camp-detail-entry(?: [^"]*)?"/g) ?? []).length).toBe(4)
-    expect(markup).toContain('>执行</span><small>0</small></button>')
+    expect(markup).toContain('>执行</span><small>0</small></span></button>')
     expect(markup).toContain('>任务</span><small>0</small>')
     expect(markup).toContain('>队员</span><small>2</small>')
     expect(markup).toContain('>单聊</span><small>0</small>')
@@ -4813,7 +4962,7 @@ describe('task event projections', () => {
   })
 
   it('keeps image and file regions separate and orders them by author intent', () => {
-    const attachments: CampMessageView['attachments'] = [{
+    const attachments: ThreadMessageView['attachments'] = [{
       id: 'file-first', displayName: 'report.pdf', kind: 'file', fileCount: 1,
       mediaType: 'application/pdf', byteSize: 1200, previewKind: 'none', availability: 'available'
     }, {
@@ -4825,7 +4974,7 @@ describe('task event projections', () => {
     }]
     const renderGroups = (presentation: 'user' | 'agent') => renderToStaticMarkup(createElement(
       MessageAttachmentGroups,
-      { attachments, campId: 'camp', messageId: 'message-1', presentation, onNotify: vi.fn() }
+      { attachments, threadId: 'camp', messageId: 'message-1', presentation, onNotify: vi.fn() }
     ))
 
     const userMarkup = renderGroups('user')
@@ -4846,7 +4995,7 @@ describe('task event projections', () => {
   })
 
   it('renders an attachment-only message shell without an empty body bubble', () => {
-    const attachmentOnlyMessage: CampMessageView = {
+    const attachmentOnlyMessage: ThreadMessageView = {
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id: 'message-attachment-only',
@@ -4878,15 +5027,15 @@ describe('task event projections', () => {
       }],
       addressMode: 'default',
       addressedAgentIds: ['agent_1'],
-      replyToCampMessageId: null,
-      campTurnId: 'turn-attachment-only',
+      replyToThreadMessageId: null,
+      threadTurnId: 'turn-attachment-only',
       presentation: null,
       createdAt: '2026-08-20T00:00:00Z'
     }
-    const snapshot: CampSnapshot = {
-      schemaVersion: 34,
+    const snapshot: ThreadSnapshot = {
+      schemaVersion: 35,
       throughGlobalSequence: 1,
-      camp: {
+      thread: {
         id: 'camp-attachment-only', title: '附件消息', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1', membershipGeneration: 1, version: 1,
         createdAt: '2026-08-20T00:00:00Z', updatedAt: '2026-08-20T00:00:00Z'
@@ -4909,7 +5058,7 @@ describe('task event projections', () => {
       actions: [],
       timeline: []
     }
-    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const markup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
       projectName: null,
       agents: [agentProfile()],
@@ -4948,7 +5097,7 @@ describe('task event projections', () => {
   })
 
   it('renders the Scheme C handoff footer only for Agent messages, not human deliveries', () => {
-    const publicMessage: CampMessageView = {
+    const publicMessage: ThreadMessageView = {
     quotes: [],
       withdrawn: false, canWithdraw: false, version: 1,
       id: 'public-a2a-message',
@@ -4962,15 +5111,15 @@ describe('task event projections', () => {
       attachments: [],
       addressMode: 'explicit',
       addressedAgentIds: ['agent_2', 'agent_3'],
-      replyToCampMessageId: null,
-      campTurnId: 'turn-a2a',
+      replyToThreadMessageId: null,
+      threadTurnId: 'turn-a2a',
       presentation: null,
       createdAt: '2026-07-30T03:00:00Z'
     }
     const delivery: MessageDeliveryView = {
       id: 'delivery-a2a',
       messageId: publicMessage.id,
-      campTurnId: 'turn-a2a',
+      threadTurnId: 'turn-a2a',
       taskId: null,
       recipientAgentId: 'agent_2',
       recipientMembershipVersionAtAdmission: 1,
@@ -5008,7 +5157,7 @@ describe('task event projections', () => {
       targetAgentRunId: null,
       failureCode: 'runtime_unavailable'
     }
-    const fileChanges: CampSnapshot['agentRunFileChanges'][number] = {
+    const fileChanges: ThreadSnapshot['agentRunFileChanges'][number] = {
       schemaVersion: 2,
       agentRunId: 'run-luoke',
       executionEpoch: 1,
@@ -5029,10 +5178,10 @@ describe('task event projections', () => {
     }
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
-    const snapshot: CampSnapshot = {
-      schemaVersion: 34,
+    const snapshot: ThreadSnapshot = {
+      schemaVersion: 35,
       throughGlobalSequence: 3,
-      camp: {
+      thread: {
         id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
         membershipGeneration: 1,
@@ -5080,8 +5229,8 @@ describe('task event projections', () => {
       displayName: '小狐狸',
       runtimeReadiness: { status: 'ready', blockers: [] }
     }]
-    const renderWorkspace = (candidateSnapshot: CampSnapshot): string =>
-      renderToStaticMarkup(createElement(CampWorkspace, {
+    const renderWorkspace = (candidateSnapshot: ThreadSnapshot): string =>
+      renderToStaticMarkup(createElement(ThreadWorkspace, {
         snapshot: candidateSnapshot,
         projectName: null,
         agents,
@@ -5178,10 +5327,10 @@ describe('task event projections', () => {
   })
 
   it('renders durable Task records below a single explicit creation action', () => {
-    const snapshot: CampSnapshot = {
-      schemaVersion: 34,
+    const snapshot: ThreadSnapshot = {
+      schemaVersion: 35,
       throughGlobalSequence: 1,
-      camp: {
+      thread: {
         id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_2',
         membershipGeneration: 1,
@@ -5194,7 +5343,7 @@ describe('task event projections', () => {
         isDefaultLead: true, version: 1
       }],
       tasks: [{
-        taskId: 'task-1', campId: 'camp-task', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
+        taskId: 'task-1', threadId: 'camp-task', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
         blockedReason: null, completionSummary: null, cancelReason: null,
         status: 'pending', assigneeAgentId: 'agent_2', createdByType: 'user',
         createdById: 'local_user', sourceAgentRunId: null, closedByType: null,
@@ -5721,7 +5870,7 @@ describe('task event projections', () => {
     }])
 
     const run: AgentRunView = {
-      id: 'run-claude-retrying', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      id: 'run-claude-retrying', threadTurnId: 'turn-1', conversationId: 'conversation-claude',
       agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
       responsibilityGeneration: 0, purpose: '检查 API', completionRole: 'required',
       status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
@@ -5736,7 +5885,7 @@ describe('task event projections', () => {
       endedAt: null, updatedAt: '2026-08-20T15:50:29Z'
     }
     const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
-      run, progress, campId: 'camp-1', focused: true
+      run, progress, threadId: 'camp-1', focused: true
     }))
     expect(markup).toContain('class="runtime-retry-notice"')
     expect(markup).toContain('Claude Code API 暂时不可用')
@@ -5891,7 +6040,7 @@ describe('task event projections', () => {
 
   it('shows only a failed AgentRun original error and places it after existing execution records', () => {
     const run: AgentRunView = {
-      id: 'run-claude-failed', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      id: 'run-claude-failed', threadTurnId: 'turn-1', conversationId: 'conversation-claude',
       agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
       responsibilityGeneration: 0, purpose: '检查仓库', completionRole: 'required',
       status: 'failed', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
@@ -5912,7 +6061,7 @@ describe('task event projections', () => {
     }
 
     const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
-      run, campId: 'camp-1'
+      run, threadId: 'camp-1'
     }))
     expect(markup).toContain('<details class="execution-disclosure worked is-terminal" open="">')
     expect(markup).toContain('class="process-disclosure-label"')
@@ -5933,16 +6082,16 @@ describe('task event projections', () => {
           body: '已执行前置检查。'
         }]
       },
-      campId: 'camp-1'
+      threadId: 'camp-1'
     }))
     expect(positionedMarkup.indexOf('已执行前置检查。')).toBeGreaterThan(-1)
     expect(positionedMarkup.indexOf('请稍后重试。'))
       .toBeGreaterThan(positionedMarkup.indexOf('已执行前置检查。'))
   })
 
-  it('mounts Run details only after a terminal Run is focused while keeping non-terminal details immediate', () => {
+  it('mounts Run details only after a terminal Run is focused while keeping non-terminal details immediate', async () => {
     const run: AgentRunView = {
-      id: 'run-lazy-history', campTurnId: 'turn-1', conversationId: 'conversation-lazy',
+      id: 'run-lazy-history', threadTurnId: 'turn-1', conversationId: 'conversation-lazy',
       agentId: 'agent-lazy', taskId: null, responsibilityKey: 'direct:agent-lazy',
       responsibilityGeneration: 0, purpose: '检查懒挂载', completionRole: 'required',
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
@@ -5965,7 +6114,7 @@ describe('task event projections', () => {
     }
 
     const collapsedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
-      run, progress, campId: 'camp-1'
+      run, progress, threadId: 'camp-1'
     }))
     expect(collapsedMarkup).toContain('<details class="execution-disclosure worked is-terminal">')
     expect(collapsedMarkup).toContain('class="process-disclosure-label"')
@@ -5973,7 +6122,7 @@ describe('task event projections', () => {
     expect(collapsedMarkup).not.toContain('仅在详情激活后渲染')
 
     const focusedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
-      run, progress, campId: 'camp-1', focused: true
+      run, progress, threadId: 'camp-1', focused: true
     }))
     expect(focusedMarkup).toContain('class="process-content"')
     expect(focusedMarkup).toContain('仅在详情激活后渲染')
@@ -5987,7 +6136,7 @@ describe('task event projections', () => {
         endedAt: null
       },
       progress,
-      campId: 'camp-1'
+      threadId: 'camp-1'
     }))
     expect(waitingMarkup).toContain('class="process-content"')
     expect(waitingMarkup).toContain('仅在详情激活后渲染')
@@ -6003,10 +6152,30 @@ describe('task event projections', () => {
         endedAt: null
       },
       progress,
-      campId: 'camp-1'
+      threadId: 'camp-1'
     }))
     expect(networkBlockedMarkup).toContain('自动恢复已停止')
     expect(networkBlockedMarkup).not.toContain('process-spinner')
+
+    const languageApi = {
+      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
+        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
+    } as GeneralPreferencesApi
+    await changeInterfaceLanguage(languageApi, 'en')
+    try {
+      const englishMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+        run: { ...run, status: 'waiting', waitReason: 'recovery_blocked', endedAt: null },
+        progress,
+        threadId: 'camp-1'
+      }))
+      expect(englishMarkup).toContain('The Agent accepted the task, but Rovai AI cannot confirm its final result after restart.')
+      expect(englishMarkup).toContain('Execution exception, cleaning up')
+      expect(englishMarkup).toContain('The original request will not be sent again automatically.')
+      expect(englishMarkup).toContain('仅在详情激活后渲染')
+      expect(englishMarkup).not.toContain('原请求不会自动重发')
+    } finally {
+      await changeInterfaceLanguage(languageApi, 'zh-CN')
+    }
   })
 
   it('does not present an ACP protocol kind as Copilot execution detail', () => {
@@ -6033,7 +6202,7 @@ describe('task event projections', () => {
     expect(executionEvidenceResultText('runtime.action', { kind: 'execute' })).toBeNull()
 
     const run: AgentRunView = {
-      id: 'run-copilot', campTurnId: 'turn-1', conversationId: 'conversation-copilot',
+      id: 'run-copilot', threadTurnId: 'turn-1', conversationId: 'conversation-copilot',
       agentId: 'agent-copilot', taskId: null, responsibilityKey: 'direct:agent-copilot',
       responsibilityGeneration: 0, purpose: '检查工作区状态', completionRole: 'required',
       status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
@@ -6049,7 +6218,7 @@ describe('task event projections', () => {
       endedAt: null, updatedAt: '2026-08-14T00:00:02Z'
     }
     const markup = renderExpandedExecution({
-      run, progress, campId: 'camp-1', focused: true
+      run, progress, threadId: 'camp-1', focused: true
     })
     expect(markup).toContain('tool-call-static')
     expect(markup).toContain('class="tool-activity-group status-running"')
@@ -6080,7 +6249,7 @@ describe('task event projections', () => {
       }
     }
     const run: AgentRunView = {
-      id: 'run-live-tail', campTurnId: 'turn-live-tail', conversationId: 'conversation-live-tail',
+      id: 'run-live-tail', threadTurnId: 'turn-live-tail', conversationId: 'conversation-live-tail',
       agentId: 'agent-live-tail', taskId: null, responsibilityKey: 'direct:agent-live-tail',
       responsibilityGeneration: 0, purpose: '验证连续操作摘要', completionRole: 'required',
       status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
@@ -6098,7 +6267,7 @@ describe('task event projections', () => {
     const liveTailMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run,
       progress: { items: [settledTool] },
-      campId: 'camp-live-tail',
+      threadId: 'camp-live-tail',
       focused: true
     }))
     expect(liveTailMarkup).toContain('class="tool-activity-group status-running"')
@@ -6110,7 +6279,7 @@ describe('task event projections', () => {
     const thinkingTailMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run,
       progress: { items: [settledTool], runtimePhase: 'thinking' },
-      campId: 'camp-live-tail',
+      threadId: 'camp-live-tail',
       focused: true
     }))
     expect(thinkingTailMarkup).toContain('class="tool-activity-group status-completed"')
@@ -6128,7 +6297,7 @@ describe('task event projections', () => {
         }],
         runtimePhase: 'thinking'
       },
-      campId: 'camp-live-tail',
+      threadId: 'camp-live-tail',
       focused: true
     }))
     expect(activeToolMarkup).toContain('aria-label="执行中：pnpm lint"')
@@ -6143,7 +6312,7 @@ describe('task event projections', () => {
         ],
         runtimePhase: 'thinking'
       },
-      campId: 'camp-live-tail',
+      threadId: 'camp-live-tail',
       focused: true
     }))
     expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
@@ -6155,24 +6324,24 @@ describe('task event projections', () => {
       run,
       progress: { items: [settledTool], runtimePhase: 'thinking' },
       finalBody: '最终正文已经到达',
-      campId: 'camp-live-tail',
+      threadId: 'camp-live-tail',
       focused: true
     }))
     expect(finalMarkup).not.toContain('title="思考中"')
 
     const queuedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
-      run: { ...run, status: 'queued', startedAt: null }, campId: 'camp-live-tail', focused: true
+      run: { ...run, status: 'queued', startedAt: null }, threadId: 'camp-live-tail', focused: true
     }))
     expect(queuedMarkup).toContain('<span>连接中</span>')
     expect(queuedMarkup).not.toMatch(/等待开始|正在处理|工作了|处理过程 ·/)
     const backgroundMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
-      run, progress: { items: [settledTool] }, campId: 'camp-live-tail'
+      run, progress: { items: [settledTool] }, threadId: 'camp-live-tail'
     }))
     expect(backgroundMarkup).toContain('process-disclosure-label">执行中</span>')
     expect(backgroundMarkup).not.toMatch(/工作了|处理过程 ·/)
     const terminalMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run: { ...run, status: 'succeeded', endedAt: '2026-08-26T00:00:14Z' },
-      progress: { items: [settledTool], runtimePhase: 'thinking' }, campId: 'camp-live-tail'
+      progress: { items: [settledTool], runtimePhase: 'thinking' }, threadId: 'camp-live-tail'
     }))
     expect(terminalMarkup).toContain('工作了 13 秒')
     expect(terminalMarkup).not.toContain('<span>Thinking</span>')
@@ -6180,7 +6349,7 @@ describe('task event projections', () => {
 
     const renderLive = (items: ReturnType<typeof buildLiveExecutionProgress>['items'] = [], finalBody: string | null = null): string =>
       renderToStaticMarkup(createElement(RunExecutionDisclosure, {
-        run, progress: { items }, finalBody, campId: 'camp-live-tail', focused: true
+        run, progress: { items }, finalBody, threadId: 'camp-live-tail', focused: true
       }))
     expect(renderLive()).toContain('<span>执行中</span>')
     for (const items of [
@@ -6194,12 +6363,12 @@ describe('task event projections', () => {
     const waitingMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run: { ...run, status: 'waiting', waitReason: 'network_recovery' },
       progress: { items: [{ key: 'narration:previous', kind: 'narration', body: '已有正文' }] },
-      campId: 'camp-live-tail', focused: true
+      threadId: 'camp-live-tail', focused: true
     }))
     expect(waitingMarkup).toContain('连接中断，等待恢复')
   })
 
-  it('keeps Built-in Camp inputs behind nested Tool rows without exposing results', () => {
+  it('keeps Built-in Thread inputs behind nested Tool rows without exposing results', () => {
     const readResult = {
       mode: 'item',
       message: { messageId: 'message-1', body: '完整消息正文' }
@@ -6213,7 +6382,7 @@ describe('task event projections', () => {
       searchIncomplete: false
     }
     const builtInEvent = (
-      operation: 'camp.read' | 'camp.search',
+      operation: 'thread.read' | 'thread.search',
       result: unknown,
       sequence: number
     ) => ({
@@ -6251,14 +6420,14 @@ describe('task event projections', () => {
       createdAt: `2026-08-18T00:00:0${sequence}Z`
     })
     const events = [
-      builtInEvent('camp.read', readResult, 1),
-      builtInEvent('camp.search', searchResult, 2)
+      builtInEvent('thread.read', readResult, 1),
+      builtInEvent('thread.search', searchResult, 2)
     ]
     const progress = buildLiveExecutionProgress(events, 'run-builtins')
     expect(progress.items).toHaveLength(2)
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
-      step: { title: 'camp.read' }
+      step: { title: 'thread.read' }
     })
     const readItem = progress.items[0]
     if (readItem.kind !== 'tool') throw new Error('Expected camp.read Tool progress')
@@ -6273,9 +6442,9 @@ describe('task event projections', () => {
     expect(resultText).not.toContain('private-request-2')
 
     const run: AgentRunView = {
-      id: 'run-builtins', campTurnId: 'turn-1', conversationId: 'conversation-builtins',
+      id: 'run-builtins', threadTurnId: 'turn-1', conversationId: 'conversation-builtins',
       agentId: 'agent-builtins', taskId: null, responsibilityKey: 'direct:agent-builtins',
-      responsibilityGeneration: 0, purpose: '读取 Camp 历史', completionRole: 'required',
+      responsibilityGeneration: 0, purpose: '读取 Thread 历史', completionRole: 'required',
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
       failure: null,
@@ -6289,7 +6458,7 @@ describe('task event projections', () => {
       endedAt: '2026-08-18T00:00:02Z', updatedAt: '2026-08-18T00:00:02Z'
     }
     const markup = renderExpandedExecution({
-      run, progress, campId: 'camp-1', focused: true
+      run, progress, threadId: 'camp-1', focused: true
     })
     expect(markup.match(/<details class="tool-activity-group/g)).toHaveLength(1)
     expect(markup).toContain('aria-label="已完成 2 个步骤"')
@@ -6321,7 +6490,7 @@ describe('task event projections', () => {
       { iconKind: 'unknown' as const, activityDomain: 'unknown' }
     ]
     const run: AgentRunView = {
-      id: 'run-domains', campTurnId: 'turn-domains', conversationId: 'conversation-domains',
+      id: 'run-domains', threadTurnId: 'turn-domains', conversationId: 'conversation-domains',
       agentId: 'agent-domains', taskId: null, responsibilityKey: 'direct:agent-domains',
       responsibilityGeneration: 0, purpose: '验证指令图标', completionRole: 'required',
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
@@ -6354,7 +6523,7 @@ describe('task event projections', () => {
       }))
     }
     const markup = renderExpandedExecution({
-      run, progress, campId: 'camp-domains', focused: true
+      run, progress, threadId: 'camp-domains', focused: true
     })
 
     for (const { iconKind } of icons) {
@@ -6414,7 +6583,7 @@ describe('task event projections', () => {
     )
 
     const run: AgentRunView = {
-      id: 'run-claude', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      id: 'run-claude', threadTurnId: 'turn-1', conversationId: 'conversation-claude',
       agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
       responsibilityGeneration: 0, purpose: '执行无输出 Bash 命令', completionRole: 'required',
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
@@ -6430,7 +6599,7 @@ describe('task event projections', () => {
       endedAt: '2026-08-18T00:00:01Z', updatedAt: '2026-08-18T00:00:01Z'
     }
     const markup = renderExpandedExecution({
-      run, progress, campId: 'camp-1', focused: true
+      run, progress, threadId: 'camp-1', focused: true
     })
     expect(markup).toContain('tool-call-disclosure')
     expect(markup).toContain('command-expand-cue')
@@ -6460,7 +6629,7 @@ describe('task event projections', () => {
           }
         }]
       },
-      campId: 'camp-1',
+      threadId: 'camp-1',
       focused: true
     })
     expect(failedMarkup).toContain('class="tool-call-state status-failed"')
@@ -6587,7 +6756,7 @@ describe('task event projections', () => {
     })
 
     const run: AgentRunView = {
-      id: 'run-files', campTurnId: 'turn-files', conversationId: 'conversation-files',
+      id: 'run-files', threadTurnId: 'turn-files', conversationId: 'conversation-files',
       agentId: 'agent-files', taskId: null, responsibilityKey: 'direct:agent-files',
       responsibilityGeneration: 0, purpose: '修改文件', completionRole: 'required',
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
@@ -6602,7 +6771,7 @@ describe('task event projections', () => {
       endedAt: '2026-08-27T00:00:02Z', updatedAt: '2026-08-27T00:00:02Z'
     }
     const markup = renderExpandedExecution({
-      run, progress, campId: 'camp-1', focused: true
+      run, progress, threadId: 'camp-1', focused: true
     })
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
@@ -6691,7 +6860,7 @@ describe('task event projections', () => {
           status: 'available',
           semanticKind: 'exact_mutation',
           entries: [{
-            path: 'apps/desktop/src/renderer/src/CampWorkspace.tsx',
+            path: 'apps/desktop/src/renderer/src/ThreadWorkspace.tsx',
             changeKind: 'update',
             additions: 1,
             deletions: 1,
@@ -6710,16 +6879,16 @@ describe('task event projections', () => {
     expect(progress.items).toMatchObject([
       {
         key: 'tool:toolu-edit-1',
-        step: { title: '编辑 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
       },
       {
         key: 'tool:toolu-edit-2',
-        step: { title: '编辑 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
       }
     ])
 
     const run: AgentRunView = {
-      id: 'run-claude-edits', campTurnId: 'turn-claude-edits', conversationId: 'conversation-claude-edits',
+      id: 'run-claude-edits', threadTurnId: 'turn-claude-edits', conversationId: 'conversation-claude-edits',
       agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
       responsibilityGeneration: 0, purpose: '连续修改文件', completionRole: 'required',
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
@@ -6734,13 +6903,13 @@ describe('task event projections', () => {
       endedAt: '2026-08-27T00:00:02Z', updatedAt: '2026-08-27T00:00:02Z'
     }
     const markup = renderExpandedExecution({
-      run, progress, campId: 'camp-1', focused: true
+      run, progress, threadId: 'camp-1', focused: true
     })
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
     expect(markup.match(/modified-file-diff is-exact-mutation/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
     expect(markup).toContain('aria-label="已完成 2 个步骤"')
-    expect(markup).toContain('CampWorkspace.tsx 的修改片段')
+    expect(markup).toContain('ThreadWorkspace.tsx 的修改片段')
     expect(markup).not.toContain('const enabled = false')
     expect(markup).not.toContain('const enabled = ready')
     expect(markup).not.toContain('@@')
@@ -6916,7 +7085,7 @@ describe('task event projections', () => {
       activityDomain: 'tool', semanticKind: 'tool.web.search', toolName: 'web_search'
     }))).toBe('web')
     expect(activityIconKind(canonicalActivity('rovai', {
-      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'camp.read',
+      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'thread.read',
       sourceAuthority: 'core', credibility: 'core_verified'
     }))).toBe('rovai')
     expect(activityIconKind(canonicalActivity('search', {
@@ -7235,7 +7404,7 @@ describe('task event projections', () => {
     })
 
     const run: AgentRunView = {
-      id: 'run-codex-read', campTurnId: 'turn-codex-read', conversationId: 'conversation-codex-read',
+      id: 'run-codex-read', threadTurnId: 'turn-codex-read', conversationId: 'conversation-codex-read',
       agentId: 'agent-codex-read', taskId: null, responsibilityKey: 'direct:agent-codex-read',
       responsibilityGeneration: 0, purpose: '阅读文件', completionRole: 'required',
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
@@ -7250,7 +7419,7 @@ describe('task event projections', () => {
       endedAt: '2026-09-06T00:00:01Z', updatedAt: '2026-09-06T00:00:01Z'
     }
     const markup = renderExpandedExecution({
-      run, progress, campId: 'camp-codex-read', focused: true
+      run, progress, threadId: 'camp-codex-read', focused: true
     })
     expect(markup).toContain('class="process-action tool-call-summary tool-call-static file-operation-row status-completed"')
     expect(markup).toContain('role="group" aria-label="阅读 docs/README.md，成功"')
@@ -7631,18 +7800,18 @@ describe('task event projections', () => {
 
     expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'grok-build', 'deepseek-harness', 'zcode-app', 'antigravity-app', 'pi'])
     expect(markup).toContain('member-runtime-picker')
-    expect(markup).toContain('aria-label="Agent 运行时，暂不配置"')
+    expect(markup).toContain('aria-label="智能体类型，暂不配置"')
     expect(markup).toContain('aria-haspopup="menu"')
-    expect(markup).toContain('未配置 Agent 运行时')
+    expect(markup).toContain('未配置智能体')
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('Claude Code CLI')
     expect(markup).not.toContain('Antigravity App')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('Agent 运行时</label>')
+    expect(markup).toContain('智能体类型</label>')
     expect(markup).toContain('保存运行配置')
     expect(markup).toContain('放弃更改')
-    expect(markup).not.toContain('清除 Agent 运行时')
+    expect(markup).not.toContain('清除智能体')
     expect(markup).not.toContain('<div class="member-section-heading">')
     expect(markup).not.toContain('选择执行产品，并确认当前安装与可用状态')
   })
@@ -7668,10 +7837,10 @@ describe('task event projections', () => {
 
     expect(markup).toContain('GitHub Copilot')
     expect(markup).toContain('未检测到')
-    expect(markup).toContain('前往 Agent 运行时')
+    expect(markup).toContain('前往智能体')
     expect(markup).toMatch(/<button[^>]*aria-label="保存运行配置"[^>]*disabled=""/)
     expect(markup).toContain('放弃更改')
-    expect(markup).not.toContain('清除 Agent 运行时')
+    expect(markup).not.toContain('清除智能体')
   })
 
   it('disables the Runtime save only while the request is in flight', () => {
@@ -7717,7 +7886,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('正在检查…')
-    expect(markup).toContain('Agent 运行时，Kiro')
+    expect(markup).toContain('智能体类型，Kiro')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('正在检测')
     expect(markup).not.toContain('已找到')
@@ -7740,12 +7909,12 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('Agent 运行时，Kiro')
+    expect(markup).toContain('智能体类型，Kiro')
     expect(markup).toContain('status-available')
     expect(markup).toContain('可用')
     expect(markup).toContain('kiro-cli 1.0.0')
     expect(markup).not.toContain('runtime-blockers')
-    expect(markup).not.toContain('需要探测 Agent 运行时')
+    expect(markup).not.toContain('需要探测智能体')
     expect(markup).not.toContain('runtime-status-refresh')
     expect(markup).not.toContain('重新检查')
   })
@@ -7772,7 +7941,7 @@ describe('task event projections', () => {
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
     expect(markup).toContain('当前平台仅可查看这份配置')
     expect(markup).toMatch(/class="member-runtime-picker" disabled=""/)
-    expect(markup).not.toContain('前往 Agent 运行时')
+    expect(markup).not.toContain('前往智能体')
   })
 
   it('keeps qualified Pi selectable without experimental disclosure', () => {
@@ -7946,7 +8115,7 @@ describe('task event projections', () => {
     expect(markup.match(/Windows 尚未验证/g)).toHaveLength(15)
     expect(markup.match(/不可检查/g)).toHaveLength(15)
     expect(markup).not.toContain('检查状态')
-    expect(markup).toContain('当前平台尚无可检测 Runtime')
+    expect(markup).toContain('当前平台尚无可检测的智能体')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
     expect(markup).not.toContain('安装指南')
     expect(markup).not.toContain('登录指南')

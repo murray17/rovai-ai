@@ -29,6 +29,9 @@ jobs:
     name: macOS ${{ matrix.arch }} signed build
     runs-on: ${{ matrix.runner }}
     environment: release-signing
+    env:
+      MAC_RELEASE_TEAM_ID: ${{ vars.MAC_RELEASE_TEAM_ID }}
+      MAC_RELEASE_CERT_SHA256: ${{ vars.MAC_RELEASE_CERT_SHA256 }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -65,10 +68,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Import and trust fixed signing identity
+      - name: Prepare Developer ID signing and notarization
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set +x
           set -euo pipefail
@@ -76,22 +82,64 @@ jobs:
 
           : "${MAC_CSC_LINK:?MAC_CSC_LINK is required}"
           : "${MAC_CSC_KEY_PASSWORD:?MAC_CSC_KEY_PASSWORD is required}"
+          : "${APPLE_API_KEY_BASE64:?APPLE_API_KEY_BASE64 is required}"
+          : "${APPLE_API_KEY_ID:?APPLE_API_KEY_ID is required}"
+          : "${APPLE_API_ISSUER:?APPLE_API_ISSUER is required}"
+          [[ "$MAC_RELEASE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || {
+            echo "MAC_RELEASE_TEAM_ID must be a 10-character Team ID" >&2
+            exit 1
+          }
+          [[ "$MAC_RELEASE_CERT_SHA256" =~ ^[A-F0-9]{64}$ ]] || {
+            echo "MAC_RELEASE_CERT_SHA256 must be 64 uppercase hex characters" >&2
+            exit 1
+          }
 
           P12_PATH="$RUNNER_TEMP/rovai-release-signing.p12"
           CERT_PEM="$RUNNER_TEMP/rovai-release-signing.pem"
-          CERT_DER="$RUNNER_TEMP/rovai-release-signing.cer"
+          API_KEY_PATH="$RUNNER_TEMP/rovai-notarization-key.p8"
+          G2_CERT_PATH="$RUNNER_TEMP/rovai-developer-id-g2.cer"
           KEYCHAIN_PATH="$RUNNER_TEMP/rovai-signing.keychain-db"
-          TRUST_MARKER="$RUNNER_TEMP/rovai-system-trust-added"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
           DEFAULT_KEYCHAIN="$(security default-keychain -d user | tr -d '"')"
 
           printf '%s' "$MAC_CSC_LINK" | /usr/bin/base64 -D > "$P12_PATH"
           test -s "$P12_PATH"
+          printf '%s' "$APPLE_API_KEY_BASE64" | /usr/bin/base64 -D > "$API_KEY_PATH"
+          test -s "$API_KEY_PATH"
+
+          openssl pkcs12 \
+            -in "$P12_PATH" \
+            -clcerts \
+            -nokeys \
+            -passin env:MAC_CSC_KEY_PASSWORD \
+            -out "$CERT_PEM"
+          openssl x509 -in "$CERT_PEM" -checkend 0 -noout
+          ACTUAL_FINGERPRINT="$(
+            openssl x509 -in "$CERT_PEM" -noout -fingerprint -sha256 \
+              | cut -d= -f2 \
+              | tr -d ':\r\n' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+          test "$ACTUAL_FINGERPRINT" = "$MAC_RELEASE_CERT_SHA256" || {
+            echo "Developer ID certificate fingerprint does not match release-signing policy" >&2
+            exit 1
+          }
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" "$DEFAULT_KEYCHAIN"
+
+          curl --fail --location --silent --show-error \
+            --output "$G2_CERT_PATH" \
+            'https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer'
+          G2_CERT_SHA256="$(shasum -a 256 "$G2_CERT_PATH" | awk '{print $1}')"
+          test "$G2_CERT_SHA256" = \
+            'f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a' || {
+            echo "Developer ID G2 intermediate fingerprint mismatch" >&2
+            exit 1
+          }
+          security add-certificates -k "$KEYCHAIN_PATH" "$G2_CERT_PATH"
 
           security import "$P12_PATH" \
             -k "$KEYCHAIN_PATH" \
@@ -104,39 +152,35 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
-          openssl pkcs12 \
-            -in "$P12_PATH" \
-            -clcerts \
-            -nokeys \
-            -passin env:MAC_CSC_KEY_PASSWORD \
-            -out "$CERT_PEM"
-          openssl x509 -in "$CERT_PEM" -outform DER -out "$CERT_DER"
-
-          ACTUAL_FINGERPRINT="$(
-            openssl x509 -in "$CERT_PEM" -noout -fingerprint -sha256 \
-              | cut -d= -f2 \
-              | tr -d ':\r\n' \
-              | tr '[:lower:]' '[:upper:]'
-          )"
-          EXPECTED_FINGERPRINT="875C6F486E223AB1889A2AD63860FBE48F7E8C0E4D94832656896BA5DA4EF82E"
-          test "$ACTUAL_FINGERPRINT" = "$EXPECTED_FINGERPRINT"
-
-          sudo -n security add-trusted-cert \
-            -d \
-            -r trustRoot \
-            -p codeSign \
-            -k /Library/Keychains/System.keychain \
-            "$CERT_DER"
-          touch "$TRUST_MARKER"
-
           security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
-            | grep -F 'Rovai Release Signing'
+            | grep -E "Developer ID Application:.*\\(${MAC_RELEASE_TEAM_ID}\\)"
 
-          printf 'CSC_NAME=%s\n' 'Rovai Release Signing' >> "$GITHUB_ENV"
+          printf 'CSC_NAME=%s\n' "$MAC_RELEASE_TEAM_ID" >> "$GITHUB_ENV"
           printf 'CSC_KEYCHAIN=%s\n' "$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          printf 'APPLE_API_KEY=%s\n' "$API_KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Build signed release artifacts
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: ${{ matrix.build-command }}
+
+      - name: Notarize and staple release DMG
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          DMG_PATH="dist/Rovai-AI-${VERSION}-${{ matrix.arch }}.dmg"
+          test -s "$DMG_PATH"
+          xcrun notarytool submit "$DMG_PATH" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$DMG_PATH"
 
       - name: Verify signed release artifacts
         run: node scripts/verify-macos-release.mjs ${{ matrix.arch }}
@@ -150,9 +194,9 @@ jobs:
 
           P12_PATH="$RUNNER_TEMP/rovai-release-signing.p12"
           CERT_PEM="$RUNNER_TEMP/rovai-release-signing.pem"
-          CERT_DER="$RUNNER_TEMP/rovai-release-signing.cer"
+          API_KEY_PATH="$RUNNER_TEMP/rovai-notarization-key.p8"
+          G2_CERT_PATH="$RUNNER_TEMP/rovai-developer-id-g2.cer"
           KEYCHAIN_PATH="$RUNNER_TEMP/rovai-signing.keychain-db"
-          TRUST_MARKER="$RUNNER_TEMP/rovai-system-trust-added"
           DEFAULT_KEYCHAIN="$(
             security default-keychain -d user 2>/dev/null |
               tr -d '"'
@@ -170,9 +214,9 @@ jobs:
           rm -f \
             "$P12_PATH" \
             "$CERT_PEM" \
-            "$CERT_DER" \
-            "$KEYCHAIN_PATH" \
-            "$TRUST_MARKER"
+            "$API_KEY_PATH" \
+            "$G2_CERT_PATH" \
+            "$KEYCHAIN_PATH"
 
           exit 0
 

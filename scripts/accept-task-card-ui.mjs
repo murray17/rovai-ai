@@ -29,10 +29,10 @@ let compactApp = null
 try {
   desktopApp = await launchApp(firstPort, 1440, 920, false)
   await setTheme(desktopApp.cdp, 'day')
-  await openCamp(desktopApp.cdp, fixture.campId)
+  await openCamp(desktopApp.cdp, fixture.threadId)
 
   const initialSnapshot = await request(desktopApp.cdp, 'camps.snapshot', {
-    campId: fixture.campId
+    threadId: fixture.threadId
   })
   assert(initialSnapshot.messages.length === 0 && initialSnapshot.tasks.length === 0,
     `Task-card fixture did not start empty: ${JSON.stringify(initialSnapshot)}`)
@@ -40,7 +40,7 @@ try {
 
   const createdTask = await request(desktopApp.cdp, 'tasks.create', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     title: '确认任务卡创建位置',
     description: '这段说明只能出现在任务详情，不能出现在会话卡片。任务卡保持唯一，详情完整展示责任与审计。',
     assigneeAgentId: fixture.primaryAssignee.id
@@ -63,10 +63,10 @@ try {
     count: 1
   })
 
-  let task = await getTask(desktopApp.cdp, fixture.campId, completedTaskId)
+  let task = await getTask(desktopApp.cdp, fixture.threadId, completedTaskId)
   const startedTask = await request(desktopApp.cdp, 'tasks.update', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     taskId: completedTaskId,
     title: '任务卡已原地更新',
     description: '更新后的说明仍然只能在任务详情里看到。',
@@ -92,10 +92,10 @@ try {
     count: 1
   })
 
-  task = await getTask(desktopApp.cdp, fixture.campId, completedTaskId)
+  task = await getTask(desktopApp.cdp, fixture.threadId, completedTaskId)
   const blockedTask = await request(desktopApp.cdp, 'tasks.update', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     taskId: completedTaskId,
     status: 'blocked',
     assignee: { operation: 'unchanged' },
@@ -117,10 +117,10 @@ try {
     count: 1
   })
 
-  task = await getTask(desktopApp.cdp, fixture.campId, completedTaskId)
+  task = await getTask(desktopApp.cdp, fixture.threadId, completedTaskId)
   const resumedTask = await request(desktopApp.cdp, 'tasks.update', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     taskId: completedTaskId,
     status: 'in_progress',
     assignee: { operation: 'unchanged' }
@@ -130,10 +130,10 @@ try {
   await waitForTaskCard(desktopApp.cdp, '任务卡已原地更新', '进行中', 1, '任务正在推进')
   await assertMarkedTaskCard(desktopApp.cdp, completedTaskId)
 
-  task = await getTask(desktopApp.cdp, fixture.campId, completedTaskId)
+  task = await getTask(desktopApp.cdp, fixture.threadId, completedTaskId)
   const completedTask = await request(desktopApp.cdp, 'tasks.update', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     taskId: completedTaskId,
     status: 'completed',
     completionSummary: '任务卡路径已验证完成。'
@@ -156,7 +156,7 @@ try {
 
   const createdCancelledTask = await request(desktopApp.cdp, 'tasks.create', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     title: '取消路径仍复用原卡',
     description: '取消后保留在任务详情与审计记录。',
     assigneeAgentId: fixture.primaryAssignee.id
@@ -167,10 +167,10 @@ try {
   await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '待处理', 2, '任务责任已更新')
   await markTaskCard(desktopApp.cdp, cancelledTaskId)
 
-  task = await getTask(desktopApp.cdp, fixture.campId, cancelledTaskId)
+  task = await getTask(desktopApp.cdp, fixture.threadId, cancelledTaskId)
   const releasedTask = await request(desktopApp.cdp, 'tasks.update', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     taskId: cancelledTaskId,
     status: 'pending',
     assignee: { operation: 'clear' }
@@ -193,10 +193,10 @@ try {
   const liveStatesCapture = join(outputDir, 'task-card-live-states-day-1440x920.png')
   await capture(desktopApp.cdp, liveStatesCapture)
 
-  task = await getTask(desktopApp.cdp, fixture.campId, cancelledTaskId)
+  task = await getTask(desktopApp.cdp, fixture.threadId, cancelledTaskId)
   const reassignedTask = await request(desktopApp.cdp, 'tasks.update', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     taskId: cancelledTaskId,
     status: 'pending',
     assignee: {
@@ -209,10 +209,10 @@ try {
   await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '待处理', 2, '任务责任已更新')
   await assertMarkedTaskCard(desktopApp.cdp, cancelledTaskId)
 
-  task = await getTask(desktopApp.cdp, fixture.campId, cancelledTaskId)
+  task = await getTask(desktopApp.cdp, fixture.threadId, cancelledTaskId)
   const cancelledTask = await request(desktopApp.cdp, 'tasks.update', {
     commandId: crypto.randomUUID(),
-    campId: fixture.campId,
+    threadId: fixture.threadId,
     taskId: cancelledTaskId,
     status: 'cancelled',
     cancelReason: '该责任不再需要继续。'
@@ -234,7 +234,7 @@ try {
   })
 
   const terminalSnapshot = await request(desktopApp.cdp, 'camps.snapshot', {
-    campId: fixture.campId
+    threadId: fixture.threadId
   })
   assert(terminalSnapshot.tasks.length === 2 && terminalSnapshot.messages.length === 0,
     `Task lifecycle created a CampMessage or lost a Task: ${JSON.stringify(terminalSnapshot)}`)
@@ -252,7 +252,7 @@ try {
 
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
   await setTheme(compactApp.cdp, 'night')
-  await openCamp(compactApp.cdp, fixture.campId)
+  await openCamp(compactApp.cdp, fixture.threadId)
   await waitForTaskCard(compactApp.cdp, '任务卡已原地更新', '已完成', 2, '任务已经完成')
   const compactCardCapture = join(outputDir, 'task-card-night-1040x700-reduced-motion.png')
   await capture(compactApp.cdp, compactCardCapture)
@@ -324,12 +324,12 @@ async function createFixtureCamp() {
       collaborationMode: 'peer',
       activationState: 'active'
     })
-    assert(created.status === 'applied' && created.payload?.campId,
+    assert(created.status === 'applied' && created.payload?.threadId,
       `Could not create task-card fixture Camp: ${JSON.stringify(created)}`)
     const primary = presentMembers[0]
     const secondary = presentMembers[1] ?? primary
     return {
-      campId: created.payload.campId,
+      threadId: created.payload.threadId,
       primaryAssignee: { id: primary.agentId, name: primary.displayName },
       secondaryAssignee: { id: secondary.agentId, name: secondary.displayName }
     }
@@ -338,8 +338,8 @@ async function createFixtureCamp() {
   }
 }
 
-async function getTask(cdp, campId, taskId) {
-  const task = await request(cdp, 'tasks.get', { campId, taskId })
+async function getTask(cdp, threadId, taskId) {
+  const task = await request(cdp, 'tasks.get', { threadId, taskId })
   assert(task?.taskId === taskId, `Could not read Task ${taskId}: ${JSON.stringify(task)}`)
   return task
 }
@@ -622,7 +622,7 @@ async function verifyTaskEditorLifecycle(cdp, fixture) {
     `Switching/closing Camp details lost the Task draft: ${JSON.stringify(restored)}`)
   await evaluate(cdp, `document.querySelector('.task-editor')?.requestSubmit()`)
   await waitForExpression(cdp, `!document.querySelector('.task-editor-dialog')`)
-  let snapshot = await request(cdp, 'camps.snapshot', { campId: fixture.campId })
+  let snapshot = await request(cdp, 'camps.snapshot', { threadId: fixture.threadId })
   const task = snapshot.tasks.find((candidate) => candidate.title === '浮层编辑与草稿验收')
   assert(task?.description === '关闭后保留的任务说明。保留草稿与版本冲突时的修改。',
     'Task dialog did not submit its complete draft')
@@ -634,7 +634,7 @@ async function verifyTaskEditorLifecycle(cdp, fixture) {
   await setTaskField(cdp, '状态', 'blocked')
   await setTaskField(cdp, '阻塞原因', '等待用户验收')
   const concurrent = await request(cdp, 'tasks.update', {
-    commandId: crypto.randomUUID(), campId: fixture.campId, taskId: task.taskId,
+    commandId: crypto.randomUUID(), threadId: fixture.threadId, taskId: task.taskId,
     description: '另一次操作更新了说明',
     assignee: { operation: 'unchanged' }
   })
@@ -648,7 +648,7 @@ async function verifyTaskEditorLifecycle(cdp, fixture) {
   await evaluate(cdp, `document.querySelector('.task-cancel-dialog .danger-button')?.click()`)
   await waitForExpression(cdp, `!document.querySelector('.task-cancel-dialog')
     && document.querySelector('.task-detail-status')?.textContent === '已取消'`)
-  snapshot = await request(cdp, 'camps.snapshot', { campId: fixture.campId })
+  snapshot = await request(cdp, 'camps.snapshot', { threadId: fixture.threadId })
   assert(snapshot.tasks.find((candidate) => candidate.taskId === task.taskId)?.description === '另一次操作更新了说明',
     'A field patch overwrote a concurrently updated description')
   const cancelled = snapshot.tasks.find((candidate) => candidate.taskId === task.taskId)
@@ -691,21 +691,21 @@ async function assertNoHorizontalOverflow(cdp, context) {
     `${context} overflowed horizontally: ${JSON.stringify(state)}`)
 }
 
-async function openCamp(cdp, campId) {
+async function openCamp(cdp, threadId) {
   await waitForExpression(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     return [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === target)
   })()`, 30_000)
   const opened = await evaluate(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     const menu = [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .find((element) => element.dataset.sidebarMenuTarget === target)
     const button = menu?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')
     button?.click()
     return Boolean(button)
   })()`)
-  assert(opened, `Could not open Camp ${campId}`)
+  assert(opened, `Could not open Camp ${threadId}`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
   await evaluate(cdp, `(() => {
     const view = [...document.querySelectorAll('.camp-conversation-view-controls button')]

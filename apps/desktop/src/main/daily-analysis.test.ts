@@ -22,7 +22,7 @@ it('prepares only owner-configured workspace files, excludes analysis descendant
       }
       throw new Error(`Unexpected operation ${method}`)
     } })
-    const config = { automationId: 'analysis', timezone: 'Asia/Shanghai', output: join(workspace, 'reports'), campIds: [], excludeCampIds: [], excludeAutomationIds: ['weekly-regression'] }
+    const config = { automationId: 'analysis', timezone: 'Asia/Shanghai', output: join(workspace, 'reports'), threadIds: [], excludeThreadIds: [], excludeAutomationIds: ['weekly-regression'] }
     await expect(service.configure({ ...config, output: join(root, 'outside') })).rejects.toThrow('inside')
     await symlink(root, join(workspace, 'escape'))
     await expect(service.configure({ ...config, output: join(workspace, 'escape') })).rejects.toThrow('outside')

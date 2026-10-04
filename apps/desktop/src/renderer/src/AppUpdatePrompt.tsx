@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AppUpdatePrompt as AppUpdatePromptValue, AppUpdateSnapshot } from '@contracts'
+import { UiText, uiAttribute } from './interface-language'
 
 export function AppUpdatePrompt({
   snapshot,
@@ -57,17 +58,17 @@ export function AppUpdatePrompt({
     <aside
       className={`app-update-prompt ${campComposerVisible ? 'is-above-composer' : ''}`}
       aria-live="polite"
-      aria-label="Rovai AI 应用更新提醒"
+      aria-label={uiAttribute("Rovai AI 应用更新提醒")}
     >
       <div className="app-update-prompt-copy">
-        <strong>Rovai AI v{release.version} 可用</strong>
-        <span>当前版本 v{snapshot.currentVersion}</span>
-        {actionFailed && <small role="alert">操作未完成，更新提醒仍然保留。</small>}
+        <strong>Rovai AI v{release.version}<UiText zh={" 可用"} /></strong>
+        <span><UiText zh={"当前版本 v"} />{snapshot.currentVersion}</span>
+        {actionFailed && <small role="alert"><UiText zh={"操作未完成，更新提醒仍然保留。"} /></small>}
       </div>
       <button
         className="app-update-prompt-close"
         type="button"
-        aria-label="稍后处理本次更新提醒"
+        aria-label={uiAttribute("稍后处理本次更新提醒")}
         disabled={busy !== null}
         onClick={() => void run('dismiss', () => onDismiss(prompt.id))}
       >
@@ -79,20 +80,20 @@ export function AppUpdatePrompt({
           type="button"
           disabled={busy !== null}
           onClick={() => void run('dismiss', () => onDismiss(prompt.id))}
-        >稍后</button>
+        ><UiText zh={"稍后"} /></button>
         <button
           className="quiet-button compact"
           type="button"
           disabled={busy !== null}
           onClick={() => void run('details', () => onOpenDetails(prompt))}
-        >{busy === 'details' ? '正在打开…' : '查看更新内容'}</button>
+        >{busy === 'details' ? uiAttribute("正在打开…") : uiAttribute("查看更新内容")}</button>
         <button
           className="primary-button compact"
           type="button"
           aria-busy={busy === 'download' || undefined}
           disabled={busy !== null}
           onClick={() => void run('download', onDownload)}
-        >{busy === 'download' ? '正在开始…' : '下载更新'}</button>
+        >{busy === 'download' ? uiAttribute("正在开始…") : uiAttribute("下载更新")}</button>
       </div>
     </aside>
   )

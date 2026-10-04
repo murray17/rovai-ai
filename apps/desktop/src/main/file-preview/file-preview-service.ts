@@ -64,21 +64,21 @@ function canPresentProjectRelativePath(sourceKind: OpenFilePreviewRequest['kind'
 export type FilePreviewAuthorityResult =
   | {
       kind: 'evidence_review'
-      campId: string
+      threadId: string
       agentRunId: string
       executionEpoch: number
       evidenceFileId: string
     }
   | {
       kind: 'evidence_identity_unavailable'
-      campId: string
+      threadId: string
       agentRunId: string
       executionEpoch: number
       evidenceFileId: string
     }
   | {
       kind: 'file_target'
-      campId: string
+      threadId: string
       sourceKind: 'skill_reference' | 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence' | 'run_activity_file'
       sourceIdentity: string
       rootPath: string
@@ -109,7 +109,7 @@ export interface FilePreviewNativeActions {
 
 interface ResolvedTarget {
   kind: 'file_target'
-  campId: string
+  threadId: string
   sourceKind: OpenFilePreviewRequest['kind']
   sourceIdentity: string
   rootPath: string
@@ -129,7 +129,7 @@ type SupportedClassification = Omit<FilePreviewClassification, 'kind'> & { kind:
 interface PreviewHandleRecord {
   handleId: string
   webContentsId: number
-  campId: string
+  threadId: string
   bindingGeneration: number
   request: OpenFilePreviewRequest
   sourceIdentity: string
@@ -160,7 +160,7 @@ interface PreviewHandleRecord {
 interface PendingOpen {
   id: string
   webContentsId: number
-  campId: string
+  threadId: string
   bindingGeneration: number
   request: OpenFilePreviewRequest
   target: ResolvedTarget
@@ -172,7 +172,7 @@ interface PendingOpen {
 interface RootGrant {
   id: string
   webContentsId: number
-  campId: string
+  threadId: string
   bindingGeneration: number
   canonicalRoot: string
   displayName: string
@@ -183,15 +183,15 @@ interface HtmlPreviewToken {
   bridgeToken: string
   handleId: string
   webContentsId: number
-  campId: string
+  threadId: string
   generation: string
   assetRoot: string
   expiresAt: number
 }
 
-interface WindowCampBinding {
+interface WindowThreadBinding {
   previewSessionId?: string
-  campId: string | null
+  threadId: string | null
   generation: number
 }
 
@@ -326,8 +326,8 @@ export class FilePreviewService {
   readonly #authority: FilePreviewSourceAuthority
   readonly #native: FilePreviewNativeActions
   readonly #handles = new Map<string, PreviewHandleRecord>()
-  readonly #windowCamps = new Map<number, WindowCampBinding>()
-  readonly #sessionBindings = new Map<number, Map<string, WindowCampBinding>>()
+  readonly #windowThreads = new Map<number, WindowThreadBinding>()
+  readonly #sessionBindings = new Map<number, Map<string, WindowThreadBinding>>()
   #nextBindingGeneration = 0
   readonly #pending = new Map<string, PendingOpen>()
   readonly #rootGrants = new Map<string, RootGrant>()
@@ -349,14 +349,14 @@ export class FilePreviewService {
     })
   }
 
-  async bindCamp(webContentsId: number, campId: string | null): Promise<void> {
+  async bindThread(webContentsId: number, threadId: string | null): Promise<void> {
     // Navigation is presentation only. Retained sessions keep their own binding identity.
     const sessions = this.#sessions(webContentsId)
-    if (campId && !sessions.has(campId)) sessions.set(campId, { campId, generation: ++this.#nextBindingGeneration })
-    this.#windowCamps.set(webContentsId, { campId, generation: ++this.#nextBindingGeneration })
+    if (threadId && !sessions.has(threadId)) sessions.set(threadId, { threadId, generation: ++this.#nextBindingGeneration })
+    this.#windowThreads.set(webContentsId, { threadId, generation: ++this.#nextBindingGeneration })
   }
 
-  #sessions(webContentsId: number): Map<string, WindowCampBinding> {
+  #sessions(webContentsId: number): Map<string, WindowThreadBinding> {
     let sessions = this.#sessionBindings.get(webContentsId)
     if (!sessions) { sessions = new Map(); this.#sessionBindings.set(webContentsId, sessions) }
     return sessions
@@ -364,23 +364,23 @@ export class FilePreviewService {
 
   async updateRetention(webContentsId: number, state: FilePreviewRetentionState): Promise<void> {
     const sessions = this.#sessions(webContentsId)
-    const incoming = new Map(state.sessions.map(value => [value.campId, value]))
+    const incoming = new Map(state.sessions.map(value => [value.threadId, value]))
     const closing: Promise<void>[] = []
-    for (const [campId, binding] of sessions) {
-      const next = incoming.get(campId)
+    for (const [threadId, binding] of sessions) {
+      const next = incoming.get(threadId)
       if (!next || (binding.previewSessionId && next.previewSessionId !== binding.previewSessionId)) {
-        sessions.delete(campId)
-        closing.push(this.#releaseCamp(webContentsId, campId, binding.generation))
+        sessions.delete(threadId)
+        closing.push(this.#releaseThread(webContentsId, threadId, binding.generation))
       }
     }
     for (const value of state.sessions) {
-      const existing = sessions.get(value.campId)
+      const existing = sessions.get(value.threadId)
       if (existing) existing.previewSessionId = value.previewSessionId
-      else sessions.set(value.campId, { ...value, generation: ++this.#nextBindingGeneration })
+      else sessions.set(value.threadId, { ...value, generation: ++this.#nextBindingGeneration })
     }
     for (const hint of state.handles) {
       const record = this.#handles.get(hint.handleId)
-      const binding = record && sessions.get(record.campId)
+      const binding = record && sessions.get(record.threadId)
       if (record?.webContentsId === webContentsId && binding?.generation === record.bindingGeneration
         && binding.previewSessionId === hint.previewSessionId) record.retention = { ...hint }
     }
@@ -410,11 +410,11 @@ export class FilePreviewService {
     policy: FilePreviewOpenPolicy
   ): Promise<FilePreviewOperationResult<OpenFilePreviewResult>> {
     this.#prune()
-    const navigation = this.#windowCamps.get(webContentsId)
+    const navigation = this.#windowThreads.get(webContentsId)
     try {
-      const binding = this.#captureBinding(webContentsId, 'campId' in request ? request.campId : undefined)
+      const binding = this.#captureBinding(webContentsId, 'threadId' in request ? request.threadId : undefined)
       const target = await this.#resolveTarget(webContentsId, request)
-      this.#requireBinding(webContentsId, binding, target && 'campId' in target ? target.campId : undefined)
+      this.#requireBinding(webContentsId, binding, target && 'threadId' in target ? target.threadId : undefined)
       if (!target) return failed('source_not_authorized', '无法确认这个文件来源。')
       if (target.kind === 'evidence_review') return ok(target)
       if (target.kind === 'evidence_identity_unavailable') {
@@ -422,8 +422,8 @@ export class FilePreviewService {
       }
       return await this.#openResolved(webContentsId, request, target, binding, {
         ...policy, nativeGuard: () => {
-          if (!navigation || navigation.campId !== target.campId || this.#windowCamps.get(webContentsId) !== navigation)
-            throw new FilePreviewAccessError('read_failed', '文件不属于当前显示的 Camp。')
+          if (!navigation || navigation.threadId !== target.threadId || this.#windowThreads.get(webContentsId) !== navigation)
+            throw new FilePreviewAccessError('read_failed', '文件不属于当前显示的 Thread。')
         }
       })
     } catch (error) {
@@ -433,12 +433,12 @@ export class FilePreviewService {
 
   async reopen(
     webContentsId: number,
-    request: { campId: string; reopenToken: string }
+    request: { threadId: string; reopenToken: string }
   ): Promise<FilePreviewOperationResult<OpenFilePreviewResult>> {
     this.#prune()
     const record = [...this.#handles.values()].find((candidate) =>
       candidate.webContentsId === webContentsId
-      && candidate.campId === request.campId
+      && candidate.threadId === request.threadId
       && candidate.reopenToken === request.reopenToken
     )
     if (!record) return failed('source_not_authorized', '这个文件访问已失效。', true)
@@ -643,7 +643,7 @@ export class FilePreviewService {
         bridgeToken: randomUUID(),
         handleId: current.handleId,
         webContentsId: current.webContentsId,
-        campId: current.campId,
+        threadId: current.threadId,
         generation: current.generation,
         assetRoot: dirname(current.canonicalPath),
         expiresAt: Number.POSITIVE_INFINITY
@@ -672,11 +672,11 @@ export class FilePreviewService {
     return Boolean(
       record
       && record.webContentsId === webContentsId
-      && record.campId === token.campId
+      && record.threadId === token.threadId
       && record.generation === token.generation
       && record.capabilities.includes('preview_asset')
-      && this.#sessionBindings.get(webContentsId)?.get(token.campId)?.campId === token.campId
-      && this.#sessionBindings.get(webContentsId)?.get(token.campId)?.generation === record.bindingGeneration
+      && this.#sessionBindings.get(webContentsId)?.get(token.threadId)?.threadId === token.threadId
+      && this.#sessionBindings.get(webContentsId)?.get(token.threadId)?.generation === record.bindingGeneration
     )
   }
 
@@ -690,11 +690,11 @@ export class FilePreviewService {
     if (
       !record
       || record.webContentsId !== token.webContentsId
-      || record.campId !== token.campId
+      || record.threadId !== token.threadId
       || record.generation !== token.generation
       || !record.capabilities.includes('preview_asset')
-      || this.#sessionBindings.get(record.webContentsId)?.get(record.campId)?.campId !== record.campId
-      || this.#sessionBindings.get(record.webContentsId)?.get(record.campId)?.generation !== record.bindingGeneration
+      || this.#sessionBindings.get(record.webContentsId)?.get(record.threadId)?.threadId !== record.threadId
+      || this.#sessionBindings.get(record.webContentsId)?.get(record.threadId)?.generation !== record.bindingGeneration
     ) return new Response(null, { status: 403 })
 
     let opened: OpenedPreviewFile | null = null
@@ -738,10 +738,10 @@ export class FilePreviewService {
     if (!record || record.reopenToken !== request.reopenToken || record.generation !== request.expectedGeneration) {
       return failed('source_not_authorized', '这个文件访问已失效。', true)
     }
-    const binding = this.#captureBinding(webContentsId, record.campId)
+    const binding = this.#captureBinding(webContentsId, record.threadId)
     try {
       const target = await this.#resolveReopenTarget(record)
-      this.#requireBinding(webContentsId, binding, record.campId)
+      this.#requireBinding(webContentsId, binding, record.threadId)
       // A candidate has its own handle/generation/tokens. Preparing it never mutates the displayed version.
       const result = await this.#openResolved(webContentsId, record.request, target, binding, RESTORE_OPEN_POLICY, record.handleId)
       if (!result.ok) return result
@@ -762,16 +762,16 @@ export class FilePreviewService {
   ): Promise<FilePreviewOperationResult<{ opened: true }>> {
     const record = this.#recordOrNull(webContentsId, request.handleId)
     if (!record) return failed('source_not_authorized', '这个文件访问已失效。')
-    const binding = this.#captureBinding(webContentsId, record.campId)
-    const navigation = this.#windowCamps.get(webContentsId)
+    const binding = this.#captureBinding(webContentsId, record.threadId)
+    const navigation = this.#windowThreads.get(webContentsId)
     try {
       const current = await this.#revalidateRecordPath(record)
-      this.#requireBinding(webContentsId, binding, record.campId); this.#requireNavigation(webContentsId, navigation, record.campId)
+      this.#requireBinding(webContentsId, binding, record.threadId); this.#requireNavigation(webContentsId, navigation, record.threadId)
       return this.#openNative(
         current.canonicalPath,
         record.fileName,
         current.openRisk,
-        () => { this.#requireBinding(webContentsId, binding, record.campId); this.#requireNavigation(webContentsId, navigation, record.campId) }
+        () => { this.#requireBinding(webContentsId, binding, record.threadId); this.#requireNavigation(webContentsId, navigation, record.threadId) }
       )
     } catch (error) {
       return this.#errorResult(error, 'open_failed')
@@ -784,11 +784,11 @@ export class FilePreviewService {
   ): Promise<FilePreviewOperationResult<{ revealed: true }>> {
     const record = this.#recordOrNull(webContentsId, request.handleId)
     if (!record) return failed('source_not_authorized', '这个文件访问已失效。')
-    const binding = this.#captureBinding(webContentsId, record.campId)
-    const navigation = this.#windowCamps.get(webContentsId)
+    const binding = this.#captureBinding(webContentsId, record.threadId)
+    const navigation = this.#windowThreads.get(webContentsId)
     try {
       const current = await this.#revalidateRecordPath(record)
-      this.#requireBinding(webContentsId, binding, record.campId); this.#requireNavigation(webContentsId, navigation, record.campId)
+      this.#requireBinding(webContentsId, binding, record.threadId); this.#requireNavigation(webContentsId, navigation, record.threadId)
       this.#native.revealPath(current.canonicalPath)
       return ok({ revealed: true })
     } catch (error) {
@@ -806,8 +806,8 @@ export class FilePreviewService {
     if (request.format === 'absolute' && record.pathPresentation === 'file_name_only') {
       return failed('source_not_authorized', '无法复制这个文件的内部路径。')
     }
-    const binding = this.#captureBinding(webContentsId, record.campId)
-    const navigation = this.#windowCamps.get(webContentsId)
+    const binding = this.#captureBinding(webContentsId, record.threadId)
+    const navigation = this.#windowThreads.get(webContentsId)
     try {
       let value = record.displayPath
       if (request.format === 'absolute') {
@@ -815,7 +815,7 @@ export class FilePreviewService {
         if (!target.canShowPath) return failed('source_not_authorized', '无法复制这个文件的内部路径。')
         value = target.canonicalPath
       }
-      this.#requireBinding(webContentsId, binding, record.campId); this.#requireNavigation(webContentsId, navigation, record.campId)
+      this.#requireBinding(webContentsId, binding, record.threadId); this.#requireNavigation(webContentsId, navigation, record.threadId)
       this.#native.copyText(value)
       return ok({ copied: true })
     } catch (error) {
@@ -825,35 +825,35 @@ export class FilePreviewService {
 
   async chooseAuthorizedRoot(
     webContentsId: number,
-    request: { campId: string; pendingOpenId: string }
+    request: { threadId: string; pendingOpenId: string }
   ): Promise<FilePreviewOperationResult<FilePreviewRootGrantResult | null>> {
     this.#prune()
     try {
-      const binding = this.#captureBinding(webContentsId, request.campId)
-      const navigation = this.#windowCamps.get(webContentsId)
-      this.#requireNavigation(webContentsId, navigation, request.campId)
+      const binding = this.#captureBinding(webContentsId, request.threadId)
+      const navigation = this.#windowThreads.get(webContentsId)
+      this.#requireNavigation(webContentsId, navigation, request.threadId)
       const pending = this.#pending.get(request.pendingOpenId)
       if (
         !pending
         || pending.webContentsId !== webContentsId
-        || pending.campId !== request.campId
+        || pending.threadId !== request.threadId
         || pending.bindingGeneration !== binding.generation
       ) {
         return failed('source_not_authorized', '这次目录授权请求已失效。')
       }
       const selected = await this.#native.selectRoot(webContentsId)
-      this.#requireNavigation(webContentsId, navigation, request.campId)
+      this.#requireNavigation(webContentsId, navigation, request.threadId)
       if (!selected) return ok(null)
       const canonicalRoot = await canonicalizeExistingPath(selected)
       const canonicalCandidate = await canonicalizeExistingPath(pending.candidatePath)
-      this.#requireNavigation(webContentsId, navigation, request.campId)
+      this.#requireNavigation(webContentsId, navigation, request.threadId)
       if (!pathIsWithin(canonicalRoot, canonicalCandidate)) {
         return failed('outside_authorized_root', '所选目录不包含目标文件。')
       }
       const grant: RootGrant = {
         id: randomUUID(),
         webContentsId,
-        campId: request.campId,
+        threadId: request.threadId,
         bindingGeneration: binding.generation,
         canonicalRoot,
         displayName: basename(canonicalRoot) || '已授权目录'
@@ -862,7 +862,7 @@ export class FilePreviewService {
       this.#pending.delete(pending.id)
       const result = await this.#openResolved(webContentsId, {
         kind: 'authorized_root',
-        campId: request.campId,
+        threadId: request.threadId,
         rootGrantId: grant.id,
         rawReference: pending.candidatePath
       }, {
@@ -885,7 +885,7 @@ export class FilePreviewService {
     const records = [...this.#handles.values()].filter((record) => record.webContentsId === webContentsId)
     await Promise.all(records.map((record) => this.#dropHandle(record)))
     this.#sessionBindings.delete(webContentsId)
-    this.#windowCamps.delete(webContentsId)
+    this.#windowThreads.delete(webContentsId)
     for (const [id, pending] of this.#pending) if (pending.webContentsId === webContentsId) this.#pending.delete(id)
     for (const [id, grant] of this.#rootGrants) if (grant.webContentsId === webContentsId) this.#rootGrants.delete(id)
     this.#watchers.releaseWindow(webContentsId)
@@ -895,7 +895,7 @@ export class FilePreviewService {
     this.#sessionBindings.clear()
     await Promise.all([...this.#handles.values()].map((record) => this.#dropHandle(record)))
     this.#sessionBindings.clear()
-    this.#windowCamps.clear()
+    this.#windowThreads.clear()
     this.#pending.clear()
     this.#rootGrants.clear()
     this.#htmlTokens.clear()
@@ -913,10 +913,10 @@ export class FilePreviewService {
     if (request.kind === 'child_of_handle') {
       const parent = this.#recordOrNull(webContentsId, request.parentHandleId)
       if (!parent || !parent.allowChildren) return null
-      this.#requireSession(webContentsId, parent.campId)
+      this.#requireSession(webContentsId, parent.threadId)
       return {
         kind: 'file_target',
-        campId: parent.campId,
+        threadId: parent.threadId,
         sourceKind: request.kind,
         sourceIdentity: `child:${parent.previewKey}:${request.rawReference}`,
         rootPath: parent.canonicalRoot,
@@ -928,18 +928,18 @@ export class FilePreviewService {
       }
     }
     if (request.kind === 'authorized_root') {
-      this.#requireSession(webContentsId, request.campId)
+      this.#requireSession(webContentsId, request.threadId)
       const grant = this.#rootGrants.get(request.rootGrantId)
-      const binding = this.#captureBinding(webContentsId, request.campId)
+      const binding = this.#captureBinding(webContentsId, request.threadId)
       if (
         !grant
         || grant.webContentsId !== webContentsId
-        || grant.campId !== request.campId
+        || grant.threadId !== request.threadId
         || grant.bindingGeneration !== binding.generation
       ) return null
       return {
         kind: 'file_target',
-        campId: request.campId,
+        threadId: request.threadId,
         sourceKind: request.kind,
         sourceIdentity: `root-grant:${grant.id}:${request.rawReference}`,
         rootPath: grant.canonicalRoot,
@@ -950,7 +950,7 @@ export class FilePreviewService {
         projectRoot: null
       }
     }
-    this.#requireSession(webContentsId, request.campId)
+    this.#requireSession(webContentsId, request.threadId)
     return this.#authority.resolve(request)
   }
 
@@ -958,7 +958,7 @@ export class FilePreviewService {
     webContentsId: number,
     request: OpenFilePreviewRequest,
     target: ResolvedTarget | Extract<FilePreviewAuthorityResult, { kind: 'file_target' }>,
-    binding: WindowCampBinding,
+    binding: WindowThreadBinding,
     policy: FilePreviewOpenPolicy,
     protectedHandleId?: string
   ): Promise<FilePreviewOperationResult<OpenFilePreviewResult>> {
@@ -988,7 +988,7 @@ export class FilePreviewService {
           || (request.kind === 'child_of_handle' && request.allowSystemOpen === false)) {
           return failed('reference_not_clickable', '这个链接不能在预览中打开。')
         }
-        this.#requireBinding(webContentsId, binding, target.campId)
+        this.#requireBinding(webContentsId, binding, target.threadId)
         policy.nativeGuard?.()
         // Reveal through the file manager, never launch a directory-shaped app bundle.
         try {
@@ -1006,7 +1006,7 @@ export class FilePreviewService {
         && error.code === 'outside_authorized_root'
         && isAbsolute(candidatePath)
       ) {
-        this.#requireBinding(webContentsId, binding, target.campId)
+        this.#requireBinding(webContentsId, binding, target.threadId)
         policy.nativeGuard?.()
         const challenge = this.#createAuthorizationChallenge(webContentsId, request, {
           ...target,
@@ -1038,12 +1038,12 @@ export class FilePreviewService {
         || (request.kind === 'child_of_handle' && request.allowSystemOpen === false)) {
         return failed('reference_not_clickable', '这个链接不能在预览中打开。')
       }
-      this.#requireBinding(webContentsId, binding, target.campId)
+      this.#requireBinding(webContentsId, binding, target.threadId)
       const nativeResult = await this.#openNative(
         opened.canonicalPath,
         fileName,
         openRisk,
-        () => { this.#requireBinding(webContentsId, binding, target.campId); policy.nativeGuard?.() }
+        () => { this.#requireBinding(webContentsId, binding, target.threadId); policy.nativeGuard?.() }
       )
       return nativeResult.ok
         ? ok({ kind: 'opened_in_system', fileName })
@@ -1051,14 +1051,14 @@ export class FilePreviewService {
     }
     const supportedClassification = classification as SupportedClassification
     try {
-      this.#requireBinding(webContentsId, binding, target.campId)
+      this.#requireBinding(webContentsId, binding, target.threadId)
     } catch (error) {
       await opened.file.close().catch(() => undefined)
       throw error
     }
     const handleId = randomUUID()
     const previewKey = createHash('sha256')
-      .update(`${webContentsId}\0${target.campId}\0${opened.canonicalPath}`)
+      .update(`${webContentsId}\0${target.threadId}\0${opened.canonicalPath}`)
       .digest('hex')
     const allowChildren = target.allowChildren ?? target.sourceKind !== 'attachment'
     const capabilities: FilePreviewCapability[] = ['read', 'open_in_system']
@@ -1067,9 +1067,9 @@ export class FilePreviewService {
       capabilities.push('preview_asset')
     }
     const pathProjection = await this.#pathProjection(target, opened)
-    const restoreRequest = await this.#independentRestoreRequest(request, target.campId, opened.canonicalPath)
+    const restoreRequest = await this.#independentRestoreRequest(request, target.threadId, opened.canonicalPath)
     try {
-      this.#requireBinding(webContentsId, binding, target.campId)
+      this.#requireBinding(webContentsId, binding, target.threadId)
     } catch (error) {
       await opened.file.close().catch(() => undefined)
       throw error
@@ -1092,7 +1092,7 @@ export class FilePreviewService {
     const record: PreviewHandleRecord = {
       handleId,
       webContentsId,
-      campId: target.campId,
+      threadId: target.threadId,
       bindingGeneration: binding.generation,
       request,
       reopenTarget: {
@@ -1159,7 +1159,7 @@ export class FilePreviewService {
       }
     }
     if (inheritedProjectRoot === undefined && target.sourceKind === 'attachment') {
-      projectRoot = await this.#canonicalWorkspaceRoot(target.campId)
+      projectRoot = await this.#canonicalWorkspaceRoot(target.threadId)
     }
     if (projectRoot && pathIsWithin(projectRoot, opened.canonicalPath)) {
       return {
@@ -1181,26 +1181,26 @@ export class FilePreviewService {
 
   async #independentRestoreRequest(
     request: OpenFilePreviewRequest,
-    campId: string,
+    threadId: string,
     canonicalPath: string
   ): Promise<RestoreFilePreviewRequest | undefined> {
     if (request.kind !== 'child_of_handle') return undefined
-    const root = await this.#canonicalWorkspaceRoot(campId)
+    const root = await this.#canonicalWorkspaceRoot(threadId)
     const rawReference = root ? workspaceRelativeReference(root, canonicalPath) : null
-    return rawReference ? { kind: 'camp_workspace', campId, rawReference } : undefined
+    return rawReference ? { kind: 'camp_workspace', threadId, rawReference } : undefined
   }
 
-  async #canonicalWorkspaceRoot(campId: string): Promise<string | null> {
+  async #canonicalWorkspaceRoot(threadId: string): Promise<string | null> {
     try {
       const workspace = await this.#authority.resolve({
         kind: 'camp_workspace',
-        campId,
+        threadId,
         rawReference: '.'
       })
       if (
         !workspace
         || workspace.kind !== 'file_target'
-        || workspace.campId !== campId
+        || workspace.threadId !== threadId
         || workspace.sourceKind !== 'camp_workspace'
         || workspace.allowChildren !== true
       ) return null
@@ -1269,7 +1269,7 @@ export class FilePreviewService {
     this.#watchers.subscribe(record.canonicalRoot, {
       handleId: record.handleId,
       webContentsId: record.webContentsId,
-      campId: record.campId,
+      threadId: record.threadId,
       bindingGeneration: record.bindingGeneration,
       previewKey: record.previewKey,
       canonicalFilePath: record.canonicalPath
@@ -1277,17 +1277,17 @@ export class FilePreviewService {
   }
 
   #onExternalUpdate(notification: RootWatchNotification): void {
-    const binding = this.#sessionBindings.get(notification.webContentsId)?.get(notification.campId)
+    const binding = this.#sessionBindings.get(notification.webContentsId)?.get(notification.threadId)
     if (
       !binding
-      || binding.campId !== notification.campId
+      || binding.threadId !== notification.threadId
       || binding.generation !== notification.bindingGeneration
     ) return
     const changed = new Set(notification.previewKeys)
     for (const record of this.#handles.values()) {
       if (
         record.webContentsId === notification.webContentsId
-        && record.campId === notification.campId
+        && record.threadId === notification.threadId
         && record.bindingGeneration === notification.bindingGeneration
         && changed.has(record.previewKey)
       ) record.hasExternalUpdate = true
@@ -1307,45 +1307,45 @@ export class FilePreviewService {
     this.#prune()
     const record = this.#handles.get(handleId)
     if (!record || record.webContentsId !== webContentsId) return null
-    const binding = this.#sessionBindings.get(webContentsId)?.get(record.campId)
+    const binding = this.#sessionBindings.get(webContentsId)?.get(record.threadId)
     if (
       !binding
-      || binding.campId !== record.campId
+      || binding.threadId !== record.threadId
       || record.bindingGeneration !== binding.generation
     ) return null
     record.lastUsedAt = Date.now()
     return record
   }
 
-  #captureBinding(webContentsId: number, campId?: string): WindowCampBinding {
-    const selectedCamp = campId ?? this.#windowCamps.get(webContentsId)?.campId
-    const binding = selectedCamp ? this.#sessionBindings.get(webContentsId)?.get(selectedCamp) : undefined
-    if (!binding || !binding.campId || (campId !== undefined && binding.campId !== campId)) {
-      throw new FilePreviewAccessError('read_failed', '文件不属于当前 Camp。')
+  #captureBinding(webContentsId: number, threadId?: string): WindowThreadBinding {
+    const selectedThread = threadId ?? this.#windowThreads.get(webContentsId)?.threadId
+    const binding = selectedThread ? this.#sessionBindings.get(webContentsId)?.get(selectedThread) : undefined
+    if (!binding || !binding.threadId || (threadId !== undefined && binding.threadId !== threadId)) {
+      throw new FilePreviewAccessError('read_failed', '文件不属于当前 Thread。')
     }
     return binding
   }
 
   #requireBinding(
     webContentsId: number,
-    expected: WindowCampBinding,
-    campId?: string
+    expected: WindowThreadBinding,
+    threadId?: string
   ): void {
-    const current = expected.campId ? this.#sessionBindings.get(webContentsId)?.get(expected.campId) : undefined
+    const current = expected.threadId ? this.#sessionBindings.get(webContentsId)?.get(expected.threadId) : undefined
     if (
       current !== expected
-      || !current?.campId
-      || (campId !== undefined && current.campId !== campId)
-    ) throw new FilePreviewAccessError('read_failed', '文件不属于当前 Camp。')
+      || !current?.threadId
+      || (threadId !== undefined && current.threadId !== threadId)
+    ) throw new FilePreviewAccessError('read_failed', '文件不属于当前 Thread。')
   }
 
-  #requireNavigation(webContentsId: number, expected: WindowCampBinding | undefined, campId: string): void {
-    if (!expected || expected.campId !== campId || this.#windowCamps.get(webContentsId) !== expected)
+  #requireNavigation(webContentsId: number, expected: WindowThreadBinding | undefined, threadId: string): void {
+    if (!expected || expected.threadId !== threadId || this.#windowThreads.get(webContentsId) !== expected)
       throw new FilePreviewAccessError('read_failed', '这次文件操作已失效。')
   }
 
-  #requireSession(webContentsId: number, campId: string): void {
-    this.#captureBinding(webContentsId, campId)
+  #requireSession(webContentsId: number, threadId: string): void {
+    this.#captureBinding(webContentsId, threadId)
   }
 
   async #readAt(record: PreviewHandleRecord, position: number, length: number): Promise<Uint8Array> {
@@ -1389,7 +1389,7 @@ export class FilePreviewService {
   }
 
   async #reopenFile(record: PreviewHandleRecord): Promise<FileHandle> {
-    this.#requireSession(record.webContentsId, record.campId)
+    this.#requireSession(record.webContentsId, record.threadId)
     const target = await this.#resolveReopenTarget(record)
     const parsed = this.#parsedReference(target)
     const candidatePath = await this.#candidatePath(target, parsed)
@@ -1452,7 +1452,7 @@ export class FilePreviewService {
     if (
       !target
       || target.kind !== 'file_target'
-      || target.campId !== record.campId
+      || target.threadId !== record.threadId
       || target.sourceIdentity !== record.sourceIdentity
     ) throw new FilePreviewAccessError('read_failed', '无法重新确认文件来源。')
     return {
@@ -1499,14 +1499,14 @@ export class FilePreviewService {
     request: OpenFilePreviewRequest,
     target: ResolvedTarget,
     candidatePath: string,
-    binding: WindowCampBinding
+    binding: WindowThreadBinding
   ): FilePreviewAuthorizationChallenge & { displayReference: string } {
     const id = randomUUID()
     const displayReference = safeDisplayReference(target.rawReference || candidatePath)
     const pending: PendingOpen = {
       id,
       webContentsId,
-      campId: target.campId,
+      threadId: target.threadId,
       bindingGeneration: binding.generation,
       request,
       target,
@@ -1517,50 +1517,50 @@ export class FilePreviewService {
     this.#pending.set(id, pending)
     return {
       pendingOpenId: id,
-      campId: target.campId,
+      threadId: target.threadId,
       displayReference,
       expiresAt: pending.expiresAt
     }
   }
 
-  /** End existing file leases before an explicitly requested Camp deletion. */
-  async releaseCamp(campId: string): Promise<void> {
+  /** End existing file leases before an explicitly requested Thread deletion. */
+  async releaseThread(threadId: string): Promise<void> {
     const closing: Promise<void>[] = []
     for (const [webContentsId, sessions] of this.#sessionBindings) {
-      const binding = sessions.get(campId)
+      const binding = sessions.get(threadId)
       if (!binding) continue
-      sessions.delete(campId)
-      closing.push(this.#releaseCamp(webContentsId, campId, binding.generation))
+      sessions.delete(threadId)
+      closing.push(this.#releaseThread(webContentsId, threadId, binding.generation))
     }
     await Promise.all(closing)
   }
 
-  async #releaseCamp(
+  async #releaseThread(
     webContentsId: number,
-    campId: string,
+    threadId: string,
     bindingGeneration: number
   ): Promise<void> {
     const records = [...this.#handles.values()].filter((record) =>
       record.webContentsId === webContentsId
-      && record.campId === campId
+      && record.threadId === threadId
       && record.bindingGeneration === bindingGeneration
     )
     await Promise.all(records.map((record) => this.#dropHandle(record)))
     for (const [id, pending] of this.#pending) {
       if (
         pending.webContentsId === webContentsId
-        && pending.campId === campId
+        && pending.threadId === threadId
         && pending.bindingGeneration === bindingGeneration
       ) this.#pending.delete(id)
     }
     for (const [id, grant] of this.#rootGrants) {
       if (
         grant.webContentsId === webContentsId
-        && grant.campId === campId
+        && grant.threadId === threadId
         && grant.bindingGeneration === bindingGeneration
       ) this.#rootGrants.delete(id)
     }
-    this.#watchers.releaseBinding(webContentsId, campId, bindingGeneration)
+    this.#watchers.releaseBinding(webContentsId, threadId, bindingGeneration)
   }
 
   async #dropHandle(record: PreviewHandleRecord): Promise<void> {

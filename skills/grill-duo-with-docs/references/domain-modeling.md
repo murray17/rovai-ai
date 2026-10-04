@@ -1,41 +1,13 @@
-# 领域建模纪律
+# Domain modeling
 
-在设计过程中主动打磨项目的领域语言：质疑模糊术语、构造边界场景，并在结论形成时及时记录。
+Follow repository navigation first. If root `CONTEXT-MAP.md` exists, locate this topic's context and `CONTEXT.md`; otherwise use root `CONTEXT.md`. Find relevant Architecture/Contract documents and the unique current version. Create missing documents only after the first relevant content is confirmed.
 
-## 定位文档
+During discussion:
 
-如果仓库根目录存在 `CONTEXT-MAP.md`，先找到当前主题所属的上下文和对应的 `CONTEXT.md`；只有根 `CONTEXT.md` 时，使用单一上下文。随后定位相关 Architecture、Contract，并从 `docs/versions/README.md` 解析唯一当前版本及其 `decisions.md`。没有相关文件时，等第一项内容真正确认后再按项目路由创建。
+- Compare the user's terms with the glossary. Surface a conflict and ask whether to retain the meaning or create a distinct concept; resolve it first if other questions depend on it.
+- Replace vague or overloaded language with precise canonical terms. One term should not represent several concepts.
+- Use concrete boundary cases to test ownership, relationships and lifecycle.
+- Check claimed behavior against code and current authority. Show contradictions and let the user decide whether the model or implementation should change.
+- Record confirmed terms promptly using [Glossary format](context-format.md). Keep drafts, implementation detail and full specifications out of `CONTEXT.md`.
 
-仓库自己的文档导航和维护规则始终优先。
-
-## 会话中执行
-
-### 对照现有词汇
-
-用户使用的术语与现有 `CONTEXT.md` 冲突时立即指出，并把“沿用现有含义还是形成新概念”列为本轮待确认问题。若该冲突影响其它问题，优先解决。
-
-### 收紧模糊语言
-
-遇到模糊或重载词时，提出更精确的规范术语。不要让一个词同时代表多个领域概念。
-
-### 构造具体场景
-
-讨论概念关系时，用具体场景触碰边界和例外，帮助确认概念范围、所有权和生命周期。
-
-### 与代码交叉验证
-
-用户描述系统行为时检查代码和权威文档。发现矛盾就展示证据，让用户决定改变模型还是实现。
-
-### 更新词汇表
-
-术语确认后及时更新适用的 `CONTEXT.md`，使用 [词汇表格式](context-format.md)。`CONTEXT.md` 只保存领域语言，不保存实现细节、草稿或完整规格。
-
-### 谨慎记录长期决定
-
-只有决定同时满足以下条件时，才在当前版本 `decisions.md` 增加章节：
-
-1. 以后改变的成本高；
-2. 缺少背景时会让未来读者意外；
-3. 存在真实取舍并选择了其中一种。
-
-同时把当前语义直接写入适用的 Architecture、Contract、Context、UI 或 Development 文档。使用仓库自己的决定治理；没有项目规则时使用[决定与当前权威路由](decision-routing.md)。不得创建数字 ADR。
+For durable choices, follow [Decision routing](decision-routing.md) and the project's admission rules. Record rationale only when warranted, and update current semantics in the owning document at the same time.

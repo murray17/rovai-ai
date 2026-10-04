@@ -37,17 +37,17 @@ async function create(body) {
     address:{mode:'explicit',agentIds:['agent_2']},purpose:'DSH Fleet acceptance' })
   const command=response.commandResult??response
   assert.equal(command.status,'accepted')
-  return {campId:command.payload.campId,runId:command.payload.agentRunIds[0]}
+  return {threadId:command.payload.threadId,runId:command.payload.agentRunIds[0]}
 }
-async function send(campId, body) {
-  const draft=await core.request('camp.composerDraft.get',{campId})
-  const saved=await core.request('camp.composerDraft.save',{campId,expectedRevision:draft.revision,
+async function send(threadId, body) {
+  const draft=await core.request('camp.composerDraft.get',{threadId})
+  const saved=await core.request('camp.composerDraft.save',{threadId,expectedRevision:draft.revision,
     content:{version:2,segments:[{kind:'text',text:body}]}})
-  const response=await core.request('camp.messages.send',{commandId:crypto.randomUUID(),campId,draftRevision:saved.revision,
+  const response=await core.request('camp.messages.send',{commandId:crypto.randomUUID(),threadId,draftRevision:saved.revision,
     execution:{taskId:null,purpose:'DSH Fleet continuation',completionRole:'required'}})
   const command=response.commandResult??response
   assert.equal(command.status,'accepted')
-  return {campId,runId:command.payload.agentRunIds[0]}
+  return {threadId,runId:command.payload.agentRunIds[0]}
 }
 function started(runId) {
   return events.find(event=>event.method==='agent_run.started' && event.params?.agentRunId===runId)
@@ -56,7 +56,7 @@ function started(runId) {
 async function wait(item, predicate) {
   const deadline=Date.now()+240_000
   while(Date.now()<deadline) {
-    const snapshot=await core.request('camps.snapshot',{campId:item.campId})
+    const snapshot=await core.request('camps.snapshot',{threadId:item.threadId})
     const run=snapshot.agentRuns.find(run=>run.id===item.runId)
     if(run && ['failed','cancelled'].includes(run.status)) throw new Error(`DSH Fleet Run ${run.status}: ${JSON.stringify(run.failure)}`)
     if(predicate(snapshot,run)) return {snapshot,run,start:started(item.runId)}
@@ -94,14 +94,14 @@ try {
   await runningTool(first)
   const second=await create(`You do not know the marker. Use the terminal tool exactly once to execute \`${delayedReadCommand('marker-b.txt')}\`. You must actually read the tool result and remember its exact marker for the next turn. Then reply DONE. Do not simulate the tool or call another tool.`)
   await runningTool(second)
-  const firstWhileSecond=await core.request('camps.snapshot',{campId:first.campId})
+  const firstWhileSecond=await core.request('camps.snapshot',{threadId:first.threadId})
   assert.equal(firstWhileSecond.agentRuns.find(run=>run.id===first.runId)?.status,'running','concurrency did not overlap')
   const [a,b]=await Promise.all([finished(first),finished(second)])
   assert(a.start?.params.hostInstanceId && b.start?.params.hostInstanceId)
   assert.notEqual(a.start.params.hostInstanceId,b.start.params.hostInstanceId)
   assert.notEqual(a.start.params.nativeThreadId,b.start.params.nativeThreadId)
   await rm(join(project,'marker-a.txt')); await rm(join(project,'marker-b.txt'))
-  const back=await send(first.campId,'Return exactly the marker produced by your previous Bash call. Do not call tools or include any other marker.')
+  const back=await send(first.threadId,'Return exactly the marker produced by your previous Bash call. Do not call tools or include any other marker.')
   const backResult=await finished(back)
   assert.equal(backResult.start.params.nativeThreadId,a.start.params.nativeThreadId)
   const backText=JSON.stringify(backResult.snapshot.messages.filter(message=>message.sourceAgentRunId===back.runId))
@@ -114,7 +114,7 @@ try {
   console.error('[dsh-fleet] concurrency and exact switch-back passed')
   await stopAndCheck('coreCrash',true)
   await start()
-  const restored=await send(first.campId,'Return exactly the marker produced by your previous Bash call. Do not call tools.')
+  const restored=await send(first.threadId,'Return exactly the marker produced by your previous Bash call. Do not call tools.')
   const restoredResult=await finished(restored)
   assert.equal(restoredResult.start.params.nativeThreadId,a.start.params.nativeThreadId)
   assert.notEqual(restoredResult.start.params.hostInstanceId,a.start.params.hostInstanceId)
@@ -127,7 +127,7 @@ try {
     const remaining=await waitForProcessIdentitiesToExit(beforeIdle,32*60_000)
     assert.deepEqual(remaining,[],'idle eviction left a Runtime process')
     evidence.checks.idleEviction={passed:true,elapsedMs:Date.now()-since,descendantsReaped:beforeIdle.length}
-    const afterIdle=await finished(await send(first.campId,'Reply exactly AFTER_IDLE. Do not call tools.'))
+    const afterIdle=await finished(await send(first.threadId,'Reply exactly AFTER_IDLE. Do not call tools.'))
     assert.equal(afterIdle.start.params.nativeThreadId,a.start.params.nativeThreadId)
     assert.notEqual(afterIdle.start.params.hostInstanceId,restoredResult.start.params.hostInstanceId)
     evidence.checks.idleEviction.exactResume=true

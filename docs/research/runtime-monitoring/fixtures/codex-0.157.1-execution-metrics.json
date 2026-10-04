@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "runtime": "codex-cli",
+  "runtimeVersion": "codex-cli 0.157.1",
+  "observedModel": "gpt-6-sol",
+  "source": "isolated two-Run smoke, migrated Core projection, monitoring.execution read after Core restart",
+  "runs": [
+    {
+      "status": "succeeded",
+      "promptInputTotalTokens": 56368,
+      "outputTokens": 424,
+      "cacheReadTokens": 49408,
+      "cacheWriteTokens": 0,
+      "finalized": true
+    },
+    {
+      "status": "succeeded",
+      "promptInputTotalTokens": 56117,
+      "outputTokens": 266,
+      "cacheReadTokens": 36736,
+      "cacheWriteTokens": 0,
+      "finalized": true
+    }
+  ],
+  "currentSession": {
+    "bindingGeneration": 2,
+    "usedTokens": null,
+    "windowTokens": 258400,
+    "dialectId": "codex-thread-context-window-v1"
+  },
+  "limits": [
+    "Provider account identity and native Session IDs are omitted",
+    "The legacy two-turn smoke's same-native-thread assertion failed; this fixture proves metrics persistence and readback, not continuation",
+    "No Renderer screenshot or live tok/s measurement was captured"
+  ]
+}

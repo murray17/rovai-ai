@@ -41,6 +41,14 @@ describe('general preferences', () => {
 
   it('accepts only the exact schema and finite enums', () => {
     expect(parseGeneralPreferences({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      interfaceLanguage: 'en'
+    })?.interfaceLanguage).toBe('en')
+    expect(parseGeneralPreferences({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      interfaceLanguage: 'fr'
+    })).toBeNull()
+    expect(parseGeneralPreferences({
       schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'about',
@@ -74,7 +82,8 @@ describe('general preferences', () => {
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics'
     })).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
+      interfaceLanguage: 'zh-CN',
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
       executionConsolePlacement: 'inspector',
@@ -108,7 +117,8 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: true,
       oneClickNewConversationEnabled: true
     })).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
+      interfaceLanguage: 'zh-CN',
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
       executionConsolePlacement: 'inspector',
@@ -193,11 +203,13 @@ describe('general preferences', () => {
       store.setLastSettingsSection('toolbox'),
       store.setExecutionConsolePlacement('bottom'),
       store.setWorldMapEnabled(false),
+      store.setInterfaceLanguage('en'),
       store.setStartupLocationMode('last_location')
     ])
 
     expect(store.get()).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
+      interfaceLanguage: 'en',
       startupLocationMode: 'last_location',
       lastSettingsSection: 'toolbox',
       executionConsolePlacement: 'bottom',

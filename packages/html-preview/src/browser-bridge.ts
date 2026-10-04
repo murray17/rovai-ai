@@ -30,7 +30,15 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
   const diagnostics: HtmlPreviewDiagnostic[] = []
   const keys = new Map<string, number>()
   const abort = new AbortController()
+  // Stopping supplemental diagnostics must leave the document bridge alive.
+  const diagnosticsAbort = new AbortController()
+  abort.signal.addEventListener('abort', () => diagnosticsAbort.abort(), { once: true })
+  const diagnosticUrl = `${config.origin}/__rovai-preview/events?documentId=${encodeURIComponent(config.documentId)}`
+  const bridgeSource = document.currentScript?.getAttribute('src')
+  const bridgeUrl = bridgeSource ? new URL(bridgeSource, config.documentUrl).href : null
+  let serverDiagnosticsStarted = false
   let serverDiagnosticsState: 'waiting' | 'connected' | 'unavailable' = 'waiting'
+  let serverDiagnosticsReason: 'policy' | undefined
   let indexes: { document: Document; index: ReturnType<typeof createIndex>; offset: number }[] = []
   const clean = (value: unknown, limit: number): string => {
     try { return String(value).slice(0, limit) } catch { return '未知错误' }
@@ -39,6 +47,9 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
     if (connection) sendRaw(parent, connection.origin, type, { connectionId: connection.id, ...data })
   }
   const state = (): void => send('state', { document: config.documentError ? 'failed' : loaded ? 'loaded' : 'loading', message: config.documentError })
+  const serverDiagnostics = (): void => send('server-diagnostics', {
+    state: serverDiagnosticsState, ...(serverDiagnosticsReason ? { reason: serverDiagnosticsReason } : {})
+  })
   const add = (value: unknown): void => {
     const item = parseDiagnostic(value, config)
     if (!item) return
@@ -80,7 +91,19 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
     const reason = event.reason
     report('promise', reason instanceof Error ? reason.message : clean(reason, 2000), null, null, null, reason instanceof Error ? reason.stack : null)
   }, { signal: abort.signal })
-  document.addEventListener('securitypolicyviolation', event => report('policy', `浏览器策略阻止：${event.effectiveDirective}（${clean(event.blockedURI || '资源未知', 1024)}）`, event.sourceFile || null, event.lineNumber || null, event.columnNumber || null), { signal: abort.signal })
+  document.addEventListener('securitypolicyviolation', event => {
+    // Only a browser-enforced violation of our exact request, issued by this
+    // document's injected script, can be attributed to the previewer. Missing
+    // source information and author requests keep their ordinary diagnostics.
+    if (event.isTrusted && event.disposition === 'enforce' && event.effectiveDirective === 'connect-src'
+      && !config.browserDocument && serverDiagnosticsStarted && bridgeUrl
+      && event.blockedURI === diagnosticUrl && event.sourceFile === bridgeUrl) {
+      serverDiagnosticsState = 'unavailable'; serverDiagnosticsReason = 'policy'
+      diagnosticsAbort.abort(); serverDiagnostics()
+      return
+    }
+    report('policy', `浏览器策略阻止：${event.effectiveDirective}（${clean(event.blockedURI || '资源未知', 1024)}）`, event.sourceFile || null, event.lineNumber || null, event.columnNumber || null)
+  }, { signal: abort.signal })
 
   const childWindow = (source: MessageEventSource | null): source is Window => Boolean(source && [...document.querySelectorAll<HTMLIFrameElement>('iframe,frame')].some(frame => frame.contentWindow === source))
   const connectChild = (source: Window): void => {
@@ -172,7 +195,7 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
         connection = { id: data.connectionId, origin: event.origin }
         send('connected'); state(); send('find-ready')
         if (event.origin !== config.origin && !config.browserDocument) {
-          send('server-diagnostics', { state: serverDiagnosticsState })
+          serverDiagnostics()
           startServerDiagnostics()
         }
         diagnostics.forEach(diagnostic => send('diagnostic', { diagnostic }))
@@ -212,7 +235,6 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
   // cannot establish a connection or contribute diagnostics to a new document.
   sendRaw(parent, config.browserDocument ? config.hostOrigin : '*', 'hello')
   if (config.documentError) report('document', config.documentError, config.documentUrl)
-  let serverDiagnosticsStarted = false
   function startServerDiagnostics(): void {
     if (serverDiagnosticsStarted) return
     serverDiagnosticsStarted = true
@@ -223,23 +245,23 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
       // reconnects and repeated host handshakes. It is not a background poller.
       const retryDelays = [1000, 2000, 4000]
       let retries = 0
-      while (!abort.signal.aborted) {
+      while (!diagnosticsAbort.signal.aborted) {
         const attempt = new AbortController()
         const stop = (): void => attempt.abort()
-        abort.signal.addEventListener('abort', stop, { once: true })
+        diagnosticsAbort.signal.addEventListener('abort', stop, { once: true })
         // Only connection establishment is timed. An idle healthy stream stays open.
         const deadline = setTimeout(stop, 12_000)
         let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
         let revoked = false
         try {
-          const response = await fetch(`${config.origin}/__rovai-preview/events?documentId=${encodeURIComponent(config.documentId)}`, { signal: attempt.signal, credentials: 'same-origin', cache: 'no-store' })
+          const response = await fetch(diagnosticUrl, { signal: attempt.signal, credentials: 'same-origin', cache: 'no-store' })
           clearTimeout(deadline)
           revoked = [403, 404, 410].includes(response.status)
           reader = response.body?.getReader()
           if (!response.ok || !reader) throw new Error('Diagnostic stream unavailable')
-          if (abort.signal.aborted) return
+          if (diagnosticsAbort.signal.aborted) return
           serverDiagnosticsState = 'connected'
-          send('server-diagnostics', { state: serverDiagnosticsState })
+          serverDiagnostics()
           const decoder = new TextDecoder()
           let pending = ''
           for (;;) {
@@ -253,19 +275,19 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
         } catch { /* HTTP diagnostics do not determine page communication or state. */ }
         finally {
           clearTimeout(deadline)
-          abort.signal.removeEventListener('abort', stop)
+          diagnosticsAbort.signal.removeEventListener('abort', stop)
           attempt.abort()
           await reader?.cancel().catch(() => undefined)
           reader?.releaseLock()
         }
-        if (abort.signal.aborted) return
+        if (diagnosticsAbort.signal.aborted) return
         serverDiagnosticsState = 'unavailable'
-        send('server-diagnostics', { state: serverDiagnosticsState })
+        serverDiagnostics()
         if (revoked || retries === retryDelays.length) return
         await new Promise<void>(resolve => {
           const stopWaiting = (): void => { clearTimeout(timer); resolve() }
-          const timer = setTimeout(() => { abort.signal.removeEventListener('abort', stopWaiting); resolve() }, retryDelays[retries++])
-          abort.signal.addEventListener('abort', stopWaiting, { once: true })
+          const timer = setTimeout(() => { diagnosticsAbort.signal.removeEventListener('abort', stopWaiting); resolve() }, retryDelays[retries++])
+          diagnosticsAbort.signal.addEventListener('abort', stopWaiting, { once: true })
         })
       }
     })()

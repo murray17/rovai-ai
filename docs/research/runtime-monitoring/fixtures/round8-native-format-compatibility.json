@@ -1,0 +1,773 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-02",
+  "baselineCommit": "0ffafac710d41dde509e3ca1f4801e320251036a",
+  "privacy": "Only numeric native fields and required identity/shape metadata. Session, Run, call, workspace and root Agent identifiers are aliases. No body, reasoning, tools, endpoints, credentials or content hashes. CLI versions are witnesses, never gates.",
+  "entries": [
+    {
+      "runtime": "codebuddy-cli",
+      "version": "2.133.1",
+      "model": "gpt-6.1-sol",
+      "coreDigest": "083e8795c5e33e2569e09c85a6f0284c01e5b2839c87283f3d5387b0eda5551e",
+      "launch": "managed isolated Core via native runtime adapter",
+      "coreRestartPreservedProjection": true,
+      "runs": [
+        {
+          "id": "run-1",
+          "sourceRecords": [
+            {
+              "type": "function_call",
+              "timestamp": 1790950316650,
+              "sessionId": "session-1",
+              "cwd": "/fixture/workspace",
+              "providerData": {
+                "agent": "cli",
+                "model": "gpt-6.1-sol",
+                "messageId": "run-1-call-1",
+                "rawUsage": {
+                  "prompt_tokens": 21416,
+                  "completion_tokens": 39,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 13824
+                  }
+                }
+              }
+            },
+            {
+              "type": "function_call",
+              "timestamp": 1790950325620,
+              "sessionId": "session-1",
+              "cwd": "/fixture/workspace",
+              "providerData": {
+                "agent": "cli",
+                "model": "gpt-6.1-sol",
+                "messageId": "run-1-call-2",
+                "rawUsage": {
+                  "prompt_tokens": 22250,
+                  "completion_tokens": 126,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 21248
+                  },
+                  "completion_tokens_details": {
+                    "reasoning_tokens": 39
+                  }
+                }
+              }
+            },
+            {
+              "type": "message",
+              "role": "assistant",
+              "timestamp": 1790950407594,
+              "sessionId": "session-1",
+              "cwd": "/fixture/workspace",
+              "providerData": {
+                "agent": "cli",
+                "model": "gpt-6.1-sol",
+                "messageId": "run-1-call-3",
+                "rawUsage": {
+                  "prompt_tokens": 22476,
+                  "completion_tokens": 778,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 22272
+                  }
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 57344,
+            "cacheWriteTokens": null,
+            "outputTokens": 943,
+            "promptInputTotalTokens": 66142
+          },
+          "expectedSessionProjection": [
+            {
+              "dialectId": "codebuddy-native-call-context-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "sessionGeneration": 1,
+              "usedTokens": 22476,
+              "windowTokens": null
+            }
+          ]
+        },
+        {
+          "id": "run-2",
+          "sourceRecords": [
+            {
+              "type": "function_call",
+              "timestamp": 1790950428374,
+              "sessionId": "session-1",
+              "cwd": "/fixture/workspace",
+              "providerData": {
+                "agent": "cli",
+                "model": "gpt-6.1-sol",
+                "messageId": "run-2-call-1",
+                "rawUsage": {
+                  "prompt_tokens": 23670,
+                  "completion_tokens": 352,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 22272
+                  }
+                }
+              }
+            },
+            {
+              "type": "function_call",
+              "timestamp": 1790950465784,
+              "sessionId": "session-1",
+              "cwd": "/fixture/workspace",
+              "providerData": {
+                "agent": "cli",
+                "model": "gpt-6.1-sol",
+                "messageId": "run-2-call-2",
+                "rawUsage": {
+                  "prompt_tokens": 24062,
+                  "completion_tokens": 141
+                }
+              }
+            },
+            {
+              "type": "message",
+              "role": "assistant",
+              "timestamp": 1790950471677,
+              "sessionId": "session-1",
+              "cwd": "/fixture/workspace",
+              "providerData": {
+                "agent": "cli",
+                "model": "gpt-6.1-sol",
+                "messageId": "run-2-call-3",
+                "rawUsage": {
+                  "prompt_tokens": 24329,
+                  "completion_tokens": 43,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 23936
+                  }
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 46208,
+            "cacheWriteTokens": null,
+            "outputTokens": 536,
+            "promptInputTotalTokens": 72061
+          },
+          "expectedSessionProjection": [
+            {
+              "dialectId": "codebuddy-native-call-context-v1",
+              "modelKey": "gpt-6.1-sol",
+              "nativeRatio": null,
+              "sessionGeneration": 1,
+              "usedTokens": 24329,
+              "windowTokens": null
+            }
+          ]
+        }
+      ],
+      "sourceModelWindows": [
+        {
+          "modelId": "gpt-6.1-sol",
+          "window": null,
+          "reason": "selected model absent from native advertised maxInputTokens catalog"
+        }
+      ]
+    },
+    {
+      "runtime": "opencode-cli",
+      "version": "1.18.32",
+      "model": "sub2api/gpt-6.1-sol",
+      "coreDigest": "2f221fe87f4759cc8ddd66ac2c27bd075570e163194e56ac0aa9c1fa98c71e72",
+      "launch": "managed isolated Core via native runtime adapter",
+      "coreRestartPreservedProjection": true,
+      "runs": [
+        {
+          "id": "run-1",
+          "sourceRecords": [
+            {
+              "id": "run-1-call-1",
+              "role": "assistant",
+              "time": {
+                "created": 1790951486818,
+                "completed": 1790951510004
+              },
+              "tokens": {
+                "total": 8347,
+                "input": 7854,
+                "output": 156,
+                "reasoning": 337,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              }
+            },
+            {
+              "id": "run-1-call-2",
+              "role": "assistant",
+              "time": {
+                "created": 1790951510005,
+                "completed": 1790951517636
+              },
+              "tokens": {
+                "total": 8199,
+                "input": 8067,
+                "output": 132,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 625,
+            "promptInputTotalTokens": 15921
+          },
+          "expectedSessionProjection": [
+            {
+              "dialectId": "opencode-native-call-context-v1",
+              "modelKey": "sub2api/gpt-6.1-sol",
+              "nativeRatio": null,
+              "sessionGeneration": 1,
+              "usedTokens": 8067,
+              "windowTokens": null
+            }
+          ]
+        },
+        {
+          "id": "run-2",
+          "sourceRecords": [
+            {
+              "id": "run-2-call-1",
+              "role": "assistant",
+              "time": {
+                "created": 1790951521982,
+                "completed": 1790951545155
+              },
+              "tokens": {
+                "total": 8938,
+                "input": 4897,
+                "output": 329,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 3712
+                }
+              }
+            },
+            {
+              "id": "run-2-call-2",
+              "role": "assistant",
+              "time": {
+                "created": 1790951545157,
+                "completed": 1790951551932
+              },
+              "tokens": {
+                "total": 9067,
+                "input": 504,
+                "output": 115,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 8448
+                }
+              }
+            },
+            {
+              "id": "run-2-call-3",
+              "role": "assistant",
+              "time": {
+                "created": 1790951551933,
+                "completed": 1790951556749
+              },
+              "tokens": {
+                "total": 9173,
+                "input": 5410,
+                "output": 51,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 3712
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 15872,
+            "cacheWriteTokens": 0,
+            "outputTokens": 495,
+            "promptInputTotalTokens": 26683
+          },
+          "expectedSessionProjection": [
+            {
+              "dialectId": "opencode-native-call-context-v1",
+              "modelKey": "sub2api/gpt-6.1-sol",
+              "nativeRatio": null,
+              "sessionGeneration": 1,
+              "usedTokens": 9122,
+              "windowTokens": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "runtime": "kiro-cli",
+      "version": "kiro-cli 2.21.1",
+      "model": "auto",
+      "coreDigest": "1408bf25939692778769b23bbaa74384c42af5d8e830f9c9a34af5ec90744bc2",
+      "launch": "managed isolated Core via native runtime adapter",
+      "coreRestartPreservedProjection": null,
+      "runs": [
+        {
+          "id": "run-1",
+          "sourceRecords": [
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 3.632999897003174
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 0.7265999913215637
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 3.632999897003174
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 1.4449999332427979
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 1.460800051689148
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 1.568100094795227
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 1.5810999870300293
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 1.5921000242233276
+              }
+            },
+            {
+              "method": "_kiro.dev/metadata",
+              "params": {
+                "sessionId": "session-1",
+                "contextUsagePercentage": 1.5921000242233276
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": null,
+            "cacheWriteTokens": null,
+            "outputTokens": null,
+            "promptInputTotalTokens": null
+          },
+          "expectedSessionProjection": [
+            {
+              "dialectId": "kiro-acp-context-percentage-v1",
+              "modelKey": "auto",
+              "nativeRatio": 0.015921000242233276,
+              "sessionGeneration": 1,
+              "usedTokens": null,
+              "windowTokens": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "runtime": "trae-cn-cli",
+      "version": "trae-cli version 0.120.52",
+      "model": "GLM-5.3",
+      "coreDigest": "1408bf25939692778769b23bbaa74384c42af5d8e830f9c9a34af5ec90744bc2",
+      "launch": "managed isolated Core via native runtime adapter",
+      "coreRestartPreservedProjection": true,
+      "runs": [
+        {
+          "id": "run-1",
+          "sourceRecords": [
+            {
+              "id": "run-1-call-1",
+              "branch": "Trae CLI",
+              "agent_name": "Trae CLI",
+              "parent_tool_call_id": "",
+              "created_at": "2026-10-02T22:41:40.300545+08:00",
+              "session_id": "session-1",
+              "agent_id": "root-agent",
+              "message": {
+                "message": {
+                  "role": "assistant",
+                  "response_meta": {
+                    "usage": {
+                      "prompt_tokens": 15568,
+                      "prompt_token_details": {
+                        "cached_tokens": 7808
+                      },
+                      "completion_tokens": 346,
+                      "total_tokens": 15914,
+                      "completion_token_details": {}
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "run-1-call-2",
+              "branch": "Trae CLI",
+              "agent_name": "Trae CLI",
+              "parent_tool_call_id": "",
+              "created_at": "2026-10-02T22:41:43.691911+08:00",
+              "session_id": "session-1",
+              "agent_id": "root-agent",
+              "message": {
+                "message": {
+                  "role": "assistant",
+                  "response_meta": {
+                    "usage": {
+                      "prompt_tokens": 15998,
+                      "prompt_token_details": {
+                        "cached_tokens": 15552
+                      },
+                      "completion_tokens": 148,
+                      "total_tokens": 16146,
+                      "completion_token_details": {}
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 23360,
+            "cacheWriteTokens": null,
+            "outputTokens": 494,
+            "promptInputTotalTokens": 31566
+          },
+          "expectedSessionProjection": []
+        },
+        {
+          "id": "run-2",
+          "sourceRecords": [
+            {
+              "id": "run-2-call-1",
+              "branch": "Trae CLI",
+              "agent_name": "Trae CLI",
+              "parent_tool_call_id": "",
+              "created_at": "2026-10-02T22:41:55.040557+08:00",
+              "session_id": "session-1",
+              "agent_id": "root-agent",
+              "message": {
+                "message": {
+                  "role": "assistant",
+                  "response_meta": {
+                    "usage": {
+                      "prompt_tokens": 16411,
+                      "prompt_token_details": {
+                        "cached_tokens": 15552
+                      },
+                      "completion_tokens": 416,
+                      "total_tokens": 16827,
+                      "completion_token_details": {}
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "run-2-call-2",
+              "branch": "Trae CLI",
+              "agent_name": "Trae CLI",
+              "parent_tool_call_id": "",
+              "created_at": "2026-10-02T22:42:02.003413+08:00",
+              "session_id": "session-1",
+              "agent_id": "root-agent",
+              "message": {
+                "message": {
+                  "role": "assistant",
+                  "response_meta": {
+                    "usage": {
+                      "prompt_tokens": 16866,
+                      "prompt_token_details": {
+                        "cached_tokens": 16384
+                      },
+                      "completion_tokens": 318,
+                      "total_tokens": 17184,
+                      "completion_token_details": {}
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "run-2-call-3",
+              "branch": "Trae CLI",
+              "agent_name": "Trae CLI",
+              "parent_tool_call_id": "",
+              "created_at": "2026-10-02T22:42:05.448925+08:00",
+              "session_id": "session-1",
+              "agent_id": "root-agent",
+              "message": {
+                "message": {
+                  "role": "assistant",
+                  "response_meta": {
+                    "usage": {
+                      "prompt_tokens": 17267,
+                      "prompt_token_details": {
+                        "cached_tokens": 16832
+                      },
+                      "completion_tokens": 197,
+                      "total_tokens": 17464,
+                      "completion_token_details": {}
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 48768,
+            "cacheWriteTokens": null,
+            "outputTokens": 931,
+            "promptInputTotalTokens": 50544
+          },
+          "expectedSessionProjection": []
+        }
+      ],
+      "sourceSessionMetadata": {
+        "id": "session-1",
+        "metadata": {
+          "cwd": "/fixture/workspace",
+          "model_name": "GLM-5.3"
+        }
+      }
+    },
+    {
+      "runtime": "antigravity-app",
+      "version": "1.2.14",
+      "model": {
+        "source": "runtime_default",
+        "modelId": "antigravity://runtime-default",
+        "options": {}
+      },
+      "coreDigest": "1408bf25939692778769b23bbaa74384c42af5d8e830f9c9a34af5ec90744bc2",
+      "launch": "managed isolated Core via native runtime adapter",
+      "coreRestartPreservedProjection": true,
+      "runs": [
+        {
+          "id": "run-1",
+          "sourceRecords": [
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 0,
+                "state": "DONE",
+                "step_type": "user_input"
+              }
+            },
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 1,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {
+                  "input_tokens": 15121,
+                  "output_tokens": 257,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 0,
+                  "total_tokens": 15378
+                }
+              }
+            },
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 3,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {
+                  "input_tokens": 15495,
+                  "output_tokens": 159,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 0,
+                  "total_tokens": 15654
+                }
+              }
+            },
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 5,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {
+                  "input_tokens": 4231,
+                  "output_tokens": 257,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 12204,
+                  "total_tokens": 4488
+                }
+              }
+            },
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 7,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {
+                  "input_tokens": 4633,
+                  "output_tokens": 25,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 12199,
+                  "total_tokens": 4658
+                }
+              }
+            },
+            {
+              "event": "result",
+              "result": {
+                "conversation_id": "session-1",
+                "usage": {
+                  "input_tokens": 39480,
+                  "output_tokens": 698,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 24403,
+                  "total_tokens": 40178
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 24403,
+            "cacheWriteTokens": null,
+            "outputTokens": 698,
+            "promptInputTotalTokens": null
+          },
+          "expectedSessionProjection": []
+        },
+        {
+          "id": "run-2",
+          "sourceRecords": [
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 8,
+                "state": "DONE",
+                "step_type": "user_input"
+              }
+            },
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 10,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {
+                  "input_tokens": 9509,
+                  "output_tokens": 155,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 8130,
+                  "total_tokens": 9664
+                }
+              }
+            },
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 12,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {
+                  "input_tokens": 5692,
+                  "output_tokens": 350,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 12190,
+                  "total_tokens": 6042
+                }
+              }
+            },
+            {
+              "event": "step_update",
+              "step_update": {
+                "conversation_id": "session-1",
+                "step_index": 14,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {
+                  "input_tokens": 18373,
+                  "output_tokens": 30,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 0,
+                  "total_tokens": 18403
+                }
+              }
+            },
+            {
+              "event": "result",
+              "result": {
+                "conversation_id": "session-1",
+                "usage": {
+                  "input_tokens": 73054,
+                  "output_tokens": 1233,
+                  "thinking_tokens": 0,
+                  "cache_read_tokens": 44723,
+                  "total_tokens": 74287
+                }
+              }
+            }
+          ],
+          "expectedRunProjection": {
+            "cacheReadTokens": 20320,
+            "cacheWriteTokens": null,
+            "outputTokens": 535,
+            "promptInputTotalTokens": null
+          },
+          "expectedSessionProjection": []
+        }
+      ]
+    }
+  ]
+}

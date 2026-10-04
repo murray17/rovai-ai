@@ -1,13 +1,14 @@
+import { uiAttribute } from './interface-language'
 import type { RuntimeFailureView } from '@contracts'
 
 export function runtimeFailureTitle(failure: RuntimeFailureView): string {
   const runtimeLabel = publicRuntimeLabel(failure.runtimeKind)
   return ({
-    runtime: `${runtimeLabel} 返回错误`,
-    compatibility: `${runtimeLabel} 与当前 Rovai 版本不兼容`,
-    environment: `${runtimeLabel} 的本机运行环境不可用`,
+    runtime: uiAttribute("{0} 返回错误", String(runtimeLabel)),
+    compatibility: uiAttribute("{0} 与当前 Rovai 版本不兼容", String(runtimeLabel)),
+    environment: uiAttribute("{0} 的本机运行环境不可用", String(runtimeLabel)),
     rovai: 'Rovai 内部错误',
-    unknown: `${runtimeLabel} 未能完成运行`
+    unknown: uiAttribute("{0} 未能完成运行", String(runtimeLabel))
   } as const)[failure.origin]
 }
 
@@ -53,5 +54,5 @@ function publicRuntimeLabel(runtimeKind: RuntimeFailureView['runtimeKind']): str
   return ({
     'claude-code-cli': 'Claude Code',
     'antigravity-app': 'Antigravity'
-  } as Partial<Record<RuntimeFailureView['runtimeKind'], string>>)[runtimeKind] ?? 'Agent 运行时'
+  } as Partial<Record<RuntimeFailureView['runtimeKind'], string>>)[runtimeKind] ?? uiAttribute('未知智能体')
 }

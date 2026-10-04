@@ -105,13 +105,13 @@ try {
     ].join(' '),
     purpose: 'Keep one real Runtime turn active while Rovai performs a controlled shutdown.'
   })
-  const campId = sent.payload?.campId
+  const threadId = sent.payload?.threadId
   const agentRunId = sent.payload?.agentRunIds?.[0]
-  assert(sent.status === 'accepted' && campId && agentRunId,
+  assert(sent.status === 'accepted' && threadId && agentRunId,
     `Real Runtime AgentRun was not accepted: ${JSON.stringify(sent)}`)
 
   await waitFor(async () => {
-    const snapshot = await request('camps.snapshot', { campId })
+    const snapshot = await request('camps.snapshot', { threadId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (['succeeded', 'failed', 'cancelled'].includes(run?.status)) {
       throw new Error(`Real Runtime completed before shutdown could begin: ${JSON.stringify(run)}`)
@@ -123,10 +123,10 @@ try {
       ? snapshot
       : null
   }, 'real Runtime input handoff', 180_000, 40)
-  await openCamp(firstApp.cdp, campId)
+  await openCamp(firstApp.cdp, threadId)
   await appendComposerText(firstApp.cdp, quitDraftSavedPrefix, quitDraftSavedPrefix)
   const savedDraftBeforeQuit = await waitFor(async () => {
-    const draft = await request('camp.composerDraft.get', { campId })
+    const draft = await request('camp.composerDraft.get', { threadId })
     return draft.body === quitDraftSavedPrefix ? draft : null
   }, 'initial Composer Draft autosave', 10_000, 40)
 
@@ -137,7 +137,7 @@ try {
   await appendComposerText(firstApp.cdp, quitDraftLatestSuffix, quitDraftExpectedBody)
   const acceptedText = ['1', 'partial-only', 'text-and-partial'].includes(textAcceptanceMode)
     ? await waitFor(async () => {
-      const snapshot = await request('camps.snapshot', { campId })
+      const snapshot = await request('camps.snapshot', { threadId })
       const text = snapshot.executionEvidence.find((item) => item.agentRunId === agentRunId
         && item.eventType === 'agent.text.block' && item.payload.status === 'streaming'
         && item.payload.text?.length >= 512)
@@ -146,7 +146,7 @@ try {
     : null
   // Delivery can advance from prepared to accepted while the Composer is being
   // exercised. Assert against the boundary just before quit, not the first poll.
-  const beforeQuitSnapshot = await request('camps.snapshot', { campId })
+  const beforeQuitSnapshot = await request('camps.snapshot', { threadId })
   const inputStatusBeforeShutdown = beforeQuitSnapshot.contextManifests
     .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
   const shutdownStartedAt = Date.now()
@@ -199,12 +199,12 @@ try {
   recoveredApp = await launchApp(await availablePort(), 1040, 700)
   const recoveredRequest = (method, params = {}) => appRequest(recoveredApp.cdp, method, params)
   if (acceptedText) {
-    const recoveredText = await recoveredRequest('agentRunEvidence.getContent', { campId, evidenceId: acceptedText.id })
+    const recoveredText = await recoveredRequest('agentRunEvidence.getContent', { threadId, evidenceId: acceptedText.id })
     assert(recoveredText.payload?.status === 'interrupted'
       && recoveredText.payload?.text?.startsWith(acceptedText.text),
     'Normal App quit lost accepted partial text or marked it successfully completed')
   }
-  const recoveredDraft = await recoveredRequest('camp.composerDraft.get', { campId })
+  const recoveredDraft = await recoveredRequest('camp.composerDraft.get', { threadId })
   assert(recoveredDraft.body === quitDraftExpectedBody
     && recoveredDraft.revision > savedDraftBeforeQuit.revision,
   `Normal App quit did not persist the latest Composer Draft: ${JSON.stringify({
@@ -212,7 +212,7 @@ try {
     recovered: recoveredDraft
   })}`)
   const recoveredSnapshot = await waitFor(async () => {
-    const snapshot = await recoveredRequest('camps.snapshot', { campId })
+    const snapshot = await recoveredRequest('camps.snapshot', { threadId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     return run?.status === 'cancelled'
       && run.hasUnsettledExternalEffects === false
@@ -225,7 +225,7 @@ try {
     && recoveredRun.terminalResolutionSource === null
     && recoveredRun.terminalReasonCode === null,
   `Restart changed the fenced execution identity or fabricated Runtime terminal proof: ${JSON.stringify(recoveredRun)}`)
-  await openCamp(recoveredApp.cdp, campId)
+  await openCamp(recoveredApp.cdp, threadId)
   await openAgentProcess(recoveredApp.cdp, agentId)
   const terminal = await collectFencedTerminal(recoveredApp.cdp)
   const terminalCapture = join(outputDir, 'planned-shutdown-fenced-terminal.png')
@@ -525,21 +525,21 @@ function trace(message) {
   }
 }
 
-async function openCamp(cdp, campId) {
+async function openCamp(cdp, threadId) {
   await waitForExpression(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     return [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === target)
   })()`, 30_000)
   const opened = await evaluate(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${campId}`)}
+    const target = ${JSON.stringify(`camp:${threadId}`)}
     const menu = [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .find((element) => element.dataset.sidebarMenuTarget === target)
     const button = menu?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')
     button?.click()
     return Boolean(button)
   })()`)
-  assert(opened, `Could not open Camp ${campId}`)
+  assert(opened, `Could not open Camp ${threadId}`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
 }
 

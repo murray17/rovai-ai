@@ -53,6 +53,7 @@ pub struct OpenSingleChatCommand {
     )]
     pub draft_client: DraftClient,
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
 }
@@ -72,6 +73,7 @@ pub struct SendSingleChatMessageCommand {
     )]
     pub draft_client: DraftClient,
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub conversation_id: String,
     pub body: String,
@@ -87,6 +89,7 @@ impl DomainCommand for SendSingleChatMessageCommand {
 #[serde(rename_all = "camelCase")]
 pub struct EndSingleChatCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub conversation_id: String,
 }
@@ -127,6 +130,7 @@ impl DomainCommand for EndSingleChatCommand {
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatConversationView {
     pub id: String,
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
     pub version: i64,
@@ -157,6 +161,7 @@ pub struct SingleChatMessageView {
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatRunView {
     pub id: String,
+    #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: String,
     pub trigger_conversation_message_id: String,
     pub status: String,
@@ -237,6 +242,7 @@ pub struct EditSingleChatPendingInputCommand {
     )]
     pub draft_client: DraftClient,
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub conversation_id: String,
     pub pending_input_id: String,
@@ -280,6 +286,7 @@ impl DomainCommand for EditSingleChatPendingInputCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PublishSingleChatPendingInput {
+    #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub conversation_id: String,
     pub pending_input_id: String,
@@ -341,7 +348,7 @@ impl SingleChatService {
                             "sequence": {"type": "integer", "minimum": 1},
                             "role": {"type": "string", "enum": ["user", "assistant"]},
                             "body": {"type": "string"},
-                            "quotes": crate::message_quote::model_quotes_schema("current_conversation_messages"),
+                            "quotes": crate::message_quote::model_quotes_schema("current_messages"),
                             "attachments": {
                                 "type": "array",
                                 "items": {
@@ -472,7 +479,7 @@ impl SingleChatService {
             if envelope.camp_id.as_deref() != Some(envelope.payload.camp_id.as_str()) {
                 return Ok(rejected(
                     "single_chat.camp_mismatch",
-                    "Single Chat command is outside the Camp",
+                    "Single Chat command is outside the Thread",
                 ));
             }
             if !active_member(
@@ -482,7 +489,7 @@ impl SingleChatService {
             )? {
                 return Ok(rejected(
                     "single_chat.member_unavailable",
-                    "Single Chat target is not an active Camp member",
+                    "Single Chat target is not an active Thread member",
                 ));
             }
             let active = transaction
@@ -598,13 +605,13 @@ impl SingleChatService {
             {
                 return Ok(rejected(
                     "single_chat.camp_mismatch",
-                    "Single Chat command is outside the Camp",
+                    "Single Chat command is outside the Thread",
                 ));
             }
             if !active_member(transaction, &target.camp_id, &target.agent_id)? {
                 return Ok(rejected(
                     "single_chat.member_unavailable",
-                    "Single Chat target is not an active Camp member",
+                    "Single Chat target is not an active Thread member",
                 ));
             }
             let (draft_revision, source_attachments) =
@@ -725,7 +732,7 @@ impl SingleChatService {
                     "conversationVersion": admitted.conversation_version,
                     "draftRevision": draft_revision + 1,
                     "conversationMessageId": admitted.conversation_message_id,
-                    "campTurnId": admitted.camp_turn_id,
+                    "threadTurnId": admitted.camp_turn_id,
                     "agentRunId": admitted.agent_run_id,
                 }),
                 Some(entity_ref("agent_run", &admitted.agent_run_id)),
@@ -763,7 +770,7 @@ impl SingleChatService {
             {
                 return Ok(rejected(
                     "single_chat.camp_mismatch",
-                    "Single Chat command is outside the Camp",
+                    "Single Chat command is outside the Thread",
                 ));
             }
             if target.ended_at.is_some() {
@@ -1094,7 +1101,7 @@ impl SingleChatService {
             {
                 return Ok(rejected(
                     "single_chat.camp_mismatch",
-                    "Single Chat command is outside the Camp",
+                    "Single Chat command is outside the Thread",
                 ));
             }
             let current = transaction
@@ -1512,7 +1519,7 @@ impl SingleChatService {
                     "conversationVersion": admitted.conversation_version,
                     "pendingInputId": command.pending_input_id,
                     "conversationMessageId": admitted.conversation_message_id,
-                    "campTurnId": admitted.camp_turn_id,
+                    "threadTurnId": admitted.camp_turn_id,
                     "agentRunId": admitted.agent_run_id,
                 }),
                 Some(entity_ref("agent_run", &admitted.agent_run_id)),
@@ -2423,7 +2430,7 @@ fn admit_single_chat_message(
         &json!({
             "conversationId": target.conversation_id,
             "conversationVersion": target.version + 1,
-            "campTurnId": camp_turn_id,
+            "threadTurnId": camp_turn_id,
             "agentRunId": agent_run_id,
             "publicBoundary": target.current_public_boundary_sequence,
             "attachmentCount": source_attachments.len(),
@@ -2437,7 +2444,7 @@ fn admit_single_chat_message(
         actor,
         None,
         &json!({
-            "campTurnId": camp_turn_id,
+            "threadTurnId": camp_turn_id,
             "conversationId": target.conversation_id,
             "invocationKind": "single_chat",
             "responseDelivery": SINGLE_CHAT_RESPONSE_DELIVERY,
@@ -2628,18 +2635,18 @@ pub fn authorize_builtin_operation(
             }),
         )));
     }
-    if matches!(operation, "camp.search" | "camp.read") {
+    if matches!(operation, "thread.search" | "thread.read") {
         let requested_camp_id = input
-            .get("campId")
+            .get("threadId")
             .or_else(|| input.get("camp_id"))
             .and_then(Value::as_str);
         if requested_camp_id.is_some_and(|requested| requested != camp_id) {
             return Ok(Some(CommandHandlerResult::rejected(
                 "single_chat.cross_camp_denied",
                 json!({
-                    "message": "Single Chat can only read the current Camp.",
+                    "message": "Single Chat can only read the current Thread.",
                     "operation": operation,
-                    "campId": requested_camp_id,
+                    "threadId": requested_camp_id,
                 }),
             )));
         }
@@ -2707,7 +2714,7 @@ pub fn single_chat_operation_policy_is_supported(policy: &str, version: i64) -> 
 fn single_chat_operation_is_allowed(policy_version: i64, operation: &str) -> bool {
     matches!(
         operation,
-        "camp.search" | "camp.read" | SINGLE_CHAT_HISTORY_TOOL_NAME
+        "thread.search" | "thread.read" | SINGLE_CHAT_HISTORY_TOOL_NAME
     ) || (policy_version >= 2 && matches!(operation, "mission.list" | "mission.get"))
 }
 
@@ -2715,7 +2722,7 @@ fn single_chat_operation_is_allowed(policy_version: i64, operation: &str) -> boo
 mod tests {
     use super::*;
     use crate::{
-        collaboration::{CollaborationService, CreateCampCommand},
+        collaboration::{CollaborationService, CreateThreadCommand},
         command::{CommandResultStatus, canonical_json_digest},
         local_attachment_source::{
             LocalAttachmentFailure, LocalAttachmentOwnerLocator, load_agent_run_source_attachments,
@@ -2748,12 +2755,12 @@ mod tests {
                 &user_envelope(
                     "single-chat-create-camp",
                     None,
-                    CreateCampCommand::for_test(workspace.to_string_lossy().to_string()),
+                    CreateThreadCommand::for_test(workspace.to_string_lossy().to_string()),
                 ),
             )
             .unwrap();
         assert_eq!(created.result.status, CommandResultStatus::Applied);
-        let camp_id = created.result.payload["campId"]
+        let camp_id = created.result.payload["threadId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -3243,7 +3250,7 @@ mod tests {
             "{:?}",
             completed.result
         );
-        assert!(completed.result.payload["finalCampMessageId"].is_null());
+        assert!(completed.result.payload["finalThreadMessageId"].is_null());
         let public_messages: i64 = database
             .connection()
             .query_row(
@@ -3272,7 +3279,7 @@ mod tests {
             .iter()
             .filter_map(|change| change.heads_up_signal.as_ref())
             .find(|signal| {
-                signal.semantic == crate::notification::NotificationSemantic::TurnCompleted
+                signal.semantic == crate::notification::NotificationSemantic::SingleChatReply
             })
             .unwrap();
         let source = signal.action.single_chat.as_ref().unwrap();
@@ -3292,7 +3299,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(private_snapshot.agent_runs[0].camp_turn_id, turn_id);
-        // A public next turn does not satisfy a private result, even in the same Camp.
+        // A public next turn does not satisfy a private result, even in the same Thread.
         database.connection().execute(
             r#"INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, version, created_at, updated_at)
                VALUES('public-next-turn', ?1, 'system_event', 'next', 'running', 1, '2099-01-01', '2099-01-01')"#, [&camp_id]).unwrap();
@@ -3412,6 +3419,62 @@ mod tests {
             )
             .unwrap();
         assert_eq!(leaked, 0);
+        let (failed_conversation, _) = open(
+            &service,
+            &mut database,
+            &camp_id,
+            "single-chat-open-failure",
+        );
+        let failed_send = send(
+            &service,
+            &mut database,
+            &camp_id,
+            &failed_conversation,
+            "single-chat-send-failure",
+        );
+        let failed_run = failed_send.result.payload["agentRunId"].as_str().unwrap();
+        database.connection().execute("UPDATE agent_run SET status='failed',ended_at=datetime('now'),updated_at=datetime('now') WHERE id=?1",[failed_run]).unwrap();
+        let changes = notifications
+            .changes_since(&mut database, "local_user", through, 100)
+            .unwrap();
+        let failure = changes
+            .changes
+            .iter()
+            .filter_map(|c| c.heads_up_signal.as_ref())
+            .find(|s| s.semantic == crate::notification::NotificationSemantic::TurnFailed)
+            .unwrap();
+        assert_eq!(
+            failure.action.single_chat.as_ref().unwrap().agent_run_id,
+            failed_run
+        );
+        assert_eq!(
+            failure.action.single_chat.as_ref().unwrap().conversation_id,
+            failed_conversation
+        );
+        let failure_id = failure.action.acknowledgement_id.clone().unwrap();
+        service
+            .end(
+                &mut database,
+                &user_envelope(
+                    "single-chat-close-failure",
+                    Some(&camp_id),
+                    EndSingleChatCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: failed_conversation,
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(database.connection().query_row("SELECT resolved_at IS NOT NULL FROM notification_occurrence_disposition WHERE occurrence_id=?1",[failure_id],|r|r.get::<_,bool>(0)).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT count(*) FROM notification_round", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "private work never admits a public round"
+        );
     }
 
     #[test]
@@ -3447,8 +3510,8 @@ mod tests {
                 &database,
                 &run_id,
                 1,
-                "camp.read",
-                &json!({"campId": camp_id}),
+                "thread.read",
+                &json!({"threadId": camp_id}),
             )
             .unwrap()
             .is_none()
@@ -3473,7 +3536,8 @@ mod tests {
             );
         }
         for denied_operation in [
-            "camp.message.send",
+            "thread.runs",
+            "thread.message.send",
             "team.gather",
             "team.get_task",
             "team.list_tasks",
@@ -3492,8 +3556,8 @@ mod tests {
             &database,
             &run_id,
             1,
-            "camp.search",
-            &json!({"campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}),
+            "thread.search",
+            &json!({"threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}),
         )
         .unwrap()
         .unwrap();
@@ -3810,7 +3874,7 @@ mod tests {
         );
     }
 
-    // Private Draft refs and Pending FIFO share a transaction, independently of Camp Draft.
+    // Private Draft refs and Pending FIFO share a transaction, independently of Thread Draft.
     #[test]
     fn returning_pending_input_restores_private_draft_and_releases_the_next_input() {
         let (mut database, camp_id) = fixture();

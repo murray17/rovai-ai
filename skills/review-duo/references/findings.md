@@ -1,121 +1,81 @@
-# Finding 与报告
+# Findings and reports
 
-## Finding 准入
+Report a locatable problem with evidence or a rule, real impact and a useful correction. Exclude preferences, harmless observations and duplicates within an axis.
 
-只报告能够说明具体问题、证据或规则、实际影响和处理方向的问题。不要报告纯个人偏好、没有实际影响的观察、无法定位的问题或同一方向内的重复问题。
+Per axis: at most 8 findings, ordered by severity and impact. Each problem/evidence/impact/recommendation field uses 1-2 sentences. Aim for 2,000-2,500 Chinese characters, or comparable brevity in the user's language. If important evidence will not fit, mark `partial`, state coverage limits and suggest a narrower review.
 
-每个方向最多 8 条 finding，按严重度和影响排序。每条的“问题、依据、影响、建议”分别只写 1–2 句；单方向完整结果目标控制在约 2,000–2,500 个中文字符。无法在该范围内保留重要问题和必要证据时，把状态标记为 `partial`，列出覆盖限制，并建议缩小范围重新评审。
+| Severity | Meaning |
+| --- | --- |
+| `blocker` | Unsafe to merge; severe data, security or core-requirement failure |
+| `high` | Major functional error, persistent inconsistency or missing key requirement |
+| `medium` | Important boundary, maintenance or test risk usually needing a pre-merge fix |
+| `low` | Local quality or clarity issue with concrete value |
 
-## 严重度
+## Finding
 
-```text
-blocker
-无法安全合并，可能造成严重数据、安全或核心需求失败。
-
-high
-会导致主要功能错误、持久状态不一致或关键需求缺失。
-
-medium
-影响重要边界、维护性或测试保障，通常应在合并前处理。
-
-low
-局部质量或清晰度问题，影响较小但有明确改进价值。
-```
-
-## 规范与质量 Finding
+Use `STD-01` for Standards or `SPEC-01` for Spec, preserving stable IDs. Spec also names the requirement ID. Localize labels, not identifiers:
 
 ```markdown
-### STD-01 · high
-
-`path/to/file.ts:42`
-
-**问题：** <1–2 句完整判断>
-
-**依据：** <1–2 句仓库规则、代码或调用链证据>
-
-**影响：** <1–2 句实际后果>
-
-**建议：** <1–2 句最小处理方向>
+### STD-01 / SPEC-01: high
+Location: `path/to/file.ts:42`
+Requirement: `REQ-03` (Spec only)
+Problem: ...
+Evidence: ...
+Impact: ...
+Recommendation: ...
+Needs verification: <only when evidence is insufficient>
 ```
 
-## 需求 Finding
+## Complete axis result
+
+Title the result Standards and quality or Spec compliance, in the user's language:
 
 ```markdown
-### SPEC-01 · high
+Scope: <fixed identifier>
+Reviewer: <member>
+Status: complete | partial | blocked | not_assessed
+Finding count: <0-8>
 
-`REQ-03` · `path/to/file.ts:42`
+Findings:
+<full findings, or no reportable findings>
 
-**问题：** <1–2 句实现如何偏离需求>
-
-**依据：** <1–2 句稳定需求来源和实现证据>
-
-**影响：** <1–2 句对用户或验收条件的影响>
-
-**建议：** <1–2 句最小处理方向>
+Coverage and limits:
+- Reviewed: ...
+- Not reviewed: ...
+- Not run: ...
 ```
 
-证据不足但值得关注时，在 finding 末尾增加：
+Standards cannot be `not_assessed`. Zero findings does not prove correctness; retain coverage limits. Carry only the fixed scope, without extra correlation keys, result fragments or manifests.
 
-```text
-需要验证：<需要什么证据才能确认>
-```
+## Final report
 
-## 单方向结果
-
-标题使用“规范与质量结果”或“需求符合度结果”，正文包含：
+Present Standards first, then Spec:
 
 ```markdown
-**评审范围：** `<固定范围>`
-**评审者：** <成员>
-**状态：** complete | partial | blocked | not_assessed
-**Finding 数量：** <0–8>
+# Review Duo result
+Scope: <fixed identifier>
+Mode: duo | solo fallback
+Freshness: current | stale
 
-## Findings
+## Standards and quality
+Reviewer: ...
+Status: complete | partial | blocked
+Finding count: ...
+Key findings: <at most 3; original order, ID, severity and problem statement>
+Coverage limits: ...
 
-<完整 findings；没有时写“未发现达到报告门槛的问题”>
+## Spec compliance
+Reviewer: ...
+Status: complete | partial | blocked | not_assessed
+Finding count: ...
+Key findings: <at most 3; original order, ID, severity and problem statement>
+Coverage limits: ...
 
-## 覆盖与限制
-
-- 已检查：...
-- 未检查：...
-- 未运行：...
+## Overall limits
+Not reviewed: ...
+Not run: ...
+Full findings remain in the two preceding axis results.
+This report applies only to the fixed scope above.
 ```
 
-规范与质量方向不使用 `not_assessed`。没有 finding 不等于已经证明全部正确，必须同时查看覆盖和限制。单方向结果只携带固定评审范围，不增加独立关联键、结果分片或清单。
-
-## 最终报告
-
-```markdown
-# 双人代码评审结果
-
-## 评审范围
-
-- 固定范围：...
-- 模式：双人 | 单人降级
-- 状态：current | stale
-
-## 规范与质量
-
-- 评审者：...
-- 状态：complete | partial | blocked
-- Finding 数量：...
-- 重要问题：最多 3 条，按原顺序列出 `<ID> · <severity> · <原“问题”句>`
-- 覆盖限制：...
-
-## 需求符合度
-
-- 评审者：...
-- 状态：complete | partial | blocked | not_assessed
-- Finding 数量：...
-- 重要问题：最多 3 条，按原顺序列出 `<ID> · <severity> · <原“问题”句>`
-- 覆盖限制：...
-
-## 总体限制
-
-- 未检查：...
-- 未运行：...
-- 完整 finding 保留在前面的两条轴结果中。
-- 本报告只适用于上述固定代码范围。
-```
-
-最终报告固定先呈现“规范与质量”，再呈现“需求符合度”。不得复制两个方向的全部 finding，不得跨方向合并、删除、重新编号或改变严重度，也不得给出掩盖其中一个方向的单一总分。
+Do not repeat both full finding lists, merge/delete/renumber findings across axes, change severity, or produce a combined score that hides either axis.

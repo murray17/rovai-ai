@@ -6,6 +6,7 @@ import {
   VISIBLE_PRODUCT_RUNTIMES,
   adapterLabel
 } from './runtime-products'
+import { UiText , uiAttribute } from './interface-language'
 
 export function RuntimeGlyph({
   kind
@@ -62,12 +63,10 @@ export function MemberRuntimePicker({
   isDisabled(kind: AdapterKind): boolean
   onChange(kind: AdapterKind | ''): void
 }): React.JSX.Element {
-  const label = value ? adapterLabel(value) : '暂不配置'
+  const label = value ? adapterLabel(value) : uiAttribute('暂不配置')
   return (
     <div className="member-editor-field member-runtime-picker-field">
-      <label className="member-editor-field-label" htmlFor={id}>
-        Agent 运行时
-      </label>
+      <label className="member-editor-field-label" htmlFor={id}><UiText zh={"智能体类型"} /></label>
       <Menu.Root>
         <Menu.Trigger asChild>
           <button
@@ -76,7 +75,7 @@ export function MemberRuntimePicker({
             type="button"
             className="member-runtime-picker"
             disabled={disabled}
-            aria-label={`Agent 运行时，${label}`}
+            aria-label={uiAttribute("智能体类型，{0}", String(label))}
           >
             <RuntimeGlyph kind={value} />
             <span>{label}</span>
@@ -106,13 +105,13 @@ export function MemberRuntimePicker({
               <div className="runtime-picker-scroll">{(['', ...VISIBLE_PRODUCT_RUNTIMES] as const).map((kind) => (
                 <Menu.RadioItem
                   key={kind}
-                  textValue={kind ? adapterLabel(kind) : '暂不配置'}
+                  textValue={kind ? adapterLabel(kind) : uiAttribute("暂不配置")}
                   disabled={Boolean(kind && isDisabled(kind))}
                   value={kind || '__none__'}
                   className="runtime-model-picker-item member-runtime-menu-item"
                 >
                   <RuntimeGlyph kind={kind} />
-                  <span className="runtime-model-picker-copy"><strong>{kind ? adapterLabel(kind) : '暂不配置'}</strong></span>
+                  <span className="runtime-model-picker-copy"><strong>{kind ? adapterLabel(kind) : uiAttribute("暂不配置")}</strong></span>
                   <Menu.ItemIndicator className="runtime-model-picker-check">
                     <svg aria-hidden="true" viewBox="0 0 16 16">
                       <path d="m3.5 8.2 2.8 2.8 6.2-6.2" />

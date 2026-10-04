@@ -1,0 +1,4 @@
+This is an isolated native Usage and Session Context acceptance.
+Use read-only shell commands to inspect the workspace, then explain a resilient library catalogue design in about 600 words.
+Discuss consistency, retries, concurrency and recovery. Do not delegate or modify files.
+Finish normally and send a brief completion with rovai send --public-only, following the Session Charter.

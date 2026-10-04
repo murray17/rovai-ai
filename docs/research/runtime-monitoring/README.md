@@ -9,6 +9,29 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 
 # Rovai AI 运行监控指标可采集性审计
 
+> 2026-10-02：按用户要求撤下全部 Runtime 的输出测速。以下速度、v2/v3、思考计数及旧探针记录均为历史证据，
+> 对应代码保留在 Git 提交 `ee444ab1`。当前只保留原生用量与 Session 上下文，见[执行指标合同](../../contracts/runtime-execution-metrics-v7.md)。
+
+当前执行台的取数范围、隐藏暂停、引用复用与迟到刷新收口见[执行指标读取验收](execution-metrics-refresh-verification-2026-10-01.md)。
+
+2026-10-04 [上下文运行中可用性收口](live-context-usability-2026-10-04.md)：输入确认解绑、实际模型窗口复用及 ZCode 事件触发读取。
+
+2026-10-03 [运行中 Context 缺失复核](live-context-verification-2026-10-03.md)：Claude 不再等待整轮终态；逐 Runtime 列出采样时机与 ACP 输入确认限制。
+
+2026-10-03 [分批刷盘一致性修复](flush-partition-verification-2026-10-03.md)：逐调用归一化与请求计数、累计基线/重置、部分状态；使用合成固定回放。
+
+同日[空值与 Kiro used 复核](kiro-and-field-audit-2026-10-03.md)：更正旧探针遗漏 `breakdown` 的结论；Kiro 分类 token 估算与总体比例不一致，不能作为 used。复核 15 类实际 Renderer 与 26 次根调用，列出剩余字段及模型/版本标注勘误。
+
+同日[五类原生来源补查](native-source-completion-2026-10-03.md)：Antigravity 四项与 Context、Qoder 数量、TRAE Context、Kiro 窗口补接；CodeBuddy 当前模型窗口及 Kiro 精确 used/Token 仍未取得。
+
+此前[遗漏字段修复核验](missing-fields-verification-2026-10-03.md)：DSH 总量、ZCode Context 补接；
+Run 总量 13/15、上下文比例 12/15，全矩阵未完整通过。[同会话验收](all-runtime-app-verification-2026-10-03.md)
+保留初始 15 类 Runtime 数值与界面对照，不再作为字段齐全的结论。
+
+2026-10-02 本轮补采与版本兼容结果见[原生来源验收](native-format-compatibility-2026-10-02.md)。
+
+此前执行台的字段与 App 证据见[原生压缩、冷恢复与剩余链路验收（2026-10-01）](native-boundaries-verification-2026-10-01.md)。[原生比例与当前占用核验](native-context-ratio-verification-2026-10-01.md)、[原生来源补接](native-usage-context-verification-2026-09-30.md)、[第二轮字段级核验](execution-metrics-verification-2026-09-29.md)、[v3 思考验收](observable-output-v3-verification-2026-09-30.md)与[首轮记录](observable-output-v3-verification-2026-09-29.md)保留各自当时的范围。本文是历史设计输入，版本与支持判断以当次实测记录为准。
+
 > 本文审计设置页“运行监控”原型中的数据是否能由 Rovai 当前事实和 Runtime 原生协议可靠提供。
 > 用户提供的 HTML、Research 报告和 Codex Brief 仅作为需求与候选设计输入，不是仓库权威合同；
 > 结论以当前代码、已有真实 Fixture、当前文档和上游官方协议为准。

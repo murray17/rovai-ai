@@ -23,14 +23,23 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
     return Reflect.apply(writeHead, this, args)
   } as typeof writeHead
   try {
-    await run(`window.previewAcceptance.open({kind:'camp_workspace',campId:'preview-test',rawReference:'history.html'})`)
+    await run(`window.previewAcceptance.open({kind:'camp_workspace',threadId:'preview-test',rawReference:'history.html'})`)
     await wait(`${stage}?.dataset.documentState==='loaded' && ${stage}?.dataset.serverDiagnosticsState==='connected'`)
   } finally { ServerResponse.prototype.writeHead = writeHead }
   if (!streams.size) throw new Error('Fixture did not observe the diagnostic stream')
   await run(`window.lifecycleFrame=${stage}.querySelector('iframe')`)
   const origin = await run('window.previewAcceptance.activeTab.content.preview.origin')
   const frame = window.webContents.mainFrame.framesInSubtree.find(frame => frame.url.startsWith(origin))!
-  await frame.executeJavaScript(`window.retainedValue=42;document.body.style.minHeight='2000px';const input=document.createElement('input');input.id='retained-input';input.value='诊断断流后保留的输入';input.style.cssText='position:fixed;top:80px;left:24px;width:300px';document.body.append(input);window.scrollTo(0,150)`)
+  await frame.executeJavaScript(`window.retainedValue=42;document.body.style.minHeight='2000px';const input=document.createElement('input');input.id='retained-input';input.value='诊断断流后保留的输入';input.style.cssText='position:fixed;top:80px;left:24px;width:300px';document.body.append(input);document.body.offsetHeight;window.scrollTo(0,150)`)
+  // A hidden Linux Chromium window can defer layout until the next frame.
+  // Establish the scroll position before testing whether diagnostic loss keeps it.
+  for (let count = 0; count < 40; count++) {
+    if (await frame.executeJavaScript('scrollY === 150')) break
+    await new Promise(resolve => setTimeout(resolve, 25))
+    await frame.executeJavaScript('window.scrollTo(0,150)')
+  }
+  const scrollBefore = await frame.executeJavaScript('scrollY')
+  if (scrollBefore !== 150) throw new Error(`Fixture could not establish preview scroll position: ${scrollBefore}`)
   const timeOrigin = await frame.executeJavaScript('performance.timeOrigin')
   const snapshot = () => run(`(() => {const stage=${stage}; return {document:stage?.dataset.documentState, channel:stage?.dataset.channelState,
     diagnostics:stage?.dataset.serverDiagnosticsState, summary:stage?.querySelector('.file-preview-html-feedback')?.textContent ?? '',
@@ -51,7 +60,7 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
         && interrupted.summary === '诊断详情' && interrupted.expanded === 'false' && !interrupted.warning && !interrupted.alert
         && interrupted.text.includes('资源诊断连接中断，部分资源错误信息可能不完整')
         && retained.value === 42 && retained.input === '诊断断流后保留的输入' && retained.top === 150 && retained.timeOrigin === timeOrigin,
-      evidence: { interrupted, retained } })
+      evidence: { interrupted, scrollBefore, retained } })
   }
   await wait(`${stage}?.dataset.serverDiagnosticsState==='connected'`)
   const recovered = await snapshot()

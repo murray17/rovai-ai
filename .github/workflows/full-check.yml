@@ -11,6 +11,7 @@ on:
           - full
           - server
           - server-updates
+          - desktop-windows
       server_target:
         description: Native Server target (server or server-updates scope)
         type: choice
@@ -22,7 +23,7 @@ on:
           - windows-x64
           - linux-x64
       server_release_draft:
-        description: Assemble a GitHub draft Release after all native targets pass (main only)
+        description: Add Server assets to the unified draft Release after native checks pass (main only)
         type: boolean
         default: false
 
@@ -70,6 +71,38 @@ jobs:
         env:
           ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
         run: xvfb-run -a pnpm test:desktop:integration
+
+  desktop-windows:
+    name: Windows Desktop
+    if: inputs.scope == 'full' || inputs.scope == 'desktop-windows'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - name: Check close policy and existing quit/update owners
+        run: pnpm exec vitest run apps/desktop/src/main/windows-window-close.test.ts apps/desktop/src/main/window-close-preferences.test.ts apps/desktop/src/main/window-close-ipc.test.ts apps/desktop/src/preload/window-close-api.test.ts apps/desktop/src/main/app-quit-coordinator.test.ts apps/desktop/src/main/app-updates.test.ts
+      - name: Exercise Windows close choice and native tray
+        env:
+          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
+        run: pnpm test:windows-close
+      - name: Preserve standalone window close
+        env:
+          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
+        run: pnpm test:window-close
+      - name: Verify the isolated production bridge
+        env:
+          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
+        run: pnpm test:desktop-bridge
 
   rust-full:
     if: inputs.scope == 'full'
@@ -363,7 +396,7 @@ jobs:
           if-no-files-found: error
 
   server-release-draft:
-    name: Assemble native Server draft Release
+    name: Assemble unified draft Release with native Server assets
     needs: [server-native, server-linux-os, server-linux-debian]
     if: inputs.scope == 'server' && inputs.server_release_draft && inputs.server_target == 'all' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -375,7 +408,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24
+          node-version: 26
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.20.0
+          run_install: false
+      - name: Install locked dependencies for release-note validation
+        run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: rovai-server-archive-*-${{ github.sha }}
@@ -389,4 +428,4 @@ jobs:
         run: |
           set -euo pipefail
           version=$(node -p 'require("./package.json").version')
-          gh release create "server-v$version" --draft --target "$GITHUB_SHA" --title "Rovai Server $version" --notes-file out/server-release/RELEASE-NOTES.md out/server-release/*.tar.gz out/server-release/*.zip out/server-release/SHA256SUMS scripts/install-server.sh scripts/install-server.ps1
+          gh release create "v$version" --draft --target "$GITHUB_SHA" --title "Rovai AI v$version" --notes-file out/server-release/RELEASE-NOTES.md out/server-release/*.tar.gz out/server-release/*.zip out/server-release/SHA256SUMS scripts/install-server.sh scripts/install-server.ps1

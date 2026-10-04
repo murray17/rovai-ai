@@ -327,7 +327,7 @@ async function runTrial(options, registerCleanup) {
       defaultLeadAgentId: 'agent_1',
       collaborationMode: 'peer'
     })
-    const campId = createResult.payload?.campId
+    const campId = (createResult.payload?.threadId ?? createResult.payload?.campId)
     if (createResult.status !== 'applied' || !campId) {
       throw new Error(`qualification Camp creation failed: ${JSON.stringify(createResult)}`)
     }
@@ -405,7 +405,7 @@ async function runTrial(options, registerCleanup) {
       throw new Error(`qualification dispatch was not accepted: ${JSON.stringify(commandResult)}`)
     }
     dispatchAccepted = true
-    const batchPublication = !commandResult.payload.campTurnId
+    const batchPublication = !(commandResult.payload.threadTurnId ?? commandResult.payload.campTurnId)
       && Array.isArray(commandResult.payload.deliveryIds)
     const frozenBudgetInspection = batchPublication
       ? { budget: null, issues: [] }
@@ -419,8 +419,8 @@ async function runTrial(options, registerCleanup) {
       runnerObservedAcceptedAt: new Date().toISOString(),
       requestBodyDigest: sha256(caseRecord.contract.prompt),
       campId,
-      campTurnId: commandResult.payload.campTurnId,
-      rootCampMessageId: commandResult.payload.campMessageId ?? null,
+      campTurnId: (commandResult.payload.threadTurnId ?? commandResult.payload.campTurnId),
+      rootCampMessageId: (commandResult.payload.threadMessageId ?? commandResult.payload.campMessageId) ?? null,
       rootAgentRunId: commandResult.payload.agentRunIds?.[0] ?? null,
       rootAgentRunIds: [...(commandResult.payload.agentRunIds ?? [])].sort(),
       preDispatchThroughGlobalSequence: preDispatchSnapshot.throughGlobalSequence,
@@ -453,8 +453,8 @@ async function runTrial(options, registerCleanup) {
     }
     await atomicWriteJson(join(evidenceDirectory, 'dispatch-boundary.json'), dispatchBoundary)
     await appendLifecycle('dispatched', {
-      campId: dispatchBoundary.campId,
-      campTurnId: dispatchBoundary.campTurnId,
+      campId: (dispatchBoundary.threadId ?? dispatchBoundary.campId),
+      campTurnId: (dispatchBoundary.threadTurnId ?? dispatchBoundary.campTurnId),
       rootAgentRunId: dispatchBoundary.rootAgentRunId
     })
     await appendLifecycle('observing')
@@ -908,8 +908,8 @@ async function runTrial(options, registerCleanup) {
       freshStateNonce,
       dataDirectory,
       workspacePath,
-      campId: dispatchBoundary?.campId ?? null,
-      campTurnId: dispatchBoundary?.campTurnId ?? null,
+      campId: (dispatchBoundary?.threadId ?? dispatchBoundary?.campId) ?? null,
+      campTurnId: (dispatchBoundary?.threadTurnId ?? dispatchBoundary?.campTurnId) ?? null,
       snapshot: finalSnapshot,
       evidenceIndex: evidenceIndexBuild.artifact,
       producerDigest: evaluatorDigest
@@ -987,7 +987,7 @@ async function runTrial(options, registerCleanup) {
       observedAcceptedA2a: isBatchTrialBoundary(dispatchBoundary)
         ? trialAgentDeliveries(finalSnapshot, dispatchBoundary).length
         : finalSnapshot?.turns?.find(
-          (turn) => turn.id === dispatchBoundary?.campTurnId
+          (turn) => turn.id === (dispatchBoundary?.threadTurnId ?? dispatchBoundary?.campTurnId)
         )?.executionBudget?.acceptedA2a ?? null,
       observedDurableA2aEffects: observedDurableMemberCallEffects(
         finalSnapshot,
@@ -996,7 +996,7 @@ async function runTrial(options, registerCleanup) {
       acceptedA2aAuthority: isBatchTrialBoundary(dispatchBoundary)
         ? 'runner_observed_durable_agent_deliveries'
         : finalSnapshot?.turns?.find(
-        (turn) => turn.id === dispatchBoundary?.campTurnId
+        (turn) => turn.id === (dispatchBoundary?.threadTurnId ?? dispatchBoundary?.campTurnId)
       )?.executionBudget
         ? 'core_canonical_acceptance_receipt_counter'
         : 'unavailable'
@@ -1595,7 +1595,7 @@ function normalizeSnapshot(snapshot) {
     schemaVersion: snapshot.schemaVersion,
     ...(snapshot.evaluationContext ? { evaluationContext: snapshot.evaluationContext } : {}),
     throughGlobalSequence: snapshot.throughGlobalSequence,
-    camp: snapshot.camp,
+    camp: (snapshot.thread ?? snapshot.camp),
     members: snapshot.members,
     turns: snapshot.turns,
     agentRuns: snapshot.agentRuns,
@@ -1825,7 +1825,7 @@ function buildFreshStateAttestation({
   evidenceIndex,
   producerDigest
 }) {
-  const trialRuns = (snapshot?.agentRuns ?? []).filter((run) => run.campTurnId === campTurnId)
+  const trialRuns = (snapshot?.agentRuns ?? []).filter((run) => (run.threadTurnId ?? run.campTurnId) === campTurnId)
   const conversationIds = [...new Set(trialRuns
     .map((run) => run.conversationId)
     .filter((value) => typeof value === 'string' && value.length > 0))].sort()

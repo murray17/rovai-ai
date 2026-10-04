@@ -58,16 +58,16 @@ try {
   }
   if (createReplay.commandId !== created.commandId
       || createReplay.requestDigest !== created.requestDigest
-      || createReplay.payload?.campId !== created.payload?.campId) {
+      || createReplay.payload?.threadId !== created.payload?.threadId) {
     throw new Error(`Configured Camp creation replay was not stable: ${JSON.stringify(createReplay)}`)
   }
 
-  const campId = created.payload.campId
-  let snapshot = await core.request('camps.snapshot', { campId })
-  if (snapshot.camp.title !== '未命名对话'
-      || snapshot.camp.projectBindingKind !== 'directory'
-      || snapshot.camp.projectPath !== selectedWorkspace.projectPath
-      || snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentId
+  const threadId = created.payload.threadId
+  let snapshot = await core.request('camps.snapshot', { threadId })
+  if (snapshot.thread.title !== '未命名对话'
+      || snapshot.thread.projectBindingKind !== 'directory'
+      || snapshot.thread.projectPath !== selectedWorkspace.projectPath
+      || snapshot.thread.defaultLeadAgentId !== structural.initialLeadAgentId
       || snapshot.members.length !== structural.presentMembers.length
       || snapshot.messages.length !== 0
       || snapshot.turns.length !== 0
@@ -76,14 +76,14 @@ try {
   }
   const navigationAfterCreation = await core.request('navigation.snapshot')
   if (!navigationAfterCreation.projects
-    .flatMap((project) => project.recentCamps)
-    .some((candidate) => candidate.id === campId && candidate.title === '未命名对话')) {
+    .flatMap((project) => project.recentThreads)
+    .some((candidate) => candidate.id === threadId && candidate.title === '未命名对话')) {
     throw new Error(`Empty Camp did not appear in navigation: ${JSON.stringify(navigationAfterCreation)}`)
   }
 
   await core.stop()
   core = startCore(dataDir)
-  const restoredEmptySnapshot = await core.request('camps.snapshot', { campId })
+  const restoredEmptySnapshot = await core.request('camps.snapshot', { threadId })
   if (restoredEmptySnapshot.messages.length !== 0
       || restoredEmptySnapshot.turns.length !== 0
       || restoredEmptySnapshot.agentRuns.length !== 0) {
@@ -106,8 +106,8 @@ try {
     const deletion = await core.request('camps.delete', {
       commandId: crypto.randomUUID(),
       command: {
-        campId,
-        expectedVersion: restoredEmptySnapshot.camp.version
+        threadId,
+        expectedVersion: restoredEmptySnapshot.thread.version
       }
     })
     if (deletion.status !== 'accepted' || deletion.code !== 'camp.delete_accepted') {
@@ -122,7 +122,7 @@ try {
     console.log(JSON.stringify({
       ok: true,
       platform: 'windows-x64',
-      campId,
+      threadId,
       structuralIntake: true,
       emptyCampRestartStable: true,
       runtimeExecutionBlocked: platformBlock,
@@ -139,12 +139,12 @@ try {
   const sendCommandId = crypto.randomUUID()
   const firstDraft = await saveComposerDraft(
     core.request,
-    campId,
+    threadId,
     'Reply with INTAKE_OK. Do not call tools.'
   )
   const firstRequest = {
     commandId: sendCommandId,
-    campId,
+    threadId,
     draftRevision: firstDraft.revision,
     execution: {
       taskId: null,
@@ -164,14 +164,14 @@ try {
   }
 
   snapshot = await waitFor(core.request, async () => {
-    const candidate = await core.request('camps.snapshot', { campId })
+    const candidate = await core.request('camps.snapshot', { threadId })
     return candidate.agentRuns[0]?.status === 'succeeded'
       && candidate.messages.some((message) => message.authorType === 'agent' && message.body.includes('INTAKE_OK'))
       ? candidate
       : null
   }, 'first Camp AgentRun')
-  if (snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentId
-      || snapshot.camp.title === '未命名对话'
+  if (snapshot.thread.defaultLeadAgentId !== structural.initialLeadAgentId
+      || snapshot.thread.title === '未命名对话'
       || snapshot.members.length !== 4
       || snapshot.turns.length !== 1
       || snapshot.agentRuns.length !== 1
@@ -183,12 +183,12 @@ try {
   const firstConversationId = snapshot.agentRuns[0].conversationId
   const followUpDraft = await saveComposerDraft(
     core.request,
-    campId,
+    threadId,
     'Reply with CONTINUE_OK. Do not call tools.'
   )
   const followUp = await core.request('camp.messages.send', {
     commandId: crypto.randomUUID(),
-    campId,
+    threadId,
     draftRevision: followUpDraft.revision,
     execution: {
       taskId: null,
@@ -200,7 +200,7 @@ try {
     throw new Error(`Follow-up Camp message was not accepted: ${JSON.stringify(followUp)}`)
   }
   snapshot = await waitFor(core.request, async () => {
-    const candidate = await core.request('camps.snapshot', { campId })
+    const candidate = await core.request('camps.snapshot', { threadId })
     return candidate.agentRuns.length === 2
       && candidate.agentRuns.every((agentRun) => agentRun.status === 'succeeded')
       && candidate.messages.some((message) => message.authorType === 'agent' && message.body.includes('CONTINUE_OK'))
@@ -215,9 +215,9 @@ try {
   core = startCore(dataDir)
   const restoredNavigation = await core.request('navigation.snapshot')
   const restoredCamp = restoredNavigation.projects
-    .flatMap((project) => project.recentCamps)
-    .find((candidate) => candidate.id === campId)
-  const restoredSnapshot = await core.request('camps.snapshot', { campId })
+    .flatMap((project) => project.recentThreads)
+    .find((candidate) => candidate.id === threadId)
+  const restoredSnapshot = await core.request('camps.snapshot', { threadId })
   if (!restoredCamp || restoredSnapshot.messages.length !== snapshot.messages.length
       || restoredSnapshot.agentRuns[1]?.conversationId !== firstConversationId) {
     throw new Error('Core restart did not restore the same Camp and Conversation')
@@ -226,8 +226,8 @@ try {
   const deletion = await core.request('camps.delete', {
     commandId: crypto.randomUUID(),
     command: {
-      campId,
-      expectedVersion: restoredSnapshot.camp.version
+      threadId,
+      expectedVersion: restoredSnapshot.thread.version
     }
   })
   if (deletion.status !== 'accepted' || deletion.code !== 'camp.delete_accepted') {
@@ -248,8 +248,8 @@ try {
   console.log(JSON.stringify({
     ok: true,
     runtime: codexInstallation.snapshot.reportedVersion,
-    campId,
-    defaultLeadAgentId: snapshot.camp.defaultLeadAgentId,
+    threadId,
+    defaultLeadAgentId: snapshot.thread.defaultLeadAgentId,
     memberCount: snapshot.members.length,
     messageCount: snapshot.messages.length,
     agentRunCount: snapshot.agentRuns.length,
@@ -312,10 +312,10 @@ function startCore(dataDirectory) {
   return { request, stop }
 }
 
-async function saveComposerDraft(request, campId, body) {
-  const current = await request('camp.composerDraft.get', { campId })
+async function saveComposerDraft(request, threadId, body) {
+  const current = await request('camp.composerDraft.get', { threadId })
   return request('camp.composerDraft.save', {
-    campId,
+    threadId,
     expectedRevision: current.revision,
     content: [{ kind: 'text', text: body }]
   })

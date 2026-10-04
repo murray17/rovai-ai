@@ -1,3 +1,5 @@
+mod native_metrics;
+
 use std::{
     collections::{HashMap, HashSet},
     error::Error as StdError,
@@ -427,6 +429,7 @@ impl AntigravityAppRuntimeAdapter {
             )?;
             ManagedProcess::spawn(spec)
         })();
+        let native_metrics_root = native_metrics::root_for_command(command.as_std());
         let mut child = launch_result.map_err(|error| {
             let raw_detail = error.to_string();
             let failure = antigravity_public_failure(
@@ -465,6 +468,7 @@ impl AntigravityAppRuntimeAdapter {
                     resumable_native_session_id.as_deref(),
                     runtime_events.as_ref(),
                     &image_log_path,
+                    native_metrics_root,
                 )
                 .await
                 .map(|capture| AntigravityStdoutCapture::Structured(Box::new(capture)))
@@ -967,6 +971,10 @@ struct AntigravityStreamCapture {
     conversation_id: Option<String>,
     final_result: Option<AntigravityJsonResult>,
     model_observation_emitted: bool,
+    usage_input_step: Option<u64>,
+    observed_usage_steps: HashSet<u64>,
+    observed_native_calls: HashSet<u64>,
+    native_metrics_root: Option<PathBuf>,
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
     started_shell_commands: HashMap<String, String>,
@@ -986,13 +994,17 @@ async fn capture_antigravity_stream<R>(
     expected_session_id: Option<&str>,
     runtime_events: Option<&mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
     log_path: &Path,
+    native_metrics_root: Option<PathBuf>,
 ) -> Result<AntigravityStreamCapture>
 where
     R: AsyncRead + Unpin,
 {
     let mut line = Vec::new();
     let mut buffer = [0_u8; 16 * 1024];
-    let mut capture = AntigravityStreamCapture::default();
+    let mut capture = AntigravityStreamCapture {
+        native_metrics_root,
+        ..Default::default()
+    };
     loop {
         let read = reader.read(&mut buffer).await?;
         if read == 0 {
@@ -1069,6 +1081,51 @@ async fn process_antigravity_stream_line(
                 .and_then(Value::as_str)
                 .context("Antigravity step_update omitted conversation_id")?;
             observe_antigravity_conversation(capture, expected_session_id, conversation_id)?;
+            if step["step_type"] == "user_input"
+                && step["state"] == "DONE"
+                && rovai_core::runtime::is_root_output(step)
+                && capture.usage_input_step.is_none()
+            {
+                capture.usage_input_step = step["step_index"].as_u64();
+            }
+            if let Some(input_step) = capture.usage_input_step
+                && let Some(index) = step["step_index"]
+                    .as_u64()
+                    .filter(|index| *index > input_step)
+                && capture.observed_usage_steps.len() < 8192
+                && !capture.observed_usage_steps.contains(&index)
+                && let Some(usage) = crate::monitoring::parse_antigravity_step_usage(step)
+                && let Some(sender) = runtime_events
+            {
+                capture.observed_usage_steps.insert(index);
+                // Select one observation for this call. A native supplement
+                // must replace the sparse stream observation before buffering,
+                // never add a second copy of its output/cache-read counters.
+                let native = if let Some(root) = &capture.native_metrics_root {
+                    native_metrics::read(root, input_step, index, &usage).await
+                } else {
+                    None
+                };
+                let observations = if let Some(native) = native {
+                    if capture.observed_native_calls.insert(native.call_index) {
+                        std::iter::once(native.usage)
+                            .chain(native.context)
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    vec![usage]
+                };
+                // Numeric projection only. result.usage is Session cumulative
+                // and must never be added to these completed native calls.
+                for observation in observations {
+                    let _ = sender.send(AntigravityRuntimeEvent {
+                        event_type: "runtime.antigravity.usage",
+                        payload: serde_json::to_value(observation)?,
+                    });
+                }
+            }
             if let Some(runtime_event) = normalize_antigravity_tool_step(step, capture)?
                 && let Some(sender) = runtime_events
             {
@@ -1727,6 +1784,100 @@ mod tests {
             .is_err()
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    // New lowest-cost owner: the streaming input boundary, numeric-only handoff,
+    // and Session-cumulative terminal suppression do not belong to image tests.
+    #[tokio::test]
+    async fn structured_usage_is_numeric_and_bound_to_current_input_step() {
+        let session = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut capture = AntigravityStreamCapture::default();
+        let log = Path::new("/nonexistent/unused-native-log");
+        let frames = [
+            serde_json::json!({"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"output_tokens":9}}),
+            serde_json::json!({"step_index":3,"state":"DONE","step_type":"user_input"}),
+            serde_json::json!({"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"output_tokens":9}}),
+            serde_json::json!({"step_index":5,"state":"ACTIVE","step_type":"agent_response","usage":{"output_tokens":2}}),
+            serde_json::json!({"step_index":5,"state":"DONE","step_type":"agent_response","text_delta":"PRIVATE_AGY_CANARY","usage":{"output_tokens":133,"cache_read_tokens":12206}}),
+            serde_json::json!({"step_index":5,"state":"DONE","step_type":"agent_response","usage":{"output_tokens":133,"cache_read_tokens":12206}}),
+        ];
+        for mut step in frames {
+            step["conversation_id"] = serde_json::json!(session);
+            let frame = serde_json::json!({"event":"step_update","step_update":step});
+            process_antigravity_stream_line(
+                frame.to_string().as_bytes(),
+                Some(session),
+                Some(&sender),
+                &mut capture,
+                log,
+            )
+            .await
+            .unwrap();
+        }
+        let final_frame = serde_json::json!({"event":"result","result":{"conversation_id":session,"status":"SUCCESS",
+            "response":"final","usage":{"output_tokens":237,"cache_read_tokens":12206}}});
+        process_antigravity_stream_line(
+            final_frame.to_string().as_bytes(),
+            Some(session),
+            Some(&sender),
+            &mut capture,
+            log,
+        )
+        .await
+        .unwrap();
+        let event = receiver.try_recv().unwrap();
+        assert_eq!(event.event_type, "runtime.antigravity.usage");
+        assert_eq!(event.payload["fields"]["outputTokens"], 133);
+        assert!(!event.payload.to_string().contains("PRIVATE_AGY_CANARY"));
+        assert!(receiver.try_recv().is_err());
+        let witness: Value = serde_json::from_str(include_str!(
+            "../../../docs/research/runtime-monitoring/fixtures/round8-native-format-compatibility.json"
+        )).unwrap();
+        let entry = witness["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["runtime"] == "antigravity-app")
+            .unwrap();
+        for run in entry["runs"].as_array().unwrap() {
+            let mut capture = AntigravityStreamCapture::default();
+            for raw in run["sourceRecords"].as_array().unwrap() {
+                let mut frame = raw.clone();
+                let body = if frame["event"] == "result" {
+                    "result"
+                } else {
+                    "step_update"
+                };
+                frame[body]["conversation_id"] = serde_json::json!(session);
+                if body == "result" {
+                    // The numerical witness omits text; add a synthetic terminal
+                    // envelope only so the real adapter can complete its state.
+                    frame[body]["status"] = serde_json::json!("SUCCESS");
+                    frame[body]["response"] = serde_json::json!("");
+                }
+                process_antigravity_stream_line(
+                    frame.to_string().as_bytes(),
+                    Some(session),
+                    Some(&sender),
+                    &mut capture,
+                    log,
+                )
+                .await
+                .unwrap();
+            }
+            let mut output = 0;
+            let mut read = 0;
+            while let Ok(event) = receiver.try_recv() {
+                assert_eq!(event.event_type, "runtime.antigravity.usage");
+                output += event.payload["fields"]["outputTokens"].as_i64().unwrap();
+                read += event.payload["fields"]["cacheReadInputTokens"]
+                    .as_i64()
+                    .unwrap();
+            }
+            assert_eq!(output, run["expectedRunProjection"]["outputTokens"]);
+            assert_eq!(read, run["expectedRunProjection"]["cacheReadTokens"]);
+        }
     }
 
     #[test]

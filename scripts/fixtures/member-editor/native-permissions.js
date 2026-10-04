@@ -145,6 +145,13 @@ export const nativePermissions = {
       'dangerous'
     )
   ],
+  'deepseek-harness': [
+    option('sandbox_mode', ['read-only', 'workspace-write', 'danger-full-access'], 'danger-full-access'),
+    option('approval_policy', ['ask', 'never'], 'never')
+  ],
+  'zcode-app': [
+    option('permission_mode', ['plan', 'build', 'edit', 'yolo', 'auto'], 'build')
+  ],
   pi: []
 }
 export const memberPermissionDefaults = {
@@ -159,6 +166,8 @@ export const memberPermissionDefaults = {
   'trae-cn-cli': { permission_mode: 'bypass_permissions' },
   'kimi-code-cli': { permission_mode: 'yolo' },
   'grok-build': { permission_mode: 'bypassPermissions' },
+  'deepseek-harness': { sandbox_mode: 'danger-full-access', approval_policy: 'never' },
+  'zcode-app': { permission_mode: 'yolo' },
   'antigravity-app': {
     mode: 'accept-edits',
     sandbox: 'off',

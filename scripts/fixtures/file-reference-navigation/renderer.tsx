@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { CampSnapshot, FilePreviewApi, NavigationCampItem, OpenFilePreviewRequest, ResolvedFilePreview } from '@contracts'
+import type { ThreadSnapshot, FilePreviewApi, NavigationThreadItem, OpenFilePreviewRequest, ResolvedFilePreview } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
-import { CampWorkspace, QuickChatWorkspace } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { ThreadWorkspace, QuickChatWorkspace } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { FilePreviewProvider, useFilePreview } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
 import { FilePreviewTabs } from '../../../apps/desktop/src/renderer/src/FilePreviewTabs'
 import { visibleTimelineMessageAnchor } from '../../../apps/desktop/src/renderer/src/timeline-reading-anchor'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
-const campId = 'camp-file-navigation'
+const threadId = 'camp-file-navigation'
 const file: ResolvedFilePreview = {
   previewKey: 'report', handleId: 'report', reopenToken: 'report', displayPath: 'src/report/run_report.py',
   pathPresentation: 'project_relative',
@@ -28,7 +28,7 @@ const api: FilePreviewApi = {
       return { ok: false, error: {
         code: 'authorization_required', message: '内部目录授权原因不应显示给用户。', retryable: false,
         authorizationChallenge: {
-          pendingOpenId: 'pending-external-file', campId, displayReference: request.rawReference, expiresAt: Date.now() + 60_000
+          pendingOpenId: 'pending-external-file', threadId, displayReference: request.rawReference, expiresAt: Date.now() + 60_000
         }
       } }
     }
@@ -54,7 +54,7 @@ const api: FilePreviewApi = {
   prepareHtml: unsupported, reload: unsupported, openInSystem: unsupported, revealInFolder: unsupported,
   copyPath: unsupported, chooseAuthorizedRoot: async () => { chooseRootCalls += 1; return null as never }
 }
-const draft = { campId, body: '保留原有草稿', content: {
+const draft = { threadId, body: '保留原有草稿', content: {
   version: 2 as const,
   segments: [{ kind: 'text' as const, text: '保留原有草稿' }]
 }, revision: 1,
@@ -81,9 +81,9 @@ const targetBody = [
   '网页入口：[网页 · GitHub](https://github.com/)。文档中的改动：',
   ...Array.from({ length: 4 }, () => prose)
 ].join('\n\n')
-const snapshot: CampSnapshot = {
-  schemaVersion: 34, throughGlobalSequence: 36,
-  camp: { id: campId, title: '文件引用回归', activationState: 'active', projectBindingKind: 'directory',
+const snapshot: ThreadSnapshot = {
+  schemaVersion: 35, throughGlobalSequence: 36,
+  thread: { id: threadId, title: '文件引用回归', activationState: 'active', projectBindingKind: 'directory',
     projectPath: '/fixture', defaultLeadAgentId: 'author', membershipGeneration: 1, version: 1,
     createdAt: '2026-08-31T00:00:00Z', updatedAt: '2026-08-31T00:00:00Z' },
   members: [{ agentId: 'author', displayName: '队员', teamRole: 'Lead', avatarRef: null, accent: '#526f88',
@@ -94,7 +94,7 @@ const snapshot: CampSnapshot = {
     return { id: `message-${index}`, sequence: index + 1, timelineGlobalSequence: index + 1,
       authorType: 'agent', authorId: 'author', sourceAgentRunId: null, body,
       content: [{ kind: 'text', text: body }], attachments: [], addressMode: 'default', addressedAgentIds: [],
-      replyToCampMessageId: null, campTurnId: null, presentation: null, createdAt: '2026-08-31T00:00:00Z' }
+      replyToThreadMessageId: null, threadTurnId: null, presentation: null, createdAt: '2026-08-31T00:00:00Z' }
   }),
   membershipReconciliations: [], tasks: [], messageDeliveries: [], turns: [], agentRuns: [], executionEvidence: [],
   agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: []
@@ -109,12 +109,12 @@ const wideBody = [
   `| ${Array.from({ length: 24 }, () => '---').join(' | ')} |`,
   `| ${Array.from({ length: 24 }, () => '已完成').join(' | ')} |`
 ].join('\n')
-const wideSnapshot: CampSnapshot = { ...snapshot, messages: snapshot.messages.map((message, index) => index === 35
+const wideSnapshot: ThreadSnapshot = { ...snapshot, messages: snapshot.messages.map((message, index) => index === 35
   ? { ...message, body: wideBody, content: [{ kind: 'text', text: wideBody }] } : message) }
-const recentCamps: NavigationCampItem[] = ['长'.repeat(80), 'W'.repeat(80), '日常对话'].map((title, index) => ({
+const recentThreads: NavigationThreadItem[] = ['长'.repeat(80), 'W'.repeat(80), '日常对话'].map((title, index) => ({
   id: `recent-${index}`, title, activationState: 'active', projectBindingKind: 'directory', projectPath: '/fixture',
   defaultLead: null, marker: index === 0 ? 'unread_completed' : index === 1 ? 'loading' : 'none',
-  lastActivityAt: snapshot.camp.updatedAt, lastActivityGlobalSequence: index + 1, latestCompletionGlobalSequence: 0, version: 1
+  lastActivityAt: snapshot.thread.updatedAt, lastActivityGlobalSequence: index + 1, latestCompletionGlobalSequence: 0, version: 1
 }))
 type FixtureSurface = 'history' | 'wide-message' | 'home'
 let setSurface: (surface: FixtureSurface) => void
@@ -123,9 +123,9 @@ function Workspace({ surface }: { surface: FixtureSurface }): React.JSX.Element 
   const preview = useFilePreview()
   if (surface === 'home') return <div className="app-shell">
     <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
-    <AppHeader campTitle={null} contextLabel="Rovai AI" camp={null} onFocusApprovals={() => {}} />
+    <AppHeader threadTitle={null} contextLabel="Rovai AI" thread={null} onFocusApprovals={() => {}} />
     <main className="content task-content">
-      <QuickChatWorkspace agents={[]} recentCamps={recentCamps} onOpenCamp={() => {}}
+      <QuickChatWorkspace agents={[]} recentThreads={recentThreads} onOpenCamp={() => {}}
         onNewConversation={() => {}} onOpenMembers={() => {}} onOpenRuntimeSettings={() => {}} />
     </main>
   </div>
@@ -134,7 +134,7 @@ function Workspace({ surface }: { surface: FixtureSurface }): React.JSX.Element 
       <button id="toggle-preview" onClick={() => preview.paneVisible ? preview.hidePane() : preview.showPane()}>文件预览</button>
       <FilePreviewTabs />
     </header>
-    <CampWorkspace snapshot={surface === 'wide-message' ? wideSnapshot : snapshot} projectName="fixture" agents={[]} busy={false} stopping={false}
+    <ThreadWorkspace snapshot={surface === 'wide-message' ? wideSnapshot : snapshot} initialComposerDraft={draft} projectName="fixture" agents={[]} busy={false} stopping={false}
       onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}}
       onResolveApproval={() => {}} onStop={() => {}} inspectorVisible={false} worldMapEnabled={false}
       onNotify={(message) => notices.push(message)} />
@@ -143,7 +143,7 @@ function Workspace({ surface }: { surface: FixtureSurface }): React.JSX.Element 
 function Fixture(): React.JSX.Element {
   const [surface, updateSurface] = useState<FixtureSurface>('history')
   setSurface = updateSurface
-  return <FilePreviewProvider campId={surface === 'home' ? null : campId} resolvedTheme="day">
+  return <FilePreviewProvider threadId={surface === 'home' ? null : threadId} resolvedTheme="day">
     <Workspace surface={surface} />
   </FilePreviewProvider>
 }

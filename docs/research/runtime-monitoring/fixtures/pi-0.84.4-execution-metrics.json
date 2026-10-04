@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-28",
+  "runtime": "pi",
+  "runtimeVersion": "0.84.4",
+  "configuredModel": "pi://runtime-default",
+  "effectiveProviderModel": "sub2api/gpt-5.6-sol",
+  "source": "isolated successful one-Run smoke using copied local Pi configuration, monitoring.execution read after terminal",
+  "visibleTextDeltaCount": 8,
+  "run": { "status": "succeeded", "promptInputTotalTokens": 25985, "outputTokens": 112, "cacheReadTokens": 16768, "cacheWriteTokens": 0, "finalized": true },
+  "currentSession": null,
+  "limits": ["Provider account identity and native Session ID are omitted", "The one-Run probe did not test cold resume, cancellation, or concurrent hosts", "No Renderer speed sampling was captured"]
+}
