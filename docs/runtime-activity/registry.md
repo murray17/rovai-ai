@@ -11,7 +11,7 @@ last_updated: 2026-10-04
 
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
-| `cline-cli` | Cline | 官方 ACP v1 + 只读数值 Plugin | `run_level` | 原生 ToolCall ID 配对 started/terminal；typed run_commands results 的 success 决定失败，只有 command 文本结果公开；read_files/apply_patch 使用原生工具和输入结构补 typed kind，未知工具保留原值。数值与思考不进入 Activity | Host/observer 文件边界、命令失败/私有字段排除及 unknown fallback fixture；复用 ACP lifecycle/classifier | 3.0.65 + sub2api/gpt-6-sol 的 Core Host read/edit/command、stdout/stderr、非零失败、取消与精确恢复通过；完整 App/平台未验收，保持 NotQualified |
+| `cline-cli` | Cline | 官方 ACP v1 + 只读数值 Plugin | `run_level` | 原生 ToolCall ID 配对 started/terminal；typed results 的 success 决定命令/文件失败，只有 command 文本结果公开；成功单文件 read_files 的 files[0].path、apply_patch 的唯一 Update/Add 头补标准 location，未知/多文件/移动/删除保持回退；不伪造 Diff。数值与思考不进入 Activity | Host/observer 文件边界、命令/文件失败、私有字段排除及 unknown fallback fixture；复用 ACP lifecycle/classifier 与 completion seam | 3.0.65 + sub2api/gpt-6-sol 的 Host read/edit/command、取消与恢复通过；隔离 App 两名成员真实 read/edit/read 的路径、持久化及可点击文件预览通过；macOS arm64 Preview，完整资格未完成 |
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v3 不生成 commandActions 标题，但非空、全 read、唯一 path 的 `commandActions` 可形成 typed read；Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的 Shell 标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | structured read 正反例、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过；[`0.153.4` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
 | `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；同一 ToolCall 的 start/update 精确 `read/write/edit + args.path` 与成功 terminal 可形成 typed read/write；成功 `edit` 的 `result.details.patch` 只有在 old/new header 都与同 ToolCall path 完全一致且包含 hunk 时形成 unified diff；`write` 保持 path-only；update 作为累计预览，唯一 terminal 结算 Action；所有 Built-in/Extension Tool 按 Pi 原生语义执行，Rovai 不审批或阻断 | Tool started→terminal、结束事件省略参数、read/write/edit、edit patch 正例、header mismatch、write/失败 edit 反例、累计输出、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai Approval、sandbox 或 MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；[v1.52 read/write 真实结果](../versions/v1.52/runtime-acceptance.md)已通过；`0.84.4` native session 的 edit patch wire 已核验，本次 post-fix 模型 smoke 未执行 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text`；`1.18.20` write metadata 的 Boolean `exists` 只在同 ToolCall 路径对齐后区分 add/update | 受控 fixture、固定 `printf` 与 metadata 正反例断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；[`1.18.20` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
@@ -33,8 +33,9 @@ Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。�
 该运行不能因为产品基线为 `fine_grained` 就补写工具调用。
 
 Cline 新 identity 复用既有 ACP typed kind 和 `activity-v4`，没有改变已支持 Runtime 的解释或历史
-projection。当前证据止于共享 Host 与归一化；完整 AgentRun live/Read Side/App 一致性仍待验收，
-因此保持 `run_level`。来源与数值证据见[Cline 矩阵](../research/cline-runtime/README.md)。
+projection。[真实文件验证](../research/runtime-monitoring/command-cline-files-context-2026-10-04.md)
+覆盖 AgentRun 持久化与 App 的单文件读取/编辑路径；缺事件时仍不补造细粒度 Activity，基线保持
+`run_level`。来源、其余能力边界与数值证据见[Cline 矩阵](../research/cline-runtime/README.md)。
 
 ## Classifier cutover
 

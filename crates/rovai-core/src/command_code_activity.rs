@@ -266,6 +266,10 @@ fn action_event(
     // File reads and edits can contain private source text or patch contents.
     // Only command tools have an output presentation contract here.
     let output = (kind == "execute").then_some(output).flatten();
+    let file_path = matches!(tool.name.as_str(), "read_file" | "edit_file" | "write_file")
+        .then(|| tool.requested_input.as_ref()?.get("file_path")?.as_str())
+        .flatten()
+        .filter(|path| !path.trim().is_empty());
     CommandCodeRuntimeEvent {
         event_type: "runtime.action",
         payload: json!({
@@ -276,6 +280,7 @@ fn action_event(
             "title": tool.name,
             "input": input,
             "output": output,
+            "filePath": file_path,
         }),
     }
 }
@@ -302,9 +307,9 @@ mod tests {
             json!({"type":"tool_denied","toolCallId":"tool-2","toolName":"shell_command"}),
             json!({"type":"tool_queued","toolCallId":"tool-3","toolName":"shell_command","input":{"command":"exit 7"}}),
             json!({"type":"tool_completed","toolCallId":"tool-3","toolName":"shell_command","result":[{"type":"text","text":"Exit code: 7\nSTDOUT\n\nSTDERR\n"}]}),
-            json!({"type":"tool_queued","toolCallId":"tool-4","toolName":"read_file","input":{"path":"private.txt"}}),
+            json!({"type":"tool_queued","toolCallId":"tool-4","toolName":"read_file","input":{"file_path":"src/read target.txt"}}),
             json!({"type":"tool_completed","toolCallId":"tool-4","toolName":"read_file","result":[{"type":"text","text":"PRIVATE_SOURCE_MARKER"}]}),
-            json!({"type":"tool_queued","toolCallId":"tool-5","toolName":"edit_file","input":{"path":"private.txt"}}),
+            json!({"type":"tool_queued","toolCallId":"tool-5","toolName":"edit_file","input":{"file_path":"src/edit target.ts","old_string":"PRIVATE_OLD","new_string":"PRIVATE_NEW"}}),
             json!({"type":"tool_completed","toolCallId":"tool-5","toolName":"edit_file","result":[{"type":"text","text":"PRIVATE_PATCH_MARKER"}]}),
             json!({"type":"tool_queued","toolCallId":"tool-6","toolName":"shell_command","input":{"command":"printf 'Exit code: 7\\n'"}}),
             json!({"type":"tool_update","toolCallId":"tool-6","toolName":"shell_command","partial":[{"type":"text","text":"Exit code: 7\n"}]}),
@@ -331,8 +336,12 @@ mod tests {
         );
         assert_eq!(output[10].payload["kind"], "read");
         assert!(output[10].payload["output"].is_null());
+        assert_eq!(output[9].payload["filePath"], "src/read target.txt");
+        assert_eq!(output[10].payload["filePath"], "src/read target.txt");
         assert_eq!(output[12].payload["kind"], "edit");
         assert!(output[12].payload["output"].is_null());
+        assert_eq!(output[12].payload["filePath"], "src/edit target.ts");
+        assert!(output[12].payload["input"].is_null());
         assert_eq!(output[14].payload["status"], "completed");
         assert!(!format!("{output:?}").contains("private"));
         assert!(!format!("{output:?}").contains("PRIVATE_"));

@@ -13100,7 +13100,8 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn successful_terminal_acp_write_keeps_one_structured_location_without_inventing_a_diff() {
+    fn successful_terminal_acp_file_operation_keeps_one_structured_location_without_inventing_a_diff()
+     {
         let completion = completed_action(
             AdapterKind::KimiCodeCli,
             &json!({
@@ -13126,6 +13127,44 @@ while IFS= read -r ignored; do :; done
             Some("write")
         );
         assert!(completion.public_file_changes.is_none());
+        // The Cline native envelope omits locations and its sparse terminal
+        // omits input. Its profile supplies a confirmed path to this same seam.
+        for (initial, output, operation) in [
+            (
+                json!({"title":"read_files: fixture","rawInput":{"files":[{"path":"src/target.ts"}]}}),
+                json!([{"success":true,"result":"PRIVATE_SOURCE"}]),
+                "read",
+            ),
+            (
+                json!({"title":"apply_patch: fixture","rawInput":{"input":"*** Begin Patch\n*** Update File: src/target.ts\n@@\n-old\n+new\n*** End Patch"}}),
+                json!({"success":true,"result":"Applied"}),
+                "write",
+            ),
+        ] {
+            let mut initial = initial;
+            crate::cline::enrich_tool_update(&mut initial, None);
+            assert!(initial.get("locations").is_none());
+            let mut terminal = json!({"sessionUpdate":"tool_call_update","toolCallId":"cline-file","status":"completed","rawOutput":output});
+            crate::cline::enrich_tool_update(&mut terminal, Some(&initial));
+            let completion = completed_action(AdapterKind::ClineCli, &json!({"update":terminal}))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                completion.public_file_operation_path.as_deref(),
+                Some("src/target.ts")
+            );
+            assert_eq!(
+                completion.public_file_operation_kind.as_deref(),
+                Some(operation)
+            );
+            assert!(completion.public_file_changes.is_none());
+            assert!(
+                !completion
+                    .result_data
+                    .to_string()
+                    .contains("PRIVATE_SOURCE")
+            );
+        }
     }
 
     #[test]

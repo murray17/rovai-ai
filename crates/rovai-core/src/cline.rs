@@ -504,11 +504,47 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
     }
     if name == "read_files" {
         update["kind"] = json!("read");
-        if let Some(files) = update["rawInput"]["files"].as_array()
-            && let [file] = files.as_slice()
-            && let Some(path) = file["path"].as_str().filter(|path| !path.is_empty())
-        {
-            update["rawInput"]["filepath"] = json!(path);
+    }
+    // Cline reports a completed ACP envelope even when its typed tool result
+    // failed. Do not publish a successful file operation for that envelope.
+    if matches!(name.as_str(), "read_files" | "apply_patch")
+        && matches!(update["status"].as_str(), Some("completed" | "failed"))
+    {
+        let output = &update["rawOutput"];
+        let success = if name == "read_files" {
+            output
+                .as_array()
+                .filter(|values| !values.is_empty())
+                .and_then(|values| {
+                    if values.iter().any(|value| value["success"] == false) {
+                        Some(false)
+                    } else if values.iter().all(|value| value["success"] == true) {
+                        Some(true)
+                    } else {
+                        None
+                    }
+                })
+        } else {
+            output["success"].as_bool()
+        };
+        if success == Some(false) {
+            update["status"] = json!("failed");
+        } else if success == Some(true) && update["status"] == "completed" {
+            let path = if name == "read_files" {
+                update["rawInput"]["files"].as_array().and_then(|files| {
+                    let [file] = files.as_slice() else {
+                        return None;
+                    };
+                    file["path"].as_str().filter(|path| !path.trim().is_empty())
+                })
+            } else {
+                update["rawInput"]["input"]
+                    .as_str()
+                    .and_then(single_patch_path)
+            };
+            if let Some(path) = path {
+                update["locations"] = json!([{"path": path}]);
+            }
         }
     }
     if name != "run_commands" {
@@ -552,6 +588,34 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
     if failed {
         update["status"] = json!("failed");
     }
+}
+
+/// A successful single-file native patch can name the file without exposing
+/// source text or inventing complete before/after states. Multi-file and move
+/// patches stay unlabelled by the single-file operation contract.
+fn single_patch_path(patch: &str) -> Option<&str> {
+    if patch.len() > 2 * 1024 * 1024 {
+        return None;
+    }
+    let mut lines = patch.trim().lines().map(|line| line.trim_end_matches('\r'));
+    if lines.next()? != "*** Begin Patch" || lines.next_back()? != "*** End Patch" {
+        return None;
+    }
+    let mut path = None;
+    for line in lines {
+        if line.starts_with("*** Move to:") || line.starts_with("*** Delete File:") {
+            return None;
+        }
+        for prefix in ["*** Update File: ", "*** Add File: "] {
+            if let Some(next) = line.strip_prefix(prefix) {
+                if path.is_some() || next.trim().is_empty() {
+                    return None;
+                }
+                path = Some(next.trim());
+            }
+        }
+    }
+    path
 }
 
 pub fn parse_usage(record: &Value) -> Option<crate::monitoring::ParsedRuntimeUsage> {
@@ -741,10 +805,63 @@ mod tests {
         enrich_tool_update(&mut read, Some(&read_initial));
         assert!(read.get("content").is_none());
         assert_eq!(read["kind"], "read");
-        assert_eq!(read["rawInput"]["filepath"], "secret");
+        assert_eq!(read["locations"], json!([{"path":"secret"}]));
         let mut edit = json!({"title":"apply_patch: change","status":"completed","rawOutput":{"result":"Applied"}});
         enrich_tool_update(&mut edit, None);
         assert_eq!(edit["kind"], "edit");
+        assert!(edit.get("locations").is_none());
+        for (patch, expected) in [
+            (
+                "*** Begin Patch\n*** Update File: src/edit target.ts\n@@\n-old\n+new\n*** End Patch",
+                Some("src/edit target.ts"),
+            ),
+            (
+                "*** Begin Patch\r\n*** Add File: 中文 空格.txt\r\n+new\r\n*** End Patch\r\n",
+                Some("中文 空格.txt"),
+            ),
+            (
+                "*** Begin Patch\n*** Update File: a\n@@\n-*** Update File: secret\n+*** Add File: secret\n*** End Patch",
+                Some("a"),
+            ),
+            (
+                "*** Begin Patch\n*** Update File: a\n*** Update File: b\n*** End Patch",
+                None,
+            ),
+            (
+                "*** Begin Patch\n*** Update File: a\n*** Move to: b\n*** End Patch",
+                None,
+            ),
+            ("*** Begin Patch\n*** Delete File: a\n*** End Patch", None),
+            ("*** Update File: a\nPRIVATE_PATCH_MARKER", None),
+        ] {
+            let initial = json!({"title":"apply_patch: change","rawInput":{"input":patch}});
+            let mut completed = json!({"status":"completed","rawOutput":{"success":true}});
+            enrich_tool_update(&mut completed, Some(&initial));
+            assert_eq!(
+                completed
+                    .pointer("/locations/0/path")
+                    .and_then(Value::as_str),
+                expected
+            );
+            assert!(completed.get("content").is_none());
+            for output in [
+                json!({"success":false}),
+                json!({}),
+                json!({"success":"true"}),
+            ] {
+                let mut unconfirmed = json!({"status":"completed","rawOutput":output});
+                enrich_tool_update(&mut unconfirmed, Some(&initial));
+                assert!(unconfirmed.get("locations").is_none());
+                if output["success"] == false {
+                    assert_eq!(unconfirmed["status"], "failed");
+                }
+            }
+        }
+        for output in [json!([{"success":false}]), json!([{}]), json!([])] {
+            let mut unconfirmed = json!({"status":"completed","rawOutput":output});
+            enrich_tool_update(&mut unconfirmed, Some(&read_initial));
+            assert!(unconfirmed.get("locations").is_none());
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -364,6 +364,11 @@ fn command_for(request: &CommandCodeHeadlessRequest) -> Result<Command> {
         .args(["--output-format", "json"])
         .arg("--no-auto-update")
         .args(["--permission-mode", request.permission_mode.as_str()]);
+    if matches!(request.permission_mode, CommandCodePermissionMode::Yolo) {
+        // Headless 1.66.0 has a separate tool-write gate; permission-mode=yolo
+        // alone still blocks edit_file and shell_command before execution.
+        command.arg("--yolo");
+    }
     if let Some(config) = request.builtin_tools.as_ref() {
         config.configure_command(&mut command)?;
     }
@@ -931,6 +936,20 @@ printf '%s\n' '{"type":"result","subtype":"success","sessionId":"11111111-1111-4
         request.prepared_context.charter_delivery_mode = CharterDeliveryMode::NativeAppend;
         assert!(command_for(&request).is_err());
         request.prepared_context.charter_delivery_mode = CharterDeliveryMode::FirstPayload;
+        for (mode, writes_enabled) in [
+            (CommandCodePermissionMode::Yolo, true),
+            (CommandCodePermissionMode::DontAsk, false),
+        ] {
+            request.permission_mode = mode;
+            assert_eq!(
+                command_for(&request)
+                    .unwrap()
+                    .as_std()
+                    .get_args()
+                    .any(|arg| arg == "--yolo"),
+                writes_enabled
+            );
+        }
         let result = run_headless(request, cancel_rx).await.unwrap();
         drop(cancel_tx);
         assert_eq!(result.session_id, "11111111-1111-4111-8111-111111111111");

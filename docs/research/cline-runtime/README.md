@@ -32,7 +32,7 @@ DeepSeek Harness，不能把该 Runtime 的证据借给 Cline。
 | Compaction continuity | 完成信号、补发、失败/取消与恢复 | ACP 不转发 compaction；官方 Plugin status-notice 可观测 completed | Plugin/Host 完成事件桥已接线；真实 ACP 发送 `/compact` 仍进入模型调用且没有压缩事件，manual 入口未闭合；auto/overflow/cold resume 未观测 |
 | Skills | 当前受管索引与原生 Skills 并存 | 共享受管索引；Cline 原生 `.cline/skills`、`.agents/skills` | 路径与 group 接线已编译，真实投影增删与发现待验收 |
 | External MCP | PreparedMcpProjection、追加、撤销、无串会话 | 3.0.65 ACP 忽略 `session/new.mcpServers`；官方 `CLINE_MCP_SETTINGS_PATH` 指向 Host 私有合并文件 | 原生隔离配置调用真实 fixture Tool Verified；Core Host 合并已实现，投影增删/相邻 Session 待验收 |
-| Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 已通过；App read/write/command 与文件结果、活动持久化通过；空/超大输出待验收 |
+| Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 已通过；修复单文件 location 后，App 两成员 read/edit/read 的准确路径、持久化、点击预览与文件副作用通过；编辑保持 path-only；空/超大输出待验收 |
 | Narration / Final / Missing-Send | thinking 私有、权威终态、zero-send 恢复 | agent_message_chunk 与 thought 分开；prompt stopReason / JSON-RPC error | App 四轮均 succeeded，且每轮恰一条显式 CLI 公开回帖；产品 Missing-Send NotImplemented |
 | Permission / Approval / Workspace | 原生权限为唯一权威、allow/deny/cancel | 官方 auto_approve 布尔、plan/act；request_permission 原样往返 | 原生拒绝无副作用 Verified；共享 Core Host 在命令发出后取消，得到 `cancelled` 且 10 秒后无文件副作用；Core allow/deny 与产品审批待验收 |
 | Built-in rovai CLI | 每 Run lease 与 bundled CLI | 共享 ACP process config 注入 shell 环境，Run 结束解除 | App first/warm/第二名队员/cold 四轮真实 bundled CLI 回帖通过，cold 使用重启后当前 Run lease |
@@ -83,6 +83,12 @@ run_finished` 和 `agent_message_chunk`，没有 Plugin `compaction` status-noti
 随后按 User 的开发包请求完成[打包 App 真实发送验收](app-send-verification-2026-10-04.md)：
 四轮 AgentRun、两名队员、warm/cold 续接、bundled CLI、持久化指标与 Renderer 入口均取得证据。
 该主路径证据不会补齐未测试的能力轴，也不确认独立的 Plugin Rule 模型输入提案。
+
+[文件名、编辑和窗口复核](../runtime-monitoring/command-cline-files-context-2026-10-04.md)进一步确认原生
+路径存在，修复了 read_files 与 apply_patch 的标准 location 投影；两名成员各自完成真实读取、编辑、
+读回和公开回帖。当前 sub2api/gpt-6-sol 配置未提供可信窗口，继续保留未知，不以压缩预算替代。
+随后两名成员都从原生命令输出正确读出实际 `+1/-1`；这证明模型可读取 Diff。apply_patch 的 ACP 终态
+仍不含可靠内容 Diff，编辑行内展开尚未完成，不把输入 patch 当作已应用差异。
 
 正式完成按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 逐轴闭合；
 当前分支已加入 closed identity、Host/发现/Skill 接线与 Migration 184/schema 134；macOS arm64 开发 Preview

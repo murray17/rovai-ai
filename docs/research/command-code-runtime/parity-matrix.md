@@ -47,6 +47,12 @@ last_updated: 2026-10-04
 上表 1.64.0 的历史测试结论保留各自范围。当前内部传输显式接受原生 `dont-ask` 或 `yolo`，
 不再固定 `dont-ask`；真实工具数值 Smoke 显式使用隔离 workspace 的 `yolo`，产品审批仍未闭合。
 
+同日[文件与窗口复核](../runtime-monitoring/command-cline-files-context-2026-10-04.md)在真实 1.66.0 中
+确认 read_file/edit_file 均携带 `input.file_path`，内部 Activity 现在保留独立 `filePath`，不公开文件正文。
+编辑实测还证明 `--permission-mode yolo` 单独不足以通过 headless 写入 gate；仅为已选择 Yolo 的请求
+补齐原生 `--yolo` 后，修改与原生读回均成功。DontAsk 不添加该开关。窗口字段仍未观察到，
+这些证据仍不代表 Command Code Product Adapter/App 已接入。
+
 ## 实施准入顺序
 
 1. 用固定 1.64.0 发布包和隔离工作区记录真实 NDJSON、失败、取消、精确恢复与原生 Tool 事件；确认 Runtime 接受输入的最早可证明时点。
