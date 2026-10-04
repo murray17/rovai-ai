@@ -1967,7 +1967,7 @@ export interface CanonicalRuntimeDiffProjectionView {
   revision: number
   sourceEvidenceIds: string[]
   status: 'available' | 'unavailable' | 'conflict'
-  semanticKind?: 'unified_diff_snapshot' | 'complete_patch_snapshot' | 'exact_mutation' | 'complete_before_after'
+  semanticKind?: 'unified_diff_snapshot' | 'complete_patch_snapshot' | 'exact_mutation' | 'reported_mutation' | 'complete_before_after'
   entries?: CanonicalRuntimeDiffEntryView[]
   safeReasonCode?: string
 }
@@ -2331,6 +2331,7 @@ export interface DomainEventView {
 export type AgentRunFileChangePresentationKind =
   | 'full_net_diff'
   | 'exact_mutations'
+  | 'reported_mutations'
   | 'operation_only'
   | 'operation_history'
 
@@ -2361,7 +2362,7 @@ export interface AgentRunFileChangesView {
 
 export interface AgentRunFileChangeBlockView {
   sequence: number
-  semantics: 'full_net_diff' | 'full_before_after' | 'unified_diff_snapshot' | 'exact_mutation' | 'operation_only'
+  semantics: 'full_net_diff' | 'full_before_after' | 'unified_diff_snapshot' | 'exact_mutation' | 'reported_mutation' | 'operation_only'
   changeKind: string
   additions?: number
   deletions?: number

@@ -1,0 +1,555 @@
+{
+  "schemaVersion": 1,
+  "sourceBase": "d9579cf5b7cc9904cf628e89ae275c13cc034dea",
+  "observedDate": "2026-10-05",
+  "platform": "macos-arm64",
+  "model": "gpt-6-sol",
+  "provider": "sub2api BYOK",
+  "clineVersion": "3.0.65",
+  "admission": "preview",
+  "nativeContextChanged": false,
+  "runs": [
+    {
+      "case": "multi_file_edit",
+      "agentRunId": "91ba0a8c-1e04-49c3-a5a6-ad9f352dc703",
+      "agentId": "agent_2",
+      "status": "succeeded",
+      "publicReplyCount": 1,
+      "publicReplies": [
+        "CHEESE_EDIT40_OK；读回核验：差异验收40/芝士 a.ts 为 answer=\"after\"、keep=40、note=\"中文 unchanged\"；差异验收40/芝士 b.ts 为 answer=\"before\"、keep=41、note=\"中文 unchanged\"。测试命令一退出码 7，stdout=PARITY_STDOUT，stderr=PARITY_STDERR；测试命令二退出码 0，输出为空。"
+      ],
+      "usageRows": [
+        {
+          "prompt_input_total_tokens": 71053,
+          "uncached_input_tokens": 37005,
+          "cache_read_tokens": 34048,
+          "cache_write_tokens": 0,
+          "output_tokens": 885,
+          "reasoning_output_tokens": 58,
+          "cost_amount_decimal": null,
+          "usage_source": "runtime_private_extension"
+        }
+      ],
+      "context": {
+        "usedTokens": 12502,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "modelKey": "gpt-6-sol",
+        "sessionGeneration": 1
+      }
+    },
+    {
+      "case": "edit_then_restore",
+      "agentRunId": "7a709205-3121-423a-afa4-5d8948b737f1",
+      "agentId": "agent_1",
+      "status": "succeeded",
+      "publicReplyCount": 1,
+      "publicReplies": [
+        "DING_EDIT40_OK；差异验收40/叮叮 loop.ts 已经两次独立编辑：answer 从 \"before\" 改为 \"middle\"，再改回原文 \"before\"。读回确认 keep = 40，note = \"中文 unchanged\" 未变。"
+      ],
+      "usageRows": [
+        {
+          "prompt_input_total_tokens": 53927,
+          "uncached_input_tokens": 20647,
+          "cache_read_tokens": 33280,
+          "cache_write_tokens": 0,
+          "output_tokens": 687,
+          "reasoning_output_tokens": 8,
+          "cost_amount_decimal": null,
+          "usage_source": "runtime_private_extension"
+        }
+      ],
+      "context": {
+        "usedTokens": 9530,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "modelKey": "gpt-6-sol",
+        "sessionGeneration": 1
+      }
+    },
+    {
+      "case": "zero_send",
+      "agentRunId": "96e7441d-baff-410c-b1a6-e27ade475c7a",
+      "agentId": "agent_2",
+      "status": "succeeded",
+      "publicReplyCount": 1,
+      "publicReplies": [
+        "CLINE_NATIVE_FINAL40_OK"
+      ],
+      "usageRows": [
+        {
+          "prompt_input_total_tokens": 13043,
+          "uncached_input_tokens": 627,
+          "cache_read_tokens": 12416,
+          "cache_write_tokens": 0,
+          "output_tokens": 10,
+          "reasoning_output_tokens": null,
+          "cost_amount_decimal": null,
+          "usage_source": "runtime_private_extension"
+        }
+      ],
+      "context": {
+        "usedTokens": 13043,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "modelKey": "gpt-6-sol",
+        "sessionGeneration": 1
+      }
+    },
+    {
+      "case": "mcp_assignment_legacy_skill_negative",
+      "agentRunId": "9ae076bf-bc37-4128-b500-4b38f5cfa380",
+      "agentId": "agent_2",
+      "status": "succeeded",
+      "publicReplyCount": 1,
+      "publicReplies": [
+        "CAPABILITIES40_OK；本轮提供的 Skill 索引中没有 parity-check40，核对本轮 skills 目录后也未发现其 SKILL.md，因此无法读取或提供实际 Skill 校验标记，不猜测。实际调用 MCP cline_parity40 echo(text=first40) 一次，结果：cline-app40:first40。"
+      ],
+      "usageRows": [
+        {
+          "prompt_input_total_tokens": 57512,
+          "uncached_input_tokens": 43048,
+          "cache_read_tokens": 14464,
+          "cache_write_tokens": 0,
+          "output_tokens": 539,
+          "reasoning_output_tokens": 150,
+          "cost_amount_decimal": null,
+          "usage_source": "runtime_private_extension"
+        }
+      ],
+      "context": {
+        "usedTokens": 14855,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "modelKey": "gpt-6-sol",
+        "sessionGeneration": 1
+      }
+    },
+    {
+      "case": "adjacent_mcp_failure_edit_empty_output",
+      "agentRunId": "5648dc50-dedf-4dc3-9bca-2156edde65e0",
+      "agentId": "agent_1",
+      "status": "succeeded",
+      "publicReplyCount": 1,
+      "publicReplies": [
+        "ADJACENT40_DONE。当前可用工具中没有 `cline_parity40` 的 MCP `echo`，因此未调用，也未模拟。指定的 `apply_patch` 尝试了一次，因找不到目标行而失败；未修复或重试。最后的 `sh -c 'exit 0'` 执行成功，输出为空。未调用 `rovai send`。"
+      ],
+      "usageRows": [
+        {
+          "prompt_input_total_tokens": 31256,
+          "uncached_input_tokens": 3096,
+          "cache_read_tokens": 28160,
+          "cache_write_tokens": 0,
+          "output_tokens": 366,
+          "reasoning_output_tokens": 69,
+          "cost_amount_decimal": null,
+          "usage_source": "runtime_private_extension"
+        }
+      ],
+      "context": {
+        "usedTokens": 10559,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "modelKey": "gpt-6-sol",
+        "sessionGeneration": 1
+      }
+    },
+    {
+      "case": "native_skill_mcp_update",
+      "agentRunId": "73b2cfda-9273-46ab-becd-e9a7106dd134",
+      "agentId": "agent_2",
+      "status": "succeeded",
+      "publicReplyCount": 1,
+      "publicReplies": [
+        "NATIVE_CAPABILITIES40_DONE；原生 parity-check40 Skill 实际校验标记：CLINE_SKILL40_41e3637822；MCP cline_parity40 echo(text=updated40) 实际结果：cline-app40-updated:updated40。"
+      ],
+      "usageRows": [
+        {
+          "prompt_input_total_tokens": 62421,
+          "uncached_input_tokens": 31701,
+          "cache_read_tokens": 30720,
+          "cache_write_tokens": 0,
+          "output_tokens": 300,
+          "reasoning_output_tokens": 24,
+          "cost_amount_decimal": null,
+          "usage_source": "runtime_private_extension"
+        }
+      ],
+      "context": {
+        "usedTokens": 15859,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "modelKey": "gpt-6-sol",
+        "sessionGeneration": 1
+      }
+    },
+    {
+      "case": "capability_revocation",
+      "agentRunId": "2442094d-a0ef-4059-9bed-d1ebe8eecfd8",
+      "agentId": "agent_2",
+      "status": "succeeded",
+      "publicReplyCount": 1,
+      "publicReplies": [
+        "REVOKE40_DONE：当前可用工具中没有 MCP `cline_parity40` 的 `echo`，因此未调用；当前原生 Skills 列表中没有 `parity-check40`。"
+      ],
+      "usageRows": [
+        {
+          "prompt_input_total_tokens": 13523,
+          "uncached_input_tokens": 13523,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 91,
+          "reasoning_output_tokens": 41,
+          "cost_amount_decimal": null,
+          "usage_source": "runtime_private_extension"
+        }
+      ],
+      "context": {
+        "usedTokens": 13523,
+        "windowTokens": null,
+        "nativeRatio": null,
+        "modelKey": "gpt-6-sol",
+        "sessionGeneration": 1
+      }
+    }
+  ],
+  "cheeseFileChanges": {
+    "card": {
+      "additions": 2,
+      "agentRunId": "91ba0a8c-1e04-49c3-a5a6-ad9f352dc703",
+      "completedAt": "2026-10-04T16:38:53.121358+00:00",
+      "deletions": 2,
+      "executionEpoch": 1,
+      "fileCount": 2,
+      "files": [
+        {
+          "additions": 1,
+          "changeKind": "update",
+          "deletions": 1,
+          "evidenceFileId": "ef_01a107c859c77493a253c5200e4792f4",
+          "operationCount": 1,
+          "path": "差异验收40/芝士 a.ts",
+          "presentationKind": "reported_mutations"
+        },
+        {
+          "additions": 1,
+          "changeKind": "update",
+          "deletions": 1,
+          "evidenceFileId": "ef_01a107c859c77493a253c530e2079709",
+          "operationCount": 1,
+          "path": "差异验收40/芝士 b.ts",
+          "presentationKind": "reported_mutations"
+        }
+      ],
+      "isStale": false,
+      "operationCount": 2,
+      "revision": 1,
+      "schemaVersion": 3,
+      "sourceChangeSequence": 12
+    },
+    "files": [
+      {
+        "additions": 1,
+        "blocks": [
+          {
+            "additions": 1,
+            "changeKind": "update",
+            "deletions": 1,
+            "diff": "-export const answer = \"before\";\n+export const answer = \"after\";\n",
+            "semantics": "reported_mutation",
+            "sequence": 6
+          }
+        ],
+        "changeKind": "update",
+        "deletions": 1,
+        "evidenceFileId": "ef_01a107c859c77493a253c5200e4792f4",
+        "operationCount": 1,
+        "path": "差异验收40/芝士 a.ts",
+        "presentationKind": "reported_mutations"
+      },
+      {
+        "additions": 1,
+        "blocks": [
+          {
+            "additions": 1,
+            "changeKind": "update",
+            "deletions": 1,
+            "diff": "-export const keep = 40;\n+export const keep = 41;\n",
+            "semantics": "reported_mutation",
+            "sequence": 6
+          }
+        ],
+        "changeKind": "update",
+        "deletions": 1,
+        "evidenceFileId": "ef_01a107c859c77493a253c530e2079709",
+        "operationCount": 1,
+        "path": "差异验收40/芝士 b.ts",
+        "presentationKind": "reported_mutations"
+      }
+    ],
+    "schemaVersion": 3
+  },
+  "dingFileChanges": {
+    "card": {
+      "additions": 2,
+      "agentRunId": "7a709205-3121-423a-afa4-5d8948b737f1",
+      "completedAt": "2026-10-04T16:39:53.227788+00:00",
+      "deletions": 2,
+      "executionEpoch": 1,
+      "fileCount": 1,
+      "files": [
+        {
+          "additions": 2,
+          "changeKind": "update",
+          "deletions": 2,
+          "evidenceFileId": "ef_01a107c944927751856ec4205743e99f",
+          "operationCount": 2,
+          "path": "差异验收40/叮叮 loop.ts",
+          "presentationKind": "reported_mutations"
+        }
+      ],
+      "isStale": false,
+      "operationCount": 2,
+      "revision": 1,
+      "schemaVersion": 3,
+      "sourceChangeSequence": 14
+    },
+    "files": [
+      {
+        "additions": 2,
+        "blocks": [
+          {
+            "additions": 1,
+            "changeKind": "update",
+            "deletions": 1,
+            "diff": "-export const answer = \"before\";\n+export const answer = \"middle\";\n",
+            "semantics": "reported_mutation",
+            "sequence": 6
+          },
+          {
+            "additions": 1,
+            "changeKind": "update",
+            "deletions": 1,
+            "diff": "-export const answer = \"middle\";\n+export const answer = \"before\";\n",
+            "semantics": "reported_mutation",
+            "sequence": 8
+          }
+        ],
+        "changeKind": "update",
+        "deletions": 2,
+        "evidenceFileId": "ef_01a107c944927751856ec4205743e99f",
+        "operationCount": 2,
+        "path": "差异验收40/叮叮 loop.ts",
+        "presentationKind": "reported_mutations"
+      }
+    ],
+    "schemaVersion": 3
+  },
+  "fileActionChecks": [
+    {
+      "case": "cheese",
+      "actions": [
+        {
+          "evidenceId": "023d15e3-d14a-4da7-b896-d59a1d4236c9",
+          "semanticKind": "file.read",
+          "outcome": "succeeded",
+          "command": null,
+          "output": null,
+          "diffAvailable": false
+        },
+        {
+          "evidenceId": "dc88c2a6-7635-4010-96de-4e28075be048",
+          "semanticKind": "file.write",
+          "outcome": "succeeded",
+          "command": null,
+          "output": null,
+          "diffAvailable": true
+        },
+        {
+          "evidenceId": "6770ca0b-772f-456e-a67f-4e6eb5aabb96",
+          "semanticKind": "file.read",
+          "outcome": "succeeded",
+          "command": null,
+          "output": null,
+          "diffAvailable": false
+        },
+        {
+          "evidenceId": "d73cfc85-b906-47a5-95b6-fa4f3e7d1807",
+          "semanticKind": "shell.execute",
+          "outcome": "failed",
+          "command": "sh -c 'printf PARITY_STDOUT; printf PARITY_STDERR >&2; exit 7'\nsh -c 'exit 0'",
+          "output": "[Command exited with code 7]\nPARITY_STDOUT\n[stderr]\nPARITY_STDERR\n",
+          "diffAvailable": false
+        },
+        {
+          "evidenceId": "08d22ef5-a299-4706-b7b0-4a3a18912c33",
+          "semanticKind": "shell.execute",
+          "outcome": "succeeded",
+          "command": null,
+          "output": null,
+          "diffAvailable": false
+        },
+        {
+          "evidenceId": "847d9e89-d2e3-4a8d-8908-b212bc3de4db",
+          "semanticKind": "tool.call",
+          "outcome": "succeeded",
+          "command": null,
+          "output": null,
+          "diffAvailable": false
+        }
+      ]
+    },
+    {
+      "case": "adjacent",
+      "actions": [
+        {
+          "evidenceId": "2648ea10-b065-487d-93d7-996782d212df",
+          "semanticKind": "file.write",
+          "outcome": "failed",
+          "command": null,
+          "output": null,
+          "diffAvailable": false
+        },
+        {
+          "evidenceId": "4cefc185-70f1-42a3-9bb2-8b37e43f76db",
+          "semanticKind": "shell.execute",
+          "outcome": "succeeded",
+          "command": "sh -c 'exit 0'",
+          "output": null,
+          "diffAvailable": false
+        }
+      ]
+    },
+    {
+      "case": "nosend",
+      "actions": []
+    }
+  ],
+  "capabilities": {
+    "mcpActualServerCalls": 2,
+    "initialCall": "cline-app40:first40",
+    "updatedCall": "cline-app40-updated:updated40",
+    "unassignedPeerHadNoTool": true,
+    "revokedOwnerHadNoTool": true,
+    "nativeProjectSkillDiscoveredFor": [
+      "agent_1",
+      "agent_2"
+    ],
+    "nativeSkillReadMarkerVerified": true,
+    "legacyLibraryImportDeliveredToNewRun": false,
+    "nativeSkillsRemovalRefresh": {
+      "unassigned": "ok",
+      "remainingSkill": false
+    },
+    "testConfigurationCleaned": {
+      "removedTestServer": "ok",
+      "remainingLegacyTestSkill": true
+    },
+    "scope": "Native skill add/remove verified with a Host rebuild caused by MCP configuration change; not a standalone warm skills-refresh claim."
+  },
+  "shutdown": {
+    "observedOwnedProcesses": 19,
+    "survivors": []
+  },
+  "restart": {
+    "nativeBindingsRetained": true,
+    "fileDetailsRetained": [
+      "cheese",
+      "ding"
+    ],
+    "appPid": 50007
+  },
+  "ui": {
+    "commandDisclosureVerifiedFor": [
+      "agent_1",
+      "agent_2"
+    ],
+    "review": {
+      "review": [
+        "File Change\n1 个文件 · +2 −2\n差异验收40/叮叮 loop.ts\n补丁片段\n+2\n−2\n打开当前文件\n修改 1\n补丁片段\n−\nexport const answer = \"before\";\n+\nexport const answer = \"middle\";\n修改 2\n补丁片段\n−\nexport const answer = \"middle\";\n+\nexport const answer = \"before\";"
+      ],
+      "blocks": [
+        "修改 1\n补丁片段\n−\nexport const answer = \"before\";\n+\nexport const answer = \"middle\";",
+        "修改 2\n补丁片段\n−\nexport const answer = \"middle\";\n+\nexport const answer = \"before\";"
+      ],
+      "titles": [
+        {
+          "label": "补丁片段",
+          "title": "已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。"
+        },
+        {
+          "label": "补丁片段",
+          "title": "已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。"
+        }
+      ],
+      "overflow": false
+    },
+    "composerDraftPreserved": true,
+    "screenshots": [
+      "cline-edit40-cheese-command.png",
+      "cline-edit40-ding-command.png",
+      "cline-edit40-files-review.png"
+    ]
+  },
+  "commandCode": {
+    "version": "1.66.0",
+    "scope": "native_cli_and_staged_normalizer",
+    "productAdapterImplemented": false,
+    "sameNativeSession": true,
+    "tool": "edit_file",
+    "nativeInputFields": [
+      "file_path",
+      "new_string",
+      "old_string"
+    ],
+    "reportedOld": "export const answer = \"after\";",
+    "reportedNew": "export const answer = \"parity40\";",
+    "nativeTerminal": "tool_completed",
+    "finalMarker": "COMMAND_EDIT40_OK",
+    "usage": {
+      "inputTokens": 53729,
+      "outputTokens": 333,
+      "cacheReadTokens": 30976,
+      "cacheWriteTokens": 0
+    },
+    "contextWindowObserved": false
+  },
+  "liveRunBuildSha256": {
+    "Resources/bin/rovai-core": "967013c676602974f1e25f91ce4e6ec40f4704e98148df5194fc5e95133f1383",
+    "Resources/bin/rovai-host": "6a3b2c659be15dbcabec3ff60430469b1fe3b01c538e6df65779d5ca829041b7",
+    "Resources/app.asar": "839197ec9410312fe1f45e5a46d0cbdec77cd03d0a213e363f697b4d3efa6db1"
+  },
+  "liveRunSourceSha256": {
+    "crates/rovai-core/src/cline.rs": "14e0ace51c9c2bc8df4ec80ecb9f0af008c4c79a74affcd4d8acbd837d581c7a",
+    "crates/rovai-core/src/application.rs": "2cada2e1243dba40904ab5af1cf7ce1e17ccef56f09c76847fa5e1fae0c9f079",
+    "crates/rovai-core/src/runtime_diff.rs": "2df976229fa32d96cd7e06ab913adc35b26bd530b32b8347425bb656810c0405",
+    "crates/rovai-core/src/command_code_activity.rs": "e1b36045344649afa3488538065a427e36c8faaa0b16467dae9560d2e015fbf1",
+    "crates/rovai-core/src/agent_run_file_change.rs": "bdbd8cbc9e530607f6a7cba0aa8c716ea157814a1a8c136a57255d02322870c9",
+    "apps/desktop/src/renderer/src/ExecutionToolGroup.tsx": "1b18f8a394b57403d8f41bb4f16c1f76e6c914f014f7c50917feda4d9bed7d91",
+    "apps/desktop/src/renderer/src/FileChangesPreview.tsx": "1326f02697d7fe420ce1005e919684c8935fc070fce68c206584f7f34d35bf4b",
+    "packages/contracts/src/index.ts": "53c07e2e0f1b5fbfc5dfc2546aca4cd6e20993bebe6b21281577a6225c06f810"
+  },
+  "retainedSourceSha256": {
+    "crates/rovai-core/src/cline.rs": "14e0ace51c9c2bc8df4ec80ecb9f0af008c4c79a74affcd4d8acbd837d581c7a",
+    "crates/rovai-core/src/application.rs": "2cada2e1243dba40904ab5af1cf7ce1e17ccef56f09c76847fa5e1fae0c9f079",
+    "crates/rovai-core/src/runtime_diff.rs": "86ad4d3c4ff07bb04dc28c89046bbdacb484855fabafb4275c45cf6226d206fa",
+    "crates/rovai-core/src/command_code_activity.rs": "e1b36045344649afa3488538065a427e36c8faaa0b16467dae9560d2e015fbf1",
+    "crates/rovai-core/src/agent_run_file_change.rs": "bdbd8cbc9e530607f6a7cba0aa8c716ea157814a1a8c136a57255d02322870c9",
+    "apps/desktop/src/renderer/src/ExecutionToolGroup.tsx": "1b18f8a394b57403d8f41bb4f16c1f76e6c914f014f7c50917feda4d9bed7d91",
+    "apps/desktop/src/renderer/src/FileChangesPreview.tsx": "1326f02697d7fe420ce1005e919684c8935fc070fce68c206584f7f34d35bf4b",
+    "packages/contracts/src/index.ts": "53c07e2e0f1b5fbfc5dfc2546aca4cd6e20993bebe6b21281577a6225c06f810"
+  },
+  "retainedBuildSha256": {
+    "Resources/bin/rovai-core": "ff6a08f1f905b43a332debfcfe32de153d5f2d52ac5e9a53ad4c65cb57af0c7c",
+    "Resources/bin/rovai-host": "974651595f3e2f4ed069a79251a0c6dd2b78bd91df19ea6fed8dd3624b192053",
+    "Resources/app.asar": "b143a62345e75ff9b8e187712a2c98350621b82a47b9f610ca7d52929e9217bc"
+  },
+  "retainedBuildReadback": {
+    "cheeseFileChangesIdentical": true,
+    "dingFileChangesIdentical": true,
+    "commandDisclosureRechecked": true,
+    "composerDraftPreserved": true,
+    "pageOverflow": false,
+    "screenshot": "cline-edit40-files-review.png"
+  }
+}

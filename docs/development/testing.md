@@ -118,6 +118,13 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 仍要求两个 prompt 共用同一 Host/Session。原 `private_host_config_is_created_only_for_kiro` 更名为
 `private_host_config_is_scoped_to_profiles_that_require_it`，保留全部原输入并补 Cline 私有目录 case。
 
+本次 `reported_mutation` 新增纯函数 owner
+`runtime_diff::tests::reported_mutations_preserve_native_fragments_without_claiming_exact_or_full_states`：
+拥有新持久化语义的来源白名单、字段剔除、路径排除和 Evidence 读回；既有 exact mutation owner 不拥有模糊匹配语义。
+它不创建文件、数据库、子进程或真实模型。Cline 配对、Command Code 生命周期、ACP 公共 seam、AgentRun reducer
+和 Renderer 均扩展既有 owner，不复制同一链路。沿现有 Runtime Diff owner 的 extended-tests 层级；定向命令为 `cargo test -p rovai-core --features extended-tests --lib runtime_diff::tests::`。
+真实模型与隔离 App 属于单独验收，见研究记录。
+
 最小命令：`cargo test -p rovai-core --features extended-tests --lib command_code::tests::`、
 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`、
 `cargo test -p rovai-core --features extended-tests --lib cline_catalog_migration_preserves_rows_and_rolls_back_with_its_receipt`；

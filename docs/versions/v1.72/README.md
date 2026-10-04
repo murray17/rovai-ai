@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-04
+last_updated: 2026-10-05
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -28,6 +28,11 @@ Cline 另有可选 reasoning；最新根调用输入独立投影 Context used。
 读回，执行面板文件名与可点击预览均通过。Command Code 内部 Activity 保留原生 file_path，并为已选
 Yolo 补齐 headless 写入所需的原生开关；当前 BYOK 仍没有可信窗口值。
 [文件与上限证据](../../research/runtime-monitoring/command-cline-files-context-2026-10-04.md)区分 App 和内部传输。
+
+编辑内容随后按 [File Change v7](../../contracts/runtime-file-change-observation-v7.md) 接入：Cline 成功 Update
+补丁和 editor 替换保留为有明确来源标签的补丁片段，Command 可展开增删，Files Changed 保留按序统计；
+Command Code 内部 normalizer 同步候选映射。真实两成员、多文件与连续改回、失败编辑、命令输出、零发送恢复
+及能力发现复核见[差异验收](../../research/runtime-monitoring/command-cline-parity-2026-10-05.md)。
 
 Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
 macOS arm64 按 [V1.72-D13](decisions.md#v1-72-d13)开放开发 `Preview`，其余平台保持 `NotQualified`；

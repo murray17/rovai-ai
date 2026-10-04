@@ -14,6 +14,9 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 
 当前执行台的取数范围、隐藏暂停、引用复用与迟到刷新收口见[执行指标读取验收](execution-metrics-refresh-verification-2026-10-01.md)。
 
+2026-10-05 [Command Code / Cline 编辑与能力差异复核](command-cline-parity-2026-10-05.md)：
+成功补丁片段接入 Command/Files Changed，真实两成员编辑、失败、零发送、原生 Skills/MCP 及重开证据。
+
 2026-10-04 [Command Code 与 Cline 真实模型核验](command-cline-verification-2026-10-04.md)：
 两条链路均取得四个原生 token 桶，Cline 另有可选 reasoning；最新根调用输入产生 Context used，
 窗口、比例和成本仍未知。证据分别到 Core headless transport / ACP Host，不是完整 App 或平台准入。

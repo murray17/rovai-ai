@@ -6,7 +6,7 @@ status: implementation-in-progress
 admission: preview
 observed_version: 3.0.65
 observed_platform: macos-arm64
-last_updated: 2026-10-04
+last_updated: 2026-10-05
 ---
 
 # Cline 官方 ACP 接入
@@ -30,10 +30,10 @@ DeepSeek Harness，不能把该 Runtime 的证据借给 Cline。
 | Native Session / Continuation | 精确 ID、warm/cold、重放隔离 | new/load 返回原生 ID；load 会重放历史，并重取 provider/model/权限默认值；必须重设冻结值 | 共享 Host exact load/replay quarantine 通过；完整 App/Core 重启后 Session ID、Binding ID、generation 精确保留，真实回帖通过 |
 | Bootstrap / Context | 冻结 Charter/Identity/Memory 与每轮动态输入 | 当前 staged `first_payload` 仅是普通用户 Prompt；官方 Plugin Rule 可进入 System Prompt，拟改用既有 `managed_system_prompt` | 静态／函数 Rule 在真实 ACP 的 `beforeModel.request.systemPrompt` 均已观察到；[revision 1 方案](model-context-change-v1.70-proposal.md)待二次确认，Core 字节级投递与前置失败关闭未实现 |
 | Compaction continuity | 完成信号、补发、失败/取消与恢复 | ACP 不转发 compaction；官方 Plugin status-notice 可观测 completed | Plugin/Host 完成事件桥已接线；真实 ACP 发送 `/compact` 仍进入模型调用且没有压缩事件，manual 入口未闭合；auto/overflow/cold resume 未观测 |
-| Skills | 当前受管索引与原生 Skills 并存 | 共享受管索引；Cline 原生 `.cline/skills`、`.agents/skills` | 路径与 group 接线已编译，真实投影增删与发现待验收 |
-| External MCP | PreparedMcpProjection、追加、撤销、无串会话 | 3.0.65 ACP 忽略 `session/new.mcpServers`；官方 `CLINE_MCP_SETTINGS_PATH` 指向 Host 私有合并文件 | 原生隔离配置调用真实 fixture Tool Verified；Core Host 合并已实现，投影增删/相邻 Session 待验收 |
-| Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 已通过；修复单文件 location 后，App 两成员 read/edit/read 的准确路径、持久化、点击预览与文件副作用通过；编辑保持 path-only；空/超大输出待验收 |
-| Narration / Final / Missing-Send | thinking 私有、权威终态、zero-send 恢复 | agent_message_chunk 与 thought 分开；prompt stopReason / JSON-RPC error | App 四轮均 succeeded，且每轮恰一条显式 CLI 公开回帖；产品 Missing-Send NotImplemented |
+| Skills | 当前受管索引与原生 Skills 并存 | 共享受管索引；Cline 原生 `.cline/skills`、`.agents/skills` | 现行 main 使用平台/工具箱索引与原生文件发现，旧 Library/group 不再投递给新 Run；本轮原生项目 Skill 的 Core 候选发现和真实读取见[差异复核](../runtime-monitoring/command-cline-parity-2026-10-05.md) |
+| External MCP | PreparedMcpProjection、追加、撤销、无串会话 | 3.0.65 ACP 忽略 `session/new.mcpServers`；官方 `CLINE_MCP_SETTINGS_PATH` 指向 Host 私有合并文件 | 原生隔离配置调用真实 fixture Tool Verified；Core Host 合并已实现；App 分配、原生调用、更新及未分配成员隔离通过；撤销结果见差异复核，完整并发/HTTP 矩阵未完成 |
+| Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 已通过；修复单文件 location 后，App 两成员 read/edit/read 的准确路径、持久化、点击预览与文件副作用通过；成功 Update 补丁/editor 替换已接 Command 和 Files Changed 的补丁片段；两成员、多文件、连续改回、失败编辑、非零和独立空输出实测通过；editor 原生模型路径及超大输出仍待验收 |
+| Narration / Final / Missing-Send | thinking 私有、权威终态、zero-send 恢复 | agent_message_chunk 与 thought 分开；prompt stopReason / JSON-RPC error | App 四轮均 succeeded，且每轮恰一条显式 CLI 公开回帖；zero-send 恢复两轮真实通过，均只有一条公开消息 |
 | Permission / Approval / Workspace | 原生权限为唯一权威、allow/deny/cancel | 官方 auto_approve 布尔、plan/act；request_permission 原样往返 | 原生拒绝无副作用 Verified；共享 Core Host 在命令发出后取消，得到 `cancelled` 且 10 秒后无文件副作用；Core allow/deny 与产品审批待验收 |
 | Built-in rovai CLI | 每 Run lease 与 bundled CLI | 共享 ACP process config 注入 shell 环境，Run 结束解除 | App first/warm/第二名队员/cold 四轮真实 bundled CLI 回帖通过，cold 使用重启后当前 Run lease |
 | Usage / Cache / Cost | 原生结构化字段与稳定归属，未知 NULL | 官方 Plugin afterModel 按 message ID 报 token/cache；Host 按唯一 Prompt lease 归属 | Host 与 App 四轮 17 次调用通过；四桶、可选 reasoning、live Context used、去重及 AgentRun 持久化已核验；Renderer 展示 toks/Context，窗口、比例和 Cost 未知 |

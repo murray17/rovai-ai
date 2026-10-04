@@ -315,3 +315,22 @@ Cline 已有 shared ACP Host 和隔离真实模型证据，但尚未完成全部
 不选择伪造 Qualified 或验收专用绕过开关，它们会掩盖真实配置和发送路径的问题。继续完全关闭虽然保守，
 却不能满足本次开发包的使用要求。此决定只允许开发预览，不接受 Cline 的尚未确认 Plugin Rule 提案，
 也不把现有 FirstPayload 的试运行结果等同于 Bootstrap 或压缩连续性的正式资格。
+
+<a id="v1-72-d14"></a>
+## V1.72-D14：成功的模糊匹配编辑保留为补丁片段
+
+- 状态：accepted
+- 日期：2026-10-05
+- 当前权威：[Runtime File Change Observation v7](../../contracts/runtime-file-change-observation-v7.md)、[Runtime 文件变化架构](../../architecture/runtime-file-change-observation.md)
+
+### 背景与选择
+
+User 要求 Cline 与 Command Code 的编辑能够点击查看增删。两者原生输入有修改片段，但执行器允许模糊匹配；
+Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation 会承诺无法证明的旧文件字节，而只保留路径又丢失了
+已经确认成功的可审阅内容。选择新增 `reported_mutation`，保留来源区别、顺序与补丁统计，复用既有 Evidence 和 UI。
+
+### 后果与替代方案
+
+持久化语义增加一个可选种类，后续读取必须继续区分完整状态、精确替换与原生补丁。接受不能由片段获得净差异、
+行号及实际旧字节的限制；不会据此提升 Runtime 资格。没有选择执行前后读取文件或 Git 捕获，因为并发写入、非 Git
+工作区及完整状态归属会引入另一套观测权威。继续只显示路径可保持旧边界，却不能满足用户审阅已执行修改的要求。

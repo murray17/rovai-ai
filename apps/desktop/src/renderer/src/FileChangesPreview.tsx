@@ -318,21 +318,22 @@ function AgentRunFileReviewBlock({
   index: number
   showLabel: boolean
 }): JSX.Element | null {
-  const exactMutation = block.semantics === 'exact_mutation'
+  const reportedMutation = block.semantics === 'reported_mutation'
+  const fragmentDiff = block.semantics === 'exact_mutation' || reportedMutation
   if (!block.diff) {
     return null
   }
-  const lines = exactMutation ? exactMutationDiffLines(block.diff) : inlineDiffLines(block.diff)
+  const lines = fragmentDiff ? exactMutationDiffLines(block.diff) : inlineDiffLines(block.diff)
   return (
-    <section className={`agent-run-file-review-block${exactMutation ? ' is-exact-mutation' : ''}`}>
+    <section className={`agent-run-file-review-block${fragmentDiff ? ' is-exact-mutation' : ''}`}>
       {showLabel && (
         <header>
           <strong><UiText zh={"修改 "} />{index + 1}</strong>
-          <span>{exactMutation ? uiAttribute("精确替换 · 无行号") : uiAttribute("完整文件差异")}</span>
+          <span title={reportedMutation ? uiAttribute('已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。') : undefined}>{reportedMutation ? uiAttribute('补丁片段') : fragmentDiff ? uiAttribute("精确替换 · 无行号") : uiAttribute("完整文件差异")}</span>
         </header>
       )}
       <div className="agent-run-file-review-diff-code">
-        {lines.map((line, lineIndex) => exactMutation
+        {lines.map((line, lineIndex) => fragmentDiff
           ? (
               <div className={`agent-run-file-review-diff-line is-${line.kind}`} key={`${lineIndex}:${line.text}`}>
                 <span aria-hidden="true">{line.kind === 'addition' ? '+' : '−'}</span>

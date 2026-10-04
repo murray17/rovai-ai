@@ -1521,9 +1521,9 @@ describe('task event projections', () => {
       expect(agentRunFileChangesSummaryLabel(changes)).toBe('1 file · 1 change')
       expect(agentRunFileChangesSummaryLabel({ ...changes, fileCount: 4, operationCount: 5 })).toBe('4 files · 5 changes')
       expect(agentRunFileChangesSummaryLabel({ ...changes, additions: 1, deletions: 2 })).toBe('1 file · +1 −2')
-      expect((['full_net_diff', 'exact_mutations', 'operation_history', 'operation_only'] as const)
+      expect((['full_net_diff', 'exact_mutations', 'reported_mutations', 'operation_history', 'operation_only'] as const)
         .map(agentRunFileChangeModeLabel)).toEqual([
-          'Full diff', 'Edit fragments', 'Operation history', 'File operations only'
+          'Full diff', 'Edit fragments', 'Patch fragments', 'Operation history', 'File operations only'
         ])
       expect(agentRunFilePathParts('README.md').directory).toBe('Current directory')
     } finally {
@@ -1666,7 +1666,7 @@ describe('task event projections', () => {
           diff: '-old\n+new'
         }, {
           sequence: 5,
-          semantics: 'exact_mutation',
+          semantics: 'reported_mutation',
           changeKind: 'update',
           diff: '-before\n+after'
         }]
@@ -1712,6 +1712,8 @@ describe('task event projections', () => {
     expect(historyMarkup).not.toContain('修改 3')
     expect(historyMarkup).toContain('>old<')
     expect(historyMarkup).toContain('>new<')
+    expect(historyMarkup).toContain('补丁片段')
+    expect(historyMarkup).toContain('已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。')
     expect(historyMarkup).toContain('>before<')
     expect(historyMarkup).toContain('>after<')
     expect(historyMarkup).not.toContain('这次文件操作没有可靠的差异内容')
@@ -6830,7 +6832,7 @@ describe('task event projections', () => {
     expect(progress.items[0].step.fileChangeSemantics).toBeUndefined()
   })
 
-  it('renders consecutive Claude Edit mutations as separate rows without inferred hunk line numbers', () => {
+  it.each(['exact_mutation', 'reported_mutation'] as const)('renders %s as separate rows without inferred hunk line numbers', (semanticKind) => {
     const exactEdit = (
       toolCallId: string,
       oldText: string,
@@ -6858,7 +6860,7 @@ describe('task event projections', () => {
           revision: 1,
           sourceEvidenceIds: [`evidence-${toolCallId}`],
           status: 'available',
-          semanticKind: 'exact_mutation',
+          semanticKind,
           entries: [{
             path: 'apps/desktop/src/renderer/src/ThreadWorkspace.tsx',
             changeKind: 'update',
@@ -6879,11 +6881,11 @@ describe('task event projections', () => {
     expect(progress.items).toMatchObject([
       {
         key: 'tool:toolu-edit-1',
-        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: semanticKind }
       },
       {
         key: 'tool:toolu-edit-2',
-        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: semanticKind }
       }
     ])
 
@@ -6909,7 +6911,7 @@ describe('task event projections', () => {
     expect(markup.match(/modified-file-diff is-exact-mutation/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
     expect(markup).toContain('aria-label="已完成 2 个步骤"')
-    expect(markup).toContain('ThreadWorkspace.tsx 的修改片段')
+    expect(markup).toContain(semanticKind === 'reported_mutation' ? 'ThreadWorkspace.tsx 的补丁片段' : 'ThreadWorkspace.tsx 的修改片段')
     expect(markup).not.toContain('const enabled = false')
     expect(markup).not.toContain('const enabled = ready')
     expect(markup).not.toContain('@@')

@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-file-change-observation
 authority: command-and-agent-run-file-change-boundaries
 status: accepted
-last_updated: 2026-09-22
+last_updated: 2026-10-05
 ---
 
 # Runtime File Change Observation 架构
 
-字段、归约与授权接口见 [Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)。
+字段、归约与授权接口见 [Runtime File Change Observation v7](../contracts/runtime-file-change-observation-v7.md)。
 本架构只消费 Runtime 明确报告的文件变化，不读取当前文件、不扫描工作区，也不依赖 Git。
 
 ## 产品模型
@@ -39,7 +39,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 ### Runtime Adapter normalizer
 
 - Adapter 只接纳它能从协议结构化字段证明的成功 read/write 文件操作、完整 before/after、完整 unified diff snapshot 或 exact
-  mutation；失败、取消、字段不完整和自由文本保持普通 Tool Evidence；
+  mutation，以及当前合同明确准入的 reported mutation；失败、取消、字段不完整和自由文本保持普通 Tool Evidence；
 - Pi 只把成功 `edit` 终态的 `result.details.patch` 作为内容来源，并要求 patch 文件头与同 ToolCall 的结构化 path
   完全一致且包含 hunk；`write` 保持 operation-only，不从当前磁盘或 input 反推内容；
 - 路径按 Run 冻结的 execution root 做纯词法规范化，该 root 也是 display root。root 内转换为相对路径；root 外
@@ -62,7 +62,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
   伪造计数或空 diff；
 - Activity identity、phase、outcome、排序和 operation count 继续由既有 Canonical Activity 拥有。逐文件行只是
   presentation rows；
-- `apply_patch` 等 Runtime 原始 Tool 名不作为 Diff 数据源，也不形成父级聚合行；
+- `apply_patch` 等原始 Tool 名本身不构成 Diff 数据源，也不形成父级聚合行；Cline 只将同 ToolCall 确认成功的规范补丁按 `reported_mutation` 准入，明确保留模糊匹配的不确定性；
 - managed output 的 unavailable projection 只保留内部诊断，不形成带 path 的文件行或 inline Diff；原 Tool
   Activity 仍可按可靠 Runtime kind 保持普通 file/tool 分类与通用 presentation。
 
@@ -86,7 +86,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - terminal Evidence 已用 `runtime_diff_no_changes` 明确确认没有内容变化时，projector 不再把同事件的 path-only
   operation 回退成卡片文件；
 - 每个文件按语义归约：连续 `FullBeforeAfter` 链可合成为首态到末态的净差异，回到首态则移除；链断裂只让该
-  文件降级为 operation history，不影响其他文件；`ExactMutation` 保留时序；`OperationOnly` 保留成功操作、
+  文件降级为 operation history，不影响其他文件；`ExactMutation` 和 `ReportedMutation` 保留时序；后者统计为补丁报告值，不参与完整状态净差异合并；`OperationOnly` 保留成功操作、
   原序号和 operation count，但不参与 Diff 统计；
 - 移除 `runtime_diff_no_changes` 后，同文件只要仍有可靠 Diff，就按其语义计算逐文件 `+A −D`：连续完整状态链
   使用净统计，其余可靠块累计统计。只有所有文件都有可靠统计时卡片才显示总 `+A −D`；任一文件只有
@@ -178,7 +178,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 ## 相关规范
 
-- [Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)
+- [Runtime File Change Observation v7](../contracts/runtime-file-change-observation-v7.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)

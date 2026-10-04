@@ -270,18 +270,40 @@ fn action_event(
         .then(|| tool.requested_input.as_ref()?.get("file_path")?.as_str())
         .flatten()
         .filter(|path| !path.trim().is_empty());
+    let mut payload = json!({
+        "toolCallId": id,
+        "toolName": tool.name,
+        "status": status,
+        "kind": kind,
+        "title": tool.name,
+        "input": input,
+        "output": output,
+        "filePath": file_path,
+    });
+    if status == "completed"
+        && tool.name == "edit_file"
+        && let Some(input) = tool.requested_input.as_ref()
+        && let Some(path) = file_path
+        && let Some(old) = input["old_string"].as_str().filter(|v| !v.is_empty())
+        && let Some(new) = input["new_string"].as_str()
+        && old != new
+        && old.len().saturating_add(new.len()) <= 2 * 1024 * 1024
+        && matches!(input.get("replace_all"), None | Some(Value::Bool(false)))
+        && input
+            .get("replacement_count")
+            .is_none_or(|v| v.as_u64() == Some(1))
+    {
+        // Native edits can use fuzzy matching. Keep reported replacement
+        // fragments, never a fabricated full-file or exact-mutation snapshot.
+        // This remains staged until the independent Product Adapter is admitted.
+        payload["runtimeDiff"] = json!({"adapterKind":"command-code-cli",
+            "protocolFamily":"command-code-ndjson-v1","sourceEventKind":"tool_completed.edit_file",
+            "semanticKind":"reported_mutation","entries":[{"semantics":"reported_mutation","path":path,
+                "fragments":[{"oldText":old,"newText":new}]}]});
+    }
     CommandCodeRuntimeEvent {
         event_type: "runtime.action",
-        payload: json!({
-            "toolCallId": id,
-            "toolName": tool.name,
-            "status": status,
-            "kind": kind,
-            "title": tool.name,
-            "input": input,
-            "output": output,
-            "filePath": file_path,
-        }),
+        payload,
     }
 }
 
@@ -309,7 +331,7 @@ mod tests {
             json!({"type":"tool_completed","toolCallId":"tool-3","toolName":"shell_command","result":[{"type":"text","text":"Exit code: 7\nSTDOUT\n\nSTDERR\n"}]}),
             json!({"type":"tool_queued","toolCallId":"tool-4","toolName":"read_file","input":{"file_path":"src/read target.txt"}}),
             json!({"type":"tool_completed","toolCallId":"tool-4","toolName":"read_file","result":[{"type":"text","text":"PRIVATE_SOURCE_MARKER"}]}),
-            json!({"type":"tool_queued","toolCallId":"tool-5","toolName":"edit_file","input":{"file_path":"src/edit target.ts","old_string":"PRIVATE_OLD","new_string":"PRIVATE_NEW"}}),
+            json!({"type":"tool_queued","toolCallId":"tool-5","toolName":"edit_file","input":{"file_path":"src/edit target.ts","old_string":"EDIT_BEFORE","new_string":"EDIT_AFTER","credential":"PRIVATE_EDIT_CREDENTIAL"}}),
             json!({"type":"tool_completed","toolCallId":"tool-5","toolName":"edit_file","result":[{"type":"text","text":"PRIVATE_PATCH_MARKER"}]}),
             json!({"type":"tool_queued","toolCallId":"tool-6","toolName":"shell_command","input":{"command":"printf 'Exit code: 7\\n'"}}),
             json!({"type":"tool_update","toolCallId":"tool-6","toolName":"shell_command","partial":[{"type":"text","text":"Exit code: 7\n"}]}),
@@ -342,8 +364,51 @@ mod tests {
         assert!(output[12].payload["output"].is_null());
         assert_eq!(output[12].payload["filePath"], "src/edit target.ts");
         assert!(output[12].payload["input"].is_null());
+        assert_eq!(
+            output[12].payload["runtimeDiff"]["semanticKind"],
+            "reported_mutation"
+        );
+        assert_eq!(
+            output[12]
+                .payload
+                .pointer("/runtimeDiff/entries/0/fragments/0/oldText"),
+            Some(&json!("EDIT_BEFORE"))
+        );
+        assert!(output[11].payload.get("runtimeDiff").is_none());
         assert_eq!(output[14].payload["status"], "completed");
         assert!(!format!("{output:?}").contains("private"));
         assert!(!format!("{output:?}").contains("PRIVATE_"));
+        for terminal in ["tool_errored", "tool_denied", "tool_hook_blocked"] {
+            let mut candidate = CommandCodeActivityNormalizer::default();
+            candidate.observe(&json!({"type":"tool_queued","toolCallId":"edit","toolName":"edit_file","input":{"file_path":"x","old_string":"old","new_string":"new"}})).unwrap();
+            let events = candidate
+                .observe(&json!({"type":terminal,"toolCallId":"edit","toolName":"edit_file"}))
+                .unwrap();
+            assert!(
+                events
+                    .iter()
+                    .all(|e| e.payload.get("runtimeDiff").is_none())
+            );
+            assert_eq!(events.last().unwrap().payload["status"], "failed");
+        }
+        for input in [
+            json!({"file_path":"x","old_string":"old","new_string":"new","replace_all":true}),
+            json!({"file_path":"x","old_string":"old","new_string":"new","replacement_count":2}),
+            json!({"file_path":"x","old_string":"","new_string":"new"}),
+            json!({"file_path":"x","old_string":"same","new_string":"same"}),
+        ] {
+            let mut candidate = CommandCodeActivityNormalizer::default();
+            candidate.observe(&json!({"type":"tool_queued","toolCallId":"edit","toolName":"edit_file","input":input})).unwrap();
+            let events = candidate
+                .observe(
+                    &json!({"type":"tool_completed","toolCallId":"edit","toolName":"edit_file"}),
+                )
+                .unwrap();
+            assert!(
+                events
+                    .iter()
+                    .all(|e| e.payload.get("runtimeDiff").is_none())
+            );
+        }
     }
 }

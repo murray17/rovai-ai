@@ -20913,6 +20913,18 @@ fn normalize_acp_event_with_completion(
                 payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":zcode::PROTOCOL,
                     "sourceEventKind":"tool.updated.result","semanticKind":"zcode_edit_patch","entries":entries});
             }
+            if adapter_kind == AdapterKind::ClineCli
+                && public_status == "completed"
+                && let Some(mutation) = update.pointer("/_meta/rovaiClineMutation")
+                && let Some(tool @ ("apply_patch" | "editor")) = mutation["tool"].as_str()
+                && let Some(entries) = mutation.get("entries")
+            {
+                payload["runtimeDiff"] = json!({
+                    "adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":format!("session/update.tool_call_update.completed.{tool}"),
+                    "semanticKind":"reported_mutation","entries":entries,
+                });
+            }
             ("runtime.action", payload)
         }
         Some("plan") => ("runtime.plan", update),
@@ -30368,6 +30380,25 @@ done
         let serialized_cline = serde_json::to_string(&cline_payload).unwrap();
         assert!(!serialized_cline.contains("CLINE_PRIVATE_INPUT"));
         assert!(!serialized_cline.contains("CLINE_PRIVATE_RESULT"));
+
+        let patch_initial = json!({"title":"apply_patch: fixture","rawInput":{"input":"*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch","private":"CLINE_PRIVATE"}});
+        let mut patch_terminal = json!({"sessionUpdate":"tool_call_update","toolCallId":"edit","status":"completed","rawOutput":{"success":true,"private":"CLINE_PRIVATE"}});
+        rovai_core::cline::enrich_tool_update(&mut patch_terminal, Some(&patch_initial));
+        let (_, patch_payload) = normalize_acp_event(
+            AdapterKind::ClineCli,
+            "session/update",
+            &json!({"update":patch_terminal}),
+        );
+        assert_eq!(
+            patch_payload["runtimeDiff"]["semanticKind"],
+            "reported_mutation"
+        );
+        assert_eq!(
+            patch_payload.pointer("/runtimeDiff/entries/0/fragments/0/oldText"),
+            Some(&json!("old\n"))
+        );
+        assert!(patch_payload["input"].is_null());
+        assert!(!patch_payload.to_string().contains("CLINE_PRIVATE"));
 
         let query = "password=公开测试词 token=也照常展示";
         let (_, web_payload) = normalize_acp_event(

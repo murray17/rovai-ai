@@ -6,7 +6,7 @@ status: implementation-in-progress
 admission: research
 observed_version: 1.64.0, 1.65.2, 1.66.0
 observed_platform: macos-arm64
-last_updated: 2026-10-04
+last_updated: 2026-10-05
 ---
 
 # Command Code Parity Matrix（1.64.0 fixture；1.65.2 真实 BYOK）
@@ -52,6 +52,15 @@ last_updated: 2026-10-04
 编辑实测还证明 `--permission-mode yolo` 单独不足以通过 headless 写入 gate；仅为已选择 Yolo 的请求
 补齐原生 `--yolo` 后，修改与原生读回均成功。DontAsk 不添加该开关。窗口字段仍未观察到，
 这些证据仍不代表 Command Code Product Adapter/App 已接入。
+
+## 2026-10-05 编辑片段补齐
+
+1.66.0 再次用真实模型原生 read/edit/read 将 answer 从 after 改为 parity40，精确保持此前 UUID，
+结果 `COMMAND_EDIT40_OK`。原生输入确有 file_path/old_string/new_string，内部 normalizer 在可靠成功终态
+生成 `reported_mutation` 候选；原生执行器允许模糊匹配，不能称完整或精确文件状态。
+失败、拒绝、replace_all 与多次替换回退测试通过。仍未接 Product identity/dispatch，因此没有 Command Code
+App Diff 验收；不能把两个 Cline 测试队员的界面证据借给它。完整对照及当前 Skills 合同纠偏见
+[差异复核](../runtime-monitoring/command-cline-parity-2026-10-05.md)。
 
 ## 实施准入顺序
 

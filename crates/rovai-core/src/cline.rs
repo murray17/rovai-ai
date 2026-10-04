@@ -483,6 +483,10 @@ pub fn read_observations(
 /// nevertheless followed by ACP `completed`. Trust `success`, not prose or the
 /// coarse terminal status, and expose result text only for command tools.
 pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
+    // This field is owned by the profile, never by an unvalidated wire payload.
+    if let Some(meta) = update.get_mut("_meta").and_then(Value::as_object_mut) {
+        meta.remove("rovaiClineMutation");
+    }
     if let Some(initial) = initial {
         if update["title"].is_null() && initial["title"].is_string() {
             update["title"] = initial["title"].clone();
@@ -499,7 +503,7 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
         .unwrap_or_default()
         .trim()
         .to_owned();
-    if name == "apply_patch" {
+    if matches!(name.as_str(), "apply_patch" | "editor") {
         update["kind"] = json!("edit");
     }
     if name == "read_files" {
@@ -507,7 +511,7 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
     }
     // Cline reports a completed ACP envelope even when its typed tool result
     // failed. Do not publish a successful file operation for that envelope.
-    if matches!(name.as_str(), "read_files" | "apply_patch")
+    if matches!(name.as_str(), "read_files" | "apply_patch" | "editor")
         && matches!(update["status"].as_str(), Some("completed" | "failed"))
     {
         let output = &update["rawOutput"];
@@ -537,6 +541,10 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
                     };
                     file["path"].as_str().filter(|path| !path.trim().is_empty())
                 })
+            } else if name == "editor" {
+                update["rawInput"]["path"]
+                    .as_str()
+                    .filter(|path| !path.trim().is_empty())
             } else {
                 update["rawInput"]["input"]
                     .as_str()
@@ -544,6 +552,19 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
             };
             if let Some(path) = path {
                 update["locations"] = json!([{"path": path}]);
+            }
+            let entries = match name.as_str() {
+                "apply_patch" => update["rawInput"]["input"]
+                    .as_str()
+                    .and_then(applied_patch_entries),
+                "editor" => editor_mutation_entries(&update["rawInput"]),
+                _ => None,
+            };
+            if let Some(entries) = entries {
+                if !update["_meta"].is_object() {
+                    update["_meta"] = json!({});
+                }
+                update["_meta"]["rovaiClineMutation"] = json!({"tool":name,"entries":entries});
             }
         }
     }
@@ -616,6 +637,100 @@ fn single_patch_path(patch: &str) -> Option<&str> {
         }
     }
     path
+}
+
+/// Retain the native, successfully applied UPDATE patch as reported fragments.
+/// Cline can normalize punctuation or fuzzy-match old text; these are not exact
+/// mutations or complete file states. No filesystem observation is involved.
+fn applied_patch_entries(patch: &str) -> Option<Value> {
+    if patch.len() > 2 * 1024 * 1024 || patch.contains('\0') {
+        return None;
+    }
+    let mut lines = patch.trim().lines();
+    if lines.next()? != "*** Begin Patch" || lines.next_back()? != "*** End Patch" {
+        return None;
+    }
+    let mut entries = Vec::new();
+    let mut paths = std::collections::BTreeSet::new();
+    let mut path = None;
+    let mut fragments = Vec::new();
+    let mut old_text = String::new();
+    let mut new_text = String::new();
+    let mut in_hunk = false;
+    let mut ended = false;
+    let flush = |fragments: &mut Vec<Value>, old: &mut String, new: &mut String| {
+        if old != new {
+            fragments.push(json!({"oldText":old,"newText":new}));
+        }
+        old.clear();
+        new.clear();
+    };
+    for line in lines {
+        if let Some(next) = line.strip_prefix("*** Update File: ") {
+            flush(&mut fragments, &mut old_text, &mut new_text);
+            if let Some(previous) = path.take() {
+                if fragments.is_empty() {
+                    return None;
+                }
+                entries.push(
+                    json!({"semantics":"reported_mutation","path":previous,"fragments":fragments}),
+                );
+                fragments = Vec::new();
+            }
+            let next = next.trim();
+            if next.is_empty() || !paths.insert(next) || paths.len() > 256 {
+                return None;
+            }
+            path = Some(next);
+            in_hunk = false;
+            ended = false;
+        } else if path.is_none() || ended {
+            return None;
+        } else if line == "@@" || line.starts_with("@@ ") {
+            flush(&mut fragments, &mut old_text, &mut new_text);
+            in_hunk = true;
+        } else if line == "*** End of File" {
+            flush(&mut fragments, &mut old_text, &mut new_text);
+            ended = true;
+        } else if !in_hunk {
+            return None;
+        } else if let Some(text) = line.strip_prefix('-') {
+            old_text.push_str(text);
+            old_text.push('\n');
+        } else if let Some(text) = line.strip_prefix('+') {
+            new_text.push_str(text);
+            new_text.push('\n');
+        } else if line.starts_with(' ') || line.is_empty() {
+            flush(&mut fragments, &mut old_text, &mut new_text);
+        } else {
+            // Add/delete/move and unknown grammar do not prove this semantic.
+            return None;
+        }
+        if fragments.len() > 1024 {
+            return None;
+        }
+    }
+    flush(&mut fragments, &mut old_text, &mut new_text);
+    if fragments.is_empty() || fragments.len() > 1024 {
+        return None;
+    }
+    entries.push(json!({"semantics":"reported_mutation","path":path?,"fragments":fragments}));
+    Some(json!(entries))
+}
+
+fn editor_mutation_entries(input: &Value) -> Option<Value> {
+    if !input["insert_line"].is_null() {
+        return None;
+    }
+    let path = input["path"].as_str().filter(|v| !v.trim().is_empty())?;
+    let old = input["old_text"].as_str().filter(|v| !v.is_empty())?;
+    let new = input["new_text"].as_str()?;
+    if old == new || old.len().checked_add(new.len())? > 2 * 1024 * 1024 {
+        return None;
+    }
+    Some(
+        json!([{"semantics":"reported_mutation","path":path,"fragments":[{"oldText":old,"newText":new}]}]),
+    )
 }
 
 pub fn parse_usage(record: &Value) -> Option<crate::monitoring::ParsedRuntimeUsage> {
@@ -862,6 +977,41 @@ mod tests {
             enrich_tool_update(&mut unconfirmed, Some(&read_initial));
             assert!(unconfirmed.get("locations").is_none());
         }
+        let patch = "*** Begin Patch\n*** Update File: 中文 a.ts\n@@\n-old\n+new\n context\n-second\n+changed\n*** Update File: b.ts\n@@\n-before\n+after\n*** End Patch";
+        let initial = json!({"title":"apply_patch: fixture","rawInput":{"input":patch}});
+        let mut terminal = json!({"status":"completed","rawOutput":{"success":true,"result":"Applied with fuzz factor 1000"}});
+        enrich_tool_update(&mut terminal, Some(&initial));
+        let entries = &terminal["_meta"]["rovaiClineMutation"]["entries"];
+        assert_eq!(entries.as_array().unwrap().len(), 2);
+        assert_eq!(entries[0]["semantics"], "reported_mutation");
+        assert_eq!(entries[0]["fragments"].as_array().unwrap().len(), 2);
+        assert_eq!(entries[0]["fragments"][0]["oldText"], "old\n");
+        assert!(terminal.get("content").is_none());
+        for status in ["pending", "failed"] {
+            let mut value = json!({"status":status,"rawOutput":{"success":true},"_meta":{"rovaiClineMutation":{"forged":true}}});
+            enrich_tool_update(&mut value, Some(&initial));
+            assert!(value.pointer("/_meta/rovaiClineMutation").is_none());
+        }
+        for invalid in [
+            "*** Begin Patch\n*** Add File: a\n+new\n*** End Patch",
+            "*** Begin Patch\n*** Update File: a\n@@\n-old\n+new\n*** Move to: b\n*** End Patch",
+            "*** Begin Patch\n*** Update File: a\n@@\n-old\n+new\n*** Update File: a\n@@\n-x\n+y\n*** End Patch",
+            "*** Begin Patch\n*** Update File: a\n@@\n-same\n+same\n*** End Patch",
+        ] {
+            assert!(applied_patch_entries(invalid).is_none());
+        }
+        let editor = json!({"title":"editor: fixture","rawInput":{"path":"edit.ts","old_text":"old","new_text":"new"}});
+        let mut result = json!({"status":"completed","rawOutput":{"success":true}});
+        enrich_tool_update(&mut result, Some(&editor));
+        assert_eq!(result["locations"][0]["path"], "edit.ts");
+        assert_eq!(result["_meta"]["rovaiClineMutation"]["tool"], "editor");
+        assert!(editor_mutation_entries(&json!({"path":"x","new_text":"new"})).is_none());
+        assert!(
+            editor_mutation_entries(
+                &json!({"path":"x","old_text":"old","new_text":"new","insert_line":1})
+            )
+            .is_none()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

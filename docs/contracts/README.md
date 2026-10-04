@@ -221,7 +221,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Permanent Deletion v3（历史）](camp-permanent-deletion-v3.md) | 原删除权限/journal 不变；先定向业务终态，再有界 Runtime 清理和物理删除 |
 | [Camp Permanent Deletion v2（历史）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
-| [Runtime File Change Observation v6（当前）](runtime-file-change-observation-v6.md) | exact-epoch 文件事实水位、stale/no_changes 重算、稳定文件 ID 与原子 projection 发布 |
+| [Runtime File Change Observation v7（当前）](runtime-file-change-observation-v7.md) | 已成功的原生补丁片段、来源标签、按序统计与共享 Command/Files Changed 投影 |
+| [Runtime File Change Observation v6（历史）](runtime-file-change-observation-v6.md) | exact-epoch 文件事实水位、stale/no_changes 重算、稳定文件 ID 与原子 projection 发布 |
 | [Runtime File Change Observation v5（历史）](runtime-file-change-observation-v5.md) | 官方 ZCode Runtime 与原生证据边界；继承上一版合同 |
 | [Runtime File Change Observation v4（历史）](runtime-file-change-observation-v4.md) | v3 typed read/write 与文件汇总不变；准入 Pi 成功 edit 的 path-bound 原生 patch，activity-v4 隔离新映射且不回写历史 |
 | [Runtime File Change Observation v3（历史）](runtime-file-change-observation-v3.md) | v2 文件变化与临时区排除不变；schema 2 增加 typed read/write，activity-v3 准入可靠单文件阅读且排除 Files Changed |

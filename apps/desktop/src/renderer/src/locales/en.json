@@ -3360,6 +3360,8 @@
   "1 次修改": "1 change",
   "完整差异": "Full diff",
   "片段差异": "Edit fragments",
+  "补丁片段": "Patch fragments",
+  "已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。": "Native edit fragments confirmed as applied; matching may adjust the text. Counts come from the patch.",
   "操作记录": "Operation history",
   "仅文件操作": "File operations only",
   "当前目录": "Current directory",
