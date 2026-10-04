@@ -56,6 +56,7 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'kimi-code-cli', label: 'Kimi Code' },
   { value: 'grok-build', label: 'Grok Build' },
   { value: 'deepseek-harness', label: 'DeepSeek Harness' },
+  { value: 'cline-cli', label: 'Cline' },
   { value: 'zcode-app', label: 'ZCode' },
   { value: 'antigravity-app', label: 'Antigravity' }
 ]

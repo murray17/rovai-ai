@@ -806,6 +806,16 @@ impl AgentRuntimeAdapterRegistry {
                 ),
             };
         }
+        if kind == AdapterKind::ClineCli && platform == HostPlatformKey::MacosArm64 {
+            // Development use is explicit and platform-scoped. The real
+            // Installation probe still owns authentication and readiness;
+            // Preview carries no First-Class qualification evidence.
+            return RuntimePlatformAdmission::preview(
+                kind,
+                platform,
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            );
+        }
         if matches!(kind, AdapterKind::CursorAgent | AdapterKind::ClineCli) {
             return RuntimePlatformAdmission::not_qualified(
                 kind,

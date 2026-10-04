@@ -3,7 +3,7 @@ document_type: runtime-research
 runtime: cline-cli
 authority: research-evidence-only
 status: implementation-in-progress
-admission: research
+admission: preview
 observed_version: 3.0.65
 observed_platform: macos-arm64
 last_updated: 2026-10-04
@@ -14,7 +14,8 @@ last_updated: 2026-10-04
 Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 ACP，在
 `292c2ea2-5695-40ca-ad5d-8de31832d8fe` 允许使用 sub2api BYOK。候选入口是独立
 `cline-cli` Adapter 调用 `cline --acp`，复用现有 ACP Host/Fleet；没有切换 SDK Host 的授权。
-本文件记录逐轴的原生实测与 Core 接线进度，不是产品准入决定。
+本文件记录逐轴的原生实测与 Core 接线进度，不是产品准入决定。macOS arm64 的开发 Preview
+由 [V1.72-D13](../../versions/v1.72/decisions.md#v1-72-d13)拥有，其他平台仍为 NotQualified。
 
 固定调查对象：[CLI 3.0.65](https://github.com/cline/cline/releases/tag/cli-v3.0.65)，
 commit `9131e36429314ea614491bf749678adbacb3d3cb`。本机全局 CLI 3.0.3 没有被升级；真实 Probe
@@ -24,20 +25,20 @@ DeepSeek Harness，不能把该 Runtime 的证据借给 Cline。
 
 | 能力轴 | Rovai 标准行为 | 上游能力面与接入策略 | Runtime evidence / Rovai implementation |
 | --- | --- | --- | --- |
-| Auth / Provider / Model | 官方原生配置、default/显式模型、凭据变化 fence | Cline 原生 providers/models 文件；ACP 使用 `CLINE_PROVIDER`、`CLINE_MODEL`、`CLINE_API_KEY`；按实际 catalog 核对模型 | sub2api/gpt-6-sol 首次与 warm 调用 Verified；Host 配置摘要和默认模型核验已接线；真实 Core Run 待验收 |
-| Host / Fleet / LRU | 统一进程所有权、空闲复用、隔离 | 官方 stdio ACP 常驻；候选 resident_multi_session，MCP/配置差异必须 fence | 真实共享 Host 首次、warm、A→B→A 已通过；Fleet LRU、Core crash/planned shutdown 待验收 |
-| Native Session / Continuation | 精确 ID、warm/cold、重放隔离 | new/load 返回原生 ID；load 会重放历史，并重取 provider/model/权限默认值；必须重设冻结值 | 真实共享 Host 停止后 exact `session/load`、replay quarantine 已通过；完整 Core 重启/Binding 恢复待验收 |
+| Auth / Provider / Model | 官方原生配置、default/显式模型、凭据变化 fence | Cline 原生 providers/models 文件；ACP 使用 `CLINE_PROVIDER`、`CLINE_MODEL`、`CLINE_API_KEY`；按实际 catalog 核对模型 | sub2api/gpt-6-sol 的原生默认配置通过四轮真实 App AgentRun；Host 摘要和模型核验已接线；显式模型切换及凭据变化矩阵待验收 |
+| Host / Fleet / LRU | 统一进程所有权、空闲复用、隔离 | 官方 stdio ACP 常驻；resident_multi_session，MCP/配置差异必须 fence | 真实共享 Host 首次、warm、A→B→A 通过；App 两成员与空闲后受控关闭通过；Fleet LRU、运行中关闭及 Core crash 待验收 |
+| Native Session / Continuation | 精确 ID、warm/cold、重放隔离 | new/load 返回原生 ID；load 会重放历史，并重取 provider/model/权限默认值；必须重设冻结值 | 共享 Host exact load/replay quarantine 通过；完整 App/Core 重启后 Session ID、Binding ID、generation 精确保留，真实回帖通过 |
 | Bootstrap / Context | 冻结 Charter/Identity/Memory 与每轮动态输入 | 当前 staged `first_payload` 仅是普通用户 Prompt；官方 Plugin Rule 可进入 System Prompt，拟改用既有 `managed_system_prompt` | 静态／函数 Rule 在真实 ACP 的 `beforeModel.request.systemPrompt` 均已观察到；[revision 1 方案](model-context-change-v1.70-proposal.md)待二次确认，Core 字节级投递与前置失败关闭未实现 |
 | Compaction continuity | 完成信号、补发、失败/取消与恢复 | ACP 不转发 compaction；官方 Plugin status-notice 可观测 completed | Plugin/Host 完成事件桥已接线；真实 ACP 发送 `/compact` 仍进入模型调用且没有压缩事件，manual 入口未闭合；auto/overflow/cold resume 未观测 |
 | Skills | 当前受管索引与原生 Skills 并存 | 共享受管索引；Cline 原生 `.cline/skills`、`.agents/skills` | 路径与 group 接线已编译，真实投影增删与发现待验收 |
 | External MCP | PreparedMcpProjection、追加、撤销、无串会话 | 3.0.65 ACP 忽略 `session/new.mcpServers`；官方 `CLINE_MCP_SETTINGS_PATH` 指向 Host 私有合并文件 | 原生隔离配置调用真实 fixture Tool Verified；Core Host 合并已实现，投影增删/相邻 Session 待验收 |
-| Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 真实共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 与文件结果已通过；空/超大输出及 App 持久化待验收 |
-| Narration / Final / Missing-Send | thinking 私有、权威终态、zero-send 恢复 | agent_message_chunk 与 thought 分开；prompt stopReason / JSON-RPC error | 两轮 end_turn Verified；产品 Missing-Send NotImplemented |
+| Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 已通过；App read/write/command 与文件结果、活动持久化通过；空/超大输出待验收 |
+| Narration / Final / Missing-Send | thinking 私有、权威终态、zero-send 恢复 | agent_message_chunk 与 thought 分开；prompt stopReason / JSON-RPC error | App 四轮均 succeeded，且每轮恰一条显式 CLI 公开回帖；产品 Missing-Send NotImplemented |
 | Permission / Approval / Workspace | 原生权限为唯一权威、allow/deny/cancel | 官方 auto_approve 布尔、plan/act；request_permission 原样往返 | 原生拒绝无副作用 Verified；共享 Core Host 在命令发出后取消，得到 `cancelled` 且 10 秒后无文件副作用；Core allow/deny 与产品审批待验收 |
-| Built-in rovai CLI | 每 Run lease 与 bundled CLI | 共享 ACP process config 注入 shell 环境，Run 结束解除 | NotObserved / NotImplemented |
-| Usage / Cache / Cost | 原生结构化字段与稳定归属，未知 NULL | 官方 Plugin afterModel 按 message ID 报 token/cache；Host 按唯一 Prompt lease 归属 | 2026-10-04 真实 Host 首次/warm/切换/cold 及 5 调用工具轮通过；四桶、可选 reasoning、运行中 Context used 与 live/terminal 去重已核验；窗口/比例/Cost 未知，AgentRun 持久化/App 待验收 |
-| Retry / Queue / Cancel / Cleanup | accepted fence、迟到事件隔离、整树停止 | session/cancel、ACP EOF shutdown；固定 local backend 防止逃逸到共享 hub | 原生工具 `in_progress` 和共享 Host `tool_call` 后取消均无 10 秒延迟副作用；Host planned shutdown 通过；Core crash、队列、所有子进程身份仍未闭合 |
-| Ready / Version / Platform | 安装、认证、能力资格分离 | CLI 与 initialize 均报告 3.0.65；只测 macOS arm64 | Core light/deep Probe 已接线，产品结果待验收；平台保持 NotQualified，不能借通用 macOS evidence |
+| Built-in rovai CLI | 每 Run lease 与 bundled CLI | 共享 ACP process config 注入 shell 环境，Run 结束解除 | App first/warm/第二名队员/cold 四轮真实 bundled CLI 回帖通过，cold 使用重启后当前 Run lease |
+| Usage / Cache / Cost | 原生结构化字段与稳定归属，未知 NULL | 官方 Plugin afterModel 按 message ID 报 token/cache；Host 按唯一 Prompt lease 归属 | Host 与 App 四轮 17 次调用通过；四桶、可选 reasoning、live Context used、去重及 AgentRun 持久化已核验；Renderer 展示 toks/Context，窗口、比例和 Cost 未知 |
+| Retry / Queue / Cancel / Cleanup | accepted fence、迟到事件隔离、整树停止 | session/cancel、ACP EOF shutdown；固定 local backend 防止逃逸到共享 hub | 原生工具与共享 Host 发命令后取消无 10 秒副作用；App 空闲受控关闭后所记录 11 个进程全部退出；Core crash、运行中关闭、队列及网络恢复待验收 |
+| Ready / Version / Platform | 安装、认证、能力资格分离 | CLI 与 initialize 均报告 3.0.65；只测 macOS arm64 | App 普通 Startup Settings/Installation 深检为 Ready，两个成员可配置发送；macOS arm64 Preview，其余 NotQualified，没有借用通用 macOS qualification |
 
 ## BYOK 实测结论
 
@@ -79,5 +80,10 @@ run_finished` 和 `agent_message_chunk`，没有 Plugin `compaction` status-noti
 详见[真实字段和数字](../runtime-monitoring/command-cline-verification-2026-10-04.md)。私有数值源复用已有
 4 秒 Flush，不把 Context 累计进 Run 用量；reasoning 省略仍未知，没有从模型名猜窗口。
 
+随后按 User 的开发包请求完成[打包 App 真实发送验收](app-send-verification-2026-10-04.md)：
+四轮 AgentRun、两名队员、warm/cold 续接、bundled CLI、持久化指标与 Renderer 入口均取得证据。
+该主路径证据不会补齐未测试的能力轴，也不确认独立的 Plugin Rule 模型输入提案。
+
 正式完成按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 逐轴闭合；
-当前分支已加入内部 closed identity、Host/发现/Skill 接线与 Migration 184/schema 134；全平台保持 NotQualified，完整产品准入与 First-Class 尚未完成。
+当前分支已加入 closed identity、Host/发现/Skill 接线与 Migration 184/schema 134；macOS arm64 开发 Preview
+已验证上述主路径，完整产品资格与 First-Class 尚未完成。

@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-04",
+  "runtime": "cline-cli",
+  "runtimeVersion": "3.0.65",
+  "platform": "macos-arm64",
+  "admission": "preview",
+  "provider": "sub2api via Cline openai-compatible",
+  "model": "gpt-6-sol",
+  "delivery": "isolated packaged Electron App, normal Host API and Renderer Composer",
+  "sourceBase": "50f81571efc9dd0ff89e2e3ca041ea9d60b85799",
+  "packagedBinarySha256": {
+    "rovai-core": "23acfed084fd7335c5e29be20d387016fffc8e84a9ab11e792258ce45b34ef31",
+    "rovai": "6a06b279055fcbd30c2a5d1831c3da4a5c9e4570444486201c5bb096a504189b",
+    "rovai-host": "26c8fb9f1ba04774e946f304d0dde42f60a40181b91b56ff15a16475d5743b2d"
+  },
+  "asarSha256": "ed29290d461d17e9f04a01b59bc06b16b4aa0b582dd1b0b60178a7d22dff7e6d",
+  "runs": [
+    {
+      "phase": "first",
+      "agent": "agent_2",
+      "status": "succeeded",
+      "model": "gpt-6-sol",
+      "publicReplyCount": 1,
+      "publicReplyMarker": "CLINE_APP_FIRST_OK",
+      "sentFromRendererComposer": false,
+      "activities": [
+        "file.read",
+        "file.write",
+        "shell.execute",
+        "tool.call"
+      ],
+      "inputTokens": 41609,
+      "uncachedInputTokens": 21513,
+      "cacheReadTokens": 20096,
+      "cacheWriteTokens": 0,
+      "outputTokens": 902,
+      "reasoningOutputTokens": 165,
+      "observedModelCalls": 8,
+      "toks": 42511,
+      "contextUsedTokens": 6158,
+      "contextWindowTokens": null,
+      "contextRatio": null,
+      "cost": null,
+      "liveMetricsObserved": true
+    },
+    {
+      "phase": "warm",
+      "agent": "agent_2",
+      "status": "succeeded",
+      "model": "gpt-6-sol",
+      "publicReplyCount": 1,
+      "publicReplyMarker": "CLINE_APP_WARM_OK",
+      "sentFromRendererComposer": true,
+      "activities": [
+        "file.read",
+        "shell.execute",
+        "tool.call"
+      ],
+      "inputTokens": 20524,
+      "uncachedInputTokens": 4140,
+      "cacheReadTokens": 16384,
+      "cacheWriteTokens": 0,
+      "outputTokens": 264,
+      "reasoningOutputTokens": 29,
+      "observedModelCalls": 3,
+      "toks": 20788,
+      "contextUsedTokens": 7019,
+      "contextWindowTokens": null,
+      "contextRatio": null,
+      "cost": null,
+      "liveMetricsObserved": true
+    },
+    {
+      "phase": "peer",
+      "agent": "agent_1",
+      "status": "succeeded",
+      "model": "gpt-6-sol",
+      "publicReplyCount": 1,
+      "publicReplyMarker": "CLINE_APP_PEER_OK",
+      "sentFromRendererComposer": false,
+      "activities": [
+        "file.read",
+        "shell.execute",
+        "tool.call"
+      ],
+      "inputTokens": 13710,
+      "uncachedInputTokens": 6414,
+      "cacheReadTokens": 7296,
+      "cacheWriteTokens": 0,
+      "outputTokens": 361,
+      "reasoningOutputTokens": 36,
+      "observedModelCalls": 3,
+      "toks": 14071,
+      "contextUsedTokens": 5023,
+      "contextWindowTokens": null,
+      "contextRatio": null,
+      "cost": null,
+      "liveMetricsObserved": true
+    },
+    {
+      "phase": "cold",
+      "agent": "agent_2",
+      "status": "succeeded",
+      "model": "gpt-6-sol",
+      "publicReplyCount": 1,
+      "publicReplyMarker": "CLINE_APP_COLD_OK",
+      "sentFromRendererComposer": true,
+      "activities": [
+        "file.read",
+        "shell.execute",
+        "tool.call"
+      ],
+      "inputTokens": 22997,
+      "uncachedInputTokens": 2901,
+      "cacheReadTokens": 20096,
+      "cacheWriteTokens": 0,
+      "outputTokens": 270,
+      "reasoningOutputTokens": 20,
+      "observedModelCalls": 3,
+      "toks": 23267,
+      "contextUsedTokens": 7843,
+      "contextWindowTokens": null,
+      "contextRatio": null,
+      "cost": null,
+      "liveMetricsObserved": true
+    }
+  ],
+  "exactColdBindingPreserved": true,
+  "sameNativeSessionWarm": true,
+  "independentMemberNativeSessions": true,
+  "shutdown": {
+    "controlled": true,
+    "forcedSignal": null,
+    "checkedProcesses": 11,
+    "allExited": true
+  },
+  "initialFailure": {
+    "reason": "Incomplete acceptance Cline installation omitted platform Plugin dependencies; public reply existed but observer correctly failed terminal completion. Replaced with full pinned official npm installation.",
+    "retainedInSeparateThread": true
+  },
+  "qualificationExclusions": [
+    "complete compaction continuity",
+    "full permission failure matrix",
+    "Skills/MCP assignment isolation matrix",
+    "non-macOS-arm64 platforms",
+    "Command Code product integration"
+  ],
+  "deliveryAsarSha256": "702b38f2630f2b1c824e6053f0305f791e9f99648a9e89db93bc959a805332df",
+  "deliveryChangesAfterLlmVerification": "Cline monochrome glyph uses existing theme-aware mask; Core and bundled CLI hashes unchanged.",
+  "rendererObserved": {
+    "contextUsed": "7.8k",
+    "contextWindow": "unknown",
+    "contextRatio": "unknown",
+    "coldRunToks": "23.3k",
+    "input": "23k",
+    "output": "0.3k",
+    "cacheRead": "20.1k",
+    "cacheWrite": "0k",
+    "backgroundVisibilityPauseConfirmed": true
+  }
+}

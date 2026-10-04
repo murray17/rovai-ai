@@ -7,6 +7,7 @@ import copilotLogo from './assets/runtime-logos/copilot-color.svg'
 import cursorLogo from './assets/runtime-logos/cursor.svg'
 import grokLogo from './assets/runtime-logos/grok.svg'
 import deepseekLogo from './assets/runtime-logos/deepseek-color.svg'
+import clineLogo from './assets/runtime-logos/cline.svg'
 import zcodeLogo from './assets/runtime-logos/zcode.png'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
 import kimiLogo from './assets/runtime-logos/kimi.svg'
@@ -30,6 +31,7 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'kimi-code-cli',
   'grok-build',
   'deepseek-harness',
+  'cline-cli',
   'zcode-app',
   'antigravity-app',
   'pi'
@@ -54,6 +56,7 @@ export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'kimi-code-cli': kimiLogo,
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
+  'cline-cli': clineLogo,
   'zcode-app': zcodeLogo,
   'antigravity-app': antigravityLogo
 }
@@ -74,6 +77,7 @@ export function adapterLabel(kind: AdapterKind): string {
     'kimi-code-cli': 'Kimi Code',
     'grok-build': 'Grok Build',
     'deepseek-harness': 'DeepSeek Harness',
+    'cline-cli': 'Cline',
     'zcode-app': 'ZCode',
     'antigravity-app': 'Antigravity'
   }[kind]

@@ -11309,7 +11309,9 @@ impl Core {
                         attempted_at,
                         last_error: if matches!(
                             kind,
-                            AdapterKind::ZcodeApp | AdapterKind::DeepseekHarness
+                            AdapterKind::ZcodeApp
+                                | AdapterKind::DeepseekHarness
+                                | AdapterKind::ClineCli
                         ) && probe.result.status
                             == health::AgentRuntimeProbeStatus::Ready
                         {

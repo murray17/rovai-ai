@@ -35,7 +35,8 @@ Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下�
 四个 token 桶与可选 reasoning 来自官方只读 Plugin，运行中及终态 Context used 已观察到；
 未测到可靠窗口、比例或成本。详见[Cline 矩阵](research/cline-runtime/README.md)和[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
 内部 closed identity、发现/Host/Skill/数据库接线已存在，Migration 184 升级 schema 134；
-全平台 `NotQualified`，完整 AgentRun/App、Bootstrap、compaction 与准入仍未完成。
+macOS arm64 开放开发 `Preview`，其余平台保持 `NotQualified`；Preview 不带资格 evidence，
+完整 AgentRun/App、Bootstrap、compaction 与 First-Class 资格仍需分别验证。
 
 ## 当前 Product Runtime Catalog
 

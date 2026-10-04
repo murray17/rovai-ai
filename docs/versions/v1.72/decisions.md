@@ -294,3 +294,24 @@ Command Code 的官方 headless NDJSON 提供精确 Session 恢复，但没有�
 - 将受管 Bootstrap 放进 Command Code Mod：其失败放行语义无法保证每个模型请求都有目标 `B`。
 - 改写共享 `AGENTS.md`：会把成员私有的冻结 Bootstrap 投到项目／用户级并造成跨成员串线。
 - 自封 ACP 代理：只改接口形状，不能补出上游缺失的高权限投递和审批保证。
+
+<a id="v1-72-d13"></a>
+## V1.72-D13：Cline 先在 macOS arm64 开放真实开发预览
+
+- 状态：accepted
+- 日期：2026-10-04
+- 当前权威：[Cline 实施边界](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)、[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)
+
+### 背景与选择
+
+User 在 Thread 消息 `33c5ae08-46e3-40ed-92ae-533dd4353b68` 要求保留开发包、配置队员并真实验证发送。
+Cline 已有 shared ACP Host 和隔离真实模型证据，但尚未完成全部 First-Class 能力轴。仅 macOS arm64
+开放平台 `Preview`，让开发包沿普通 discovery、Installation、队员配置和 AgentRun 路径取得产品证据。
+不赋予 qualification revision，版本、原生认证、模型及权限检查保持生效。
+
+### 后果与替代方案
+
+允许在资格尚不完整时产生真实产品数据，因此必须清晰保留 Preview 与未知能力；其他平台继续关闭。
+不选择伪造 Qualified 或验收专用绕过开关，它们会掩盖真实配置和发送路径的问题。继续完全关闭虽然保守，
+却不能满足本次开发包的使用要求。此决定只允许开发预览，不接受 Cline 的尚未确认 Plugin Rule 提案，
+也不把现有 FirstPayload 的试运行结果等同于 Bootstrap 或压缩连续性的正式资格。

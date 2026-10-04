@@ -51,9 +51,13 @@ Command Code 目前只有内部 one-shot headless NDJSON 传输；1.66.0 已取�
 
 Cline 使用官方 `cline --acp` 与共享 Host/Fleet，原生配置由 Cline 拥有；sub2api BYOK 不转移配置权威。
 当前分支已建立 closed `cline-cli` / Skill group `cline` 及 Migration 184（schema 133 → 134），
-共享 ACP 启动、精确恢复、权限和数值 observer 已接线，但所有平台保持 `NotQualified`。
-这些内部接线不是完整产品准入；[真实证据矩阵](../research/cline-runtime/README.md)仍有
-AgentRun/App、Bootstrap、压缩连续性、Skills/MCP 和 Built-in 缺口。
+共享 ACP 启动、精确恢复、权限和数值 observer 已接线。macOS arm64 按
+[V1.72-D13](../versions/v1.72/decisions.md#v1-72-d13)开放 `Preview`，支持隔离开发包的真实队员配置与发送；
+其余平台保持 `NotQualified`。Preview 没有 qualification evidence，仍须通过普通版本、认证和能力检查。
+隔离打包 App 已完成两名队员的真实发送、工具、Usage/Context、bundled CLI 及精确 warm/cold 恢复，
+见[开发包验收](../research/cline-runtime/app-send-verification-2026-10-04.md)。这些主路径证据不是
+First-Class 资格；[真实证据矩阵](../research/cline-runtime/README.md)仍有 Bootstrap、压缩连续性、
+权限失败及 Skills/MCP 隔离矩阵缺口。
 数值 observer 只读，不改变模型输入；尚未确认的 Plugin Rule 不能因 Command 的确认自动实施。
 
 ## 可执行准入

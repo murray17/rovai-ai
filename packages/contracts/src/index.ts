@@ -42,6 +42,7 @@ export type AdapterKind =
   | 'grok-build'
   | 'zcode-app'
   | 'deepseek-harness'
+  | 'cline-cli'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'

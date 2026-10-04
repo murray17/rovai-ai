@@ -455,6 +455,7 @@ export function runtimeAdapterDisplayLabel(kind: string): string {
     'kimi-code-cli': 'Kimi',
     'grok-build': 'Grok',
     'deepseek-harness': 'DSH',
+    'cline-cli': 'Cline',
     'zcode-app': 'ZCode',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind

@@ -17,10 +17,16 @@ last_updated: 2026-10-04
 Usage v8 / Execution Metrics v7。真实 sub2api/gpt-6-sol 调用取得 input、output、cache read/write，
 Cline 另有可选 reasoning；最新根调用输入独立投影 Context used。窗口、比例和费用保持未知，
 不增加指标定时器或输出测速。[真实数值、测试与层级边界](../../research/runtime-monitoring/command-cline-verification-2026-10-04.md)
-区分 Core 传输/Host 证据与尚未完成的 AgentRun/App 验收，两个 Runtime 都没有由此取得 First-Class。
+区分 Core 传输/Host 证据与产品路径，两个 Runtime 都没有由此取得 First-Class。
+
+随后 Cline 在隔离打包 App 中配置叮叮、芝士并完成四轮真实发送：首次、warm、第二名队员、App/Core
+重启后的精确 cold 恢复；公开回帖来自 bundled CLI，17 次模型调用的 Usage 与 Context 已持久化，
+执行面板可查看 toks 与已知 Context used。[开发包验收](../../research/cline-runtime/app-send-verification-2026-10-04.md)
+记录原生未知字段、空闲关闭清理和仍未完成的能力矩阵；本轮不改变模型上下文方案。
 
 Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
-所有平台保持 `NotQualified`；完整产品准入仍在实施。Command Code 仍无 Product Adapter。
+macOS arm64 按 [V1.72-D13](decisions.md#v1-72-d13)开放开发 `Preview`，其余平台保持 `NotQualified`；
+完整资格仍在实施。Command Code 仍无 Product Adapter。
 其已确认的 [first_payload revision 4](model-context-change-command-code.md)移入当前版本，
 理由由 [V1.72-D12](decisions.md#v1-72-d12)拥有；指标补充没有改变模型输入。
 Cline 的 [Plugin Rule 上下文提案](../../research/cline-runtime/model-context-change-v1.70-proposal.md)
