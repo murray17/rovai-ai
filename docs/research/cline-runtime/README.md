@@ -36,7 +36,7 @@ DeepSeek Harness，不能把该 Runtime 的证据借给 Cline。
 | Narration / Final / Missing-Send | thinking 私有、权威终态、zero-send 恢复 | agent_message_chunk 与 thought 分开；prompt stopReason / JSON-RPC error | App 四轮均 succeeded，且每轮恰一条显式 CLI 公开回帖；zero-send 恢复两轮真实通过，均只有一条公开消息 |
 | Permission / Approval / Workspace | 原生权限为唯一权威、allow/deny/cancel | 官方 auto_approve 布尔、plan/act；request_permission 原样往返 | 原生拒绝无副作用 Verified；共享 Core Host 在命令发出后取消，得到 `cancelled` 且 10 秒后无文件副作用；Core allow/deny 与产品审批待验收 |
 | Built-in rovai CLI | 每 Run lease 与 bundled CLI | 共享 ACP process config 注入 shell 环境，Run 结束解除 | App first/warm/第二名队员/cold 四轮真实 bundled CLI 回帖通过，cold 使用重启后当前 Run lease |
-| Usage / Cache / Cost | 原生结构化字段与稳定归属，未知 NULL | 官方 Plugin afterModel 按 message ID 报 token/cache；Host 按唯一 Prompt lease 归属 | Host 与 App 四轮 17 次调用通过；四桶、可选 reasoning、live Context used、去重及 AgentRun 持久化已核验；Renderer 展示 toks/Context，窗口、比例和 Cost 未知 |
+| Usage / Cache / Cost | 原生结构化字段与稳定归属，未知 NULL | 官方 Plugin afterModel 按 message ID 报 token/cache；Host 按唯一 Prompt lease 归属；原生 models.json 显式窗口以实际 Provider/模型匹配 | 四桶、可选 reasoning、live Context used、去重及 AgentRun 持久化已核验；[窗口补采](../runtime-monitoring/command-cline-context-window-2026-10-05.md)取得 Provider 元数据并在原生配置生效后实测两成员与 warm 的 272k 分母、计算比例和重开；Cost 未知，未新增自动 Provider 发现 |
 | Retry / Queue / Cancel / Cleanup | accepted fence、迟到事件隔离、整树停止 | session/cancel、ACP EOF shutdown；固定 local backend 防止逃逸到共享 hub | 原生工具与共享 Host 发命令后取消无 10 秒副作用；App 空闲受控关闭后所记录 11 个进程全部退出；Core crash、运行中关闭、队列及网络恢复待验收 |
 | Ready / Version / Platform | 安装、认证、能力资格分离 | CLI 与 initialize 均报告 3.0.65；只测 macOS arm64 | App 普通 Startup Settings/Installation 深检为 Ready，两个成员可配置发送；macOS arm64 Preview，其余 NotQualified，没有借用通用 macOS qualification |
 

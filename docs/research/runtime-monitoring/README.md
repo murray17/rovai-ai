@@ -14,6 +14,9 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 
 当前执行台的取数范围、隐藏暂停、引用复用与迟到刷新收口见[执行指标读取验收](execution-metrics-refresh-verification-2026-10-01.md)。
 
+2026-10-05 [Command Code / Cline 窗口补采](command-cline-context-window-2026-10-05.md)：
+同一 Provider 的版本化模型目录返回 gpt-6-sol 容量；修正普通 `/models` 漏查，Cline 补原生配置窗口采集。
+
 2026-10-05 [Command Code / Cline 编辑与能力差异复核](command-cline-parity-2026-10-05.md)：
 成功补丁片段接入 Command/Files Changed，真实两成员编辑、失败、零发送、原生 Skills/MCP 及重开证据。
 

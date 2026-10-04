@@ -15,7 +15,7 @@ last_updated: 2026-10-05
 
 合入主干 `b2c9c976` 后，Command Code 内部 headless transport 与 Cline 官方 ACP Host 适配当前
 Usage v8 / Execution Metrics v7。真实 sub2api/gpt-6-sol 调用取得 input、output、cache read/write，
-Cline 另有可选 reasoning；最新根调用输入独立投影 Context used。窗口、比例和费用保持未知，
+Cline 另有可选 reasoning；最新根调用输入独立投影 Context used。初轮窗口、比例和费用未知，
 不增加指标定时器或输出测速。[真实数值、测试与层级边界](../../research/runtime-monitoring/command-cline-verification-2026-10-04.md)
 区分 Core 传输/Host 证据与产品路径，两个 Runtime 都没有由此取得 First-Class。
 
@@ -26,13 +26,18 @@ Cline 另有可选 reasoning；最新根调用输入独立投影 Context used。
 
 文件复核修复 Cline 单文件读取/编辑的标准 location 映射，两名成员在更新开发包中真实读取、编辑、
 读回，执行面板文件名与可点击预览均通过。Command Code 内部 Activity 保留原生 file_path，并为已选
-Yolo 补齐 headless 写入所需的原生开关；当前 BYOK 仍没有可信窗口值。
+Yolo 补齐 headless 写入所需的原生开关；当时只查询普通模型列表，未取得 BYOK 的窗口值。
 [文件与上限证据](../../research/runtime-monitoring/command-cline-files-context-2026-10-04.md)区分 App 和内部传输。
 
 编辑内容随后按 [File Change v7](../../contracts/runtime-file-change-observation-v7.md) 接入：Cline 成功 Update
 补丁和 editor 替换保留为有明确来源标签的补丁片段，Command 可展开增删，Files Changed 保留按序统计；
 Command Code 内部 normalizer 同步候选映射。真实两成员、多文件与连续改回、失败编辑、命令输出、零发送恢复
 及能力发现复核见[差异验收](../../research/runtime-monitoring/command-cline-parity-2026-10-05.md)。
+
+后续窗口补查在同一 Provider 的版本化模型目录取得精确 `gpt-6-sol` 默认窗口 272000、最大可选窗口 872000。
+Cline observer v2 补齐原生模型配置快照与实际 Provider/模型匹配，沿现有 Session Gauge 展示窗口，
+不修改 Bootstrap/Dynamic Context、费用合同或 Renderer 布局；配置和真实验收边界见
+[窗口补采](../../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
 
 Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
 macOS arm64 按 [V1.72-D13](decisions.md#v1-72-d13)开放开发 `Preview`，其余平台保持 `NotQualified`；

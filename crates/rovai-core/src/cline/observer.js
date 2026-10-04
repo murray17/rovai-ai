@@ -11,6 +11,12 @@ const integer = value => Number.isSafeInteger(value) && value >= 0;
 let sessionId;
 let active;
 let sequence = 0;
+let modelWindows = {};
+try {
+  if (root) modelWindows = JSON.parse(readFileSync(join(root, "model-windows.json"), "utf8"));
+} catch {
+  // An unavailable optional capacity must not interfere with the native run.
+}
 
 function emit(kind, payload) {
   if (!root || !active) return;
@@ -27,7 +33,7 @@ function emit(kind, payload) {
 }
 
 export default {
-  name: "rovai-cline-observer-v1",
+  name: "rovai-cline-observer-v2",
   manifest: { capabilities: ["hooks"] },
   setup(_api, context) {
     sessionId = context?.session?.sessionId;
@@ -55,11 +61,18 @@ export default {
       for (const key of ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokenCount"]) {
         if (integer(message.metrics?.[key])) metrics[key] = message.metrics[key];
       }
+      const modelId = message.modelInfo?.id;
+      const providerId = message.modelInfo?.provider;
+      const window = typeof modelId === "string" && typeof providerId === "string" &&
+        Object.hasOwn(modelWindows, providerId) && Object.hasOwn(modelWindows[providerId], modelId)
+        ? modelWindows[providerId][modelId] : undefined;
       emit("model_completed", {
         messageId: message.id,
         requestId: typeof context.requestId === "string" ? context.requestId : null,
         modelId: typeof message.modelInfo?.id === "string" ? message.modelInfo.id : null,
         providerId: typeof message.modelInfo?.provider === "string" ? message.modelInfo.provider : null,
+        ...(integer(window) && window > 0
+          ? { contextWindow: window, contextWindowSource: "native_models_config" } : {}),
         metrics,
       });
     },

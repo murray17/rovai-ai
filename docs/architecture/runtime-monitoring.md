@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-monitoring
 authority: runtime-usage-metering-and-read-boundaries
 status: accepted
-last_updated: 2026-10-04
+last_updated: 2026-10-05
 ---
 
 # Runtime Monitoring 架构
@@ -110,9 +110,14 @@ Cline 官方 ACP 的数值补充来自只读 Plugin `afterModel`，按根调用�
 单调序号归属。既有周期 Flush 读取有界私有文件，terminal 消费同一批记录并排除已采序号；
 无正文、原生历史扫描或第二个定时器。四个原生 token 桶按 `model_call / delta` 归一化，可选 reasoning
 不与 output 重复相加；最新调用的含缓存 input 独立产生 used-only Gauge，实际模型来自该调用。
-未取得有效窗口、原生比例和费用时保持未知。Cline 仍未取得平台资格；Command Code 的等价数值帧
+Host 同时将原生 `settings/models.json` 中显式的 `contextWindow` 冻结为仅含 Provider/模型/数值的私有目录，
+observer 以实际调用返回的 Provider 与模型 ID 精确匹配后补窗口；目录由现有 native configuration digest 栅栏，
+不猜别名、不使用压缩回退或最大可选窗口。窗口和 used 独立，缺字段仍未知；此只读路径不访问 Provider 网络。
+配置缺窗口时，可先独立核验 Provider 对精确模型的元数据，再由原生配置明确生效；不把手动同步说成自动发现。
+原生比例和费用缺失时保持未知。Cline 仍未取得平台资格；Command Code 的等价数值帧
 目前只接内部 headless transport，尚无 Product AgentRun 消费者。真实字段与验收层级见
-[两条 Runtime 数值核验](../research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+[两条 Runtime 数值核验](../research/runtime-monitoring/command-cline-verification-2026-10-04.md)及
+[窗口补采复核](../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
 
 ## Read path
 

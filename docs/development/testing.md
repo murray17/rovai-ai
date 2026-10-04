@@ -125,6 +125,12 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 和 Renderer 均扩展既有 owner，不复制同一链路。沿现有 Runtime Diff owner 的 extended-tests 层级；定向命令为 `cargo test -p rovai-core --features extended-tests --lib runtime_diff::tests::`。
 真实模型与隔离 App 属于单独验收，见研究记录。
 
+Cline 窗口补采扩展既有 observer/config 两个 Rust owner 和 `scripts/lib/cline-observer.test.mjs`：
+覆盖精确 Provider/模型匹配、Host 快照与配置变更栅栏、无 used 的独立窗口、无效值/未知来源回退和私有字段排除。
+未增加独立测试或退役测试；定向命令为 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`
+与 `node --test scripts/lib/cline-observer.test.mjs`。真实目录、模型调用和 UI 证据见
+[窗口补采](../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
+
 最小命令：`cargo test -p rovai-core --features extended-tests --lib command_code::tests::`、
 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`、
 `cargo test -p rovai-core --features extended-tests --lib cline_catalog_migration_preserves_rows_and_rolls_back_with_its_receipt`；

@@ -16,7 +16,7 @@ use tokio::process::Command;
 use crate::{command::canonical_json_digest, mcp::McpServerDefinition};
 
 pub const MINIMUM_VERSION: &str = "3.0.65";
-pub const OBSERVER_REVISION: &str = "cline-plugin-observer-v1";
+pub const OBSERVER_REVISION: &str = "cline-plugin-observer-v2";
 const OBSERVER: &str = include_str!("cline/observer.js");
 const MAX_OBSERVATION_BYTES: u64 = 32 * 1024;
 const MAX_OBSERVATIONS: usize = 1024;
@@ -229,6 +229,20 @@ pub fn configure_host(
     }
     let observer = root.join("observer.js");
     write_private(&observer, OBSERVER.as_bytes())?;
+    // Freeze only explicit native capacities with this Host's configuration.
+    // Provider credentials and model instructions never enter the observer.
+    let catalog_path = paths.data.join("settings/models.json");
+    let windows = fs::metadata(&catalog_path)
+        .ok()
+        .filter(|meta| meta.len() <= 1024 * 1024)
+        .and_then(|_| fs::read(&catalog_path).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .map(|catalog| native_model_windows(&catalog))
+        .unwrap_or_default();
+    write_private(
+        &root.join("model-windows.json"),
+        &serde_json::to_vec(&windows)?,
+    )?;
     let mut plugins = native_plugin_paths(&paths.config.join("plugins"))?;
     plugins.push(observer);
     write_private(
@@ -269,6 +283,35 @@ pub fn configure_host(
         .env("CLINE_MCP_SETTINGS_PATH", private_mcp)
         .env("ROVAI_CLINE_OBSERVER_ROOT", root);
     Ok(())
+}
+
+fn native_model_windows(catalog: &Value) -> BTreeMap<String, BTreeMap<String, i64>> {
+    let mut windows = BTreeMap::new();
+    if catalog["version"] != 1 {
+        return windows;
+    }
+    let Some(providers) = catalog["providers"].as_object() else {
+        return windows;
+    };
+    for (provider, config) in providers {
+        let Some(models) = config["models"].as_object() else {
+            continue;
+        };
+        for (model, info) in models {
+            if !provider.is_empty()
+                && !model.is_empty()
+                && let Some(window) = info["contextWindow"]
+                    .as_i64()
+                    .filter(|n| *n > 0 && *n <= 9_007_199_254_740_991)
+            {
+                windows
+                    .entry(provider.clone())
+                    .or_insert_with(BTreeMap::new)
+                    .insert(model.clone(), window);
+            }
+        }
+    }
+    windows
 }
 
 fn read_optional_json(path: &Path) -> Result<Option<Value>> {
@@ -786,22 +829,36 @@ pub fn parse_usage(record: &Value) -> Option<crate::monitoring::ParsedRuntimeUsa
 /// the sum of this Run's requests. The observer does not guess a model window.
 pub fn parse_observations(record: &Value) -> Vec<crate::monitoring::ParsedRuntimeUsage> {
     use crate::monitoring::{RuntimeInputSemantics, RuntimeUsageCounterMode, RuntimeUsageFields};
-    let Some(usage) = parse_usage(record) else {
+    if record["schemaVersion"] != 1 || record["kind"] != "model_completed" {
         return Vec::new();
-    };
-    let mut result = vec![usage.clone()];
-    if let Some(used) = usage.fields.input_tokens {
+    }
+    let mut result: Vec<_> = parse_usage(record).into_iter().collect();
+    let used = record["metrics"]["inputTokens"]
+        .as_i64()
+        .filter(|n| *n >= 0);
+    let window = (record["contextWindowSource"] == "native_models_config"
+        && record["providerId"].as_str().is_some_and(|s| !s.is_empty())
+        && record["modelId"].as_str().is_some_and(|s| !s.is_empty()))
+    .then(|| record["contextWindow"].as_i64())
+    .flatten()
+    .filter(|n| *n > 0 && *n <= 9_007_199_254_740_991);
+    if (used.is_some() || window.is_some())
+        && let Some(session) = record["sessionId"].as_str().filter(|s| !s.is_empty())
+        && let Some(run) = record["runId"].as_str().filter(|s| !s.is_empty())
+        && let Some(message) = record["messageId"].as_str().filter(|s| !s.is_empty())
+    {
         result.push(crate::monitoring::ParsedRuntimeUsage {
-            identity_suffix: format!("{}:context", usage.identity_suffix),
+            identity_suffix: format!("{run}:{message}:context"),
             dialect_id: "cline-plugin-model-context-v1".into(),
-            source: usage.source.clone(),
+            source: "runtime_private_extension".into(),
             scope: "session".into(),
             counter_mode: RuntimeUsageCounterMode::Gauge,
             input_semantics: RuntimeInputSemantics::Unknown,
-            native_session_id: usage.native_session_id,
+            native_session_id: Some(session.into()),
             native_turn_id: None,
             fields: RuntimeUsageFields {
-                context_used_tokens: Some(used),
+                context_used_tokens: used,
+                context_size_tokens: window,
                 ..Default::default()
             },
             context_model_id: record["modelId"]
@@ -809,7 +866,10 @@ pub fn parse_observations(record: &Value) -> Vec<crate::monitoring::ParsedRuntim
                 .filter(|id| !id.is_empty())
                 .map(str::to_owned),
             cost: None,
-            occurred_at: usage.occurred_at,
+            occurred_at: record["observedAt"]
+                .as_str()
+                .filter(|time| chrono::DateTime::parse_from_rfc3339(time).is_ok())
+                .map(str::to_owned),
         });
     }
     result
@@ -843,6 +903,43 @@ mod tests {
         assert!(usage.fields.cache_write_input_tokens.is_none());
         assert!(usage.fields.reasoning_output_tokens.is_none());
         assert!(usage.cost.is_none());
+        let mut with_window = observation.clone();
+        with_window["modelId"] = json!("actual-model");
+        with_window["providerId"] = json!("actual-provider");
+        with_window["contextWindowSource"] = json!("native_models_config");
+        with_window["contextWindow"] = json!(272000);
+        let parsed = parse_observations(&with_window);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[1].fields.context_used_tokens, Some(110));
+        assert_eq!(parsed[1].fields.context_size_tokens, Some(272000));
+        assert_eq!(parsed[1].context_model_id.as_deref(), Some("actual-model"));
+        assert_eq!(parsed[0].fields.context_size_tokens, None);
+        for invalid in [
+            json!(0),
+            json!(-1),
+            json!("272000"),
+            json!(272000.5),
+            json!(null),
+        ] {
+            with_window["contextWindow"] = invalid;
+            assert_eq!(
+                parse_observations(&with_window)[1]
+                    .fields
+                    .context_size_tokens,
+                None
+            );
+        }
+        with_window["contextWindow"] = json!(272000);
+        with_window["metrics"] = json!({});
+        let window_only = parse_observations(&with_window);
+        assert_eq!(window_only.len(), 1);
+        assert_eq!(window_only[0].fields.context_used_tokens, None);
+        assert_eq!(window_only[0].fields.context_size_tokens, Some(272000));
+        with_window["providerId"] = Value::Null;
+        assert!(parse_observations(&with_window).is_empty());
+        with_window["providerId"] = json!("actual-provider");
+        with_window["contextWindowSource"] = json!("inferred");
+        assert!(parse_observations(&with_window).is_empty());
         write_private(&path, &serde_json::to_vec(&observation).unwrap()).unwrap();
         assert!(
             drain_observations(root, "session-b", "run:1")
@@ -1036,6 +1133,13 @@ mod tests {
         )
         .unwrap();
         fs::write(&paths.mcp, r#"{"mcpServers":{"native":{"command":"echo","args":["native"]},"assigned":{"command":"old","env":{"OLD":"must-not-survive"}}}}"#).unwrap();
+        let catalog = json!({"version":1,"providers":{"native":{"models":{
+            "actual":{"contextWindow":272000,"max_context_window":872000,"private":"secret-catalog"},
+            "default":{"maxInputTokens":128000},"invalid":{"contextWindow":-1},
+            "text":{"contextWindow":"272000"},"unsafe":{"contextWindow":9007199254740992_i64}
+        }}}});
+        let catalog_path = paths.data.join("settings/models.json");
+        fs::write(&catalog_path, serde_json::to_vec(&catalog).unwrap()).unwrap();
         let native_plugin = paths.config.join("plugins/pkg/index.js");
         fs::write(&native_plugin, "export default {name:'native'};").unwrap();
         fs::write(
@@ -1051,7 +1155,21 @@ mod tests {
             serde_json::from_value(json!({"command":"new","args":["safe"]})).unwrap(),
         )]);
         configure_host(&mut command, &root, &paths, false, &servers).unwrap();
+        let frozen_windows = fs::read(root.join("model-windows.json")).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&frozen_windows).unwrap(),
+            json!({"native":{"actual":272000}})
+        );
         assert_eq!(native_configuration_digest(&paths).unwrap(), before);
+        let mut updated_catalog = catalog.clone();
+        updated_catalog["providers"]["native"]["models"]["actual"]["contextWindow"] = json!(300000);
+        fs::write(&catalog_path, serde_json::to_vec(&updated_catalog).unwrap()).unwrap();
+        assert_ne!(native_configuration_digest(&paths).unwrap(), before);
+        assert_eq!(
+            fs::read(root.join("model-windows.json")).unwrap(),
+            frozen_windows
+        );
+        fs::write(&catalog_path, serde_json::to_vec(&catalog).unwrap()).unwrap();
         assert!(
             fs::symlink_metadata(root.join("config/rules"))
                 .unwrap()

@@ -7,6 +7,9 @@ last_updated: 2026-10-05
 
 # Command Code / Cline 编辑 Diff 与能力差异复核
 
+> 后续更正：本记录的窗口未知来自当时普通模型列表的调查；同日进一步查询版本化模型元数据取得
+> 默认 272k，Cline 已补原生配置采集。当前结论与独立验收见[窗口补采](command-cline-context-window-2026-10-05.md)。
+
 User 的 Thread 消息 `89e5c167-85c4-49d0-ba56-87bc0c0397ff` 要求补上编辑展开并对照其他 Runtime 查漏。
 本轮沿任务分支 `rovai/mission/052`、基线 `d9579cf5`；沿用已保留的隔离开发包，不改变日常 App、
 用户原生配置或模型上下文层级。此前 [路径与 Context 记录](command-cline-files-context-2026-10-04.md)
