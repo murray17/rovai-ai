@@ -50,11 +50,11 @@ for (const lang of ['', '/zh']) {
   const home = new JSDOM(readFileSync(join(dist, lang, 'index.html'), 'utf8')).window.document
   const download = readFileSync(join(dist, lang, 'download', 'index.html'), 'utf8')
   if (!home.querySelector('.hero-figure img')) problems.push(`${lang || '/'}: hero product image is missing`)
-  for (const asset of ['Rovai-AI-0.4.3-arm64.dmg', 'Rovai-AI-0.4.3-x64.dmg', 'Rovai-AI-0.4.3-x64.exe']) {
-    if (!download.includes(`/releases/download/v0.4.3/${asset}`)) problems.push(`${lang}/download: missing ${asset}`)
+  for (const asset of ['Rovai-AI-0.4.4-arm64.dmg', 'Rovai-AI-0.4.4-x64.dmg', 'Rovai-AI-0.4.4-x64.exe']) {
+    if (!download.includes(`/releases/download/v0.4.4/${asset}`)) problems.push(`${lang}/download: missing ${asset}`)
   }
   for (const target of ['linux-x64.tar.gz','macos-arm64.tar.gz','macos-x64.tar.gz','windows-x64.zip']) {
-    if (!download.includes(`/releases/download/v0.4.3/rovai-server-0.4.3-${target}`)) problems.push(`${lang}/download: missing Server asset ${target}`)
+    if (!download.includes(`/releases/download/v0.4.4/rovai-server-0.4.4-${target}`)) problems.push(`${lang}/download: missing Server asset ${target}`)
   }
   for (const topic of ['remote','desktop-web','server-install','lan-access','tailscale','public-https','server-maintenance']) {
     const article = new JSDOM(readFileSync(join(dist, lang, 'docs', topic + '.html'), 'utf8')).window.document
@@ -63,10 +63,10 @@ for (const lang of ['', '/zh']) {
   }
   const install = new JSDOM(readFileSync(join(dist, lang, 'docs', 'server-install.html'), 'utf8')).window.document
   const commands = [...install.querySelectorAll('.doc-code pre')].map(pre => pre.textContent)
-  if (!commands[0]?.includes(' -o install-server.sh\nsh install-server.sh --version 0.4.3')) {
+  if (!commands[0]?.includes(' -o install-server.sh\nsh install-server.sh --version 0.4.4')) {
     problems.push(`${lang}/docs/server-install: Unix installer commands lost their line break`)
   }
-  if (!commands[1]?.includes('-OutFile install-server.ps1\n.\\install-server.ps1 -Version 0.4.3')) {
+  if (!commands[1]?.includes('-OutFile install-server.ps1\n.\\install-server.ps1 -Version 0.4.4')) {
     problems.push(`${lang}/docs/server-install: PowerShell installer commands lost their line break`)
   }
   if (!commands[2]?.includes(' \\\n  --data-dir')) {
@@ -78,5 +78,5 @@ if (problems.length) {
   console.error(problems.join('\n'))
   process.exitCode = 1
 } else {
-  console.log(`Checked ${pageCount} website pages, internal links, assets, anchors, Desktop 0.4.3 / Server 0.4.3 downloads, and deployment locale routes.`)
+  console.log(`Checked ${pageCount} website pages, internal links, assets, anchors, Desktop 0.4.4 / Server 0.4.4 downloads, and deployment locale routes.`)
 }
