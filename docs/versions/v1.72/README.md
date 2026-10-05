@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-05
+last_updated: 2026-10-06
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -44,8 +44,9 @@ macOS arm64 按 [V1.72-D13](decisions.md#v1-72-d13)开放开发 `Preview`，其�
 完整资格仍在实施。Command Code 随后接入官方 1.74.1 ACP 与共享 Fleet，Migration 185 升至 schema **135**，
 也仅在 macOS arm64 开放 Preview。按 User 后续修复要求，Bootstrap 从旧候选 first_payload 改为受管
 System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D15](decisions.md#v1-72-d15)
-记录加载门禁、逐 Session 绑定与失败收敛。Cline System Rule 已获继续修复授权，但缺失 Plugin 仍调用模型的
-反例尚未解决，故保留现有 first_payload；当前未完成项不能解释成等待重复确认。
+记录加载门禁、逐 Session 绑定与失败收敛。Cline 随后按 User 明确指示改为正常 System Rule，
+不再以故意缺失插件的极端场景阻挡。冻结 B 逐 Session 绑定、user P 独立，见
+[Cline System revision 2](model-context-change-cline-system.md)及 [V1.72-D17](decisions.md#v1-72-d17)。
 共享 Core 的 Command 门禁与常驻接线已过；原生默认 BYOK 路径已解决先前额度阻碍，真实模型 A→B→A、
 exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证通过。显式自定义模型切换仍被上游拒绝，
 因此保留原生默认哨兵而不伪造目录。Cline ACP 未传 compaction 配置，真实探针未得到完成信号。完整 14 轴对照与实际验证见
@@ -57,6 +58,11 @@ exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证
 已增加官方 session/list 精确 ID/cwd 门禁；有效 cold 的 Session/Binding/generation 保留通过。
 范围、失败候选和平台限制见[故障恢复验收](../../research/runtime-monitoring/command-cline-fault-recovery-2026-10-05.md)
 与 [V1.72-D16](decisions.md#v1-72-d16)，不改变两者 Preview 或未闭合的上游差异。
+
+2026-10-06 追加完成 Command 原生私有 MCP 配置与 Cline System 新包真实验收：两者 first/warm/cold、
+文件工具与显式 CLI 发送通过；MCP cwd、字面 env/headers、原生同名优先和更新/撤销边界通过。
+同一服务器 Cline 的 stdio/HTTP 真正调用成功，Command 当前 BYOK deferred tools 仍只发现未调用。
+完整 14 轴、9 Golden Flow 与剩余限制见[追加验收](../../research/runtime-monitoring/command-cline-native-system-2026-10-06.md)。
 
 本切片更新 Runtime Catalog/Monitoring 架构、兼容性清单、研究矩阵、测试说明与当前决定导航。
 活动目录加入 Cline 的保守 run_level 条目，复用既有 ACP typed kind，不改变 activity-v4 或旧 Runtime 解释。

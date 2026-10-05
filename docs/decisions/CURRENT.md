@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-10-03
+last_updated: 2026-10-06
 ---
 
 # 当前规范与决定理由导航
@@ -256,3 +256,5 @@ Command Code 官方 ACP、System 门禁及 macOS arm64 Preview 由 [V1.72-D15](.
 macOS ACP detached 后代与 Core 重启回收当前规范见
 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md#macos-acp-descendants)，
 内核身份、私有 ledger 和不增加常驻代理的取舍见 [V1.72-D16](../versions/v1.72/decisions.md#v1-72-d16)。
+
+Cline 正常 System Rule 与 Command 原生 MCP 由 [V1.72-D17](../versions/v1.72/decisions.md#v1-72-d17)记录；当前交付边界由 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)及 [Cline System 输入说明](../versions/v1.72/model-context-change-cline-system.md)拥有。

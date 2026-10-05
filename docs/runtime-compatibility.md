@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-05
+last_updated: 2026-10-06
 ---
 
 # Agent Runtime 兼容性清单
@@ -21,6 +21,14 @@ operations 的正式准入基线是 [Built-in 运输不变量](architecture/foun
 Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core Router。旧 Team、
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
+
+## 2026-10-06 Command / Cline 当前补验
+
+Command Code 1.74.1 改用 Host 私有原生 MCP 配置：真实 stdio/HTTP 发现、cwd、字面 env/headers、
+同名优先和更新/撤销边界通过；当前 sub2api/gpt-6-sol 实际调用仍未通过。相同服务器经 Cline 真实调用成功。
+Cline 3.0.65 改用 managed System Rule；真实 System B 恰好一次/user B 为零，A/B/A、App first/warm/cold
+和正确记忆通过。原生 ACP compaction 仍未启用。最新事实以[本轮完整对照](research/runtime-monitoring/command-cline-native-system-2026-10-06.md)
+及证据为准；下面按时间保留的旧 first_payload/ACP MCP 交付描述不再是当前实现。两者仍为 macOS arm64 Preview。
 
 ## Command Code 接入实施状态
 

@@ -16493,7 +16493,7 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         if matches!(
             execution.runtime.adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
+            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
         ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation

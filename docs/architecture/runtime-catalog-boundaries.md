@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-09-27
+last_updated: 2026-10-06
 ---
 
 # Runtime Catalog Boundaries
@@ -26,7 +26,7 @@ last_updated: 2026-09-27
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含十六种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前包含十八种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 当前不展示 Settings Preview row。DeepSeek Harness 通过官方 ACP profile 接入；macOS arm64、macOS x64、
 Windows x64 与 Linux x64 分别绑定平台专属证据并取得 qualified。
 产品目录的机器可判数量、全量检查、诊断分母和
@@ -51,7 +51,7 @@ Session、模型/权限、Action、取消和终态路径；不建立另一套进
 NotQualified；没有 qualification evidence，不声称 First-Class。旧 headless 传输只保留研究/兼容测试。
 
 Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
-Host 私有 Home 保留原生 auth/provider/Skill/Mod/Session 路径，仅覆盖私有 settings 的 `mods.paths`，通过
+Host 私有 Home 保留原生 auth/provider/Skill/Mod/Session 路径，仅覆盖私有 settings 的 `mods.paths` 与原生 `mcp.json`，通过
 官方 `appendSystemPrompt({state})` 按 `state.sessionId` 读取完整冻结 Bootstrap。工厂注册完成后写入带
 随机 nonce/当前 PID 的 readiness；Core 在 initialize 后校验，缺失则关闭 Host 且不发 prompt。每次
 hook 检查绑定、摘要和预算，异常直接停止进程，避免上游捕获普通异常后继续。A/B 不共享 active Bootstrap 指针，
@@ -61,7 +61,7 @@ cold Host 重新绑定原冻结字节。原生 System 保留并追加 B，用户
 配置文件保守失效，不读取历史。显式模型来自 ACP 真实目录；原生配置中的默认 BYOK ID 若不在目录中，
 以 runtime-default 哨兵保留默认选择。该 ID 不伪装成 session/set_model 可选项，实际模型仍按原生 Session 记录。
 原生五种权限原值传给 session/set_mode，默认 bypass，审批响应仍由共享 ACP 原生请求路径承载。
-External MCP 使用标准 session mcpServers；同名采用已存在的 `native_wins_skip`，先通过官方 `mcp list`
+External MCP 合入 Host 私有 Home 的原生 `mcp.json`，session mcpServers 保持空；保留原生定义、工作目录和已解析的环境/请求头，同名采用已存在的 `native_wins_skip`，先通过官方 `mcp list`
 发现有效名称并冻结冲突结果。发现失败/格式漂移阻断投影；不把被原生遮蔽的 Assignment 标为可用。
 原生连接失败可能继续建立 Session，因此握手和配置可见性不是 MCP 调用成功证明。
 
@@ -79,9 +79,9 @@ Cline 使用官方 `cline --acp` 与共享 Host/Fleet，原生配置由 Cline �
 其余平台保持 `NotQualified`。Preview 没有 qualification evidence，仍须通过普通版本、认证和能力检查。
 隔离打包 App 已完成两名队员的真实发送、工具、Usage/Context、bundled CLI 及精确 warm/cold 恢复，
 见[开发包验收](../research/cline-runtime/app-send-verification-2026-10-04.md)。这些主路径证据不是
-First-Class 资格；[真实证据矩阵](../research/cline-runtime/README.md)仍有 Bootstrap、压缩连续性、
-权限失败及 Skills/MCP 隔离矩阵缺口。
-数值 observer 只读，不改变模型输入。User 已要求修复 System 层级，但原生可选 Plugin 的缺失负向测试仍会继续调用模型，故保持 first_payload；这不是等待再次授权。3.0.65 的 ACP buildConfig 未传 compaction，真实开启全局设置仍未观察到压缩，不能把普通回复宣称为压缩连续性。
+First-Class 资格；[真实证据矩阵](../research/cline-runtime/README.md)仍有压缩连续性、
+完整权限及 Skills/MCP 压力矩阵缺口。
+数值 observer 只读；独立受管 Rule 通过官方 registerRule 按完整 Session 绑定冻结 Bootstrap，交付模式为 managed_system_prompt，user prompt 只含动态输入。正常加载、真实 A/B/A 与 exact cold 已验证；User 明确接受不以故意缺失插件的极端测试作为阻挡，不声称新增 required-plugin 门禁。变更与兼容 fence 见 [Cline System revision 2](../versions/v1.72/model-context-change-cline-system.md)。3.0.65 的 ACP buildConfig 未传 compaction，真实开启全局设置仍未观察到压缩；System Rule 不等于启用原生压缩。
 
 ## 可执行准入
 

@@ -9,6 +9,10 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 
 # Rovai AI 运行监控指标可采集性审计
 
+2026-10-06 [Command 原生 MCP / Cline System 补验及 14 轴对照](command-cline-native-system-2026-10-06.md)：
+正常 System Rule、原生配置生命周期、真实 LLM 正反对照和字段边界；不把发现/配置成功冒称 MCP 调用通过。
+
+
 > 2026-10-02：按用户要求撤下全部 Runtime 的输出测速。以下速度、v2/v3、思考计数及旧探针记录均为历史证据，
 > 对应代码保留在 Git 提交 `ee444ab1`。当前只保留原生用量与 Session 上下文，见[执行指标合同](../../contracts/runtime-execution-metrics-v7.md)。
 

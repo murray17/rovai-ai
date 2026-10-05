@@ -5,6 +5,40 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
+test('Cline System Rule retains its own frozen Session through A/B/A and cold setup', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rovai-cline-bootstrap-'));
+  const previous = process.env.ROVAI_CLINE_OBSERVER_ROOT;
+  process.env.ROVAI_CLINE_OBSERVER_ROOT = root;
+  const hash = value => createHash('sha256').update(value).digest('hex');
+  try {
+    mkdirSync(join(root, 'bootstrap'));
+    const { default: plugin } = await import('../../crates/rovai-core/src/cline/bootstrap.js');
+    const setup = sessionId => {
+      const rules = [];
+      plugin.setup({ registerRule: rule => rules.push(rule) }, { session: { sessionId } });
+      assert.equal(rules.length, 1);
+      assert.equal(rules[0].source, 'plugin');
+      return rules[0];
+    };
+    for (const sessionId of ['A', 'B']) {
+      const bootstrap = `System identity ${sessionId}`;
+      writeFileSync(join(root, 'bootstrap', `${hash(sessionId)}.json`), JSON.stringify({
+        schemaVersion: 1, sessionId, bootstrap, sha256: hash(bootstrap),
+      }));
+    }
+    const a = setup('A');
+    const b = setup('B');
+    assert.equal(a.content(), 'System identity A');
+    assert.equal(b.content(), 'System identity B');
+    assert.equal(a.content(), 'System identity A');
+    assert.equal(setup('A').content(), 'System identity A');
+  } finally {
+    if (previous === undefined) delete process.env.ROVAI_CLINE_OBSERVER_ROOT;
+    else process.env.ROVAI_CLINE_OBSERVER_ROOT = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Cline official hooks emit only leased, structured observations', async () => {
   const root = mkdtempSync(join(tmpdir(), 'rovai-cline-hooks-'));
   const previous = process.env.ROVAI_CLINE_OBSERVER_ROOT;

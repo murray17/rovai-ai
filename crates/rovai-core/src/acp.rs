@@ -4065,6 +4065,16 @@ impl AcpRuntime {
         session_id: &str,
         bootstrap: &str,
     ) -> Result<()> {
+        if self.host.adapter_kind == AdapterKind::ClineCli {
+            return crate::cline::bind_bootstrap(
+                self.host
+                    .private_config_root
+                    .as_deref()
+                    .context("Cline private Host missing")?,
+                session_id,
+                bootstrap,
+            );
+        }
         if self.host.adapter_kind == AdapterKind::CommandCodeCli {
             return crate::command_code_acp::bind_bootstrap(
                 self.host
@@ -4156,6 +4166,7 @@ impl AcpRuntime {
                 | AdapterKind::CursorAgent
                 | AdapterKind::GrokBuild
                 | AdapterKind::ClineCli
+                | AdapterKind::CommandCodeCli
         ) {
             external_mcp_servers
                 .iter()
@@ -5666,6 +5677,7 @@ fn configure_runtime_command(
             crate::command_code_acp::configure_host(
                 command,
                 private_config_root.context("Command Code private Host directory missing")?,
+                external_mcp_servers,
             )?;
         }
         AdapterKind::ClineCli => {

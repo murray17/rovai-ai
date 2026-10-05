@@ -2340,6 +2340,17 @@ fn acp_capability_snapshot(
                 "session.new",
                 "context.charter.first_payload",
             ]
+        } else if adapter_kind == AdapterKind::ClineCli {
+            &[
+                "acp.initialize",
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "session.set_config_option",
+                "structured_permission_request",
+                "context.charter.managed_system_prompt",
+            ]
         } else if matches!(
             adapter_kind,
             AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli

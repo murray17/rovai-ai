@@ -18,6 +18,8 @@ use crate::{command::canonical_json_digest, mcp::McpServerDefinition};
 pub const MINIMUM_VERSION: &str = "3.0.65";
 pub const OBSERVER_REVISION: &str = "cline-plugin-observer-v3";
 const OBSERVER: &str = include_str!("cline/observer.js");
+pub const BOOTSTRAP_REVISION: &str = "cline-system-rule-v1";
+const BOOTSTRAP: &str = include_str!("cline/bootstrap.js");
 const MAX_OBSERVATION_BYTES: u64 = 32 * 1024;
 const MAX_OBSERVATIONS: usize = 1024;
 
@@ -243,7 +245,7 @@ pub fn native_configuration_digest(paths: &NativePaths) -> Result<String> {
         ));
     }
     canonical_json_digest(
-        &json!({"revision": OBSERVER_REVISION, "config": paths.config, "data": paths.data, "files": entries}),
+        &json!({"revision": OBSERVER_REVISION, "bootstrap": BOOTSTRAP_REVISION, "config": paths.config, "data": paths.data, "files": entries}),
     )
 }
 
@@ -261,6 +263,7 @@ pub fn configure_host(
     for directory in [
         root.to_path_buf(),
         root.join("bindings"),
+        root.join("bootstrap"),
         root.join("observations"),
         root.join("config/plugins/rovai"),
     ] {
@@ -279,6 +282,8 @@ pub fn configure_host(
     }
     let observer = root.join("observer.js");
     write_private(&observer, OBSERVER.as_bytes())?;
+    let bootstrap = root.join("bootstrap.js");
+    write_private(&bootstrap, BOOTSTRAP.as_bytes())?;
     // Freeze only explicit native capacities with this Host's configuration.
     // Provider credentials and model instructions never enter the observer.
     let catalog_path = paths.data.join("settings/models.json");
@@ -294,6 +299,7 @@ pub fn configure_host(
         &serde_json::to_vec(&windows)?,
     )?;
     let mut plugins = native_plugin_paths(&paths.config.join("plugins"))?;
+    plugins.push(bootstrap);
     plugins.push(observer);
     write_private(
         &private_config.join("plugins/rovai/package.json"),
@@ -485,6 +491,35 @@ pub fn bind_prompt(root: &Path, session_id: &str, lease_id: &str) -> Result<()> 
         &path,
         &serde_json::to_vec(&json!({"schemaVersion":1,"sessionId":session_id,"leaseId":lease_id}))?,
     )
+}
+
+/// Frozen Session Bootstrap has a longer lifetime than the per-Prompt lease.
+pub fn bind_bootstrap(root: &Path, session_id: &str, bootstrap: &str) -> Result<()> {
+    ensure!(
+        !session_id.is_empty()
+            && session_id.len() <= 256
+            && !bootstrap.trim().is_empty()
+            && bootstrap.len() <= 32 * 1024,
+        "cline_bootstrap_binding_invalid"
+    );
+    let path = root
+        .join("bootstrap")
+        .join(format!("{:x}.json", Sha256::digest(session_id.as_bytes())));
+    let payload = serde_json::to_vec(&json!({"schemaVersion":1,"sessionId":session_id,
+        "bootstrap":bootstrap,"sha256":format!("{:x}", Sha256::digest(bootstrap.as_bytes()))}))?;
+    if path.exists() {
+        ensure!(
+            fs::read(path)? == payload,
+            "cline_bootstrap_binding_changed"
+        );
+        return Ok(());
+    }
+    let temporary = root
+        .join("bootstrap")
+        .join(format!("{}.tmp", uuid::Uuid::new_v4()));
+    write_private(&temporary, &payload)?;
+    fs::rename(temporary, path)?;
+    Ok(())
 }
 
 pub fn unbind_prompt(root: &Path, session_id: &str) -> Result<()> {
@@ -1256,6 +1291,25 @@ mod tests {
             manifest["cline"]["plugins"][0]["paths"][0],
             native_plugin.to_str().unwrap()
         );
+        assert_eq!(
+            manifest["cline"]["plugins"][0]["paths"][1],
+            root.join("bootstrap.js").to_str().unwrap()
+        );
+        for (session, bootstrap) in [("session-A", "Identity A"), ("session-B", "Identity B")] {
+            bind_bootstrap(&root, session, bootstrap).unwrap();
+            bind_bootstrap(&root, session, bootstrap).unwrap();
+            assert!(bind_bootstrap(&root, session, "Changed identity").is_err());
+            let frozen: Value = serde_json::from_slice(
+                &fs::read(
+                    root.join("bootstrap")
+                        .join(format!("{:x}.json", Sha256::digest(session.as_bytes()))),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(frozen["sessionId"], session);
+            assert_eq!(frozen["bootstrap"], bootstrap);
+        }
         let mcp: Value = serde_json::from_slice(&fs::read(root.join("mcp.json")).unwrap()).unwrap();
         assert_eq!(mcp["mcpServers"]["native"]["command"], "echo");
         assert_eq!(mcp["mcpServers"]["assigned"]["command"], "new");

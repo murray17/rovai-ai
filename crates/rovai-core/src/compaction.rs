@@ -74,10 +74,13 @@ impl DesiredCompactionDetectorPolicies {
             let policy = match std::env::var(key) {
                 Ok(value) => match CompactionDetectorPolicy::parse(&value) {
                     Some(CompactionDetectorPolicy::BestEffort)
-                        if adapter_kind == AdapterKind::AntigravityApp =>
+                        if matches!(
+                            adapter_kind,
+                            AdapterKind::AntigravityApp | AdapterKind::ClineCli
+                        ) =>
                     {
                         diagnostics.push(format!(
-                            "{key} cannot enable the Antigravity compaction detector in {BOOTSTRAP_REDELIVERY_POLICY_RELEASE}; the detector is disabled"
+                            "{key} cannot enable Bootstrap redelivery for {}; the detector is disabled", adapter_kind.as_str()
                         ));
                         CompactionDetectorPolicy::Disabled
                     }
@@ -115,7 +118,6 @@ impl DesiredCompactionDetectorPolicies {
 pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDetectorPolicy {
     match adapter_kind {
         AdapterKind::CopilotCli
-        | AdapterKind::ClineCli
         | AdapterKind::OpencodeCli
         | AdapterKind::KiroCli
         | AdapterKind::QoderCli
@@ -125,6 +127,7 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::GrokBuild
         | AdapterKind::ZcodeApp => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
+        | AdapterKind::ClineCli
         | AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::DeepseekHarness
@@ -975,11 +978,11 @@ mod tests {
 
     #[test]
     fn release_policy_matrix_keeps_protected_and_antigravity_disabled() {
-        // Checking only release_default_policy missed an unregistered Cline:
-        // application startup iterates POLICY_ADAPTERS, not AdapterKind::ALL.
+        // Keep Cline in startup reconciliation to fence the previous
+        // first_payload observer when upgrading to the protected System Rule.
         assert_eq!(
             release_policies().policy_for(AdapterKind::ClineCli),
-            Some(CompactionDetectorPolicy::BestEffort)
+            Some(CompactionDetectorPolicy::Disabled)
         );
         assert_eq!(
             release_default_policy(AdapterKind::CopilotCli),

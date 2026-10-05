@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::{agent_profile::AdapterKind, command::canonical_json_digest};
+use crate::{agent_profile::AdapterKind, command::canonical_json_digest, mcp::McpServerDefinition};
 
 pub const MINIMUM_VERSION: &str = "1.74.1";
 pub const BOOTSTRAP_REVISION: &str = "command-code-system-bootstrap-v1";
@@ -81,11 +81,24 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
     update["_meta"]["rovaiCommandMutation"] = mutation;
 }
 
-/// Only settings are overlaid. Original auth, providers, Skills, Mods and
-/// Session storage remain native paths; no shared project file is rewritten.
-pub fn configure_host(command: &mut tokio::process::Command, root: &Path) -> Result<()> {
+/// Settings and MCP are private native overlays. Original auth, providers,
+/// Skills, Mods and Session storage remain native; shared files are not edited.
+pub fn configure_host(
+    command: &mut tokio::process::Command,
+    root: &Path,
+    servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<()> {
     let home = crate::runtime_discovery::runtime_home_directory(AdapterKind::CommandCodeCli)
         .context("Command Code native Home unavailable")?;
+    configure_host_from_home(command, root, &home, servers)
+}
+
+fn configure_host_from_home(
+    command: &mut tokio::process::Command,
+    root: &Path,
+    home: &Path,
+    servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<()> {
     let native = home.join(".commandcode");
     let private_home = root.join("home");
     let private_native = private_home.join(".commandcode");
@@ -105,7 +118,7 @@ pub fn configure_host(command: &mut tokio::process::Command, root: &Path) -> Res
     }
     for entry in fs::read_dir(&native)? {
         let entry = entry?;
-        if entry.file_name() != "settings.json" {
+        if entry.file_name() != "settings.json" && entry.file_name() != "mcp.json" {
             native_link(&entry.path(), &private_native.join(entry.file_name()))?;
         }
     }
@@ -136,6 +149,67 @@ pub fn configure_host(command: &mut tokio::process::Command, root: &Path) -> Res
         &private_native.join("settings.json"),
         &serde_json::to_vec(&settings)?,
     )?;
+    let mut mcp = match fs::read(native.join("mcp.json")) {
+        Ok(bytes) => {
+            serde_json::from_slice::<Value>(&bytes).context("command_code_native_mcp_invalid")?
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({"mcpServers": {}}),
+        Err(error) => return Err(error.into()),
+    };
+    let entries = mcp
+        .get_mut("mcpServers")
+        .and_then(Value::as_object_mut)
+        .context("command_code_native_mcp_invalid")?;
+    // PreparedMcpProjection already excludes all effective native-name
+    // conflicts. Keep whole-definition precedence here for user-scope entries.
+    for (name, definition) in servers {
+        if !entries.contains_key(name) {
+            let mut value = serde_json::to_value(definition)?;
+            value["transport"] = json!(if value.get("url").is_some() {
+                "http"
+            } else {
+                "stdio"
+            });
+            // Native config does not accept cwd. Preserve the already-resolved
+            // directory with an argv-only launcher, without shell interpolation.
+            if let McpServerDefinition::Stdio {
+                command,
+                args,
+                cwd: Some(cwd),
+                ..
+            } = definition
+            {
+                value["command"] = json!("node");
+                value["args"] = json!(
+                    [
+                        vec![
+                            "--eval".to_owned(),
+                            include_str!("command_code/mcp-cwd.cjs").to_owned(),
+                            "--".to_owned(),
+                            cwd.clone(),
+                            command.clone()
+                        ],
+                        args.clone()
+                    ]
+                    .concat()
+                );
+                value.as_object_mut().unwrap().remove("cwd");
+            }
+            // Core has resolved these values already. Native interpolation
+            // must not reinterpret literal ${...} from the resolved secret.
+            for field in ["env", "headers"] {
+                if let Some(values) = value.get_mut(field).and_then(Value::as_object_mut) {
+                    for value in values.values_mut() {
+                        if let Some(text) = value.as_str() {
+                            *value = json!(text.replace("${", "$${"));
+                        }
+                    }
+                }
+            }
+            entries.insert(name.clone(), value);
+        }
+    }
+    write_private(&private_native.join("mcp.json"), &serde_json::to_vec(&mcp)?)?;
     let nonce = uuid::Uuid::new_v4().to_string();
     write_private(&root.join("nonce"), nonce.as_bytes())?;
     command
@@ -261,7 +335,7 @@ pub fn native_configuration_digest(workspace: &Path) -> Result<String> {
         })
         .collect();
     canonical_json_digest(
-        &json!({"profile":"command-code-acp-v1", "bootstrap": BOOTSTRAP_REVISION, "home":home, "files":files, "environment":environment}),
+        &json!({"profile":"command-code-acp-v2-native-mcp", "bootstrap": BOOTSTRAP_REVISION, "home":home, "files":files, "environment":environment}),
     )
 }
 
@@ -512,6 +586,77 @@ mod tests {
             );
             fs::write(path, "revision1").unwrap();
         }
+        let native_mcp = home.join(".commandcode/mcp.json");
+        let original =
+            json!({"mcpServers":{"native":{"command":"original","env":{"KEY":"${NATIVE_KEY}"}}}});
+        fs::write(&native_mcp, serde_json::to_vec(&original).unwrap()).unwrap();
+        let servers = BTreeMap::from([
+            ("native".to_owned(), serde_json::from_value(json!({"command":"must-not-replace"})).unwrap()),
+            ("assigned".to_owned(), serde_json::from_value(json!({"command":"echo","args":["literal $(never-execute)"],"cwd":workspace,"env":{"VALUE":"${literal}"}})).unwrap()),
+            ("http".to_owned(), serde_json::from_value(json!({"url":"http://127.0.0.1:9000/mcp","headers":{"X-Probe":"$${literal}"}})).unwrap()),
+        ]);
+        let host = root.join("host");
+        configure_host_from_home(
+            &mut tokio::process::Command::new("command-code"),
+            &host,
+            &home,
+            &servers,
+        )
+        .unwrap();
+        let overlay: Value =
+            serde_json::from_slice(&fs::read(host.join("home/.commandcode/mcp.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            overlay["mcpServers"]["native"],
+            original["mcpServers"]["native"]
+        );
+        assert_eq!(overlay["mcpServers"]["assigned"]["command"], "node");
+        assert_eq!(
+            overlay["mcpServers"]["assigned"]["args"][3],
+            workspace.to_str().unwrap()
+        );
+        assert_eq!(
+            overlay["mcpServers"]["assigned"]["env"]["VALUE"],
+            "$${literal}"
+        );
+        assert_eq!(overlay["mcpServers"]["http"]["transport"], "http");
+        assert_eq!(
+            overlay["mcpServers"]["http"]["headers"]["X-Probe"],
+            "$$${literal}"
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(&native_mcp).unwrap()).unwrap(),
+            original
+        );
+        let revoked = root.join("revoked");
+        configure_host_from_home(
+            &mut tokio::process::Command::new("command-code"),
+            &revoked,
+            &home,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &fs::read(revoked.join("home/.commandcode/mcp.json")).unwrap()
+            )
+            .unwrap(),
+            original
+        );
+        fs::write(&native_mcp, b"[]").unwrap();
+        let invalid = configure_host_from_home(
+            &mut tokio::process::Command::new("command-code"),
+            &root.join("invalid"),
+            &home,
+            &servers,
+        )
+        .unwrap_err();
+        assert!(
+            invalid
+                .to_string()
+                .contains("command_code_native_mcp_invalid")
+        );
+        fs::write(&native_mcp, serde_json::to_vec(&original).unwrap()).unwrap();
         fs::write(
             project.join(".commandcode/settings.local.json"),
             "invalid json",

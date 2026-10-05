@@ -2,10 +2,15 @@
 document_type: runtime-research
 authority: research-evidence-only
 status: partial-verification
-last_updated: 2026-10-05
+last_updated: 2026-10-06
 ---
 
 # Command Code / Cline：14 轴实现与真实验收
+
+当前结论已于 2026-10-06 更新：Cline 正常 System Rule 已接入且完成真实 A/B/A、warm/cold；
+Command 改为原生私有 MCP 配置，当前 BYOK 实际工具调用仍未通过。完整本轮比较、正向对照和字段见
+[追加验收](command-cline-native-system-2026-10-06.md)。下方 10 月 5 日的实施经过和失败证据保留为历史，
+其中“Cline 仍 first_payload / 必需插件门禁阻挡实施”和“Command Session MCP 注入”不再是当前接线。
 
 User 消息 `677d610d-e4cf-4ffb-aba2-d4ebb021cbcd`、`1bd0ab39-6939-40cd-9653-b472b3b69082` 要求修复
 Bootstrap、warm 和此前遗漏，并尽可能接入、验证全部能力。本记录按
@@ -103,10 +108,10 @@ Prompt 才延迟加载 Plugin，ACP 无已验证的 required-plugin readiness。
 | Auth / Provider / Model | 原生认证；默认/显式模型；配置变化使旧 Host/Binding 失效 | **部分**：自身 BYOK、默认模型、配置摘要通过；完整凭据轮换/显式切换矩阵未完成 | **部分**：自身原生默认 BYOK 真实通过；默认哨兵修复；自定义 ID 的显式 set_model 被上游拒绝；完整 OAuth/凭据轮换未验 |
 | Host / Fleet / LRU | 统一 Fleet；ACP/Pi 常驻，Claude 等 one-shot resumable | **部分**：共享 Fleet、真实 warm/A→B→A 已过；完整 LRU 压力未验 | **部分**：共享 Fleet，Core 常驻控制与真实原生 A→B→A、App warm 通过；完整 LRU 压力未验 |
 | Native Session / Continuation | 完整 ID；warm、exact cold、Core 重启；replay 隔离 | **部分**：原生及 App/Core exact cold、原 Binding/generation 保留通过；不存在/截短 ID 原生拒绝；Runtime/Core/App 强杀后新输入成功 | **部分**：真实 warm、exact cold、同 Session/Binding/generation 通过；原生错误 ID 静默成功已用官方 catalog 门禁补齐；Runtime/Core/App 强杀恢复通过，网络矩阵未全验 |
-| Bootstrap / Context | native append、managed system、first_payload 三类并存 | **目标未完成**：first_payload；Rule 正向通过但缺失反例阻断 System-only | **Verified + Implemented 主路径**：受管 System、readiness/每请求绑定门禁、A/B 隔离、压缩及冷恢复保留；B/P 不重写共享正文 |
+| Bootstrap / Context | native append、managed system、first_payload 三类并存 | **主路径已补齐**：managed System Rule；真实 B 一次/user B 零、A/B/A 与 cold 已验；User 接受正常加载路线，不新增 required-plugin 门禁 | **Verified + Implemented 主路径**：受管 System、readiness/每请求绑定门禁、A/B 隔离、压缩及冷恢复保留；B/P 不重写共享正文 |
 | Compaction continuity | System 保护或合格完成信号后补发；manual/threshold/overflow/retry 分验 | **Blocked 上游 ACP 接缝**：policy/observer 已实现，原生未 enable；不把普通 `/compact` 回复当压缩 | **部分**：真实 manual、threshold 和随后 cold 通过；overflow/retry 与产品压缩进度尚未验证 |
 | Skills | 当前 Skills v2 工具箱索引；原生发现由 Runtime 拥有 | **部分**：真实原生发现/读取/撤销、工具箱共享通路已接；全部并发/同名矩阵未验 | **部分**：`.commandcode/skills` 原生读取在 App 通过；当前平台/工具箱共享索引已接；新 Host 撤销原生 Skill 已过；同 Host 热更新/相邻隔离未全验，非旧 managed group 投递 |
-| External MCP | Session/Run 投影、同名策略、更新/撤销/隔离 | **部分**：ACP 不消费 session 字段，使用 Host 私有官方 config；App stdio/HTTP 真实调用、测试头、更新、撤销、相邻隔离已过；HTTP 并发压力未验 | **部分**：标准 session mcpServers，native_wins_skip；App stdio/HTTP 连接、schema 发现、更新、撤销及同名跳过已过；当前 BYOK 真实 echo 未调用，不能把发现算作调用通过 |
+| External MCP | Session/Run 投影、同名策略、更新/撤销/隔离 | **部分**：ACP 不消费 session 字段，使用 Host 私有官方 config；App stdio/HTTP 真实调用、测试头、更新、撤销、相邻隔离已过；HTTP 并发压力未验 | **部分**：已改 Host 私有原生 mcp.json，native_wins_skip；新包 stdio/HTTP 发现、cwd/字面环境/请求头、更新、撤销及同名通过；当前 BYOK 真正调用仍未通过 |
 | Tool / Action / Output | 原生 ID、准确路径、生命周期、输出、退出码和分级 Diff | **部分**：App read/edit ±、失败编辑、非零与空输出通过；部分 editor 路径/大输出未全验 | **部分**：App 中文空格 read/edit/read、+1/−1 点击通过；原生 stdout/stderr、16001 字节和空输出过；非零 exit 上游仍 completed/text-only，不猜退出码 |
 | Narration / Final / Missing-Send | 思考私有、显式 send、唯一 final、合格 zero-send 恢复 | **部分**：显式发送、zero-send 与公开去重已过；故障后终态单独记录 | **部分**：App 显式 CLI 与零发送最终回复恢复通过；MCP 搜索循环取消后不恢复公开结果，故障矩阵见新增证据 |
 | Permission / Approval / Workspace | 原生审批权威；allow/deny/cancel；授权目录 | **部分**：App allow_once / deny 已过：允许后写入，拒绝无文件且 Run 正常结束；拒绝后回复与 manual→auto 权限刷新通过；更广审批选项/并发矩阵未验 | **部分**：五种原生 mode 接线；真实 default deny 和运行中 cancel 通过；App allow_once/deny 已验，允许后写入成功，拒绝无目标文件；default→bypass 刷新后新写入无审批 |
@@ -153,6 +158,6 @@ Cline 拒绝回归最终 Run `1d633037-d57b-4ee0-bfe7-0beca9dbfdfd` 正常 succe
 userData、managed-skill-library 和 MCP 配置；未升级全局 CLI、未重启日常 App。原生 Summary、Provider 配置与
 wire 保留在私有验收目录，公开证据只保留必要 IDs、数值、验证结果和测试 marker。
 
-已明确的剩余差异是 Cline 必需 Plugin 门禁/ACP compaction 配置接缝，Command 自定义 BYOK 的 MCP 延迟加载、模型显式选择/结构化
+已明确的剩余差异是 Cline ACP compaction 配置接缝（正常 System Rule 已于后续完成），Command 自定义 BYOK 的 MCP 延迟加载、模型显式选择/结构化
 非零退出码/Run 费用，以及上表未覆盖的压力、网络和平台矩阵。这些项保持 Preview/未验证，不虚构
 Unsupported 决定，也不把 Mission 或 First-Class 标成完成。

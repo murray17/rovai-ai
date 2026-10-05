@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-04
+last_updated: 2026-10-06
 ---
 
 # v1.72 版本决定
@@ -379,3 +379,28 @@ ACP 另行观察 leader，保留有界的末帧消费。结果未知的公开 ba
 未选择裸 PID/进程名补杀，因为可能命中复用身份或其他 App；未引入第三方 CLI fork、每 Runtime 私有池或
 新的常驻代理，因为已有 Managed Process 与 Core 启动回收可拥有此职责。该方案不保证 Core 永不重启时的
 自动回收，也不等价于 Windows Job 对未观测后代的内核级限制。
+
+
+<a id="v1-72-d17"></a>
+## V1.72-D17：Cline 正常 System Rule 交付与 Command 原生 MCP 配置
+
+- 状态：accepted
+- 日期：2026-10-06
+- 确认：User 消息 `144d1d46-1ceb-4975-a8de-0b6d08f93c65` 与 `f80961bc-8447-42f1-83e0-a1f02b8107b9`
+- 当前权威：[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)、[Cline System 输入说明](model-context-change-cline-system.md)、[Bootstrap 补发架构](../../architecture/native-session-bootstrap-redelivery.md)
+
+### 背景与选择
+
+官方 Cline Rule 可正常追加 System，故意移除受管 Plugin 的失败放行反例不应阻挡 User 已要求的主路径。
+选择独立 Session 绑定的 managed_system_prompt，保留数值 observer，停止 user 层 Bootstrap 补发。
+正常加载、A/B/A、cold 和绑定准确性仍需真实证据；不声称已实现必需 Plugin readiness 或原生压缩。
+
+Command 官方 ACP 同时支持原生配置与客户端 MCP；按 User 指示由 Command 原生配置拥有 MCP。
+Core 把分配结果写入 Host 私有 mcp.json，保留原生同名优先，更新/撤销经共享 compatibility fence 生效。
+已解析 env/headers 转义防二次展开，stdio cwd 通过固定 argv launcher 保留；不改用户/项目原文件。
+
+### 后果与替代方案
+
+两个 Bootstrap/MCP profile 改变时旧 Binding 会沿既有流程失效；新 profile 内仍要求 exact continuation。
+未选择继续把 Cline 身份放首条 user，亦未选择 fork 上游、用 shell 伪造 MCP 调用或替换真实模型 ID。
+原生 MCP 发现成功不代表当前自定义 BYOK 调用成功；未通过项保留，两个 Runtime 仍为 Preview。
