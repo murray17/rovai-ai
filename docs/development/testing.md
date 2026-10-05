@@ -1006,3 +1006,31 @@ Run 权限刷新扩展既有 `kimi_completed_run_keeps_the_warm_session_and_idle
 第二轮冻结 mode 改为 plan，仍断言同 Host/Session，并直接核对原生 RPC 先 default 后 plan。
 Cline/Command Code 同样将动态配置移到 AcpRuntime，不再由 Host 保存旧值；两者的模式切换及执行行为
 由隔离 packaged App 真实验证。未新增平行进程 fixture。
+
+## ACP leader 退出与继承管道（2026-10-05）
+
+新增 extended owner `acp::tests::leader_exit_reaps_inherited_pipes_and_preserves_buffered_response`。
+真实 Cline/Command Code SIGKILL 验收复现 leader 已死但子进程持有 stdout，原 reader 不产生 EOF，
+Command 延迟写入且 Run 留在 waiting。现有 client-terminal cancel owner 不经过 Runtime 原生子进程，
+无法覆盖该失败。最小真实进程 fixture 验证非零强杀清理、pending RPC 失败、精确一次退出通知，
+同时保留退出前已写入管道的权威 response；不使用数据库或网络。定向命令：
+`cargo test -p rovai-core --features extended-tests --lib leader_exit_reaps_inherited_pipes_and_preserves_buffered_response`。
+
+另以 `managed_process::macos::tests` 最小真实进程 owner 覆盖 macOS detached 子进程，
+验证 kernel PID version 拒绝替代身份，以及私有 ledger 在原 owner 消失后的回收和重复恢复。
+只用有界 sleep/标记文件，无数据库或模型；进程组内 fixture 无法证明 setsid 后代与 Core 重启路径。
+
+既有 `runtime::tests::startup_recovery_terminalizes_an_accepted_unknown_input_without_a_waiting_blocker`
+扩展 accepted / delivery_unknown / 已 dispatch 的 prepared 三种输入，并分别经过重启和同 Core Runtime loss。
+沿用最小数据库 owner，验证失败、未确认 cleanup、原输入保留、Delivery 收口与重复恢复不再处理，
+并断言完整公开快照仍为 failed、无旧恢复操作，避免 cleanup 记账被误投影为用户取消；不新增平行 DB fixture。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib startup_recovery_terminalizes_an_accepted_unknown_input_without_a_waiting_blocker`。
+
+两项既有 slow `action::tests::slow_tests::runtime_loss_*` 保留审批取消、未执行/unknown、attempt 与 delivery 的
+全部断言，将过时的永久 waiting 预期对齐 v6 的失败终态，并追加 cleanup 仍未确认的断言；未删除或降低覆盖。
+
+既有 ignored 原生 owner `isolated_command_code_acp_bootstrap_gate_and_resident_sessions` 增加不存在完整 ID
+和截短 ID 的恢复反例：官方 Runtime 的 resume/load 静默成功，Rovai 必须在打开前以 session/list 拒绝；
+复用同一真实 Host 验证没有登记假 Session，不新增默认 fixture 或数据库。真实模型的有效 cold 恢复独立在 App 验收。
+既有 `controlled_native_resume_classifies_only_explicit_rejection_as_incompatible` 同时检查 catalog 明确缺失为
+incompatible、无效响应为 ambiguous，保证后续共享 continuity-lost 回退保留正确失败分类。

@@ -1,0 +1,1353 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-05",
+  "userMessageId": "372f5220-e237-4740-ad85-ddabbabbb859",
+  "baselineCommit": "2b7e73c1950fce764eda3b3f8bd98e9697cc8b2f",
+  "platform": "macOS arm64",
+  "runtimes": {
+    "command": "1.74.1",
+    "cline": "3.0.65"
+  },
+  "provider": "separate native sub2api BYOK / gpt-6-sol",
+  "admission": "Preview; not full First-Class qualification",
+  "modelPromptsAndCredentialsIncluded": false,
+  "faultMatrixPackageHostSha256": "a78f6b3f8517710ca733ccd838e71a8e22b0700817f98041a7cae96b74595f20",
+  "records": [
+    {
+      "evidenceFile": "fault52-runtime-summary.json",
+      "record": {
+        "scenario": "runtime SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "3364cf09-5657-4651-9624-18b85e9d8192",
+            "label": "runtime-command",
+            "toolPid": 11333,
+            "runtimePid": 11142,
+            "runtimeChainPids": [
+              11333,
+              11142
+            ],
+            "lateSideEffect": true,
+            "status": "waiting",
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "cancelled",
+              "last_error_code": null,
+              "cancel_reason_code": "user_requested_agent_run_stop",
+              "cancel_acknowledged_at": "2026-10-05T13:37:10.703474+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "5c6836a5-2e91-49a3-90b6-cd5b95c1838c",
+            "label": "runtime-cline",
+            "toolPid": 11347,
+            "runtimePid": 11156,
+            "runtimeChainPids": [
+              11347,
+              11167,
+              11156
+            ],
+            "lateSideEffect": false,
+            "status": "succeeded",
+            "failure": {},
+            "publicReplyCount": 1,
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          }
+        ],
+        "passed": false,
+        "killedPids": [
+          11142,
+          11156
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "remainingAt4Seconds": [
+          11333,
+          11347,
+          11190,
+          11167
+        ],
+        "remainingAfterDeadline": [
+          11190,
+          11167
+        ],
+        "faultInjected": true
+      }
+    },
+    {
+      "evidenceFile": "fault52-fixed-runtime-summary.json",
+      "record": {
+        "phase": "fixed",
+        "scenario": "runtime SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "f6fdcfcc-52fe-4441-84ba-0a4bd22cd81d",
+            "label": "runtime-command",
+            "toolPid": 28353,
+            "runtimePid": 28196,
+            "runtimeChainPids": [
+              28353,
+              28196
+            ],
+            "lateSideEffect": true,
+            "status": "waiting",
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "cancelled",
+              "last_error_code": null,
+              "cancel_reason_code": "user_requested_agent_run_stop",
+              "cancel_acknowledged_at": "2026-10-05T13:45:16.913129+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "6be07903-d05b-4fce-83e7-0387e14d1a73",
+            "label": "runtime-cline",
+            "toolPid": 28382,
+            "runtimePid": 28207,
+            "runtimeChainPids": [
+              28382,
+              28208,
+              28207
+            ],
+            "lateSideEffect": true,
+            "status": "waiting",
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "cancelled",
+              "last_error_code": null,
+              "cancel_reason_code": "user_requested_agent_run_stop",
+              "cancel_acknowledged_at": "2026-10-05T13:45:17.047599+00:00",
+              "terminal_resolution_source": null
+            }
+          }
+        ],
+        "passed": false,
+        "killedPids": [
+          28196,
+          28207
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "remainingAt4Seconds": [
+          28353,
+          28382
+        ],
+        "statusesAt4Seconds": {
+          "f6fdcfcc-52fe-4441-84ba-0a4bd22cd81d": "waiting",
+          "6be07903-d05b-4fce-83e7-0387e14d1a73": "waiting"
+        },
+        "remainingAfterDeadline": [],
+        "faultInjected": true
+      }
+    },
+    {
+      "evidenceFile": "fault52-fixed-core-summary.json",
+      "record": {
+        "phase": "fixed",
+        "scenario": "core SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "7d93ea7d-7e7c-418b-b52a-230f71d0a8e0",
+            "label": "core-command",
+            "toolPid": 30075,
+            "runtimePid": 29903,
+            "runtimeChainPids": [
+              30075,
+              29903
+            ],
+            "lateSideEffect": false,
+            "status": "waiting",
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "cancelled",
+              "last_error_code": null,
+              "cancel_reason_code": "app_shutdown_cancel_all",
+              "cancel_acknowledged_at": "2026-10-05T14:17:01.514570+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "faf94721-f43d-41fd-8981-6b9fe550e8c1",
+            "label": "core-cline",
+            "toolPid": 30115,
+            "runtimePid": 29924,
+            "runtimeChainPids": [
+              30115,
+              29936,
+              29924
+            ],
+            "lateSideEffect": true,
+            "status": "waiting",
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "cancelled",
+              "last_error_code": null,
+              "cancel_reason_code": "app_shutdown_cancel_all",
+              "cancel_acknowledged_at": "2026-10-05T14:17:01.513835+00:00",
+              "terminal_resolution_source": null
+            }
+          }
+        ],
+        "passed": false,
+        "killedPids": [
+          28064
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "remainingAt4Seconds": [
+          30115
+        ],
+        "statusesAt4Seconds": {
+          "7d93ea7d-7e7c-418b-b52a-230f71d0a8e0": "waiting",
+          "faf94721-f43d-41fd-8981-6b9fe550e8c1": "waiting"
+        },
+        "remainingAfterDeadline": [],
+        "automaticCoreReplacementCount": 1,
+        "newCorePid": 30121,
+        "faultInjected": true
+      }
+    },
+    {
+      "evidenceFile": "fault52-guarded-runtime-summary.json",
+      "record": {
+        "phase": "guarded",
+        "scenario": "runtime SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "e6238955-e3d7-4910-94ad-a74be033b5f4",
+            "label": "runtime-command",
+            "toolPid": 82462,
+            "runtimePid": 82025,
+            "runtimeChainPids": [
+              82462,
+              82025
+            ],
+            "lateSideEffect": false,
+            "status": "cancelled",
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:17:30.737150+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "d5a8e4f0-bc13-4df3-8b06-ca5ba01c152f",
+            "label": "runtime-cline",
+            "toolPid": 82481,
+            "runtimePid": 82040,
+            "runtimeChainPids": [
+              82481,
+              82053,
+              82040
+            ],
+            "lateSideEffect": false,
+            "status": "cancelled",
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:17:30.879107+00:00",
+              "terminal_resolution_source": null
+            }
+          }
+        ],
+        "passed": true,
+        "killedPids": [
+          82025,
+          82040
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "remainingAt4Seconds": [],
+        "statusesAt4Seconds": {
+          "e6238955-e3d7-4910-94ad-a74be033b5f4": "cancelled",
+          "d5a8e4f0-bc13-4df3-8b06-ca5ba01c152f": "cancelled"
+        },
+        "remainingAfterDeadline": [],
+        "faultInjected": true,
+        "qualified": false,
+        "qualificationNote": "process cleanup passed, but public cancelled projection was incorrect; superseded by final candidate"
+      }
+    },
+    {
+      "evidenceFile": "fault52-final-runtime-summary.json",
+      "record": {
+        "phase": "final",
+        "scenario": "runtime SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "da1ee0fc-03b3-4e24-88f5-1302327f2eb6",
+            "label": "runtime-command",
+            "toolPid": 12447,
+            "runtimePid": 12222,
+            "runtimeChainPids": [
+              12447,
+              12222
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:29:52.608848+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "4ffa43ee-d68b-4e85-a0ef-66c2eeadc934",
+            "label": "runtime-cline",
+            "toolPid": 12448,
+            "runtimePid": 12240,
+            "runtimeChainPids": [
+              12448,
+              12241,
+              12240
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:29:52.850043+00:00",
+              "terminal_resolution_source": null
+            }
+          }
+        ],
+        "passed": true,
+        "killedPids": [
+          12222,
+          12240
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "remainingAt4Seconds": [],
+        "statusesAt4Seconds": {
+          "da1ee0fc-03b3-4e24-88f5-1302327f2eb6": "failed",
+          "4ffa43ee-d68b-4e85-a0ef-66c2eeadc934": "failed"
+        },
+        "remainingAfterDeadline": [],
+        "faultInjected": true
+      }
+    },
+    {
+      "evidenceFile": "fault52-final-core-summary.json",
+      "record": {
+        "phase": "final",
+        "scenario": "core SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "f60f1229-9938-46b6-a999-5c83f80b4255",
+            "label": "core-command",
+            "toolPid": 13972,
+            "runtimePid": 13236,
+            "runtimeChainPids": [
+              13972,
+              13236
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:32:56.592203+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "4de2b170-a941-4bf0-8097-0a9600501677",
+            "label": "core-cline",
+            "toolPid": 13985,
+            "runtimePid": 13247,
+            "runtimeChainPids": [
+              13985,
+              13262,
+              13247
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:32:56.592289+00:00",
+              "terminal_resolution_source": null
+            }
+          }
+        ],
+        "passed": true,
+        "killedPids": [
+          11962
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "remainingAt4Seconds": [],
+        "statusesAt4Seconds": {
+          "f60f1229-9938-46b6-a999-5c83f80b4255": "failed",
+          "4de2b170-a941-4bf0-8097-0a9600501677": "failed"
+        },
+        "remainingAfterDeadline": [],
+        "automaticCoreReplacementCount": 1,
+        "newCorePid": 13992,
+        "faultInjected": true
+      }
+    },
+    {
+      "evidenceFile": "fault52-final-app-summary.json",
+      "record": {
+        "phase": "final",
+        "scenario": "app SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "d7db5ee8-711a-4666-ae24-3fd0519a3101",
+            "label": "app-command",
+            "toolPid": 15570,
+            "runtimePid": 14439,
+            "runtimeChainPids": [
+              15570,
+              14439
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:37:53.235148+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "57bea88b-0896-434e-952e-b56a5223919c",
+            "label": "app-cline",
+            "toolPid": 15651,
+            "runtimePid": 14450,
+            "runtimeChainPids": [
+              15651,
+              14451,
+              14450
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:37:53.234994+00:00",
+              "terminal_resolution_source": null
+            }
+          }
+        ],
+        "passed": true,
+        "killedPids": [
+          11948
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "remainingAt4Seconds": [],
+        "remainingAfterDeadline": [],
+        "faultInjected": true
+      }
+    },
+    {
+      "evidenceFile": "fault52-release-runtime-summary.json",
+      "record": {
+        "phase": "release",
+        "scenario": "runtime SIGKILL during real tools",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "runId": "a1cf10bb-9ac0-481c-b088-bcae17b6b176",
+            "label": "runtime-command",
+            "toolPid": 31153,
+            "runtimePid": 30361,
+            "runtimeChainPids": [
+              31153,
+              30361
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:45:01.919827+00:00",
+              "terminal_resolution_source": null
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "runId": "656dca2d-8a58-4e2d-acd5-84334fe49f9b",
+            "label": "runtime-cline",
+            "toolPid": 30990,
+            "runtimePid": 30388,
+            "runtimeChainPids": [
+              30990,
+              30389,
+              30388
+            ],
+            "lateSideEffect": false,
+            "status": "failed",
+            "cleanupAcknowledged": true,
+            "waitReason": null,
+            "failure": {},
+            "publicReplyCount": 0,
+            "inputDeliveryEvidence": [
+              {
+                "status": "delivery_unknown",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "accepted_input_outcome_unknown",
+              "cancel_reason_code": "accepted_input_outcome_unknown",
+              "cancel_acknowledged_at": "2026-10-05T14:45:01.957296+00:00",
+              "terminal_resolution_source": null
+            }
+          }
+        ],
+        "passed": true,
+        "killedPids": [
+          30361,
+          30388
+        ],
+        "ownedRuntimeProcessCount": 6,
+        "queuedRecoveries": [
+          {
+            "agentId": "agent_2",
+            "marker": "QUEUE52_AGENT_2_RECOVERED",
+            "runId": "c1a3e1fa-3327-495c-80d7-bc9ba05fc908",
+            "status": "succeeded",
+            "startedAt": "2026-10-05T14:45:01.950485+00:00",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "startedAfterCleanup": true
+          },
+          {
+            "agentId": "agent_1",
+            "marker": "QUEUE52_AGENT_1_RECOVERED",
+            "runId": "ef0ab477-0708-4d06-8c85-dbc1243d06e7",
+            "status": "succeeded",
+            "startedAt": "2026-10-05T14:45:02.015919+00:00",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "startedAfterCleanup": true
+          }
+        ],
+        "queuedRunCreatedBeforeCleanup": false,
+        "remainingAt4Seconds": [],
+        "statusesAt4Seconds": {
+          "a1cf10bb-9ac0-481c-b088-bcae17b6b176": "failed",
+          "656dca2d-8a58-4e2d-acd5-84334fe49f9b": "failed"
+        },
+        "remainingAfterDeadline": [],
+        "queuePassed": true,
+        "faultInjected": true
+      }
+    },
+    {
+      "evidenceFile": "recovery52-runtime-summary.json",
+      "record": {
+        "scenario": "runtime",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "marker": "FAULT52_RUNTIME_COMMAND_RECOVERED",
+            "runId": "cca3fc52-a727-425a-816a-a4a693398a9d",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "marker": "FAULT52_RUNTIME_CLINE_RECOVERED",
+            "runId": "cc391970-3966-41c0-a09a-f5849dd36335",
+            "status": "failed",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {
+              "code": "runtime_prompt_runtime_error",
+              "origin": "runtime",
+              "phase": "execution",
+              "retryable": false
+            },
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "runtime_prompt_runtime_error",
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          }
+        ],
+        "passed": false
+      }
+    },
+    {
+      "evidenceFile": "recovery52-final-runtime-summary.json",
+      "record": {
+        "phase": "final",
+        "scenario": "runtime",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "marker": "FAULT52_FINAL_RUNTIME_COMMAND_RECOVERED",
+            "runId": "1a90c1cc-a60e-4d4a-9e0c-6788eb29b891",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "marker": "FAULT52_FINAL_RUNTIME_CLINE_RECOVERED",
+            "runId": "1f1ae3b1-5b89-48c5-a6fd-7cac34fc9920",
+            "status": "failed",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {
+              "code": "runtime_prompt_runtime_error",
+              "origin": "runtime",
+              "phase": "execution",
+              "retryable": false
+            },
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "failed",
+              "last_error_code": "runtime_prompt_runtime_error",
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          }
+        ],
+        "passed": false
+      }
+    },
+    {
+      "evidenceFile": "recovery52-final-core-summary.json",
+      "record": {
+        "phase": "final",
+        "scenario": "core",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "marker": "FAULT52_FINAL_CORE_COMMAND_RECOVERED",
+            "runId": "ca27a877-8b40-4176-88a3-c4640c280b9f",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "marker": "FAULT52_FINAL_CORE_CLINE_RECOVERED",
+            "runId": "02195827-4d9f-4a4e-9d94-56f814d8cfcd",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          }
+        ],
+        "passed": true
+      }
+    },
+    {
+      "evidenceFile": "recovery52-final-app-summary.json",
+      "record": {
+        "phase": "final",
+        "scenario": "app",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "marker": "FAULT52_FINAL_APP_COMMAND_RECOVERED",
+            "runId": "294f59f7-71c3-47b1-8b28-88e2621f41b1",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "marker": "FAULT52_FINAL_APP_CLINE_RECOVERED",
+            "runId": "35a6cd6a-ef09-4756-99d9-328e845b2c59",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          }
+        ],
+        "passed": true
+      }
+    },
+    {
+      "evidenceFile": "recovery52-cold-app-summary.json",
+      "record": {
+        "phase": "cold",
+        "scenario": "app",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "marker": "FAULT52_COLD_APP_COMMAND_RECOVERED",
+            "runId": "06c7dea8-38ed-45b9-96be-a39ec917c36e",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "marker": "FAULT52_COLD_APP_CLINE_RECOVERED",
+            "runId": "2fe160a4-a154-44af-8990-adfabe8e28b5",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          }
+        ],
+        "passed": true
+      }
+    },
+    {
+      "evidenceFile": "invalid-session52-summary.json",
+      "record": {
+        "scope": "official native ACP control plane; no model prompts",
+        "cases": [
+          {
+            "runtime": "command",
+            "cases": [
+              {
+                "case": "absent-exact-id",
+                "rejected": false,
+                "errorCode": null,
+                "returnedSessionId": null
+              },
+              {
+                "case": "truncated-id",
+                "rejected": false,
+                "errorCode": null,
+                "returnedSessionId": null
+              }
+            ],
+            "newSessionAfterRejections": true
+          },
+          {
+            "runtime": "cline",
+            "cases": [
+              {
+                "case": "absent-exact-id",
+                "rejected": true,
+                "errorCode": -32002,
+                "returnedSessionId": null
+              },
+              {
+                "case": "truncated-id",
+                "rejected": true,
+                "errorCode": -32002,
+                "returnedSessionId": null
+              }
+            ],
+            "newSessionAfterRejections": true
+          }
+        ],
+        "passed": false
+      }
+    },
+    {
+      "evidenceFile": "invalid-session52-resume-summary.json",
+      "record": {
+        "scope": "official native ACP control plane; no model prompts",
+        "cases": [
+          {
+            "runtime": "command",
+            "cases": [
+              {
+                "case": "absent-exact-id",
+                "catalogHasTarget": false,
+                "catalogKeys": [
+                  "sessions"
+                ],
+                "rejected": false,
+                "errorCode": null,
+                "returnedSessionId": null
+              },
+              {
+                "case": "truncated-id",
+                "catalogHasTarget": false,
+                "catalogKeys": [
+                  "sessions"
+                ],
+                "rejected": false,
+                "errorCode": null,
+                "returnedSessionId": null
+              }
+            ],
+            "newSessionAfterRejections": true
+          },
+          {
+            "runtime": "cline",
+            "cases": [
+              {
+                "case": "absent-exact-id",
+                "catalogHasTarget": false,
+                "catalogKeys": [],
+                "rejected": true,
+                "errorCode": -32002,
+                "returnedSessionId": null
+              },
+              {
+                "case": "truncated-id",
+                "catalogHasTarget": false,
+                "catalogKeys": [],
+                "rejected": true,
+                "errorCode": -32002,
+                "returnedSessionId": null
+              }
+            ],
+            "newSessionAfterRejections": true
+          }
+        ],
+        "passed": false
+      }
+    },
+    {
+      "evidenceFile": "restore52-package-summary.json",
+      "record": {
+        "coreSha256": "9e01a89b14452796a2ff602a762983d58bcae7bb57471e072468a6e6ccaa4312",
+        "adHocSignatureVerified": true,
+        "isolatedApp": true,
+        "dailyAppUntouched": true
+      }
+    },
+    {
+      "evidenceFile": "release52-package-summary.json",
+      "record": {
+        "coreSha256": "a8b4e1e3a3dfca69d938d2b406e7e11e373d96c21c3c80e5b1947846dffe6adf",
+        "adHocSignatureVerified": true,
+        "isolatedApp": true,
+        "dailyAppUntouched": true
+      }
+    },
+    {
+      "evidenceFile": "ui52-status-summary.json",
+      "record": {
+        "renderedRunCount": 90,
+        "verifiedRows": [
+          {
+            "id": "ef0ab477-0708-4d06-8c85-dbc1243d06e7",
+            "class": "execution-process-stage status-succeeded",
+            "nodeClass": "execution-process-node tone-success state-completed"
+          },
+          {
+            "id": "c1a3e1fa-3327-495c-80d7-bc9ba05fc908",
+            "class": "execution-process-stage status-succeeded",
+            "nodeClass": "execution-process-node tone-success state-completed"
+          },
+          {
+            "id": "656dca2d-8a58-4e2d-acd5-84334fe49f9b",
+            "class": "execution-process-stage status-failed",
+            "nodeClass": "execution-process-node tone-danger state-failed"
+          },
+          {
+            "id": "a1cf10bb-9ac0-481c-b088-bcae17b6b176",
+            "class": "execution-process-stage status-failed",
+            "nodeClass": "execution-process-node tone-danger state-failed"
+          }
+        ]
+      }
+    },
+    {
+      "evidenceFile": "restore52-cold-binding-summary.json",
+      "record": {
+        "before": [
+          {
+            "agent_id": "agent_2",
+            "native_session_id": "4416814f-c7c0-4423-8d87-fd2e2c8df7f5",
+            "native_binding_id": "03e956b7-1ef1-49e9-a7c9-be5bdf16820b",
+            "native_binding_generation": 14
+          },
+          {
+            "agent_id": "agent_1",
+            "native_session_id": "1791211076562_iUqyr_cli",
+            "native_binding_id": "62efcfea-8edf-45b8-978b-559c6afd1fb2",
+            "native_binding_generation": 11
+          }
+        ],
+        "after": [
+          {
+            "agent_id": "agent_2",
+            "native_session_id": "4416814f-c7c0-4423-8d87-fd2e2c8df7f5",
+            "native_binding_id": "03e956b7-1ef1-49e9-a7c9-be5bdf16820b",
+            "native_binding_generation": 14
+          },
+          {
+            "agent_id": "agent_1",
+            "native_session_id": "1791211076562_iUqyr_cli",
+            "native_binding_id": "62efcfea-8edf-45b8-978b-559c6afd1fb2",
+            "native_binding_generation": 11
+          }
+        ],
+        "passed": true
+      }
+    },
+    {
+      "evidenceFile": "restore52-missing-history-summary.json",
+      "record": {
+        "scenario": "Command Code missing exact native transcript, Product ACP startup gate",
+        "passed": false,
+        "before": {
+          "native_session_id": "5974ef98-439e-4934-ae4e-04615eee36d1",
+          "native_binding_id": "9166fb73-dc41-4107-a938-29f7a7717c88",
+          "native_binding_generation": 15,
+          "last_accepted_public_boundary_sequence": 146
+        },
+        "runId": "e3eb80f9-18ce-4ecf-bf51-6bbca0c403e6",
+        "status": "succeeded",
+        "publicReplyCount": 1,
+        "failureCode": null,
+        "guardReported": false,
+        "replacementTranscriptCreated": false,
+        "after": {
+          "native_session_id": "249e1076-29c8-47d8-b365-0b242939e9e3",
+          "native_binding_id": "85b04a0a-0709-48b6-86e3-3d7901f56368",
+          "native_binding_generation": 16,
+          "last_accepted_public_boundary_sequence": 149
+        },
+        "acceptedOrUnknownInputCount": 1,
+        "historyRestored": true,
+        "qualificationNote": "initial harness incorrectly expected whole Run failure; shared contract instead requires recorded continuity loss and one new Binding/Session before current input; final verified case checks that contract"
+      }
+    },
+    {
+      "evidenceFile": "restore52-missing-history-verified-summary.json",
+      "record": {
+        "scenario": "Command Code rejects missing exact history, then uses the existing audited new-Session fallback",
+        "passed": true,
+        "before": {
+          "native_session_id": "249e1076-29c8-47d8-b365-0b242939e9e3",
+          "native_binding_id": "85b04a0a-0709-48b6-86e3-3d7901f56368",
+          "native_binding_generation": 16,
+          "last_accepted_public_boundary_sequence": 149
+        },
+        "runId": "5a911461-b37d-4765-b511-aefb4c2092e4",
+        "status": "succeeded",
+        "publicReplyCount": 1,
+        "failureCode": null,
+        "guardReported": false,
+        "replacementTranscriptCreated": false,
+        "after": {
+          "native_session_id": "5b8af4c2-00f9-4c2e-9894-161f84b09a5d",
+          "native_binding_id": "6976aa7f-71d8-4185-99fa-d50ce3c8b19f",
+          "native_binding_generation": 17,
+          "last_accepted_public_boundary_sequence": 151
+        },
+        "acceptedOrUnknownInputCount": 1,
+        "continuityLost": [
+          {
+            "continuation": "acp_session_resume",
+            "failure": "incompatible",
+            "fallback": "new_session",
+            "previousNativeSessionId": "249e1076-29c8-47d8-b365-0b242939e9e3"
+          }
+        ],
+        "inputDeliveries": [
+          {
+            "native_binding_id": "6976aa7f-71d8-4185-99fa-d50ce3c8b19f",
+            "native_binding_generation": 17,
+            "status": "accepted"
+          }
+        ],
+        "bootstrapEvidence": [
+          {
+            "native_binding_id": "6976aa7f-71d8-4185-99fa-d50ce3c8b19f",
+            "native_binding_generation": 17,
+            "delivery_mode": "managed_system_prompt"
+          }
+        ],
+        "historyRestored": true
+      }
+    },
+    {
+      "evidenceFile": "recovery52-restored-app-summary.json",
+      "record": {
+        "phase": "restored",
+        "scenario": "app",
+        "runs": [
+          {
+            "agentId": "agent_2",
+            "marker": "FAULT52_RESTORED_APP_COMMAND_RECOVERED",
+            "runId": "2343c680-5d58-4812-bd53-bd9553778661",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          },
+          {
+            "agentId": "agent_1",
+            "marker": "FAULT52_RESTORED_APP_CLINE_RECOVERED",
+            "runId": "a4a0df3b-d9ca-4f6a-a6c1-91f8c8483487",
+            "status": "succeeded",
+            "publicReplyCount": 1,
+            "markerMatched": true,
+            "failure": {},
+            "inputDeliveryEvidence": [
+              {
+                "status": "accepted",
+                "count": 1
+              }
+            ],
+            "persistedOutcomeAtEvidenceCollection": {
+              "status": "succeeded",
+              "last_error_code": null,
+              "cancel_reason_code": null,
+              "cancel_acknowledged_at": null,
+              "terminal_resolution_source": "runtime_terminal"
+            }
+          }
+        ],
+        "passed": true
+      }
+    }
+  ],
+  "tests": [
+    {
+      "suite": "fault52-workspace-projection",
+      "passed": 456,
+      "failed": 0,
+      "ignored": 2,
+      "completed": true
+    },
+    {
+      "suite": "command52-acp-restore-final",
+      "passed": 69,
+      "failed": 0,
+      "ignored": 2,
+      "completed": true
+    },
+    {
+      "suite": "fault52-runtime-projection",
+      "passed": 25,
+      "failed": 0,
+      "ignored": 0,
+      "completed": true
+    },
+    {
+      "suite": "fault52-mac-final",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "completed": true
+    },
+    {
+      "suite": "fault52-loss-slow-final",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "completed": true
+    },
+    {
+      "suite": "command52-restore-smoke",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "completed": true
+    },
+    {
+      "suite": "restore52-classification-extended",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "completed": true
+    }
+  ],
+  "unqualified": [
+    "Cline required System Rule loader / ACP compaction",
+    "Command custom BYOK deferred MCP invocation and explicit set_model",
+    "Command structured nonzero tool exit / attributable reasoning and Run cost",
+    "overflow+retry compaction, full 20/200-host pressure, full credential rotation and cross-platform matrix",
+    "macOS capture is not a Job: unobserved intermediate descendants and no Core restart remain outside proven cleanup"
+  ],
+  "validation": {
+    "documentationTests": 10,
+    "documentationVersionCheck": true,
+    "decisionGovernanceWithBase": true,
+    "cargoFmtCheck": true,
+    "credentialMatchesInPublicEvidence": 0
+  }
+}

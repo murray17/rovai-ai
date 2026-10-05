@@ -17,6 +17,22 @@ pub const MINIMUM_VERSION: &str = "1.74.1";
 pub const BOOTSTRAP_REVISION: &str = "command-code-system-bootstrap-v1";
 const BOOTSTRAP: &str = include_str!("command_code/bootstrap.mjs");
 
+/// 1.74.1 returns its complete native catalog in one page. Do not infer a
+/// successful restore from resume/load: both silently accept missing history.
+pub(crate) fn verify_restore_target(catalog: &Value, session_id: &str, cwd: &str) -> Result<()> {
+    let sessions = catalog["sessions"]
+        .as_array()
+        .context("command_code_restore_catalog_invalid")?;
+    if sessions.iter().any(|session| {
+        session["sessionId"].as_str() == Some(session_id) && session["cwd"].as_str() == Some(cwd)
+    }) {
+        return Ok(());
+    }
+    // A future paginated catalog requires fresh qualification; absence from
+    // an incomplete response cannot prove an exact restore of the old Session.
+    bail!("command_code_restore_target_missing: session not found in exact native catalog");
+}
+
 /// Native ACP sends the proposed edit only on tool_call. Its old/new strings
 /// are matched fragments, not complete file states. Promote them only after a
 /// matching successful terminal and never mislabel the proposal as a full diff.

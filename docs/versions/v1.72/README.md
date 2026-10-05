@@ -51,6 +51,13 @@ exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证
 因此保留原生默认哨兵而不伪造目录。Cline ACP 未传 compaction 配置，真实探针未得到完成信号。完整 14 轴对照与实际验证见
 [最新 Checklist](../../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
 
+后续真实强杀验收修复共享 ACP leader 退出观察、macOS 身份绑定的后代清理与 Core 启动 ledger 回收，
+并将已交付输入丢失后的领域终态和公开投影对齐现行恢复合同。两 Runtime 的 Runtime/Core/App SIGKILL、
+超过 75 秒无迟到写入、cleanup 后排队输入自动成功均通过。Command 官方 resume/load 会接受不存在历史，
+已增加官方 session/list 精确 ID/cwd 门禁；有效 cold 的 Session/Binding/generation 保留通过。
+范围、失败候选和平台限制见[故障恢复验收](../../research/runtime-monitoring/command-cline-fault-recovery-2026-10-05.md)
+与 [V1.72-D16](decisions.md#v1-72-d16)，不改变两者 Preview 或未闭合的上游差异。
+
 本切片更新 Runtime Catalog/Monitoring 架构、兼容性清单、研究矩阵、测试说明与当前决定导航。
 活动目录加入 Cline 的保守 run_level 条目，复用既有 ACP typed kind，不改变 activity-v4 或旧 Runtime 解释。
 既有 Usage/Execution Metrics 合同足以表达数值，无新字段合同、Renderer 布局或根 README 支持声明。

@@ -2703,6 +2703,16 @@ impl ActionSafetyService {
                     Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
                 ));
             }
+            if invocation_kind == "batch" {
+                let settlement = crate::runtime::settle_lost_agent_run_in_tx(
+                    transaction, &envelope.payload.agent_run_id, &envelope.actor, &now,
+                )?;
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.failed",
+                    json!({ "agentRunId": envelope.payload.agent_run_id, "status": settlement.terminal_status }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
             let actions_marked_unknown = transaction.execute(
                 r#"
                 UPDATE action_execution
@@ -5278,7 +5288,7 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery() {
+    fn runtime_loss_closes_an_unanswered_intercepted_request_and_fails_the_run() {
         let mut fixture = fixture("ask");
         let service = ActionSafetyService::default();
         let prepare = intercepted_prepare_envelope(&fixture, "action-runtime-lost", "request-1");
@@ -5311,7 +5321,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(reconciled.result.status, CommandResultStatus::Applied);
-        let state: (String, String, String, String, i64) = fixture
+        let state: (String, String, String, Option<String>, i64) = fixture
             .database
             .connection()
             .query_row(
@@ -5342,8 +5352,20 @@ mod tests {
                 "not_executed".to_string(),
                 "runtime_request_lost".to_string(),
                 "cancelled".to_string(),
-                "runtime_recovery".to_string(),
-                1,
+                None,
+                0,
+            )
+        );
+        let run: (String, String, bool) = fixture.database.connection().query_row(
+            "SELECT status, last_error_code, cancel_acknowledged_at IS NULL FROM agent_run WHERE id = ?1",
+            [&fixture.agent_run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            run,
+            (
+                "failed".into(),
+                "accepted_input_outcome_unknown".into(),
+                true
             )
         );
         drop(fixture.database);
@@ -5480,7 +5502,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        let state: (String, String, String, String, i64) = fixture
+        let state: (String, String, String, Option<String>, i64) = fixture
             .database
             .connection()
             .query_row(
@@ -5513,8 +5535,20 @@ mod tests {
                 "unknown".to_string(),
                 "unknown".to_string(),
                 "safely_closed".to_string(),
-                "unknown_action_outcome".to_string(),
-                1,
+                None,
+                0,
+            )
+        );
+        let run: (String, String, bool) = fixture.database.connection().query_row(
+            "SELECT status, last_error_code, cancel_acknowledged_at IS NULL FROM agent_run WHERE id = ?1",
+            [&fixture.agent_run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            run,
+            (
+                "failed".into(),
+                "accepted_input_outcome_unknown".into(),
+                true
             )
         );
         drop(fixture.database);
@@ -6016,8 +6050,8 @@ mod tests {
         }
 
         #[test]
-        fn runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery() {
-            super::runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery();
+        fn runtime_loss_closes_an_unanswered_intercepted_request_and_fails_the_run() {
+            super::runtime_loss_closes_an_unanswered_intercepted_request_and_fails_the_run();
         }
 
         #[test]

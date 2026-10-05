@@ -17611,6 +17611,12 @@ async fn run_core(
     let compaction_detector_policies =
         DesiredCompactionDetectorPolicies::from_process_environment();
     let recovery = (|| -> Result<_> {
+        // An old native tool can outlive Core. Reclaim persisted ownership before
+        // readiness, so another Runtime sharing its execution root cannot race it.
+        #[cfg(target_os = "macos")]
+        rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
+            &data_dir.join("runtime"),
+        )?;
         ManagedBlobStore::new(&data_dir).recover_gc_state(&mut database)?;
         recover_legacy_pending_cancellations(&mut database)?;
         rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
@@ -19644,6 +19650,16 @@ async fn process_pi_agent_run_exit(
         )
     };
     match recovery {
+        Ok(recovery) if recovery.result.code == "agent_run.failed" => {
+            emit_agent_run_terminal(
+                output,
+                Some(&execution.camp_id),
+                json!({"agentRunId":agent_run_id,"executionEpoch":execution_epoch,
+                    "adapterKind":AdapterKind::Pi,"result":recovery.result}),
+            );
+            core.agent_run_cancellation_notify.notify_one();
+            core.delivery_batch_scheduler_notify.notify_one();
+        }
         Ok(recovery) if recovery.result.status != CommandResultStatus::Rejected => emit(
             output,
             "agent_run.recovering",
@@ -22497,6 +22513,16 @@ async fn process_acp_agent_run_exit(
         )
     };
     match recovery {
+        Ok(recovery) if recovery.result.code == "agent_run.failed" => {
+            emit_agent_run_terminal(
+                output,
+                Some(&execution.camp_id),
+                json!({"agentRunId":agent_run_id,"executionEpoch":execution_epoch,
+                    "adapterKind":adapter_kind,"result":recovery.result}),
+            );
+            core.agent_run_cancellation_notify.notify_one();
+            core.delivery_batch_scheduler_notify.notify_one();
+        }
         Ok(recovery) if recovery.result.status != CommandResultStatus::Rejected => emit(
             output,
             "agent_run.recovering",
@@ -23807,6 +23833,16 @@ async fn process_agent_run_exit(
         )
     };
     match recovery {
+        Ok(recovery) if recovery.result.code == "agent_run.failed" => {
+            emit_agent_run_terminal(
+                output,
+                Some(&execution.camp_id),
+                json!({"agentRunId":agent_run_id,"executionEpoch":execution_epoch,
+                    "adapterKind":AdapterKind::CodexCli,"result":recovery.result}),
+            );
+            core.agent_run_cancellation_notify.notify_one();
+            core.delivery_batch_scheduler_notify.notify_one();
+        }
         Ok(recovery) if recovery.result.status != CommandResultStatus::Rejected => emit(
             output,
             "agent_run.recovering",
@@ -28536,6 +28572,26 @@ done
 
     #[test]
     fn controlled_native_resume_classifies_only_explicit_rejection_as_incompatible() {
+        let missing = crate::command_code_acp::verify_restore_target(
+            &json!({"sessions": []}),
+            "missing-session",
+            "/workspace",
+        )
+        .unwrap_err();
+        assert_eq!(
+            classify_native_resume_failure(&missing),
+            NativeSessionResumeFailure::Incompatible
+        );
+        let invalid = crate::command_code_acp::verify_restore_target(
+            &json!({}),
+            "missing-session",
+            "/workspace",
+        )
+        .unwrap_err();
+        assert_eq!(
+            classify_native_resume_failure(&invalid),
+            NativeSessionResumeFailure::Ambiguous
+        );
         assert_eq!(
             classify_native_resume_failure(&anyhow::anyhow!("session not found")),
             NativeSessionResumeFailure::Incompatible

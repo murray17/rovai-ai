@@ -251,3 +251,8 @@ Cline 的 macOS arm64 开发预览由 [V1.72-D13](../versions/v1.72/decisions.md
 Command Code 官方 ACP、System 门禁及 macOS arm64 Preview 由 [V1.72-D15](../versions/v1.72/decisions.md#v1-72-d15)
 记录；当前范围由 [Command Code ACP 边界](../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)
 及 [revision 5 输入说明](../versions/v1.72/model-context-change-command-code-acp.md)拥有。
+
+
+macOS ACP detached 后代与 Core 重启回收当前规范见
+[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md#macos-acp-descendants)，
+内核身份、私有 ledger 和不增加常驻代理的取舍见 [V1.72-D16](../versions/v1.72/decisions.md#v1-72-d16)。

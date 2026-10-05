@@ -22,6 +22,11 @@ sub2api BYOK，未借用另一 Runtime 的认证。两者保持 **Preview**，�
 修改前基线为 `59a43b52`；历史证据保留在[前轮记录](command-cline-checklist-2026-10-05.evidence.json)，
 本轮记录见[新增证据](command-cline-completion-2026-10-05.evidence.json)。证据不包含凭据、完整模型输入或原生历史。
 
+User 消息 52 后继续完成的真实崩溃矩阵、排队恢复与 Session 负向验收见
+[故障恢复补验](command-cline-fault-recovery-2026-10-05.md)及[对应证据](command-cline-fault-recovery-2026-10-05.evidence.json)。
+这轮修复继承 stdout 阻塞退出检测、macOS 独立进程组漏清理、Core 重启遗留后代、accepted/unknown 永久 waiting、
+失败误显示成取消，以及 Command 恢复不存在历史时静默成功。以下仍未覆盖的子项继续保留，不以新增通过替代整轴资格。
+
 ## 本轮实际修复
 
 1. 新增 closed `command-code-cli`、发现/版本检查、安装指南、模型/权限、成员设置和监控入口；
@@ -97,7 +102,7 @@ Prompt 才延迟加载 Plugin，ACP 无已验证的 required-plugin readiness。
 | --- | --- | --- | --- |
 | Auth / Provider / Model | 原生认证；默认/显式模型；配置变化使旧 Host/Binding 失效 | **部分**：自身 BYOK、默认模型、配置摘要通过；完整凭据轮换/显式切换矩阵未完成 | **部分**：自身原生默认 BYOK 真实通过；默认哨兵修复；自定义 ID 的显式 set_model 被上游拒绝；完整 OAuth/凭据轮换未验 |
 | Host / Fleet / LRU | 统一 Fleet；ACP/Pi 常驻，Claude 等 one-shot resumable | **部分**：共享 Fleet、真实 warm/A→B→A 已过；完整 LRU 压力未验 | **部分**：共享 Fleet，Core 常驻控制与真实原生 A→B→A、App warm 通过；完整 LRU 压力未验 |
-| Native Session / Continuation | 完整 ID；warm、exact cold、Core 重启；replay 隔离 | **部分**：原生及 App/Core exact cold、原 Binding/generation 保留通过 | **部分**：原生 exact load、真实 warm 与 App/Core 重启后同 Session/Binding/generation 通过；崩溃/网络矩阵未全验 |
+| Native Session / Continuation | 完整 ID；warm、exact cold、Core 重启；replay 隔离 | **部分**：原生及 App/Core exact cold、原 Binding/generation 保留通过；不存在/截短 ID 原生拒绝；Runtime/Core/App 强杀后新输入成功 | **部分**：真实 warm、exact cold、同 Session/Binding/generation 通过；原生错误 ID 静默成功已用官方 catalog 门禁补齐；Runtime/Core/App 强杀恢复通过，网络矩阵未全验 |
 | Bootstrap / Context | native append、managed system、first_payload 三类并存 | **目标未完成**：first_payload；Rule 正向通过但缺失反例阻断 System-only | **Verified + Implemented 主路径**：受管 System、readiness/每请求绑定门禁、A/B 隔离、压缩及冷恢复保留；B/P 不重写共享正文 |
 | Compaction continuity | System 保护或合格完成信号后补发；manual/threshold/overflow/retry 分验 | **Blocked 上游 ACP 接缝**：policy/observer 已实现，原生未 enable；不把普通 `/compact` 回复当压缩 | **部分**：真实 manual、threshold 和随后 cold 通过；overflow/retry 与产品压缩进度尚未验证 |
 | Skills | 当前 Skills v2 工具箱索引；原生发现由 Runtime 拥有 | **部分**：真实原生发现/读取/撤销、工具箱共享通路已接；全部并发/同名矩阵未验 | **部分**：`.commandcode/skills` 原生读取在 App 通过；当前平台/工具箱共享索引已接；新 Host 撤销原生 Skill 已过；同 Host 热更新/相邻隔离未全验，非旧 managed group 投递 |
@@ -107,12 +112,26 @@ Prompt 才延迟加载 Plugin，ACP 无已验证的 required-plugin readiness。
 | Permission / Approval / Workspace | 原生审批权威；allow/deny/cancel；授权目录 | **部分**：App allow_once / deny 已过：允许后写入，拒绝无文件且 Run 正常结束；拒绝后回复与 manual→auto 权限刷新通过；更广审批选项/并发矩阵未验 | **部分**：五种原生 mode 接线；真实 default deny 和运行中 cancel 通过；App allow_once/deny 已验，允许后写入成功，拒绝无目标文件；default→bypass 刷新后新写入无审批 |
 | Built-in rovai CLI | 当前 Run lease、进程注入、结束解除、发送去重 | **部分**：App first/warm/第二成员/cold 显式公开回帖已过；全 operation 矩阵未完成 | **部分**：App first/warm/cold 真实公开发送通过；全 operation 矩阵未完成，运行中退出清理已过 |
 | Usage / Cache / Cost | 消费与 Context 分离、稀疏原生字段、未知 NULL | **部分**：四桶、可选 reasoning、live used、配置匹配 272k 和重开已过；费用未知 | **部分**：Prompt 四桶 cache-inclusive、实测命中、latest used/272k、App 持久化通过；reasoning 和 Run fee 未得到可归属值 |
-| Retry / Queue / Cancel / Cleanup | accepted 不盲投、迟到隔离、取消/断网/整树回收 | **部分**：工具取消、空闲 App 清理已过；新包实测 Provider overload 在发送前/后分别可重试/不可盲重试；运行中 App 退出整树回收通过 | **部分**：共享排队/终态/epoch，原生工具 cancel 后等待超过延迟无副作用，同 Session 再生成成功；运行中 App 退出整树回收及无迟到文件通过；非计划崩溃矩阵未全验 |
+| Retry / Queue / Cancel / Cleanup | accepted 不盲投、迟到隔离、取消/断网/整树回收 | **部分**：工具 cancel、planned shutdown、Runtime/Core/App SIGKILL 通过；超过 75 秒无迟到写入，排队输入在 cleanup ACK 后自动成功；Provider overload 后不重放已发送输入 | **部分**：工具 cancel、planned shutdown、Runtime/Core/App SIGKILL 通过；新 Core 回收 ledger 后开放调度；超过 75 秒无迟到文件，排队输入在 cleanup ACK 后自动成功；完整网络/压力矩阵未验 |
 | Ready / Version / Platform | 安装 Ready 与行为资格分离；逐平台固定版本证据 | **Preview**：macOS arm64；其他平台 NotQualified | **Preview**：最低 1.74.1、catalog 18 项、schema 135、macOS arm64；其他平台 NotQualified |
 
 代表 Runtime 的输入位置并不完全相同：Codex/Claude/Grok 有 native append 接缝，Pi/DeepSeek Harness 使用
 受管 System，OpenCode/Copilot 等使用 first_payload。对齐的是冻结输入、连续性、权限和证据语义，不能把
 缺少字段的 Runtime 伪装成提供了同样原生协议。
+
+## Checklist 九条 Golden Flow 的剩余范围
+
+| Flow | 已有真实证据 | 仍未闭合 |
+| --- | --- | --- |
+| First Run | 两者自身 BYOK、默认模型、Bootstrap、工具、Final 与内置 CLI | 不外推所有 Auth/Provider 组合 |
+| Warm Host | 两者原生与 App warm；动态权限刷新；Command System 绑定 | 完整 idle eviction / 20、200 Host 压力 |
+| Multi-Session / Concurrency | 两者 A→B→A；本轮两 Runtime 同时运行真实工具 | 全部同 Runtime 并发、相邻 Session 能力变更矩阵 |
+| Cold Resume | 有效 App/Core cold 保留完整 Session/Binding；Cline 错 ID 拒绝；Command 加官方 catalog 门禁 | 全部网络/协议故障组合；错误恢复须记连续性丢失后的新 Session，不能计入 exact resume |
+| Context / Compaction | Context used/window 与消费分离；Command manual、threshold、随后 cold | Cline ACP compaction 上游接缝；Command overflow+retry 与产品进度展示 |
+| Skill / MCP Projection | 原生发现、更新/撤销；Cline stdio/HTTP 真实调用；Command 连接、发现与同名优先 | Command 当前 BYOK deferred MCP invocation；完整热更新/并发压力 |
+| Safety / Output | allow/deny/cancel、文件 ±、stdout/stderr/empty；Cline 非零/失败编辑 | 全部 read-only/审批选项/大输出组合；Command 结构化非零退出码缺失 |
+| Monitoring | 四桶、缓存命中、272k、Session gauge、App 持久化与重开 | 全部 retry/compaction 计量组合；缺失的可归属费用与 Command reasoning |
+| Failure / Cleanup | planned shutdown、Runtime/Core/App 强杀、迟到写入检查、清理后排队自动发送 | 真 Runtime 的完整协议错误/Probe timeout/断网矩阵；其他平台；macOS 未观测后代不等价于 OS Job |
 
 ## 验证范围与保留边界
 
@@ -135,5 +154,5 @@ userData、managed-skill-library 和 MCP 配置；未升级全局 CLI、未重�
 wire 保留在私有验收目录，公开证据只保留必要 IDs、数值、验证结果和测试 marker。
 
 已明确的剩余差异是 Cline 必需 Plugin 门禁/ACP compaction 配置接缝，Command 自定义 BYOK 的 MCP 延迟加载、模型显式选择/结构化
-非零退出码/Run 费用，以及上表未覆盖的压力、故障和平台矩阵。这些项保持 Preview/未验证，不虚构
+非零退出码/Run 费用，以及上表未覆盖的压力、网络和平台矩阵。这些项保持 Preview/未验证，不虚构
 Unsupported 决定，也不把 Mission 或 First-Class 标成完成。

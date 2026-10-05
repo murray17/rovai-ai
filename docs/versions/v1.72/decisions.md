@@ -357,3 +357,25 @@ User 在消息 `677d610d-e4cf-4ffb-aba2-d4ebb021cbcd` 与 `1bd0ab39-6939-40cd-96
 MCP 同名选择已有 native_wins_skip，避免改写原生全局/项目配置；冲突 Assignment 明确不可用。
 未选择自造 ACP 代理或继续每轮 one-shot；也未将 handshake 和控制命令冒称模型 warm。
 Preview 不代表完整资格：原生账号额度、自定义 BYOK 目录和压缩等未验证轴仍公开记录。
+
+
+<a id="v1-72-d16"></a>
+## V1.72-D16：macOS ACP 按内核身份回收独立进程组，并保留重启记录
+
+- 状态：accepted
+- 日期：2026-10-05
+- 当前权威：[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md#macos-acp-descendants)
+
+### 背景与选择
+
+真实 Command Code / Cline 在 Runtime leader 被强杀后留下独立进程组的 shell 工具；Cline 在 Core 被强杀后
+还会迟到写入。stdout EOF 与根进程退出都不能证明整树已空。沿用 Managed Process，在 macOS 捕获 kernel
+unique identity 与 PID version，以 audit-token signal 校验目标；私有 ledger 在 Core 重启、开放执行前回收。
+ACP 另行观察 leader，保留有界的末帧消费。结果未知的公开 batch 沿已有恢复合同失败收口、禁止重放；清理确认独立。
+
+### 后果与替代方案
+
+依赖 XNU libproc 的固定 ABI，缺失或变化时关闭相关启动/清理确认；验收不外推其他 macOS 版本或平台。
+未选择裸 PID/进程名补杀，因为可能命中复用身份或其他 App；未引入第三方 CLI fork、每 Runtime 私有池或
+新的常驻代理，因为已有 Managed Process 与 Core 启动回收可拥有此职责。该方案不保证 Core 永不重启时的
+自动回收，也不等价于 Windows Job 对未观测后代的内核级限制。

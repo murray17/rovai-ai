@@ -30,6 +30,10 @@ mod windows;
 #[path = "managed_process/linux.rs"]
 mod linux;
 
+#[cfg(target_os = "macos")]
+#[path = "managed_process/macos.rs"]
+mod macos;
+
 #[cfg(unix)]
 pub type ManagedChildStdin = ChildStdin;
 #[cfg(unix)]
@@ -524,6 +528,8 @@ pub struct ManagedProcess {
     linux_tree: linux::ProcessTree,
     #[cfg(target_os = "linux")]
     descendants_captured: bool,
+    #[cfg(target_os = "macos")]
+    macos_tree: Option<macos::ProcessTree>,
     #[cfg(windows)]
     child: windows::WindowsManagedProcess,
     tree_termination_requested: bool,
@@ -553,6 +559,8 @@ impl ManagedProcess {
                 linux_tree,
                 #[cfg(target_os = "linux")]
                 descendants_captured: false,
+                #[cfg(target_os = "macos")]
+                macos_tree: None,
                 tree_termination_requested: false,
             })
         }
@@ -625,6 +633,24 @@ impl ManagedProcess {
         None
     }
 
+    /// Observe the owned leader independently of inherited stdio. A descendant
+    /// can keep stdout open after a native Host crashes.
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        #[cfg(unix)]
+        {
+            return self.child.try_wait();
+        }
+        #[cfg(windows)]
+        {
+            return self.child.try_wait();
+        }
+        #[allow(unreachable_code)]
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "managed process is unsupported on this host",
+        ))
+    }
+
     pub async fn wait(&mut self) -> io::Result<ExitStatus> {
         #[cfg(unix)]
         {
@@ -642,6 +668,12 @@ impl ManagedProcess {
     }
 
     pub fn request_graceful_termination(&mut self) -> io::Result<()> {
+        #[cfg(target_os = "macos")]
+        if let Some(tree) = self.macos_tree.as_mut() {
+            let captured = tree.capture();
+            let signaled = tree.signal(libc::SIGTERM);
+            return captured.and(signaled);
+        }
         #[cfg(target_os = "linux")]
         let descendants = self.signal_captured_descendants(libc::SIGTERM);
         #[cfg(unix)]
@@ -689,6 +721,54 @@ impl ManagedProcess {
         self.linux_tree.capture()
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn track_descendants(&mut self, directory: &Path) -> io::Result<()> {
+        let pid = self
+            .id()
+            .ok_or_else(|| io::Error::other("managed root PID unavailable"))?;
+        self.macos_tree = Some(macos::ProcessTree::new(pid as i32, directory)?);
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn recover_descendants(directory: &Path) -> io::Result<()> {
+        macos::recover(directory)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn recover_runtime_descendants(runtime_directory: &Path) -> io::Result<()> {
+        if !runtime_directory.exists() {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(runtime_directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                macos::recover(&entry.path().join("owned-processes"))?;
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn capture_descendants(&mut self) -> io::Result<()> {
+        match self.macos_tree.as_mut() {
+            Some(tree) => tree.capture(),
+            None => Err(io::Error::other("macOS descendant tracking unavailable")),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn captured_tree_is_empty(&self) -> io::Result<bool> {
+        match self.macos_tree.as_ref() {
+            Some(tree) if tree.is_empty()? => {
+                tree.retire()?;
+                Ok(true)
+            }
+            Some(_) => Ok(false),
+            None => Ok(false),
+        }
+    }
+
     #[cfg(target_os = "linux")]
     fn signal_captured_descendants(&mut self, signal: i32) -> io::Result<()> {
         if !self.descendants_captured {
@@ -708,6 +788,14 @@ impl ManagedProcess {
     }
 
     pub fn force_terminate_tree(&mut self) -> io::Result<()> {
+        #[cfg(target_os = "macos")]
+        if let Some(tree) = self.macos_tree.as_mut() {
+            let captured = tree.capture();
+            let signaled = tree.signal(libc::SIGKILL);
+            captured.and(signaled)?;
+            self.tree_termination_requested = true;
+            return Ok(());
+        }
         if self.tree_termination_requested {
             return Ok(());
         }

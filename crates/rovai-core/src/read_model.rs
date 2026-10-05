@@ -2971,6 +2971,7 @@ fn load_agent_runs(
                  WHEN agent_run.status = 'failed'
                   AND COALESCE(agent_run.last_error_code, '') = 'accepted_input_outcome_unknown'
                   AND agent_run.cancel_requested_at IS NOT NULL
+                  AND COALESCE(agent_run.cancel_reason_code, '') <> 'accepted_input_outcome_unknown'
                   AND agent_run.terminal_resolution_source IS NULL
                  THEN 'cancelled'
                  ELSE agent_run.status

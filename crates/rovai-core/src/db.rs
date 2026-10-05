@@ -7599,6 +7599,29 @@ impl Database {
             "#,
             [&now],
         )?;
+        let lost_batches = {
+            let mut query = transaction.prepare(
+                "SELECT id FROM agent_run WHERE invocation_kind = 'batch'
+                 AND status IN ('running', 'waiting') AND cancel_requested_at IS NULL
+                 AND EXISTS (SELECT 1 FROM runtime_input_delivery AS input
+                     WHERE input.agent_run_id = agent_run.id
+                     AND (input.status IN ('accepted', 'delivery_unknown')
+                         OR (input.status = 'prepared' AND input.dispatch_started_at IS NOT NULL)))",
+            )?;
+            query
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for run_id in &lost_batches {
+            crate::runtime::settle_lost_agent_run_in_tx(
+                &transaction,
+                run_id,
+                &crate::command::ActorRef::System {
+                    component_id: "runtime-recovery-coordinator".into(),
+                },
+                &now,
+            )?;
+        }
         let accepted_input_recovery_blockers_created = transaction.execute(
             r#"
             UPDATE agent_run
@@ -7701,7 +7724,8 @@ impl Database {
         )?;
         let summary = V2RecoverySummary {
             runs_waiting_for_recovery,
-            accepted_input_recovery_blockers_created,
+            accepted_input_recovery_blockers_created: accepted_input_recovery_blockers_created
+                + lost_batches.len() as i64,
             actions_returned_to_prepared,
             actions_marked_unknown,
             intercepted_actions_failed_closed,

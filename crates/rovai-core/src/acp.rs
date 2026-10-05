@@ -1326,6 +1326,8 @@ pub(crate) struct AcpHost {
     session_results: RwLock<HashMap<String, Value>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
+    exit_handled: AtomicBool,
+    stdout_finished: Notify,
     protocol_violated: AtomicBool,
     initialize_result: RwLock<Option<Value>>,
     startup_diagnostics: Mutex<String>,
@@ -1539,6 +1541,8 @@ impl AcpHost {
                 frozen_runtime.executable_path
             )
         })?;
+        #[cfg(target_os = "macos")]
+        child.track_descendants(&private_runtime_dir.join("owned-processes"))?;
         let stdin = child.take_stdin().context("ACP stdin was unavailable")?;
         let stdout = child.take_stdout().context("ACP stdout was unavailable")?;
         let stderr = child.take_stderr().context("ACP stderr was unavailable")?;
@@ -1600,6 +1604,8 @@ impl AcpHost {
             session_results: RwLock::new(HashMap::new()),
             incoming,
             alive: AtomicBool::new(true),
+            exit_handled: AtomicBool::new(false),
+            stdout_finished: Notify::new(),
             protocol_violated: AtomicBool::new(false),
             initialize_result: RwLock::new(None),
             startup_diagnostics: Mutex::new(String::new()),
@@ -1613,6 +1619,7 @@ impl AcpHost {
             builtin_tools,
             grok_context_windows,
         });
+        Self::spawn_exit_watcher(&host);
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
         let mut initialize_params = json!({
@@ -2022,19 +2029,65 @@ impl AcpHost {
                     }
                 }
             }
-            host.alive.store(false, Ordering::Release);
-            host.release_all_client_terminals().await;
-            for (_, pending) in host.pending.lock().await.drain() {
-                if let PendingRpc::Response { sender, .. } = pending {
-                    let _ = sender.send(Err("ACP Host exited".to_string()));
+            host.stdout_finished.notify_one();
+            host.handle_exit().await;
+        });
+    }
+
+    fn spawn_exit_watcher(host: &Arc<Self>) {
+        let host = Arc::downgrade(host);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(250));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let Some(host) = host.upgrade() else {
+                    return;
+                };
+                if !host.is_alive() {
+                    return;
                 }
-            }
-            for owner in host.owners().await {
-                let _ = host
-                    .incoming
-                    .send(owner.exited(host.adapter_kind, &host.host_instance_id));
+                let exited = {
+                    let mut child = host.child.lock().await;
+                    // Record descendants while their ancestry is available, including
+                    // SDK subprocesses that may vanish with the native leader.
+                    host.capture_native_descendants(&mut child)
+                        .and_then(|()| child.try_wait())
+                };
+                match exited {
+                    Ok(None) => continue,
+                    Ok(Some(_)) => {}
+                    Err(_) => {
+                        host.send_host_diagnostic("ACP Host exit observation failed".to_string())
+                    }
+                }
+                // Stop descendants that can retain protocol pipe handles, then
+                // let the reader consume any buffered authoritative terminal.
+                let _ = host.child.lock().await.force_terminate_tree();
+                let _ = timeout(Duration::from_secs(1), host.stdout_finished.notified()).await;
+                host.handle_exit().await;
+                return;
             }
         });
+    }
+
+    async fn handle_exit(&self) {
+        if self.exit_handled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        // Reap the owned tree before reporting isolation. Waiting for stdout
+        // EOF alone allows orphan tools to write after their leader has died.
+        self.shutdown_and_reap().await;
+        for (_, pending) in self.pending.lock().await.drain() {
+            if let PendingRpc::Response { sender, .. } = pending {
+                let _ = sender.send(Err("ACP Host exited".to_string()));
+            }
+        }
+        for owner in self.owners().await {
+            let _ = self
+                .incoming
+                .send(owner.exited(self.adapter_kind, &self.host_instance_id));
+        }
     }
 
     async fn enrich_paired_tool_message(
@@ -3246,7 +3299,7 @@ impl AcpHost {
         child: &ManagedProcess,
         deadline: tokio::time::Instant,
     ) -> bool {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             loop {
                 match child.captured_tree_is_empty() {
@@ -3266,7 +3319,7 @@ impl AcpHost {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             if self.adapter_kind != AdapterKind::ZcodeApp
                 || self.zcode_cleanup_confirmed.load(Ordering::Acquire)
@@ -3368,9 +3421,9 @@ impl AcpHost {
         // On Linux explicit teardown uses pinned descendant identities, including
         // ZCode's watcher. The watcher still handles unexpected native EOF; its
         // group report is not the proof for an explicit pidfd-backed teardown.
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         return _child.capture_descendants();
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         Ok(())
     }
 
@@ -4136,6 +4189,24 @@ impl AcpRuntime {
             AcpSessionContinuation::Resume | AcpSessionContinuation::HistoryRestore => {
                 let existing_session_id =
                     existing_session_id.context("cross-Host ACP continuation has no Session ID")?;
+                if self.host.adapter_kind == AdapterKind::CommandCodeCli {
+                    // Command Code 1.74.1 silently opens an empty Session when
+                    // resume/load names missing history. Its official catalog
+                    // must prove the exact target before either operation.
+                    let catalog = self
+                        .host
+                        .rpc_with_timeout(
+                            "session/list",
+                            json!({"cwd": cwd}),
+                            ACP_HISTORY_RESTORE_TIMEOUT,
+                        )
+                        .await?;
+                    crate::command_code_acp::verify_restore_target(
+                        &catalog,
+                        existing_session_id,
+                        &cwd,
+                    )?;
+                }
                 self.host
                     .bind_session(
                         existing_session_id,
@@ -5062,6 +5133,8 @@ impl AcpCliRuntimeAdapter {
         if !launchable_acp_adapter(kind) {
             bail!("{} is not a launchable ACP Adapter", kind.as_str());
         }
+        #[cfg(target_os = "macos")]
+        ManagedProcess::recover_descendants(&self.private_runtime_dir.join("owned-processes"))?;
         if matches!(
             kind,
             AdapterKind::CopilotCli
@@ -9999,6 +10072,31 @@ while IFS= read -r ignored; do :; done
                     runtime.detach().await;
                     assert_eq!(host.pid(), pid);
                 }
+                // Native resume itself accepts nonexistent IDs. Our official
+                // catalog preflight must reject them before opening a Session.
+                for id in [uuid::Uuid::new_v4().to_string(), "12345678".into()] {
+                    let error = sessions[0]
+                        .0
+                        .start_or_resume_session(
+                            Some(&id),
+                            AcpSessionCapabilities {
+                                can_resume: true,
+                                can_load_history: true,
+                            },
+                            "runtime_default",
+                            "runtime_default",
+                            &json!({}),
+                            &BTreeMap::new(),
+                        )
+                        .await
+                        .unwrap_err();
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("command_code_restore_target_missing")
+                    );
+                    assert!(!host.knows_session(&id).await);
+                }
                 // The native Mod runner swallows ordinary hook exceptions.
                 // A missing binding must kill the real Host before it can
                 // reach the Provider, rather than emit an unprotected request.
@@ -12049,6 +12147,119 @@ while IFS= read -r ignored; do :; done
 
         host.shutdown().await;
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn leader_exit_reaps_inherited_pipes_and_preserves_buffered_response() {
+        for completed in [false, true] {
+            let root = std::env::temp_dir()
+                .join(format!("rovai-acp-leader-exit-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("agent");
+            let late = root.join("late");
+            let started = root.join("started");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+IFS= read -r request || exit 1
+(sleep 3; printf late > '{}') &
+printf ready > '{}'
+{}
+while IFS= read -r ignored; do :; done
+"#,
+                    late.display(),
+                    started.display(),
+                    if completed {
+                        "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"terminal\":true}}'\nexit 0"
+                    } else {
+                        ""
+                    }
+                ),
+            );
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen_trae_runtime(&executable),
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::Disabled,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
+                None,
+            )
+            .await
+            .unwrap();
+            let owner = AcpRuntimeOwner {
+                agent_run_id: "leader-exit-run".into(),
+                execution_epoch: 1,
+            };
+            host.bind_session("leader-exit-session", &owner, AcpSessionPhase::Ready)
+                .await
+                .unwrap();
+            let pid = host.pid().unwrap();
+            let caller = host.clone();
+            let pending =
+                tokio::spawn(async move { caller.rpc("fixture/request", json!({})).await });
+            timeout(Duration::from_secs(2), async {
+                while !started.is_file() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            if !completed {
+                // This exact PID is the child just created by this test. Kill
+                // only the leader so its tool retains the inherited pipes.
+                assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+            }
+            let response = timeout(Duration::from_secs(2), pending)
+                .await
+                .unwrap()
+                .unwrap();
+            if completed {
+                assert_eq!(response.unwrap()["terminal"], true);
+            } else {
+                assert!(response.unwrap_err().to_string().contains("Host exited"));
+            }
+            // stderr/cleanup diagnostics may race with the exit notification;
+            // they are not terminal events and do not own the Run outcome.
+            let exited = timeout(Duration::from_secs(2), async {
+                loop {
+                    let event = receiver.recv().await.unwrap();
+                    if !matches!(event, AcpIncoming::HostDiagnostic { .. }) {
+                        break event;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                matches!(&exited, AcpIncoming::Exited { agent_run_id, execution_epoch: 1, .. } if agent_run_id == &owner.agent_run_id),
+                "expected exact owner exit, got {exited:?}"
+            );
+            assert!(!host.is_alive());
+            tokio::time::sleep(Duration::from_millis(3200)).await;
+            assert!(
+                !late.exists(),
+                "child must not write after the leader exited"
+            );
+            while let Ok(event) = receiver.try_recv() {
+                assert!(
+                    matches!(event, AcpIncoming::HostDiagnostic { .. }),
+                    "reader and exit watcher must notify once: {event:?}"
+                );
+            }
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

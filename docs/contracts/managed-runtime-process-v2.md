@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-09-23
+last_updated: 2026-10-05
 ---
 
 # Managed Runtime Process v2
@@ -137,6 +137,26 @@ Job handle 非 inheritable，并由 Core generation 独占。planned shutdown �
 Unix 直接启动目标进程并保留 process group、stdio、环境快照与退出回收语义；Windows 保留原子 Job、
 handle list 与受控 entrypoint。所有 Runtime/Probe/derived child 都不经过 Rovai 的 `sandbox-exec` 包装。
 Runtime 可以自行创建原生沙箱，其可用性由 Runtime 配置和实际宿主环境决定。
+
+ACP Host 同时观察受管 leader 的退出和协议管道结束。leader 退出后先终止持有管道的后代，给 reader
+有界时间消费已到达的权威结果，再精确一次通知 owner；不能仅等待 stdout EOF，也不能丢弃退出前的完成帧。
+
+<a id="macos-acp-descendants"></a>
+### macOS ACP 后代与重启回收
+
+macOS ACP 在 Managed Process 内记录同 UID 后代的 kernel unique identity、parent unique identity 和 PID version。
+Native shell 可创建独立进程组，回收不能只依赖 `killpg`。Darwin audit-token signal 在内核校验 PID version，
+不能退化为按名称、路径或裸 PID 扫描补杀。跨 `exec` 仅刷新同一 unique identity 的版本。
+
+每个 Host 在现有 Runtime 私有目录保存 mode 0600 的原子 ownership ledger，父目录 mode 0700；记录
+boot session、Core owner 和已观测祖先，不保存 argv、Prompt、凭据或工具输出。运行时采集与显式清理复用
+同一 ledger。确认整棵已捕获树不再运行才移除记录；读写、身份或信号失败保留未确认状态。
+Core 在开放 readiness 前处理前代 ledger；仅同次系统启动且原 owner 已消失时回收，失败则关闭启动准入。
+旧 boot 的记录只清除文件，不向可能复用 PID 的新进程发信号。
+
+这是既有 Unix 回收的补强，不是 Windows Job/cgroup：未观测且已消失的中间祖先、跨 UID 后代、Core 停止后
+直到再次启动前的空窗不受此记录保证。macOS 使用 XNU libproc 的固定结构与 PID-version signal 接口，
+字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D16](../versions/v1.72/decisions.md#v1-72-d16)。
 
 Linux ACP Host 在原生 cancel、graceful stop 或强制回收之前，先由 Managed Process 捕获同 UID 后代的
 父子关系与启动身份，并持有 pidfd。原生取消使父进程退出或后代重新挂靠后，仍通过已捕获的 pidfd 终止后代；
