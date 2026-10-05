@@ -11,17 +11,17 @@ test('configured Camp helper sends an explicit recipient as ComposerDocument V2'
   const request = async (method, params = {}) => {
     calls.push({ method, params })
     switch (method) {
-      case 'camps.creationPreflight':
+      case 'threads.creationPreflight':
         return {
           admissible: true,
           initialLeadAgentId: 'agent_2',
           presentMembers: [{ agentId: 'agent_2' }]
         }
-      case 'camps.create':
-        return { status: 'applied', payload: { campId: 'camp_test' } }
-      case 'camp.messages.send':
+      case 'threads.create':
+        return { status: 'applied', payload: { threadId: 'camp_test' } }
+      case 'thread.messages.send':
         assert.equal(params.commandId, 'command_test')
-        assert.equal(params.campId, 'camp_test')
+        assert.equal(params.threadId, 'camp_test')
         assert.deepEqual(params.content, {
           version: 2,
           segments: [
@@ -31,7 +31,7 @@ test('configured Camp helper sends an explicit recipient as ComposerDocument V2'
         })
         assert.deepEqual(params.sourceAttachments, [])
         assert.deepEqual(params.quotes, [])
-        assert.equal(params.replyToCampMessageId, null)
+        assert.equal(params.replyToThreadMessageId, null)
         return {
           commandResult: {
             status: 'accepted',
@@ -51,10 +51,11 @@ test('configured Camp helper sends an explicit recipient as ComposerDocument V2'
   })
 
   assert.equal(result.payload.campId, 'camp_test')
+  assert.equal(result.payload.threadId, 'camp_test')
   assert.deepEqual(calls.map(({ method }) => method), [
-    'camps.creationPreflight',
-    'camps.create',
-    'camp.messages.send'
+    'threads.creationPreflight',
+    'threads.create',
+    'thread.messages.send'
   ])
 })
 

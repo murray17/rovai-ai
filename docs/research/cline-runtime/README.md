@@ -28,8 +28,8 @@ DeepSeek Harness，不能把该 Runtime 的证据借给 Cline。
 | Auth / Provider / Model | 官方原生配置、default/显式模型、凭据变化 fence | Cline 原生 providers/models 文件；ACP 使用 `CLINE_PROVIDER`、`CLINE_MODEL`、`CLINE_API_KEY`；按实际 catalog 核对模型 | sub2api/gpt-6-sol 的原生默认配置通过四轮真实 App AgentRun；Host 摘要和模型核验已接线；显式模型切换及凭据变化矩阵待验收 |
 | Host / Fleet / LRU | 统一进程所有权、空闲复用、隔离 | 官方 stdio ACP 常驻；resident_multi_session，MCP/配置差异必须 fence | 真实共享 Host 首次、warm、A→B→A 通过；App 两成员与空闲后受控关闭通过；Fleet LRU、运行中关闭及 Core crash 待验收 |
 | Native Session / Continuation | 精确 ID、warm/cold、重放隔离 | new/load 返回原生 ID；load 会重放历史，并重取 provider/model/权限默认值；必须重设冻结值 | 共享 Host exact load/replay quarantine 通过；完整 App/Core 重启后 Session ID、Binding ID、generation 精确保留，真实回帖通过 |
-| Bootstrap / Context | 冻结 Charter/Identity/Memory 与每轮动态输入 | 当前 staged `first_payload` 仅是普通用户 Prompt；官方 Plugin Rule 可进入 System Prompt，拟改用既有 `managed_system_prompt` | 静态／函数 Rule 在真实 ACP 的 `beforeModel.request.systemPrompt` 均已观察到；[revision 1 方案](model-context-change-v1.70-proposal.md)待二次确认，Core 字节级投递与前置失败关闭未实现 |
-| Compaction continuity | 完成信号、补发、失败/取消与恢复 | ACP 不转发 compaction；官方 Plugin status-notice 可观测 completed | Plugin/Host 完成事件桥已接线；真实 ACP 发送 `/compact` 仍进入模型调用且没有压缩事件，manual 入口未闭合；auto/overflow/cold resume 未观测 |
+| Bootstrap / Context | 冻结 Charter/Identity/Memory 与每轮动态输入 | 当前 staged `first_payload` 仅是普通用户 Prompt；官方 Plugin Rule 可进入 System Prompt，拟改用既有 `managed_system_prompt` | 静态／函数 Rule 在真实 ACP 的 `beforeModel.request.systemPrompt` 均已观察到；User 已在消息 677d610d-e4cf-4ffb-aba2-d4ebb021cbcd 授权修复；真实插件缺失后继续调用的反例阻断切换，见[完整复核](../runtime-monitoring/command-cline-checklist-2026-10-05.md)，不是等待重复确认 |
+| Compaction continuity | 完成信号、补发、失败/取消与恢复 | ACP 不转发 compaction；官方 Plugin status-notice 可观测 completed | 本轮修复默认策略漏注册、实际 observer lease 和 started/completed 数值展示；真实 ACP `/compact` 仍是普通调用，预算探针仍无自动压缩事件；manual/auto/overflow/cold 连续性未过 |
 | Skills | 当前受管索引与原生 Skills 并存 | 共享受管索引；Cline 原生 `.cline/skills`、`.agents/skills` | 现行 main 使用平台/工具箱索引与原生文件发现，旧 Library/group 不再投递给新 Run；本轮原生项目 Skill 的 Core 候选发现和真实读取见[差异复核](../runtime-monitoring/command-cline-parity-2026-10-05.md) |
 | External MCP | PreparedMcpProjection、追加、撤销、无串会话 | 3.0.65 ACP 忽略 `session/new.mcpServers`；官方 `CLINE_MCP_SETTINGS_PATH` 指向 Host 私有合并文件 | 原生隔离配置调用真实 fixture Tool Verified；Core Host 合并已实现；App 分配、原生调用、更新及未分配成员隔离通过；撤销结果见差异复核，完整并发/HTTP 矩阵未完成 |
 | Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 已通过；修复单文件 location 后，App 两成员 read/edit/read 的准确路径、持久化、点击预览与文件副作用通过；成功 Update 补丁/editor 替换已接 Command 和 Files Changed 的补丁片段；两成员、多文件、连续改回、失败编辑、非零和独立空输出实测通过；editor 原生模型路径及超大输出仍待验收 |
@@ -86,9 +86,9 @@ run_finished` 和 `agent_message_chunk`，没有 Plugin `compaction` status-noti
 
 [文件名、编辑和窗口复核](../runtime-monitoring/command-cline-files-context-2026-10-04.md)进一步确认原生
 路径存在，修复了 read_files 与 apply_patch 的标准 location 投影；两名成员各自完成真实读取、编辑、
-读回和公开回帖。当前 sub2api/gpt-6-sol 配置未提供可信窗口，继续保留未知，不以压缩预算替代。
+读回和公开回帖。当时窗口未知；随后已完成[原生配置窗口补采](../runtime-monitoring/command-cline-context-window-2026-10-05.md)，真实 App 为 272k，不以压缩预算替代。
 随后两名成员都从原生命令输出正确读出实际 `+1/-1`；这证明模型可读取 Diff。apply_patch 的 ACP 终态
-仍不含可靠内容 Diff，编辑行内展开尚未完成，不把输入 patch 当作已应用差异。
+不提供可靠完整文件状态；随后已完成可点击的 reported mutation 补丁片段，见[编辑对照](../runtime-monitoring/command-cline-parity-2026-10-05.md)，仍不把输入 patch 当作精确文件状态。
 
 正式完成按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 逐轴闭合；
 当前分支已加入 closed identity、Host/发现/Skill 接线与 Migration 184/schema 134；macOS arm64 开发 Preview

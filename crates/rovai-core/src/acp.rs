@@ -139,6 +139,15 @@ pub enum AcpIncoming {
         display_execution_epoch: Option<i64>,
         display_event: Option<Box<RuntimeCompactionDisplayEvent>>,
     },
+    CompactionDisplay {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
+        native_session_id: String,
+        native_prompt_id: String,
+        event: Box<RuntimeCompactionDisplayEvent>,
+    },
     IngressBarrier {
         completion: oneshot::Sender<()>,
     },
@@ -2124,15 +2133,9 @@ impl AcpHost {
                         };
                     if self.adapter_kind == AdapterKind::ClineCli && !cline_observations.is_empty()
                     {
-                        for record in cline_observations.iter().filter(|value| {
-                            value["kind"] == "compaction" && value["phase"] == "completed"
-                        }) {
-                            self.forward_compaction_observation(
-                                &session_id,
-                                &json!({"method":"_rovai/cline_plugin_compaction","params":{"sessionId":session_id,"compactionId":format!("{}:{}",record["runId"].as_str().unwrap_or_default(),record["seq"].as_u64().unwrap_or_default()),"status":"completed"}}),
-                                AcpCompactionSignalSurface::ActivePrompt,
-                                Some(owner.clone()),
-                            ).await;
+                        for record in &cline_observations {
+                            self.forward_cline_compaction(&session_id, &prompt_id, &owner, record)
+                                .await;
                         }
                         let _ = self.incoming.send(owner.message(
                             self.adapter_kind, &self.host_instance_id,
@@ -2262,7 +2265,7 @@ impl AcpHost {
             return Vec::new();
         }
         let last = sequences
-            .entry((session_id.to_owned(), prompt_id))
+            .entry((session_id.to_owned(), prompt_id.clone()))
             .or_default();
         let mut observations = Vec::new();
         for record in records {
@@ -2271,6 +2274,8 @@ impl AcpHost {
                 continue;
             }
             *last = seq;
+            self.forward_cline_compaction(session_id, &prompt_id, owner, &record)
+                .await;
             for usage in crate::cline::parse_observations(&record) {
                 observations.push(NativeUsageObservation {
                     source_identity: format!(
@@ -2282,6 +2287,40 @@ impl AcpHost {
             }
         }
         observations
+    }
+
+    async fn forward_cline_compaction(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+        owner: &AcpRuntimeOwner,
+        record: &Value,
+    ) {
+        let Some(event) = crate::cline::compaction_display(record) else {
+            return;
+        };
+        // Display has its own exact prompt fence. Disabling Bootstrap
+        // redelivery must not hide an observed native compaction.
+        let _ = self.incoming.send(AcpIncoming::CompactionDisplay {
+            adapter_kind: self.adapter_kind,
+            host_instance_id: self.host_instance_id.clone(),
+            agent_run_id: owner.agent_run_id.clone(),
+            execution_epoch: owner.execution_epoch,
+            native_session_id: session_id.to_owned(),
+            native_prompt_id: prompt_id.to_owned(),
+            event: Box::new(event.clone()),
+        });
+        if event.phase == RuntimeCompactionDisplayPhase::Completed {
+            self.forward_compaction_observation(
+                session_id,
+                &json!({"method":"_rovai/cline_plugin_compaction","params":{
+                    "sessionId":session_id,"compactionId":event.compaction_id,"status":"completed"
+                }}),
+                AcpCompactionSignalSurface::ActivePrompt,
+                None,
+            )
+            .await;
+        }
     }
 
     fn spawn_stderr_reader(host: Arc<Self>, stderr: ManagedChildStderr) {

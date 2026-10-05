@@ -17,8 +17,9 @@ pub const BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_FORMATTER_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v1.28";
 
-const POLICY_ADAPTERS: [AdapterKind; 10] = [
+const POLICY_ADAPTERS: [AdapterKind; 11] = [
     AdapterKind::CopilotCli,
+    AdapterKind::ClineCli,
     AdapterKind::OpencodeCli,
     AdapterKind::KiroCli,
     AdapterKind::QoderCli,
@@ -971,6 +972,12 @@ mod tests {
 
     #[test]
     fn release_policy_matrix_keeps_protected_and_antigravity_disabled() {
+        // Checking only release_default_policy missed an unregistered Cline:
+        // application startup iterates POLICY_ADAPTERS, not AdapterKind::ALL.
+        assert_eq!(
+            release_policies().policy_for(AdapterKind::ClineCli),
+            Some(CompactionDetectorPolicy::BestEffort)
+        );
         assert_eq!(
             release_default_policy(AdapterKind::CopilotCli),
             CompactionDetectorPolicy::BestEffort

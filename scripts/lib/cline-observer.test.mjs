@@ -39,6 +39,10 @@ test('Cline official hooks emit only leased, structured observations', async () 
     ]) {
       plugin.hooks.afterModel({ snapshot: { runId: 'native-run' }, assistantMessage: { id, modelInfo } });
     }
+    plugin.hooks.onEvent({ type: 'status-notice', snapshot: { runId: 'native-run', parentAgentId: 'root' },
+      metadata: { kind: 'auto_compaction', phase: 'started', tokensBefore: 999 } });
+    plugin.hooks.onEvent({ type: 'status-notice', snapshot: { runId: 'native-run' },
+      metadata: { kind: 'auto_compaction', phase: 'started', tokensBefore: 1000 } });
     plugin.hooks.onEvent({ type: 'status-notice', snapshot: { runId: 'native-run' }, message: 'private text',
       metadata: { kind: 'auto_compaction', phase: 'completed', tokensBefore: 1000, tokensAfter: 100 } });
     plugin.hooks.onEvent({ type: 'status-notice', snapshot: { runId: 'native-run' },
@@ -46,8 +50,8 @@ test('Cline official hooks emit only leased, structured observations', async () 
     plugin.hooks.afterRun({ result: { runId: 'native-run', status: 'completed', outputText: 'private final', usage: { inputTokens: 9999 } } });
     plugin.hooks.afterModel({ snapshot: { runId: 'native-run' }, assistantMessage: { id: 'late-message', metrics: { inputTokens: 999 } } });
     const records = readdirSync(join(root, 'observations')).sort().map(name => JSON.parse(readFileSync(join(root, 'observations', name), 'utf8')));
-    assert.deepEqual(records.map(r => r.kind), ['run_started', ...Array(5).fill('model_completed'), 'compaction', 'run_finished']);
-    assert.deepEqual(records.map(r => r.seq), [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.deepEqual(records.map(r => r.kind), ['run_started', ...Array(5).fill('model_completed'), 'compaction', 'compaction', 'run_finished']);
+    assert.deepEqual(records.map(r => r.seq), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     assert.ok(records.every(r => Number.isFinite(Date.parse(r.observedAt))));
     assert.ok(records.every(r => r.leaseId === 'agent-run:2' && r.sessionId === 'native-session' && r.runId === 'native-run'));
     assert.deepEqual(records[1].metrics, { inputTokens: 120, outputTokens: 2, cacheReadTokens: 100 });
@@ -56,8 +60,10 @@ test('Cline official hooks emit only leased, structured observations', async () 
     assert.ok(records.slice(2, 5).every(record => !('contextWindow' in record)));
     assert.equal(records[5].contextWindow, 272000);
     assert.deepEqual(records[5].metrics, {});
-    assert.equal(records[6].phase, 'completed');
-    assert.equal(records[6].tokensAfter, 100);
+    assert.equal(records[6].phase, 'started');
+    assert.equal(records[7].phase, 'completed');
+    assert.equal(records[7].tokensAfter, 100);
+    assert.equal(records[6].compactionId, records[7].compactionId);
     assert.doesNotMatch(JSON.stringify(records), /private|secret|9999|999|totalCost/);
   } finally {
     if (previous === undefined) delete process.env.ROVAI_CLINE_OBSERVER_ROOT;

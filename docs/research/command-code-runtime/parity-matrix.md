@@ -13,6 +13,8 @@ last_updated: 2026-10-05
 
 本矩阵按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 建立，先于正式 Adapter 实现。最接近的生产 Adapter 是 `claude-code-cli`；公共控制流可参考它，Command Code 的 wire 与能力证据必须独立取得。`DocumentationOnly` 仅指 [官方 CLI/Headless/Mods/MCP 文档](https://commandcode.ai/docs)或发布包帮助，未替代真实账号、模型、Tool 或 Session Smoke。开发者已在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 确认当前 [first_payload revision 4](prompt-guidance-v1.70-proposal.md)；此确认不提升其他能力轴或平台资格。
 
+2026-10-05 新调查的 **1.74.1 已有官方 ACP**；真实握手和无模型的同 PID A→B→A 通过，BYOK 模型选择和原生余额出现阻碍。下表的旧版本 headless 证据不代表新 ACP；以[最新 14 轴对照](../runtime-monitoring/command-cline-checklist-2026-10-05.md)区分上游更新、实际修复和未闭合产品链路。
+
 | 能力轴 | Rovai 标准行为 | Command Code 1.64.0 上游能力面 | 候选接入策略 | 当前状态与证据 | 已接受差异 |
 | --- | --- | --- | --- | --- | --- |
 | Auth / Provider / Model | 自身原生认证、默认/显式模型、变化后精确 fence | 原生认证/BYOK、`--model`、`--list-models` | 继承用户原生配置；Probe 区分认证与模型目录，保存后核对显式模型 | `--list-models` 可见隔离 BYOK；headless 仍以退出码 3 拒绝未登录；完整轴未实现 | 无 |

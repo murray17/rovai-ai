@@ -11,6 +11,8 @@ const integer = value => Number.isSafeInteger(value) && value >= 0;
 let sessionId;
 let active;
 let sequence = 0;
+let compactionSequence = 0;
+let compactionId;
 let modelWindows = {};
 try {
   if (root) modelWindows = JSON.parse(readFileSync(join(root, "model-windows.json"), "utf8"));
@@ -33,7 +35,7 @@ function emit(kind, payload) {
 }
 
 export default {
-  name: "rovai-cline-observer-v2",
+  name: "rovai-cline-observer-v3",
   manifest: { capabilities: ["hooks"] },
   setup(_api, context) {
     sessionId = context?.session?.sessionId;
@@ -43,6 +45,8 @@ export default {
       if (context?.snapshot?.parentAgentId != null) return;
       active = undefined;
       sequence = 0;
+      compactionSequence = 0;
+      compactionId = undefined;
       if (!root || typeof sessionId !== "string") return;
       const lease = JSON.parse(readFileSync(join(root, "bindings", `${hash(sessionId)}.json`), "utf8"));
       const runId = context?.snapshot?.runId;
@@ -77,15 +81,19 @@ export default {
       });
     },
     onEvent(event) {
-      if (!active || event?.snapshot?.runId !== active.runId || event.type !== "status-notice") return;
+      if (!active || event?.snapshot?.parentAgentId != null || event?.snapshot?.runId !== active.runId || event.type !== "status-notice") return;
       const metadata = event.metadata;
       if (!["manual_compaction", "auto_compaction", "overflow_recovery_compaction"].includes(metadata?.kind)) return;
       if (!["started", "completed", "skipped"].includes(metadata?.phase)) return;
-      const values = { trigger: metadata.kind, phase: metadata.phase };
+      if (metadata.phase === "started" || !compactionId) {
+        compactionId = `${active.runId}:compaction:${++compactionSequence}`;
+      }
+      const values = { compactionId, trigger: metadata.kind, phase: metadata.phase };
       for (const key of ["tokensBefore", "tokensAfter", "messagesBefore", "messagesAfter"]) {
         if (integer(metadata[key])) values[key] = metadata[key];
       }
       emit("compaction", values);
+      if (metadata.phase !== "started") compactionId = undefined;
     },
     afterRun(context) {
       if (!active || context?.result?.runId !== active.runId) return;

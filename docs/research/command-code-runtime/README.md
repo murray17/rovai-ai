@@ -18,6 +18,8 @@ last_updated: 2026-09-24
 
 实现前六列评估见 [Parity Matrix](parity-matrix.md)。
 
+2026-10-05 增量：[1.74.1 官方 ACP 与完整 Checklist 复核](../runtime-monitoring/command-cline-checklist-2026-10-05.md)。官方已提供常驻 ACP；原生控制面已测，模型调用受 BYOK 目录与账号余额阻断。以下早期版本“未见 ACP”只保留其当时范围，不再代表最新上游能力。
+
 ## 当前判断
 
 候选路线是独立的 `command-code-cli` Adapter，采用 `one_shot_resumable` 进程策略，读取 Command Code 原生 `-p --output-format json` NDJSON，并按完整原生 Session ID 恢复。进程与输入收敛最接近 Claude Code；两者的协议、权限和配置结论不能直接沿用。

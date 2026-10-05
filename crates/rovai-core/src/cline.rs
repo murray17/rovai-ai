@@ -16,10 +16,60 @@ use tokio::process::Command;
 use crate::{command::canonical_json_digest, mcp::McpServerDefinition};
 
 pub const MINIMUM_VERSION: &str = "3.0.65";
-pub const OBSERVER_REVISION: &str = "cline-plugin-observer-v2";
+pub const OBSERVER_REVISION: &str = "cline-plugin-observer-v3";
 const OBSERVER: &str = include_str!("cline/observer.js");
 const MAX_OBSERVATION_BYTES: u64 = 32 * 1024;
 const MAX_OBSERVATIONS: usize = 1024;
+
+/// Private Plugin records have already passed Session/lease/sequence checks.
+/// Only native numeric facts enter the shared local compaction display.
+pub fn compaction_display(
+    record: &Value,
+) -> Option<crate::runtime_compaction_display::RuntimeCompactionDisplayEvent> {
+    use crate::runtime_compaction_display::{
+        RuntimeCompactionCompletionEvidence, RuntimeCompactionDisplayEvent,
+        RuntimeCompactionDisplayPhase, RuntimeCompactionMessageSnapshot,
+        RuntimeCompactionTokenSnapshot,
+    };
+    if record["kind"] != "compaction" {
+        return None;
+    }
+    let phase = match record["phase"].as_str()? {
+        "started" => RuntimeCompactionDisplayPhase::Started,
+        "completed" => RuntimeCompactionDisplayPhase::Completed,
+        _ => return None,
+    };
+    let mut event =
+        RuntimeCompactionDisplayEvent::new(record["compactionId"].as_str()?, "cline-cli", phase)?;
+    let count = |field: &str| {
+        record[field]
+            .as_u64()
+            .filter(|value| *value <= 9_007_199_254_740_991)
+    };
+    let before = count("tokensBefore");
+    let after = (phase == RuntimeCompactionDisplayPhase::Completed)
+        .then(|| count("tokensAfter"))
+        .flatten();
+    if before.is_some() || after.is_some() {
+        event.tokens = Some(RuntimeCompactionTokenSnapshot {
+            before,
+            after,
+            ..Default::default()
+        });
+    }
+    if phase == RuntimeCompactionDisplayPhase::Completed {
+        event.completion_evidence = Some(RuntimeCompactionCompletionEvidence::NativeTerminal);
+        if let Some(compacted) = count("messagesBefore")
+            .zip(count("messagesAfter"))
+            .and_then(|(before, after)| before.checked_sub(after))
+        {
+            event.messages = Some(RuntimeCompactionMessageSnapshot {
+                compacted: Some(compacted),
+            });
+        }
+    }
+    Some(event)
+}
 
 pub fn supported_version(version: Option<&str>) -> bool {
     let Some(version) = version.and_then(|v| {
@@ -883,6 +933,29 @@ mod tests {
     // JSON tests. One owner covers lease, size/type and exact-consumption rules.
     #[test]
     fn observer_records_are_private_bounded_and_owned_by_one_prompt() {
+        let mut compact = json!({"kind":"compaction","compactionId":"run:compact:1",
+            "phase":"completed","tokensBefore":1000,"tokensAfter":100,
+            "messagesBefore":10,"messagesAfter":2,"summary":"private"});
+        let display = compaction_display(&compact).unwrap().payload();
+        assert_eq!(display["tokens"], json!({"before":1000,"after":100}));
+        assert_eq!(display["messages"]["compacted"], 8);
+        assert!(display.get("summaryText").is_none());
+        compact["phase"] = json!("started");
+        let display = compaction_display(&compact).unwrap().payload();
+        assert_eq!(display["phase"], "started");
+        assert!(display.get("completionEvidence").is_none());
+        assert!(display["tokens"].get("after").is_none());
+        for phase in ["skipped", "failed", "unknown"] {
+            compact["phase"] = json!(phase);
+            assert!(compaction_display(&compact).is_none());
+        }
+        compact["phase"] = json!("completed");
+        compact["messagesAfter"] = json!(20);
+        compact["tokensBefore"] = json!(-1);
+        compact["tokensAfter"] = json!("100");
+        let display = compaction_display(&compact).unwrap().payload();
+        assert!(display.get("tokens").is_none());
+        assert!(display.get("messages").is_none());
         let temporary =
             std::env::temp_dir().join(format!("rovai-cline-observer-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&temporary).unwrap();

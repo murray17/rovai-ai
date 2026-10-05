@@ -20038,6 +20038,45 @@ async fn process_acp_events(
                 )
                 .await;
             }
+            AcpIncoming::CompactionDisplay {
+                adapter_kind,
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                native_session_id,
+                native_prompt_id,
+                event,
+            } => {
+                let Some(runtime) = acp_runtime_on_host(
+                    &core,
+                    adapter_kind,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                )
+                .await
+                else {
+                    continue;
+                };
+                if runtime.session_id().await.as_deref() != Some(&native_session_id)
+                    || runtime.prompt_id().await.as_deref() != Some(&native_prompt_id)
+                {
+                    continue;
+                }
+                if let Err(error) = persist_runtime_compaction_display(
+                    &core,
+                    &output,
+                    &agent_run_id,
+                    execution_epoch,
+                    None,
+                    *event,
+                    "cline.plugin.compaction.v1",
+                )
+                .await
+                {
+                    eprintln!("Cline local compaction display skipped: {error:#}");
+                }
+            }
             AcpIncoming::CompactionObservation {
                 adapter_kind,
                 host_instance_id,

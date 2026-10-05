@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-04
+last_updated: 2026-10-05
 ---
 
 # Agent Runtime 兼容性清单
@@ -28,15 +28,17 @@ Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下�
 
 2026-10-04 使用官方 1.66.0 经 Core headless transport 完成真实首次、精确恢复与多工具调用：四个 token 桶的逐调用和与原生 result 完全对齐，最新调用输入独立形成运行中的 Context used。窗口/比例/成本未知；仍无 Product AgentRun 和 App 证据。见[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
 
+2026-10-05 官方 1.74.1 ACP 实测同 PID 多 Session 控制面与 context size；现有 BYOK 模型被拒、原生账号余额不足，生成/warm/compact 资格未通过。详见[最新 14 轴对照](research/runtime-monitoring/command-cline-checklist-2026-10-05.md)，不能继续声称上游没有 ACP。
+
 ## Cline 接入实施状态
 
 用户已选择官方 `cline --acp` 并允许 sub2api BYOK。Cline 3.0.65 / macOS arm64 经共享 Core ACP Host
 真实验证首次、warm、A→B→A、exact cold load、read/edit/command、取消与逐调用数值采集。
 四个 token 桶与可选 reasoning 来自官方只读 Plugin，运行中及终态 Context used 已观察到；
-未测到可靠窗口、比例或成本。详见[Cline 矩阵](research/cline-runtime/README.md)和[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+后续从原生 models.json 精确匹配容量，真实 App 已取得 272k 窗口与比例，费用仍未知。详见[窗口补采](research/runtime-monitoring/command-cline-context-window-2026-10-05.md)、[Cline 矩阵](research/cline-runtime/README.md)和[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
 内部 closed identity、发现/Host/Skill/数据库接线已存在，Migration 184 升级 schema 134；
 macOS arm64 开放开发 `Preview`，其余平台保持 `NotQualified`；Preview 不带资格 evidence，
-完整 AgentRun/App、Bootstrap、compaction 与 First-Class 资格仍需分别验证。
+AgentRun/App 主路径已通过；Bootstrap、compaction 与 First-Class 全矩阵仍未通过。本轮补齐 compaction policy 注册和数值展示，真实插件缺失负向测试仍阻断 System Rule 切换。
 
 ## 当前 Product Runtime Catalog
 
