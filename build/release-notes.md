@@ -1,67 +1,51 @@
-# Rovai AI v0.4.3
+# Rovai AI v0.4.4
 
 <!-- lang:en -->
 
-This release makes teammates easier to create and configure, improves conversation navigation and long execution records, and adds a system tray on Windows.
+This release adds execution usage and session context readings, restores unsent drafts in new conversations, and displays release notes in your interface language.
 
 ### What's changed
 
-- [Feature] **Create teammates through a conversation.** The Add action opens a conversation with an available teammate and an editable starter request. Three prompts help you explore a character, a work partner, or an original companion. Nothing is sent automatically, and manual creation remains available.
-- [Feature] **Apply a saved runtime configuration to other teammates.** Copy the agent, model, parameters, and permissions to selected teammates. Review replacements before applying them, preserve unsaved runtime drafts, and retry only failed items.
-- [Feature] **See the model and reasoning effort beside replies.** Conversation message headers and teammate details show model information directly. Historical replies use the configuration recorded for that execution, not the teammate's current settings.
-- [Feature] **Keep Rovai running in the Windows system tray.** Choose whether closing the window minimizes to the tray or quits the app, and optionally remember the choice. Tray mode preserves the window and background work; change the behavior in Settings → General → Window.
-- [Interaction] **Jump back to your questions.** Wider conversation views show a compact rail of user-message anchors. Hover to preview a question and its first reply, then click or use the keyboard to return to that message.
-- [Interaction] **Use context menus and unread reminders in the sidebar.** Open project and conversation actions with a right-click, keyboard shortcut, or long press. Mark conversations read or unread, copy project paths, and reveal project folders in the desktop file manager.
-- [Interaction] **Reorder teammates directly.** Drag teammate rows on desktop or their avatars in the mobile layout. Keyboard reordering remains available.
-- [Performance] **Load long execution records in complete content blocks.** Folded command groups count as one block and load their operations separately. Short initial views fill automatically, while paging and live updates preserve reading position, expanded results, and focus. Streaming text and older execution records remain visible through updates.
-- [Interface] **Give the first execution preview a narrower starting width.** A new conversation's first automatic execution preview leaves more room for the conversation. Existing file tabs and manually chosen widths are preserved.
-- [Interaction] **Clarify permission and sandbox choices.** Menus identify recommended options and include brief guidance. Permission switches use consistent sizing without changing existing selections.
-- [Fix] **Keep newly created teammate cards with their creating execution.** Cards appear below that execution's last reply, align with file-change cards, and link directly to agent configuration.
-- [Interaction] **Show when you stopped an execution.** A subtle "Stopped by you" marker appears beside an interrupted execution’s existing replies or artifacts. Activate it to inspect that exact execution. Stopping before any reply or artifact no longer creates an empty teammate row.
-- [Fix] **Restore navigation from execution notifications.** Clicking a notification can now locate its execution even when the target is not in the current cache, rather than failing with an incompatible-contract error.
-- [Feature] **Let teammates inspect execution and queued work.** The built-in `rovai thread runs` command lists a conversation's execution states and queued messages, with filtering and pagination. Message reads also expose their recipients and structured mentions. Long-history queries now bound the returned candidate set in SQL.
-- [Improvement] **Standardize built-in collaboration terminology.** Built-in commands and agent guidance use Thread and User, while preserving compatibility aliases, historical records, and frozen session recovery.
-- [Documentation] **Add a collaboration demo video.** Both READMEs include a workflow demonstration, and the website homepage uses a clearer workspace overview.
+- [Feature] **Inspect token usage on execution cards.** After an execution ends, open its usage entry to see Input Token, Output Token, Cache Read, Cache Write, and duration. Native usage collection has also been extended and corrected across runtimes. Missing fields stay unknown rather than becoming zero.
+- [Feature] **See the current session's context usage.** The execution panel shows used tokens, the context window, and a percentage when the runtime provides them. Available observations refresh during execution rather than waiting for the whole turn to finish. Model changes, compaction, and session recovery are checked against the current session; historical executions do not replace its reading.
+- [Fix] **Keep unsent drafts in newly created conversations.** Drafts survive conversation switching, page refresh, window recreation, and ordinary restart. A project can keep several new-conversation drafts. Rejected sends preserve the input; accepted sends clear the saved draft.
+- [Feature] **Read release notes in your interface language.** Chinese and English interfaces show their matching notes immediately when the language changes. Historical and single-language notes remain readable, and switching languages preserves the selected version tab.
+- [Interface] **Restore the new-teammate card layout.** Text sits on the left and the portrait on the right, with adjusted name sizing, filled trait tags, and a separate footer for creation details and agent configuration.
+- [Fix] **Stop reporting internal diagnostic failures as HTML page errors.** When a page's security policy blocks Rovai's supplemental diagnostic connection, the preview explains that diagnostics are unavailable without counting it as a page issue. Genuine script and resource errors remain visible, and the page's policy is not weakened.
+- [Fix] **Fix DeepSeek Harness tool calls on some Responses endpoints.** Handle optional tool parameters on routes such as sub2api while preserving native settings and explicit provider or model overrides.
+- [Performance] **Limit execution-metric reads to the relevant records.** Query active, visible, or newly expanded executions; pause reads while the panel is hidden and stop continuous polling of stable history.
 
 ### Upgrading
 
-Mac users on v0.4.1 or later can update in the app. Users on v0.4.0 or earlier need to download the DMG and replace the installed app once. Keep your existing user data.
+Mac users on v0.4.1 or later can update in the app. Users on v0.4.0 or earlier need to download the DMG, quit the old app, and replace the installed app once. Keep your existing user data.
 
 Server users on v0.4.1 or later can update through "About & Updates" in the web interface. For earlier versions, back up your data, stop Server, and run the updated official installer while keeping the same data directory.
 
-Desktop and Server share this release and are built from the same source commit.
+Desktop and Server share this release and are built from the same source commit. Token and context fields depend on what each runtime reports; this release does not add output-speed measurement.
 
 Windows x64 remains an unsigned preview. SmartScreen may show "Unknown publisher" during installation; download installers only from this official GitHub Release.
 
 <!-- lang:zh-CN -->
 
-本次更新让队员创建和配置更方便，改善会话定位与长执行记录的阅读体验，并为 Windows 增加系统托盘。
+本次新增执行用量和会话上下文占用显示，修复新会话草稿丢失，并让更新说明跟随界面语言显示。
 
 ### 更新内容
 
-- 【功能】**可以通过对话创建队员。** 点击添加后，与已有队员一起确定新队员的角色、职责和性格；提供角色、工作伙伴、原创搭档三个起步方向。预填内容可修改，不会自动发送，仍可选择手动创建。
-- 【功能】**批量应用队员的运行时配置。** 将已保存的智能体、模型、参数和权限应用到选中的其他队员，替换前可确认内容；保留未保存的配置草稿，失败后可只重试失败项。
-- 【功能】**回复旁可查看模型与思考强度。** 在消息头和队员信息中直接查看模型信息；历史回复显示当次执行记录的配置，不会跟随队员当前设置变化。
-- 【功能】**Windows 支持系统托盘。** 关闭窗口时可选择最小化到托盘或退出，并记住选择。托盘模式保留窗口与后台工作，可在“设置 → 通用 → 窗口”中调整。
-- 【交互】**快速回到之前的问题。** 较宽的会话窗口会显示用户消息定位栏，悬浮可预览问题和首条回复，点击或使用键盘即可跳转。
-- 【交互】**侧栏支持右键菜单与未读标记。** 可通过右键、快捷键或长按打开项目和会话操作，手动标记已读或未读、复制项目路径；桌面端可直接在文件管理器中打开项目目录。
-- 【交互】**拖动调整队员顺序。** 桌面端可拖动队员列表，移动端可拖动头像，同时保留键盘排序操作。
-- 【性能】**长执行记录按完整内容块加载。** 折叠的命令组作为一个内容块，其内部操作单独加载；首屏内容不足时自动补齐。翻页和实时更新会保留阅读位置、已展开的结果与焦点，并修复流式文本和旧记录在更新时丢失的问题。
-- 【界面】**首次执行预览为会话留出更多空间。** 新会话第一次自动展开执行预览时采用较窄的初始宽度，已有文件标签页和手动调整的宽度保持不变。
-- 【交互】**权限与沙箱选项更清楚。** 菜单标注推荐项并补充简短说明，权限开关统一尺寸，不改变已有选择。
-- 【修复】**新队员卡片跟随创建它的执行显示。** 卡片放在对应执行的最后一条回复下方，与文件变更卡片对齐，并可直接打开智能体配置。
-- 【交互】**手动停止执行后显示“你已中断”。** 中断标记显示在该次执行已有的回复或成果旁，点击可查看对应执行过程；在产生任何回复或成果前停止，不再创建空白队员行。
-- 【修复】**修复点击执行通知无法跳转的问题。** 即使目标执行尚未载入当前缓存，也能定位到它，不再因接口版本不一致而报错。
-- 【功能】**队员可查看执行状态与排队消息。** 新增内置命令 `rovai thread runs`，支持筛选和分页；读取消息时可查看接收对象与结构化提及，同时减少长历史查询中的无效读取。
-- 【改进】**统一内置协作命令与说明中的术语。** 使用 Thread 和 User，保留旧命令兼容入口、历史记录与原有会话恢复能力。
-- 【文档】**新增协作演示视频。** 中英文 README 均提供工作流程演示，官网首页换用更清楚的工作台总览图。
+- 【功能】**执行卡片可以查看 Token 用量。** 执行结束后，点击用量入口，可查看输入、输出、缓存读取、缓存写入和执行耗时。同时补齐和修正多种运行时的原生用量采集，缺失项保持未知，不会补成 0。
+- 【功能】**执行台新增上下文占用显示。** 原生数据可用时，显示当前会话的已用量、窗口上限和占比，并在执行过程中更新，不必等整轮结束。切换模型、压缩或恢复会话时会校验数据归属，查看历史执行不会替换当前读数。
+- 【修复】**新建会话的未发送内容可以恢复。** 切换会话、刷新页面、重新打开窗口或正常重启后，草稿仍会保留。同一项目可以保存多个新会话草稿，发送失败不清空，发送成功后清除。
+- 【功能】**更新说明跟随界面语言显示。** 中文界面显示中文说明，英文界面显示英文说明；切换语言即时生效，保留正在查看的版本，并兼容旧版和只有单一语言的更新日志。
+- 【界面】**恢复新队员加入卡片的布局。** 文字在左、头像在右，调整名称字号、性格标签和底部操作区，保留创建信息与智能体配置入口。
+- 【修复】**修复 HTML 预览误报网页错误的问题。** 页面安全策略阻止 Rovai 的辅助诊断连接时，改为提示诊断不可用，不再算作网页自身的错误。真实脚本和资源错误仍保留，不放宽页面安全策略。
+- 【修复】**修复 DeepSeek Harness 在部分 Responses 接口下的工具调用失败。** 处理 sub2api 等场景中的可选参数兼容问题，保留原生配置和用户显式设置。
+- 【性能】**减少执行指标的后台读取。** 只查询运行中、可见或刚展开的执行记录，面板隐藏时暂停查询，稳定的历史记录不持续轮询。
 
 ### 升级提醒
 
-Mac v0.4.1 及更新版本可在应用内升级；v0.4.0 及更早版本需要手动下载 DMG 并替换已安装应用一次。保留原有用户数据。
+Mac v0.4.1 及更新版本可在应用内升级；v0.4.0 及更早版本需要下载 DMG、退出旧应用并手动替换已安装应用一次。保留原有用户数据。
 
 Server v0.4.1 及更新版本可在网页的“关于与更新”中升级；更早版本请先备份数据、停止 Server，再使用新版官方安装脚本，并保持原有数据目录。
 
-Desktop 与 Server 同版发布，使用同一份源码构建。
+Desktop 与 Server 同版发布，使用同一份源码构建。用量和上下文字段取决于各运行时实际提供的数据，本次不增加输出测速。
 
 Windows x64 仍为未签名预览版，安装时可能出现“未知发布者”提示。请仅从本次官方 GitHub Release 下载安装包。
