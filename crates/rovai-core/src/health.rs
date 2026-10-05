@@ -1401,6 +1401,7 @@ async fn acp_probe_at(
             | AdapterKind::TraeCnCli
             | AdapterKind::GrokBuild
             | AdapterKind::DeepseekHarness
+            | AdapterKind::CommandCodeCli
             | AdapterKind::ClineCli
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
@@ -1573,6 +1574,8 @@ async fn acp_probe_at(
         && !grok_build_minimum_version_satisfied(reported_version.as_deref()))
         || (kind == AdapterKind::DeepseekHarness
             && !crate::dsh::supported_version(reported_version.as_deref()))
+        || (kind == AdapterKind::CommandCodeCli
+            && !crate::command_code_acp::supported_version(reported_version.as_deref()))
         || (kind == AdapterKind::ClineCli
             && !crate::cline::supported_version(reported_version.as_deref()))
     {
@@ -1586,7 +1589,9 @@ async fn acp_probe_at(
                 Vec::new(),
                 vec![format!(
                     "runtime.version>={}",
-                    if kind == AdapterKind::ClineCli {
+                    if kind == AdapterKind::CommandCodeCli {
+                        crate::command_code_acp::MINIMUM_VERSION
+                    } else if kind == AdapterKind::ClineCli {
                         crate::cline::MINIMUM_VERSION
                     } else if kind == AdapterKind::DeepseekHarness {
                         crate::dsh::MINIMUM_VERSION
@@ -1597,7 +1602,9 @@ async fn acp_probe_at(
                 Some(format!(
                     "{} >= {} is required.",
                     kind.display_name(),
-                    if kind == AdapterKind::ClineCli {
+                    if kind == AdapterKind::CommandCodeCli {
+                        crate::command_code_acp::MINIMUM_VERSION
+                    } else if kind == AdapterKind::ClineCli {
                         crate::cline::MINIMUM_VERSION
                     } else if kind == AdapterKind::DeepseekHarness {
                         crate::dsh::MINIMUM_VERSION
@@ -1641,7 +1648,10 @@ async fn acp_probe_at(
             };
             let detail = if matches!(
                 kind,
-                AdapterKind::ZcodeApp | AdapterKind::DeepseekHarness | AdapterKind::ClineCli
+                AdapterKind::ZcodeApp
+                    | AdapterKind::DeepseekHarness
+                    | AdapterKind::ClineCli
+                    | AdapterKind::CommandCodeCli
             ) && missing.is_empty()
             {
                 Some("Native configuration and basic connection checked in a temporary workspace; no prompt sent. Model generation, balance and advanced capabilities were not tested. Native initialization may access the network and write state.".to_string())
@@ -1952,11 +1962,12 @@ async fn run_acp_probe_with_scope(
     };
     match result {
         Ok(result) => Ok(result),
-        Err(_) if kind == AdapterKind::ClineCli => {
+        Err(_) if matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli) => {
             // Native diagnostics and RPC error bodies can contain BYOK
             // settings. The probe only publishes a stable failure category.
             Err(anyhow::anyhow!(
-                "Cline ACP probe failed; check its native provider configuration"
+                "{} ACP probe failed; check its native provider configuration",
+                kind.as_str()
             ))
         }
         Err(error) if stderr.bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
@@ -2007,6 +2018,36 @@ pub(crate) fn select_grok_noninteractive_auth_method(
         "Grok Build ACP did not advertise a non-interactive authentication method \
          (expected cached_token or xai.api_key; advertised: {advertised}). \
          Run `grok login` or `grok login --device-auth` before retrying account authentication"
+    )
+}
+
+pub(crate) async fn inspect_command_code_native_mcp_server_names(
+    executable: &Path,
+    cwd: &Path,
+) -> Result<BTreeSet<String>> {
+    if !runtime_launch_allowed(
+        AdapterKind::CommandCodeCli,
+        RuntimeLaunchPurpose::DispatchPreflight,
+    ) {
+        bail!("runtime_launch_disallowed:dispatch_preflight");
+    }
+    let mut command = runtime_command(executable, Some(AdapterKind::CommandCodeCli));
+    command
+        .args(["mcp", "list"])
+        .current_dir(cwd)
+        .env("COMMANDCODE_SKIP_UPDATES", "1")
+        .env("NO_COLOR", "1")
+        .env("FORCE_COLOR", "0");
+    let output = bounded_output(&mut command, Duration::from_secs(15))
+        .await
+        .map_err(|_| anyhow::anyhow!("command_code_native_mcp_inspection_failed"))?;
+    anyhow::ensure!(
+        output.status.success() && !output.stdout.truncated,
+        "command_code_native_mcp_inspection_failed"
+    );
+    crate::command_code_acp::native_mcp_names(
+        std::str::from_utf8(&output.stdout.bytes)
+            .context("command_code_native_mcp_list_invalid")?,
     )
 }
 
@@ -2427,6 +2468,9 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::KimiCodeCli => {
             command.arg("acp");
         }
+        AdapterKind::CommandCodeCli => {
+            command.arg("acp").env("COMMANDCODE_SKIP_UPDATES", "1");
+        }
         AdapterKind::ClineCli => {
             command
                 .args([
@@ -2534,7 +2578,10 @@ fn acp_observed_capabilities(
             .to_string(),
         );
     }
-    if matches!(kind, AdapterKind::DeepseekHarness | AdapterKind::ClineCli) {
+    if matches!(
+        kind,
+        AdapterKind::DeepseekHarness | AdapterKind::ClineCli | AdapterKind::CommandCodeCli
+    ) {
         capabilities.retain(|capability| capability != "workspace.additional_roots");
     }
     if kind == AdapterKind::DeepseekHarness {
@@ -2548,7 +2595,7 @@ fn acp_observed_capabilities(
 }
 
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
-    if kind == AdapterKind::ClineCli {
+    if matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli) {
         return [
             "acp.initialize",
             "session.new",
@@ -2669,6 +2716,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
             | AdapterKind::TraeCnCli
             | AdapterKind::GrokBuild
             | AdapterKind::DeepseekHarness
+            | AdapterKind::CommandCodeCli
             | AdapterKind::ClineCli
     )
 }
@@ -3552,6 +3600,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         AdapterKind::GrokBuild => (&["ROVAI_GROK_BIN"][..], "grok"),
         AdapterKind::DeepseekHarness => (&["ROVAI_DEEPSEEK_HARNESS_BIN"][..], "dsh"),
         AdapterKind::ClineCli => (&["ROVAI_CLINE_BIN"][..], "cline"),
+        AdapterKind::CommandCodeCli => (&["ROVAI_COMMAND_CODE_BIN"][..], "command-code"),
         AdapterKind::ZcodeApp => {
             return rovai_core::zcode::default_executables()
                 .into_iter()
@@ -3946,6 +3995,21 @@ done
         assert_eq!(arguments(AdapterKind::TraeCnCli), ["acp", "serve"]);
         assert_eq!(arguments(AdapterKind::CursorAgent), ["acp"]);
         assert_eq!(arguments(AdapterKind::KimiCodeCli), ["acp"]);
+        assert_eq!(arguments(AdapterKind::CommandCodeCli), ["acp"]);
+        assert_eq!(
+            crate::command_code_acp::native_mcp_names("\nNo MCP servers configured\n").unwrap(),
+            BTreeSet::new()
+        );
+        assert_eq!(crate::command_code_acp::native_mcp_names("MCP Servers\n NAME TYPE SCOPE AUTH STATUS\n native stdio user - enabled\n disabled http project x disabled\n Total: 2 servers\n").unwrap(),
+            BTreeSet::from(["native".to_owned(), "disabled".to_owned()]));
+        for invalid in [
+            "NAME TYPE SCOPE AUTH STATUS\nnative stdio project x enabled",
+            "NAME TYPE SCOPE AUTH STATUS\nTotal: 9 servers",
+            "unknown format",
+            "\x1b[31mNo MCP servers configured",
+        ] {
+            assert!(crate::command_code_acp::native_mcp_names(invalid).is_err());
+        }
         assert_eq!(
             arguments(AdapterKind::GrokBuild),
             ["--no-auto-update", "agent", "--no-leader", "stdio"]

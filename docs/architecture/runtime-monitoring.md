@@ -114,8 +114,11 @@ Host 同时将原生 `settings/models.json` 中显式的 `contextWindow` 冻结�
 observer 以实际调用返回的 Provider 与模型 ID 精确匹配后补窗口；目录由现有 native configuration digest 栅栏，
 不猜别名、不使用压缩回退或最大可选窗口。窗口和 used 独立，缺字段仍未知；此只读路径不访问 Provider 网络。
 配置缺窗口时，可先独立核验 Provider 对精确模型的元数据，再由原生配置明确生效；不把手动同步说成自动发现。
-原生比例和费用缺失时保持未知。Cline 仍未取得平台资格；Command Code 的等价数值帧
-目前只接内部 headless transport，尚无 Product AgentRun 消费者。真实字段与验收层级见
+原生比例和费用缺失时保持未知。Cline 仍未取得 First-Class 资格。
+Command Code ACP 的 `usage_update.used/size` 作为 Session Gauge，`session/prompt` 结果的 `_meta.usage`
+四个字段作为当前 prompt 的 Delta，input 包含缓存，归一化时扣除 read/write 得到 uncached；同结果的 `usage` 是 Session 累计，禁止入账。原生累计 Session
+cost 缺少安全的跨 Run baseline，按现有 OpenCode 边界保持 Run 费用未知；没有 reasoning 字段时保持 NULL。
+旧 headless 数值帧只保留内部研究路径。真实字段与验收层级见
 [两条 Runtime 数值核验](../research/runtime-monitoring/command-cline-verification-2026-10-04.md)及
 [窗口补采复核](../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
 

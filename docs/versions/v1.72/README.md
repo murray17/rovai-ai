@@ -41,11 +41,15 @@ Cline observer v2 补齐原生模型配置快照与实际 Provider/模型匹配�
 
 Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
 macOS arm64 按 [V1.72-D13](decisions.md#v1-72-d13)开放开发 `Preview`，其余平台保持 `NotQualified`；
-完整资格仍在实施。Command Code 仍无 Product Adapter。
-其已确认的 [first_payload revision 4](model-context-change-command-code.md)移入当前版本，
-理由由 [V1.72-D12](decisions.md#v1-72-d12)拥有；指标补充没有改变模型输入。
-Cline 的 [Plugin Rule 上下文提案](../../research/cline-runtime/model-context-change-v1.70-proposal.md)
-仍独立待确认，不能借 Command 的确认更换其 Bootstrap 层级。
+完整资格仍在实施。Command Code 随后接入官方 1.74.1 ACP 与共享 Fleet，Migration 185 升至 schema **135**，
+也仅在 macOS arm64 开放 Preview。按 User 后续修复要求，Bootstrap 从旧候选 first_payload 改为受管
+System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D15](decisions.md#v1-72-d15)
+记录加载门禁、逐 Session 绑定与失败收敛。Cline System Rule 已获继续修复授权，但缺失 Plugin 仍调用模型的
+反例尚未解决，故保留现有 first_payload；当前未完成项不能解释成等待重复确认。
+共享 Core 的 Command 门禁与常驻接线已过；原生默认 BYOK 路径已解决先前额度阻碍，真实模型 A→B→A、
+exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证通过。显式自定义模型切换仍被上游拒绝，
+因此保留原生默认哨兵而不伪造目录。Cline ACP 未传 compaction 配置，真实探针未得到完成信号。完整 14 轴对照与实际验证见
+[最新 Checklist](../../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
 
 本切片更新 Runtime Catalog/Monitoring 架构、兼容性清单、研究矩阵、测试说明与当前决定导航。
 活动目录加入 Cline 的保守 run_level 条目，复用既有 ACP typed kind，不改变 activity-v4 或旧 Runtime 解释。

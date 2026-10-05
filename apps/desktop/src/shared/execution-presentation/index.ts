@@ -456,6 +456,7 @@ export function runtimeAdapterDisplayLabel(kind: string): string {
     'grok-build': 'Grok',
     'deepseek-harness': 'DSH',
     'cline-cli': 'Cline',
+    'command-code-cli': 'Command Code',
     'zcode-app': 'ZCode',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind

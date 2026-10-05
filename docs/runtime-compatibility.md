@@ -22,13 +22,21 @@ Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core 
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
 
-## Command Code 研究状态
+## Command Code 接入实施状态
 
-Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。2026-09-25 又用官方 1.65.2、隔离的现有 BYOK 配置和 `sub2api/gpt-6-sol` 真实完成原生生成、同 UUID 续接、read/edit/command 与手动 compact 后恢复；范围及失败语义见[真实 Smoke](research/command-code-runtime/real-byok-smoke-2026-09-25.md)。这些调用没有经过 Rovai AgentRun 或 App Camp。其曾在 v1.68 基线确认的普通 Prompt 引导见[研究提案 revision 3](research/command-code-runtime/prompt-guidance-proposal.md)；合并后的 [revision 4](versions/v1.72/model-context-change-command-code.md)已在 2026-09-27 确认，复用共享 first_payload。当前 Command Code 不在 Product Runtime Catalog，所有目标平台均未取得准入或资格证据。
+Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。2026-09-25 又用官方 1.65.2、隔离的现有 BYOK 配置和 `sub2api/gpt-6-sol` 真实完成原生生成、同 UUID 续接、read/edit/command 与手动 compact 后恢复；范围及失败语义见[真实 Smoke](research/command-code-runtime/real-byok-smoke-2026-09-25.md)。这些调用没有经过 Rovai AgentRun 或 App Camp。其曾在 v1.68 基线确认的普通 Prompt 引导见[研究提案 revision 3](research/command-code-runtime/prompt-guidance-proposal.md)；合并后的 [revision 4](versions/v1.72/model-context-change-command-code.md)已在 2026-09-27 确认，复用共享 first_payload。以上属于旧 headless 路径；当前产品路径见下段。
 
 2026-10-04 使用官方 1.66.0 经 Core headless transport 完成真实首次、精确恢复与多工具调用：四个 token 桶的逐调用和与原生 result 完全对齐，最新调用输入独立形成运行中的 Context used。窗口/比例/成本未知；仍无 Product AgentRun 和 App 证据。见[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
 
-2026-10-05 官方 1.74.1 ACP 实测同 PID 多 Session 控制面与 context size；现有 BYOK 模型被拒、原生账号余额不足，生成/warm/compact 资格未通过。详见[最新 14 轴对照](research/runtime-monitoring/command-cline-checklist-2026-10-05.md)，不能继续声称上游没有 ACP。
+2026-10-05 官方 1.74.1 ACP 接入共享 Core Host/Fleet 和 Product identity `command-code-cli`，Migration 185
+升级 schema 135，macOS arm64 为 Preview，其他平台 NotQualified。Bootstrap 改为带加载/绑定门禁的官方
+System Mod；真实 Core 门禁、同 PID A→B→A、五种 mode、原生 BYOK 模型生成、warm/exact cold、手动及自动
+压缩后身份/记忆保留已通过。隔离 App 中芝士已切换 Command Code，真实读写中文/空格路径、可点击 +1/−1、
+内置 CLI 公开发送、warm 与 App/Core 重启恢复通过。ACP 的 `session/set_model` 拒绝自定义 ID，但原生
+config.json.model 默认值可使用同一 BYOK；目录缺省补 runtime-default 哨兵，不伪造可选模型。
+prompt 四桶按输入已含缓存归约，标准 usage_update 提供本次实测 272000 窗口；Session 累计用量/费用
+不冒领为 Run。非零 shell exit 仅见文本、无结构化退出码。完整矩阵仍未取得 First-Class；详见
+[最新 14 轴对照](research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
 
 ## Cline 接入实施状态
 
@@ -38,13 +46,13 @@ Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下�
 后续从原生 models.json 精确匹配容量，真实 App 已取得 272k 窗口与比例，费用仍未知。详见[窗口补采](research/runtime-monitoring/command-cline-context-window-2026-10-05.md)、[Cline 矩阵](research/cline-runtime/README.md)和[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
 内部 closed identity、发现/Host/Skill/数据库接线已存在，Migration 184 升级 schema 134；
 macOS arm64 开放开发 `Preview`，其余平台保持 `NotQualified`；Preview 不带资格 evidence，
-AgentRun/App 主路径已通过；Bootstrap、compaction 与 First-Class 全矩阵仍未通过。本轮补齐 compaction policy 注册和数值展示，真实插件缺失负向测试仍阻断 System Rule 切换。
+AgentRun/App 主路径已通过；Bootstrap、compaction 与 First-Class 全矩阵仍未通过。本轮补齐 compaction policy 注册和数值展示，真实插件缺失负向测试仍阻断 System Rule 切换。固定版本 ACP buildConfig 不传 compaction 配置；原生设置显式启用后，真实预算探针仍无压缩事件。
 
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十七种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
+当前 closed `AdapterKind` 包含十八种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
-Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness 与实施中的 Cline。Cline identity 的存在不代表 First-Class 或平台已准入。
+Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。后两者只有 macOS arm64 Preview，identity 不代表 First-Class。
 Cursor 在三个目标平台均为 `not_qualified`；Pi、Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。Pi 三个平台分别绑定自己的 adapter-scoped evidence，不继承通用 macOS/Windows、
 Kimi 或 Grok 的平台结论。

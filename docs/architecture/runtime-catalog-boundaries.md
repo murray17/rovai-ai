@@ -41,11 +41,34 @@ selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并�
 后两者不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
 可以原样读取并在修改无关队员字段时原样保留，但不能修改 Runtime 子对象、重新保存默认值或执行。
 
-## Command Code 研究接入边界
+<a id="command-code-研究接入边界"></a>
+## Command Code ACP 实施边界
 
-Command Code 目前只有内部 one-shot headless NDJSON 传输；1.66.0 已取得真实模型的逐调用 Usage/Context 与精确恢复证据，不属于 closed `AdapterKind`、Product Runtime Catalog 或 Settings Preview。其候选 AgentRun 模型输入复用既有 `CharterDeliveryMode::FirstPayload`：Core 按冻结 Context 证据选择新 Session 的 Bootstrap 与 Dynamic Context 合成，普通精确恢复只交付当次 Dynamic Context；受管 Bootstrap 不通过 `--mod` 或共享 `AGENTS.md` 投递。该 Bootstrap 在 Command Code 中是普通用户消息，不能冒称 System/Developer 级指令。合格压缩补发只有在该 Runtime 的信号与恢复行为获得证据后才能启用或宣称有效。
+`command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
+Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
+原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
+[V1.72-D15](../versions/v1.72/decisions.md#v1-72-d15)仅在 macOS arm64 开放开发 Preview，其余平台
+NotQualified；没有 qualification evidence，不声称 First-Class。旧 headless 传输只保留研究/兼容测试。
 
-此输入选择曾在 v1.68 基线上由[研究提案 revision 3](../research/command-code-runtime/prompt-guidance-proposal.md)确认；合并后的当前基线由[当前版本 revision 4](../versions/v1.72/model-context-change-command-code.md)二次确认。[V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12)只对 Command Code 接受普通用户消息层级的差异，不把它误称高权限注入。权限、MCP/Skill/Taste 隔离、真实认证、Usage 和逐平台 Golden Flows 仍由[接入清单](../development/runtime-integration-checklist.md)与[研究矩阵](../research/command-code-runtime/parity-matrix.md)逐项验收。正式 Catalog identity 必须满足下述原子准入，不能用已实现的公共 FirstPayload 或 ManagedProcess 代替 Command Code 证据。
+Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
+Host 私有 Home 保留原生 auth/provider/Skill/Mod/Session 路径，仅覆盖私有 settings 的 `mods.paths`，通过
+官方 `appendSystemPrompt({state})` 按 `state.sessionId` 读取完整冻结 Bootstrap。工厂注册完成后写入带
+随机 nonce/当前 PID 的 readiness；Core 在 initialize 后校验，缺失则关闭 Host 且不发 prompt。每次
+hook 检查绑定、摘要和预算，异常直接停止进程，避免上游捕获普通异常后继续。A/B 不共享 active Bootstrap 指针，
+cold Host 重新绑定原冻结字节。原生 System 保留并追加 B，用户 prompt 只含 P；不改项目 AGENTS.md。
+
+配置 digest 覆盖原生认证/provider/settings、Mod 源、环境与 MCP；项目 MCP 按原生 projects 下的具名
+配置文件保守失效，不读取历史。显式模型来自 ACP 真实目录；原生配置中的默认 BYOK ID 若不在目录中，
+以 runtime-default 哨兵保留默认选择。该 ID 不伪装成 session/set_model 可选项，实际模型仍按原生 Session 记录。
+原生五种权限原值传给 session/set_mode，默认 bypass，审批响应仍由共享 ACP 原生请求路径承载。
+External MCP 使用标准 session mcpServers；同名采用已存在的 `native_wins_skip`，先通过官方 `mcp list`
+发现有效名称并冻结冲突结果。发现失败/格式漂移阻断投影；不把被原生遮蔽的 Assignment 标为可用。
+原生连接失败可能继续建立 Session，因此握手和配置可见性不是 MCP 调用成功证明。
+
+1.74.1 共享 Core Host 门禁和同 PID A→B→A 控制面已过；以原生默认 sub2api/gpt-6-sol 真实完成模型
+A→B→A、exact cold、文件工具、原生 allow/deny/cancel、手动及自动压缩后连续性。隔离 App 的首次/warm/
+Core 重启、CLI 公开发送、文件 +/− 与 272000 Context 窗口通过。费用与非零命令状态等未取得结构化字段的
+边界保持未知，不提升 First-Class；详见[完整 Checklist 对照](../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
 
 ## Cline 实施边界
 
@@ -58,7 +81,7 @@ Cline 使用官方 `cline --acp` 与共享 Host/Fleet，原生配置由 Cline �
 见[开发包验收](../research/cline-runtime/app-send-verification-2026-10-04.md)。这些主路径证据不是
 First-Class 资格；[真实证据矩阵](../research/cline-runtime/README.md)仍有 Bootstrap、压缩连续性、
 权限失败及 Skills/MCP 隔离矩阵缺口。
-数值 observer 只读，不改变模型输入；尚未确认的 Plugin Rule 不能因 Command 的确认自动实施。
+数值 observer 只读，不改变模型输入。User 已要求修复 System 层级，但原生可选 Plugin 的缺失负向测试仍会继续调用模型，故保持 first_payload；这不是等待再次授权。3.0.65 的 ACP buildConfig 未传 compaction，真实开启全局设置仍未观察到压缩，不能把普通回复宣称为压缩连续性。
 
 ## 可执行准入
 

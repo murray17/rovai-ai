@@ -244,6 +244,10 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 - 当前规范：[Member Creation Flow v1](../contracts/member-creation-flow-v1.md)、[Pending Camp Activation v4](../contracts/pending-camp-activation-v4.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md#ai-队员创建)、[队员身份与图像](../ui/components/member-identity.md#添加队员与名册排序)。
 - 独立静态回执及窗口内草稿的取舍：[V1.72-D09](../versions/v1.72/decisions.md#v1-72-d09)。
 
-Command Code 的已确认 `first_payload` 差异由 [V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12) 记录；[完整 revision 4](../versions/v1.72/model-context-change-command-code.md)保留原确认，运行时范围由 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md#command-code-研究接入边界) 拥有。
+Command Code 的旧 headless `first_payload` 差异由 [V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12) 记录；[完整 revision 4](../versions/v1.72/model-context-change-command-code.md)保留原确认，运行时范围由 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md#command-code-研究接入边界) 拥有。
 
 Cline 的 macOS arm64 开发预览由 [V1.72-D13](../versions/v1.72/decisions.md#v1-72-d13) 记录；当前范围由 [Cline 实施边界](../architecture/runtime-catalog-boundaries.md#cline-实施边界)与 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有。
+
+Command Code 官方 ACP、System 门禁及 macOS arm64 Preview 由 [V1.72-D15](../versions/v1.72/decisions.md#v1-72-d15)
+记录；当前范围由 [Command Code ACP 边界](../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)
+及 [revision 5 输入说明](../versions/v1.72/model-context-change-command-code-acp.md)拥有。

@@ -43,6 +43,7 @@ export type AdapterKind =
   | 'zcode-app'
   | 'deepseek-harness'
   | 'cline-cli'
+  | 'command-code-cli'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'

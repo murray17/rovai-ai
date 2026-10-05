@@ -239,6 +239,8 @@ function runtimeParametersFor(
           <PermissionSwitch {...props} fieldKey="auto_approve" label={uiAttribute("自动通过权限请求")} enabledValue="true" disabledValue="false" />
         </div>
       )
+    case 'command-code-cli':
+      return <div className="runtime-parameter-form">{modelFieldsFor('command-code-cli', props)}<PermissionSelect {...props} fieldKey="permission_mode" label={uiAttribute("权限模式")} /></div>
     case 'zcode-app':
       return <div className="runtime-parameter-form">{modelFieldsFor('zcode-app', props)}<PermissionSelect {...props} fieldKey="permission_mode" label={uiAttribute("权限模式")} /></div>
     case 'antigravity-app':
@@ -411,6 +413,7 @@ function modelFieldsFor(
   props: RuntimeParameterProps
 ): React.JSX.Element {
   switch (adapterKind) {
+    case 'command-code-cli':
     case 'claude-code-cli':
       return <ModelFields {...props} optionKey="effort" optionLabel={uiAttribute("思考强度")} />
     case 'codex-cli':

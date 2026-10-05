@@ -74,6 +74,7 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
   'cline-cli': clineLogo,
+  'command-code-cli': new URL('./assets/runtime-logos/command-code.ico', import.meta.url).href,
   'zcode-app': zcodeLogo,
   'antigravity-app': antigravityLogo
 }
@@ -94,6 +95,7 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'grok-build': 'Grok Build',
   'deepseek-harness': 'DeepSeek Harness',
   'cline-cli': 'Cline',
+  'command-code-cli': 'Command Code',
     'zcode-app': 'ZCode',
   'antigravity-app': 'Antigravity'
 }

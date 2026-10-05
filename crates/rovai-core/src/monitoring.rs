@@ -2039,6 +2039,9 @@ fn eligible_mask(runtime: AdapterKind, _runtime_version: Option<&str>) -> i64 {
             ELIGIBLE_PROMPT_INPUT_TOTAL | ELIGIBLE_CACHE_READ | ELIGIBLE_OUTPUT
         }
         AdapterKind::ClineCli => full_tokens,
+        AdapterKind::CommandCodeCli => {
+            full_tokens & !(ELIGIBLE_REASONING_OUTPUT | ELIGIBLE_REQUEST_CACHE_HIT)
+        }
         AdapterKind::DeepseekHarness => {
             ELIGIBLE_UNCACHED_INPUT
                 | ELIGIBLE_CACHE_READ
@@ -3502,8 +3505,11 @@ pub fn parse_acp_usage_message(
             }
         }
 
-        let cost = if adapter_kind == AdapterKind::OpencodeCli {
-            // OpenCode reports totalSessionCost(messages) here, not the current
+        let cost = if matches!(
+            adapter_kind,
+            AdapterKind::OpencodeCli | AdapterKind::CommandCodeCli
+        ) {
+            // These adapters report total Session cost here, not the current
             // Turn/Run cost. A Run projection requires a Native Session-scoped
             // baseline, which the minimal Usage model intentionally does not own.
             None
@@ -3575,8 +3581,25 @@ pub fn parse_acp_usage_message(
         // stays unknown instead of presenting this tail as a complete Run.
         return Vec::new();
     }
-    let usage = params.pointer("/result/usage").unwrap_or(&Value::Null);
+    let usage = params
+        .pointer(if adapter_kind == AdapterKind::CommandCodeCli {
+            "/result/_meta/usage"
+        } else {
+            "/result/usage"
+        })
+        .unwrap_or(&Value::Null);
     let (dialect_id, input_semantics, fields) = match adapter_kind {
+        AdapterKind::CommandCodeCli => (
+            "command-code-acp-prompt-usage-v1",
+            RuntimeInputSemantics::CacheInclusiveTotal,
+            RuntimeUsageFields {
+                input_tokens: integer_at_any(usage, &["/inputTokens"]),
+                output_tokens: integer_at_any(usage, &["/outputTokens"]),
+                cache_read_input_tokens: integer_at_any(usage, &["/cacheReadTokens"]),
+                cache_write_input_tokens: integer_at_any(usage, &["/cacheWriteTokens"]),
+                ..Default::default()
+            },
+        ),
         AdapterKind::CopilotCli => (
             "acp-copilot-usage-v2",
             RuntimeInputSemantics::CacheInclusiveTotal,
@@ -5476,6 +5499,56 @@ mod tests {
             );
             assert_eq!(normalized.output_tokens, usage["outputTokens"].as_i64());
         }
+        // Command Code result.usage is cumulative across the native Session;
+        // only _meta.usage is a current-prompt delta. Warm reuse must not
+        // double-charge previous turns or turn a context gauge into input.
+        let mut command = json!({"sessionId":"command-session","result":{
+            "usage":{"inputTokens":9000,"outputTokens":1000},
+            "_meta":{"usage":{"inputTokens":105,"outputTokens":7,"cacheReadTokens":80,"cacheWriteTokens":5}}}});
+        let parsed = parse_acp_usage_message(
+            AdapterKind::CommandCodeCli,
+            Some("1.74.1"),
+            "rovai/acp_prompt_completed",
+            &command,
+        );
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].counter_mode, RuntimeUsageCounterMode::Delta);
+        assert_eq!(
+            normalize_usage(&parsed[0])
+                .unwrap()
+                .prompt_input_total_tokens,
+            Some(105)
+        );
+        assert_eq!(parsed[0].fields.reasoning_output_tokens, None);
+        command["result"]["_meta"] = json!({});
+        assert!(
+            parse_acp_usage_message(
+                AdapterKind::CommandCodeCli,
+                None,
+                "rovai/acp_prompt_completed",
+                &command
+            )
+            .is_empty()
+        );
+        let command_context = parse_acp_usage_message(
+            AdapterKind::CommandCodeCli,
+            Some("1.74.1"),
+            "session/update",
+            &json!({"sessionId":"command-session","update":{"sessionUpdate":"usage_update","used":720,"size":1000000,"cost":{"amount":0.004,"currency":"USD"}}}),
+        );
+        assert_eq!(
+            command_context[0].counter_mode,
+            RuntimeUsageCounterMode::Gauge
+        );
+        assert_eq!(command_context[0].fields.context_size_tokens, Some(1000000));
+        assert_eq!(command_context[0].fields.input_tokens, None);
+        assert_eq!(
+            command_context.len(),
+            1,
+            "Session cumulative cost must not be charged to this Run"
+        );
+        assert!(command_context[0].cost.is_none());
+
         let cline = parse_acp_usage_message(
             AdapterKind::ClineCli,
             Some("3.0.65"),

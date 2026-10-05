@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:9ceedde15fe69a6f441d53ec83a86f5e146a77251e165f28e624cfb5f526bcff";
+    "sha256:31c6adbea9046c61a921877678bd6f8850e598946a823e309cebda9745e7cf5b";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -331,7 +331,9 @@ mod tests {
                                 Some(DSH_LINUX_X64_EVIDENCE_REVISION)
                             );
                         }
-                        AdapterKind::CursorAgent | AdapterKind::ClineCli => {
+                        AdapterKind::CursorAgent
+                        | AdapterKind::ClineCli
+                        | AdapterKind::CommandCodeCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -413,6 +415,7 @@ mod tests {
                 runtime_kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
+                    | AdapterKind::CommandCodeCli
                     | AdapterKind::ZcodeApp
                     | AdapterKind::DeepseekHarness
             ) {
@@ -474,6 +477,7 @@ mod tests {
                 kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
+                    | AdapterKind::CommandCodeCli
                     | AdapterKind::Pi
                     | AdapterKind::GrokBuild
                     | AdapterKind::ZcodeApp
@@ -492,10 +496,14 @@ mod tests {
             }
         }
         for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
-            for kind in [AdapterKind::CursorAgent, AdapterKind::ClineCli] {
+            for kind in [
+                AdapterKind::CursorAgent,
+                AdapterKind::ClineCli,
+                AdapterKind::CommandCodeCli,
+            ] {
                 let admission = registry.platform_admission(kind, platform);
-                let preview =
-                    kind == AdapterKind::ClineCli && platform == HostPlatformKey::MacosArm64;
+                let preview = matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli)
+                    && platform == HostPlatformKey::MacosArm64;
                 assert_eq!(
                     admission.status(),
                     if preview {

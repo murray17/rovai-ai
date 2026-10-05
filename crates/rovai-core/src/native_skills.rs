@@ -602,6 +602,9 @@ fn user_roots(
             );
         }
         AdapterKind::ZcodeApp => paths.push(home.join(".zcode/skills")),
+        AdapterKind::CommandCodeCli => {
+            paths.push(home.join(".commandcode/skills"));
+        }
         AdapterKind::ClineCli => {
             paths.push(
                 configured_root("CLINE_DIR", home.join(".cline"), configuration).join("skills"),
@@ -658,6 +661,7 @@ fn project_roots(adapter: AdapterKind, project: &Path) -> Vec<(&'static str, Pat
         AdapterKind::GrokBuild => &[".grok/skills"],
         AdapterKind::DeepseekHarness => &[".dsh/skills", ".agents/skills"],
         AdapterKind::ClineCli => &[".cline/skills", ".agents/skills", ".clinerules/skills"],
+        AdapterKind::CommandCodeCli => &[".commandcode/skills"],
         AdapterKind::ZcodeApp => &[".zcode/skills"],
         AdapterKind::AntigravityApp => &[".agents/skills", ".agent/skills"],
     };

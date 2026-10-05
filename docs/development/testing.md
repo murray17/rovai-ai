@@ -100,7 +100,7 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 | `command_code::tests::usage_counts_root_calls_once_and_keeps_context_separate` | root start/end 配对、终态重述/子事件去重、稀疏桶和最新 Context；现有 decoder 只拥有帧和权威终态，不能证明计量语义。纯事件进入默认层 |
 | `cline::tests::observer_records_are_private_bounded_and_owned_by_one_prompt` | 新的官方 Plugin 文件边界：精确 lease、跨 Run/重复序号、预算、只读 poll 与终态消费；复用单个最小临时目录，归入 extended-tests。纯 DTO 不能证明文件隔离/消费 |
 | `cline::tests::host_overlay_preserves_native_paths_and_fences_config_changes` | Host 私有配置必须保留原生路径/插件、合并 MCP、限制文件权限并感知 credential 变化；最小文件 fixture，归入 extended-tests，不启动进程/数据库/模型 |
-| `db::tests::cline_catalog_migration_preserves_rows_and_rolls_back_with_its_receipt` | 新的已部署 schema 133 来源，七个 CHECK 表及其触发器/收据/marker 必须在故障后整体回滚；沿用 extended-tests 数据库 owner 层级。旧 DSH migration 不拥有此来源；纯函数无法证明事务回滚与重开 |
+| `db::tests::runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` | 新的已部署 schema 133 来源，七个 CHECK 表及其触发器/收据/marker 必须在故障后整体回滚；沿用 extended-tests 数据库 owner 层级。旧 DSH migration 不拥有此来源；纯函数无法证明事务回滚与重开 |
 
 真实 `isolated_command_code_reports_live_calls_and_exact_resume_usage` 和
 `isolated_cline_acp_host_observes_warm_and_exact_cold_prompts` 使用显式原因的 ignored Smoke，
@@ -133,7 +133,7 @@ Cline 窗口补采扩展既有 observer/config 两个 Rust owner 和 `scripts/li
 
 最小命令：`cargo test -p rovai-core --features extended-tests --lib command_code::tests::`、
 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`、
-`cargo test -p rovai-core --features extended-tests --lib cline_catalog_migration_preserves_rows_and_rolls_back_with_its_receipt`；
+`cargo test -p rovai-core --features extended-tests --lib runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`；
 其余定向与真实 Smoke 命令见上述验收记录，默认 workspace 门禁仍按下方路由。
 
 ## Thread 执行查询
@@ -977,3 +977,32 @@ owner，覆盖已安装指标 schema 129 和 main Thread schema 128 两条路径
 `fresh_schema_database_at`，沿用 `extended-tests`；不新增 Rust owner。既有 Session Context 迁移
 owner 继续拥有指标数量保留与 127/128 升级；默认 workspace 与字段级回归另行执行。
 最低命令：`cargo test -p rovai-core --features extended-tests --lib thread_upgrade_preserves_existing_tables_and_rolls_back_on_receipt_failure`。
+
+## Command Code 官方 ACP 增量（2026-10-05）
+
+合并后的 catalog migration owner 同时保留 Migration 184/schema 133 和 185/schema 134 的来源、行数、
+故障回滚及重开断言，没有退役旧边界。Tool、Usage、权限、MCP 名称和平台 case 扩展已有最低层 owner。
+新增 ignored `isolated_command_code_acp_bootstrap_gate_and_resident_sessions` 拥有真实官方 Mod 在 initialize
+前加载、同 PID A→B→A 控制 RPC 与缺失绑定结束真实 Host 的跨进程边界；fixture 无法证明原生可选 Mod
+执行位置。它要求显式隔离 Home/可执行文件，不默认联网调用模型。`scripts/lib/command-code-bootstrap.test.mjs`
+拥有 Node hook 的 A/B 绑定及缺失/摘要/预算负例，已纳入 `pnpm test`。
+
+
+Command Code 原生配置指纹回归由
+`command_code_acp::tests::native_configuration_tracks_scoped_mod_sources_without_hashing_history` 拥有。
+新增此默认 Rust owner 的原因是没有既有测试覆盖其官方 Mod scope：同一嵌套 cwd 下，用户相对路径、
+项目相对路径、自动发现 Mod 和本地 source 的正文变化必须使配置不兼容，而 Session 历史追加必须不改变
+配置指纹；非法 settings 必须拒绝。这是保留 Host/Native Binding 的跨文件行为门禁，不是枚举快照测试。
+
+真实 App 拒绝审批暴露 Cline 在执行前只发送 `tool_call_update.pending → failed`，缺少 `tool_call` 时
+原配对器会退出读取，Run 停在 waiting。新增最低层纯状态 owner
+`acp::tests::paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`：拥有权限提案的
+稀疏失败、原生重复失败、权限通知不提前生成审计结果、后续 completed/result 仍保留拒绝结果，以及相同 Tool ID 在不同
+Session/Prompt 的隔离；成功但没有初始输入仍拒绝。
+现有 completion/路径 owner 没有配对状态，不能证明此回归；该测试不启动数据库或进程，沿用 ACP 的
+`extended-tests` 路由。最小命令：`cargo test -p rovai-core --features extended-tests --lib paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`。
+
+Run 权限刷新扩展既有 `kimi_completed_run_keeps_the_warm_session_and_idle_compaction_observer`：
+第二轮冻结 mode 改为 plan，仍断言同 Host/Session，并直接核对原生 RPC 先 default 后 plan。
+Cline/Command Code 同样将动态配置移到 AcpRuntime，不再由 Host 保存旧值；两者的模式切换及执行行为
+由隔离 packaged App 真实验证。未新增平行进程 fixture。

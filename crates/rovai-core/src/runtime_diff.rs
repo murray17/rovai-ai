@@ -174,6 +174,10 @@ fn admit_candidate(
                 && source_event_kind == "tool.updated.result"
                 && semantic_kind == "zcode_edit_patch"
         }
+        AdapterKind::CommandCodeCli if semantic_kind == "reported_mutation" => {
+            protocol_family == "acp-v1"
+                && source_event_kind == "session/update.tool_call_update.completed.edit_file"
+        }
         AdapterKind::ClineCli if semantic_kind == "reported_mutation" => {
             protocol_family == "acp-v1"
                 && matches!(

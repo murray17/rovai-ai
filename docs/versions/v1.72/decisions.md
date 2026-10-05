@@ -334,3 +334,26 @@ Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation �
 持久化语义增加一个可选种类，后续读取必须继续区分完整状态、精确替换与原生补丁。接受不能由片段获得净差异、
 行号及实际旧字节的限制；不会据此提升 Runtime 资格。没有选择执行前后读取文件或 Git 捕获，因为并发写入、非 Git
 工作区及完整状态归属会引入另一套观测权威。继续只显示路径可保持旧边界，却不能满足用户审阅已执行修改的要求。
+
+<a id="v1-72-d15"></a>
+## V1.72-D15：Command Code 使用官方 ACP 与必需 System Mod 开发预览
+
+- 状态：accepted
+- 日期：2026-10-05
+- 当前权威：[Command Code ACP 边界](../../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)、[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)
+
+### 背景与选择
+
+User 在消息 `677d610d-e4cf-4ffb-aba2-d4ebb021cbcd` 与 `1bd0ab39-6939-40cd-9653-b472b3b69082`
+要求修复 System Bootstrap、warm 及全部可接能力。1.74.1 已有官方多 Session ACP，继续仅用 one-shot 会
+丢失可接的常驻能力。选择共享 ACP Host/Fleet，macOS arm64 开放 Preview；新产品路径采用带 readiness 与
+逐 Session 绑定校验的官方 System Mod，替代 D12 的候选 first_payload。完整输入变化由
+[revision 5](model-context-change-command-code-acp.md)记录，Cline 的缺失插件反例独立保留。
+
+### 后果与替代方案
+
+原生 Mod 普通异常会被吞掉，所以必需绑定失败必须结束 Host。一个 Host 内其他 Session 随之失去驻留，但
+可按精确绑定恢复；正确 Bootstrap 优先于保留失效进程。私有设置覆盖保留原生账号、模型和历史权威。
+MCP 同名选择已有 native_wins_skip，避免改写原生全局/项目配置；冲突 Assignment 明确不可用。
+未选择自造 ACP 代理或继续每轮 one-shot；也未将 handshake 和控制命令冒称模型 warm。
+Preview 不代表完整资格：原生账号额度、自定义 BYOK 目录和压缩等未验证轴仍公开记录。

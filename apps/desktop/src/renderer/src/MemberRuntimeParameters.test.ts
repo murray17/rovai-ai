@@ -306,6 +306,7 @@ describe('member runtime parameters', () => {
     ['trae-cn-cli', '权限模式', 'bypass_permissions'],
     ['kimi-code-cli', '权限模式', 'yolo'],
     ['cline-cli', '执行模式', 'act'],
+    ['command-code-cli', '权限模式', 'bypass'],
     ['grok-build', '权限模式', 'bypassPermissions']
   ] as const)('renders %s with its native permission value', (kind, label, value) => {
     const installation = runtimeInstallation(kind)
@@ -518,6 +519,8 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'codex-cli':
     case 'deepseek-harness':
       return { sandbox_mode: 'danger-full-access', approval_policy: 'never' }
+    case 'command-code-cli':
+      return { permission_mode: 'bypass' }
     case 'cline-cli':
       return { mode: 'act', auto_approve: 'true' }
     case 'pi':

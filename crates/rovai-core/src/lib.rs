@@ -10,6 +10,7 @@ mod claude_control;
 pub(crate) mod cline;
 mod codex;
 pub(crate) mod command_code;
+pub mod command_code_acp;
 mod command_code_activity;
 mod health;
 mod pi;

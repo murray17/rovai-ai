@@ -2387,6 +2387,7 @@ struct Core {
     grok_build: AcpCliRuntimeAdapter,
     deepseek_harness: AcpCliRuntimeAdapter,
     cline_cli: AcpCliRuntimeAdapter,
+    command_code_cli: AcpCliRuntimeAdapter,
     zcode_app: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
@@ -2741,6 +2742,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::DeepseekHarness => "DeepSeek Harness",
         AdapterKind::ClineCli => "Cline",
+        AdapterKind::CommandCodeCli => "Command Code",
         AdapterKind::AntigravityApp => "Antigravity",
         AdapterKind::ZcodeApp => "ZCode",
     }
@@ -5275,6 +5277,13 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
+        if let Some(runtime) = self
+            .command_code_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
         self.grok_build
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -5393,6 +5402,7 @@ impl Core {
             self.grok_build.shutdown_all(),
             self.deepseek_harness.shutdown_all(),
             self.cline_cli.shutdown_all(),
+            self.command_code_cli.shutdown_all(),
             self.zcode_app.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
             self.antigravity_app.shutdown_all(),
@@ -5417,6 +5427,7 @@ impl Core {
                 self.grok_build.shutdown_all(),
                 self.deepseek_harness.shutdown_all(),
                 self.cline_cli.shutdown_all(),
+                self.command_code_cli.shutdown_all(),
                 self.zcode_app.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
                 self.antigravity_app.shutdown_all(),
@@ -5445,6 +5456,7 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
             AdapterKind::DeepseekHarness => Some(&self.deepseek_harness),
             AdapterKind::ClineCli => Some(&self.cline_cli),
+            AdapterKind::CommandCodeCli => Some(&self.command_code_cli),
             rovai_core::agent_profile::AdapterKind::ZcodeApp => Some(&self.zcode_app),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::Pi
@@ -11290,6 +11302,7 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
+            | rovai_core::agent_profile::AdapterKind::CommandCodeCli
             | rovai_core::agent_profile::AdapterKind::ClineCli
             | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 let probe =
@@ -11311,6 +11324,7 @@ impl Core {
                             kind,
                             AdapterKind::ZcodeApp
                                 | AdapterKind::DeepseekHarness
+                                | AdapterKind::CommandCodeCli
                                 | AdapterKind::ClineCli
                         ) && probe.result.status
                             == health::AgentRuntimeProbeStatus::Ready
@@ -13496,6 +13510,16 @@ impl Core {
             )
             .await
             .context("failed to discover effective Grok native MCP names")?;
+            projection.finalize_native_name_conflicts(&native_names)?;
+        }
+        if execution.runtime.adapter_kind == AdapterKind::CommandCodeCli
+            && !projection.servers.is_empty()
+        {
+            let native_names = health::inspect_command_code_native_mcp_server_names(
+                Path::new(&execution.runtime.executable_path),
+                &execution_root,
+            )
+            .await?;
             projection.finalize_native_name_conflicts(&native_names)?;
         }
         Ok(projection)
@@ -16467,15 +16491,18 @@ impl Core {
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await
             .context("failed to bind ACP Native Session")?;
-        if execution.runtime.adapter_kind == AdapterKind::DeepseekHarness {
+        if matches!(
+            execution.runtime.adapter_kind,
+            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
+        ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
                     != binding_credential.native_binding_generation
             {
-                anyhow::bail!("DSH Bootstrap does not match its Native Binding");
+                anyhow::bail!("Managed Bootstrap does not match its Native Binding");
             }
             runtime
-                .bind_dsh_bootstrap(&session_id, &bootstrap.payload)
+                .bind_managed_bootstrap(&session_id, &bootstrap.payload)
                 .await?;
         }
         self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id)
@@ -16745,6 +16772,7 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
+            | rovai_core::agent_profile::AdapterKind::CommandCodeCli
             | rovai_core::agent_profile::AdapterKind::ClineCli
             | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
@@ -17807,6 +17835,15 @@ async fn run_core(
             runtime_fleet.clone(),
             compaction_detector_policies
                 .policy_for(AdapterKind::DeepseekHarness)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        ),
+        command_code_cli: AcpCliRuntimeAdapter::deferred(
+            rovai_core::agent_profile::AdapterKind::CommandCodeCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/command-code"),
+            runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::CommandCodeCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         ),
         cline_cli: AcpCliRuntimeAdapter::deferred(
@@ -20951,6 +20988,13 @@ fn normalize_acp_event_with_completion(
             {
                 payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":zcode::PROTOCOL,
                     "sourceEventKind":"tool.updated.result","semanticKind":"zcode_edit_patch","entries":entries});
+            }
+            if adapter_kind == AdapterKind::CommandCodeCli
+                && public_status == "completed"
+                && let Some(entries) = update.pointer("/_meta/rovaiCommandMutation/entries")
+            {
+                payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":"session/update.tool_call_update.completed.edit_file", "semanticKind":"reported_mutation", "entries":entries});
             }
             if adapter_kind == AdapterKind::ClineCli
                 && public_status == "completed"
@@ -25988,6 +26032,15 @@ mod tests {
                     .policy_for(AdapterKind::DeepseekHarness)
                     .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
+            command_code_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::CommandCodeCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/command-code"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::CommandCodeCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
             cline_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::ClineCli,
                 acp_tx.clone(),
@@ -30438,6 +30491,53 @@ done
         );
         assert!(patch_payload["input"].is_null());
         assert!(!patch_payload.to_string().contains("CLINE_PRIVATE"));
+
+        let command_initial = json!({"sessionUpdate":"tool_call", "toolCallId":"command-edit",
+            "status":"pending", "kind":"edit", "title":"Edit file",
+            "locations":[{"path":"src/a.ts"}],
+            "rawInput":{"file_path":"src/a.ts","old_string":"old\n","new_string":"new\n","private":"COMMAND_PRIVATE"},
+            "content":[{"type":"diff","path":"src/a.ts","oldText":"old\n","newText":"new\n"}]});
+        for (status, has_diff) in [
+            ("pending", false),
+            ("in_progress", false),
+            ("failed", false),
+            ("completed", true),
+        ] {
+            let mut update = json!({"sessionUpdate":"tool_call_update","toolCallId":"command-edit","status":status});
+            rovai_core::command_code_acp::enrich_tool_update(&mut update, Some(&command_initial));
+            let (_, payload) = normalize_acp_event(
+                AdapterKind::CommandCodeCli,
+                "session/update",
+                &json!({"update":update}),
+            );
+            assert_eq!(!payload["runtimeDiff"].is_null(), has_diff, "{status}");
+            if has_diff {
+                assert_eq!(payload["runtimeDiff"]["semanticKind"], "reported_mutation");
+                assert_eq!(
+                    payload.pointer("/runtimeDiff/entries/0/fragments/0/oldText"),
+                    Some(&json!("old\n"))
+                );
+            }
+            assert!(!payload.to_string().contains("COMMAND_PRIVATE"));
+        }
+        for case in ["unknown-kind", "replace-all", "empty-old"] {
+            let mut initial = command_initial.clone();
+            let mut update = initial.clone();
+            rovai_core::command_code_acp::enrich_tool_update(&mut update, None);
+            assert_eq!(
+                update["content"],
+                json!([]),
+                "proposed diff must never enter complete-file evidence"
+            );
+            match case {
+                "unknown-kind" => initial["kind"] = json!("other"),
+                "replace-all" => initial["rawInput"]["replace_all"] = json!(true),
+                _ => initial["rawInput"]["old_string"] = json!(""),
+            }
+            update["status"] = json!("completed");
+            rovai_core::command_code_acp::enrich_tool_update(&mut update, Some(&initial));
+            assert!(update.pointer("/_meta/rovaiCommandMutation").is_none());
+        }
 
         let query = "password=公开测试词 token=也照常展示";
         let (_, web_payload) = normalize_acp_event(
