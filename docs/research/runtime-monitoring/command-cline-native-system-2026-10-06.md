@@ -63,6 +63,10 @@ Command 的问题并非“官方 ACP 不支持 MCP 注入”：[官方 MCP 文�
 已验证的关闭该策略的接口。该定位有源码与真实零调用对照；不把结论外推为所有模型都无法调用 MCP。
 没有伪装模型 ID、用 shell 替代工具、覆盖 Provider 的 tools 数组或另建代理 Host 来制造通过。
 
+随后按 User 消息 64 补齐[请求级 A/B 对照](../command-code-runtime/mcp-delivery-ab-2026-10-06.md)：
+同版本、同模型的原生/ACP × stdio/HTTP 四组共 28 次出站请求，24 次已含搜索 schema 文本，目标工具在 callable tools 中始终为零。
+独立 Provider 正向对照实际调用成功，但不算 Command ACP 验收。保持当前生产接线并准备上游复现；不再仅以源码推断替代请求证据。
+
 Cline 的正常 Rule 加载已完成，但[固定版本 ACP](https://github.com/cline/cline/blob/cli-v3.0.65/apps/cli/src/acp/acpAgent.ts)
 仍未将 compaction.enabled 传入 SDK；此前全局设置和真实预算探针未触发压缩。System Rule 不会启用该引擎。
 没有把普通 `/compact` 生成回复当压缩，也未把旧的缺失插件反例继续当作本轮待授权项。

@@ -20,6 +20,10 @@ last_updated: 2026-09-24
 
 2026-10-05 增量：[1.74.1 官方 ACP 与完整 Checklist 复核](../runtime-monitoring/command-cline-checklist-2026-10-05.md)。官方已提供常驻 ACP；原生控制面已测，模型调用受 BYOK 目录与账号余额阻断。以下早期版本“未见 ACP”只保留其当时范围，不再代表最新上游能力。
 
+2026-10-06 最新：[原生/ACP MCP 交付 A/B](mcp-delivery-ab-2026-10-06.md)已使用当前真实 BYOK 完成请求级观察。
+四组在搜索后均缺少目标 callable tool，保持原生交付并提供上游最小复现；独立 Provider 正向对照成功不能冒充 Command ACP 通过。
+当前会话、System、warm/cold 与 Cline 全面对照见[追加验收](../runtime-monitoring/command-cline-native-system-2026-10-06.md)，下文早期 headless 方案不再代表当前实现。
+
 ## 当前判断
 
 候选路线是独立的 `command-code-cli` Adapter，采用 `one_shot_resumable` 进程策略，读取 Command Code 原生 `-p --output-format json` NDJSON，并按完整原生 Session ID 恢复。进程与输入收敛最接近 Claude Code；两者的协议、权限和配置结论不能直接沿用。

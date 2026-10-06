@@ -9,6 +9,9 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 
 # Rovai AI 运行监控指标可采集性审计
 
+2026-10-06 [Command MCP 原生/ACP 交付 A/B](../command-code-runtime/mcp-delivery-ab-2026-10-06.md)：
+固定 1.74.1 + sub2api/gpt-6-sol，观察实际 Provider 工具集合；保持生产原生交付，提供上游复现及独立诊断正向对照。
+
 2026-10-06 [Command 原生 MCP / Cline System 补验及 14 轴对照](command-cline-native-system-2026-10-06.md)：
 正常 System Rule、原生配置生命周期、真实 LLM 正反对照和字段边界；不把发现/配置成功冒称 MCP 调用通过。
 
