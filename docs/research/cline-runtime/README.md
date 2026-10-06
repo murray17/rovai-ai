@@ -6,7 +6,7 @@ status: implementation-in-progress
 admission: preview
 observed_version: 3.0.65
 observed_platform: macos-arm64
-last_updated: 2026-10-05
+last_updated: 2026-10-07
 ---
 
 # Cline 官方 ACP 接入
@@ -16,6 +16,12 @@ Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 AC
 `cline-cli` Adapter 调用 `cline --acp`，复用现有 ACP Host/Fleet；没有切换 SDK Host 的授权。
 本文件记录逐轴的原生实测与 Core 接线进度，不是产品准入决定。macOS arm64 的开发 Preview
 由 [V1.72-D13](../../versions/v1.72/decisions.md#v1-72-d13)拥有，其他平台仍为 NotQualified。
+
+最新追加：[零干预原生 Compaction 验收](native-compaction-2026-10-07.md)在当前正式接线下
+观测到 918,618 input tokens 和真实 Provider overflow，仍无原生 compaction；cold 保持同一
+Session 但再次 overflow，结论为 `native_compaction_not_observed`。System 已按
+[10 月 6 日验收](../runtime-monitoring/command-cline-native-system-2026-10-06.md)切换到官方
+managed System Rule；此前 first_payload 与故意缺失插件阻断的描述属于旧状态。
 
 固定调查对象：[CLI 3.0.65](https://github.com/cline/cline/releases/tag/cli-v3.0.65)，
 commit `9131e36429314ea614491bf749678adbacb3d3cb`。本机全局 CLI 3.0.3 没有被升级；真实 Probe
@@ -28,8 +34,8 @@ DeepSeek Harness，不能把该 Runtime 的证据借给 Cline。
 | Auth / Provider / Model | 官方原生配置、default/显式模型、凭据变化 fence | Cline 原生 providers/models 文件；ACP 使用 `CLINE_PROVIDER`、`CLINE_MODEL`、`CLINE_API_KEY`；按实际 catalog 核对模型 | sub2api/gpt-6-sol 的原生默认配置通过四轮真实 App AgentRun；Host 摘要和模型核验已接线；显式模型切换及凭据变化矩阵待验收 |
 | Host / Fleet / LRU | 统一进程所有权、空闲复用、隔离 | 官方 stdio ACP 常驻；resident_multi_session，MCP/配置差异必须 fence | 真实共享 Host 首次、warm、A→B→A 通过；App 两成员与空闲后受控关闭通过；Fleet LRU、运行中关闭及 Core crash 待验收 |
 | Native Session / Continuation | 精确 ID、warm/cold、重放隔离 | new/load 返回原生 ID；load 会重放历史，并重取 provider/model/权限默认值；必须重设冻结值 | 共享 Host exact load/replay quarantine 通过；完整 App/Core 重启后 Session ID、Binding ID、generation 精确保留，真实回帖通过 |
-| Bootstrap / Context | 冻结 Charter/Identity/Memory 与每轮动态输入 | 当前 staged `first_payload` 仅是普通用户 Prompt；官方 Plugin Rule 可进入 System Prompt，拟改用既有 `managed_system_prompt` | 静态／函数 Rule 在真实 ACP 的 `beforeModel.request.systemPrompt` 均已观察到；User 已在消息 677d610d-e4cf-4ffb-aba2-d4ebb021cbcd 授权修复；真实插件缺失后继续调用的反例阻断切换，见[完整复核](../runtime-monitoring/command-cline-checklist-2026-10-05.md)，不是等待重复确认 |
-| Compaction continuity | 完成信号、补发、失败/取消与恢复 | ACP 不转发 compaction；官方 Plugin status-notice 可观测 completed | 本轮修复默认策略漏注册、实际 observer lease 和 started/completed 数值展示；真实 ACP `/compact` 仍是普通调用，预算探针仍无自动压缩事件；manual/auto/overflow/cold 连续性未过 |
+| Bootstrap / Context | 冻结 Charter/Identity/Memory 与每轮动态输入 | 官方 Plugin Rule 承载 `managed_system_prompt`，按 Session 绑定冻结 B；user 只传动态输入 | [System 真实验收](../runtime-monitoring/command-cline-native-system-2026-10-06.md)已观察 System B 一次、user B 零，同 Host A/B/A 和 exact cold 身份/记忆正确；按 User 口径不以人为移除插件阻挡正常加载 |
+| Compaction continuity | 原生压缩信号、失败与连续性；未知保持未知 | 保留生产只读 observer 的 manual/auto/overflow started/completed/skipped 数值接线，不用普通模型总结代替压缩 | [零干预真实验收](native-compaction-2026-10-07.md)：最高成功 input 918,618，第 42 批 overflow，原生事件和 sidecar 均未出现；同 Session cold 再次 overflow。分类 C；底层 HTTP retry 次数未知 |
 | Skills | 当前受管索引与原生 Skills 并存 | 共享受管索引；Cline 原生 `.cline/skills`、`.agents/skills` | 现行 main 使用平台/工具箱索引与原生文件发现，旧 Library/group 不再投递给新 Run；本轮原生项目 Skill 的 Core 候选发现和真实读取见[差异复核](../runtime-monitoring/command-cline-parity-2026-10-05.md) |
 | External MCP | PreparedMcpProjection、追加、撤销、无串会话 | 3.0.65 ACP 忽略 `session/new.mcpServers`；官方 `CLINE_MCP_SETTINGS_PATH` 指向 Host 私有合并文件 | 原生隔离配置调用真实 fixture Tool Verified；Core Host 合并已实现；App 分配、原生调用、更新及未分配成员隔离通过；撤销结果见差异复核，完整并发/HTTP 矩阵未完成 |
 | Tool / Action / Output | 原生 ID、唯一生命周期、可靠 command/read/edit 输出 | 终态只带 Tool ID 与 typed rawOutput；Host 配对开始事件的 title/rawInput | 共享 Host 的 read/edit/command、stdout/stderr、非零失败 Action 已通过；修复单文件 location 后，App 两成员 read/edit/read 的准确路径、持久化、点击预览与文件副作用通过；成功 Update 补丁/editor 替换已接 Command 和 Files Changed 的补丁片段；两成员、多文件、连续改回、失败编辑、非零和独立空输出实测通过；editor 原生模型路径及超大输出仍待验收 |
@@ -90,6 +96,6 @@ run_finished` 和 `agent_message_chunk`，没有 Plugin `compaction` status-noti
 随后两名成员都从原生命令输出正确读出实际 `+1/-1`；这证明模型可读取 Diff。apply_patch 的 ACP 终态
 不提供可靠完整文件状态；随后已完成可点击的 reported mutation 补丁片段，见[编辑对照](../runtime-monitoring/command-cline-parity-2026-10-05.md)，仍不把输入 patch 当作精确文件状态。
 
-正式完成按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 逐轴闭合；
+已按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 逐轴记录进度；
 当前分支已加入 closed identity、Host/发现/Skill 接线与 Migration 184/schema 134；macOS arm64 开发 Preview
 已验证上述主路径，完整产品资格与 First-Class 尚未完成。
