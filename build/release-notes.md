@@ -2,10 +2,12 @@
 
 <!-- lang:en -->
 
-This release simplifies runtime startup and Fast settings, improves first-run setup and the update page, and fixes executions getting stuck in recovery.
+This release adds native API configuration for Claude Code and Codex, simplifies runtime startup and Fast settings, improves first-run setup and the update page, and fixes executions getting stuck in recovery.
 
 ### What's changed
 
+- [Feature] **Configure Claude Code and Codex API connections in Settings.** Choose between official login and a custom API, edit the endpoint and API key, and configure models. Codex also supports maintaining a model list and selecting its default model.
+- [Interaction] **Reuse existing native connection settings.** Existing endpoints, credential sources, and models are read from the selected runtime's own configuration. Switching connection modes keeps your draft until you save; unrelated settings and official login credentials are preserved. Saved changes affect that shared native configuration, including other apps that use it.
 - [Interaction] **Simpler Fast settings.** Claude Code and Codex can switch Fast on or off without a separate eligibility check. The choice applies to subsequent executions, including an explicit off setting that could previously be ignored. When no choice has been saved, the button reflects the runtime's initialization response; actual Fast, standard, or cooldown feedback appears separately during execution.
 - [Performance] **Less checking before a task starts.** App startup and rescanning no longer launch every installed runtime for probing. Installed runtimes can be configured and used without being blocked by a version-query timeout or a historical failed check. Required validation happens during the actual task's initialization.
 - [Interaction] **Clearer initialization and configuration errors.** Executions show when the runtime is initializing and report specific installation, model, or permission problems. After correcting the configuration, start another task without first running a manual check to clear an old status.
@@ -30,10 +32,12 @@ Windows x64 remains an unsigned preview. SmartScreen may show "Unknown publisher
 
 <!-- lang:zh-CN -->
 
-本次更新简化智能体启动和 Fast 设置，改善首次配置与更新页面，并修复执行卡在“恢复中”的问题。
+本次更新新增 Claude Code 和 Codex 自定义 API 配置，简化智能体启动和 Fast 设置，改善首次配置与更新页面，并修复执行卡在“恢复中”的问题。
 
 ### 更新内容
 
+- 【功能】**支持在设置中配置 Claude Code 和 Codex 的 API 连接。** 可选择官方登录或自定义 API，编辑接口地址、API Key 和模型；Codex 还支持维护模型列表、选择默认模型。
+- 【交互】**直接复用智能体已有的原生配置。** 读取当前智能体的接口地址、凭据来源和模型配置；切换连接方式时保留草稿，点击保存后才写入，保留无关配置与官方登录凭据。保存会修改这份共享原生配置，也会影响使用它的其他应用。
 - 【交互】**简化 Fast 设置。** Claude Code 和 Codex 可以直接选择开启或关闭，不再需要前置资格检查；选择用于后续执行，修复关闭选择可能被忽略的问题。未手动设置时，按智能体初始化返回的状态显示，实际响应档位和冷却状态在执行过程中单独呈现。
 - 【性能】**减少智能体启动前的等待。** 应用启动和重新检测时不再批量启动智能体进行探测。已安装的智能体可直接配置并发起任务，不再因版本查询超时或历史检查失败被拦住；必要校验在实际任务初始化时完成。
 - 【交互】**执行的初始化状态和失败原因更清楚。** 启动期间显示“正在初始化 Runtime”；安装、模型或权限配置有问题时显示对应原因，修复后可重新发起任务，无需先手动检测来解除历史状态。
