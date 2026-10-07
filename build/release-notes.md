@@ -1,54 +1,44 @@
-# Rovai AI v0.4.5
+# Rovai AI v0.4.6
 
 <!-- lang:en -->
 
-This release adds native API configuration for Claude Code and Codex, simplifies runtime startup and Fast settings, improves first-run setup and the update page, and fixes executions getting stuck in recovery.
+This release adds tools for reading and updating teammate profiles, reduces the wait when saving agent settings, and fixes model-list queries and process cleanup after Codex failures.
 
 ### What's changed
 
-- [Feature] **Configure Claude Code and Codex API connections in Settings.** Choose between official login and a custom API, edit the endpoint and API key, and configure models. Codex also supports maintaining a model list and selecting its default model.
-- [Interaction] **Reuse existing native connection settings.** Existing endpoints, credential sources, and models are read from the selected runtime's own configuration. Switching connection modes keeps your draft until you save; unrelated settings and official login credentials are preserved. Saved changes affect that shared native configuration, including other apps that use it.
-- [Interaction] **Simpler Fast settings.** Claude Code and Codex can switch Fast on or off without a separate eligibility check. The choice applies to subsequent executions, including an explicit off setting that could previously be ignored. When no choice has been saved, the button reflects the runtime's initialization response; actual Fast, standard, or cooldown feedback appears separately during execution.
-- [Performance] **Less checking before a task starts.** App startup and rescanning no longer launch every installed runtime for probing. Installed runtimes can be configured and used without being blocked by a version-query timeout or a historical failed check. Required validation happens during the actual task's initialization.
-- [Interaction] **Clearer initialization and configuration errors.** Executions show when the runtime is initializing and report specific installation, model, or permission problems. After correcting the configuration, start another task without first running a manual check to clear an old status.
-- [Feature] **Apply first-run settings to the other unconfigured built-in teammates.** The runtime, model parameters, and default permissions selected during onboarding are also applied to the remaining unconfigured built-in teammates. Existing configurations are preserved, and the first conversation still includes only the selected teammate.
-- [Interface] **Rework the update entry and About & Updates page.** The sidebar shows update, download, and installation states more clearly. The page groups the installed version with its actions, labels release notes with their version, places check history below the notes, and improves narrow-window layouts.
-- [Interface] **Reduce routine runtime hints on teammate surfaces.** Teammate cards, member lists, and configuration forms no longer repeat ordinary readiness and startup explanations. Unconfigured, checking, and actionable failure feedback remains.
-- [Fix] **Stop executions remaining in recovery after their runtime process exits.** Executions that cannot safely continue are settled while preserving existing output. After cleanup, the next message can run without restarting the app. Inputs with an unknown outcome are not automatically sent again.
-
-### Thanks
-
-Thanks to [@arschlochnop](https://github.com/arschlochnop) for reporting executions stuck in recovery and tasks stuck in the queue after restarting, with detailed analysis and screenshots in [#635](https://github.com/murray17/rovai-ai/issues/635) and [#636](https://github.com/murray17/rovai-ai/issues/636).
+- [Feature] **New tools for reading and updating teammate profiles.** Agents can query the current conversation's members, read their avatars and portraits, and update profile details and images at the user's explicit request. Text and images are saved together; fields not included in the change remain untouched.
+- [Change] **Simpler Claude Code and Codex startup settings.** The built-in API editor has been removed. Connection settings are managed by the native CLI, and existing configuration and credentials are left unchanged.
+- [Performance] **Saving agent settings no longer waits for extra checks.** Changing the program path or environment variables only saves local settings. It no longer also queries accounts, refreshes model lists, or restarts the runtime process; the page shows “Saved” as soon as the save completes.
+- [Fix] **Fix checks failing when a model-list response is too large.** Probe reading limits have been adjusted, and Claude Code uses its dedicated model query first. If the list is temporarily unavailable, existing model selections and parameters are preserved, without blocking an unchanged save or a new task solely because the list could not be read.
+- [Fix] **Stop Codex from reusing a failed process.** Processes from failed, cancelled, or interrupted executions are retired. Subsequent messages wait until cleanup is confirmed, and old inputs with an unknown outcome are not automatically resent.
+- [Fix] **Fix process registration and cleanup on Windows.** Directory permissions no longer prevent managed process registration. Descendant-process exit checks have also been completed so recovery cannot start while an old process tree remains unconfirmed.
+- [Fix] **Fix relative avatar paths when creating teammates.** Avatar paths in both creation and profile updates are resolved against the current execution's working directory.
+- [Interface] **Simpler agent status feedback.** Discovered agents are shown as “Available.” Successful checks no longer repeat explanatory text; failure reasons and actions that need attention remain.
 
 ### Upgrading
 
 Mac users on v0.4.1 or later can update in the app. Users on v0.4.0 or earlier need to download the DMG, quit the old app, and replace the installed app once. Keep your existing user data.
 
-Server users on v0.4.1 or later can update through "About & Updates" in the web interface. For earlier versions, back up your data, stop Server, and run the updated official installer while keeping the same data directory.
+Server users on v0.4.1 or later can update through “About & Updates” in the web interface. For earlier versions, back up your data, stop Server, and run the updated official installer while keeping the same data directory.
 
 Desktop and Server share this release and are built from the same source commit.
 
-Windows x64 remains an unsigned preview. SmartScreen may show "Unknown publisher" during installation; download installers only from this official GitHub Release.
+Windows x64 remains an unsigned preview. SmartScreen may show “Unknown publisher” during installation; download installers only from this official GitHub Release.
 
 <!-- lang:zh-CN -->
 
-本次更新新增 Claude Code 和 Codex 自定义 API 配置，简化智能体启动和 Fast 设置，改善首次配置与更新页面，并修复执行卡在“恢复中”的问题。
+本次更新新增队员资料查询与修改工具，减少智能体设置保存时的等待，并修复模型列表读取和 Codex 失败后的进程回收问题。
 
 ### 更新内容
 
-- 【功能】**支持在设置中配置 Claude Code 和 Codex 的 API 连接。** 可选择官方登录或自定义 API，编辑接口地址、API Key 和模型；Codex 还支持维护模型列表、选择默认模型。
-- 【交互】**直接复用智能体已有的原生配置。** 读取当前智能体的接口地址、凭据来源和模型配置；切换连接方式时保留草稿，点击保存后才写入，保留无关配置与官方登录凭据。保存会修改这份共享原生配置，也会影响使用它的其他应用。
-- 【交互】**简化 Fast 设置。** Claude Code 和 Codex 可以直接选择开启或关闭，不再需要前置资格检查；选择用于后续执行，修复关闭选择可能被忽略的问题。未手动设置时，按智能体初始化返回的状态显示，实际响应档位和冷却状态在执行过程中单独呈现。
-- 【性能】**减少智能体启动前的等待。** 应用启动和重新检测时不再批量启动智能体进行探测。已安装的智能体可直接配置并发起任务，不再因版本查询超时或历史检查失败被拦住；必要校验在实际任务初始化时完成。
-- 【交互】**执行的初始化状态和失败原因更清楚。** 启动期间显示“正在初始化 Runtime”；安装、模型或权限配置有问题时显示对应原因，修复后可重新发起任务，无需先手动检测来解除历史状态。
-- 【功能】**首次配置会同步到其他未配置的内置队员。** 新手引导中选定的智能体、模型参数和默认权限，会应用到其余未配置的内置队员，不覆盖已有配置；首次会话仍只加入选中的队员。
-- 【界面】**调整更新入口和“关于与更新”页面。** 侧栏更清楚地显示更新、下载和安装状态；页面集中展示当前版本与操作按钮，更新日志标明具体版本，检查记录移至日志下方，并改善窄窗口下的布局。
-- 【界面】**精简队员的运行状态提示。** 队员卡片、成员列表和配置页减少重复的状态与启动说明，保留未配置、检查中及需要处理的故障提示。
-- 【修复】**修复智能体进程退出后，执行一直显示“恢复中”的问题。** 无法安全恢复的执行会结束并保留已有输出，清理完成后可继续发送下一条消息，无需重启应用；不会自动重复发送结果不明的旧消息。
-
-### 感谢
-
-感谢 [@arschlochnop](https://github.com/arschlochnop) 在 [#635](https://github.com/murray17/rovai-ai/issues/635) 和 [#636](https://github.com/murray17/rovai-ai/issues/636) 中反馈执行卡在“恢复中”、重启后任务停在队列中的问题，并提供详细分析和截图，帮助我们定位和修复。
+- 【功能】**新增队员资料查询与修改工具。** 可查询当前会话成员的身份资料、读取头像与半身照，并按用户明确要求修改资料和头像。文字与图片一起保存，未修改的字段保持原样。
+- 【调整】**简化 Claude Code 和 Codex 的启动设置。** 移除内置 API 编辑，连接配置交由原生 CLI 管理，已有配置与凭据保持不变。
+- 【性能】**保存智能体设置不再等待额外检查。** 修改程序路径或环境变量后，只保存本地设置，不再连带查询账号、刷新模型列表或重启运行进程，完成后直接显示“已保存”。
+- 【修复】**修复模型列表响应过大导致检查失败的问题。** 调整探测读取限制，Claude Code 优先使用专用模型查询；列表暂时不可用时保留已选模型和参数，不再因此阻止原样保存或发起任务。
+- 【修复】**修复 Codex 出错后重复使用故障进程的问题。** 失败、取消或中断的进程会被回收，确认清理完成后再处理后续消息，不自动重发结果不明的旧输入。
+- 【修复】**修复 Windows 下的进程登记与回收问题。** 解决目录权限导致进程无法登记的问题，并补齐子进程退出检查，避免旧进程尚未清理就开始恢复执行。
+- 【修复】**修复创建队员时相对路径头像读取错误的问题。** 创建和修改队员时，头像路径统一按当前执行的工作目录解析。
+- 【界面】**精简智能体状态提示。** 已发现的智能体统一显示“可用”，检查成功后不再重复展示说明，保留失败原因及处理入口。
 
 ### 升级提醒
 
