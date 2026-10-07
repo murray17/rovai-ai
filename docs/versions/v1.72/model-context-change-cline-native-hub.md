@@ -46,7 +46,6 @@ Host 固定 B，原生用户 Rules 作私有快照、项目规则仍由原生发
 | warm / A→B→A | P | 各自 Host 原 B | 保留完整 ID、Binding 和 generation |
 | 同后端 cold | 新 Run 的 P | 新 Host 重新提供原 B | 原生 get/messages → create，同完整 ID |
 | 原生 basic/agentic 压缩后 | P | 原 B，未由 Rovai 补发 | 原生历史与恢复逻辑拥有压缩结果 |
-| 旧 ACP Binding | 保持原 ACP 的 P | 保持 revision 2 Rule | 不转换或自动迁移 |
 
 原生配置明确关闭时传 `{enabled:false}`；明确 basic/agentic 时传原生策略；未设置时读取所选 CLI
 help 的实际默认。无效类型、未知策略或无法验证的默认关闭启动，不静默启用。没有 compaction
@@ -62,8 +61,8 @@ Bootstrap evidence 绑定 B，Runtime input evidence 绑定 P。共享 formatter
 
 ## 兼容与失败路径
 
-已有 ACP 从其 Binding 对应的冻结 AgentRun 取回后端；缺少后端证据拒绝恢复。preflight 不将旧
-Run 改为 Hub。同后端 cold 必须读取精确 ID 的原生 metadata/messages，并将 messages 原样交回
+User 消息 83 确认没有需要兼容的旧会话；删除 ACP 后端与对应兼容分支，不改变本说明的 B/P 运输。
+Hub cold 必须读取精确 ID 的原生 metadata/messages，并将 messages 原样交回
 原生 create；不生成摘要或改变 Session ID。缺历史、身份不匹配、配置无法解析均关闭该次启动。
 新输入必须是共享 prepared delivery；原生 beforeRun 才确认接受，连接中断后不自动重发。
 
@@ -80,3 +79,5 @@ fixture 按实际发送回执验证 first/A→B→A/cold，不能以最终文本
 User 在消息 76 定义 Native Hub 方案及安装/压缩/后端边界，已阅读消息 79 的原生验证结果；
 消息 80 明确要求“把 cline 改为这一套”，完成后推送远端并列出 Runtime 差异。此次直接实施指令
 授权该 Native Hub 交付，不要求再次确认相同方案。文件记录运输细节，未改变 B/P 的产品语义。
+
+2026-10-08：User 消息 83 直接授权删除旧 ACP 兼容；未改变已确认 revision 1 的 Hub 模型输入、System Rule 或压缩实现。

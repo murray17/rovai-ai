@@ -72,15 +72,14 @@ Core 重启、CLI 公开发送、文件 +/− 与 272000 Context 窗口通过。
 
 ## Cline 实施边界
 
-Cline 新 Native Binding 使用用户选中或正常发现的官方 CLI 启动独立 Native Hub，协议为
-`cline-hub-v1`；现有 `acp-v1` Binding 保留官方 `cline --acp`，不跨后端恢复或迁移历史。
-后端身份来自 Binding 对应的冻结 AgentRun；缺少证据时关闭恢复，不能按最新 Installation 猜测。
-两个后端复用 `cline-cli`、Skill group `cline`、共享 Fleet、Builtin Tool lease、输入投递、审批、
-监控和终态结算。Hub 使用 member scope，Host 的冻结 Bootstrap/原生配置不兼容时由 Fleet 回收。
+Cline 只使用用户选中或正常发现的官方 CLI 启动独立 Native Hub，协议为 `cline-hub-v1`。
+User 已确认不存在需要兼容的旧 Cline 会话，因此删除 ACP 后端、版本门槛和 Binding 后端推断；
+不提供旧会话迁移或回退。Hub 复用 `cline-cli`、Skill group `cline`、共享 Fleet、Builtin Tool lease、
+输入投递、审批、监控和终态结算。Host 使用 member scope，冻结 Bootstrap/原生配置不兼容时由 Fleet 回收。
 
 官方 `hub ... start` 的 launcher 可以成功退出，实际 daemon 必须通过 Managed Process 的内核身份
 核验；独立 loopback、随机端口、私有 discovery/token 和认证 WebSocket 不连接用户已有 Hub。
-临时配置只在确认自有进程树退出后删除，原生 Session 历史独立保留。当前实现仅 macOS arm64
+进程启动前由本次独占创建目录的准备 guard 回收失败配置；启动后只在确认自有进程树退出后删除临时配置，原生 Session 历史独立保留。当前实现仅 macOS arm64
 `Preview`；其他平台 `NotQualified`，不借此提高整个 Runtime 的资格。
 
 Hub 通过原生文件 Rule 交付冻结 B，user 只传 P；每个 root beforeModel 校验 B 恰好一次。
@@ -88,13 +87,16 @@ Hub 通过原生文件 Rule 交付冻结 B，user 只传 P；每个 root beforeM
 off/basic/agentic；未设置时核验所选 CLI 的实际 help 默认，无效配置不当作未设置。
 不会修改用户设置、安装 wrapper、二进制或 node_modules，也不下载另一套 SDK/Core。
 
-ACP 的 3.0.65 最低版本仍由 ACP 初始化拥有；Hub 用实际认证协议和原生 Session 探测独立判断，
-没有新增版本白名单。Hub 当前支持 Cline 原生保存或环境中的 BYOK；订阅/OAuth 的凭据解析尚未准入。
+Hub 用实际认证协议和原生 Session 探测判断能力，不设版本白名单。当前仅接通原生保存或环境中的 API key/BYOK；
+没有 API key 的原生订阅/OAuth 配置在启动前明确拒绝，尚未实现其认证与刷新路径。模型目录读取所选 Provider 的
+原生本地 models.json，保留当前配置模型；不声称可发现所有远端模型或切换 Provider。
+原生完整历史接口无分页；WebSocket 单帧和消息、恢复请求均有 64 MiB 上限，超限明确失败且不裁剪原生历史。
+匹配 requestId 的明确原生失败与传输结果未知分开；公开错误只保留封闭码、分类和固定安全说明，不自动重发。
 原生费用、缺失 token 桶和无法确认的压缩事件保持未知。实现、真实验证和剩余差异见
 [Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md)；取舍见
 [V1.72-D22](../versions/v1.72/decisions.md#v1-72-d22)，上下文见
 [Native Hub 输入说明](../versions/v1.72/model-context-change-cline-native-hub.md)。
-旧 ACP 的 Rule/Plugin 与历史验收见 [System revision 2](../versions/v1.72/model-context-change-cline-system.md)。
+已退役 ACP 的 Rule/Plugin 历史验收见 [System revision 2](../versions/v1.72/model-context-change-cline-system.md)。
 
 ## 可执行准入
 

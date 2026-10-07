@@ -1524,7 +1524,6 @@ async fn acp_probe_at(
             | AdapterKind::GrokBuild
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli
-            | AdapterKind::ClineCli
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
             | AdapterKind::ZcodeApp
@@ -1698,8 +1697,6 @@ async fn acp_probe_at(
             && !crate::dsh::supported_version(reported_version.as_deref()))
         || (kind == AdapterKind::CommandCodeCli
             && !crate::command_code_acp::supported_version(reported_version.as_deref()))
-        || (kind == AdapterKind::ClineCli
-            && !crate::cline::supported_version(reported_version.as_deref()))
     {
         return AcpCapabilityProbe {
             result: agent_probe_result(
@@ -1713,8 +1710,6 @@ async fn acp_probe_at(
                     "runtime.version>={}",
                     if kind == AdapterKind::CommandCodeCli {
                         crate::command_code_acp::MINIMUM_VERSION
-                    } else if kind == AdapterKind::ClineCli {
-                        crate::cline::MINIMUM_VERSION
                     } else if kind == AdapterKind::DeepseekHarness {
                         crate::dsh::MINIMUM_VERSION
                     } else {
@@ -1726,8 +1721,6 @@ async fn acp_probe_at(
                     kind.display_name(),
                     if kind == AdapterKind::CommandCodeCli {
                         crate::command_code_acp::MINIMUM_VERSION
-                    } else if kind == AdapterKind::ClineCli {
-                        crate::cline::MINIMUM_VERSION
                     } else if kind == AdapterKind::DeepseekHarness {
                         crate::dsh::MINIMUM_VERSION
                     } else {
@@ -1770,10 +1763,7 @@ async fn acp_probe_at(
             };
             let detail = if matches!(
                 kind,
-                AdapterKind::ZcodeApp
-                    | AdapterKind::DeepseekHarness
-                    | AdapterKind::ClineCli
-                    | AdapterKind::CommandCodeCli
+                AdapterKind::ZcodeApp | AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
             ) && missing.is_empty()
             {
                 Some("Native configuration and basic connection checked in a temporary workspace; no prompt sent. Model generation, balance and advanced capabilities were not tested. Native initialization may access the network and write state.".to_string())
@@ -1853,9 +1843,6 @@ async fn run_acp_probe_with_scope(
     }
     let mut command = runtime_command(path, Some(kind));
     configure_acp_command(&mut command, kind, false);
-    if kind == AdapterKind::ClineCli {
-        crate::cline::configure_native_environment(&mut command)?;
-    }
     if kind == AdapterKind::CodebuddyCli
         && let Ok(model) = env::var("ROVAI_CODEBUDDY_MODEL")
     {
@@ -2079,7 +2066,7 @@ async fn run_acp_probe_with_scope(
     };
     match result {
         Ok(result) => Ok(result),
-        Err(_) if matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli) => {
+        Err(_) if matches!(kind, AdapterKind::CommandCodeCli) => {
             // Native diagnostics and RPC error bodies can contain BYOK
             // settings. The probe only publishes a stable failure category.
             Err(anyhow::anyhow!(
@@ -2587,22 +2574,14 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::CommandCodeCli => {
             command.arg("acp").env("COMMANDCODE_SKIP_UPDATES", "1");
         }
-        AdapterKind::ClineCli => {
-            command
-                .args([
-                    "--acp",
-                    "--auto-approve",
-                    if allow_all { "true" } else { "false" },
-                ])
-                .env("CLINE_SESSION_BACKEND_MODE", "local");
-        }
         AdapterKind::DeepseekHarness => {
             command.args(["--profile", "acp"]);
         }
         AdapterKind::GrokBuild => {
             configure_grok_acp_command(command, None);
         }
-        AdapterKind::CodexCli
+        AdapterKind::ClineCli
+        | AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp
@@ -2696,7 +2675,7 @@ fn acp_observed_capabilities(
     }
     if matches!(
         kind,
-        AdapterKind::DeepseekHarness | AdapterKind::ClineCli | AdapterKind::CommandCodeCli
+        AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
     ) {
         capabilities.retain(|capability| capability != "workspace.additional_roots");
     }
@@ -2711,7 +2690,7 @@ fn acp_observed_capabilities(
 }
 
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
-    if matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli) {
+    if matches!(kind, AdapterKind::CommandCodeCli) {
         return [
             "acp.initialize",
             "session.new",
@@ -2833,7 +2812,6 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
             | AdapterKind::GrokBuild
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli
-            | AdapterKind::ClineCli
     )
 }
 

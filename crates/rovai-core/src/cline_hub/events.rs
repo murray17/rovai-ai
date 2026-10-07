@@ -128,7 +128,7 @@ impl ClineHubRuntime {
             .as_ref()
             .map(|v| v["input"].clone())
             .unwrap_or(Value::Null);
-        // Share Cline's typed tool-result decoder across both transports. This
+        // Use Cline's typed tool-result decoder. This
         // is a local result record, never an ACP envelope or synthetic wire event.
         let mut result = json!({"title":name,"rawInput":input,"rawOutput":value["output"],
             "status":if event == "tool.started" { "in_progress" } else if value["error"].is_null() { "completed" } else { "failed" }});

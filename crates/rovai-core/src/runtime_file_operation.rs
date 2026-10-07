@@ -462,7 +462,6 @@ mod tests {
             AdapterKind::KimiCodeCli,
             AdapterKind::GrokBuild,
             AdapterKind::DeepseekHarness,
-            AdapterKind::ClineCli,
             AdapterKind::CommandCodeCli,
         ] {
             let admitted = admit_runtime_file_operation(

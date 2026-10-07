@@ -151,8 +151,8 @@ run_finished(failed)`。这里的 `model_completed` **requestId 为 null、metri
   所有成功 usage、前后原生文件摘要/消息数、错误、Bootstrap 与 cold 结果。
 - [生产 observer 原始数值事件 JSONL](native-compaction-2026-10-07.observer.jsonl)：保留原始字段，
   仅增加来源 `hostId`，不含凭据、headers、完整 Prompt/history。
-- [生产 observer](../../../crates/rovai-core/src/cline/observer.js) 与
-  [生产 System Rule](../../../crates/rovai-core/src/cline/bootstrap.js)：本轮未改动。
+- [生产 observer](https://github.com/murray17/rovai-ai/blob/b05ea021d73c1a07e5176907f61bbbf5d20db38c/crates/rovai-core/src/cline/observer.js) 与
+  [生产 System Rule](https://github.com/murray17/rovai-ai/blob/b05ea021d73c1a07e5176907f61bbbf5d20db38c/crates/rovai-core/src/cline/bootstrap.js)：本轮未改动。
 
 交付检查：43 组原生序列完整性、逐轮水位、Session/Binding/config 摘要、原生文件清单及公开
 消息归属断言通过；4 个公开变更文件与实际凭据值的匹配为零。`pnpm docs:test` 10 项通过，

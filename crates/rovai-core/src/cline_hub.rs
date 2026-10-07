@@ -1,17 +1,17 @@
 //! Native Cline Hub transport. This module does not implement or translate ACP.
 mod config;
 mod events;
+mod failure;
+mod platform;
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests;
+mod transport;
 
 use crate::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     builtin_tool_runtime::BuiltinToolProcessConfig,
     context::PreparedSessionBootstrap,
-    managed_process::{
-        ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
-        ManagedWindowsArgvDialect,
-    },
+    managed_process::ManagedProcess,
     mcp::McpServerDefinition,
     runtime_fleet::{
         AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
@@ -32,14 +32,10 @@ use std::{
 };
 use tokio::{
     net::TcpStream,
-    process::Command,
     sync::{Mutex, RwLock, mpsc, oneshot},
     time::{Instant, timeout, timeout_at},
 };
-use tokio_tungstenite::{
-    MaybeTlsStream, WebSocketStream,
-    tungstenite::{Message, client::IntoClientRequest},
-};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 
 pub(crate) const PROTOCOL: &str = "cline-hub-v1";
 pub(crate) const APPROVAL_METHOD: &str = "cline-hub/approval.requested";
@@ -49,7 +45,9 @@ pub(crate) fn native_configuration_digest() -> Result<String> {
     }))
 }
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
-type Pending = oneshot::Sender<Result<Value>>;
+use failure::HubFailure;
+type HubReply = std::result::Result<Value, HubFailure>;
+type Pending = oneshot::Sender<HubReply>;
 
 pub(crate) enum HubIncoming {
     Event {
@@ -78,10 +76,12 @@ pub(crate) struct ClineHubHost {
     alive: AtomicBool,
     root: PathBuf,
     session_config: Value,
+    models: Vec<crate::agent_profile::ModelDescriptor>,
     sessions: Mutex<HashMap<String, ()>>,
     builtin_tools: Option<BuiltinToolProcessConfig>,
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn owned_discovery(path: &Path, root: &Path) -> Result<Value> {
     let meta = std::fs::symlink_metadata(path)?;
     if !meta.is_file()
@@ -141,118 +141,8 @@ impl ClineHubHost {
         history: PathBuf,
         incoming: mpsc::UnboundedSender<HubIncoming>,
     ) -> Result<Arc<Self>> {
-        if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            bail!("cline_hub_platform_not_qualified");
-        }
-        let mut command = Command::new(&request.executable);
-        crate::runtime_discovery::configure_runtime_command(AdapterKind::ClineCli, &mut command);
-        if let Some(tools) = &request.builtin_tools {
-            tools.configure_command(&mut command)?;
-        }
-        let configuration = config::configure(
-            &mut command,
-            &root,
-            &history,
-            &request.cwd,
-            &request.executable,
-            request.selected_model.as_deref(),
-            &request.bootstrap,
-            &request.servers,
-        )
-        .await?;
-        if request.builtin_tools.is_some() {
-            config::configure_tool_shell(&mut command);
-        }
-        let spec = ManagedProcessLaunchSpec::capture(
-            &command,
-            ManagedProcessPurpose::RuntimeHost,
-            ManagedStdinPolicy::Null,
-            ManagedWindowsArgvDialect::MicrosoftCrt,
-            "runtime-host:cline-hub",
-        )?;
-        #[cfg(unix)]
-        if let Some(tools) = &request.builtin_tools {
-            let first = spec
-                .environment()
-                .get(std::ffi::OsStr::new("PATH"))
-                .and_then(|value| std::env::split_paths(value).next());
-            if first.as_deref() != tools.cli_executable().parent() {
-                bail!("cline_hub_builtin_cli_path_not_owned");
-            }
-        }
-        let mut child = ManagedProcess::spawn(spec)?;
-        #[cfg(target_os = "macos")]
-        if let Err(error) = child
-            .track_descendants(&root.join("owned-processes"))
-            .map_err(anyhow::Error::from)
-            .and_then(|()| {
-                // A marker may outlive a retired ledger only after ownership
-                // was recorded. Never infer cleanup from a failed first track.
-                config::private_file(&root.join(config::OWNED_HOST_MARKER), PROTOCOL.as_bytes())
-            })
-        {
-            let _ = child.force_terminate_tree();
-            let _ = child.wait().await;
-            return Err(error.into());
-        }
-        // Native stderr may contain provider credentials. Drain both streams
-        // without forwarding them into public diagnostics or snapshots.
-        if let Some(mut out) = child.take_stdout() {
-            tokio::spawn(async move {
-                let _ = tokio::io::copy(&mut out, &mut tokio::io::sink()).await;
-            });
-        }
-        if let Some(mut err) = child.take_stderr() {
-            tokio::spawn(async move {
-                let _ = tokio::io::copy(&mut err, &mut tokio::io::sink()).await;
-            });
-        }
-        let connected = timeout(Duration::from_secs(20), async {
-            loop {
-                child.capture_descendants()?;
-                if child.try_wait()?.is_some_and(|status| !status.success()) {
-                    bail!("cline_hub_startup_exited");
-                }
-                if configuration.discovery.exists() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            let discovery = owned_discovery(&configuration.discovery, &root)?;
-            if !child.owns_live_pid(discovery["pid"].as_u64().unwrap() as u32)? {
-                bail!("cline_hub_discovery_process_mismatch");
-            }
-            let mut upgrade = discovery["url"].as_str().unwrap().into_client_request()?;
-            upgrade.headers_mut().insert(
-                "Sec-WebSocket-Protocol",
-                format!(
-                    "cline-hub-auth.{}",
-                    discovery["authToken"].as_str().unwrap()
-                )
-                .parse()?,
-            );
-            let socket = tokio_tungstenite::connect_async(upgrade)
-                .await
-                .map_err(|_| anyhow::anyhow!("cline_hub_authenticated_connection_failed"))?
-                .0;
-            Ok::<_, anyhow::Error>((socket, discovery["pid"].as_u64().unwrap() as u32))
-        })
-        .await;
-        let (socket, daemon_pid) = match connected {
-            Ok(Ok(socket)) => socket,
-            other => {
-                let _ = child.force_terminate_tree();
-                let _ = timeout(Duration::from_secs(2), child.wait()).await;
-                #[cfg(any(target_os = "macos", target_os = "linux"))]
-                if child.captured_tree_is_empty().unwrap_or(false) {
-                    let _ = std::fs::remove_dir_all(&root);
-                }
-                return match other {
-                    Ok(Err(error)) => Err(error),
-                    _ => Err(anyhow::anyhow!("cline_hub_startup_timeout")),
-                };
-            }
-        };
+        let (child, socket, daemon_pid, configuration) =
+            platform::launch(request, &root, &history).await?;
         let (sink, mut source) = socket.split();
         let host = Arc::new(Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -266,38 +156,51 @@ impl ClineHubHost {
             alive: AtomicBool::new(true),
             root,
             session_config: configuration.session,
+            models: configuration.models,
             sessions: Mutex::new(HashMap::new()),
             builtin_tools: request.builtin_tools.clone(),
         });
         let read_host = host.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
-            loop {
+            let failure = loop {
                 tokio::select! {
                     _ = tick.tick() => {
                         let mut child = read_host.child.lock().await;
                         let _ = child.try_wait();
-                        if !read_host.is_alive() || !child.owns_live_pid(daemon_pid).unwrap_or(false) { break; }
+                        if !read_host.is_alive() || !child.owns_live_pid(daemon_pid).unwrap_or(false) {
+                            break HubFailure::disconnected();
+                        }
                     },
                     frame = source.next() => {
-                        let Some(Ok(frame)) = frame else { break; };
+                        let frame = match frame {
+                            Some(Ok(frame)) => frame,
+                            Some(Err(error)) => break transport::socket_failure(&error),
+                            None => break HubFailure::disconnected(),
+                        };
                         match frame {
-                            Message::Text(text) if text.len() <= 16 * 1024 * 1024 => {
-                                let Ok(frame) = serde_json::from_str::<Value>(&text) else { break; };
-                                if let Err(error) = read_host.receive(frame).await { eprintln!("Cline Hub protocol rejected: {error}"); break; }
+                            Message::Text(text) => {
+                                let Ok(frame) = serde_json::from_str::<Value>(&text) else {
+                                    break HubFailure::Transport { code: "cline_hub_invalid_json" };
+                                };
+                                if read_host.receive(frame).await.is_err() {
+                                    break HubFailure::Transport { code: "cline_hub_protocol_rejected" };
+                                }
                             },
-                            Message::Ping(bytes) => { if read_host.socket.lock().await.send(Message::Pong(bytes)).await.is_err() { break; } },
+                            Message::Ping(bytes) => {
+                                if read_host.socket.lock().await.send(Message::Pong(bytes)).await.is_err() {
+                                    break HubFailure::disconnected();
+                                }
+                            },
                             Message::Pong(_) => {},
-                            _ => break,
+                            _ => break HubFailure::disconnected(),
                         }
                     }
                 }
-            }
+            };
             read_host.alive.store(false, Ordering::Release);
             for (_, pending) in read_host.pending.lock().await.drain() {
-                let _ = pending.send(Err(anyhow::anyhow!(
-                    "cline_hub_disconnected_outcome_unknown"
-                )));
+                let _ = pending.send(Err(failure.clone()));
             }
             if let Some(runtime) = read_host.owner.read().await.upgrade() {
                 let _ = read_host.incoming.send(HubIncoming::Exited {
@@ -330,7 +233,7 @@ impl ClineHubHost {
             self.socket
                 .lock()
                 .await
-                .send(Message::Text(serde_json::to_string(&value)?.into()))
+                .send(Message::Text(transport::encode(&value)?.into()))
                 .await
                 .map_err(|_| anyhow::anyhow!("cline_hub_send_outcome_unknown"))
         })
@@ -344,7 +247,7 @@ impl ClineHubHost {
         command: &str,
         payload: Value,
         session: Option<&str>,
-    ) -> Result<oneshot::Receiver<Result<Value>>> {
+    ) -> Result<oneshot::Receiver<HubReply>> {
         let (tx, rx) = oneshot::channel();
         match self.pending.lock().await.entry(id.to_owned()) {
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -373,7 +276,23 @@ impl ClineHubHost {
         let result = timeout(Duration::from_secs(45), rx).await;
         self.pending.lock().await.remove(&id);
         match result {
-            Ok(Ok(result)) => result,
+            Ok(Ok(result)) => result.map_err(|failure| {
+                if command == "session.messages"
+                    && matches!(
+                        failure,
+                        HubFailure::Transport {
+                            code: "cline_hub_message_limit_exceeded"
+                        }
+                    )
+                {
+                    HubFailure::Transport {
+                        code: "cline_hub_history_limit_exceeded",
+                    }
+                    .into()
+                } else {
+                    failure.into()
+                }
+            }),
             _ => {
                 self.alive.store(false, Ordering::Release);
                 bail!("cline_hub_command_outcome_unknown");
@@ -389,10 +308,12 @@ impl ClineHubHost {
                     .as_str()
                     .context("cline_hub_reply_without_identity")?;
                 if let Some(pending) = self.pending.lock().await.remove(id) {
-                    let result = if envelope["ok"] == true {
-                        Ok(envelope["payload"].clone())
-                    } else {
-                        Err(anyhow::anyhow!("cline_hub_native_command_rejected"))
+                    let result = match envelope["ok"].as_bool() {
+                        Some(true) => Ok(envelope["payload"].clone()),
+                        Some(false) => Err(HubFailure::native(&envelope["error"])),
+                        None => Err(HubFailure::Transport {
+                            code: "cline_hub_invalid_reply",
+                        }),
                     };
                     let _ = pending.send(result);
                 }
@@ -509,6 +430,7 @@ pub(crate) struct ClineHubRuntime {
     settled: AtomicBool,
     sequence: AtomicU64,
     terminal: RwLock<(Option<String>, Option<String>)>,
+    failure: RwLock<Option<HubFailure>>,
     tools: Mutex<HashMap<String, Value>>,
     approvals: Mutex<HashMap<String, String>>,
     denied_tools: Mutex<HashSet<String>>,
@@ -550,6 +472,16 @@ impl ClineHubRuntime {
         self.terminal.read().await.clone()
     }
 
+    pub(crate) async fn terminal_failure(
+        &self,
+    ) -> Option<crate::runtime_failure::RuntimeFailureView> {
+        self.failure
+            .read()
+            .await
+            .as_ref()
+            .map(HubFailure::public_view)
+    }
+
     pub(crate) async fn start_prompt(self: &Arc<Self>, text: &str) -> Result<()> {
         if self.submitted.swap(true, Ordering::AcqRel) {
             bail!("cline_hub_input_already_submitted");
@@ -582,7 +514,19 @@ impl ClineHubRuntime {
                         reason,
                     )
                 }
-                _ => (None, "unknown"),
+                Ok(Err(failure)) => {
+                    let reason = if failure.is_native() {
+                        "failed"
+                    } else {
+                        "unknown"
+                    };
+                    *runtime.failure.write().await = Some(failure);
+                    (None, reason)
+                }
+                Err(_) => {
+                    *runtime.failure.write().await = Some(HubFailure::disconnected());
+                    (None, "unknown")
+                }
             };
             if reason == "stop"
                 && (runtime.native_run.read().await.is_none()
@@ -630,7 +574,7 @@ impl ClineHubRuntime {
     }
     pub(crate) async fn cancel(&self) -> Result<()> {
         self.cancelled.store(true, Ordering::Release);
-        self.host.child.lock().await.capture_descendants()?;
+        platform::capture_descendants(&mut *self.host.child.lock().await)?;
         self.host
             .command("run.abort", json!({}), Some(&self.session))
             .await?;
@@ -788,6 +732,7 @@ impl ClineHubAdapter {
             settled: AtomicBool::new(false),
             sequence: AtomicU64::new(1),
             terminal: RwLock::new((None, None)),
+            failure: RwLock::new(None),
             tools: Mutex::new(HashMap::new()),
             approvals: Mutex::new(HashMap::new()),
             denied_tools: Mutex::new(HashSet::new()),
@@ -829,20 +774,20 @@ impl ClineHubAdapter {
             if metadata["session"]["sessionId"].as_str() != Some(session) {
                 bail!("cline_hub_resume_continuity_lost");
             }
-            let history = host
+            let mut history = host
                 .command(
                     "session.messages",
                     json!({"sessionId":session}),
                     Some(session),
                 )
                 .await?;
-            let messages = history["messages"]
-                .as_array()
-                .context("cline_hub_resume_history_invalid")?;
+            if !history["messages"].is_array() {
+                bail!("cline_hub_resume_history_invalid");
+            }
             session_config["sessionId"] = json!(session);
             // The official Hub reader owns all history conversion. Reuse its
             // complete messages verbatim, including native compaction rewrites.
-            initial_messages = json!(messages);
+            initial_messages = history["messages"].take();
         }
         let auto = request.auto_approve;
         session_config["mode"] = request.runtime.permissions.values["mode"].clone();
@@ -947,10 +892,7 @@ pub(crate) async fn capability_snapshot(
     observed_at: String,
     data_directory: &Path,
 ) -> Result<crate::agent_profile::AdapterCapabilitySnapshot> {
-    use crate::{
-        agent_profile::ModelDescriptor,
-        agent_runtime_adapter::{AgentRuntimeAdapterRegistry, executable_fingerprint},
-    };
+    use crate::agent_runtime_adapter::{AgentRuntimeAdapterRegistry, executable_fingerprint};
     let version = config::native_cli_output(executable, "--version")
         .await
         .ok()
@@ -972,7 +914,6 @@ pub(crate) async fn capability_snapshot(
     let root = data_directory
         .join("runtime/cline-hub/hosts")
         .join(format!("probe-{}", uuid::Uuid::new_v4()));
-    config::private_dir(&root)?;
     let launch = HubHostLaunch {
         executable: executable.into(),
         selected_model: None,
@@ -991,12 +932,12 @@ pub(crate) async fn capability_snapshot(
             host.command("session.get",json!({}),Some(session)).await?;
             let messages = host.command("session.messages",json!({}),Some(session)).await?;
             if !messages["messages"].is_array() { bail!("cline_hub_probe_invalid_history"); }
-            Ok::<_,anyhow::Error>(host.session_config["modelId"].as_str().context("cline_hub_probe_model_missing")?.to_owned())
+            Ok::<_,anyhow::Error>(host.models.clone())
         }.await;
         if !host.force_reap_until(Instant::now()+Duration::from_secs(5)).await { bail!("cline_hub_probe_cleanup_unconfirmed"); }
         probe
     }.await;
-    if let Ok(model) = &result {
+    if let Ok(models) = &result {
         snapshot.probe_status = "ready".into();
         snapshot.authentication_status = "authenticated".into();
         snapshot.protocols = vec![PROTOCOL.into()];
@@ -1012,29 +953,19 @@ pub(crate) async fn capability_snapshot(
         .into_iter()
         .map(str::to_owned)
         .collect();
-        snapshot.models = vec![ModelDescriptor {
-            id: model.clone(),
-            display_name: model.clone(),
-            description: None,
-            runtime_metadata: None,
-            is_default: true,
-            hidden: false,
-            deprecated: false,
-            options: Vec::new(),
-        }];
+        snapshot.models = models.clone();
         snapshot.last_successful_probe_at = Some(observed_at);
         snapshot.last_error = None;
         let _ = std::fs::remove_dir_all(&root);
     } else if let Err(error) = result {
         let code = error.to_string();
         snapshot.probe_status = "probe_failed".into();
-        snapshot.authentication_status =
-            if code == "cline_hub_native_provider_credentials_unavailable" {
-                "authentication_required"
-            } else {
-                "unknown"
-            }
-            .into();
+        snapshot.authentication_status = if code == "cline_hub_native_auth_requires_api_key" {
+            "authentication_required"
+        } else {
+            "unknown"
+        }
+        .into();
         snapshot.last_error = Some(code);
         // Ownership ledgers remain available when cleanup is unconfirmed.
     }

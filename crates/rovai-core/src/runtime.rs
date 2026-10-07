@@ -357,9 +357,7 @@ impl MissingSendRecoveryBoundary {
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
             Self::AcpEndTurnAssistantSuffix => {
-                adapter_kind.uses_acp()
-                    && adapter_kind != AdapterKind::ZcodeApp
-                    && (adapter_kind != AdapterKind::ClineCli || protocol == Some("acp-v1"))
+                adapter_kind.uses_acp() && adapter_kind != AdapterKind::ZcodeApp
             }
             Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
             Self::ClineHubRunResult => {
@@ -7197,6 +7195,7 @@ mod tests {
                         MissingSendRecoveryBoundary::AntigravityPrintStdout
                     }
                     AdapterKind::Pi => MissingSendRecoveryBoundary::PiAgentSettled,
+                    AdapterKind::ClineCli => MissingSendRecoveryBoundary::ClineHubRunResult,
                     _ => unreachable!("non-ACP Adapter must have a dedicated boundary"),
                 }
             };
@@ -7210,7 +7209,14 @@ mod tests {
                 MissingSendRecoveryBoundary::ZcodeCompletedTurn,
             ] {
                 assert_eq!(
-                    boundary.is_compatible_with(adapter_kind, Some("acp-v1")),
+                    boundary.is_compatible_with(
+                        adapter_kind,
+                        Some(if adapter_kind == AdapterKind::ClineCli {
+                            crate::cline_hub::PROTOCOL
+                        } else {
+                            "acp-v1"
+                        })
+                    ),
                     boundary == expected,
                     "{} must accept only its frozen recovery boundary",
                     adapter_kind.as_str(),
@@ -7220,7 +7226,7 @@ mod tests {
         for (protocol, acp, hub) in [
             (None, false, false),
             (Some("unknown"), false, false),
-            (Some("acp-v1"), true, false),
+            (Some("acp-v1"), false, false),
             (Some(crate::cline_hub::PROTOCOL), false, true),
         ] {
             assert_eq!(

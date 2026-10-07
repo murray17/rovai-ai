@@ -57,10 +57,9 @@ Provider、profile 或此前已经生成并被原生引用的模型目录。用�
 <a id="cline-native-hub"></a>
 ## Cline Native Hub
 
-`cline-cli` 的新 Native Binding 使用内部协议 `cline-hub-v1`。已有 `acp-v1` Binding 按其对应
-冻结 AgentRun 协议继续执行；证据缺失/冲突不得隐式选择 Hub。协议参与 Native Binding compatibility
-和 Host compatibility，preflight rebind 不得改写已冻结的后端。ACP 的最低版本只约束 ACP；
-Hub Ready 必须通过所选 CLI 的独立、认证、无模型输入的 Session create/get/messages 探测。
+`cline-cli` 仅支持内部协议 `cline-hub-v1`。不存在需兼容的旧会话，不保留 ACP transport、最低版本
+或旧 Binding 后端推断。协议参与 Native Binding 和 Host compatibility；Hub Ready 必须通过所选 CLI
+的独立、认证、无模型输入的 Session create/get/messages 探测。
 Ready 不代表 First-Class、原生订阅可用或 compaction 全矩阵通过。
 
 Hub 是官方 CLI `hub --host 127.0.0.1 --port 0 ... start` 创建的自有进程。launcher 正常退出
@@ -69,16 +68,25 @@ Hub 是官方 CLI `hub --host 127.0.0.1 --port 0 ... start` 创建的自有进�
 provider key、原生 stderr 或模型正文到诊断。只清理已核验的自有树，不调用用户共享 Hub shutdown。
 
 root `beforeRun.snapshot.runId` 才能确认新 Input 已接纳；`run.started`、WebSocket 写入或 attach
-均不能确认。每次 `run.start` 只投一次冻结 P，超时/断开按未知处理；不做客户端重发。root
+均不能确认。每次 `run.start` 只投一次冻结 P。匹配 requestId 的 `ok:false` 为明确原生失败，保留封闭原生码、分类和固定安全说明，
+不保留 raw message/details；发送、超时、断开及超限读取为传输结果未知。二者均不允许自动重发，
+明确失败也不证明此前没有工具副作用。root
 `beforeModel` 检查冻结 System Rule，`afterModel` 校验实际 provider/model 并投递原生稀疏数值。
 最终状态只接受关联 requestId 的原生 result，成功必须已有接受和模型观测；事件文本不作为终态。
 
 同 Host warm 使用已实例化的完整 Session ID。cold 先通过原生 get/messages 读取，再把原生返回的
-完整 initialMessages 与原 Session ID 交回 session.create；不解析重写 compaction 历史、不跨 ACP
-恢复、不用 attach 替代执行内核恢复。缺历史或 ID 改变时关闭恢复。
+完整 initialMessages 与原 Session ID 交回 session.create；不解析重写 compaction 历史，不用 attach 替代
+执行内核恢复。当前原生接口不支持分页；单帧、完整消息和发送请求均限制为 64 MiB，读取超限返回
+`cline_hub_history_limit_exceeded`，不裁剪或改写历史。缺历史或 ID 改变时关闭恢复。
 
 权限沿当前冻结 act/plan 与 auto_approve；只有 RuntimeManagedV2 的显式 true 可自动允许。
 其余请求通过 `approval.requested` / `approval.respond` 进入共享 Action/Approval，选项为原生
 布尔允许/拒绝。本轮结束、取消、连接失效或 epoch/Host 不匹配的响应被拒绝。cancel 发原生 run.abort，
 共享清理独立确认整树退出。Usage 缺值仍缺值，Session 总计不冒领为 Run delta，未知 compaction
 通知不合成生命周期。具体平台证据和剩余差异见 [Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md)。
+
+Host 目录必须由本次准备阶段独占创建。进程尚未启动时，配置失败或任务取消均清理该目录；
+成功 spawn 后，准备 guard 将清理权移交内核进程账本，不能因缺 marker 就删除可能仍在使用的配置。
+不支持的平台以条件编译提供 `cline_hub_platform_not_qualified`，不编译 macOS 专属捕获方法。
+当前 API key/BYOK 之外的原生 OAuth/订阅认证尚未实现；缺 API key 返回
+`cline_hub_native_auth_requires_api_key`。模型目录只来自当前 Provider 的本地原生目录及当前配置模型。

@@ -5,6 +5,9 @@ pub(super) trait NativePromptCompletion {
     fn kind(&self) -> AdapterKind;
     fn boundary(&self) -> MissingSendRecoveryBoundary;
     fn terminal(&self) -> impl Future<Output = (Option<String>, Option<String>)> + Send;
+    fn terminal_failure(&self) -> impl Future<Output = Option<RuntimeFailureView>> + Send {
+        async { None }
+    }
     fn delivery_id(&self) -> &str;
     fn prompt_id(&self) -> &str;
     fn session_id(&self) -> &str;
@@ -39,7 +42,32 @@ macro_rules! native_completion {
     };
 }
 native_completion!(PiRuntime, Pi, PiAgentSettled);
-native_completion!(ClineHubRuntime, ClineCli, ClineHubRunResult);
+impl NativePromptCompletion for ClineHubRuntime {
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::ClineCli
+    }
+    fn boundary(&self) -> MissingSendRecoveryBoundary {
+        MissingSendRecoveryBoundary::ClineHubRunResult
+    }
+    async fn terminal(&self) -> (Option<String>, Option<String>) {
+        ClineHubRuntime::terminal(self).await
+    }
+    async fn terminal_failure(&self) -> Option<RuntimeFailureView> {
+        ClineHubRuntime::terminal_failure(self).await
+    }
+    fn delivery_id(&self) -> &str {
+        self.delivery_id()
+    }
+    fn prompt_id(&self) -> &str {
+        self.prompt_id()
+    }
+    fn session_id(&self) -> &str {
+        self.session_id()
+    }
+    fn builtin_tool_process_config(&self) -> Option<&BuiltinToolProcessConfig> {
+        self.builtin_tool_process_config()
+    }
+}
 
 impl Core {
     pub(super) async fn finish_native_run(

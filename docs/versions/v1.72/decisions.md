@@ -497,7 +497,7 @@ Core 把分配结果写入 Host 私有 mcp.json，保留原生同名优先，更
 
 
 <a id="v1-72-d22"></a>
-## V1.72-D22：Cline 新会话采用独立 Native Hub，保留旧 ACP 后端
+## V1.72-D22：Cline 采用独立 Native Hub，删除 ACP 后端
 
 - 状态：accepted
 - 日期：2026-10-07
@@ -511,8 +511,9 @@ sessionConfig 已验证可传入原生 basic，并在同一安装完成阈值压
 该方案和证据后要求把 Cline 改为这一套并推送分支。选择官方 CLI 自有认证 Hub，不安装替代
 Runtime、不修补上游、不实现第二套压缩器；共享 Fleet/Managed Process 和领域合同保持权威。
 
-新 Binding 冻结 `cline-hub-v1`；旧 ACP Binding 继续 `acp-v1`，从冻结 Run 证据恢复后端。
-认证 Session 探测独立于 ACP 的最低版本判断。原生文件 Rule 承载原冻结 B，readonly hook
+User 在消息 83（`b70db5df-d6eb-4d76-aadb-a88f32b8e5d9`）明确不存在旧会话，要求删除兼容逻辑。
+Cline 仅冻结 `cline-hub-v1`；删除 ACP Host、3.0.65 门槛、Plugin observer 和后端 provenance 查询。
+以实际认证 Session 探测判断能力。原生文件 Rule 承载原冻结 B，readonly hook
 检查正常模型请求并采集稀疏数值。临时配置和永久历史分离，未知发送结果不自动重投。
 
 ### 后果与替代方案
@@ -520,6 +521,5 @@ Runtime、不修补上游、不实现第二套压缩器；共享 Fleet/Managed P
 当前 Hub 仅 macOS arm64 Preview、原生 BYOK；原生订阅解析、overflow recovery/retry、压缩取消、
 多 Session 压力及其他平台仍须独立验收。普通阈值压缩不能替代 overflow 资格。
 Host 采用 member scope 且固定 B，不在活跃原生 Session 之间修改共享 Rule。配置差异可能增加
-Host 重建，接受此成本以保证身份隔离。旧 ACP 不自动迁移，避免把不同存储/后端的 Session ID
-当作可互换身份。未选择另装 SDK、客户端压缩贡献、包装 ACP 或接管用户 Hub；它们无法满足本轮
+Host 重建，接受此成本以保证身份隔离。不保留不存在的旧会话兼容；历史实验及证据只作追溯。未选择另装 SDK、客户端压缩贡献、包装 ACP 或接管用户 Hub；它们无法满足本轮
 原生安装、配置权威和恢复证据边界。

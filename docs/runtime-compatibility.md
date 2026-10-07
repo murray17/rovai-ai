@@ -22,16 +22,16 @@ Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core 
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
 
-## 2026-10-07 Cline Native Hub 产品接入
+## 2026-10-08 Cline Native Hub 产品接入与评审修正
 
-User 消息 80 后，新 Cline Binding 改用所选官方 CLI 启动的独立认证 Hub，冻结协议为 `cline-hub-v1`。
-本机 Homebrew 3.0.3 / Hub build 0.0.41 通过无模型 Ready 探测与真实 Core first、两个成员、暖续接、
-重启后的同 ID cold、身份/早期记忆和 bundled CLI 发送；后续能力逐项见
-[Native Hub 产品矩阵](research/cline-runtime/hub-adapter-implementation.md)。旧 ACP Binding 按后端证据保留，
-其 3.0.65 门槛单独执行；Hub 没有新增版本白名单、安装 patch 或源码 shim。
-原生 compaction 尊重 off/basic/agentic 和所选安装的实际默认，本机 basic；原生阈值证据与产品长上下文、
-overflow+retry 资格分开。OAuth/订阅及未覆盖能力保持未知，仍为 macOS arm64 Preview。
-下文 ACP/App/研究结论按测试时点保存，不作为新 Hub 的完整资格。
+Cline 仅使用所选官方 CLI 启动的独立认证 Hub，冻结协议 `cline-hub-v1`。User 消息 83 确认无旧会话，
+已删除旧 ACP Host、3.0.65 门槛与后端推断。真实本机入口仍为 3.0.3 / Hub 0.0.41，macOS arm64 Preview。
+已测 BYOK 发送、warm/cold、审批、取消、stdio MCP、原生 Skill 读取；九轮主流程包含一个预期取消，另有三轮扩展。
+OAuth/订阅无 API key 的配置尚不支持，非“仅未验证”；模型目录限当前 Provider 的本地原生目录。
+原生明确失败与传输未知分开，均不自动重发；准备失败清理独占私有副本，spawn 后依进程账本回收。
+平台专属启动用条件编译隔离。完整历史单帧/消息/恢复请求限制 64 MiB，超限明确失败、不截断历史。
+真实模型长上下文、overflow/retry、压缩取消及其他平台 Runtime 资格仍需独立验证；默认 basic 缺少可用压缩事件。
+详见[产品接入与评审矩阵](research/cline-runtime/hub-adapter-implementation.md)，原 ACP 证据仅作历史追溯。
 
 ## 2026-10-06 Command / Cline 此前补验
 

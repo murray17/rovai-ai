@@ -70,7 +70,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | Runtime | 唯一 admission point | detector transport | 选择理由 |
 | --- | --- | --- | --- |
 | GitHub Copilot | `preCompact` / `imminent_edge` | 隔离官方 Plugin `preCompact` Hook | 目标 CLI 没有对等 completed Hook；该 edge 一次性推进 revision，accepted redelivery 后即结束，不等待 post event |
-| Cline | `cline.plugin.compaction.completed.v1` / `completed` | 已有 Host 私有 Plugin 的精确 Session/Prompt lease 数值记录 | 保留结构化数值解析；System Rule 已替代 first_payload，补发 detector disabled。原生 ACP 尚未启用 compaction；见[本轮核验](../research/runtime-monitoring/command-cline-native-system-2026-10-06.md) |
+| Cline | 无当前准入信号 | Native Hub 的原生 System Rule；旧 ACP Plugin 已退役 | 本机 basic 无可用压缩通知，不合成进度；补发 detector disabled，见[Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md) |
 | OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
 | Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；started 与 summary 不参与 admission |
 | Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only Prompt lifecycle correlation + idle/detached completion compatibility route | Kimi native ACP server 把内部 lifecycle 降格为同形 `agent_message_chunk`；Active Prompt 只有 exact started 建立 pending 后的 exact completed 才准入，blocked 保持 pending，cancelled 清除 pending；idle/detached 保留 exact completion detector |
@@ -136,10 +136,9 @@ edge，OpenCode 只表达完成，CodeBuddy 只表达 post-compaction Session bo
 Session ID、时间差、token drop 与普通文本不能补造展示数据。Codex 不进入本 detector policy；其 app-server
 `contextCompaction` item 由执行 Evidence 入口直接截获为同一 display schema，仍不推进 Bootstrap revision。
 
-Cline 复用现有私有数值 Plugin，按同一次原生压缩 ID 投影 started/completed 和明确的前后 token/message 数，
-不采集摘要正文。Host 的实时轮询与终态捕获由共享 Evidence 幂等收敛；展示消费额外核对当前 Host/Run/epoch/
-Session/Prompt，与 completed-only 的 Bootstrap detector 分离。关闭补发 detector 不抹去已经观察到的展示事实；
-尚未观察到真实压缩时也不能用模型回复、token 下降或配置窗口代替原生事件。
+Cline 现仅走 Native Hub，旧 ACP 私有 Plugin、轮询和压缩展示入口已退役。当前安装的 basic 没有
+可用原生开始/完成通知；因此不以模型回复、token 下降或配置窗口生成压缩事件。此前 ACP/shim 的
+展示实验证据不自动成为 Hub 能力，见 [Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md)。
 
 Claude Code 与 Cursor Agent 当前没有执行台 Compaction 展示入口；本次需求不新增其协议接入。Antigravity 也只允许在现有
 Adapter 已经收到明确原生事件时投影，不为填满 Runtime 矩阵新增 detector 或启动配置。

@@ -2394,7 +2394,6 @@ struct Core {
     kimi_code_cli: AcpCliRuntimeAdapter,
     grok_build: AcpCliRuntimeAdapter,
     deepseek_harness: AcpCliRuntimeAdapter,
-    cline_cli: AcpCliRuntimeAdapter,
     cline_hub: ClineHubAdapter,
     command_code_cli: AcpCliRuntimeAdapter,
     zcode_app: AcpCliRuntimeAdapter,
@@ -5239,13 +5238,6 @@ impl Core {
             return Some(AgentRunRuntime::Acp(runtime));
         }
         if let Some(runtime) = self
-            .cline_cli
-            .get_agent_run(agent_run_id, execution_epoch)
-            .await
-        {
-            return Some(AgentRunRuntime::Acp(runtime));
-        }
-        if let Some(runtime) = self
             .command_code_cli
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -5370,7 +5362,6 @@ impl Core {
             self.kimi_code_cli.shutdown_all(),
             self.grok_build.shutdown_all(),
             self.deepseek_harness.shutdown_all(),
-            self.cline_cli.shutdown_all(),
             self.command_code_cli.shutdown_all(),
             self.zcode_app.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
@@ -5396,7 +5387,6 @@ impl Core {
                 self.kimi_code_cli.shutdown_all(),
                 self.grok_build.shutdown_all(),
                 self.deepseek_harness.shutdown_all(),
-                self.cline_cli.shutdown_all(),
                 self.command_code_cli.shutdown_all(),
                 self.zcode_app.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
@@ -5425,13 +5415,13 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
             rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
             AdapterKind::DeepseekHarness => Some(&self.deepseek_harness),
-            AdapterKind::ClineCli => Some(&self.cline_cli),
             AdapterKind::CommandCodeCli => Some(&self.command_code_cli),
             rovai_core::agent_profile::AdapterKind::ZcodeApp => Some(&self.zcode_app),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::Pi
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
-            | rovai_core::agent_profile::AdapterKind::AntigravityApp => None,
+            | rovai_core::agent_profile::AdapterKind::AntigravityApp
+            | rovai_core::agent_profile::AdapterKind::ClineCli => None,
         }
     }
 
@@ -12914,9 +12904,6 @@ impl Core {
                         self.cline_hub
                             .forget_agent_run(agent_run_id, execution_epoch)
                             .await;
-                        self.cline_cli
-                            .forget_agent_run(agent_run_id, execution_epoch)
-                            .await;
                     } else if let Ok(kind) = adapter_kind.parse::<AdapterKind>()
                         && let Some(adapter) = self.acp_adapter(kind)
                     {
@@ -14554,7 +14541,7 @@ impl Core {
                 })
                 .await;
         }
-        if execution.runtime.protocol_version == crate::cline_hub::PROTOCOL {
+        if execution.runtime.adapter_kind == AdapterKind::ClineCli {
             return self
                 .launch_cline_hub_agent_run(PreparedRuntimeLaunch {
                     execution,
@@ -16502,7 +16489,7 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         if matches!(
             execution.runtime.adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
         ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
@@ -17841,15 +17828,6 @@ async fn run_core(
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         ),
         cline_hub: ClineHubAdapter::new(&data_dir, hub_tx, runtime_fleet.clone()),
-        cline_cli: AcpCliRuntimeAdapter::deferred(
-            rovai_core::agent_profile::AdapterKind::ClineCli,
-            acp_tx.clone(),
-            data_dir.join("runtime/cline"),
-            runtime_fleet.clone(),
-            compaction_detector_policies
-                .policy_for(AdapterKind::ClineCli)
-                .unwrap_or(CompactionDetectorPolicy::Disabled),
-        ),
         grok_build: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::GrokBuild,
             acp_tx.clone(),
@@ -19333,25 +19311,32 @@ async fn persist_native_prompt_completion(
     } else {
         None
     };
-    let manual_retry_allowed = outcome == RuntimeTerminalOutcome::Failed
+    let native_failure = runtime.terminal_failure().await;
+    let manual_retry_allowed = native_failure.is_none()
+        && outcome == RuntimeTerminalOutcome::Failed
         && delivery_status.as_deref() == Some("not_accepted");
     let base_error_code = if stop_reason == "stop" {
         "runtime_missing_final_output".to_string()
     } else {
         format!("runtime_prompt_{stop_reason}")
     };
-    let error_detail = format!("Native prompt result ended the prompt as {stop_reason}");
-    let public_failure = (outcome == RuntimeTerminalOutcome::Failed).then(|| {
-        public_runtime_failure_from_output(
-            runtime.kind(),
-            RuntimeFailureOrigin::Runtime,
-            RuntimeFailurePhase::Execution,
-            &base_error_code,
-            "Runtime 未能完成运行",
-            Some(&error_detail),
-            &[(&core.data_dir, "<data-dir>")],
-            manual_retry_allowed,
-        )
+    let error_detail = native_failure
+        .as_ref()
+        .and_then(|failure| failure.detail.clone())
+        .unwrap_or_else(|| format!("Native prompt result ended the prompt as {stop_reason}"));
+    let public_failure = native_failure.or_else(|| {
+        (outcome == RuntimeTerminalOutcome::Failed).then(|| {
+            public_runtime_failure_from_output(
+                runtime.kind(),
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Execution,
+                &base_error_code,
+                "Runtime 未能完成运行",
+                Some(&error_detail),
+                &[(&core.data_dir, "<data-dir>")],
+                manual_retry_allowed,
+            )
+        })
     });
     let error_code = public_failure
         .as_ref()
@@ -20040,45 +20025,6 @@ async fn process_acp_events(
                     execution_epoch,
                 )
                 .await;
-            }
-            AcpIncoming::CompactionDisplay {
-                adapter_kind,
-                host_instance_id,
-                agent_run_id,
-                execution_epoch,
-                native_session_id,
-                native_prompt_id,
-                event,
-            } => {
-                let Some(runtime) = acp_runtime_on_host(
-                    &core,
-                    adapter_kind,
-                    &host_instance_id,
-                    &agent_run_id,
-                    execution_epoch,
-                )
-                .await
-                else {
-                    continue;
-                };
-                if runtime.session_id().await.as_deref() != Some(&native_session_id)
-                    || runtime.prompt_id().await.as_deref() != Some(&native_prompt_id)
-                {
-                    continue;
-                }
-                if let Err(error) = persist_runtime_compaction_display(
-                    &core,
-                    &output,
-                    &agent_run_id,
-                    execution_epoch,
-                    None,
-                    *event,
-                    "cline.plugin.compaction.v1",
-                )
-                .await
-                {
-                    eprintln!("Cline local compaction display skipped: {error:#}");
-                }
             }
             AcpIncoming::CompactionObservation {
                 adapter_kind,
@@ -20961,18 +20907,6 @@ fn normalize_acp_event_with_completion(
             {
                 payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
                     "sourceEventKind":"session/update.tool_call_update.completed.edit_file", "semanticKind":"reported_mutation", "entries":entries});
-            }
-            if adapter_kind == AdapterKind::ClineCli
-                && public_status == "completed"
-                && let Some(mutation) = update.pointer("/_meta/rovaiClineMutation")
-                && let Some(tool @ ("apply_patch" | "editor")) = mutation["tool"].as_str()
-                && let Some(entries) = mutation.get("entries")
-            {
-                payload["runtimeDiff"] = json!({
-                    "adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
-                    "sourceEventKind":format!("session/update.tool_call_update.completed.{tool}"),
-                    "semanticKind":"reported_mutation","entries":entries,
-                });
             }
             ("runtime.action", payload)
         }
@@ -25995,15 +25929,6 @@ mod tests {
                 mpsc::unbounded_channel().0,
                 runtime_fleet.clone(),
             ),
-            cline_cli: AcpCliRuntimeAdapter::new(
-                AdapterKind::ClineCli,
-                acp_tx.clone(),
-                data_dir.join("runtime/cline"),
-                runtime_fleet.clone(),
-                compaction_detector_policies
-                    .policy_for(AdapterKind::ClineCli)
-                    .unwrap_or(CompactionDetectorPolicy::Disabled),
-            )?,
             grok_build: AcpCliRuntimeAdapter::new(
                 AdapterKind::GrokBuild,
                 acp_tx.clone(),
@@ -31215,48 +31140,6 @@ for line in sys.stdin:
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
-
-        let initial = json!({
-            "title":"run_commands: printf CLINE_OUTPUT",
-            "rawInput":{"commands":["printf CLINE_OUTPUT; exit 7"],"credential":"CLINE_PRIVATE_INPUT"}
-        });
-        let mut cline_update = json!({
-            "sessionUpdate":"tool_call_update",
-            "toolCallId":"cline-tool",
-            "status":"completed",
-            "rawOutput":[{"success":false,"result":"CLINE_OUTPUT","private":"CLINE_PRIVATE_RESULT"}]
-        });
-        rovai_core::cline::enrich_tool_update(&mut cline_update, Some(&initial));
-        let (_, cline_payload) = normalize_acp_event(
-            AdapterKind::ClineCli,
-            "session/update",
-            &json!({"update":cline_update}),
-        );
-        assert_eq!(cline_payload["status"], "failed");
-        assert_eq!(cline_payload["input"], "printf CLINE_OUTPUT; exit 7");
-        assert_eq!(cline_payload["output"], "CLINE_OUTPUT");
-        let serialized_cline = serde_json::to_string(&cline_payload).unwrap();
-        assert!(!serialized_cline.contains("CLINE_PRIVATE_INPUT"));
-        assert!(!serialized_cline.contains("CLINE_PRIVATE_RESULT"));
-
-        let patch_initial = json!({"title":"apply_patch: fixture","rawInput":{"input":"*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch","private":"CLINE_PRIVATE"}});
-        let mut patch_terminal = json!({"sessionUpdate":"tool_call_update","toolCallId":"edit","status":"completed","rawOutput":{"success":true,"private":"CLINE_PRIVATE"}});
-        rovai_core::cline::enrich_tool_update(&mut patch_terminal, Some(&patch_initial));
-        let (_, patch_payload) = normalize_acp_event(
-            AdapterKind::ClineCli,
-            "session/update",
-            &json!({"update":patch_terminal}),
-        );
-        assert_eq!(
-            patch_payload["runtimeDiff"]["semanticKind"],
-            "reported_mutation"
-        );
-        assert_eq!(
-            patch_payload.pointer("/runtimeDiff/entries/0/fragments/0/oldText"),
-            Some(&json!("old\n"))
-        );
-        assert!(patch_payload["input"].is_null());
-        assert!(!patch_payload.to_string().contains("CLINE_PRIVATE"));
 
         let command_initial = json!({"sessionUpdate":"tool_call", "toolCallId":"command-edit",
             "status":"pending", "kind":"edit", "title":"Edit file",

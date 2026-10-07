@@ -208,10 +208,7 @@ impl super::Core {
             let result = match kind {
                 AdapterKind::CodexCli => Ok(()),
                 AdapterKind::Pi => self.pi.initialize_storage(),
-                AdapterKind::ClineCli => self
-                    .cline_hub
-                    .initialize_storage()
-                    .and_then(|_| self.cline_cli.initialize_storage()),
+                AdapterKind::ClineCli => self.cline_hub.initialize_storage(),
                 AdapterKind::ClaudeCodeCli => self.claude_code_cli.initialize_storage(),
                 AdapterKind::AntigravityApp => self.antigravity_app.initialize_storage(),
                 kind => self

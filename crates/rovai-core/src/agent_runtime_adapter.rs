@@ -985,8 +985,10 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::GrokBuild
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
-            | AdapterKind::CommandCodeCli
-            | AdapterKind::ClineCli => resolve_acp_runtime(kind, input),
+            | AdapterKind::CommandCodeCli => resolve_acp_runtime(kind, input),
+            AdapterKind::ClineCli => {
+                resolve_session_runtime(kind, crate::cline_hub::PROTOCOL, input)
+            }
         }
     }
 
@@ -1092,7 +1094,7 @@ impl AgentRuntimeAdapterRegistry {
                 acp_capability_snapshot(observation, command_code_permission_options())
             }
             AdapterKind::ClineCli => {
-                acp_capability_snapshot(observation, cline_permission_options())
+                anyhow::bail!("Cline capabilities require the native Hub probe")
             }
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
@@ -1174,8 +1176,7 @@ impl AgentRuntimeAdapterRegistry {
             && !crate::dsh::supported_version(reported_version.as_deref());
         let command_code_version_unsupported = kind == AdapterKind::CommandCodeCli
             && !crate::command_code_acp::supported_version(reported_version.as_deref());
-        // The legacy 3.0.65 gate belongs to ACP. Native Hub readiness is
-        // established by its owned, authenticated handshake, not that version.
+        // Cline Hub readiness comes from its owned authenticated handshake.
         let pi_version_unsupported =
             kind == AdapterKind::Pi && !pi_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
@@ -2414,17 +2415,6 @@ fn acp_capability_snapshot(
                 "session.new",
                 "context.charter.first_payload",
             ]
-        } else if adapter_kind == AdapterKind::ClineCli {
-            &[
-                "acp.initialize",
-                "session.new",
-                "session.prompt",
-                "session.cancel",
-                "session.update",
-                "session.set_config_option",
-                "structured_permission_request",
-                "context.charter.managed_system_prompt",
-            ]
         } else if matches!(
             adapter_kind,
             AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
@@ -3275,31 +3265,33 @@ fn resolve_pi_runtime(
 }
 
 fn resolve_acp_runtime(
+    kind: AdapterKind,
+    input: AdapterRuntimeResolutionInput<'_>,
+) -> Result<AdapterRuntimeProjection> {
+    resolve_session_runtime(
+        kind,
+        if kind == AdapterKind::ZcodeApp {
+            crate::zcode::PROTOCOL
+        } else {
+            "acp-v1"
+        },
+        input,
+    )
+}
+
+fn resolve_session_runtime(
     expected_kind: AdapterKind,
+    required_protocol: &str,
     input: AdapterRuntimeResolutionInput<'_>,
 ) -> Result<AdapterRuntimeProjection> {
     if input.permissions.adapter_kind != expected_kind {
-        anyhow::bail!("ACP permission configuration belongs to another Adapter");
+        anyhow::bail!("Runtime permission configuration belongs to another Adapter");
     }
     let protocol_version = input
         .protocols
         .iter()
-        .find(|protocol| {
-            protocol.as_str()
-                == if expected_kind == AdapterKind::ClineCli
-                    && input
-                        .protocols
-                        .iter()
-                        .any(|v| v == crate::cline_hub::PROTOCOL)
-                {
-                    crate::cline_hub::PROTOCOL
-                } else if expected_kind == AdapterKind::ZcodeApp {
-                    crate::zcode::PROTOCOL
-                } else {
-                    "acp-v1"
-                }
-        })
-        .context("ACP installation does not advertise ACP v1")?
+        .find(|protocol| protocol.as_str() == required_protocol)
+        .context("Runtime installation does not advertise the required protocol")?
         .clone();
     let permission_values = input
         .permissions

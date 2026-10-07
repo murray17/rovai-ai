@@ -90,6 +90,36 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+## Cline Hub 评审修正与测试退役（2026-10-08）
+
+User 消息 83 明确删除 Cline ACP 后端，因而退役 `cline_backend_tests`、
+`isolated_cline_acp_host_observes_warm_and_exact_cold_prompts`、原 `cline::tests` 的 Plugin 文件租约/
+Host overlay owner，以及 `scripts/lib/cline-observer.test.mjs`。生产 ACP transport、Plugin 和对应
+恢复合同在同一改动中退出；`paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`
+及 ACP Application/文件 owner 中的 Cline 专属 case 随不可达分支退出。Hub 的 Run/Session fencing、
+拒绝无副作用和已完成文件变更分别由 Hub 验收与共享文件来源 owner 承接。历史记录不构成兼容需求。原指标解析的全部稀疏桶、窗口和非法来源
+case 保留到 `cline::tests::native_metrics_keep_sparse_usage_and_verified_context_windows`；
+共享 ACP、文件解析、未知输入与 epoch fencing owner 保留。
+
+新增 owner 均覆盖评审中的独立失败边界：
+
+- `cline_hub::failure::tests`：纯函数验证明确拒绝/传输未知和原生错误秘密排除，旧实现丢失分类。
+- `cline_hub::config::tests::native_catalog_exposes_all_configured_models_without_cross_provider_or_secret_metadata`：
+  原配置只有默认模型，新纯 parser 验证多模型、当前 Provider 边界和私有元数据排除。
+- `cline_hub::config::tests::preparation_failure_removes_private_copies_but_never_claims_a_live_or_preexisting_host`：
+  最小临时文件 fixture，证明复制后 MCP 校验失败的清理及所有权移交，属于 extended-tests；纯 parser 无法证明文件删除。
+- `cline_hub::transport::tests`：实际 loopback WebSocket 证明超过旧 16 MiB 的历史帧和超限头部拒绝，
+  属于 extended-tests；只测 JSON 长度不能发现库自身的帧限制。没有模型调用。
+- `cline_hub::tests::installed_hub_known_rejection_and_large_history_cold_restore`：显式 ignored 真原生
+  protocol fixture，覆盖 native `ok:false` 到 Run 终态的完整链、禁止重发、17 MiB 同 ID 冷恢复与拒绝无副作用。
+  只向不存在的 Session 提交失败请求，不执行模型；普通 CI 不依赖安装或私有配置。
+
+最小验证：`cargo test -p rovai-core --features extended-tests --lib cline`；恢复、文件来源与
+ACP 的既有扩展 owner 按改动范围执行，最终默认 workspace 门禁仍使用 `pnpm test:rust:pr`。
+Windows 真机编译使用手动 `Full check` 的 `windows-check` scope；不把 macOS 或 Ubuntu 检查当作 Windows 证据。
+
+以下 2026-10-07/04 小节是准入历史，已退役 owner 的当前归属以上文为准。
+
 ## Cline Native Hub owner（2026-10-07）
 
 - 新纯函数 owner `cline_hub::config::tests::native_compaction_preferences_preserve_off_and_reject_unknown_defaults`

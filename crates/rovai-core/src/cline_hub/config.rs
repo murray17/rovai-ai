@@ -187,9 +187,87 @@ fn snapshot_rules(source: &Path, destination: &Path) -> Result<()> {
 pub(super) struct NativeConfiguration {
     pub session: Value,
     pub discovery: PathBuf,
+    pub models: Vec<crate::agent_profile::ModelDescriptor>,
+}
+
+/// Only the selected native provider's persisted model catalog is authoritative
+/// here. Other providers may require a different connection/authentication path.
+fn native_models(
+    catalog: &Value,
+    provider: &str,
+    selected: &str,
+) -> Vec<crate::agent_profile::ModelDescriptor> {
+    let mut ids = std::collections::BTreeSet::new();
+    if let Some(models) = catalog["providers"][provider]["models"].as_object() {
+        ids.extend(
+            models
+                .iter()
+                .filter(|(id, model)| {
+                    !id.trim().is_empty()
+                        && id.len() <= 512
+                        && !id.chars().any(char::is_control)
+                        && model.is_object()
+                        && model["hidden"] != true
+                        && model["deprecated"] != true
+                })
+                .map(|(id, _)| id.clone()),
+        );
+    }
+    ids.insert(selected.to_owned());
+    ids.into_iter()
+        .map(|id| crate::agent_profile::ModelDescriptor {
+            is_default: id == selected,
+            display_name: id.clone(),
+            id,
+            description: None,
+            runtime_metadata: None,
+            hidden: false,
+            deprecated: false,
+            options: Vec::new(),
+        })
+        .collect()
 }
 
 pub(super) const OWNED_HOST_MARKER: &str = ".rovai-cline-hub-host";
+
+/// Own only a newly created Host directory. Before spawn, unwinding (including
+/// cancellation) removes credentials. After spawn, only the process ledger may
+/// authorize deletion; a live or unconfirmed process must retain its files.
+pub(super) struct HostPreparation {
+    root: PathBuf,
+    process_started: bool,
+}
+
+impl HostPreparation {
+    pub(super) fn create(root: &Path) -> Result<Self> {
+        private_dir(root.parent().context("cline_hub_host_parent_missing")?)?;
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(root)?;
+        Ok(Self {
+            root: root.into(),
+            process_started: false,
+        })
+    }
+
+    pub(super) fn process_started(&mut self) {
+        self.process_started = true;
+    }
+}
+
+impl Drop for HostPreparation {
+    fn drop(&mut self) {
+        if !self.process_started {
+            if let Err(error) = fs::remove_dir_all(&self.root) {
+                eprintln!("Cline Hub preparation cleanup failed: {}", error.kind());
+            }
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 pub(super) fn recover_hosts(root: &Path) -> Result<()> {
@@ -258,49 +336,36 @@ pub(super) async fn configure(
     };
     let key =
         environment("CLINE_API_KEY").or_else(|| settings["apiKey"].as_str().map(str::to_owned));
-    // Authentication is Cline's own saved provider state. No other Runtime or
-    // experimental SDK is consulted; unavailable native credentials fail closed.
-    let key = key
-        .filter(|v| !v.is_empty())
-        .context("cline_hub_native_provider_credentials_unavailable")?;
+    // Native OAuth refresh/secure storage is not wired through this Hub client.
+    // A login without a reusable native API key is unsupported, not "untested".
+    let key = key.filter(|v| !v.trim().is_empty()).ok_or_else(|| {
+        crate::runtime_failure::RuntimeFailureError::new(
+            crate::runtime_failure::RuntimeFailureView::new(
+                AdapterKind::ClineCli,
+                crate::runtime_failure::RuntimeFailureOrigin::Compatibility,
+                crate::runtime_failure::RuntimeFailurePhase::Authentication,
+                "cline_hub_native_auth_requires_api_key",
+                "Cline Hub 当前需要原生 API key 配置",
+                Some(
+                    "当前接入支持 BYOK；仅有原生 OAuth 或订阅登录、没有 API key 的配置尚不支持。"
+                        .into(),
+                ),
+                false,
+            ),
+        )
+    })?;
     let catalog = read_json(&paths.data.join("settings/models.json"))?.unwrap_or(Value::Null);
     let preferences = read_json(&paths.settings)?.unwrap_or_else(|| json!({}));
     if !preferences.is_object() {
         bail!("cline_native_settings_invalid");
     }
     let compaction = compaction_setting(&preferences, &native_help(executable).await?)?;
-    private_dir(root)?;
     private_dir(history)?;
-    // The native runtime may persist provider metadata while starting a
-    // Session. Give it copies so even those writes cannot touch source settings.
+    write_native_files(root, &paths, bootstrap, servers, &saved, &preferences)?;
     let providers_path = root.join("providers.json");
     let preferences_path = root.join("global-settings.json");
-    private_file(&providers_path, &serde_json::to_vec(&saved)?)?;
-    private_file(&preferences_path, &serde_json::to_vec(&preferences)?)?;
     let config = root.join("config");
-    private_dir(&config.join("rules"))?;
-    snapshot_rules(&paths.config.join("rules"), &config.join("rules"))?;
-    private_file(&config.join("rules").join(format!("rovai-managed-{}.md", crate::command::canonical_json_digest(&json!(bootstrap))?)), format!("<!-- Rovai frozen native Rule -->\n{bootstrap}\n<!-- End Rovai frozen native Rule -->\n").as_bytes())?;
-    #[cfg(unix)]
-    for name in ["skills", "workflows", "hooks", "plugins"] {
-        let source = paths.config.join(name);
-        if source.exists() {
-            std::os::unix::fs::symlink(source, config.join(name))?;
-        }
-    }
-    let mut mcp = read_json(&paths.mcp)?.unwrap_or_else(|| json!({"mcpServers":{}}));
-    let definitions = mcp["mcpServers"]
-        .as_object_mut()
-        .context("cline_native_mcp_config_invalid")?;
-    for (name, definition) in servers {
-        let mut definition = serde_json::to_value(definition)?;
-        if definition.get("url").is_some() {
-            definition["type"] = json!("streamableHttp");
-        }
-        definitions.insert(name.clone(), definition);
-    }
     let mcp_path = root.join("mcp.json");
-    private_file(&mcp_path, &serde_json::to_vec(&mcp)?)?;
     let discovery = root.join("discovery.json");
     for name in [
         "CLINE_HUB_URL",
@@ -342,12 +407,123 @@ pub(super) async fn configure(
     if let Some(models) = catalog["providers"][&provider].get("models") {
         session["knownModels"] = models.clone();
     }
-    Ok(NativeConfiguration { session, discovery })
+    let models = native_models(&catalog, &provider, &model);
+    Ok(NativeConfiguration {
+        session,
+        discovery,
+        models,
+    })
+}
+
+fn write_native_files(
+    root: &Path,
+    paths: &crate::cline::NativePaths,
+    bootstrap: &str,
+    servers: &BTreeMap<String, McpServerDefinition>,
+    saved: &Value,
+    preferences: &Value,
+) -> Result<()> {
+    // The native runtime may persist provider metadata while starting a
+    // Session. Give it copies so even those writes cannot touch source settings.
+    let providers_path = root.join("providers.json");
+    let preferences_path = root.join("global-settings.json");
+    private_file(&providers_path, &serde_json::to_vec(&saved)?)?;
+    private_file(&preferences_path, &serde_json::to_vec(&preferences)?)?;
+    let config = root.join("config");
+    private_dir(&config.join("rules"))?;
+    snapshot_rules(&paths.config.join("rules"), &config.join("rules"))?;
+    private_file(&config.join("rules").join(format!("rovai-managed-{}.md", crate::command::canonical_json_digest(&json!(bootstrap))?)), format!("<!-- Rovai frozen native Rule -->\n{bootstrap}\n<!-- End Rovai frozen native Rule -->\n").as_bytes())?;
+    #[cfg(unix)]
+    for name in ["skills", "workflows", "hooks", "plugins"] {
+        let source = paths.config.join(name);
+        if source.exists() {
+            std::os::unix::fs::symlink(source, config.join(name))?;
+        }
+    }
+    let mut mcp = read_json(&paths.mcp)?.unwrap_or_else(|| json!({"mcpServers":{}}));
+    let definitions = mcp["mcpServers"]
+        .as_object_mut()
+        .context("cline_native_mcp_config_invalid")?;
+    for (name, definition) in servers {
+        let mut definition = serde_json::to_value(definition)?;
+        if definition.get("url").is_some() {
+            definition["type"] = json!("streamableHttp");
+        }
+        definitions.insert(name.clone(), definition);
+    }
+    let mcp_path = root.join("mcp.json");
+    private_file(&mcp_path, &serde_json::to_vec(&mcp)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_catalog_exposes_all_configured_models_without_cross_provider_or_secret_metadata() {
+        let catalog = json!({"providers":{"selected":{"models":{
+            "first":{"contextWindow":272000,"apiKey":"secret"},"second":{},
+            "hidden":{"hidden":true},"retired":{"deprecated":true},"invalid":false}},
+            "unrelated":{"models":{"must-not-appear":{}}}}});
+        let models = native_models(&catalog, "selected", "first");
+        assert_eq!(
+            models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert!(models[0].is_default);
+        assert!(!models[1].is_default);
+        assert!(!serde_json::to_string(&models).unwrap().contains("secret"));
+        assert_eq!(
+            native_models(&Value::Null, "selected", "configured")[0].id,
+            "configured"
+        );
+    }
+    // The owned filesystem boundary cannot be proven by a pure parser test.
+    #[cfg(feature = "extended-tests")]
+    #[test]
+    fn preparation_failure_removes_private_copies_but_never_claims_a_live_or_preexisting_host() {
+        let base =
+            std::env::temp_dir().join(format!("rovai-hub-preparation-{}", uuid::Uuid::new_v4()));
+        let paths = crate::cline::NativePaths::resolve(&base.join("native"), |_| None);
+        private_dir(paths.mcp.parent().unwrap()).unwrap();
+        fs::write(&paths.mcp, r#"{"mcpServers":false}"#).unwrap();
+        let source = fs::read(&paths.mcp).unwrap();
+        let root = base.join("host");
+        {
+            let _preparation = HostPreparation::create(&root).unwrap();
+            let result = write_native_files(
+                &root,
+                &paths,
+                "frozen identity",
+                &BTreeMap::new(),
+                &json!({"providers":{"native":{"settings":{"apiKey":"isolated-test-secret"}}}}),
+                &json!({}),
+            );
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "cline_native_mcp_config_invalid"
+            );
+            assert!(root.join("providers.json").is_file());
+            assert!(root.join("global-settings.json").is_file());
+        }
+        assert!(
+            !root.exists(),
+            "failed preparation must remove its credentials"
+        );
+        assert_eq!(fs::read(&paths.mcp).unwrap(), source);
+        {
+            let mut preparation = HostPreparation::create(&root).unwrap();
+            preparation.process_started();
+        }
+        assert!(
+            root.is_dir(),
+            "a possible live process belongs to ledger cleanup"
+        );
+        assert!(HostPreparation::create(&root).is_err());
+        assert!(root.is_dir(), "never claim or delete an existing directory");
+        fs::remove_dir_all(base).unwrap();
+    }
+
     #[test]
     fn native_compaction_preferences_preserve_off_and_reject_unknown_defaults() {
         let help = "  --compaction <mode> Context compaction mode: agentic|basic|off\n                                (default: basic)\n  -i, --tui Next option";

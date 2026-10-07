@@ -11,7 +11,7 @@ last_updated: 2026-10-07
 
 # Cline 官方 Runtime 接入
 
-最新产品方向已按 User 消息 80 切换：新 Binding 使用独立 Native Hub，旧 ACP Binding 保留原后端。
+最新产品方向已按 User 消息 80 切换到独立 Native Hub；消息 83 确认没有旧会话，已删除 ACP 后端及兼容逻辑。
 当前实现和验收边界以 [Native Hub 产品矩阵](hub-adapter-implementation.md)为准。下文 ACP、shim
 和最小 Hub 调查按发生顺序保留，不再将“Hub 尚未实现”作为当前状态。
 

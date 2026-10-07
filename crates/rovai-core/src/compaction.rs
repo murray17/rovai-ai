@@ -893,10 +893,7 @@ fn qualified_admission(
     admission_point: &str,
 ) -> bool {
     match adapter_kind {
-        AdapterKind::ClineCli => {
-            source_signal == "cline.plugin.compaction.completed.v1"
-                && admission_point == "completed"
-        }
+        AdapterKind::ClineCli => false,
         AdapterKind::CopilotCli => {
             source_signal == "preCompact" && admission_point == "imminent_edge"
         }
