@@ -19,6 +19,9 @@ Session 的成功请求 input usage 达到 **918,618 tokens**；第 42 批发生
 2026-10-07 00:42–01:16（Asia/Shanghai；原始证据用 2026-10-06 UTC）。
 这是本组合的一次真实负向验收，不是对所有 Cline 版本、Provider 或运行入口的能力断言。
 
+User 随后要求“再把上限用满试试”；[追加满长输入复测](#追加满长输入复测user-消息-68)仍得到真实
+Provider overflow，无原生 compaction，没有更高的成功 usage。
+
 ## 固定环境与约束
 
 | 项目 | 固定值 |
@@ -155,3 +158,36 @@ run_finished(failed)`。这里的 `model_completed` **requestId 为 null、metri
 消息归属断言通过；4 个公开变更文件与实际凭据值的匹配为零。`pnpm docs:test` 10 项通过，
 `pnpm docs:check`、以 `9faf819d5e130295c37de70374568a740504d2f0` 为 base 的
 `pnpm docs:check:ci` 及 `git diff --check` 通过。本轮没有生产代码改动，未重复运行无关 Runtime 的全量测试。
+
+## 追加满长输入复测（User 消息 68）
+
+消息 `840d3b4e-9cad-4d00-a251-cf2699a48baf` 请求继续把上限用满。本轮 checkout 为
+`2cb46da949fa007fed4a787f00a9b62e50474426`，App/CLI 二进制、模型/Provider/MCP 配置、生产
+Rule/observer 与前轮摘要完全一致。没有调整 context window 或输出上限，没有换模型、回滚原生
+历史、创建替代 Session，也没有添加压缩或 retry。
+
+先重新读取同一 Provider 的模型目录：普通 `/models` 返回 17 项，不含精确模型；带
+`client_version=0.157.1` 的元数据入口仍报告 `gpt-6-sol` 的 `context_window=272000`、
+`max_context_window=872000`。前轮成功 usage 已高于这两个目录值，故没有把任何一个值当作
+已证明的硬上限，或据此修改配置以“填满”显示圆环。
+
+通过原开发包正常发送 **32,700 bytes** 的新增合成数据，接近单条输入长度上限；内容要求只回 ACK，
+没有要求压缩。原 Session 的既有长历史完整保留。真实结果：
+
+| 项目 | 结果 |
+| --- | --- |
+| Run | `f7fb243f-6ec8-4997-b176-03d995840acb` |
+| 起止 UTC | `2026-10-07T04:04:05.184176+00:00` → `04:07:38.437350+00:00`，约 213 秒 |
+| 终态 | `failed`；再次返回 `Your input exceeds the context window of this model` |
+| Session / Binding | 仍为 `1791217949748_FrXN__cli` / `301e9573-3a00-4ee3-b84e-7150067f5128`，generation 13 |
+| Host | 本轮新 Host `9bca9301-08c6-40c3-b5ea-f98bbcf0f3b9` 加载原 Session，没有替换 Session |
+| 原生消息数 | **212 → 214**，没有缩短，没有 compaction sidecar |
+| observer | 完整 seq 1→2→3：started、空 metrics/null requestId 的错误 completion、finished(failed)；compaction **0** |
+| 成功生成与公开回复 | **0**；没有新的成功 usage，最后成功水位仍为 **918,618** |
+| 自动恢复 | 未观察到 compact + retry 成功；Core retry 0；底层 HTTP 尝试次数仍未知 |
+
+这次追加再次确认：当前会话继续增加输入后，Provider 拒绝生成；不能将一个失败请求补成更高
+usage 或声称成功使用了 1M tokens。**原生 compaction 分类仍为 C。** 原生配置未显式填写
+输出 token 上限；由于没有抓取逐请求参数，具体输出预留量及其是否决定拒绝点仍未知，不用猜测
+替代证据。独立的[追加复测证据](native-compaction-full-limit-2026-10-07.evidence.json)保留目录数值、
+Run、原始 observer 字段、原生错误、前后消息/文件摘要和配置完整性检查。
