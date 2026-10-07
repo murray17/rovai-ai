@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "upstream_source_audit",
+  "observedAt": "2026-10-07T04:48:51.037301+00:00",
+  "requestMessageId": "13c99703-c15d-4789-8023-04a0476f472e",
+  "rovaiBaseline": "d5cb7d264d25afce0447518b0ce7cc4058aab0e1",
+  "upstreamRepository": "https://github.com/cline/cline",
+  "registry": {
+    "url": "https://registry.npmjs.org/cline",
+    "distTags": {
+      "latest": "3.0.68",
+      "nightly": "3.0.68-nightly.1791289325"
+    }
+  },
+  "releases": [
+    {
+      "version": "3.0.65",
+      "ref": "cli-v3.0.65",
+      "commit": "9131e36429314ea614491bf749678adbacb3d3cb",
+      "commitDate": "2026-09-24T05:19:28Z",
+      "publishedAt": "2026-09-24T05:55:56.163Z",
+      "tarball": "https://registry.npmjs.org/cline/-/cline-3.0.65.tgz",
+      "integrity": "sha512-6P2jgsJHp+JRUzlGR6Rp4W/zAwXPg8ihC2M9ec/VgKS4nnlGCB8Ftn17StcIjYFYtocJRkU8UGUnKF69zhv40Q=="
+    },
+    {
+      "version": "3.0.66",
+      "ref": "cli-v3.0.66",
+      "commit": "20d70ceed8b749f9350bc8c573a81faaa236b289",
+      "commitDate": "2026-09-30T02:20:17Z",
+      "publishedAt": "2026-09-30T02:42:40.964Z",
+      "tarball": "https://registry.npmjs.org/cline/-/cline-3.0.66.tgz",
+      "integrity": "sha512-MJklSkCoiojuOQC0G3h1Jgd7V8IWACc4VdUW9+GUExCnhSfDNsdgad+MlUMtm6Svo554+RVTG8O630ANFTjGgg=="
+    },
+    {
+      "version": "3.0.67",
+      "ref": "cli-v3.0.67",
+      "commit": "9087191126d43c4123965501d5c2e1b9bb4dca90",
+      "commitDate": "2026-09-30T23:18:46Z",
+      "publishedAt": "2026-09-30T23:46:09.558Z",
+      "tarball": "https://registry.npmjs.org/cline/-/cline-3.0.67.tgz",
+      "integrity": "sha512-4aMoB/jww42vDt/9iXqdMbmA7QiVNP5dPLDrz4mt4veKp9Y2DL041RL67PCrEH0TeWsLuAo4nIjEiwsa93TL3A=="
+    },
+    {
+      "version": "3.0.68",
+      "ref": "cli-v3.0.68",
+      "commit": "241c1884a7461ef35f6c384a027a38e8d03b3b33",
+      "commitDate": "2026-10-02T04:21:14Z",
+      "publishedAt": "2026-10-02T04:43:12.684Z",
+      "tarball": "https://registry.npmjs.org/cline/-/cline-3.0.68.tgz",
+      "integrity": "sha512-DC5DsWqufWXYqCvGbC39KsqKQPqqybsZ6kqtFwca8kSqDSqVQ0GDDEXjp2S92qAQHio1lEyAmaGNopSxmPc6tg=="
+    }
+  ],
+  "main": {
+    "commit": "5dea21ab89f7d5a719a532a07f7d13db37a68bd8",
+    "commitDate": "2026-10-07T04:40:20Z",
+    "observedVia": "https://api.github.com/repos/cline/cline/commits/main"
+  },
+  "sourceRetrieval": "https://raw.githubusercontent.com/cline/cline/<resolved-commit>/<path>",
+  "sourceFiles": [
+    {
+      "path": "apps/cli/src/acp/acpAgent.ts",
+      "identicalAcrossAllRefs": true,
+      "hashes": [
+        {
+          "ref": "cli-v3.0.65",
+          "sha256": "39f68873abc43f80a858dbdbdfb7b6d3f3d29fb7fdf96157d229c7a71084a165"
+        },
+        {
+          "ref": "cli-v3.0.66",
+          "sha256": "39f68873abc43f80a858dbdbdfb7b6d3f3d29fb7fdf96157d229c7a71084a165"
+        },
+        {
+          "ref": "cli-v3.0.67",
+          "sha256": "39f68873abc43f80a858dbdbdfb7b6d3f3d29fb7fdf96157d229c7a71084a165"
+        },
+        {
+          "ref": "cli-v3.0.68",
+          "sha256": "39f68873abc43f80a858dbdbdfb7b6d3f3d29fb7fdf96157d229c7a71084a165"
+        },
+        {
+          "ref": "5dea21ab89f7d5a719a532a07f7d13db37a68bd8",
+          "sha256": "39f68873abc43f80a858dbdbdfb7b6d3f3d29fb7fdf96157d229c7a71084a165"
+        }
+      ],
+      "stableVersionLineAnchors": {
+        "buildConfigDefinition": [
+          761
+        ],
+        "buildConfigCall": [
+          698
+        ],
+        "sessionStart": [
+          743
+        ]
+      }
+    },
+    {
+      "path": "sdk/packages/core/src/services/local-runtime-bootstrap.ts",
+      "identicalAcrossAllRefs": true,
+      "hashes": [
+        {
+          "ref": "cli-v3.0.65",
+          "sha256": "cccfdfaaec5eca541e4e71c5225fffba7b9df3a7d76d3f94ecd39af7380b9b5f"
+        },
+        {
+          "ref": "cli-v3.0.66",
+          "sha256": "cccfdfaaec5eca541e4e71c5225fffba7b9df3a7d76d3f94ecd39af7380b9b5f"
+        },
+        {
+          "ref": "cli-v3.0.67",
+          "sha256": "cccfdfaaec5eca541e4e71c5225fffba7b9df3a7d76d3f94ecd39af7380b9b5f"
+        },
+        {
+          "ref": "cli-v3.0.68",
+          "sha256": "cccfdfaaec5eca541e4e71c5225fffba7b9df3a7d76d3f94ecd39af7380b9b5f"
+        },
+        {
+          "ref": "5dea21ab89f7d5a719a532a07f7d13db37a68bd8",
+          "sha256": "cccfdfaaec5eca541e4e71c5225fffba7b9df3a7d76d3f94ecd39af7380b9b5f"
+        }
+      ],
+      "stableVersionLineAnchors": {
+        "bootstrapBaseConfig": [
+          526
+        ]
+      }
+    },
+    {
+      "path": "sdk/packages/core/src/extensions/context/compaction.ts",
+      "identicalAcrossAllRefs": true,
+      "hashes": [
+        {
+          "ref": "cli-v3.0.65",
+          "sha256": "50534c940f999797fbe5cacf821739ff99d81610e042aab9c9269ee15dedc696"
+        },
+        {
+          "ref": "cli-v3.0.66",
+          "sha256": "50534c940f999797fbe5cacf821739ff99d81610e042aab9c9269ee15dedc696"
+        },
+        {
+          "ref": "cli-v3.0.67",
+          "sha256": "50534c940f999797fbe5cacf821739ff99d81610e042aab9c9269ee15dedc696"
+        },
+        {
+          "ref": "cli-v3.0.68",
+          "sha256": "50534c940f999797fbe5cacf821739ff99d81610e042aab9c9269ee15dedc696"
+        },
+        {
+          "ref": "5dea21ab89f7d5a719a532a07f7d13db37a68bd8",
+          "sha256": "50534c940f999797fbe5cacf821739ff99d81610e042aab9c9269ee15dedc696"
+        }
+      ],
+      "stableVersionLineAnchors": {
+        "compactionGuard": [
+          291
+        ]
+      }
+    },
+    {
+      "path": "sdk/packages/core/src/runtime/host/local-runtime-host.ts",
+      "identicalAcrossAllRefs": false,
+      "hashes": [
+        {
+          "ref": "cli-v3.0.65",
+          "sha256": "c1bf74f3dc2729a637b10b07f7910ea19775185b22299696c6362125bdc14260"
+        },
+        {
+          "ref": "cli-v3.0.66",
+          "sha256": "1df5feac2079db8c527907307a713330bedb779fde6c575b08e5aa18072c9379"
+        },
+        {
+          "ref": "cli-v3.0.67",
+          "sha256": "1df5feac2079db8c527907307a713330bedb779fde6c575b08e5aa18072c9379"
+        },
+        {
+          "ref": "cli-v3.0.68",
+          "sha256": "1df5feac2079db8c527907307a713330bedb779fde6c575b08e5aa18072c9379"
+        },
+        {
+          "ref": "5dea21ab89f7d5a719a532a07f7d13db37a68bd8",
+          "sha256": "1df5feac2079db8c527907307a713330bedb779fde6c575b08e5aa18072c9379"
+        }
+      ],
+      "stableVersionLineAnchors": {
+        "autoCompactionFactory": [
+          683
+        ]
+      }
+    },
+    {
+      "path": "apps/cli/src/utils/compaction-mode.ts",
+      "identicalAcrossAllRefs": true,
+      "hashes": [
+        {
+          "ref": "cli-v3.0.65",
+          "sha256": "835bfeafbf11466f416b96525115586074b972a115c5dc6c1d2987ce2ed39c2d"
+        },
+        {
+          "ref": "cli-v3.0.66",
+          "sha256": "835bfeafbf11466f416b96525115586074b972a115c5dc6c1d2987ce2ed39c2d"
+        },
+        {
+          "ref": "cli-v3.0.67",
+          "sha256": "835bfeafbf11466f416b96525115586074b972a115c5dc6c1d2987ce2ed39c2d"
+        },
+        {
+          "ref": "cli-v3.0.68",
+          "sha256": "835bfeafbf11466f416b96525115586074b972a115c5dc6c1d2987ce2ed39c2d"
+        },
+        {
+          "ref": "5dea21ab89f7d5a719a532a07f7d13db37a68bd8",
+          "sha256": "835bfeafbf11466f416b96525115586074b972a115c5dc6c1d2987ce2ed39c2d"
+        }
+      ],
+      "stableVersionLineAnchors": {
+        "ordinaryCliDefaultEnabled": [
+          37
+        ]
+      }
+    },
+    {
+      "path": "apps/cli/src/main.ts",
+      "identicalAcrossAllRefs": false,
+      "hashes": [
+        {
+          "ref": "cli-v3.0.65",
+          "sha256": "cd5615c6fcd8568fc1b5a63eb536787607b9ed40d51eb881d84e2127a98232bd"
+        },
+        {
+          "ref": "cli-v3.0.66",
+          "sha256": "cd5615c6fcd8568fc1b5a63eb536787607b9ed40d51eb881d84e2127a98232bd"
+        },
+        {
+          "ref": "cli-v3.0.67",
+          "sha256": "cd5615c6fcd8568fc1b5a63eb536787607b9ed40d51eb881d84e2127a98232bd"
+        },
+        {
+          "ref": "cli-v3.0.68",
+          "sha256": "cd5615c6fcd8568fc1b5a63eb536787607b9ed40d51eb881d84e2127a98232bd"
+        },
+        {
+          "ref": "5dea21ab89f7d5a719a532a07f7d13db37a68bd8",
+          "sha256": "bc1eea2ef2bb65182d73411ba8acb79218ea5b6ae1f8e5b44be4b8d901e5111f"
+        }
+      ],
+      "stableVersionLineAnchors": {
+        "acpEarlyBranch": [
+          820
+        ],
+        "ordinaryCliCompactionConfig": [
+          1075
+        ]
+      }
+    }
+  ],
+  "findings": {
+    "acpBuildConfigCompactionPresent": false,
+    "allAcpAgentFilesByteIdentical": true,
+    "coreCompactionRequiresExplicitEnabledTrue": true,
+    "ordinaryCliConfigBypassedInAcpMode": true,
+    "upgradeOnlyResolvesMissingAcpCompactionConfig": false,
+    "classification": "upstream_acp_compaction_config_still_missing"
+  },
+  "limits": {
+    "newVersionBinariesInstalledOrExecuted": false,
+    "newVersionProviderCallsMade": false,
+    "nightlyArtifactInspected": false,
+    "runtimeVerificationVersion": "3.0.65 (separate existing report)",
+    "upstreamIssueOrPullRequestPublished": false,
+    "existingImportedHistoryOrCompactionSidecarIsSeparatePath": true
+  }
+}

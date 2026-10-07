@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-06
+last_updated: 2026-10-07
 ---
 
 # Agent Runtime 兼容性清单
@@ -54,7 +54,12 @@ prompt 四桶按输入已含缓存归约，标准 usage_update 提供本次实�
 后续从原生 models.json 精确匹配容量，真实 App 已取得 272k 窗口与比例，费用仍未知。详见[窗口补采](research/runtime-monitoring/command-cline-context-window-2026-10-05.md)、[Cline 矩阵](research/cline-runtime/README.md)和[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
 内部 closed identity、发现/Host/Skill/数据库接线已存在，Migration 184 升级 schema 134；
 macOS arm64 开放开发 `Preview`，其余平台保持 `NotQualified`；Preview 不带资格 evidence，
-AgentRun/App 主路径已通过；Bootstrap、compaction 与 First-Class 全矩阵仍未通过。本轮补齐 compaction policy 注册和数值展示，真实插件缺失负向测试仍阻断 System Rule 切换。固定版本 ACP buildConfig 不传 compaction 配置；原生设置显式启用后，真实预算探针仍无压缩事件。
+AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 First-Class 全矩阵仍未通过。
+[3.0.65 零干预验收](research/cline-runtime/native-compaction-2026-10-07.md)观察到最高成功 input 918,618
+及真实 overflow，未出现压缩；cold 加载同一 Session 后仍 overflow。
+[新版本源码核对](research/cline-runtime/upstream-compaction-version-audit-2026-10-07.md)确认截至 2026-10-07，
+3.0.66、3.0.67、当前稳定版 3.0.68 与固定 main 均未补 ACP buildConfig 的 compaction 配置，
+下游仍要求显式启用；不能仅靠升最低版本解决。新版本没有执行真实 Runtime 验收。
 
 ## 当前 Product Runtime Catalog
 
