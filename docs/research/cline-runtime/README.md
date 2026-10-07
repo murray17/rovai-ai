@@ -14,11 +14,19 @@ last_updated: 2026-10-07
 Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 ACP，在
 `292c2ea2-5695-40ca-ad5d-8de31832d8fe` 允许使用 sub2api BYOK。候选入口是独立
 `cline-cli` Adapter 调用 `cline --acp`，复用现有 ACP Host/Fleet。User 消息 72 后已授权独立
-启动 shim 实验，生产入口尚未切换。
+启动 shim 实验；消息 76 改为验证用户实际安装的原生 Hub，生产入口尚未切换。
 本文件记录逐轴的原生实测与 Core 接线进度，不是产品准入决定。macOS arm64 的开发 Preview
 由 [V1.72-D13](../../versions/v1.72/decisions.md#v1-72-d13)拥有，其他平台仍为 NotQualified。
 
-最新[用户实际安装入口核验](installed-acp-entrypoint-2026-10-07.md)：正常发现选中 Homebrew 3.0.3，
+最新[原生 Hub 验证](native-hub-2026-10-07.md)：同一正常发现的 Homebrew 3.0.3 启动了独立、
+可认证且来源一致的 Hub；96 次正式模型对照证实显式 basic 会原生压缩，默认不传与 off 未见压缩。
+真实模型报告相同 272000 窗口，压缩后身份/早期记忆保持。Hub 重启后的 attach-only 路径失败；
+继续按当前 CLI 自身的 readMessages/start 恢复序列补测，同一 ID、历史、System 和真实后续请求通过。
+这是原生 Hub 的 cold 证据，Hub Adapter 尚未接入产品。原生只读 hook 可返回
+Run ID 和 System 摘要，不等于现有 managed Rule/observer 或完整合同通过。overflow+retry、
+压缩取消、多 Session 交错和其余产品资格仍缺；ACP 及既有最低版本不变。
+
+此前[用户实际安装入口核验](installed-acp-entrypoint-2026-10-07.md)：正常发现选中 Homebrew 3.0.3，
 wrapper 实际启动编译后的平台二进制，未找到可验证的 ACP/Core.start 注入入口。原生 ACP 初始化
 成功，安装与设置未改；现有 3.0.65 最低版本另使产品保持非 Ready。没有用实验 Runtime 替换，
 没有新增生产 shim 或版本限制，自动压缩兼容接入仍阻断。

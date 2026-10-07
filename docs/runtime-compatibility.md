@@ -68,6 +68,14 @@ AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 F
 原生 ACP 初始化通过，但现有最低版本使产品非 Ready；两项事实分别记录。未以实验 SDK 替换
 用户安装，未增加生产 shim 或新版本限制，自动压缩兼容接入仍阻断。
 
+[同一实际安装的 Hub 验证](research/cline-runtime/native-hub-2026-10-07.md)随后通过独立进程、
+认证及来源检查；相同 provider/model/272000 窗口的 96 次正式对照证明显式 basic 可触发原生
+历史压缩并继续真实请求，默认不传和 off 未见压缩。Hub 重启后 attach-only 执行失败；继续按
+本安装 CLI 的 readMessages/start 原生恢复序列补测，同一 Session ID 的历史/System 和真实请求通过。
+完整产品 System Rule/工具/权限合同仍未通过。
+只读原生 hook 可提供 Run ID，不借用源码实验的恢复结果。生产后端继续 ACP，Hub Adapter
+尚未实现；overflow recovery、压缩取消与多 Session 交错未验收，既有最低版本门槛不变。
+
 ## 当前 Product Runtime Catalog
 
 当前 closed `AdapterKind` 包含十八种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
