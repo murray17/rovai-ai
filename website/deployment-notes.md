@@ -1,8 +1,24 @@
 # Deployment documentation delivery notes
 
+## Desktop and Server 0.4.6 unified publication
+
+The current Desktop and Server downloads share [`v0.4.6`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.6), built from the frozen main commit `4f909c82b910596d436bb5f999f7031bea67bbdd`. All 16 release assets matched their full local SHA-256 values and GitHub asset digests. Anonymous public download access was verified before promoting `scripts/server-release-tag.txt` to `v0.4.6`: small files were checked in full and large-file opening bytes were compared with the verified local artifacts. The legacy `scripts/server-channel.txt` remains `0.4.1` for the bridge path.
+
+The [macOS](https://github.com/murray17/rovai-ai/actions/runs/37610262179), [Windows](https://github.com/murray17/rovai-ai/actions/runs/37610259209), [four-target Server](https://github.com/murray17/rovai-ai/actions/runs/37610258639), [native Windows Desktop](https://github.com/murray17/rovai-ai/actions/runs/37610259567), and [native Windows Runtime](https://github.com/murray17/rovai-ai/actions/runs/37610258732) release checks passed on that exact source commit. Ubuntu 22.04, Ubuntu 24.04, and Debian 12 checked the same Linux archive, bound to manifest SHA-256 `c86d0686f8779fa4243e7707a0e46ccf5c514281f4a5df5136d014fc4c17e681`; all three reports retain `runtimeQualification: false`.
+
+The release-time Mac update manifest was regenerated with the repository's architecture-complete merger after refreshing the sizes and SHA-512 values of the final stapled DMGs. All four Mac ZIP/DMG entries then matched the shipped files. The ZIP entries, package binaries, shared release notes, date, and source commit were unchanged; the original CI manifest was retained with the comparison evidence.
+
+On macOS arm64, the native updater installation engine upgraded an isolated copy of the actual published Desktop 0.4.5 App to 0.4.6. The upgraded App passed About & Updates checks for its version, complete bundled bilingual source, visible Chinese notes, release date, light and dark themes, compact layout, and 200% layout. Separate real Electron fixtures passed release-note language switching, Settings workspace, and member Runtime application checks. These checks did not modify or restart the daily App and do not claim a production network download through the update button.
+
+An isolated Server 0.4.5 → 0.4.6 upgrade retained its existing conversation message in the authenticated Web workspace. Restoring the complete stopped backup returned to the published 0.4.5 program with that data intact. No real Runtime execution was part of these package acceptance checks.
+
+Local JavaScript regressions, TypeScript checks, production builds, the default Rust workspace, and 111 related extended regressions passed. An additional Runtime picker integration fixture failed because its exact accessible-name selector omits an existing recommendation suffix; the same unmodified fixture failed against both v0.4.5 and the frozen v0.4.6 source. It was not reported as passing, and no production code or test was changed to hide the failure.
+
+Website version labels, downloads, and installer examples use 0.4.6. Historical captures and publication records below retain their actual versions and provenance.
+
 ## Desktop and Server 0.4.5 unified publication
 
-The current Desktop and Server downloads share [`v0.4.5`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.5), built from the frozen main commit `5421fed778fcdd62f3b2c0e7f517a6e3e2b86c51`. All 16 release assets matched their full local SHA-256 values and GitHub asset digests. Anonymous public download access was verified before promoting `scripts/server-release-tag.txt` to `v0.4.5`: small files were checked in full and large-file opening bytes were compared with the verified local artifacts. The legacy `scripts/server-channel.txt` remains `0.4.1` for the bridge path.
+The previous Desktop and Server downloads share [`v0.4.5`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.5), built from the frozen main commit `5421fed778fcdd62f3b2c0e7f517a6e3e2b86c51`. All 16 release assets matched their full local SHA-256 values and GitHub asset digests. Anonymous public download access was verified before promoting `scripts/server-release-tag.txt` to `v0.4.5`: small files were checked in full and large-file opening bytes were compared with the verified local artifacts. The legacy `scripts/server-channel.txt` remains `0.4.1` for the bridge path.
 
 The [macOS](https://github.com/murray17/rovai-ai/actions/runs/37469703947), [Windows](https://github.com/murray17/rovai-ai/actions/runs/37469703364), [four-target Server](https://github.com/murray17/rovai-ai/actions/runs/37469704176), and [native Windows Desktop](https://github.com/murray17/rovai-ai/actions/runs/37469703956) release checks passed on that exact source commit. Ubuntu 22.04, Ubuntu 24.04, and Debian 12 checked the same Linux archive, bound to manifest SHA-256 `8b73bcca202117a0a1b984a3f1f78b49cf46fec3e6db9f11520493caa77d512b`; all three reports retain `runtimeQualification: false`.
 

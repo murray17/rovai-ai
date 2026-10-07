@@ -1,12 +1,12 @@
 ---
 document_type: development-guide
 authority: standalone-server-preview-operation
-last_updated: 2026-10-06
+last_updated: 2026-10-07
 ---
 
 # 原生 Server 安装与开发验收
 
-Server 0.4.5 已与 Desktop 一起公开发布于 [`v0.4.5`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.5)，两端使用同一源码提交。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
+Server 0.4.6 已与 Desktop 一起公开发布于 [`v0.4.6`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.6)，两端使用同一源码提交。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
 
 2026-09-29 的 macOS arm64 **0.4.0** 发布包实测确认安装、登录与会话可用，但有两个发布包阻碍：快捷命令启动可能找不到 WebUI；直接运行 `current/rovai-server` 后，首次 Agent 执行仍因 `bundled Skill resources are unavailable` 失败，归档缺少内置 Skill 资源。0.4.1 桥接包补齐归档资源与快捷命令路径，包内 Skill 读取和 0.4.0 数据升级已在隔离环境验收；尚不能把旧截图记成端到端执行成功。完整记录见[官网部署素材说明](../../website/deployment-notes.md)。
 
@@ -80,7 +80,7 @@ Unix 默认配置 `.profile`、`.bashrc`、`.bash_profile`、`.zshrc` 的去重 
 `rovai-server-<版本>-<target>.tar.gz`（Unix）或 `.zip`（Windows），`SHA256SUMS` 每个资产恰好一项。
 安装器先完整下载、校验 SHA-256，检查归档路径/类型和包内版本/目标，再切换入口；下载/校验失败保留旧安装。
 0.4.0 已安装程序继续读 `scripts/server-channel.txt`，该旧指针在桥接版发布后固定为 `0.4.1`。
-0.4.1 起的程序和安装器改读 `scripts/server-release-tag.txt`：当前 `v0.4.5` 指向同版 Desktop/Server 包，历史 `server-v0.4.1` 指向桥接包，`unpublished`
+0.4.1 起的程序和安装器改读 `scripts/server-release-tag.txt`：当前 `v0.4.6` 指向同版 Desktop/Server 包，历史 `server-v0.4.1` 指向桥接包，`unpublished`
 表示新通道尚未晋升。只有实际发布相应资产并晋升指针后，才能把网络安装命令描述为可用。
 没有独立域名或下载服务。
 
