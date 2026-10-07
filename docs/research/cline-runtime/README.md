@@ -13,13 +13,19 @@ last_updated: 2026-10-07
 
 Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 ACP，在
 `292c2ea2-5695-40ca-ad5d-8de31832d8fe` 允许使用 sub2api BYOK。候选入口是独立
-`cline-cli` Adapter 调用 `cline --acp`，复用现有 ACP Host/Fleet；没有切换 SDK Host 的授权。
+`cline-cli` Adapter 调用 `cline --acp`，复用现有 ACP Host/Fleet。User 消息 72 后已授权独立
+启动 shim 实验，生产入口尚未切换。
 本文件记录逐轴的原生实测与 Core 接线进度，不是产品准入决定。macOS arm64 的开发 Preview
 由 [V1.72-D13](../../versions/v1.72/decisions.md#v1-72-d13)拥有，其他平台仍为 NotQualified。
 
-最新源码核对：[3.0.66 / 3.0.67 / 当前稳定版 3.0.68 / 固定 main](upstream-compaction-version-audit-2026-10-07.md)
+最新[启动 shim 实验](acp-compaction-shim-2026-10-07.md)：固定 3.0.68 / 官方 Core 0.0.90，
+仅补原生 compaction 配置即可观察自动压缩。同版本发布二进制和源码未注入对照均无压缩；
+隔离 Rovai Core 的 11 Run 验证保持 Session/Binding、System Rule、工具及 cold 连续性。
+这是实验结果，不改变生产官方 ACP 的压缩缺口或 Preview 准入；overflow+retry 尚未验证。
+
+此前源码核对：[3.0.66 / 3.0.67 / 当前稳定版 3.0.68 / 固定 main](upstream-compaction-version-audit-2026-10-07.md)
 均未补 `AcpAgent.buildConfig().compaction`，下游仍须显式启用；单纯升级最低版本不能解决该缺口。
-本轮没有运行新版本，真实 Runtime 证据仍为下段 3.0.65。
+该源码核对轮没有运行新版本；随后 3.0.68 的真实实验见上段，下段保留 3.0.65 正式接线负例。
 
 [零干预原生 Compaction 验收](native-compaction-2026-10-07.md)在当前正式接线下
 观测到 918,618 input tokens 和真实 Provider overflow，仍无原生 compaction；cold 保持同一

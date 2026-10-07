@@ -1,0 +1,32 @@
+{
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.16.1",
+    "@chat-adapter/discord": "^4.23.0",
+    "@chat-adapter/gchat": "^4.23.0",
+    "@chat-adapter/linear": "^4.23.0",
+    "@chat-adapter/slack": "^4.23.0",
+    "@chat-adapter/telegram": "^4.23.0",
+    "@chat-adapter/whatsapp": "^4.23.0",
+    "@clack/prompts": "^1.2.0",
+    "@gramio/format": "^0.7.0",
+    "@opentui-ui/dialog": "^0.1.2",
+    "@opentui/core": "0.4.3",
+    "@opentui/react": "0.4.3",
+    "bun": "^1.4.2",
+    "chat": "^4.23.0",
+    "cline": "^3.0.68",
+    "commander": "^14.0.3",
+    "fzf": "^0.5.2",
+    "marked": "^15.0.12",
+    "nanoid": "^5.1.7",
+    "open": "^10.2.0",
+    "opentui-spinner": "^0.0.7",
+    "pino": "^10.3.1",
+    "posthog-node": "^5.8.0",
+    "react": "19.2.4",
+    "react-devtools-core": "^7.0.1",
+    "react-reconciler": "0.33.0",
+    "yaml": "^2.8.2",
+    "zod": "^4.1.11"
+  }
+}

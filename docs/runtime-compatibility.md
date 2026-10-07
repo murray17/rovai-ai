@@ -59,7 +59,10 @@ AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 F
 及真实 overflow，未出现压缩；cold 加载同一 Session 后仍 overflow。
 [新版本源码核对](research/cline-runtime/upstream-compaction-version-audit-2026-10-07.md)确认截至 2026-10-07，
 3.0.66、3.0.67、当前稳定版 3.0.68 与固定 main 均未补 ACP buildConfig 的 compaction 配置，
-下游仍要求显式启用；不能仅靠升最低版本解决。新版本没有执行真实 Runtime 验收。
+下游仍要求显式启用；不能仅靠升最低版本解决。随后 User 授权的
+[3.0.68 启动 shim 实验](research/cline-runtime/acp-compaction-shim-2026-10-07.md)已通过真实
+自动压缩、System Rule、Session/Binding 和 cold 连续性验证；同版本未注入对照仍无压缩。
+该实验未切换生产入口、升级最低版本或补齐 overflow+retry/First-Class 全矩阵。
 
 ## 当前 Product Runtime Catalog
 
