@@ -11,6 +11,16 @@ last_updated: 2026-10-06
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Cline Native Hub（2026-10-07）
+
+User 消息 80 要求 Cline 新会话切换到已验证的 Native Hub。当前分支新增 `cline-hub-v1`，使用
+用户所选官方 CLI 的独立认证 Hub，复用共享 Fleet、Binding、投递、审批、Builtin CLI 和监控结算。
+原生 off/basic/agentic 从实际配置/默认传入，不加入自有压缩器；旧 ACP Binding 保留原后端。
+仍为 macOS arm64 Preview。取舍见 [V1.72-D18](decisions.md#v1-72-d18)，精确上下文及兼容说明见
+[Native Hub 输入说明](model-context-change-cline-native-hub.md)，验证范围见
+[产品接入矩阵](../../research/cline-runtime/hub-adapter-implementation.md)。本次无 schema 迁移，
+未改变 current_version；此前实验 shim、ACP 和 Hub 最小探针不替代产品验收。
+
 ## 并行实施：Command Code 与 Cline
 
 合入主干 `b2c9c976` 后，Command Code 内部 headless transport 与 Cline 官方 ACP Host 适配当前

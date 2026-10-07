@@ -258,3 +258,10 @@ macOS ACP detached 后代与 Core 重启回收当前规范见
 内核身份、私有 ledger 和不增加常驻代理的取舍见 [V1.72-D16](../versions/v1.72/decisions.md#v1-72-d16)。
 
 Cline 正常 System Rule 与 Command 原生 MCP 由 [V1.72-D17](../versions/v1.72/decisions.md#v1-72-d17)记录；当前交付边界由 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)及 [Cline System 输入说明](../versions/v1.72/model-context-change-cline-system.md)拥有。
+
+
+Cline 新 Binding 的 Native Hub 与旧 ACP 分离、独立版本能力核验和原生压缩选择见
+[V1.72-D18](../versions/v1.72/decisions.md#v1-72-d18)；当前权威为
+[Cline 实施边界](../architecture/runtime-catalog-boundaries.md#cline-实施边界)、
+[Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md#cline-native-hub)及
+[Native Hub 输入说明](../versions/v1.72/model-context-change-cline-native-hub.md)。

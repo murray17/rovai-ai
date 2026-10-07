@@ -325,6 +325,7 @@ pub enum MissingSendRecoveryBoundary {
     AntigravityPrintStdout,
     AcpEndTurnAssistantSuffix,
     PiAgentSettled,
+    ClineHubRunResult,
     ZcodeCompletedTurn,
 }
 
@@ -336,19 +337,26 @@ impl MissingSendRecoveryBoundary {
             Self::AntigravityPrintStdout => "antigravity_print_stdout",
             Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
             Self::PiAgentSettled => "pi_agent_settled",
+            Self::ClineHubRunResult => "cline_hub_run_result",
             Self::ZcodeCompletedTurn => "zcode_completed_turn",
         }
     }
 
-    fn is_compatible_with(self, adapter_kind: AdapterKind) -> bool {
+    fn is_compatible_with(self, adapter_kind: AdapterKind, protocol: Option<&str>) -> bool {
         match self {
             Self::CodexCompletedTurn => matches!(adapter_kind, AdapterKind::CodexCli),
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
             Self::AcpEndTurnAssistantSuffix => {
-                adapter_kind.uses_acp() && adapter_kind != AdapterKind::ZcodeApp
+                adapter_kind.uses_acp()
+                    && adapter_kind != AdapterKind::ZcodeApp
+                    && (adapter_kind != AdapterKind::ClineCli || protocol == Some("acp-v1"))
             }
             Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
+            Self::ClineHubRunResult => {
+                adapter_kind == AdapterKind::ClineCli
+                    && protocol == Some(crate::cline_hub::PROTOCOL)
+            }
             Self::ZcodeCompletedTurn => matches!(adapter_kind, AdapterKind::ZcodeApp),
         }
     }
@@ -5235,7 +5243,15 @@ fn decide_missing_send_recovery(
     let Some(adapter_kind) = adapter_kind else {
         return Ok(outcome("skipped_boundary_mismatch", None, None));
     };
-    if !candidate.boundary.is_compatible_with(adapter_kind) {
+    let protocol: Option<String> = transaction.query_row(
+        "SELECT runtime_protocol_version FROM agent_run WHERE id = ?1",
+        [&target.agent_run_id],
+        |row| row.get(0),
+    )?;
+    if !candidate
+        .boundary
+        .is_compatible_with(adapter_kind, protocol.as_deref())
+    {
         return Ok(outcome("skipped_boundary_mismatch", None, None));
     }
     if candidate.body.trim().is_empty() {
@@ -7033,15 +7049,33 @@ mod tests {
                 MissingSendRecoveryBoundary::AntigravityPrintStdout,
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
                 MissingSendRecoveryBoundary::PiAgentSettled,
+                MissingSendRecoveryBoundary::ClineHubRunResult,
                 MissingSendRecoveryBoundary::ZcodeCompletedTurn,
             ] {
                 assert_eq!(
-                    boundary.is_compatible_with(adapter_kind),
+                    boundary.is_compatible_with(adapter_kind, Some("acp-v1")),
                     boundary == expected,
                     "{} must accept only its frozen recovery boundary",
                     adapter_kind.as_str(),
                 );
             }
+        }
+        for (protocol, acp, hub) in [
+            (None, false, false),
+            (Some("unknown"), false, false),
+            (Some("acp-v1"), true, false),
+            (Some(crate::cline_hub::PROTOCOL), false, true),
+        ] {
+            assert_eq!(
+                MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix
+                    .is_compatible_with(AdapterKind::ClineCli, protocol),
+                acp
+            );
+            assert_eq!(
+                MissingSendRecoveryBoundary::ClineHubRunResult
+                    .is_compatible_with(AdapterKind::ClineCli, protocol),
+                hub
+            );
         }
     }
 

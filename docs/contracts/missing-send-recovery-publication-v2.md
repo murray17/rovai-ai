@@ -23,6 +23,14 @@ The successful AgentRun and its terminal evidence remain authoritative and may s
 the candidate body is not published, `finalCampMessageId` remains unset, and replay returns the stored decision without
 retrying publication. A later ordinary add creates a new membership lifetime and cannot change this result.
 
+## Cline backend boundary
+
+Cline Native Hub adds the internal candidate boundary `cline_hub_run_result`: only the full successful
+`run.start` result text after observed native acceptance/model execution is eligible. It matches only
+an AgentRun frozen to `cline-cli` + `cline-hub-v1`. The existing `acp_end_turn_assistant_suffix` matches
+Cline only when the frozen protocol is `acp-v1`; missing/unknown protocol never crosses this fence.
+Accepted builtin sends still suppress fallback, and all publication, membership and size checks above apply.
+
 ## References
 
 - [Missing-Send Recovery Publication v1](missing-send-recovery-publication-v1.md)

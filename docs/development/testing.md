@@ -90,6 +90,27 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+## Cline Native Hub owner（2026-10-07）
+
+- 新纯函数 owner `cline_hub::config::tests::native_compaction_preferences_preserve_off_and_reject_unknown_defaults`
+  覆盖独立的原生偏好边界：多行 CLI help 默认、明确 off/basic/agentic、非法类型与未知默认。
+  原 ACP observer 不能拥有新原生配置解析；默认层运行 `cargo test -p rovai-core --lib native_compaction_preferences`。
+- `cline_hub::tests::installed_hub_rule_approval_usage_and_cleanup` 是独立 WS/进程边界 Smoke，归入
+  extended-tests 且带明确凭据/模型费用原因的 ignored。需要 `ROVAI_CLINE_HUB_ACCEPTANCE_EXECUTABLE`
+  和隔离原生 CLINE_DIR/CLINE_DATA_DIR；命令 `cargo test -p rovai-core --features extended-tests --lib
+  installed_hub_rule_approval_usage_and_cleanup -- --ignored --nocapture`。不将真实模型混入默认层。
+- `agent_profile::cline_backend_tests::backend_provenance_uses_the_current_binding_and_preserves_legacy_acp`
+  拥有现有 Binding 的后端查询：旧 ACP 不迁移、新 Hub 保留、错误 digest 不匹配、缺证据阻断、其他
+  Runtime 切入走共享重绑。两个最小内存表验证 JOIN，纯枚举测试不能证明该读取边界；默认层运行
+  `cargo test -p rovai-core --lib cline_backend_tests`，不启动完整迁移或进程。
+- `runtime::tests::recovery_boundaries_are_closed_over_the_product_adapter_catalog` 与 runtime_diff/runtime_file_operation 既有
+  owner 扩展 Hub/ACP 冻结边界、成功/失败补丁 case；没有复制 SQLite fixture 或删除原 case。
+- 历史 v103/v107 fixture 的封闭 Skill group 列表排除后来引入的 Cline/Command Code；原 Migration
+  保留断言不变。当前 catalog owner 补齐两个已有 Runtime，并将 ACP 数量预期与现有清单对齐。
+- `docs/research/cline-runtime/fixtures/native_hub_product_probe.mjs` 拥有隔离 Core→Native Hub→builtin IPC
+  的产品 seam，读取 SQL 证据但不写数据库。每个 first/warm/cold 必须有一条实际 source_operation_id
+  发送，missing-send fallback 不算通过。流程与参数见 [产品报告](../research/cline-runtime/hub-adapter-implementation.md)。
+
 <a id="command-code--cline-数值通道2026-10-04"></a>
 ## Command Code / Cline 数值通道（2026-10-04）
 

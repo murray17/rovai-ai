@@ -1169,8 +1169,8 @@ impl AgentRuntimeAdapterRegistry {
             && !crate::dsh::supported_version(reported_version.as_deref());
         let command_code_version_unsupported = kind == AdapterKind::CommandCodeCli
             && !crate::command_code_acp::supported_version(reported_version.as_deref());
-        let cline_version_unsupported = kind == AdapterKind::ClineCli
-            && !crate::cline::supported_version(reported_version.as_deref());
+        // The legacy 3.0.65 gate belongs to ACP. Native Hub readiness is
+        // established by its owned, authenticated handshake, not that version.
         let pi_version_unsupported =
             kind == AdapterKind::Pi && !pi_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
@@ -1180,7 +1180,6 @@ impl AgentRuntimeAdapterRegistry {
             probe_status: if grok_version_unsupported
                 || pi_version_unsupported
                 || dsh_version_unsupported
-                || cline_version_unsupported
                 || command_code_version_unsupported
             {
                 "light_failed".to_string()
@@ -1200,7 +1199,6 @@ impl AgentRuntimeAdapterRegistry {
             last_error: (grok_version_unsupported
                 || pi_version_unsupported
                 || dsh_version_unsupported
-                || cline_version_unsupported
                 || command_code_version_unsupported)
                 .then(|| "runtime_version_below_minimum".to_string()),
             native_session_compatibility_key: None,
@@ -3212,7 +3210,14 @@ fn resolve_acp_runtime(
         .iter()
         .find(|protocol| {
             protocol.as_str()
-                == if expected_kind == AdapterKind::ZcodeApp {
+                == if expected_kind == AdapterKind::ClineCli
+                    && input
+                        .protocols
+                        .iter()
+                        .any(|v| v == crate::cline_hub::PROTOCOL)
+                {
+                    crate::cline_hub::PROTOCOL
+                } else if expected_kind == AdapterKind::ZcodeApp {
                     crate::zcode::PROTOCOL
                 } else {
                     "acp-v1"
@@ -4792,6 +4797,16 @@ mod tests {
             &[SkillDeliveryGroupKey],
             SkillDiscoveryVerification,
         )] = &[
+            (
+                AdapterKind::ClineCli,
+                &[SkillDeliveryGroupKey::Cline],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            (
+                AdapterKind::CommandCodeCli,
+                &[SkillDeliveryGroupKey::CommandCode],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             (
                 AdapterKind::DeepseekHarness,
                 &[SkillDeliveryGroupKey::Dsh],

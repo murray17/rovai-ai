@@ -179,12 +179,17 @@ fn admit_candidate(
                 && source_event_kind == "session/update.tool_call_update.completed.edit_file"
         }
         AdapterKind::ClineCli if semantic_kind == "reported_mutation" => {
-            protocol_family == "acp-v1"
+            (protocol_family == "acp-v1"
                 && matches!(
                     source_event_kind,
                     "session/update.tool_call_update.completed.apply_patch"
                         | "session/update.tool_call_update.completed.editor"
-                )
+                ))
+                || (protocol_family == crate::cline_hub::PROTOCOL
+                    && matches!(
+                        source_event_kind,
+                        "tool.finished.completed.apply_patch" | "tool.finished.completed.editor"
+                    ))
         }
         adapter if adapter.uses_acp() => {
             protocol_family == "acp-v1"
@@ -1548,6 +1553,22 @@ mod tests {
         );
         assert_eq!(admitted.entries[0].diff, "-old\n+new\n-second\n+changed\n");
         assert!(!admitted.evidence_entries.to_string().contains("PRIVATE"));
+        let mut hub = payload.clone();
+        hub["runtimeDiff"]["protocolFamily"] = serde_json::json!(crate::cline_hub::PROTOCOL);
+        hub["runtimeDiff"]["sourceEventKind"] =
+            serde_json::json!("tool.finished.completed.apply_patch");
+        assert!(
+            admit_runtime_diff(&hub, Path::new("/repo"), Some("cline-cli"))
+                .unwrap()
+                .is_ok()
+        );
+        hub["runtimeDiff"]["sourceEventKind"] =
+            serde_json::json!("tool.finished.failed.apply_patch");
+        assert!(
+            admit_runtime_diff(&hub, Path::new("/repo"), Some("cline-cli"))
+                .unwrap()
+                .is_err()
+        );
         let rebuilt = projection_from_evidence(&serde_json::json!({"runtimeDiff":{
             "schemaVersion":1,"status":"available","semanticKind":"reported_mutation","entries":admitted.evidence_entries
         }}), "evidence").unwrap();

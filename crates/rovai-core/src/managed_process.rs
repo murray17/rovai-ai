@@ -769,6 +769,21 @@ impl ManagedProcess {
         }
     }
 
+    /// Authenticate discovery by retained kernel process identity, never by
+    /// trusting a PID supplied by the discovery document alone.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn owns_live_pid(&mut self, pid: u32) -> io::Result<bool> {
+        self.capture_descendants()?;
+        self.macos_tree
+            .as_ref()
+            .map_or(Ok(false), |tree| tree.owns_live_pid(pid))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn owns_live_pid(&mut self, _pid: u32) -> io::Result<bool> {
+        Ok(false)
+    }
+
     #[cfg(target_os = "linux")]
     fn signal_captured_descendants(&mut self, signal: i32) -> io::Result<()> {
         if !self.descendants_captured {

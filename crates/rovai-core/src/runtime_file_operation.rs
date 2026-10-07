@@ -83,6 +83,15 @@ fn admit_candidate(
     let source_is_allowlisted = if adapter == AdapterKind::ZcodeApp {
         protocol_family == Some(crate::zcode::PROTOCOL)
             && source_event_kind == Some("tool.updated.result")
+    } else if adapter == AdapterKind::ClineCli
+        && protocol_family == Some(crate::cline_hub::PROTOCOL)
+    {
+        matches!(
+            (operation_kind, source_event_kind),
+            ("read", Some("tool.finished.completed.read_files"))
+                | ("write", Some("tool.finished.completed.apply_patch"))
+                | ("write", Some("tool.finished.completed.editor"))
+        )
     } else if adapter.uses_acp() {
         protocol_family == Some("acp-v1")
             && source_event_kind == Some("session/update.tool_call_update.completed")
@@ -355,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn admits_structured_reads_from_acp_codex_claude_and_pi_only() {
+    fn admits_structured_reads_only_from_allowlisted_native_sources() {
         for (adapter, protocol, source) in [
             (
                 "opencode-cli",
@@ -373,6 +382,11 @@ mod tests {
                 "assistant.tool_use.file+user.tool_result.completed",
             ),
             ("pi", "pi-jsonl-rpc-v1", "tool_execution_end.completed"),
+            (
+                "cline-cli",
+                crate::cline_hub::PROTOCOL,
+                "tool.finished.completed.read_files",
+            ),
         ] {
             let admitted = admit_runtime_file_operation(
                 &json!({
@@ -411,6 +425,27 @@ mod tests {
             rejected,
             Err("runtime_file_operation_source_not_allowlisted")
         );
+
+        for (source, operation, accepted) in [
+            ("tool.finished.completed.apply_patch", "write", true),
+            ("tool.finished.completed.editor", "write", true),
+            ("tool.finished.completed.read_files", "write", false),
+            ("tool.finished.completed.apply_patch", "read", false),
+            ("tool.finished.failed.apply_patch", "write", false),
+            ("session/update.tool_call_update.completed", "write", false),
+        ] {
+            let result = admit_runtime_file_operation(
+                &json!({"runtimeFileOperation": {
+                    "adapterKind":"cline-cli", "protocolFamily":crate::cline_hub::PROTOCOL,
+                    "sourceEventKind":source, "operationKind":operation,
+                    "path":absolute_test_path("/repo/src/app.ts")
+                }}),
+                Path::new(&absolute_test_path("/repo")),
+                Some("cline-cli"),
+            )
+            .expect("candidate should exist");
+            assert_eq!(result.is_ok(), accepted, "{source}/{operation}");
+        }
     }
 
     #[test]
@@ -427,6 +462,8 @@ mod tests {
             AdapterKind::KimiCodeCli,
             AdapterKind::GrokBuild,
             AdapterKind::DeepseekHarness,
+            AdapterKind::ClineCli,
+            AdapterKind::CommandCodeCli,
         ] {
             let admitted = admit_runtime_file_operation(
                 &json!({

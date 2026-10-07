@@ -1648,7 +1648,7 @@ impl AgentProfileService {
             },
             _ => anyhow::bail!("frozen Runtime model source is invalid"),
         };
-        let mut rebound = match resolve_frozen_runtime_binding(
+        let mut rebound = match resolve_frozen_runtime_binding_with_protocol(
             database.connection(),
             &ResolvedRuntimeBinding {
                 adapter_kind: frozen.adapter_kind,
@@ -1656,6 +1656,8 @@ impl AgentProfileService {
                 model,
                 permissions: frozen.permissions.clone(),
             },
+            (frozen.adapter_kind == AdapterKind::ClineCli)
+                .then_some(frozen.protocol_version.as_str()),
         )? {
             Ok(runtime) => runtime,
             Err(blocker) => return Ok(Err(blocker)),
@@ -3941,8 +3943,8 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::KimiCodeCli
         | AdapterKind::GrokBuild
         | AdapterKind::DeepseekHarness
-        | AdapterKind::ClineCli
         | AdapterKind::CommandCodeCli => "acp-v1",
+        AdapterKind::ClineCli => crate::cline_hub::PROTOCOL,
         AdapterKind::ZcodeApp => crate::zcode::PROTOCOL,
     }
 }
@@ -4235,16 +4237,155 @@ pub fn resolve_frozen_runtime(
             }),
         )));
     }
-    let mut result = resolve_frozen_runtime_binding(transaction, &binding)?;
+    let protocol = if binding.adapter_kind == AdapterKind::ClineCli {
+        match cline_protocol_for_conversation(transaction, conversation_id)? {
+            Ok(protocol) => Some(protocol),
+            Err(blocker) => return Ok(Err(blocker)),
+        }
+    } else {
+        None
+    };
+    let mut result = resolve_frozen_runtime_binding_with_protocol(transaction, &binding, protocol)?;
     if let Ok(runtime) = &mut result {
         crate::camp_fast::freeze(transaction, conversation_id, agent_id, runtime)?;
     }
     Ok(result)
 }
 
+// Backend provenance belongs to the existing Binding, not to today's discovery
+// snapshot. A switch from another Runtime follows the shared Binding reset path.
+fn cline_protocol_for_conversation(
+    connection: &Connection,
+    conversation_id: &str,
+) -> Result<std::result::Result<&'static str, RuntimeConfigurationBlocker>> {
+    let native: Option<String> = connection
+        .query_row(
+            "SELECT native_session_id FROM conversation WHERE id = ?1",
+            [conversation_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    if native.is_none() {
+        return Ok(Ok(crate::cline_hub::PROTOCOL));
+    }
+    let previous: Option<(String, Option<String>)> = connection.query_row(
+        "SELECT agent_run.runtime_adapter_kind, agent_run.runtime_protocol_version FROM agent_run JOIN conversation ON conversation.id = agent_run.conversation_id WHERE conversation.id = ?1 AND agent_run.runtime_binding_compatibility_digest = conversation.native_binding_compatibility_digest ORDER BY agent_run.created_at DESC, agent_run.id DESC LIMIT 1",
+        [conversation_id], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional()?;
+    match previous
+        .as_ref()
+        .map(|(adapter, protocol)| (adapter.as_str(), protocol.as_deref()))
+    {
+        Some(("cline-cli", Some("acp-v1"))) => Ok(Ok("acp-v1")),
+        Some(("cline-cli", Some(crate::cline_hub::PROTOCOL))) => Ok(Ok(crate::cline_hub::PROTOCOL)),
+        Some((adapter, _)) if adapter != "cline-cli" => Ok(Ok(crate::cline_hub::PROTOCOL)),
+        _ => Ok(Err(runtime_blocker(
+            "runtime_native_backend_evidence_missing",
+            json!({"conversationId":conversation_id}),
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod cline_backend_tests {
+    use super::*;
+
+    #[test]
+    fn backend_provenance_uses_the_current_binding_and_preserves_legacy_acp() {
+        // This is a query owner: the digest JOIN and ordering cannot be proved
+        // with a pure enum test. Only the two required tables are materialized.
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE conversation(id TEXT, native_session_id TEXT, native_binding_compatibility_digest TEXT);
+            CREATE TABLE agent_run(id TEXT, conversation_id TEXT, runtime_adapter_kind TEXT, runtime_protocol_version TEXT, runtime_binding_compatibility_digest TEXT, created_at TEXT);
+            INSERT INTO conversation VALUES ('c', NULL, 'binding-1');").unwrap();
+        assert_eq!(
+            cline_protocol_for_conversation(&connection, "c")
+                .unwrap()
+                .unwrap(),
+            crate::cline_hub::PROTOCOL
+        );
+        connection
+            .execute(
+                "UPDATE conversation SET native_session_id = 'full-native-id'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            cline_protocol_for_conversation(&connection, "c")
+                .unwrap()
+                .unwrap_err()
+                .code,
+            "runtime_native_backend_evidence_missing"
+        );
+        connection
+            .execute(
+                "INSERT INTO agent_run VALUES ('1','c','cline-cli','acp-v1','binding-1','1')",
+                [],
+            )
+            .unwrap();
+        // A newer incompatible Binding must not migrate this one into Hub.
+        connection
+            .execute(
+                "INSERT INTO agent_run VALUES ('2','c','cline-cli','cline-hub-v1','binding-2','2')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            cline_protocol_for_conversation(&connection, "c")
+                .unwrap()
+                .unwrap(),
+            "acp-v1"
+        );
+        connection
+            .execute(
+                "UPDATE conversation SET native_binding_compatibility_digest = 'binding-2'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            cline_protocol_for_conversation(&connection, "c")
+                .unwrap()
+                .unwrap(),
+            crate::cline_hub::PROTOCOL
+        );
+        connection
+            .execute(
+                "UPDATE agent_run SET runtime_protocol_version = NULL WHERE id = '2'",
+                [],
+            )
+            .unwrap();
+        assert!(
+            cline_protocol_for_conversation(&connection, "c")
+                .unwrap()
+                .is_err()
+        );
+        connection
+            .execute(
+                "UPDATE agent_run SET runtime_adapter_kind = 'codex-cli' WHERE id = '2'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            cline_protocol_for_conversation(&connection, "c")
+                .unwrap()
+                .unwrap(),
+            crate::cline_hub::PROTOCOL
+        );
+    }
+}
+
 pub(crate) fn resolve_frozen_runtime_binding(
     transaction: &Connection,
     binding: &ResolvedRuntimeBinding,
+) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
+    resolve_frozen_runtime_binding_with_protocol(transaction, binding, None)
+}
+
+fn resolve_frozen_runtime_binding_with_protocol(
+    transaction: &Connection,
+    binding: &ResolvedRuntimeBinding,
+    cline_protocol: Option<&str>,
 ) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
     let installation_id = binding.installation_id.clone();
     let installation = transaction
@@ -4417,10 +4558,32 @@ pub(crate) fn resolve_frozen_runtime_binding(
             }),
         )));
     }
-    let protocols: Vec<String> = if preflight_required {
+    let protocols: Vec<String> = if adapter_kind == AdapterKind::ClineCli {
+        vec![
+            cline_protocol
+                .unwrap_or(crate::cline_hub::PROTOCOL)
+                .to_owned(),
+        ]
+    } else if preflight_required {
         vec![provisional_runtime_protocol(adapter_kind).to_string()]
     } else {
         serde_json::from_str(&protocols_json).context("invalid Adapter protocols")?
+    };
+    if adapter_kind == AdapterKind::ClineCli
+        && protocols[0] == "acp-v1"
+        && !crate::cline::supported_version(reported_version.as_deref())
+    {
+        return Ok(Err(runtime_blocker(
+            "runtime_version_below_minimum",
+            json!({
+                "installationId":installation_id, "backend":"acp-v1", "reportedVersion":reported_version
+            }),
+        )));
+    }
+    let native_session_compatibility_key = if adapter_kind == AdapterKind::ClineCli {
+        Some(format!("cline-cli:{}", protocols[0]))
+    } else {
+        native_session_compatibility_key
     };
     let permission_descriptors: Vec<PermissionOptionDescriptor> =
         serde_json::from_str(&permission_options_json)

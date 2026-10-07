@@ -8,6 +8,7 @@ mod builtin_tool_runtime;
 mod claude;
 mod claude_control;
 pub(crate) mod cline;
+pub(crate) mod cline_hub;
 mod codex;
 pub(crate) mod command_code;
 pub mod command_code_acp;

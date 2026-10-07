@@ -268,6 +268,15 @@ impl ProcessTree {
         Ok(true)
     }
 
+    pub(super) fn owns_live_pid(&self, pid: u32) -> io::Result<bool> {
+        for process in self.ledger.processes.values() {
+            if process.pid == pid as i32 && process.alive()? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub(super) fn retire(&self) -> io::Result<()> {
         if !self.is_empty()? {
             return Err(io::Error::other("managed process cleanup unconfirmed"));
@@ -413,6 +422,8 @@ mod tests {
         let mut tree = ProcessTree::new(child.id() as i32, &directory).unwrap();
         std::thread::sleep(Duration::from_millis(150));
         tree.capture().unwrap();
+        assert!(tree.owns_live_pid(child.id()).unwrap());
+        assert!(!tree.owns_live_pid(std::process::id()).unwrap());
         fs::write(
             directory.join("child.identity"),
             serde_json::to_vec(&identity(child.id() as i32).unwrap().unwrap()).unwrap(),

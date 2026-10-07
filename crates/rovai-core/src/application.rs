@@ -1,3 +1,6 @@
+mod hub_runtime;
+use crate::cline_hub::{ClineHubAdapter, ClineHubRuntime, HubIncoming, HubRuntimeRequest};
+use hub_runtime::*;
 use rusqlite::OptionalExtension;
 mod config;
 mod conversation_preferences;
@@ -2387,6 +2390,7 @@ struct Core {
     grok_build: AcpCliRuntimeAdapter,
     deepseek_harness: AcpCliRuntimeAdapter,
     cline_cli: AcpCliRuntimeAdapter,
+    cline_hub: ClineHubAdapter,
     command_code_cli: AcpCliRuntimeAdapter,
     zcode_app: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
@@ -2445,6 +2449,7 @@ impl ThreadAttachmentRunAccess<'_> {
 enum AgentRunRuntime {
     Codex(Arc<CodexRuntime>),
     Pi(Arc<PiRuntime>),
+    ClineHub(Arc<ClineHubRuntime>),
     Acp(Arc<AcpRuntime>),
     Claude {
         protocol: Arc<crate::claude_control::ClaudeControl>,
@@ -2753,6 +2758,7 @@ impl AgentRunRuntime {
         match self {
             Self::Codex(_) => rovai_core::agent_profile::AdapterKind::CodexCli,
             Self::Pi(_) => rovai_core::agent_profile::AdapterKind::Pi,
+            Self::ClineHub(_) => AdapterKind::ClineCli,
             Self::Acp(runtime) => runtime.adapter_kind(),
             Self::Claude { .. } => AdapterKind::ClaudeCodeCli,
         }
@@ -2766,6 +2772,7 @@ impl AgentRunRuntime {
         match self {
             Self::Codex(runtime) => runtime.respond(id, result).await,
             Self::Pi(runtime) => runtime.respond(id, result).await,
+            Self::ClineHub(runtime) => runtime.respond(id, result).await,
             Self::Acp(runtime) => runtime.respond(id, result).await,
             Self::Claude { protocol, .. } => protocol.respond(id, result).await,
         }
@@ -2775,6 +2782,7 @@ impl AgentRunRuntime {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
             Self::Pi(runtime) => runtime.cancel().await,
+            Self::ClineHub(runtime) => runtime.cancel().await,
             Self::Acp(runtime) => runtime.cancel().await,
             Self::Claude {
                 adapter,
@@ -2792,6 +2800,7 @@ impl AgentRunRuntime {
         match self {
             Self::Codex(runtime) => runtime.detach_and_flush_ingress().await,
             Self::Pi(runtime) => runtime.detach_and_flush_ingress().await,
+            Self::ClineHub(runtime) => runtime.detach_and_flush_ingress().await,
             Self::Acp(runtime) => runtime.detach_and_flush_ingress().await,
             Self::Claude { .. } => true,
         }
@@ -3031,6 +3040,7 @@ impl Core {
     async fn forget_deleted_camp_runtimes(&self, camp_id: &str) {
         self.codex_cli.forget_camp(camp_id).await;
         self.pi.forget_camp(camp_id).await;
+        self.cline_hub.forget_camp(camp_id).await;
     }
 
     async fn stop_deleted_camp_runtimes(
@@ -5190,6 +5200,13 @@ impl Core {
         {
             return Some(AgentRunRuntime::Codex(runtime));
         }
+        if let Some(runtime) = self
+            .cline_hub
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::ClineHub(runtime));
+        }
         if let Some(runtime) = self.pi.get_agent_run(agent_run_id, execution_epoch).await {
             return Some(AgentRunRuntime::Pi(runtime));
         }
@@ -5390,6 +5407,7 @@ impl Core {
         tokio::join!(
             self.codex_cli.shutdown_all(),
             self.pi.shutdown_all(),
+            self.cline_hub.shutdown_all(),
             self.opencode_cli.shutdown_all(),
             self.copilot_cli.shutdown_all(),
             self.kiro_cli.shutdown_all(),
@@ -5415,6 +5433,7 @@ impl Core {
             tokio::join!(
                 self.codex_cli.shutdown_all(),
                 self.pi.shutdown_all(),
+                self.cline_hub.shutdown_all(),
                 self.opencode_cli.shutdown_all(),
                 self.copilot_cli.shutdown_all(),
                 self.kiro_cli.shutdown_all(),
@@ -11291,6 +11310,10 @@ impl Core {
                     None,
                 )
             }
+            AdapterKind::ClineCli => (
+                crate::cline_hub::capability_snapshot(executable_path, attempted_at).await?,
+                None,
+            ),
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
@@ -11303,7 +11326,6 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
             | rovai_core::agent_profile::AdapterKind::CommandCodeCli
-            | rovai_core::agent_profile::AdapterKind::ClineCli
             | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
@@ -12876,6 +12898,13 @@ impl Core {
                         self.pi
                             .forget_agent_run(agent_run_id, execution_epoch)
                             .await;
+                    } else if adapter_kind == "cline-cli" {
+                        self.cline_hub
+                            .forget_agent_run(agent_run_id, execution_epoch)
+                            .await;
+                        self.cline_cli
+                            .forget_agent_run(agent_run_id, execution_epoch)
+                            .await;
                     } else if let Ok(kind) = adapter_kind.parse::<AdapterKind>()
                         && let Some(adapter) = self.acp_adapter(kind)
                     {
@@ -13149,6 +13178,8 @@ impl Core {
                 } else {
                     claude_permission::deny_decision("Rovai 用户拒绝了这次 Claude Code 操作")
                 })
+            } else if candidate.native_method == crate::cline_hub::APPROVAL_METHOD {
+                Ok(json!({"approved":approved}))
             } else if candidate.native_method == "session/request_permission" {
                 acp::legacy_approval_result(&candidate.response_context, approved)
             } else {
@@ -13567,7 +13598,7 @@ impl Core {
         Ok(())
     }
 
-    async fn acknowledge_pi_agent_start(
+    async fn acknowledge_native_agent_start(
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
@@ -14496,6 +14527,20 @@ impl Core {
         if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::ClaudeCodeCli {
             return self
                 .launch_claude_code_agent_run(PreparedRuntimeLaunch {
+                    execution,
+                    resume_disposition,
+                    skill_exposure: &skill_exposure,
+                    mcp_projection: &mcp_projection,
+                    attachment_admission,
+                    attachment_authorization,
+                    output,
+                    launch_permit,
+                })
+                .await;
+        }
+        if execution.runtime.protocol_version == crate::cline_hub::PROTOCOL {
+            return self
+                .launch_cline_hub_agent_run(PreparedRuntimeLaunch {
                     execution,
                     resume_disposition,
                     skill_exposure: &skill_exposure,
@@ -17617,6 +17662,10 @@ async fn run_core(
         rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
             &data_dir.join("runtime"),
         )?;
+        #[cfg(target_os = "macos")]
+        rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
+            &data_dir.join("runtime/cline-hub/hosts"),
+        )?;
         ManagedBlobStore::new(&data_dir).recover_gc_state(&mut database)?;
         recover_legacy_pending_cancellations(&mut database)?;
         rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
@@ -17680,6 +17729,7 @@ async fn run_core(
     let mcp_projection = McpProjectionService::new(&data_dir);
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
     let (pi_tx, pi_rx) = mpsc::unbounded_channel();
+    let (hub_tx, hub_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     let (output_control_tx, output_control_rx) = mpsc::channel(1);
@@ -17852,6 +17902,7 @@ async fn run_core(
                 .policy_for(AdapterKind::CommandCodeCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         ),
+        cline_hub: ClineHubAdapter::new(&data_dir, hub_tx, runtime_fleet.clone()),
         cline_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::ClineCli,
             acp_tx.clone(),
@@ -17921,6 +17972,13 @@ async fn run_core(
         codex_rx,
         output_tx.clone(),
         event_shutdown_rx,
+    ));
+    let (hub_shutdown_tx, hub_shutdown_rx) = oneshot::channel();
+    let mut hub_event_handle = tokio::spawn(process_hub_events(
+        core.clone(),
+        hub_rx,
+        output_tx.clone(),
+        hub_shutdown_rx,
     ));
     let (pi_shutdown_tx, pi_shutdown_rx) = oneshot::channel();
     let mut pi_event_handle = tokio::spawn(process_pi_events(
@@ -18326,10 +18384,12 @@ async fn run_core(
         // tracked owners, drain any guard admitted before the cutoff, then make
         // the durable cancellation terminal authoritative.
         let _ = event_shutdown_tx.send(());
+        let _ = hub_shutdown_tx.send(());
         let _ = pi_shutdown_tx.send(());
         let _ = acp_shutdown_tx.send(());
         let _ = builtin_tool_shutdown_tx.send(());
         event_handle.abort();
+        hub_event_handle.abort();
         pi_event_handle.abort();
         acp_event_handle.abort();
         let agent_tasks_aborted = core
@@ -18366,6 +18426,12 @@ async fn run_core(
                 .await;
         let event_quiesced = join_or_abort_until(
             &mut event_handle,
+            tokio::time::Instant::now(),
+            fence_settlement_deadline,
+        )
+        .await;
+        let hub_event_quiesced = join_or_abort_until(
+            &mut hub_event_handle,
             tokio::time::Instant::now(),
             fence_settlement_deadline,
         )
@@ -18432,6 +18498,7 @@ async fn run_core(
             && agent_tasks_quiesced
             && event_quiesced
             && pi_event_quiesced
+            && hub_event_quiesced
             && acp_event_quiesced
             && runtime_usage_quiesced;
         let controlled_fence_settlement = if fence_prerequisites_quiesced {
@@ -18606,7 +18673,9 @@ async fn run_core(
         let _ = builtin_tool_handle.await;
         let _ = event_shutdown_tx.send(());
         let _ = event_handle.await;
+        let _ = hub_shutdown_tx.send(());
         let _ = pi_shutdown_tx.send(());
+        let _ = hub_event_handle.await;
         let _ = pi_event_handle.await;
         let _ = acp_shutdown_tx.send(());
         let _ = acp_event_handle.await;
@@ -19186,7 +19255,7 @@ async fn process_agent_run_pi_message(
     }
     if message_type == "agent_start"
         && let Some(execution) = core
-            .acknowledge_pi_agent_start(
+            .acknowledge_native_agent_start(
                 agent_run_id,
                 execution_epoch,
                 delivery_id,
@@ -19288,10 +19357,10 @@ async fn process_agent_run_pi_message(
         {
             eprintln!("failed to flush Pi monitoring for AgentRun {agent_run_id}: {error:#}");
         }
-        persist_pi_prompt_completion(
+        persist_native_prompt_completion(
             core,
             output,
-            &runtime,
+            runtime.as_ref(),
             host_instance_id,
             agent_run_id,
             execution_epoch,
@@ -19302,10 +19371,10 @@ async fn process_agent_run_pi_message(
     Ok(())
 }
 
-async fn persist_pi_prompt_completion(
+async fn persist_native_prompt_completion(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
-    runtime: &PiRuntime,
+    runtime: &(impl NativePromptCompletion + Sync),
     host_instance_id: &str,
     agent_run_id: &str,
     execution_epoch: i64,
@@ -19333,14 +19402,14 @@ async fn persist_pi_prompt_completion(
     } else {
         format!("runtime_prompt_{stop_reason}")
     };
-    let error_detail = format!("Pi agent_settled ended the prompt as {stop_reason}");
+    let error_detail = format!("Native prompt result ended the prompt as {stop_reason}");
     let public_failure = (outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(
-            AdapterKind::Pi,
+            runtime.kind(),
             RuntimeFailureOrigin::Runtime,
             RuntimeFailurePhase::Execution,
             &base_error_code,
-            "Pi 未能完成运行",
+            "Runtime 未能完成运行",
             Some(&error_detail),
             &[(&core.data_dir, "<data-dir>")],
             manual_retry_allowed,
@@ -19352,7 +19421,7 @@ async fn persist_pi_prompt_completion(
         .unwrap_or(base_error_code);
     let prompt_id = runtime.prompt_id().to_string();
     let terminal_discriminator = canonical_json_digest(&json!({
-        "adapterKind": AdapterKind::Pi,
+        "adapterKind": runtime.kind(),
         "sessionId": runtime.session_id(),
         "promptId": prompt_id,
         "stopReason": stop_reason,
@@ -19407,7 +19476,7 @@ async fn persist_pi_prompt_completion(
             json!({
                 "agentRunId": agent_run_id,
                 "executionEpoch": execution_epoch,
-                "adapterKind": AdapterKind::Pi,
+                "adapterKind": runtime.kind(),
                 "settlement": settlement,
             }),
         );
@@ -19423,8 +19492,7 @@ async fn persist_pi_prompt_completion(
                 .unbind(&process_id, agent_run_id, execution_epoch)
                 .await;
         }
-        core.pi
-            .forget_agent_run(agent_run_id, execution_epoch)
+        core.finish_native_run(runtime.kind(), agent_run_id, execution_epoch, false)
             .await;
         core.delivery_batch_scheduler_notify.notify_one();
         core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
@@ -19449,12 +19517,12 @@ async fn persist_pi_prompt_completion(
         let terminal = if outcome == RuntimeTerminalOutcome::Succeeded {
             let final_output = final_message
                 .clone()
-                .context("Pi successful terminal has no final message")?;
+                .context("Native successful terminal has no final message")?;
             let mut database = core.database.lock().await;
             let envelope = CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
                 actor: ActorRef::System {
-                    component_id: "runtime-adapter:pi".to_string(),
+                    component_id: format!("runtime-adapter:{}", runtime.kind().as_str()),
                 },
                 camp_id: Some(execution.camp_id.clone()),
                 expected_versions: Vec::new(),
@@ -19466,7 +19534,7 @@ async fn persist_pi_prompt_completion(
                     native_turn_id: prompt_id.clone(),
                     final_output: final_output.clone(),
                     missing_send_recovery_candidate: Some(MissingSendRecoveryCandidate::new(
-                        MissingSendRecoveryBoundary::PiAgentSettled,
+                        runtime.boundary(),
                         final_output,
                     )),
                     ending_git_observation: ending_git_observation.clone(),
@@ -19488,7 +19556,7 @@ async fn persist_pi_prompt_completion(
                 &CommandEnvelope {
                     command_id: uuid::Uuid::new_v4().to_string(),
                     actor: ActorRef::System {
-                        component_id: "runtime-adapter:pi".to_string(),
+                        component_id: format!("runtime-adapter:{}", runtime.kind().as_str()),
                     },
                     camp_id: Some(execution.camp_id.clone()),
                     expected_versions: Vec::new(),
@@ -19519,7 +19587,7 @@ async fn persist_pi_prompt_completion(
                     json!({
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
-                        "adapterKind": AdapterKind::Pi,
+                        "adapterKind": runtime.kind(),
                         "result": terminal.result,
                         "replayed": terminal.replayed,
                     }),
@@ -19538,12 +19606,10 @@ async fn persist_pi_prompt_completion(
                         .await;
                 }
                 if outcome == RuntimeTerminalOutcome::Succeeded {
-                    core.pi
-                        .complete_agent_run(agent_run_id, execution_epoch)
+                    core.finish_native_run(runtime.kind(), agent_run_id, execution_epoch, true)
                         .await;
                 } else {
-                    core.pi
-                        .forget_agent_run(agent_run_id, execution_epoch)
+                    core.finish_native_run(runtime.kind(), agent_run_id, execution_epoch, false)
                         .await;
                 }
                 core.delivery_batch_scheduler_notify.notify_one();
@@ -26077,6 +26143,11 @@ mod tests {
                     .policy_for(AdapterKind::CommandCodeCli)
                     .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
+            cline_hub: ClineHubAdapter::new(
+                &data_dir,
+                mpsc::unbounded_channel().0,
+                runtime_fleet.clone(),
+            ),
             cline_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::ClineCli,
                 acp_tx.clone(),
@@ -30756,7 +30827,7 @@ done
             .into_iter()
             .filter(|adapter_kind| adapter_kind.uses_acp())
             .collect::<Vec<_>>();
-        assert_eq!(acp_adapters.len(), 12);
+        assert_eq!(acp_adapters.len(), 14);
         for adapter_kind in acp_adapters {
             let expected_output = format!("{} terminal output", adapter_kind.as_str());
             let (event_type, payload) = normalize_acp_event(

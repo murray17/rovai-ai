@@ -404,3 +404,32 @@ Core 把分配结果写入 Host 私有 mcp.json，保留原生同名优先，更
 两个 Bootstrap/MCP profile 改变时旧 Binding 会沿既有流程失效；新 profile 内仍要求 exact continuation。
 未选择继续把 Cline 身份放首条 user，亦未选择 fork 上游、用 shell 伪造 MCP 调用或替换真实模型 ID。
 原生 MCP 发现成功不代表当前自定义 BYOK 调用成功；未通过项保留，两个 Runtime 仍为 Preview。
+
+
+<a id="v1-72-d18"></a>
+## V1.72-D18：Cline 新会话采用独立 Native Hub，保留旧 ACP 后端
+
+- 状态：accepted
+- 日期：2026-10-07
+- 确认：User 消息 `c023f19a-9f1c-4558-b4d4-1bbab3ddffe9`（Thread 80）
+- 当前权威：[Cline 实施边界](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)、[Runtime Launch v46](../../contracts/runtime-launch-and-verification-v46.md#cline-native-hub)、[Native Hub 输入说明](model-context-change-cline-native-hub.md)
+
+### 背景与选择
+
+实际安装的 3.0.3 为编译后二进制，ACP 没有可验证的 compaction 配置注入口。原生 Hub 的
+sessionConfig 已验证可传入原生 basic，并在同一安装完成阈值压缩与同 ID cold。User 在阅读
+该方案和证据后要求把 Cline 改为这一套并推送分支。选择官方 CLI 自有认证 Hub，不安装替代
+Runtime、不修补上游、不实现第二套压缩器；共享 Fleet/Managed Process 和领域合同保持权威。
+
+新 Binding 冻结 `cline-hub-v1`；旧 ACP Binding 继续 `acp-v1`，从冻结 Run 证据恢复后端。
+认证 Session 探测独立于 ACP 的最低版本判断。原生文件 Rule 承载原冻结 B，readonly hook
+检查正常模型请求并采集稀疏数值。临时配置和永久历史分离，未知发送结果不自动重投。
+
+### 后果与替代方案
+
+当前 Hub 仅 macOS arm64 Preview、原生 BYOK；原生订阅解析、overflow recovery/retry、压缩取消、
+多 Session 压力及其他平台仍须独立验收。普通阈值压缩不能替代 overflow 资格。
+Host 采用 member scope 且固定 B，不在活跃原生 Session 之间修改共享 Rule。配置差异可能增加
+Host 重建，接受此成本以保证身份隔离。旧 ACP 不自动迁移，避免把不同存储/后端的 Session ID
+当作可互换身份。未选择另装 SDK、客户端压缩贡献、包装 ACP 或接管用户 Hub；它们无法满足本轮
+原生安装、配置权威和恢复证据边界。

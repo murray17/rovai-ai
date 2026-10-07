@@ -22,7 +22,19 @@ Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core 
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
 
-## 2026-10-06 Command / Cline 当前补验
+## 2026-10-07 Cline Native Hub 产品接入
+
+User 消息 80 后，新 Cline Binding 改用所选官方 CLI 启动的独立认证 Hub，冻结协议为 `cline-hub-v1`。
+本机 Homebrew 3.0.3 / Hub build 0.0.41 通过无模型 Ready 探测与真实 Core first、两个成员、暖续接、
+重启后的同 ID cold、身份/早期记忆和 bundled CLI 发送；后续能力逐项见
+[Native Hub 产品矩阵](research/cline-runtime/hub-adapter-implementation.md)。旧 ACP Binding 按后端证据保留，
+其 3.0.65 门槛单独执行；Hub 没有新增版本白名单、安装 patch 或源码 shim。
+原生 compaction 尊重 off/basic/agentic 和所选安装的实际默认，本机 basic；原生阈值证据与产品长上下文、
+overflow+retry 资格分开。OAuth/订阅及未覆盖能力保持未知，仍为 macOS arm64 Preview。
+下文 ACP/App/研究结论按测试时点保存，不作为新 Hub 的完整资格。
+
+## 2026-10-06 Command / Cline 此前补验
+
 
 Command Code 1.74.1 改用 Host 私有原生 MCP 配置：真实 stdio/HTTP 发现、cwd、字面 env/headers、
 同名优先和更新/撤销边界通过；当前 sub2api/gpt-6-sol 实际调用仍未通过。相同服务器经 Cline 真实调用成功。
@@ -46,7 +58,7 @@ prompt 四桶按输入已含缓存归约，标准 usage_update 提供本次实�
 不冒领为 Run。非零 shell exit 仅见文本、无结构化退出码。完整矩阵仍未取得 First-Class；详见
 [最新 14 轴对照](research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
 
-## Cline 接入实施状态
+## Cline ACP 与 Hub 研究历史（截至本次产品切换前）
 
 用户已选择官方 `cline --acp` 并允许 sub2api BYOK。Cline 3.0.65 / macOS arm64 经共享 Core ACP Host
 真实验证首次、warm、A→B→A、exact cold load、read/edit/command、取消与逐调用数值采集。
@@ -73,8 +85,9 @@ AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 F
 历史压缩并继续真实请求，默认不传和 off 未见压缩。Hub 重启后 attach-only 执行失败；继续按
 本安装 CLI 的 readMessages/start 原生恢复序列补测，同一 Session ID 的历史/System 和真实请求通过。
 完整产品 System Rule/工具/权限合同仍未通过。
-只读原生 hook 可提供 Run ID，不借用源码实验的恢复结果。生产后端继续 ACP，Hub Adapter
-尚未实现；overflow recovery、压缩取消与多 Session 交错未验收，既有最低版本门槛不变。
+只读原生 hook 可提供 Run ID，不借用源码实验的恢复结果。该研究时点生产仍为 ACP、Hub Adapter
+尚未实现；随后产品实现以上方 2026-10-07 更新为准。overflow recovery、压缩取消与多 Session
+交错未验收，旧 ACP 最低版本门槛继续独立保留。
 
 ## 当前 Product Runtime Catalog
 

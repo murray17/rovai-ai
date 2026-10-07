@@ -44651,6 +44651,8 @@ mod tests {
                     | SkillDeliveryGroupKey::Pi
                     | SkillDeliveryGroupKey::Zcode
                     | SkillDeliveryGroupKey::Dsh
+                    | SkillDeliveryGroupKey::Cline
+                    | SkillDeliveryGroupKey::CommandCode
             )
         }) {
             for (skill_id, revision_id) in [
@@ -45407,6 +45409,8 @@ mod tests {
                     | SkillDeliveryGroupKey::Pi
                     | SkillDeliveryGroupKey::Zcode
                     | SkillDeliveryGroupKey::Dsh
+                    | SkillDeliveryGroupKey::Cline
+                    | SkillDeliveryGroupKey::CommandCode
             )
         }) {
             for (skill_id, revision_id) in [

@@ -17,6 +17,7 @@ chrono = { version = "0.4", features = ["serde"] }
 croner = "4.0.0"
 dirs = "6"
 getrandom = "0.3"
+futures-util = { version = "0.3", features = ["sink"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 json5 = "0.4"
 pulldown-cmark = { version = "=0.13.4", default-features = false }
@@ -28,6 +29,7 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 subtle = "2"
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = "0.28"
 toml = "0.9"
 uuid = { version = "1", features = ["serde", "v4", "v7"] }
 url = "2"
