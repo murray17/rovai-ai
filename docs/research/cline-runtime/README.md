@@ -18,7 +18,12 @@ Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 AC
 本文件记录逐轴的原生实测与 Core 接线进度，不是产品准入决定。macOS arm64 的开发 Preview
 由 [V1.72-D13](../../versions/v1.72/decisions.md#v1-72-d13)拥有，其他平台仍为 NotQualified。
 
-最新[启动 shim 实验](acp-compaction-shim-2026-10-07.md)：固定 3.0.68 / 官方 Core 0.0.90，
+最新[用户实际安装入口核验](installed-acp-entrypoint-2026-10-07.md)：正常发现选中 Homebrew 3.0.3，
+wrapper 实际启动编译后的平台二进制，未找到可验证的 ACP/Core.start 注入入口。原生 ACP 初始化
+成功，安装与设置未改；现有 3.0.65 最低版本另使产品保持非 Ready。没有用实验 Runtime 替换，
+没有新增生产 shim 或版本限制，自动压缩兼容接入仍阻断。
+
+此前[启动 shim 实验](acp-compaction-shim-2026-10-07.md)：固定 3.0.68 / 官方 Core 0.0.90，
 仅补原生 compaction 配置即可观察自动压缩。同版本发布二进制和源码未注入对照均无压缩；
 隔离 Rovai Core 的 11 Run 验证保持 Session/Binding、System Rule、工具及 cold 连续性。
 这是实验结果，不改变生产官方 ACP 的压缩缺口或 Preview 准入；overflow+retry 尚未验证。

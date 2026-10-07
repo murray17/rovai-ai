@@ -18,6 +18,9 @@ Cline CLI 3.0.68 / 官方 Core 0.0.90 / sub2api `gpt-6-sol` 场景，仅补启�
 完整数值、原生事件、Run 归属和摘要见[脱敏证据](acp-compaction-shim-2026-10-07.evidence.json)。
 本轮未修改生产代码、最低版本、用户安装的 Cline、旧验收 Session 或日常 App，也未发布上游 PR。
 
+User 74 后续要求只使用用户实际安装的 Runtime；[实际入口核验](installed-acp-entrypoint-2026-10-07.md)
+未找到本机编译分发的安全注入入口。以下源码/SDK 实验不作为该安装的兼容接入通过证据。
+
 ## 固定来源与注入位置
 
 固定官方 commit `241c1884a7461ef35f6c384a027a38e8d03b3b33`，CLI 3.0.68，npm 发布的

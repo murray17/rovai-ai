@@ -63,6 +63,10 @@ AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 F
 [3.0.68 启动 shim 实验](research/cline-runtime/acp-compaction-shim-2026-10-07.md)已通过真实
 自动压缩、System Rule、Session/Binding 和 cold 连续性验证；同版本未注入对照仍无压缩。
 该实验未切换生产入口、升级最低版本或补齐 overflow+retry/First-Class 全矩阵。
+随后[用户实际安装入口核验](research/cline-runtime/installed-acp-entrypoint-2026-10-07.md)确认正常
+发现选中 Homebrew 3.0.3，实际执行编译后的平台二进制，未暴露可验证的 ACP/Core 启动注入入口。
+原生 ACP 初始化通过，但现有最低版本使产品非 Ready；两项事实分别记录。未以实验 SDK 替换
+用户安装，未增加生产 shim 或新版本限制，自动压缩兼容接入仍阻断。
 
 ## 当前 Product Runtime Catalog
 
