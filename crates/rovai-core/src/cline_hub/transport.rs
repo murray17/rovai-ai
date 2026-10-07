@@ -7,6 +7,10 @@ use tokio_tungstenite::tungstenite::{Error, protocol::WebSocketConfig};
 // Bound both a fragmented message and an individual frame before allocation.
 // Beyond this ceiling recovery fails explicitly and leaves native history intact.
 pub(super) const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+// The selected native server disconnects on a 17 MiB create request. Keep
+// outbound envelopes at a conservative 16 MiB ceiling; a large readable
+// history is not automatically a restorable history. No paging API exists.
+pub(super) const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) fn socket_config() -> WebSocketConfig {
     WebSocketConfig::default()
@@ -28,7 +32,7 @@ pub(super) fn encode(value: &Value) -> Result<String, HubFailure> {
     struct Bounded(Vec<u8>);
     impl Write for Bounded {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if bytes.len() > MAX_MESSAGE_BYTES.saturating_sub(self.0.len()) {
+            if bytes.len() > MAX_REQUEST_BYTES.saturating_sub(self.0.len()) {
                 return Err(io::Error::other("Hub request exceeds message budget"));
             }
             self.0.extend_from_slice(bytes);
@@ -39,7 +43,7 @@ pub(super) fn encode(value: &Value) -> Result<String, HubFailure> {
         }
     }
     let mut output = Bounded(Vec::new());
-    serde_json::to_writer(&mut output, value).map_err(|_| HubFailure::Transport {
+    serde_json::to_writer(&mut output, value).map_err(|_| HubFailure::LocalLimit {
         code: "cline_hub_request_limit_exceeded",
     })?;
     // serde_json emits UTF-8, including for escaped control characters.
@@ -63,7 +67,9 @@ mod tests {
             let message =
                 serde_json::json!({"messages":[{"content":"x".repeat(17 * 1024 * 1024)}]});
             socket
-                .send(Message::Text(encode(&message).unwrap().into()))
+                .send(Message::Text(
+                    serde_json::to_string(&message).unwrap().into(),
+                ))
                 .await
                 .unwrap();
             // A real server frame header declares an oversized body. No body is
@@ -90,10 +96,10 @@ mod tests {
             }
         );
         server.await.unwrap();
-        let too_large = serde_json::json!("x".repeat(MAX_MESSAGE_BYTES));
+        let too_large = serde_json::json!("x".repeat(MAX_REQUEST_BYTES));
         assert_eq!(
             encode(&too_large).unwrap_err(),
-            HubFailure::Transport {
+            HubFailure::LocalLimit {
                 code: "cline_hub_request_limit_exceeded"
             }
         );

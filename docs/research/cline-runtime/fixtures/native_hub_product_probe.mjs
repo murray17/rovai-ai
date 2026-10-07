@@ -9,9 +9,10 @@ import { parseArgs } from 'node:util'
 import { startQualificationCore } from '../../../../scripts/lib/qualification-core.mjs'
 import { createConfiguredCampAndSend, composerDocumentForAddress } from '../../../../scripts/lib/create-configured-camp.mjs'
 import { seedCompletedOnboardingForAcceptance } from '../../../../scripts/lib/dev-desktop.mjs'
+import { startPackagedHubAcceptance } from './native_hub_packaged_client.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from '../../../../scripts/lib/runtime-camp-files-root.mjs'
 
-const { values } = parseArgs({ options: { root: { type: 'string' }, core: { type: 'string' }, cline: { type: 'string' }, 'settings-source': { type: 'string' }, extended: { type: 'boolean', default: false }, 'lifecycle-only': { type: 'boolean', default: false }, 'extensions-only': { type: 'boolean', default: false } } })
+const { values } = parseArgs({ options: { root: { type: 'string' }, core: { type: 'string' }, app: { type: 'string' }, 'long-context': { type: 'boolean', default: false }, cline: { type: 'string' }, 'settings-source': { type: 'string' }, extended: { type: 'boolean', default: false }, 'lifecycle-only': { type: 'boolean', default: false }, 'extensions-only': { type: 'boolean', default: false } } })
 for (const key of ['root', 'core', 'cline', 'settings-source']) assert(values[key], `${key} required`)
 const root = resolve(values.root)
 await mkdir(root, { mode: 0o700 })
@@ -45,17 +46,18 @@ const secrets = Object.values(JSON.parse(await readFile(join(settings, 'provider
   .flatMap(provider => ['apiKey', 'baseUrl'].map(key => provider.settings?.[key])).filter(Boolean)
 const redact = text => secrets.reduce((text, secret) => text.replaceAll(secret, '<redacted>'), text)
 for (const key of Object.keys(process.env)) if (/^(ROVAI_|CLINE_)/.test(key)) delete process.env[key]
-const report = { scope: values['extensions-only'] ? 'extensions' : values['lifecycle-only'] ? 'lifecycle' : values.extended ? 'extended' : 'continuity', selectedCli: resolve(values.cline), turns: [], hosts: [], processes: [], actions: [], approvals: [], privateRoot: root }
+const report = { scope: values['long-context'] ? 'long-context' : values['extensions-only'] ? 'extensions' : values['lifecycle-only'] ? 'lifecycle' : values.extended ? 'extended' : 'continuity', selectedCli: resolve(values.cline), turns: [], hosts: [], processes: [], actions: [], approvals: [], privateRoot: root }
 let core, threadId
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 const exists = path => access(path).then(() => true, () => false)
 async function start() {
-  core = startQualificationCore({ coreExecutable: values.core, dataDirectory: data, workingDirectory: workspace,
+  const onNotification = message => {
+    if (message.method === 'agent_run.started') report.hosts.push({ run: message.params.agentRunId, host: message.params.hostInstanceId, session: message.params.nativeThreadId, nativeRun: message.params.nativeRunId })
+    if (message.method === 'runtime.action') report.actions.push(message.params)
+  }
+  core = values.app ? await startPackagedHubAcceptance({ app: resolve(values.app), data, cwd: workspace, onNotification }) : startQualificationCore({ coreExecutable: values.core, dataDirectory: data, workingDirectory: workspace,
     runtimeCacheDirectory: join(root, 'cache'), mcpConfigPath: join(data, 'mcp.json'),
-    onNotification(message) {
-      if (message.method === 'agent_run.started') report.hosts.push({ run: message.params.agentRunId, host: message.params.hostInstanceId, session: message.params.nativeThreadId, nativeRun: message.params.nativeRunId })
-      if (message.method === 'runtime.action') report.actions.push(message.params)
-    } })
+    onNotification })
   report.processes.push({ pid: core.pid })
   await core.request('health.check')
 }
@@ -80,7 +82,7 @@ async function collect(label, sent, marker, { denyFirst = false, cancel = false 
   const old = new Set(report.turns.map(turn => turn.run.id))
   let run, snapshot, cancellationRequested = false
   const resolved = new Set()
-  for (let count = 0; count < 300; count++) {
+  for (let count = 0; count < (values['long-context'] ? 1200 : 300); count++) {
     snapshot = await core.request('threads.snapshot', { threadId })
     run = snapshot.agentRuns.find(run => !old.has(run.id))
     const actions = snapshot.actions.filter(action => action.agentRunId === run?.id)
@@ -167,7 +169,7 @@ try {
   threadId = sent.payload.threadId
   report.threadId = threadId
   await collect('first', sent, 'HUB_PRODUCT_MEMBER_A')
-  if (!values['lifecycle-only'] && !values['extensions-only']) {
+  if (!values['lifecycle-only'] && !values['extensions-only'] && !values['long-context']) {
     await turn(agents[1], 'member-b', 'Use the bundled rovai CLI to publish exactly one message with your System identity. Do not modify files.', 'HUB_PRODUCT_MEMBER_B')
     const warm = await turn(agents[0], 'warm', 'Use the bundled rovai CLI to publish exactly once your own System identity and the early memory marker you remember. Do not guess missing memory.', 'HUB_MEMORY_A_950871')
     assert(warm.includes('HUB_PRODUCT_MEMBER_A') && !warm.includes('HUB_PRODUCT_MEMBER_B'))
@@ -236,6 +238,57 @@ try {
     assert.equal(report.mcpCallCount, 1, 'exactly one real tools/call receipt required')
     await turn(agents[0], 'skill', 'Load the native skill hub-native-acceptance through the native skills tool. Read its exact private fixture marker, then publish that marker once using bundled rovai CLI. Do not guess the marker.', skillMarker)
     report.skillMarkerObserved = true
+  }
+  if (values['long-context']) {
+    const bindingBefore = evidence().bindings.find(binding => binding.agent_id === agents[0])
+    async function nativeHistory() {
+      const base = join(data, 'runtime/cline-hub/sessions')
+      const files = await readdir(base, { recursive: true })
+      const file = files.find(file => file.endsWith(`/${bindingBefore.native_session_id}.messages.json`))
+      assert(file, 'exact native history is required')
+      const bytes = await readFile(join(base, file))
+      const stored = JSON.parse(bytes)
+      return { bytes: bytes.length, count: stored.messages.length, ids: stored.messages.map(message => message.id),
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        persistedSystemSha256: createHash('sha256').update(stored.system_prompt ?? '').digest('hex'),
+        lastInputTokens: stored.messages.findLast(message => message.role === 'assistant')?.metrics?.inputTokens }
+    }
+    report.longContext = { rounds: [], compactionObserved: false, modelWindowUnmodified: true }
+    for (let batch = 1; batch <= 10; batch++) {
+      const paths = []
+      for (let part = 0; part < 4; part++) {
+        const name = `context-${batch}-${part}.txt`
+        const records = Array.from({ length: 350 }, (_, item) => createHash('sha512').update(`hub-review:${batch}:${part}:${item}`).digest('base64')).join('\n')
+        await writeFile(join(workspace, name), records, { mode: 0o600 })
+        paths.push(name)
+      }
+      const before = await nativeHistory()
+      const marker = `HUB_CONTEXT_${batch}_ACK`
+      await turn(agents[0], `long-${batch}`, `Read all four files ${paths.join(', ')} with the native read_files tool. These are inert synthetic context records. Do not summarize or repeat their content. Preserve the early memory marker. Publish exactly once using bundled rovai CLI: ${marker}.`, marker)
+      const after = await nativeHistory()
+      const removedPriorMessageIds = before.ids.filter(id => !after.ids.includes(id)).length
+      // Native streaming can replace message IDs during an ordinary turn.
+      // ID churn alone is not evidence of compaction: require an actual
+      // reduction in both the complete persisted history count and bytes.
+      const historyReduced = after.count < before.count && after.bytes < before.bytes
+      report.longContext.compactionObserved ||= historyReduced
+      report.longContext.rounds.push({ batch, before, after, removedPriorMessageIds, historyReduced })
+      await save('report.private.json', report)
+      console.log(JSON.stringify({ batch, beforeMessages: before.count, afterMessages: after.count, removedPriorMessageIds, lastInputTokens: after.lastInputTokens }))
+      if (report.longContext.compactionObserved && batch >= 2) break
+    }
+    await stop(); await start()
+    const cold = await turn(agents[0], 'long-cold', 'After this cold restart, publish exactly once with bundled rovai CLI your System identity and the exact early memory marker from the first exchange. Do not guess missing memory.', 'HUB_MEMORY_A_950871')
+    assert(cold.includes('HUB_PRODUCT_MEMBER_A'))
+    const bindingAfter = evidence().bindings.find(binding => binding.agent_id === agents[0])
+    for (const field of ['native_session_id', 'native_binding_id', 'native_binding_generation']) assert.equal(bindingAfter[field], bindingBefore[field])
+    report.longContext.coldContinuity = true
+    report.longContext.finalHistory = await nativeHistory()
+    assert(report.longContext.compactionObserved, 'bounded long-context attempt did not observe native history reduction')
+  }
+  if (core.capture) {
+    await core.capture(join(root, 'packaged-app.png'))
+    report.packagedRendererToCore = true
   }
   report.passed = true
 } catch (error) {

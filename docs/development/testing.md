@@ -110,8 +110,9 @@ case 保留到 `cline::tests::native_metrics_keep_sparse_usage_and_verified_cont
   最小临时文件 fixture，证明复制后 MCP 校验失败的清理及所有权移交，属于 extended-tests；纯 parser 无法证明文件删除。
 - `cline_hub::transport::tests`：实际 loopback WebSocket 证明超过旧 16 MiB 的历史帧和超限头部拒绝，
   属于 extended-tests；只测 JSON 长度不能发现库自身的帧限制。没有模型调用。
-- `cline_hub::tests::installed_hub_known_rejection_and_large_history_cold_restore`：显式 ignored 真原生
-  protocol fixture，覆盖 native `ok:false` 到 Run 终态的完整链、禁止重发、17 MiB 同 ID 冷恢复与拒绝无副作用。
+- `cline_hub::tests::installed_hub_known_rejection_and_bounded_history_cold_restore`：显式 ignored 真原生
+  protocol fixture，覆盖 native `ok:false` 到 Run 终态的完整链、禁止重发、有界合成历史的同 ID 冷恢复与拒绝无副作用。
+  可通过 `ROVAI_CLINE_HUB_HISTORY_BYTES` 在 1 KiB–32 MiB 范围选择合成大小，默认 1 MiB；超限负例不得算作通过。
   只向不存在的 Session 提交失败请求，不执行模型；普通 CI 不依赖安装或私有配置。
 
 最小验证：`cargo test -p rovai-core --features extended-tests --lib cline`；恢复、文件来源与

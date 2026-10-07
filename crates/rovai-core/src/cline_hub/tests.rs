@@ -27,7 +27,7 @@ fn runtime_for(host: Arc<ClineHubHost>, session: String) -> Arc<ClineHubRuntime>
 
 #[tokio::test]
 #[ignore = "Real selected Cline CLI and isolated provider configuration; protocol-only, no model request"]
-async fn installed_hub_known_rejection_and_large_history_cold_restore() {
+async fn installed_hub_known_rejection_and_bounded_history_cold_restore() {
     use anyhow::ensure;
     let executable = PathBuf::from(std::env::var("ROVAI_CLINE_HUB_ACCEPTANCE_EXECUTABLE").unwrap());
     let root = std::env::temp_dir().join(format!("rovai-hub-review-{}", uuid::Uuid::new_v4()));
@@ -49,30 +49,17 @@ async fn installed_hub_known_rejection_and_large_history_cold_restore() {
     )
     .await
     .unwrap();
+    let bytes: usize = std::env::var("ROVAI_CLINE_HUB_HISTORY_BYTES")
+        .ok()
+        .map(|v| v.parse().unwrap())
+        .unwrap_or(1024 * 1024);
+    assert!((1024..=32 * 1024 * 1024).contains(&bytes));
     let mut second = None;
     let result = async {
-        let messages = json!([{"id":"synthetic-history", "role":"user", "content":[{"type":"text","text":format!("early-marker-{}-late-marker", "x".repeat(17 * 1024 * 1024))}]}]);
-        let digest = crate::command::canonical_json_digest(&messages)?;
-        let created = first.command("session.create", json!({"workspaceRoot":root,"sessionConfig":first.session_config,"initialMessages":messages}), None).await?;
-        let session = created["session"]["sessionId"].as_str().context("missing Session")?.to_owned();
-        ensure!(first.force_reap_until(Instant::now() + Duration::from_secs(5)).await, "first host not reaped");
-        let host = ClineHubHost::spawn(&launch, root.join("second"), root.join("history"), tx).await?;
-        second = Some(host.clone());
-        let fetched = host.command("session.get", json!({}), Some(&session)).await?;
-        ensure!(fetched["session"]["sessionId"] == session, "cold identity mismatch");
-        let mut history = host.command("session.messages", json!({}), Some(&session)).await?;
-        ensure!(crate::command::canonical_json_digest(&history["messages"])? == digest, "native cold history changed");
-        let mut configuration = host.session_config.clone();
-        configuration["sessionId"] = json!(session);
-        let restored = host.command("session.create", json!({"workspaceRoot":root,"sessionConfig":configuration,"initialMessages":history["messages"].take()}), None).await?;
-        ensure!(restored["session"]["sessionId"] == session, "native restore replaced identity");
-        let reread = host.command("session.messages", json!({}), Some(&session)).await?;
-        ensure!(crate::command::canonical_json_digest(&reread["messages"])? == digest, "restored history changed");
-
         // A missing native Session rejects before model execution. Exercise the
         // production receive -> start_prompt -> shared failure view boundary.
-        let runtime = runtime_for(host.clone(), format!("missing-{}", uuid::Uuid::new_v4()));
-        *host.owner.write().await = Arc::downgrade(&runtime);
+        let runtime = runtime_for(first.clone(), format!("missing-{}", uuid::Uuid::new_v4()));
+        *first.owner.write().await = Arc::downgrade(&runtime);
         runtime.start_prompt("Do not execute: nonexistent Session fixture").await?;
         timeout(Duration::from_secs(15), async {
             while let Some(event) = rx.recv().await {
@@ -90,7 +77,33 @@ async fn installed_hub_known_rejection_and_large_history_cold_restore() {
         runtime.denied_tools.lock().await.insert("denied".into());
         let (public, completion) = runtime.normalize("tool.finished", &json!({"toolCallId":"denied", "toolName":"apply_patch", "output":{"success":false}, "error":"denied"})).await?;
         ensure!(completion.is_none() && public.context("missing denied evidence")?.1["runtimeDiff"].is_null(), "denial invented side effects");
-        println!("Native Hub protocol review: 17 MiB exact-history cold restore, same Session ID, known failure, no replay, denied tool without side effects; model executions=0");
+        println!("Native Hub known rejection: failed, session_not_found, no replay; model executions=0");
+        let messages = json!([{"id":"synthetic-history", "role":"user", "content":[{"type":"text","text":format!("early-marker-{}-late-marker", "x".repeat(bytes))}]}]);
+        let digest = crate::command::canonical_json_digest(&messages)?;
+        let creation = first.command("session.create", json!({"workspaceRoot":root,"sessionConfig":first.session_config,"initialMessages":messages}), None).await;
+        if bytes >= transport::MAX_REQUEST_BYTES {
+            let error = creation.expect_err("oversized restore must be refused before sending");
+            ensure!(error.downcast_ref::<crate::runtime_failure::RuntimeFailureError>().is_some_and(|error| error.failure.code == "cline_hub_history_restore_limit_exceeded"), "missing explicit history limit");
+            println!("Native Hub protocol review: {bytes} byte history refused before transmission; no truncation, no model execution; cold restore NOT qualified at this size");
+            return Ok(());
+        }
+        let created = creation.context("initial native history creation")?;
+        let session = created["session"]["sessionId"].as_str().context("missing Session")?.to_owned();
+        ensure!(first.force_reap_until(Instant::now() + Duration::from_secs(5)).await, "first host not reaped");
+        let host = ClineHubHost::spawn(&launch, root.join("second"), root.join("history"), tx).await?;
+        second = Some(host.clone());
+        let fetched = host.command("session.get", json!({}), Some(&session)).await?;
+        ensure!(fetched["session"]["sessionId"] == session, "cold identity mismatch");
+        let mut history = host.command("session.messages", json!({}), Some(&session)).await?;
+        ensure!(crate::command::canonical_json_digest(&history["messages"])? == digest, "native cold history changed");
+        let mut configuration = host.session_config.clone();
+        configuration["sessionId"] = json!(session);
+        let restored = host.command("session.create", json!({"workspaceRoot":root,"sessionConfig":configuration,"initialMessages":history["messages"].take()}), None).await?;
+        ensure!(restored["session"]["sessionId"] == session, "native restore replaced identity");
+        let reread = host.command("session.messages", json!({}), Some(&session)).await?;
+        ensure!(crate::command::canonical_json_digest(&reread["messages"])? == digest, "restored history changed");
+
+        println!("Native Hub protocol review: {bytes} byte exact-history cold restore, same Session ID, known failure, no replay, denied tool without side effects; model executions=0");
         Ok::<_, anyhow::Error>(())
     }.await;
     let mut reaped = first

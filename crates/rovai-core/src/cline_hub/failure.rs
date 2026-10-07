@@ -16,6 +16,9 @@ pub(super) enum HubFailure {
     Transport {
         code: &'static str,
     },
+    LocalLimit {
+        code: &'static str,
+    },
 }
 
 impl HubFailure {
@@ -106,11 +109,26 @@ impl HubFailure {
                     "Hub transport failure: {code}. Execution outcome is unknown; input is not replayed."
                 ),
             ),
+            Self::LocalLimit { code } => (
+                (*code).into(),
+                "Cline Hub 请求超过客户端支持的大小",
+                "请求在发送前被拒绝，原生历史保持完整；不会裁剪历史或自动重发。".into(),
+            ),
         };
         RuntimeFailureView::new(
             AdapterKind::ClineCli,
             RuntimeFailureOrigin::Runtime,
-            RuntimeFailurePhase::Execution,
+            if matches!(
+                self,
+                Self::Native {
+                    category: "authentication_failed",
+                    ..
+                }
+            ) {
+                RuntimeFailurePhase::Authentication
+            } else {
+                RuntimeFailurePhase::Execution
+            },
             code,
             summary,
             Some(detail),
@@ -131,6 +149,40 @@ impl fmt::Display for HubFailure {
     }
 }
 impl std::error::Error for HubFailure {}
+
+pub(super) fn probe_failure(error: &anyhow::Error) -> RuntimeFailureView {
+    if let Some(error) = error.downcast_ref::<crate::runtime_failure::RuntimeFailureError>() {
+        return error.failure.clone();
+    }
+    if let Some(error) = error.downcast_ref::<HubFailure>() {
+        return error.public_view();
+    }
+    let raw = error.to_string();
+    let code = match raw.as_str() {
+        "cline_native_mcp_config_invalid"
+        | "cline_native_config_invalid"
+        | "cline_native_provider_unconfigured"
+        | "cline_native_model_unconfigured"
+        | "cline_compaction_preference_invalid"
+        | "cline_compaction_default_unverified"
+        | "cline_hub_platform_not_qualified"
+        | "cline_hub_probe_cleanup_unconfirmed" => raw.as_str(),
+        _ => "cline_hub_probe_failed",
+    };
+    RuntimeFailureView::new(
+        AdapterKind::ClineCli,
+        RuntimeFailureOrigin::Compatibility,
+        RuntimeFailurePhase::ModelCatalog,
+        code,
+        if code == "cline_native_mcp_config_invalid" {
+            "Cline 原生 MCP 配置无效"
+        } else {
+            "Cline Hub 诊断未通过"
+        },
+        None,
+        false,
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -172,5 +224,30 @@ mod tests {
         assert!(!unknown.is_native());
         assert!(unknown.public_view().code.ends_with("outcome_unknown"));
         assert!(!unknown.public_view().retryable);
+        let auth = crate::runtime_failure::RuntimeFailureError::new(RuntimeFailureView::new(
+            AdapterKind::ClineCli,
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Authentication,
+            "cline_hub_native_auth_requires_api_key",
+            "Cline Hub 需要 API key",
+            None,
+            false,
+        ));
+        let view = auth.failure.clone();
+        assert_eq!(
+            probe_failure(&anyhow::Error::new(auth).context("probe")),
+            view
+        );
+        assert_eq!(
+            probe_failure(&anyhow::anyhow!("cline_native_mcp_config_invalid")).code,
+            "cline_native_mcp_config_invalid"
+        );
+        assert!(
+            !format!(
+                "{:?}",
+                probe_failure(&anyhow::anyhow!("secret-native-detail"))
+            )
+            .contains("secret")
+        );
     }
 }

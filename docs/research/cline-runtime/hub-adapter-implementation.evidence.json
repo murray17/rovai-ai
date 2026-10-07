@@ -1854,5 +1854,444 @@
       "runtimeFilesRemoved": true,
       "privateProviderCopyRemoved": true
     }
+  },
+  "reviewFollowUp": {
+    "userMessageId": "b70db5df-d6eb-4d76-aadb-a88f32b8e5d9",
+    "date": "2026-10-08",
+    "status": "preview-with-explicit-limits",
+    "legacyClineAcpRemoved": true,
+    "windowsChecks": [
+      {
+        "conclusion": "success",
+        "headSha": "25705105cf786e54141eb1d4b2a69769be991f12",
+        "url": "https://github.com/murray17/rovai-ai/actions/runs/37657700179"
+      }
+    ],
+    "packagedMainFlow": {
+      "scope": "extended",
+      "passed": true,
+      "runs": [
+        {
+          "label": "first",
+          "id": "31c010cd-470e-49b9-aab3-eac8820ae5b7",
+          "status": "succeeded"
+        },
+        {
+          "label": "member-b",
+          "id": "a5b56b70-c998-413f-a95c-0ec0b9fa104e",
+          "status": "succeeded"
+        },
+        {
+          "label": "warm",
+          "id": "b9ee87df-87e5-4e81-89ee-cf6e4a88584d",
+          "status": "succeeded"
+        },
+        {
+          "label": "cold",
+          "id": "d8d8bd73-f6d7-47d0-8d43-621e3beae3d9",
+          "status": "succeeded"
+        },
+        {
+          "label": "files",
+          "id": "96a7a675-0f1c-409f-a0c2-9f25c7d17e3e",
+          "status": "succeeded"
+        },
+        {
+          "label": "allow",
+          "id": "71303d61-b312-41bd-843f-73e8c52b5703",
+          "status": "succeeded"
+        },
+        {
+          "label": "deny",
+          "id": "d157cb28-6469-4e1a-9aca-bc1218b6d29c",
+          "status": "succeeded"
+        },
+        {
+          "label": "cancel",
+          "id": "a6f309df-7782-43a8-a9f3-cb8db47e0db1",
+          "status": "cancelled"
+        },
+        {
+          "label": "after-cancel",
+          "id": "a3eab438-dba2-4c1d-8a1b-8bc280d0ed3d",
+          "status": "succeeded"
+        }
+      ],
+      "sameNativeProtocol": true,
+      "configurationSourcesUnchanged": true,
+      "privateHostsRemaining": [],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true
+    },
+    "productLongContext": {
+      "scope": "long-context",
+      "passed": true,
+      "runs": [
+        {
+          "label": "first",
+          "id": "d56c2237-2d29-4dd5-a9df-a23e9f9f5ec5",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-1",
+          "id": "94a87986-40cb-425c-bab9-fce55d8fe2b6",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-2",
+          "id": "26f6a68a-5b9e-4c6d-8cfa-1c5e8d388e5c",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-3",
+          "id": "87adeb1c-d9fb-4be8-94b9-f4cc8dc9dd84",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-4",
+          "id": "3a4e99d0-2d31-4016-bd11-b83ee99d0937",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-5",
+          "id": "d84c79cd-9ef4-4400-9b4b-16a5f226ab96",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-6",
+          "id": "507617d6-1265-4614-93a3-42c44105b71e",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-7",
+          "id": "97c7b370-92a6-4855-81aa-7573c988b32b",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-cold",
+          "id": "39f60e25-bf57-42a9-9f03-b5b65935ce0d",
+          "status": "succeeded"
+        }
+      ],
+      "sameNativeProtocol": true,
+      "configurationSourcesUnchanged": true,
+      "privateHostsRemaining": [],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true
+    },
+    "coreDiagnostics": {
+      "kind": "interrupted-native-hub-diagnostic-recovery",
+      "modelInputs": 0,
+      "ownershipRecorded": true,
+      "nativeAliveBeforeRestart": true,
+      "restartReapedNative": true,
+      "privateHostRemoved": true,
+      "normalDiagnosticAfterRecovery": "ready",
+      "preparationFailureCleanedTwice": true,
+      "noApiKeyExplicitlyUnsupported": true,
+      "sourceUnchanged": true,
+      "passed": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "privateProviderCopyRemoved": true
+    },
+    "packagedDiagnostics": {
+      "kind": "packaged-hub-diagnostics",
+      "modelInputs": 0,
+      "packagedRendererToCore": true,
+      "normalDiagnosticAfterRecovery": "ready",
+      "preparationFailureCleanedTwice": true,
+      "noApiKeyExplicitlyUnsupported": true,
+      "sourceUnchanged": true,
+      "passed": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "privateProviderCopyRemoved": true
+    },
+    "protectedFiles": [
+      {
+        "scope": "settings",
+        "name": "cline_mcp_settings.json",
+        "sha256": "066cdcc5ea8b813b6d4155783f53887d104e261e0aec7c3aab159a9efed926ff",
+        "mode": "0o644",
+        "unchanged": true
+      },
+      {
+        "scope": "settings",
+        "name": "cli-default-instance.json",
+        "sha256": "280c6a4556ee1561343b970bd2406f90bd5f5bdf226f7ba190bf5cc0bf85dcc6",
+        "mode": "0o644",
+        "unchanged": true
+      },
+      {
+        "scope": "settings",
+        "name": "providers.json",
+        "sha256": "1b3eff25040b2a8d2584060b8b5849ed0ebbbf883fd3d6b0e7be23522e343426",
+        "mode": "0o600",
+        "unchanged": true
+      },
+      {
+        "scope": "hubFiles",
+        "name": "owners/hub-9869705ea029.json",
+        "sha256": "33491d53d5063fead78684a4c98c01543d1824ca271761da62c73aec6fbdabff",
+        "mode": "0o600",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "LICENSE",
+        "sha256": "f704446a5f1271608805598b557e4288cf8580477ea038c9c3d8b361f693f6b8",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "README.md",
+        "sha256": "96d5695c8bd1808bd30020aa869ac937f1ce1af21d4c1d58eef00fef5475813f",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "package.json",
+        "sha256": "62be1862187cc44837d59d76314118ef12070dd73c71eded042bca24b0d39002",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "postinstall.mjs",
+        "sha256": "78e422d0bb8a9b392926c39f106f9c9808f96bead9438f12ca204ce0d3b3cacf",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "bin/cline",
+        "sha256": "2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/.bin/cline",
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/@cline/cli-darwin-arm64/package.json",
+        "sha256": "221ac79ad535f10c687f147208fb14d4bbb90cad85b7a22a56cfb2e829a2dbf0",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/@cline/cli-darwin-arm64/bin/cline",
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js",
+        "sha256": "3fa353ee0fa24a42ce9243b912423a265145c3e894f786aa6a1f894a6626a95c",
+        "mode": "0o755",
+        "unchanged": true
+      }
+    ],
+    "nativeProtocol": {
+      "modelExecutions": 0,
+      "knownMissingSessionFailure": "cline_hub_native_session_not_found",
+      "inputReplayBlocked": true,
+      "coldRestore1MiB": "passed: same ID and canonical complete-history digest",
+      "coldCreate15MiB": "failed: no complete reply within 45 seconds; outcome unknown; not replayed",
+      "coldCreate17MiBBeforeGuard": "failed: transport broke during send; not replayed",
+      "coldCreate17MiBAfterGuard": "controlled local refusal: cline_hub_history_restore_limit_exceeded, before sending",
+      "maximumIncomingFrameAndMessageBytes": 67108864,
+      "maximumEncodedRequestBytes": 16777216,
+      "nativeHistoryTruncationByRovai": false,
+      "paginationSupportedByInspectedNativeApi": false
+    },
+    "longContextReduction": {
+      "rounds": [
+        {
+          "batch": 1,
+          "before": {
+            "bytes": 8145,
+            "count": 6,
+            "sha256": "eb8c494888959b927e01dcbc087227b73984bd90ef6d8b8766ea0526df21da18",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 4695
+          },
+          "after": {
+            "bytes": 149293,
+            "count": 14,
+            "sha256": "9f986f76880123cf7e5ecf1c8708f224b2ddd43a167716ea3949d3c0cf6c0e54",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 95807
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 2,
+          "before": {
+            "bytes": 149293,
+            "count": 14,
+            "sha256": "9f986f76880123cf7e5ecf1c8708f224b2ddd43a167716ea3949d3c0cf6c0e54",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 95807
+          },
+          "after": {
+            "bytes": 289407,
+            "count": 20,
+            "sha256": "191e9f412f7c15196c4cc9376d9bcbd903463452a40c18f0a4d92bdb9e8d8728",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 186865
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 3,
+          "before": {
+            "bytes": 289407,
+            "count": 20,
+            "sha256": "191e9f412f7c15196c4cc9376d9bcbd903463452a40c18f0a4d92bdb9e8d8728",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 186865
+          },
+          "after": {
+            "bytes": 429613,
+            "count": 26,
+            "sha256": "ed2b180398db44254b0a5b84038e690568d525c03dbc9688ede84f3b2709ca17",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 277706
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 4,
+          "before": {
+            "bytes": 429613,
+            "count": 26,
+            "sha256": "ed2b180398db44254b0a5b84038e690568d525c03dbc9688ede84f3b2709ca17",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 277706
+          },
+          "after": {
+            "bytes": 569862,
+            "count": 32,
+            "sha256": "88753fac39d79292dd8b9e3e3c6cdd511758cfb61b679151ac83aaacfe8e1359",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 368830
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 5,
+          "before": {
+            "bytes": 569862,
+            "count": 32,
+            "sha256": "88753fac39d79292dd8b9e3e3c6cdd511758cfb61b679151ac83aaacfe8e1359",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 368830
+          },
+          "after": {
+            "bytes": 710219,
+            "count": 38,
+            "sha256": "5e727d96ed489283b2ca3771d8b5e1f95377a798cc8a5ddac653fa6f2dbd86db",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 459765
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 6,
+          "before": {
+            "bytes": 710219,
+            "count": 38,
+            "sha256": "5e727d96ed489283b2ca3771d8b5e1f95377a798cc8a5ddac653fa6f2dbd86db",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 459765
+          },
+          "after": {
+            "bytes": 850669,
+            "count": 44,
+            "sha256": "ae85e2e31c947ccdc081aefa2f670b1a7f4972b49371fdc1c46696e79e121aae",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 550771
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 7,
+          "before": {
+            "bytes": 850669,
+            "count": 44,
+            "sha256": "ae85e2e31c947ccdc081aefa2f670b1a7f4972b49371fdc1c46696e79e121aae",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 550771
+          },
+          "after": {
+            "bytes": 846911,
+            "count": 41,
+            "sha256": "947229be279d5f10c4a38a862eba1c4610df456765373138ae0a223d6767f136",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 550341
+          },
+          "historyReduced": true
+        }
+      ],
+      "coldContinuity": true,
+      "finalHistory": {
+        "bytes": 712229,
+        "count": 40,
+        "sha256": "1fc550dc3955c3d8b09d6a466ed310166e49e9ac12ff3e2c09db0446fc9054bc",
+        "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "lastInputTokens": 460213
+      },
+      "nativeLifecycleNotifications": "not available in selected basic runtime",
+      "modelWindow": 272000,
+      "modelWindowChanged": false
+    },
+    "negativeEvidence": [
+      "First packaged fixture made its health request during bootstrap; zero Runs. Fixed fixture to wait for full Core.",
+      "Initial four-Run long-context fixture completed, but message-ID replacement alone is not compaction evidence; excluded from compaction qualification.",
+      "First extended diagnostic fixture read last-known-good snapshot instead of lastProbeAttempt; corrected and repeated. This exposed missing shared diagnostic failure forwarding, now fixed.",
+      "15 MiB and initial 17 MiB native history attempts did not complete; neither counts as restoration success."
+    ],
+    "checks": {
+      "rustWorkspace": {
+        "passed": 461,
+        "ignored": 2
+      },
+      "clineExtended": {
+        "passed": 6,
+        "ignored": 2
+      },
+      "acpExtended": {
+        "passed": 68,
+        "ignored": 1
+      },
+      "runtimeDiff": 17,
+      "adapterRegistry": 25,
+      "vitest": 2605,
+      "node": {
+        "passed": 335,
+        "skipped": 2
+      },
+      "typecheck": true,
+      "allTargetsAllFeaturesCheck": true,
+      "macArm64Package": true,
+      "adHocSignatureVerified": true
+    },
+    "limits": [
+      "macOS arm64 BYOK Preview only; OAuth/subscription without native API key is unsupported.",
+      "Model selection enumerates only the selected provider's persisted native catalog; remote/cross-provider discovery not qualified.",
+      "Large native history can fail below the client resource ceiling; 15 MiB timed out.",
+      "Overflow/retry, compaction cancellation, managed Skill after compaction, HTTP MCP/update/revocation, full failure/stress/credential rotation and other Cline platform qualification remain open.",
+      "Command Code BYOK deferred MCP invocation remains an independent unresolved gap."
+    ]
   }
 }

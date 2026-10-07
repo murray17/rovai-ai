@@ -76,8 +76,9 @@ root `beforeRun.snapshot.runId` 才能确认新 Input 已接纳；`run.started`�
 
 同 Host warm 使用已实例化的完整 Session ID。cold 先通过原生 get/messages 读取，再把原生返回的
 完整 initialMessages 与原 Session ID 交回 session.create；不解析重写 compaction 历史，不用 attach 替代
-执行内核恢复。当前原生接口不支持分页；单帧、完整消息和发送请求均限制为 64 MiB，读取超限返回
-`cline_hub_history_limit_exceeded`，不裁剪或改写历史。缺历史或 ID 改变时关闭恢复。
+执行内核恢复。当前原生接口不支持分页；接收单帧和完整消息限制为 64 MiB，发送请求限制为 16 MiB；读取超限返回
+`cline_hub_history_limit_exceeded`；恢复请求超限在发送前返回 `cline_hub_history_restore_limit_exceeded`，
+不裁剪或改写历史。大小上限是资源边界，不保证范围内所有历史在任意原生版本均可恢复。缺历史或 ID 改变时关闭恢复。
 
 权限沿当前冻结 act/plan 与 auto_approve；只有 RuntimeManagedV2 的显式 true 可自动允许。
 其余请求通过 `approval.requested` / `approval.respond` 进入共享 Action/Approval，选项为原生

@@ -5,10 +5,11 @@ import {join,resolve} from 'node:path'
 import {parseArgs} from 'node:util'
 import {createHash} from 'node:crypto'
 import {spawnSync} from 'node:child_process'
+import {startPackagedHubAcceptance} from './native_hub_packaged_client.mjs'
 import {startQualificationCore} from '../../../../scripts/lib/qualification-core.mjs'
 import {seedCompletedOnboardingForAcceptance} from '../../../../scripts/lib/dev-desktop.mjs'
 import {removeEphemeralRuntimeCampFilesRoot} from '../../../../scripts/lib/runtime-camp-files-root.mjs'
-const {values}=parseArgs({options:{root:{type:'string'},core:{type:'string'},cline:{type:'string'},'settings-source':{type:'string'}}})
+const {values}=parseArgs({options:{root:{type:'string'},core:{type:'string'},app:{type:'string'},cline:{type:'string'},'settings-source':{type:'string'}}})
 for(const key of ['root','core','cline','settings-source'])assert(values[key],`${key} required`)
 const root=resolve(values.root),source=resolve(values['settings-source']),cli=resolve(values.cline)
 await mkdir(root,{mode:0o700})
@@ -20,14 +21,15 @@ await writeFile(join(data,'mcp.json'),'{"mcpServers":{}}',{mode:0o600})
 const digest=async p=>createHash('sha256').update(await readFile(p)).digest('hex')
 const before=await digest(join(source,'providers.json'))
 for(const key of Object.keys(process.env))if(/^(ROVAI_|CLINE_)/.test(key))delete process.env[key]
-const start=()=>startQualificationCore({coreExecutable:resolve(values.core),dataDirectory:data,workingDirectory:workspace,runtimeCacheDirectory:join(root,'cache'),mcpConfigPath:join(data,'mcp.json')})
+const start=async()=>values.app?await startPackagedHubAcceptance({app:resolve(values.app),data,cwd:workspace}):startQualificationCore({coreExecutable:resolve(values.core),dataDirectory:data,workingDirectory:workspace,runtimeCacheDirectory:join(root,'cache'),mcpConfigPath:join(data,'mcp.json')})
 const sleep=ms=>new Promise(r=>setTimeout(r,ms))
-let core=start(),daemonPid
-const proof={kind:'interrupted-native-hub-diagnostic-recovery',modelInputs:0}
+let core=await start(),daemonPid
+const proof={kind:values.app?'packaged-hub-diagnostics':'interrupted-native-hub-diagnostic-recovery',modelInputs:0}
 try{
  await core.request('health.check')
  const current=await core.request('runtime.startup.get',{runtimeKind:'cline-cli'})
  await core.request('runtime.startup.save',{runtimeKind:'cline-cli',expectedRevision:current.revision,configuration:{programPath:cli,environment:[{name:'CLINE_DIR',value:native},{name:'CLINE_DATA_DIR',value:join(native,'data')}]}})
+ if(!values.app){
  const pending=core.request('runtime.product.check',{runtimeKind:'cline-cli'}).catch(()=>null)
  for(let i=0;i<8000&&!daemonPid;i++){
   for(const name of await readdir(hosts).catch(()=>[])){
@@ -52,15 +54,43 @@ try{
  assert.equal(beforeRestart.status,0,'native daemon must still be live after fixture Core crash')
  assert(!beforeRestart.stdout.trim().startsWith('Z'))
  proof.nativeAliveBeforeRestart=true
- core=start();await core.request('health.check')
+ core=await start();await core.request('health.check')
  const old=spawnSync('ps',['-p',String(daemonPid),'-o','stat='],{encoding:'utf8'})
  assert(old.status!==0||old.stdout.trim().startsWith('Z'),'restart must reap the exact native daemon')
  assert.deepEqual(await readdir(hosts),[])
  proof.restartReapedNative=true;proof.privateHostRemoved=true
+ }else{proof.packagedRendererToCore=true;proof.appPid=core.pid}
  await core.request('runtime.product.check',{runtimeKind:'cline-cli'})
  const install=(await core.request('runtime.installations.list')).find(i=>i.adapterKind==='cline-cli'&&i.installationClass==='managed_default')
  assert.equal(install.snapshot.probeStatus,'ready');assert(install.snapshot.protocols.includes('cline-hub-v1'))
  proof.normalDiagnosticAfterRecovery='ready'
+ // Fail after private provider/settings copies are written, before a daemon
+ // starts. Repeated diagnostics must leave no unmarked credential directory.
+ await writeFile(join(settings,'cline_mcp_settings.json'),'{"mcpServers":false}',{mode:0o600})
+ for(let attempt=0;attempt<2;attempt++){
+  const check=await core.request('runtime.product.check',{runtimeKind:'cline-cli'})
+  assert.equal(check.ready,false)
+  const failed=(await core.request('runtime.installations.list')).find(i=>i.adapterKind==='cline-cli'&&i.installationClass==='managed_default')
+  assert.equal(failed.lastProbeAttempt.failure.code,'cline_native_mcp_config_invalid')
+  assert.deepEqual(await readdir(hosts),[])
+ }
+ proof.preparationFailureCleanedTwice=true
+ await rm(join(settings,'cline_mcp_settings.json'))
+ const privateProviders=JSON.parse(await readFile(join(settings,'providers.json'),'utf8'))
+ for(const provider of Object.values(privateProviders.providers))if(provider.settings)delete provider.settings.apiKey
+ await writeFile(join(settings,'providers.json'),JSON.stringify(privateProviders),{mode:0o600})
+ await core.request('runtime.product.check',{runtimeKind:'cline-cli'})
+ const auth=(await core.request('runtime.installations.list')).find(i=>i.adapterKind==='cline-cli'&&i.installationClass==='managed_default')
+ assert.equal(auth.lastProbeAttempt.failureClass,'authentication_required')
+ assert.equal(auth.lastProbeAttempt.failure.code,'cline_hub_native_auth_requires_api_key')
+ const health=await core.request('health.check')
+ const availability=health.runtimeAvailability.find(i=>i.runtimeKind==='cline-cli')
+ assert.equal(availability.failure.code,'cline_hub_native_auth_requires_api_key')
+ assert(availability.failure.detail.includes('OAuth'))
+ assert.deepEqual(await readdir(hosts),[])
+ proof.noApiKeyExplicitlyUnsupported=true
+ // Restore only this fixture's copy for the existing integrity assertion.
+ await copyFile(join(source,'providers.json'),join(settings,'providers.json'))
  assert.equal(await digest(join(source,'providers.json')),before)
  assert.equal(await digest(join(settings,'providers.json')),before)
  proof.sourceUnchanged=true;proof.passed=true

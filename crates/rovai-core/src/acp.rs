@@ -12085,7 +12085,7 @@ while IFS= read -r ignored; do :; done
         );
         assert_eq!(
             select_acp_session_continuation(
-                AdapterKind::ClineCli,
+                AdapterKind::CommandCodeCli,
                 false,
                 Some("session-1"),
                 load_only,

@@ -90,7 +90,7 @@ off/basic/agentic；未设置时核验所选 CLI 的实际 help 默认，无效�
 Hub 用实际认证协议和原生 Session 探测判断能力，不设版本白名单。当前仅接通原生保存或环境中的 API key/BYOK；
 没有 API key 的原生订阅/OAuth 配置在启动前明确拒绝，尚未实现其认证与刷新路径。模型目录读取所选 Provider 的
 原生本地 models.json，保留当前配置模型；不声称可发现所有远端模型或切换 Provider。
-原生完整历史接口无分页；WebSocket 单帧和消息、恢复请求均有 64 MiB 上限，超限明确失败且不裁剪原生历史。
+原生完整历史接口无分页；WebSocket 接收单帧和消息上限为 64 MiB，发送请求上限为 16 MiB，超限明确失败且不裁剪原生历史。
 匹配 requestId 的明确原生失败与传输结果未知分开；公开错误只保留封闭码、分类和固定安全说明，不自动重发。
 原生费用、缺失 token 桶和无法确认的压缩事件保持未知。实现、真实验证和剩余差异见
 [Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md)；取舍见

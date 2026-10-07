@@ -272,7 +272,27 @@ impl ClineHubHost {
 
     async fn command(&self, command: &str, payload: Value, session: Option<&str>) -> Result<Value> {
         let id = uuid::Uuid::new_v4().to_string();
-        let rx = self.begin(&id, command, payload, session).await?;
+        let restores_history = command == "session.create" && payload["initialMessages"].is_array();
+        let rx = self
+            .begin(&id, command, payload, session)
+            .await
+            .map_err(|error| {
+                if restores_history
+                    && matches!(
+                        error.downcast_ref::<HubFailure>(),
+                        Some(HubFailure::LocalLimit { .. })
+                    )
+                {
+                    anyhow::Error::new(crate::runtime_failure::RuntimeFailureError::new(
+                        HubFailure::LocalLimit {
+                            code: "cline_hub_history_restore_limit_exceeded",
+                        }
+                        .public_view(),
+                    ))
+                } else {
+                    error
+                }
+            })?;
         let result = timeout(Duration::from_secs(45), rx).await;
         self.pending.lock().await.remove(&id);
         match result {
@@ -515,7 +535,9 @@ impl ClineHubRuntime {
                     )
                 }
                 Ok(Err(failure)) => {
-                    let reason = if failure.is_native() {
+                    let reason = if failure.is_native()
+                        || matches!(failure, HubFailure::LocalLimit { .. })
+                    {
                         "failed"
                     } else {
                         "unknown"
@@ -891,7 +913,10 @@ pub(crate) async fn capability_snapshot(
     executable: &Path,
     observed_at: String,
     data_directory: &Path,
-) -> Result<crate::agent_profile::AdapterCapabilitySnapshot> {
+) -> Result<(
+    crate::agent_profile::AdapterCapabilitySnapshot,
+    Option<crate::runtime_failure::RuntimeFailureView>,
+)> {
     use crate::agent_runtime_adapter::{AgentRuntimeAdapterRegistry, executable_fingerprint};
     let version = config::native_cli_output(executable, "--version")
         .await
@@ -937,6 +962,7 @@ pub(crate) async fn capability_snapshot(
         if !host.force_reap_until(Instant::now()+Duration::from_secs(5)).await { bail!("cline_hub_probe_cleanup_unconfirmed"); }
         probe
     }.await;
+    let mut failure = None;
     if let Ok(models) = &result {
         snapshot.probe_status = "ready".into();
         snapshot.authentication_status = "authenticated".into();
@@ -958,16 +984,24 @@ pub(crate) async fn capability_snapshot(
         snapshot.last_error = None;
         let _ = std::fs::remove_dir_all(&root);
     } else if let Err(error) = result {
-        let code = error.to_string();
-        snapshot.probe_status = "probe_failed".into();
-        snapshot.authentication_status = if code == "cline_hub_native_auth_requires_api_key" {
+        let public = failure::probe_failure(&error);
+        let requires_auth =
+            public.phase == crate::runtime_failure::RuntimeFailurePhase::Authentication;
+        snapshot.probe_status = if requires_auth {
+            "authentication_required"
+        } else {
+            "probe_failed"
+        }
+        .into();
+        snapshot.authentication_status = if requires_auth {
             "authentication_required"
         } else {
             "unknown"
         }
         .into();
-        snapshot.last_error = Some(code);
+        snapshot.last_error = Some(public.code.clone());
+        failure = Some(public);
         // Ownership ledgers remain available when cleanup is unconfirmed.
     }
-    Ok(snapshot)
+    Ok((snapshot, failure))
 }

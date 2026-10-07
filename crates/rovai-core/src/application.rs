@@ -11200,15 +11200,10 @@ impl Core {
                     None,
                 )
             }
-            AdapterKind::ClineCli => (
-                crate::cline_hub::capability_snapshot(
-                    executable_path,
-                    attempted_at,
-                    &self.data_dir,
-                )
-                .await?,
-                None,
-            ),
+            AdapterKind::ClineCli => {
+                crate::cline_hub::capability_snapshot(executable_path, attempted_at, &self.data_dir)
+                    .await?
+            }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
@@ -11242,7 +11237,6 @@ impl Core {
                             AdapterKind::ZcodeApp
                                 | AdapterKind::DeepseekHarness
                                 | AdapterKind::CommandCodeCli
-                                | AdapterKind::ClineCli
                         ) && probe.result.status
                             == health::AgentRuntimeProbeStatus::Ready
                         {
