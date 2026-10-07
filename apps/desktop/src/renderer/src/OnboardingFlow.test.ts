@@ -132,7 +132,7 @@ describe('first-run onboarding flow', () => {
     expect(onboardingRuntimeCanContinue('ready', {
       adapterKind: 'codex-cli',
       model: { mode: 'explicit', modelId: 'missing-model', options: {} }
-    }, readyAvailability(), installation)).toBe(false)
+    }, readyAvailability(), installation)).toBe(true)
     expect(onboardingRuntimeCanContinue('ready', selection, readyAvailability(), {
       ...installation,
       installationClass: 'custom'
@@ -154,7 +154,7 @@ describe('first-run onboarding flow', () => {
     expect(onboardingRuntimeCanContinue('ready', selection, {
       ...readyAvailability(),
       status: 'installed_unverified'
-    }, installation)).toBe(false)
+    }, installation)).toBe(true)
   })
 })
 
@@ -224,7 +224,7 @@ function renderOnboarding(
 
 function snapshot(step: InProgress['step']): InProgress {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'in_progress',
     step,
     selectedMemberRole: step === 'welcome' ? null : 'luoke',

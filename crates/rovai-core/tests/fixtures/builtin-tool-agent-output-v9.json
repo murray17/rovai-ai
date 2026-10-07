@@ -1,0 +1,888 @@
+{
+  "automation.list": {
+    "canonicalResult": {
+      "automations": [
+        {
+          "automationId": "rvat_123",
+          "version": 2,
+          "name": "Weekly report",
+          "prompt": "Summarize project progress.",
+          "enabled": true,
+          "memberId": "agent_27",
+          "projectRef": {
+            "kind": "quick_chat"
+          },
+          "schedule": {
+            "kind": "weekdays",
+            "at": "09:00"
+          },
+          "notifyChannels": [
+            "feishu"
+          ],
+          "nextRunAt": "2026-01-02T01:00:00Z",
+          "lastRun": null,
+          "createdAt": "2026-01-01T00:00:00Z",
+          "updatedAt": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "nextCursor": null,
+      "truncated": false
+    },
+    "agentOutput": {
+      "automations": [
+        {
+          "automationId": "rvat_123",
+          "version": 2,
+          "name": "Weekly report",
+          "prompt": "Summarize project progress.",
+          "enabled": true,
+          "memberId": "agent_27",
+          "projectRef": {
+            "kind": "quick_chat"
+          },
+          "schedule": {
+            "kind": "weekdays",
+            "at": "09:00"
+          },
+          "notifyChannels": [
+            "feishu"
+          ],
+          "nextRunAt": "2026-01-02T01:00:00Z",
+          "lastRun": null,
+          "createdAt": "2026-01-01T00:00:00Z",
+          "updatedAt": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "nextCursor": null,
+      "truncated": false
+    }
+  },
+  "automation.get": {
+    "canonicalResult": {
+      "automationId": "rvat_123",
+      "version": 2,
+      "name": "Weekly report",
+      "prompt": "Summarize project progress.",
+      "enabled": true,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": "2026-01-02T01:00:00Z",
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    },
+    "agentOutput": {
+      "automationId": "rvat_123",
+      "version": 2,
+      "name": "Weekly report",
+      "prompt": "Summarize project progress.",
+      "enabled": true,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": "2026-01-02T01:00:00Z",
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    }
+  },
+  "automation.create": {
+    "canonicalResult": {
+      "automationId": "rvat_123",
+      "version": 1,
+      "name": "Weekly report",
+      "prompt": "Summarize project progress.",
+      "enabled": true,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": "2026-01-02T01:00:00Z",
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    },
+    "agentOutput": {
+      "automationId": "rvat_123",
+      "version": 1,
+      "name": "Weekly report",
+      "prompt": "Summarize project progress.",
+      "enabled": true,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": "2026-01-02T01:00:00Z",
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    }
+  },
+  "automation.run": {
+    "canonicalResult": {
+      "status": "started",
+      "runId": "rvar_123",
+      "threadId": "rvcamp_123",
+      "reason": null
+    },
+    "agentOutput": {
+      "status": "started",
+      "runId": "rvar_123",
+      "threadId": "rvcamp_123",
+      "reason": null
+    }
+  },
+  "automation.close": {
+    "canonicalResult": {
+      "automationId": "rvat_123",
+      "version": 3,
+      "name": "Weekly report",
+      "prompt": "Summarize project progress.",
+      "enabled": false,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": null,
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    },
+    "agentOutput": {
+      "automationId": "rvat_123",
+      "version": 3,
+      "name": "Weekly report",
+      "prompt": "Summarize project progress.",
+      "enabled": false,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": null,
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    }
+  },
+  "automation.update": {
+    "canonicalResult": {
+      "automationId": "rvat_123",
+      "version": 3,
+      "name": "Updated report",
+      "prompt": "Summarize project progress.",
+      "enabled": true,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": "2026-01-02T01:00:00Z",
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    },
+    "agentOutput": {
+      "automationId": "rvat_123",
+      "version": 3,
+      "name": "Updated report",
+      "prompt": "Summarize project progress.",
+      "enabled": true,
+      "memberId": "agent_27",
+      "projectRef": {
+        "kind": "quick_chat"
+      },
+      "schedule": {
+        "kind": "weekdays",
+        "at": "09:00"
+      },
+      "notifyChannels": [
+        "feishu"
+      ],
+      "nextRunAt": "2026-01-02T01:00:00Z",
+      "lastRun": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    }
+  },
+  "automation.delete": {
+    "canonicalResult": {
+      "automationId": "rvat_123",
+      "deleted": true
+    },
+    "agentOutput": {
+      "automationId": "rvat_123",
+      "deleted": true
+    }
+  },
+  "thread.message.send": {
+    "canonicalResult": {
+      "status": "accepted",
+      "messageId": "msg_123",
+      "agentAddressingMode": "automatic",
+      "visibility": "camp_public",
+      "effectiveRecipients": [
+        "agent_27"
+      ],
+      "recipientPresentation": {},
+      "recipientSetDigest": "sha256:recipient-set",
+      "deliveryIds": [
+        "delivery_123"
+      ],
+      "attachments": []
+    },
+    "agentOutput": {
+      "messageId": "msg_123",
+      "agentAddressingMode": "automatic",
+      "effectiveRecipients": [
+        "agent_27"
+      ],
+      "deliveryIds": [
+        "delivery_123"
+      ]
+    }
+  },
+  "member.create": {
+    "canonicalResult": {
+      "agentId": "agent_27",
+      "version": 1,
+      "avatarRef": "rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338",
+      "avatarStatus": "saved"
+    },
+    "agentOutput": {
+      "agentId": "agent_27",
+      "version": 1,
+      "avatarRef": "rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338",
+      "avatarStatus": "saved"
+    }
+  },
+  "team.create_task": {
+    "canonicalResult": {
+      "taskId": "task_123",
+      "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "title": "Prepare release",
+      "description": "",
+      "status": "pending",
+      "assigneeAgentId": "agent_27",
+      "blockedReason": null,
+      "completionSummary": null,
+      "cancelReason": null,
+      "createdByType": "agent",
+      "createdById": "agent_27",
+      "sourceAgentRunId": "run_123",
+      "closedByType": null,
+      "closedById": null,
+      "closedByAgentRunId": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "closedAt": null,
+      "availableActions": [
+        "update"
+      ]
+    },
+    "agentOutput": {
+      "taskId": "task_123",
+      "title": "Prepare release",
+      "status": "pending",
+      "assigneeAgentId": "agent_27"
+    }
+  },
+  "team.get_task": {
+    "canonicalResult": {
+      "taskId": "task_123",
+      "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "title": "Prepare release",
+      "description": "",
+      "status": "pending",
+      "assigneeAgentId": "agent_27",
+      "blockedReason": null,
+      "completionSummary": null,
+      "cancelReason": null,
+      "createdByType": "agent",
+      "createdById": "agent_27",
+      "sourceAgentRunId": "run_123",
+      "closedByType": null,
+      "closedById": null,
+      "closedByAgentRunId": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "closedAt": null,
+      "availableActions": [
+        "update"
+      ]
+    },
+    "agentOutput": {
+      "taskId": "task_123",
+      "title": "Prepare release",
+      "description": "",
+      "status": "pending",
+      "assigneeAgentId": "agent_27"
+    }
+  },
+  "team.list_tasks": {
+    "canonicalResult": {
+      "tasks": [
+        {
+          "taskId": "task_123",
+          "title": "Prepare release",
+          "status": "pending",
+          "assigneeAgentId": "agent_27",
+          "availableActions": [
+            "update"
+          ]
+        }
+      ],
+      "nextCursor": null,
+      "truncated": false
+    },
+    "agentOutput": {
+      "tasks": [
+        {
+          "taskId": "task_123",
+          "title": "Prepare release",
+          "status": "pending",
+          "assigneeAgentId": "agent_27"
+        }
+      ],
+      "nextCursor": null,
+      "truncated": false
+    }
+  },
+  "team.update_task": {
+    "canonicalResult": {
+      "taskId": "task_123",
+      "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "title": "Prepare release",
+      "description": "",
+      "status": "pending",
+      "assigneeAgentId": "agent_27",
+      "blockedReason": null,
+      "completionSummary": null,
+      "cancelReason": null,
+      "createdByType": "agent",
+      "createdById": "agent_27",
+      "sourceAgentRunId": "run_123",
+      "closedByType": null,
+      "closedById": null,
+      "closedByAgentRunId": null,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "closedAt": null,
+      "availableActions": [
+        "update"
+      ],
+      "changed": false
+    },
+    "agentOutput": {
+      "taskId": "task_123",
+      "title": "Prepare release",
+      "status": "pending",
+      "assigneeAgentId": "agent_27",
+      "changed": false
+    }
+  },
+  "thread.list": {
+    "canonicalResult": {
+      "threads": [],
+      "truncated": false
+    },
+    "agentOutput": {
+      "threads": [],
+      "truncated": false
+    }
+  },
+  "thread.search": {
+    "canonicalResult": {
+      "results": [],
+      "truncated": false,
+      "searchIncomplete": false
+    },
+    "agentOutput": {
+      "results": [],
+      "truncated": false,
+      "searchIncomplete": false
+    }
+  },
+  "thread.read": {
+    "canonicalResult": {
+      "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "mode": "item",
+      "items": [
+        {
+          "messageId": "msg_123",
+          "sequence": 1,
+          "authorType": "agent",
+          "authorId": "agent_27",
+          "anchorMessageId": null,
+          "createdAt": "2026-01-01T00:00:00Z",
+          "body": "hello",
+          "attachmentCount": 1,
+          "attachments": [
+            {
+              "attachmentId": "attachment_123",
+              "name": "notes.txt",
+              "kind": "file",
+              "fileCount": 1,
+              "mediaType": "text/plain",
+              "byteSize": 123
+            }
+          ],
+          "attachmentsTruncated": false,
+          "attachmentOmittedCount": 0,
+          "addressing": {
+            "effectiveAgentRecipients": [
+              "agent_27"
+            ],
+            "mentionsCurrentUser": true
+          }
+        }
+      ]
+    },
+    "agentOutput": {
+      "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "mode": "item",
+      "items": [
+        {
+          "messageId": "msg_123",
+          "sequence": 1,
+          "authorType": "agent",
+          "authorId": "agent_27",
+          "anchorMessageId": null,
+          "createdAt": "2026-01-01T00:00:00Z",
+          "body": "hello",
+          "attachmentCount": 1,
+          "attachments": [
+            {
+              "attachmentId": "attachment_123",
+              "name": "notes.txt",
+              "kind": "file",
+              "fileCount": 1,
+              "mediaType": "text/plain",
+              "byteSize": 123
+            }
+          ],
+          "attachmentsTruncated": false,
+          "attachmentOmittedCount": 0,
+          "addressing": {
+            "effectiveAgentRecipients": [
+              "agent_27"
+            ],
+            "mentionsCurrentUser": true
+          }
+        }
+      ]
+    }
+  },
+  "history.search": {
+    "canonicalResult": {
+      "results": [],
+      "truncated": false,
+      "searchIncomplete": false
+    },
+    "agentOutput": {
+      "results": [],
+      "truncated": false,
+      "searchIncomplete": false
+    }
+  },
+  "single_chat.history": {
+    "canonicalResult": {
+      "schemaVersion": 2,
+      "messages": [
+        {
+          "sequence": 1,
+          "role": "user",
+          "body": "Which option is better?",
+          "attachments": []
+        },
+        {
+          "sequence": 2,
+          "role": "assistant",
+          "body": "Option B.",
+          "attachments": []
+        }
+      ],
+      "hasMore": false,
+      "nextBeforeSequence": null
+    },
+    "agentOutput": {
+      "schemaVersion": 2,
+      "messages": [
+        {
+          "sequence": 1,
+          "role": "user",
+          "body": "Which option is better?",
+          "attachments": []
+        },
+        {
+          "sequence": 2,
+          "role": "assistant",
+          "body": "Option B.",
+          "attachments": []
+        }
+      ],
+      "hasMore": false,
+      "nextBeforeSequence": null
+    }
+  },
+  "memory.view": {
+    "canonicalResult": {
+      "scope": "companion",
+      "complete": true,
+      "itemCount": 0,
+      "totalBodyBytes": 0,
+      "items": []
+    },
+    "agentOutput": {
+      "scope": "companion",
+      "complete": true,
+      "itemCount": 0,
+      "totalBodyBytes": 0,
+      "items": []
+    }
+  },
+  "memory.search": {
+    "canonicalResult": {
+      "results": []
+    },
+    "agentOutput": {
+      "results": []
+    }
+  },
+  "memory.read": {
+    "canonicalResult": {
+      "memories": []
+    },
+    "agentOutput": {
+      "memories": []
+    }
+  },
+  "memory.write": {
+    "canonicalResult": {
+      "outcome": "effective",
+      "memoryId": "memory_123",
+      "revisionId": "revision_123"
+    },
+    "agentOutput": {
+      "outcome": "effective",
+      "memoryId": "memory_123",
+      "revisionId": "revision_123"
+    }
+  },
+  "mission.list": {
+    "canonicalResult": {
+      "missions": [
+        {
+          "missionId": "rvm_example",
+          "threadId": "rvcamp_example",
+          "title": "使命",
+          "status": "in_progress",
+          "updatedAt": "2026-09-19T00:00:00Z"
+        }
+      ],
+      "nextCursor": null,
+      "hasMore": false
+    },
+    "agentOutput": {
+      "missions": [
+        {
+          "missionId": "rvm_example",
+          "threadId": "rvcamp_example",
+          "title": "使命",
+          "status": "in_progress",
+          "updatedAt": "2026-09-19T00:00:00Z"
+        }
+      ],
+      "nextCursor": null,
+      "hasMore": false
+    }
+  },
+  "mission.get": {
+    "canonicalResult": {
+      "missionId": "rvm_example",
+      "title": "使命",
+      "description": "完成目录导航",
+      "status": "needs_you",
+      "sourceMessageId": "message-1",
+      "attachments": [
+        {
+          "attachmentId": "attachment-file",
+          "name": "requirements.pdf",
+          "kind": "file",
+          "fileCount": 1,
+          "mediaType": "application/pdf",
+          "byteSize": 42,
+          "path": "/workspace/requirements.pdf"
+        },
+        {
+          "attachmentId": "attachment-directory",
+          "name": "reference",
+          "kind": "directory",
+          "fileCount": null,
+          "mediaType": null,
+          "byteSize": null,
+          "path": "/workspace/reference"
+        }
+      ]
+    },
+    "agentOutput": {
+      "missionId": "rvm_example",
+      "title": "使命",
+      "description": "完成目录导航",
+      "status": "needs_you",
+      "sourceMessageId": "message-1",
+      "attachments": [
+        {
+          "attachmentId": "attachment-file",
+          "name": "requirements.pdf",
+          "kind": "file",
+          "fileCount": 1,
+          "mediaType": "application/pdf",
+          "byteSize": 42,
+          "path": "/workspace/requirements.pdf"
+        },
+        {
+          "attachmentId": "attachment-directory",
+          "name": "reference",
+          "kind": "directory",
+          "fileCount": null,
+          "mediaType": null,
+          "byteSize": null,
+          "path": "/workspace/reference"
+        }
+      ]
+    }
+  },
+  "mission.update": {
+    "canonicalResult": {
+      "missionId": "rvm_example",
+      "changed": true
+    },
+    "agentOutput": {
+      "missionId": "rvm_example",
+      "changed": true
+    }
+  },
+  "mission.status": {
+    "canonicalResult": {
+      "missionId": "rvm_example",
+      "changed": false
+    },
+    "agentOutput": {
+      "missionId": "rvm_example",
+      "changed": false
+    }
+  },
+  "thread.runs": {
+    "canonicalResult": {
+      "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "observedAt": "2026-10-03T00:00:01Z",
+      "items": [
+        {
+          "agentRunId": null,
+          "agentId": "agent_27",
+          "status": "queued",
+          "messageCount": 3,
+          "messagePreview": {
+            "messageId": "msg_123",
+            "text": "Please check the queue.",
+            "truncated": false
+          },
+          "waitReason": null,
+          "cancelRequestedAt": null,
+          "createdAt": "2026-10-03T00:00:00Z",
+          "startedAt": null,
+          "endedAt": null
+        },
+        {
+          "agentRunId": "run_123",
+          "agentId": "agent_27",
+          "status": "waiting",
+          "messageCount": 2,
+          "messagePreview": {
+            "messageId": "msg_123",
+            "text": "Please check the queue.",
+            "truncated": false
+          },
+          "waitReason": null,
+          "cancelRequestedAt": null,
+          "createdAt": "2026-10-03T00:00:00Z",
+          "startedAt": null,
+          "endedAt": null
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": null
+    },
+    "agentOutput": {
+      "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "observedAt": "2026-10-03T00:00:01Z",
+      "items": [
+        {
+          "agentRunId": null,
+          "agentId": "agent_27",
+          "status": "queued",
+          "messageCount": 3,
+          "messagePreview": {
+            "messageId": "msg_123",
+            "text": "Please check the queue.",
+            "truncated": false
+          },
+          "waitReason": null,
+          "cancelRequestedAt": null,
+          "createdAt": "2026-10-03T00:00:00Z",
+          "startedAt": null,
+          "endedAt": null
+        },
+        {
+          "agentRunId": "run_123",
+          "agentId": "agent_27",
+          "status": "waiting",
+          "messageCount": 2,
+          "messagePreview": {
+            "messageId": "msg_123",
+            "text": "Please check the queue.",
+            "truncated": false
+          },
+          "waitReason": null,
+          "cancelRequestedAt": null,
+          "createdAt": "2026-10-03T00:00:00Z",
+          "startedAt": null,
+          "endedAt": null
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": null
+    }
+  },
+  "member.list": {
+    "canonicalResult": {
+      "threadId": "rvcamp_example",
+      "items": [
+        {
+          "agentId": "agent_1",
+          "displayName": "Nova",
+          "teamRole": "Researcher",
+          "professionalResponsibilities": "Review evidence.",
+          "isDefaultLead": true
+        }
+      ]
+    },
+    "agentOutput": {
+      "threadId": "rvcamp_example",
+      "items": [
+        {
+          "agentId": "agent_1",
+          "displayName": "Nova",
+          "teamRole": "Researcher",
+          "professionalResponsibilities": "Review evidence.",
+          "isDefaultLead": true
+        }
+      ]
+    }
+  },
+  "member.get": {
+    "canonicalResult": {
+      "agentId": "agent_1",
+      "displayName": "Nova",
+      "teamRole": "Researcher",
+      "professionalResponsibilities": "Review evidence.",
+      "personalityTraits": [
+        "Precise"
+      ],
+      "workingPrinciples": "Verify claims.",
+      "growthTopic": "Shorten feedback loops.",
+      "version": 2,
+      "images": {
+        "icon": "/run-tmp/member-icon.png",
+        "portrait": "/run-tmp/member-portrait.png"
+      },
+      "imageStatus": {
+        "icon": "available",
+        "portrait": "available"
+      }
+    },
+    "agentOutput": {
+      "agentId": "agent_1",
+      "displayName": "Nova",
+      "teamRole": "Researcher",
+      "professionalResponsibilities": "Review evidence.",
+      "personalityTraits": [
+        "Precise"
+      ],
+      "workingPrinciples": "Verify claims.",
+      "growthTopic": "Shorten feedback loops.",
+      "version": 2,
+      "images": {
+        "icon": "/run-tmp/member-icon.png",
+        "portrait": "/run-tmp/member-portrait.png"
+      },
+      "imageStatus": {
+        "icon": "available",
+        "portrait": "available"
+      }
+    }
+  },
+  "member.update": {
+    "canonicalResult": {
+      "agentId": "agent_1",
+      "version": 3,
+      "changed": true
+    },
+    "agentOutput": {
+      "agentId": "agent_1",
+      "version": 3,
+      "changed": true
+    }
+  }
+}

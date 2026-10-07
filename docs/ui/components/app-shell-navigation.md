@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-10-03
+last_updated: 2026-10-05
 ---
 
 # App Shell 与统一侧栏
@@ -252,8 +252,10 @@ App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；
 [Mobile WebUI](../host-web-mobile.md)。
 
 返回 App 后恢复原一级页面；当前 Main Window Session 内记住最后设置分类，全新安装默认“通用”。更新
-徽标的临时深链不覆盖该记忆；“关于与更新”行在有可操作 release 时显示同语义、非交互的状态徽标。设置
-页面的局部构图见
+徽标的临时深链不覆盖该记忆；进入后选择候选版本日志，聚焦日志标题，并仅就近滚动使标题可见。
+普通侧栏更新入口使用透明背景、34px 点击高度和 11.5px 状态文字；英文 200px 窄栏可另起一行。
+“关于与更新”行显示同语义、非交互的 11px 状态，图标槽和状态的宽度规则分别归属，不能挤压或重叠。
+下载中同时显示动作与百分比；下载/安装失败显示失败状态，页面才提供对应重试操作。设置页面的局部构图见
 [`settings-workspace` surface brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)。
 
 队员页继续显示普通全局侧栏和 Project / Camp 导航，不再用队员名册覆盖该槽位，也不提供独立的
@@ -271,6 +273,16 @@ Automation 工作区即将因全局导航卸载时，App 同样等待该工作�
 正常 App 退出也复用该 guard，但由 Main quit coordinator 在 Core shutdown 前请求；App Shell 不增加退出状态或 Draft
 保存实现。保存失败时 Main 放弃本次退出，当前 Camp 保持可见且 Composer 恢复交互；成功后才进入既有
 `runtime.state = shutting_down` 全局等待面。
+
+### 原生连接设置
+
+Claude Code / Codex 的自定义 API 配置功能已退出。启动页只显示程序路径、检查状态、环境变量及
+保存/放弃操作；没有官方/API 单选、登录状态、地址、Key 或自定义模型表单。目录中的原有登录与
+安装指南继续可用；不增加替代说明或停用开关。
+
+保存收到本地回执即更新基线、结束加载并显示“已保存”，不追加观察或列表刷新。
+普通字段冲突继续按项选择并保留草稿。已有本机原生配置不删除、不重写，连接由原生 CLI 使用；
+完整边界见 [Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md)。
 
 ## 宿主平台交互
 

@@ -3029,7 +3029,7 @@ export function BusinessApp({
       if (releaseSection?.dataset.appUpdateReleaseVersion !== expectedVersion) return false
       const heading = document.querySelector<HTMLElement>('#about-release-notes-heading')
       heading?.focus({ preventScroll: true })
-      releaseSection.scrollIntoView({ block: 'start' })
+      heading?.scrollIntoView({ block: 'nearest' })
       return Boolean(heading)
     } catch (nextError) {
       setError(uiAttribute("无法打开更新内容：{0}", String(errorMessage(nextError))))
@@ -5151,7 +5151,7 @@ export function campCreationPreflightFromAgents(
   const initialLeadAgentId = presentMembers
     .find((member) => member.runtimeReadiness === 'ready')
     ?.agentId ?? presentMembers
-    .find((member) => member.runtimeReadiness === 'light_ready')
+    .find((member) => member.runtimeReadiness === 'light_ready' || member.runtimeReadiness === 'installed_unverified')
     ?.agentId ?? presentMembers[0]?.agentId ?? null
   const blockers: ThreadCreationPreflight['blockers'] = presentMembers.length === 0
     ? [{ code: 'no_present_members', detail:uiAttribute("当前没有在队的队员。") }]

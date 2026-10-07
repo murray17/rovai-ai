@@ -37,7 +37,7 @@ describe('first-run provisioning', () => {
         selectedMemberRole: 'luoke'
       }
     })
-    expect(harness.requests).toHaveLength(3)
+    expect(harness.requests).toHaveLength(4)
     expect(harness.requests[0]).toEqual({ method: 'members.list', params: undefined })
     expect(harness.requests[1]).toEqual({
       method: 'members.runtime.set',
@@ -56,7 +56,7 @@ describe('first-run provisioning', () => {
         }
       }
     })
-    expect(harness.requests[2]).toEqual({
+    expect(harness.requests[3]).toEqual({
       method: 'threads.create',
       params: {
         commandId: 'camp-command',
@@ -74,6 +74,8 @@ describe('first-run provisioning', () => {
       'checkpoint:member',
       'request:members.runtime.set',
       'checkpoint:runtime',
+      'request:members.list',
+      'checkpoint:copies',
       'request:threads.create',
       'checkpoint:camp',
       'commit:camp-first',
@@ -86,7 +88,8 @@ describe('first-run provisioning', () => {
     const harness = onboardingHarness(events, {
       memberAgentId: 'agent-first',
       memberVersionBeforeRuntime: 1,
-      memberVersionAfterRuntime: 2
+      memberVersionAfterRuntime: 2,
+      runtimeCopies: []
     })
 
     await provisionFirstRun(harness.api, harness.snapshot, [], () => undefined, 'en')
@@ -164,7 +167,9 @@ describe('first-run provisioning', () => {
     }
     const selectedMember = members.find((member) => member.avatarRef === selected.avatarRef)!
     expect(result.memberAgentId).toBe(selectedMember.agentId)
-    expect(harness.requests.filter(({ method }) => method === 'members.runtime.set')).toEqual([{
+    const runtimeRequests = harness.requests.filter(({ method }) => method === 'members.runtime.set')
+    expect(runtimeRequests).toHaveLength(4)
+    expect(runtimeRequests[0]).toEqual({
       method: 'members.runtime.set',
       params: {
         commandId: 'runtime-command',
@@ -176,7 +181,14 @@ describe('first-run provisioning', () => {
           permissions: codexPermissions()
         }
       }
-    }])
+    })
+    for (const member of members.filter((candidate) => candidate !== selectedMember)) {
+      expect(runtimeRequests).toContainEqual({ method: 'members.runtime.set', params: {
+        commandId: `copy:${member.agentId}`,
+        command: { agentId: member.agentId, expectedVersion: member.version + 1,
+          adapterKind: 'codex-cli', model: { mode: 'runtime_default' }, permissions: codexPermissions() }
+      } })
+    }
     expect(harness.requests.find(({ method }) => method === 'threads.create')?.params).toMatchObject({
       memberAgentIds: [selectedMember.agentId], defaultLeadAgentId: selectedMember.agentId
     })
@@ -245,7 +257,7 @@ describe('first-run provisioning', () => {
     const result = await provisionFirstRun(harness.api, harness.snapshot, [codexInstallation()], () => undefined, 'en')
 
     expect(result.memberAgentId).toBe(seed.agentId)
-    expect(harness.requests.map(({ method }) => method)).toEqual(['members.list', 'members.runtime.set', 'threads.create'])
+    expect(harness.requests.map(({ method }) => method)).toEqual(['members.list', 'members.runtime.set', 'members.list', 'threads.create'])
   })
 
   it('recovers an identity commit before its checkpoint without repeating the update', async () => {
@@ -298,7 +310,8 @@ describe('first-run provisioning', () => {
       memberAgentId: 'agent-first',
       memberVersionBeforeRuntime: 1,
       memberVersionAfterRuntime: 2,
-      quickChatThreadId: 'camp-first'
+      quickChatThreadId: 'camp-first',
+      runtimeCopies: []
     })
     harness.api.desktopSession.commitRestorableLocation = vi.fn(async () => {
       events.push('commit:failed')
@@ -331,11 +344,12 @@ function onboardingHarness(
     memberAgentId: null,
     memberVersionBeforeRuntime: null,
     memberVersionAfterRuntime: null,
+    runtimeCopies: null,
     quickChatThreadId: null,
     ...checkpoints
   }
   let current: OnboardingSnapshot = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'in_progress',
     step: 'runtime',
     selectedMemberRole: 'luoke',
@@ -347,17 +361,21 @@ function onboardingHarness(
   }
   const snapshot = current as InProgress
   const requests: Array<{ method: CoreMethod; params: unknown }> = []
+  const versions = new Map<string, number>()
   const api: OnboardingProvisioningApi = {
     async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
       requests.push({ method, params })
       events.push(`request:${method}`)
-      if (method === 'members.list') return members as T
+      if (method === 'members.list') return members.map((member) => ({
+        ...member, version: Math.max(member.version, versions.get(member.agentId) ?? 0)
+      })) as T
       const command = (params as { command: { agentId: string; expectedVersion: number } })?.command
       const result = method === 'members.create'
         ? commandResult(method, { agentId: 'agent-first', version: 1 }, 'agent_profile', 'agent-first')
         : method === 'members.runtime.set' || method === 'members.update'
           ? commandResult(method, { agentId: command.agentId, version: command.expectedVersion + 1 }, 'agent_profile', command.agentId)
           : commandResult(method, { threadId: 'camp-first' }, 'camp', 'camp-first')
+      if (method === 'members.update') versions.set(command.agentId, command.expectedVersion + 1)
       return result as T
     },
     onboarding: {
@@ -386,6 +404,19 @@ function onboardingHarness(
         current = updateOperation(current, { memberVersionAfterRuntime: version })
         return current
       },
+      async prepareRuntimeCopies(targets): Promise<OnboardingSnapshot> {
+        events.push('checkpoint:copies')
+        current = updateOperation(current, { runtimeCopies: targets.map((target) => ({
+          ...target, commandId: `copy:${target.agentId}`, status: 'pending'
+        })) })
+        return current
+      },
+      async recordRuntimeCopy(agentId, _commandId, outcome): Promise<OnboardingSnapshot> {
+        if (current.status !== 'in_progress' || !current.provisioning) throw new Error('missing operation')
+        current = updateOperation(current, { runtimeCopies: current.provisioning.runtimeCopies!.map((target) =>
+          target.agentId !== agentId ? target : { ...target, status: outcome === 'retry' ? 'pending' : outcome }) })
+        return current
+      },
       async recordProvisionedThread(threadId): Promise<OnboardingSnapshot> {
         events.push('checkpoint:camp')
         current = updateOperation(current, { quickChatThreadId: threadId })
@@ -397,7 +428,7 @@ function onboardingHarness(
           throw new Error('incomplete')
         }
         current = {
-          schemaVersion: 2,
+          schemaVersion: 3,
           status: 'completed',
           origin: 'onboarding',
           completedAt: '2026-08-17T00:00:00.000Z',

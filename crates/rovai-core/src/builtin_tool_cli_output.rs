@@ -105,7 +105,10 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
                 "truncated": {"type": "boolean"}
             }
         })),
-        "member.create"
+        "member.list"
+        | "member.get"
+        | "member.update"
+        | "member.create"
         | "thread.list"
         | "thread.search"
         | "thread.read"
@@ -235,7 +238,10 @@ fn project_success(operation: &str, result: Value) -> Result<Value> {
                 .as_object()
                 .context("Canonical Operation Result must be an object")?,
         ),
-        "member.create"
+        "member.list"
+        | "member.get"
+        | "member.update"
+        | "member.create"
         | "thread.list"
         | "thread.search"
         | "thread.read"
@@ -713,6 +719,29 @@ mod tests {
 
     #[test]
     fn closed_agent_output_schemas_reject_extra_and_invalid_fields() {
+        let profile = json!({"agentId":"agent_2","displayName":"Nova","teamRole":"","professionalResponsibilities":"","personalityTraits":[],"workingPrinciples":"","growthTopic":"","version":1,"images":{"icon":null,"portrait":null},"imageStatus":{"icon":"absent","portrait":"absent"}});
+        let profile_schema = agent_output_schema("member.get").unwrap();
+        validate_schema(&profile, &profile_schema).unwrap();
+        for field in [
+            "runtime",
+            "model",
+            "permissions",
+            "presence",
+            "memberOrder",
+            "avatarRef",
+            "portraitRef",
+        ] {
+            let mut leaked = profile.clone();
+            leaked[field] = json!("private");
+            assert!(validate_schema(&leaked, &profile_schema).is_err());
+        }
+        let mut leaked = profile.clone();
+        leaked["images"]["base64"] = json!("data");
+        assert!(validate_schema(&leaked, &profile_schema).is_err());
+        let mut malformed = profile;
+        malformed["imageStatus"]["icon"] = json!("unknown");
+        assert!(validate_schema(&malformed, &profile_schema).is_err());
+
         let schema = agent_output_schema("thread.message.send").unwrap();
         assert!(
             validate_schema(
@@ -869,9 +898,9 @@ mod tests {
 
     #[test]
     fn every_operation_has_a_schema_valid_golden_projection() {
-        // v8 adds execution queries and addressing to collection items.
+        // v9 adds closed member list/get/update results.
         let golden: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/builtin-tool-agent-output-v8.json"
+            "../tests/fixtures/builtin-tool-agent-output-v9.json"
         ))
         .unwrap();
         // Old receipts must validate their original digest before live-name projection.

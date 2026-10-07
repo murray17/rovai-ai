@@ -12,6 +12,7 @@ on:
           - server
           - server-updates
           - desktop-windows
+          - windows-runtime
       server_target:
         description: Native Server target (server or server-updates scope)
         type: choice
@@ -133,7 +134,7 @@ jobs:
         run: cargo test --workspace --all-features
 
   windows-full:
-    if: inputs.scope == 'full'
+    if: inputs.scope == 'full' || inputs.scope == 'windows-runtime'
     name: Windows full
     runs-on: windows-2022
     timeout-minutes: 120
@@ -161,6 +162,16 @@ jobs:
           cargo test -p rovai-core --lib
           --target x86_64-pc-windows-msvc
           managed_process
+
+      - name: Exercise Windows Fleet cleanup receipts
+        run: >-
+          cargo test -p rovai-core --lib --features extended-tests
+          --target x86_64-pc-windows-msvc runtime_fleet::tests::
+
+      - name: Exercise Windows Codex release policy
+        run: >-
+          cargo test -p rovai-core --lib --features extended-tests
+          --target x86_64-pc-windows-msvc codex::tests::
 
       - name: Exercise Windows private storage admission
         run: >-

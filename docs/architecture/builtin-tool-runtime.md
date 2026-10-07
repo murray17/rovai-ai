@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-09-24
+last_updated: 2026-10-07
 ---
 
 # Built-in Tool Runtime Architecture
@@ -11,7 +11,7 @@ last_updated: 2026-09-24
 人类用户的主称呼、双别名、结构化搜索与冻结投影边界见 [User Naming v1](../contracts/user-naming-v1.md)。
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v35](../contracts/builtin-tool-transport-v35.md)、
+[Built-in Tool Transport v36](../contracts/builtin-tool-transport-v36.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History v11](../contracts/camp-history-v11.md)、
 [Durable Task v5](../contracts/durable-task-v5.md) 和
@@ -131,7 +131,7 @@ Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discover
 
 ```text
 rovai send
-rovai member create
+rovai member list|get|create|update
 rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
@@ -140,6 +140,16 @@ rovai mission list|get|update|status
 rovai single-chat history    Single Chat only
 rovai automation list|get|create|run|close|update|delete
 ```
+
+Member 身份读取通过封闭 DTO 与桌面全量 Profile 分离。`list` 只列当前 Thread；`get/update`
+复用当前 Run 身份，并用现有 `member_creation` 验证同 Thread 原创建者的后续访问。
+`update` 只在直接 User 输入下按明确要求执行全局 Profile PATCH；Core 事务内合并并一次提交文字与
+复合头像引用。版本、`command.result` 幂等和 roster invalidation 沿用现有机制。
+create/update 的 `avatarFile` 由 CLI 原样传入；Core 在 Run 认证后复用文件 ingress scope，
+用冻结的 `execution_root` 解析相对路径，绝对路径原样保留。路径 helper 与 Agent 附件共用，
+头像继续直接导入 immutable asset，不创建附件记录或新增路径授权机制。
+内置素材与 managed 图片在授权 Run tmp 中物化，复用 lease 清理；每次 get 重验权限和重取文件。
+完整字段、裁切及错误见 [Transport v36](../contracts/builtin-tool-transport-v36.md)。
 
 Mission read uses a distinct global read seam: every effective authenticated AgentRun may list all Missions or
 read one opaque internal `rvm_...` ID, including saved structured attachment paths. Omitted-ID `get` resolves only the
@@ -197,9 +207,9 @@ Domain Service 保留 line-leading 连续有效 mention 的兼容 parser，未�
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 grammar。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 该 schema 继续进入当前 catalog digest。
-当前 Contract/CLI 为 35、Agent Output 为 8、capability 为 `builtin_cli.transport.v35`，IPC 仍为 2。
+当前 Contract/CLI 为 36、Agent Output 为 9、capability 为 `builtin_cli.transport.v36`，IPC 仍为 2。
 [Thread Runs v1](../contracts/thread-runs-v1.md) 复用公开读取范围，用一个事务组合实际 Run 和按队员聚合的等待消息；不进入调度写路径。
-Camp History 当前使用 v11。新 Charter revision 为 19；Binding compatibility 保持 16 及原冻结 context tuple，
+Camp History 当前使用 v11。新 Charter revision 为 20；Binding compatibility 保持 16 及原冻结 context tuple，
 Antigravity 继续使用既有固定工具兼容身份。当前目录变化不轮换旧 Session；恢复和压缩补发复用原 Bootstrap。
 新 Binding 使用 Bootstrap v5/Formatter 5，新公开批次 Formatter/Manifest 32、非批次 28 保持。
 Skill 正文与 reference 通过现有受管同步更新原路径；旧、新 Session 后续读取均可使用新版。
@@ -388,7 +398,7 @@ request_id 用于回复，tool_use_id 关联实际工具结果。Core 转换为�
 由 Claude 原生配置处理。业务 `rovai send` 继续由现有 Run lease 认证。
 
 允许后的同一 tool_use_id 的真实 tool_result 结算 Action；会话结束、stdin 关闭、取消与失败边界由
-[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md) 拥有。
+[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md) 拥有。
 
 ### ACP Prompt 输入确认
 
@@ -553,7 +563,7 @@ AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break �
 v1.23 不修改 Bootstrap wrapper、Formatter 或数据库，而是在 Native Binding context contract 中加入
 `sessionCharterRevision: 2`；该字段只进入每个 Adapter 的 Binding compatibility digest，使新 Run 轮换旧
 Native Session 并投递完整新 Charter，历史 Bootstrap Evidence 保留原 bytes/digest。
-当前 Charter revision 为 19，User 通知主 flag 为 `--to-user`，结构化用户提及投影为 `@User`。
+当前 Charter revision 为 20，User 通知主 flag 为 `--to-user`，结构化用户提及投影为 `@User`。
 这些兼容教学更新保留 Binding compatibility 16；既有 Session 继续使用自身冻结的 Bootstrap，不因新 Charter
 revision 轮换。新 Session 才冻结新模板，既有 Evidence 保持原 bytes/digest。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在

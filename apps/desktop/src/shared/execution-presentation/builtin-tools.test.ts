@@ -52,7 +52,7 @@ describe('Built-in input presentation', () => {
   it('uses the CLI catalog for all display names without changing internal identities', () => {
     const source = readFileSync('crates/rovai-core/src/builtin_tool_transport.rs', 'utf8')
     const identities = [...source.matchAll(/BuiltinToolCliIdentity\s*\{\s*operation: "([^"]+)",\s*group: "([^"]+)",\s*action: "([^"]*)"/gu)]
-    expect(identities).toHaveLength(27)
+    expect(identities).toHaveLength(30)
     expect(BUILTIN_CLI_NAMES).toEqual(Object.fromEntries(identities.map(([, operation, group, action]) =>
       [operation, ['rovai', group, action].filter(Boolean).join(' ')])))
     for (const [operation, name] of Object.entries(BUILTIN_CLI_NAMES)) {

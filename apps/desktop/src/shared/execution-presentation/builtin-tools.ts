@@ -3,6 +3,9 @@ import type { LiveRuntimeEvent } from './index'
 /** Display vocabulary only. Protocol identities, receipts and stored evidence stay unchanged. */
 export const BUILTIN_CLI_NAMES: Readonly<Record<string, string>> = Object.freeze({
   'thread.message.send': 'rovai send',
+  'member.list': 'rovai member list',
+  'member.get': 'rovai member get',
+  'member.update': 'rovai member update',
   'member.create': 'rovai member create',
   'team.create_task': 'rovai task create',
   'team.get_task': 'rovai task get',

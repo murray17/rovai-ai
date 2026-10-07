@@ -1567,6 +1567,14 @@ ipcMain.handle('rovai:onboarding-record-runtime', (_event, version: unknown) => 
   return requireOnboarding().recordProvisionedRuntime(version)
 })
 
+ipcMain.handle('rovai:onboarding-prepare-runtime-copies', (_event, targets: unknown) => {
+  return requireOnboarding().prepareRuntimeCopies(targets)
+})
+
+ipcMain.handle('rovai:onboarding-record-runtime-copy', (_event, agentId: unknown, commandId: unknown, outcome: unknown) => {
+  return requireOnboarding().recordRuntimeCopy(agentId, commandId, outcome)
+})
+
 ipcMain.handle('rovai:onboarding-record-camp', (_event, threadId: unknown) => {
   return requireOnboarding().recordProvisionedThread(threadId)
 })

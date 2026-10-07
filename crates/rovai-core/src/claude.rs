@@ -46,6 +46,28 @@ use crate::{
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 const CLAUDE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 
+// The catalog is advisory. Validate only options this adapter can transmit;
+// the native CLI owns acceptance of model IDs and future effort values.
+fn claude_model_effort(options: &Value) -> Result<Option<&str>> {
+    let options = options
+        .as_object()
+        .context("Claude Code model options must be an object")?;
+    for key in options.keys() {
+        if key != "effort" {
+            anyhow::bail!("Claude Code cannot transmit model option: {key}");
+        }
+    }
+    options
+        .get("effort")
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|value| !value.trim().is_empty() && !value.chars().any(char::is_control))
+                .context("Claude Code effort must be a non-empty string without control characters")
+        })
+        .transpose()
+}
+
 // Keep prompt/settings bytes out of argv, including for Windows command shims.
 // Only a pre-spawn guard removes a file on drop. After spawn the registered run
 // owns its path until the process tree has been confirmed empty.
@@ -509,23 +531,17 @@ impl ClaudeCodeCliRuntimeAdapter {
             } else {
                 uuid::Uuid::new_v4().to_string()
             };
-        let fast_override = if let Some(fast) = &request.runtime.camp_fast {
-            let eligibility =
-                crate::health::claude_fast_eligibility(&request.runtime, request.workspace.path())
-                    .await
-                    .unwrap_or_default();
-            if let Some(sender) = &request.runtime_events {
-                let _ = sender.send(ClaudeCodeRuntimeEvent {
-                    event_type: "runtime.fast.eligibility",
-                    payload: serde_json::json!({"eligible": eligibility.eligible, "runtimeDefaultFast": null}),
-                });
-            }
-            eligibility.eligible.then_some(fast.fast_override).flatten()
-        } else {
-            None
-        };
+        let fast_override = request
+            .runtime
+            .camp_fast
+            .as_ref()
+            .and_then(|fast| fast.fast_override);
+        if let Some(api) = &request.runtime.custom_api {
+            api.assert_current()?;
+        }
         let mut inline_settings = serde_json::json!({});
         rovai_core::camp_fast::merge_claude_inline_settings(&mut inline_settings, fast_override)?;
+        let effort = claude_model_effort(&request.runtime.model.options)?;
         let mut command = Command::new(executable);
         rovai_core::runtime_discovery::configure_runtime_command(
             rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
@@ -560,14 +576,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         {
             command.args(["--model", request.runtime.model.model_id.as_str()]);
         }
-        if let Some(effort) = request
-            .runtime
-            .model
-            .options
-            .get("effort")
-            .and_then(serde_json::Value::as_str)
-        {
-            // Core already validated this value against the Runtime's model catalog.
+        if let Some(effort) = effort {
             command.args(["--effort", effort]);
         }
         let bootstrap_file = request
@@ -702,11 +711,19 @@ impl ClaudeCodeCliRuntimeAdapter {
         let stdin = child
             .take_stdin()
             .context("Claude Code stdin was unavailable")?;
-        let (protocol, initialized, writes) = ClaudeControl::new(
+        let (mut protocol, initialized, writes) = ClaudeControl::new(
             native_session_id.clone(),
             permission_mode.to_string(),
             request.runtime_events.clone(),
         );
+        let redactor = request
+            .runtime
+            .custom_api
+            .as_ref()
+            .and_then(|api| api.redactor().ok());
+        Arc::get_mut(&mut protocol)
+            .expect("unshared protocol")
+            .set_credential_redactor(redactor);
         *process_control.protocol.lock().unwrap() = Some(protocol.clone());
         let _protocol_guard = ControlReadGuard(protocol.clone());
         let stdout = child
@@ -745,12 +762,24 @@ impl ClaudeCodeCliRuntimeAdapter {
             _ = &mut interrupted => anyhow::bail!("Claude Code process was interrupted during stdin delivery"),
             delivered = async {
                 protocol.initialize().await?;
-                tokio::time::timeout(claude_control::INITIALIZE_TIMEOUT, initialized).await
+                let initialize = tokio::time::timeout(claude_control::INITIALIZE_TIMEOUT, initialized).await
                     .context("Claude Code protocol initialization timed out")??;
+                // A missing, stale or restricted catalog cannot reject saved intent.
+                // initialize still verifies the protocol and permission handshake.
+                if let Some(events) = &request.runtime_events {
+                    let enabled = initialize.get("fast_mode_state")
+                        .and_then(rovai_core::camp_fast::ObservedFastState::from_claude)
+                        .and_then(rovai_core::camp_fast::ObservedFastState::fast_default);
+                    let _ = events.send(ClaudeCodeRuntimeEvent {
+                        event_type: "runtime.fast.initialized",
+                        payload: serde_json::json!({ "enabled": enabled }),
+                    });
+                }
                 protocol.send_prompt(&request.prompt).await
                     .context("failed to deliver structured input to Claude Code stdin")
             } => {
                 if let Err(error) = delivered {
+                    let error = anyhow::anyhow!(protocol.redact_text(&format!("{error:#}")));
                     let failure = claude_public_failure(request, private_runtime_dir,
                         RuntimeFailureOrigin::Compatibility, RuntimeFailurePhase::Execution,
                         "runtime_control_initialization_failed", "Claude Code 双向协议初始化或输入投递失败",
@@ -831,7 +860,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         let stdout = stdout.expect("Claude Code stdout was collected");
         let stderr = stderr.expect("Claude Code stderr was collected");
         if !status.success() {
-            let raw_stderr = String::from_utf8_lossy(&stderr.bytes);
+            let raw_stderr = protocol.redact_text(&String::from_utf8_lossy(&stderr.bytes));
             let exit_diagnostic = format!(
                 "Claude Code process exited with {} (stderrBytes={}, stderrDigest={})",
                 status, stderr.total_bytes, stderr.digest
@@ -1303,8 +1332,9 @@ fn process_claude_protocol_line(
         if protocol.route(&event)? {
             return Ok(());
         }
+        let public_line = protocol.redact_frame(&event)?;
         process_claude_stream_line(
-            line,
+            &public_line,
             expected_session_id,
             native_turn_id,
             input_accepted,
@@ -1575,15 +1605,20 @@ fn normalize_claude_runtime_events(
         || event.get("type").and_then(Value::as_str) == Some("result")
     {
         validate_claude_stream_session(event, expected_session_id)?;
-        if let Some(fast) = event
+        let fast = event
             .get("fast_mode_state")
             .and_then(rovai_core::camp_fast::ObservedFastState::from_claude)
-        {
-            normalized.push(ClaudeCodeRuntimeEvent {
-                event_type: "runtime.fast.observed",
-                payload: serde_json::json!({"state": fast}),
+            .unwrap_or_default();
+        let disabled_reason = event
+            .get("fast_mode_disabled_reason")
+            .and_then(Value::as_str)
+            .and_then(|reason| {
+                rovai_core::runtime_failure::sanitize_public_runtime_error(reason, &[])
             });
-        }
+        normalized.push(ClaudeCodeRuntimeEvent {
+            event_type: "runtime.fast.observed",
+            payload: serde_json::json!({"state": fast, "disabledReason": disabled_reason}),
+        });
     }
     match event.get("type").and_then(Value::as_str) {
         Some("system") if event.get("subtype").and_then(Value::as_str) == Some("api_retry") => {
@@ -2517,6 +2552,28 @@ mod tests {
     use serde_json::json;
     use tokio::io::AsyncWriteExt;
 
+    #[test]
+    fn model_options_must_be_transmittable_without_a_catalog() {
+        assert_eq!(claude_model_effort(&json!({})).unwrap(), None);
+        assert_eq!(
+            claude_model_effort(&json!({"effort":"future-level"})).unwrap(),
+            Some("future-level")
+        );
+        for options in [
+            json!(null),
+            json!([]),
+            json!({"effort":1}),
+            json!({"effort":""}),
+            json!({"effort":"high\n"}),
+            json!({"unknown":"value"}),
+        ] {
+            assert!(
+                claude_model_effort(&options).is_err(),
+                "must not silently drop {options}"
+            );
+        }
+    }
+
     fn fake_claude_request(
         workspace: &Path,
         executable: &Path,
@@ -2537,6 +2594,7 @@ mod tests {
             },
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
             runtime: FrozenAgentRuntimeConfig {
+                custom_api: None,
                 camp_fast: None,
                 adapter_kind: AdapterKind::ClaudeCodeCli,
                 installation_id: "claude-test".to_string(),
@@ -2684,10 +2742,11 @@ mod tests {
             ("on", "fast"),
             ("off", "standard"),
             ("cooldown", "cooldown"),
+            ("unknown-future-state", "unknown"),
         ] {
             for kind in ["system", "result"] {
                 let mut stream = ClaudeCodeStreamState::default();
-                let event = json!({"type": kind, "subtype": "init", "session_id": session_id, "fast_mode_state": native});
+                let event = json!({"type": kind, "subtype": "init", "session_id": session_id, "fast_mode_state": native, "fast_mode_disabled_reason": "org disabled; api_key=secret"});
                 let events =
                     normalize_claude_runtime_events(&event, session_id, &mut stream).unwrap();
                 assert_eq!(
@@ -2698,6 +2757,28 @@ mod tests {
                         .payload["state"],
                     expected
                 );
+                let fast = events
+                    .iter()
+                    .find(|event| event.event_type == "runtime.fast.observed")
+                    .unwrap();
+                assert_eq!(
+                    fast.payload["disabledReason"],
+                    "org disabled; api_key=[redacted]"
+                );
+                let mut absent = event.clone();
+                absent.as_object_mut().unwrap().remove("fast_mode_state");
+                absent
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("fast_mode_disabled_reason");
+                let unknown =
+                    normalize_claude_runtime_events(&absent, session_id, &mut stream).unwrap();
+                let unknown = unknown
+                    .iter()
+                    .find(|event| event.event_type == "runtime.fast.observed")
+                    .unwrap();
+                assert_eq!(unknown.payload["state"], "unknown");
+                assert!(unknown.payload["disabledReason"].is_null());
                 assert!(
                     normalize_claude_runtime_events(
                         &event,
@@ -2853,6 +2934,10 @@ mod tests {
             session_id,
         );
         request.prompt = "x".repeat(16 * 1024 * 1024);
+        request.runtime.camp_fast = Some(rovai_core::camp_fast::FrozenThreadMemberFast {
+            runtime_binding_revision: "test-binding".into(),
+            fast_override: Some(false),
+        });
         request.session_bootstrap = Some("stdin failure".to_string());
         let error = adapter.run(request).await.unwrap_err();
         assert!(
@@ -3261,7 +3346,11 @@ mod tests {
 
         // This process-boundary fixture owns the exit-status ordering regression;
         // the pure terminal validator cannot prove that run_process reaches it.
-        for explicit in [false, true] {
+        for (explicit, fast, resume) in [false, true].into_iter().flat_map(|explicit| {
+            [None, Some(true), Some(false)]
+                .into_iter()
+                .flat_map(move |fast| [false, true].map(move |resume| (explicit, fast, resume)))
+        }) {
             let root = std::env::temp_dir().join(format!(
                 "rovai-claude-nonzero-structured-failure-test-{}",
                 uuid::Uuid::new_v4()
@@ -3270,15 +3359,39 @@ mod tests {
             std::fs::create_dir_all(&workspace).expect("workspace should be created");
             let executable = root.join("fake-claude");
             let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+            let native_fast = match (explicit, resume) {
+                (false, false) => Some("on"),
+                (false, true) => Some("off"),
+                (true, false) => Some("cooldown"),
+                (true, true) => None,
+            };
+            let fast_field = native_fast
+                .map(|state| format!(r#"\"fast_mode_state\":\"{state}\","#))
+                .unwrap_or_default();
+            // Existing process matrix also proves saved models/options reach the
+            // CLI when initialization omits, empties or disagrees with the catalog.
+            let models_field = match fast {
+                None => r#"\"models\":[],"#,
+                Some(true) => r#"\"models\":[{\"value\":\"another-model\"}],"#,
+                Some(false) => "",
+            };
             std::fs::write(
                 &executable,
                 format!(
                     r#"#!/bin/sh
+    printf 'start\n' >> "$0.starts"
     printf '%s\n' "$@" > "$0.argv"
+    case "$1" in --version|auth) sleep 30; exit 1;; esac
+    previous=''
+    for arg in "$@"; do
+      if [ "$previous" = '--settings' ]; then /bin/cat "$arg" > "$0.settings"; fi
+      previous="$arg"
+    done
     IFS= read -r init
     init_id=$(printf '%s' "$init" | /usr/bin/sed -E 's/.*"request_id":"([^"]+)".*/\1/')
-    printf '%s\n' "{{\"type\":\"control_response\",\"response\":{{\"subtype\":\"success\",\"request_id\":\"$init_id\",\"response\":{{}}}}}}"
+    printf '%s\n' "{{\"type\":\"control_response\",\"response\":{{\"subtype\":\"success\",\"request_id\":\"$init_id\",\"response\":{{{fast_field}{models_field}\"commands\":[]}}}}}}"
     IFS= read -r prompt
+    printf '%s\n' "$prompt" >> "$0.prompts"
     printf '%s\n' '{{"type":"stream_event","session_id":"{session_id}","event":{{"type":"message_start"}}}}'
     printf '%s\n' '{{"type":"result","subtype":"error","is_error":true,"result":"API Error: 529 overloaded; api_key=private-key","session_id":"{session_id}"}}'
     exit 1
@@ -3296,6 +3409,15 @@ mod tests {
                 uuid::Uuid::new_v4().to_string(),
                 session_id,
             );
+            request.runtime.reported_version = None;
+            request.runtime.camp_fast = Some(rovai_core::camp_fast::FrozenThreadMemberFast {
+                runtime_binding_revision: "test-binding".into(),
+                fast_override: fast,
+            });
+            if resume {
+                request.new_native_session_id = None;
+                request.resumable_native_session_id = Some(session_id.into());
+            }
             if explicit {
                 request.runtime.model.source = "explicit".to_string();
                 request.runtime.model.model_id = "provider/custom[extended]".to_string();
@@ -3303,12 +3425,23 @@ mod tests {
             }
             let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
             request.input_accepted = Some(accepted_sender);
+            let (events, mut event_receiver) = mpsc::unbounded_channel();
+            request.runtime_events = Some(events);
 
             let error = adapter
                 .run(request)
                 .await
                 .expect_err("structured Provider failure must remain visible on exit 1");
             let diagnostic = format!("{error:#}");
+            let initialized = event_receiver
+                .try_recv()
+                .expect("initialization baseline precedes input events");
+            assert_eq!(initialized.event_type, "runtime.fast.initialized");
+            assert_eq!(
+                initialized.payload["enabled"].as_bool(),
+                native_fast.map(|state| state != "off"),
+                "initialization metadata is optional on both new and resumed sessions"
+            );
             let delivered = error
                 .downcast_ref::<ClaudeCodeDeliveredFailure>()
                 .expect("structured final should prove the delivered turn ended")
@@ -3327,6 +3460,42 @@ mod tests {
                         .any(|arg| matches!(arg, "--model" | "--effort"))
                 );
             }
+            assert_eq!(
+                std::fs::read_to_string(root.join("fake-claude.starts"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1,
+                "no version/auth probe or automatic replay"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("fake-claude.prompts"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+            assert!(argv.contains("--permission-mode\nmanual\n"));
+            assert!(argv.contains(if resume {
+                "--resume\n"
+            } else {
+                "--session-id\n"
+            }));
+            if let Some(fast) = fast {
+                let settings: Value = serde_json::from_slice(
+                    &std::fs::read(root.join("fake-claude.settings")).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    settings,
+                    json!({"fastMode": fast}),
+                    "temporary Fast settings contain no permission overrides"
+                );
+                assert_eq!(argv.lines().filter(|arg| *arg == "--settings").count(), 1);
+            } else {
+                assert!(!argv.lines().any(|arg| arg == "--settings"));
+            }
+            assert!(claude_launch_files(&root).is_empty());
             std::fs::remove_dir_all(&root).expect("temporary root should be removed");
 
             assert_eq!(accepted.native_session_id, session_id);
@@ -3455,7 +3624,8 @@ mod tests {
                 &mut streamed_state,
             )
             .unwrap()
-            .is_empty(),
+            .iter()
+            .all(|event| event.event_type == "runtime.fast.observed"),
             "the terminal result must not duplicate streamed public text"
         );
         assert!(
@@ -3604,7 +3774,8 @@ mod tests {
                 &mut complete_only
             )
             .unwrap()
-            .is_empty()
+            .iter()
+            .all(|event| event.event_type == "runtime.fast.observed")
         );
         fallback_state.final_result = Some(
             serde_json::from_value(json!({
@@ -3637,7 +3808,8 @@ mod tests {
                 &mut failure_state,
             )
             .unwrap()
-            .is_empty()
+            .iter()
+            .all(|event| event.event_type == "runtime.fast.observed")
         );
     }
 
@@ -3937,7 +4109,10 @@ mod tests {
             session_id,
             &mut state,
         )
-        .expect("identity-matched init should normalize");
+        .expect("identity-matched init should normalize")
+        .into_iter()
+        .filter(|event| event.event_type != "runtime.fast.observed")
+        .collect::<Vec<_>>();
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].event_type, "runtime.model.observed");
         assert_eq!(first[0].payload["modelId"], "claude-sonnet-4-5");
@@ -3954,7 +4129,8 @@ mod tests {
                 &mut state,
             )
             .expect("later init should remain valid")
-            .is_empty(),
+            .iter()
+            .all(|event| event.event_type == "runtime.fast.observed"),
             "a Run keeps the first observed model"
         );
 
@@ -3970,7 +4146,8 @@ mod tests {
                 &mut missing,
             )
             .expect("model omission is best-effort")
-            .is_empty()
+            .iter()
+            .all(|event| event.event_type == "runtime.fast.observed")
         );
         assert!(
             normalize_claude_runtime_events(
@@ -4974,6 +5151,12 @@ mod tests {
             .expect("acceptance channel should remain open");
         assert_eq!(accepted.native_session_id, session_id);
         assert_eq!(accepted.native_turn_id, native_turn_id);
+        let init_fast = tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
+            .await
+            .expect("init metadata should be emitted without waiting for a Fast field")
+            .unwrap();
+        assert_eq!(init_fast.event_type, "runtime.fast.observed");
+        assert_eq!(init_fast.payload["state"], "unknown");
         let started = tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
             .await
             .expect("tool start should be emitted")
@@ -4990,6 +5173,13 @@ mod tests {
         assert_eq!(completed.payload["status"], "completed");
         assert_eq!(completed.payload["input"], "printf CLAUDE_PRINTF_OK");
         assert_eq!(completed.payload["output"], "CLAUDE_PRINTF_OK");
+        let early_fast =
+            tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
+                .await
+                .expect("early result metadata should precede subsequent events")
+                .unwrap();
+        assert_eq!(early_fast.event_type, "runtime.fast.observed");
+        assert_eq!(early_fast.payload["state"], "unknown");
         let after_early_result =
             tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
                 .await
@@ -5018,6 +5208,9 @@ mod tests {
         assert_eq!(final_result.result, "done");
         assert_eq!(final_result.usage["input_tokens"], 2);
         writer_task.await.unwrap();
+        let final_fast = runtime_event_receiver.recv().await.unwrap();
+        assert_eq!(final_fast.event_type, "runtime.fast.observed");
+        assert_eq!(final_fast.payload["state"], "unknown");
         let fallback_narration = runtime_event_receiver
             .recv()
             .await
@@ -5104,10 +5297,12 @@ mod tests {
             } else {
                 assert!(captured.is_err(), "{case} must fail stream parsing");
             }
-            assert!(
-                receiver.try_recv().is_err(),
-                "{case} must not publish the early success as a fallback"
-            );
+            while let Ok(event) = receiver.try_recv() {
+                assert_eq!(
+                    event.event_type, "runtime.fast.observed",
+                    "{case} must not publish the early success as a fallback"
+                );
+            }
         }
     }
 }

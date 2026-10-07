@@ -25,7 +25,10 @@ app.whenReady().then(async () => {
     assert.equal(result.guide, 'https://example.com/guide')
     assert.ok(!result.text.includes('lang:'))
   }
-  const capture = async name => writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
+  const capture = async name => {
+    await new Promise(resolve => setTimeout(resolve, 180))
+    writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
+  }
   try {
     await window.loadFile(renderer)
     await settle()
@@ -100,7 +103,89 @@ app.whenReady().then(async () => {
     await run(`window.releaseNotesTest.notes(${JSON.stringify('<!-- lang:en -->\n\n<script>alert(1)</script>\n\n[unsafe](javascript:alert(1)) ![pixel](https://example.com/pixel.png)\n\n<!-- lang:zh-CN -->\n\n安全正文')})`)
     await settle()
     assert.equal(await run("document.querySelectorAll('.about-release-notes script, .about-release-notes img, .about-release-notes a[href^=\"javascript:\"]').length"), 0)
-    process.stdout.write(JSON.stringify({ ok: true, verified: ['即时语言切换', '两个日志版本', 'tab 选择保留', '原始快照保留', '零更新请求', '历史与单语回退', '引用链接保留', '七项 Markdown 边界', '行内异常标记全文回退', '标题清理后语言回退', '无可见正文空态', '安全 Markdown', '日夜主题及紧凑缩放'] }) + '\n')
+    await run("window.releaseNotesTest.language('zh-CN')")
+    await run("window.releaseNotesTest.snapshot({ checkedAt: '2026-10-05T08:00:00.000Z', lastCheckSource: 'manual' })")
+    await settle()
+    await run("document.querySelector('[data-app-update-release-tab=available]').focus()")
+    const key = async keyCode => {
+      window.webContents.sendInputEvent({ type: 'keyDown', keyCode })
+      window.webContents.sendInputEvent({ type: 'keyUp', keyCode })
+      await settle()
+    }
+    await key('Right')
+    assert.equal(await run("document.activeElement.dataset.appUpdateReleaseTab"), 'current')
+    await key('Home')
+    assert.equal(await run("document.activeElement.dataset.appUpdateReleaseTab"), 'available')
+    assert.equal(await run(`(() => {
+      const notes = document.querySelector('.about-release-section').getBoundingClientRect()
+      const history = document.querySelector('.about-history')
+      return history.getBoundingClientRect().top >= notes.bottom && !history.open
+    })()`), true)
+    assert.deepEqual(await run('window.releaseNotesTest.requests'), [])
+    await run("document.querySelector('.about-update-actions .primary-button').click()")
+    assert.deepEqual(await run('window.releaseNotesTest.requests'), ['download'])
+    await run("window.releaseNotesTest.snapshot({ status: 'downloading', downloadPercent: 42, transferredBytes: 42e6, totalBytes: 100e6, bytesPerSecond: 5e6 })")
+    await settle()
+    assert.deepEqual(await run(`(() => {
+      const button = document.querySelector('.about-update-actions .primary-button')
+      return { disabled: button.disabled, text: button.textContent, percentages: (document.querySelector('.about-updates-settings').innerText.match(/42%/g) || []).length }
+    })()`), { disabled: true, text: '下载中…', percentages: 1 })
+    await capture('update-downloading')
+    await run("window.releaseNotesTest.snapshot({ status: 'ready_to_install' })"); await settle()
+    assert.deepEqual(await run('window.releaseNotesTest.requests'), ['download'])
+    await run("document.querySelector('.about-update-actions .primary-button').click()")
+    assert.deepEqual(await run('window.releaseNotesTest.requests'), ['download', 'install'])
+    for (const theme of ['day', 'night']) {
+      for (const language of ['zh-CN', 'en']) {
+        await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+        await run(`window.releaseNotesTest.language(${JSON.stringify(language)})`)
+        for (const [mode, width] of [['settings', 270], ['ordinary', 200], ['ordinary', 420]]) {
+          await run(`window.releaseNotesTest.sidebar(${JSON.stringify(mode)}, ${width})`)
+          for (const status of ['available', 'checking', 'downloading', 'ready_to_install', 'installing', 'check_failed', 'download_failed', 'install_failed']) {
+            await run(`window.releaseNotesTest.snapshot({ status: ${JSON.stringify(status)}, downloadPercent: 42, failureReason: ${JSON.stringify(status === 'check_failed' ? 'network' : null)} })`)
+            await settle()
+            const measured = await run(`(() => {
+              const badge = document.querySelector('.app-update-badge')
+              const rail = document.querySelector('.unified-sidebar')
+              const rect = badge.getBoundingClientRect()
+              const label = badge.querySelector('span').getBoundingClientRect()
+              const settingsLabel = document.querySelector('.has-update-badge > strong')?.getBoundingClientRect()
+              return {
+                display: getComputedStyle(badge).display,
+                inside: label.right <= rect.right + 1 && rect.right <= rail.getBoundingClientRect().right,
+                noOverlap: !settingsLabel || settingsLabel.right <= rect.left,
+                overflow: rail.scrollWidth > rail.clientWidth + 1,
+                height: rect.height,
+                width: rail.getBoundingClientRect().width
+              }
+            })()`)
+            assert.ok(['flex', 'inline-flex'].includes(measured.display), JSON.stringify({ mode, status, measured }))
+            assert.equal(measured.inside && measured.noOverlap && !measured.overflow, true, JSON.stringify({ language, mode, status, measured }))
+            assert.ok(Math.abs(measured.width - width) < 1, JSON.stringify(measured))
+            if (mode === 'ordinary') assert.ok(measured.height >= 34)
+          }
+          if (language === 'en') await capture(`update-${theme}-${mode}-${width}-en`)
+        }
+      }
+    }
+    await run("window.releaseNotesTest.sidebar('settings', 270)")
+    await run("window.releaseNotesTest.language('zh-CN')")
+    await run("window.releaseNotesTest.snapshot({ status: 'available' })")
+    await settle()
+    await capture('update-settings-final')
+    await run("window.releaseNotesTest.sidebar(null)")
+    await run("document.documentElement.dataset.mobileWeb='true'")
+    window.setContentSize(390, 844)
+    await settle()
+    assert.equal(await run('document.documentElement.scrollWidth > innerWidth + 1'), false)
+    assert.equal(await run(`(() => {
+      const actions = document.querySelector('.about-update-actions')
+      const primary = actions.querySelector('.primary-button').getBoundingClientRect()
+      const secondary = actions.querySelector('.quiet-button').getBoundingClientRect()
+      return primary.height >= 44 && secondary.height >= 44 && primary.left < secondary.left
+    })()`), true)
+    await capture('update-mobile-390')
+    process.stdout.write(JSON.stringify({ ok: true, verified: ['即时语言切换', '两个日志版本', 'tab 选择保留', '原始快照保留', '零更新请求', '历史与单语回退', '引用链接保留', '七项 Markdown 边界', '行内异常标记全文回退', '标题清理后语言回退', '无可见正文空态', '安全 Markdown', '日夜主题及紧凑缩放', '版本标签原生键盘', '日志先于检查记录', '单一百分比', '显式下载与安装', '侧栏8态中英文及200/270/420px布局', '手机390px与44px操作区'] }) + '\n')
     app.exit(0)
   } catch (error) {
     console.error(error)

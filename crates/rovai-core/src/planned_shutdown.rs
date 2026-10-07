@@ -376,6 +376,12 @@ impl PlannedShutdownCoordinator {
             .is_some_and(|execution| execution.cancellation.launching.load(Ordering::Acquire))
     }
 
+    pub async fn launch_finished_without_route(&self, key: &ActiveExecutionKey) -> bool {
+        self.active.lock().await.get(key).is_some_and(|execution| {
+            !execution.cancellation.launching.load(Ordering::Acquire) && execution.binding.is_none()
+        })
+    }
+
     pub async fn cleanup_completed(&self, key: &ActiveExecutionKey) -> bool {
         self.remove_active_inner(key, true).await
     }

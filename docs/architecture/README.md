@@ -46,7 +46,7 @@ last_updated: 2026-10-03
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、不读 event_log 的业务 open projection、渐进消息、当前会话精确查找/anchored 定位、Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
 | [Camp Attachments：原路径引用、默认输出与旧记录兼容](camp-published-attachment-view.md) | 用户与 Agent Source Refs、默认输出位置、实际路径呈现、Camp 自有目录删除及历史 Managed/Authority/View 兼容边界 |
 | [Camp 永久删除](camp-deletion.md) | 全 Runtime 状态异步受理、Camp Deletion Intent、准入 fence、Camp→cleanup journal 阶段交接、崩溃恢复与最小外部状态 |
-| [First-run Onboarding](first-run-onboarding.md) | Full Core authority-origin 首次安装 admission、schema 2 三页状态、无 Runtime 延后完成、幂等 provisioning 与 Desktop-local Active Camp starter 第四页边界 |
+| [First-run Onboarding](first-run-onboarding.md) | Full Core authority-origin 首次安装 admission、schema 3 三页状态、无 Runtime 延后完成、内置队员配置复制与幂等 provisioning 与 Desktop-local Active Camp starter 第四页边界 |
 | [File Preview](file-preview.md) | 显式 Markdown 消息资源入口、来源上下文解析、Main canonical 路径投影、窗口内 Camp Tab shell、项目内子文件独立恢复来源、无副作用恢复、binding generation、具体文件能力/重开、分页、Root Grant、watcher、HTML 协议与资源生命周期 |
 | [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |
 | [Skills 来源、配置与模型投递](skills.md) | 当前平台/工具箱与 Harness 原生来源、队员配置、消息来源身份、Run 冻结、旧投影安全清理和历史恢复 |

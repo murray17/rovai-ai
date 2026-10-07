@@ -27,14 +27,14 @@ function snapshot(overrides: Partial<AppUpdateSnapshot> = {}): AppUpdateSnapshot
 
 describe('appUpdateBadgePresentation', () => {
   it.each([
-    ['available', null, 'available', '更新可用'],
+    ['available', null, 'available', '有更新'],
     ['checking', null, 'downloading', '检查中'],
     ['check_failed', 'network', 'failed', '检查失败'],
-    ['downloading', null, 'downloading', '42%'],
+    ['downloading', null, 'downloading', '下载 42%'],
     ['ready_to_install', null, 'ready', '可安装'],
     ['installing', null, 'installing', '重启中'],
-    ['download_failed', 'download_failed', 'failed', '重试下载'],
-    ['install_failed', 'install_failed', 'failed', '重试安装']
+    ['download_failed', 'download_failed', 'failed', '下载失败'],
+    ['install_failed', 'install_failed', 'failed', '安装失败']
   ] as const)('maps %s to a distinct compact badge', (status, failureReason, kind, label) => {
     const presentation = appUpdateBadgePresentation(snapshot({
       status,

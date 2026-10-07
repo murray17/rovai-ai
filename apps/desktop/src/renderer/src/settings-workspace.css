@@ -41,7 +41,7 @@
 :root .settings-sidebar-menu button.active::before {
   content: none;
 }
-:root .settings-sidebar-menu button.active>span {
+:root .settings-sidebar-menu button.active>.settings-sidebar-icon {
   color: var(--ink);
 }
 :root .settings-sidebar-menu button strong {
@@ -1218,277 +1218,80 @@
   border: 1px dashed var(--line);
   border-radius: 8px;
 }
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-settings {
-  width: min(880px,100%);
-  max-width: 880px;
+/* About & Updates: one version/action row followed by release notes. */
+:root .settings-panel .about-updates-settings { display: grid; width: min(880px, 100%); max-width: 880px; padding-bottom: 24px; }
+.about-updates-body { display: grid; min-width: 0; }
+:root .settings-panel .about-updates-settings[data-update-read-only="false"] .settings-page-heading-copy > p:last-child { display: none; }
+.about-updates-overview { padding: 10px 0 26px; border-bottom: 1px solid var(--line); }
+.about-updates-topline { display: flex; gap: 20px; align-items: center; justify-content: space-between; }
+.about-identity { display: flex; min-width: 0; gap: 13px; align-items: center; }
+.about-mark { width: 34px; height: 34px; flex: 0 0 34px; color: var(--ink); }
+.about-identity strong { color: var(--ink); font-size: 19px; line-height: 1.3; font-weight: 620; letter-spacing: -.015em; }
+.about-identity p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.about-update-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; }
+:root .settings-panel .about-update-actions > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; font-size: 12px; padding-inline: 13px; white-space: nowrap; }
+:root .settings-panel .about-update-actions .primary-button { color: var(--conversation-action-contrast); background: var(--conversation-action); border-color: var(--conversation-action); }
+:root .settings-panel .about-update-actions .primary-button:hover:not(:disabled) { background: var(--conversation-action-hover); border-color: var(--conversation-action-hover); }
+:root .settings-panel .about-update-actions .primary-button[aria-busy="true"]:disabled { color: var(--muted); background: var(--surface-muted); border-color: transparent; opacity: 1; cursor: wait; }
+.about-update-status { display: flex; gap: 8px; align-items: start; margin: 20px 0 0 47px; color: var(--muted); }
+.about-update-status > div { min-width: 0; }
+.about-update-status-icon { width: 15px; height: 15px; flex: 0 0 15px; margin-top: 3px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.about-update-status strong { font-size: 13px; line-height: 1.7; font-weight: 500; color: var(--ink); }
+.about-update-status p { font-size: 12px; line-height: 1.65; margin: 5px 0 0; color: var(--muted); max-width: 66ch; }
+.about-update-status.is-error,
+.about-update-status.is-error strong { color: var(--danger); }
+.about-update-status.is-success > svg { color: var(--success); }
+.about-download-progress { display: grid; gap: 8px; margin: 16px 0 0 47px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.about-download-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.about-download-progress strong { font-size: 12px; font-weight: 550; color: var(--ink); }
+.about-download-speed { justify-self: end; }
+.about-download-progress progress { width: 100%; display: block; height: 5px; appearance: none; border: 0; border-radius: 4px; background: var(--surface-muted); accent-color: var(--update-progress-fill); overflow: hidden; }
+.about-download-progress progress::-webkit-progress-bar { background: var(--surface-muted); border-radius: 4px; }
+.about-download-progress progress::-webkit-progress-value { background: var(--update-progress-fill); border-radius: 4px; }
+.about-download-progress progress::-moz-progress-bar { background: var(--update-progress-fill); border-radius: 4px; }
+.about-update-fallback { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 0 70px; }
+.about-update-fallback a { font-size: 11.5px; color: var(--muted); text-underline-offset: 3px; }
+.about-update-fallback a:hover { color: var(--ink); }
+.about-release-section { padding: 25px 0 20px; min-width: 0; }
+.about-updates-settings .about-release-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; margin-bottom: 18px; }
+.about-updates-settings .about-release-heading h2 { font-size: 15px; margin: 0; line-height: 1.5; font-weight: 600; }
+.about-release-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.about-release-tabs button { min-height: 32px; padding: 5px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 11.5px; cursor: pointer; }
+.about-release-tabs button:hover { color: var(--ink); }
+.about-release-tabs button[aria-selected="true"] { color: var(--ink); background: var(--neutral-selected); font-weight: 550; }
+.about-release-tabs button span { font-variant-numeric: tabular-nums; margin-left: 4px; }
+.about-release-panel[hidden] { display: none; }
+.about-release-version { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.about-release-body { display: grid; min-width: 0; gap: 18px; }
+.about-release-header p { margin: 0; font-size: 11px; line-height: 1.45; color: var(--muted); }
+.about-updates-settings .about-release-notes { max-height: min(520px, 52vh); overflow: auto; scrollbar-gutter: stable; font-size: 13px; line-height: 1.8; padding: 0 12px 0 0; color: var(--ink); }
+.about-updates-settings .about-release-notes h2 { font-size: 14px; margin-top: 24px; font-weight: 600; }
+.about-updates-settings .about-release-notes h3 { font-size: 13px; margin-top: 20px; font-weight: 550; }
+.about-updates-settings .about-release-notes > :first-child { margin-top: 0; }
+.about-updates-settings .about-release-notes :where(pre, table) { max-width: 100%; }
+.about-updates-settings .about-release-notes pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.about-release-empty { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.about-history { border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); }
+.about-history summary { min-height: 32px; display: flex; gap: 10px; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; font-size: 11.5px; }
+.about-history summary::-webkit-details-marker { display: none; }
+.about-history summary svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.about-history[open] summary svg { transform: rotate(180deg); }
+.about-facts { display: grid; gap: 10px; font-size: 11.5px; margin: 12px 0; }
+.about-facts > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 16px; }
+.about-facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.about-updates-settings :is(button,summary,a):focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+.about-update-spinner { width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, currentColor 36%, transparent); border-top-color: currentColor; border-radius: 50%; animation: about-update-spin 650ms linear infinite; }
+@keyframes about-update-spin { to { transform: rotate(360deg); } }
+@media (max-width: 920px) {
+  .about-updates-topline { align-items: flex-start; flex-wrap: wrap; }
+  .about-update-actions { margin-left: 47px; flex-wrap: wrap; justify-content: flex-start; }
 }
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section {
-  padding: 24px 0;
-  grid-template-columns: minmax(0,1fr);
-  gap: 16px;
+@media (max-width: 600px) {
+  .about-identity strong { font-size: 18px; }
+  .about-update-status, .about-download-progress, .about-update-actions { margin-left: 0; }
+  .about-update-fallback { margin-left: 23px; }
 }
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section>.section-heading p {
-  display: none;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section:first-child {
-  padding: 12px 0 30px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section:first-child>.section-heading {
-  display: none;
-}
-.about-identity {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  min-height: 66px;
-}
-.about-mark {
-  width: 48px;
-  height: 48px;
-  flex: 0 0 48px;
-  color: var(--ink);
-}
-.about-identity>div {
-  display: grid;
-  gap: 8px;
-}
-.about-identity strong {
-  font-size: 24px;
-  font-weight: 620;
-  line-height: 1.2;
-  letter-spacing: -.02em;
-  color: var(--ink);
-}
-.about-identity p {
-  display: flex;
-  gap: 0;
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.about-identity p>span+span {
-  border-left: 1px solid var(--line-strong);
-  margin-left: 12px;
-  padding-left: 12px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-body {
-  padding: 0;
-  gap: 12px;
-  border-radius: 0;
-  background: transparent;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-settings[data-update-read-only="false"] .settings-page-heading-copy>p:last-child {
-  display: none;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control {
-  min-height: 40px;
-  align-items: center;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-  gap: 18px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control>div:first-child {
-  gap: 7px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions {
-  gap: 8px!important;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions>button {
-  min-height: 32px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-download-progress {
-  gap: 10px;
-  padding: 8px 0 4px;
-  background: transparent;
-  border-radius: 0;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-download-progress-meta {
-  color: var(--muted);
-  font-family: inherit;
-  font-size: 11px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-download-progress-heading strong {
-  font-size: 12px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback {
-  padding: 4px 0 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  flex-wrap: wrap;
-  gap: 10px 16px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback>div:first-child {
-  display: none;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback span {
-  font-size: 11px;
-  line-height: 1.6;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback-actions a {
-  padding: 5px 9px;
-  border: 0;
-  background: var(--surface-muted);
-  color: var(--ink);
-  font-size: 11px;
-  font-weight: 500;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback-actions a:hover {
-  background: var(--surface-hover);
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback-actions {
-  gap: 8px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-section {
-  border-bottom: 0;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-section>.section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-body {
-  gap: 16px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header {
-  padding: 0;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header>div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex: 1;
-  flex-wrap: wrap;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header h3 {
-  font-size: 13px;
-  font-weight: 550;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header p {
-  font-size: 11px;
-  color: var(--muted);
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header>code {
-  display: none;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-notes,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-empty {
-  padding: 0;
-  background: transparent;
-  border-radius: 0;
-  font-size: 12px;
-  line-height: 1.85;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-notes> :first-child {
-  margin-top: 0;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-notes h3 {
-  font-size: 12px;
-  font-weight: 550;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-product-name strong {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -.02em;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-version-value code {
-  font-family: inherit;
-  font-weight: 550;
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-page-state {
-  background: transparent;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions .primary-button {
-  background: var(--brand);
-  color: var(--brand-contrast);
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions .primary-button:hover:not(:disabled) {
-  background: var(--brand-hover);
-}
-.about-status-quiet {
-  position: absolute!important;
-  width: 1px!important;
-  height: 1px!important;
-  min-height: 0!important;
-  overflow: hidden!important;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  padding: 0!important;
-  border: 0!important;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-source {
-  display: none;
-}
-.about-history {
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.about-history>summary {
-  padding: 6px 0;
-  justify-content: space-between;
-}
-.about-facts {
-  display: grid;
-  gap: 10px;
-  margin: 12px 0 4px;
-  font-size: 11px;
-  line-height: 1.6;
-}
-.about-facts>div {
-  display: grid;
-  grid-template-columns: 76px minmax(0,1fr);
-  gap: 16px;
-}
-.about-facts dt {
-  color: var(--muted);
-}
-.about-facts dd {
-  margin: 0;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-check-meta,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-check-meta code {
-  font-family: inherit;
-  font-size: 10.5px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control p {
-  font-size: 12px;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control strong {
-  font-size: 14px;
-  font-weight: 550;
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control>div:first-child>strong::before {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 8px;
-  border-radius: 50%;
-  background: var(--attention);
-  vertical-align: 2px;
-  content: "";
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control[data-update-status="idle"]>div:first-child>strong::before {
-  background: var(--neutral);
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control:is([data-update-status="checking"],[data-update-status="downloading"],[data-update-status="installing"])>div:first-child>strong::before {
-  background: var(--info);
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control:is([data-update-status="up_to_date"],[data-update-status="ready_to_install"])>div:first-child>strong::before {
-  background: var(--success);
-}
-:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control:is([data-update-status="check_failed"],[data-update-status="download_failed"],[data-update-status="install_failed"],[data-update-status="unavailable"])>div:first-child>strong::before {
-  background: var(--danger);
-}
+@media (prefers-reduced-motion: reduce) { .about-update-spinner { animation: none; } }
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-note {
   border: 0;
   background: transparent;
@@ -1535,17 +1338,8 @@
   }
 }
 @media(max-width:760px) {
-  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section {
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section {
     gap: 14px;
-  }
-  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control {
-    flex-wrap: wrap;
-  }
-  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions {
-    margin-left: auto;
-  }
-  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-body {
-    padding: 0;
   }
   :root .settings-panel-notifications .notification-scenario-grid {
     grid-template-columns: 1fr;
@@ -1698,3 +1492,10 @@
   .runtime-environment-value { grid-column: 1; }
   .runtime-environment-row > button { grid-column: 2; grid-row: 1 / 3; }
 }
+
+.runtime-startup-read-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--danger); font-size: 13px; }
+.runtime-save-conflict { margin-top: 18px; border-left: 2px solid var(--attention); padding-left: 12px; font-size: 12px; }
+.runtime-save-conflict p { margin: 0 0 6px; }
+.runtime-conflict-value { color: var(--muted); overflow-wrap: anywhere; }
+.runtime-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.runtime-conflict-actions .quiet-button { min-height: 32px; }

@@ -804,6 +804,14 @@ mod tests {
         let lease = context.lease.unwrap();
         assert_eq!(Path::new(&lease.execution_root), root);
         assert_eq!(Path::new(&lease.run_tmp), config.run_tmp());
+        let member_image = rovai_core::member_avatar::materialize_member_avatar(
+            &root,
+            config.run_tmp(),
+            rovai_core::member_avatar::LUOKE_AVATAR_REF,
+            true,
+        )
+        .unwrap();
+        assert!(Path::new(&member_image).is_file());
         let frozen_source = root.join("frozen-source");
         fs::create_dir(&frozen_source).unwrap();
         fs::write(frozen_source.join("file.txt"), b"frozen").unwrap();
@@ -826,6 +834,16 @@ mod tests {
         assert!(registry.authenticate(&first).await.is_err());
         assert!(config.run_tmp().is_dir());
         assert!(!config.run_tmp().join("stale-from-first-lease.txt").exists());
+        assert!(!Path::new(&member_image).exists());
+        let reacquired = rovai_core::member_avatar::materialize_member_avatar(
+            &root,
+            config.run_tmp(),
+            rovai_core::member_avatar::LUOKE_AVATAR_REF,
+            true,
+        )
+        .unwrap();
+        assert!(Path::new(&reacquired).is_file());
+
         fs::write(
             config.run_tmp().join("stale-from-rotated-lease.txt"),
             b"stale",

@@ -141,7 +141,7 @@ impl RuntimeCompatibilityKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 struct RunLeaseKey {
     agent_run_id: String,
     execution_epoch: i64,
@@ -185,6 +185,7 @@ pub(crate) enum RuntimeProcessHost {
 pub(crate) struct FakeRuntimeProcessHost {
     process_id: String,
     shutdown_delay: Duration,
+    reap_gate: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Semaphore>)>,
     reaped: std::sync::atomic::AtomicBool,
     shutdown_calls: std::sync::atomic::AtomicUsize,
     zcode_background: AtomicBool,
@@ -195,10 +196,28 @@ pub(crate) fn fake_runtime_process_host(process_id: impl Into<String>) -> Runtim
     RuntimeProcessHost::Fake(Arc::new(FakeRuntimeProcessHost {
         process_id: process_id.into(),
         shutdown_delay: Duration::ZERO,
+        reap_gate: None,
         reaped: std::sync::atomic::AtomicBool::new(false),
         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
         zcode_background: AtomicBool::new(false),
     }))
+}
+
+#[cfg(all(test, feature = "extended-tests"))]
+pub(crate) fn fake_runtime_process_host_with_reap_gate(
+    process_id: &str,
+) -> (
+    RuntimeProcessHost,
+    Arc<tokio::sync::Notify>,
+    Arc<tokio::sync::Semaphore>,
+) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let mut host = fake_runtime_process_host(process_id);
+    if let RuntimeProcessHost::Fake(fake) = &mut host {
+        Arc::get_mut(fake).unwrap().reap_gate = Some((entered.clone(), release.clone()));
+    }
+    (host, entered, release)
 }
 
 impl RuntimeProcessHost {
@@ -254,6 +273,11 @@ impl RuntimeProcessHost {
             Self::Fake(host) => {
                 host.shutdown_calls
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if let Some((entered, release)) = &host.reap_gate {
+                    entered.notify_one();
+                    let permit = release.acquire().await.expect("test reap gate closed");
+                    permit.forget();
+                }
                 tokio::time::sleep(host.shutdown_delay).await;
                 host.reaped
                     .store(true, std::sync::atomic::Ordering::Release);
@@ -383,6 +407,15 @@ pub(crate) struct FleetLease {
 pub(crate) enum FleetReleaseDisposition {
     Reusable,
     Stop,
+}
+
+/// A missing lease is not evidence that a process was reaped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FleetReleaseOutcome {
+    Reusable,
+    Reaped,
+    NoMatchingLease,
+    ReapUnconfirmed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -530,6 +563,9 @@ struct FleetState {
     deleting_camps: HashSet<String>,
     processes: HashMap<String, ProcessEntry>,
     process_by_run: HashMap<RunLeaseKey, String>,
+    // Retain only Codex cleanup receipts until Core durably acknowledges them.
+    // These are stop-operation evidence, not another process state machine.
+    reaped_leases: HashSet<RunLeaseKey>,
     resident_processes: HashSet<String>,
     resident_processes_by_bucket: HashMap<String, HashSet<String>>,
     idle_lru: BTreeSet<(u64, String)>,
@@ -758,6 +794,19 @@ impl FleetState {
             );
         }
 
+        if request.adapter_kind == AdapterKind::CodexCli
+            && self.processes.values().any(|entry| {
+                entry.adapter_kind == AdapterKind::CodexCli
+                    && entry.compatibility.reuse_scope == request.compatibility.reuse_scope
+                    && (entry.state == FleetProcessState::Stopping
+                        || (entry.state == FleetProcessState::Starting && entry.retire_after_run))
+            })
+        {
+            return FleetAcquirePlan::Blocked(
+                "Codex Native Session cleanup is not confirmed".to_string(),
+            );
+        }
+
         let compatible_idle = [true, false].into_iter().find_map(|background_first| {
             self.idle_lru.iter().find_map(|(_, process_id)| {
                 self.processes
@@ -885,12 +934,18 @@ pub(crate) struct AgentRuntimeFleetManager {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RuntimeOwnerRecord {
+    #[serde(default)]
+    run_lease: Option<RunLeaseKey>,
+    #[serde(default)]
+    reaped: bool,
     core_generation: String,
     pid: u32,
     process_group_id: i32,
     executable_path: String,
     #[serde(default)]
     process_start_identity: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    windows_job_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -900,31 +955,51 @@ struct RuntimeOwnerRecordStore {
 }
 
 impl RuntimeOwnerRecordStore {
-    fn new(data_dir: &Path) -> Option<Self> {
-        let root = data_dir.join("runtime-fleet").join("owners");
-        if std::fs::create_dir_all(&root).is_err() {
-            eprintln!("failed to create Runtime Fleet owner record directory");
-            return None;
-        }
-        #[cfg(unix)]
+    fn new(data_dir: &Path) -> Result<Self> {
+        let fleet_root = data_dir.join("runtime-fleet");
+        let root = fleet_root.join("owners");
+        #[cfg(windows)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700));
+            use crate::platform::private_storage::{
+                admit_private_directory, prepare_legacy_managed_private_directory,
+                repair_legacy_managed_private_file,
+            };
+            admit_private_directory(data_dir)?;
+            prepare_legacy_managed_private_directory(&fleet_root)?;
+            prepare_legacy_managed_private_directory(&root)?;
+            for entry in std::fs::read_dir(&root)? {
+                let path = entry?.path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    repair_legacy_managed_private_file(&path)?;
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            crate::platform::prepare_private_directory(&fleet_root)?;
+            crate::platform::prepare_private_directory(&root)?;
         }
         let store = Self {
             root,
             core_generation: uuid::Uuid::new_v4().to_string(),
         };
         store.cleanup_stale();
-        Some(store)
+        Ok(store)
     }
 
     fn record_path(&self, process_id: &str) -> PathBuf {
         self.root.join(format!("{process_id}.json"))
     }
 
-    fn register(&self, process_id: &str, host: &RuntimeProcessHost) -> Result<()> {
+    fn register(
+        &self,
+        process_id: &str,
+        host: &RuntimeProcessHost,
+        run_lease: Option<RunLeaseKey>,
+    ) -> Result<()> {
         let record = RuntimeOwnerRecord {
+            run_lease,
+            reaped: false,
             core_generation: self.core_generation.clone(),
             pid: host.pid().context("Runtime process has no root PID")?,
             process_group_id: {
@@ -942,9 +1017,87 @@ impl RuntimeOwnerRecordStore {
             process_start_identity: owner_process_start_identity(
                 host.pid().context("Runtime process has no root PID")?,
             ),
+            windows_job_name: {
+                #[cfg(windows)]
+                {
+                    match host {
+                        RuntimeProcessHost::Codex(host) => Some(host.windows_job_name().to_owned()),
+                        _ => None,
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    None
+                }
+            },
         };
-        std::fs::write(self.record_path(process_id), serde_json::to_vec(&record)?)?;
+        rovai_core::platform::private_storage::atomic_write_private_bytes(
+            &self.record_path(process_id),
+            &serde_json::to_vec(&record)?,
+        )?;
         Ok(())
+    }
+
+    fn finish_stop(&self, process_id: &str) {
+        let path = self.record_path(process_id);
+        let record = std::fs::read(&path)
+            .ok()
+            .and_then(|data| serde_json::from_slice::<RuntimeOwnerRecord>(&data).ok());
+        if let Some(mut record) = record.filter(|record| record.run_lease.is_some()) {
+            record.reaped = true;
+            if let Ok(data) = serde_json::to_vec(&record) {
+                let _ =
+                    rovai_core::platform::private_storage::atomic_write_private_bytes(&path, &data);
+            }
+        } else {
+            self.remove(process_id);
+        }
+    }
+
+    fn confirmed_stop(&self, key: &RunLeaseKey) -> bool {
+        self.cleanup_stale();
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return false;
+        };
+        let records = entries
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+            .filter_map(|entry| {
+                std::fs::read(entry.path())
+                    .ok()
+                    .and_then(|data| serde_json::from_slice::<RuntimeOwnerRecord>(&data).ok())
+            })
+            .filter(|record| record.run_lease.as_ref() == Some(key))
+            .collect::<Vec<_>>();
+        !records.is_empty() && records.iter().all(|record| record.reaped)
+    }
+
+    fn acknowledge_cleanup(&self, key: &RunLeaseKey) {
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if entry.path().extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let record = std::fs::read(entry.path())
+                .ok()
+                .and_then(|data| serde_json::from_slice::<RuntimeOwnerRecord>(&data).ok());
+            if let Some(mut record) = record.filter(|record| record.run_lease.as_ref() == Some(key))
+            {
+                if record.reaped {
+                    let _ = std::fs::remove_file(entry.path());
+                } else {
+                    record.run_lease = None;
+                    if let Ok(data) = serde_json::to_vec(&record) {
+                        let _ = rovai_core::platform::private_storage::atomic_write_private_bytes(
+                            &entry.path(),
+                            &data,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn remove(&self, process_id: &str) {
@@ -957,9 +1110,10 @@ impl RuntimeOwnerRecordStore {
         };
         entries
             .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
             .filter_map(|entry| std::fs::read(entry.path()).ok())
             .filter_map(|bytes| serde_json::from_slice::<RuntimeOwnerRecord>(&bytes).ok())
-            .filter(|record| record.core_generation == self.core_generation)
+            .filter(|record| record.core_generation == self.core_generation && !record.reaped)
             .collect()
     }
 
@@ -1003,12 +1157,18 @@ impl RuntimeOwnerRecordStore {
             return;
         };
         for entry in entries.flatten() {
+            if entry.path().extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
             let path = entry.path();
             let record = std::fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<RuntimeOwnerRecord>(&bytes).ok());
             let mut remove_record = record.is_none();
-            if let Some(_record) = record {
+            if let Some(mut _record) = record {
+                if _record.reaped {
+                    continue;
+                }
                 #[cfg(unix)]
                 if _record.core_generation != self.core_generation
                     && _record.pid > 1
@@ -1027,9 +1187,28 @@ impl RuntimeOwnerRecordStore {
                 if unsafe { libc::getpgid(_record.pid as i32) == -1 } {
                     remove_record = true;
                 }
-                #[cfg(not(unix))]
+                #[cfg(windows)]
                 {
-                    remove_record = true;
+                    // Neither a missing Job nor ActiveProcesses=0 proves that
+                    // every process handle has signaled. A restarted Core lacks
+                    // the original owner's complete membership/exit witnesses.
+                    // Scoped records require the durable receipt above.
+                    remove_record = _record.run_lease.is_none();
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    // Legacy records have no scoped cleanup obligation. A new
+                    // scoped record needs positive process-exit evidence.
+                    remove_record = _record.run_lease.is_none();
+                }
+                if remove_record && _record.run_lease.is_some() {
+                    _record.reaped = true;
+                    if let Ok(data) = serde_json::to_vec(&_record) {
+                        let _ = rovai_core::platform::private_storage::atomic_write_private_bytes(
+                            &path, &data,
+                        );
+                    }
+                    remove_record = false;
                 }
             }
             if remove_record {
@@ -1100,7 +1279,12 @@ fn owner_process_start_identity(pid: u32) -> Option<u64> {
     fields.get(19)?.parse().ok()
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn owner_process_start_identity(pid: u32) -> Option<u64> {
+    crate::managed_process::ManagedProcess::windows_process_start_identity(pid)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn owner_process_start_identity(_pid: u32) -> Option<u64> {
     None
 }
@@ -1214,12 +1398,15 @@ impl AgentRuntimeFleetManager {
         config: AgentRuntimeFleetConfig,
         data_dir: &Path,
         builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
-    ) -> Self {
-        Self::with_owner_records(
+    ) -> Result<Self> {
+        Ok(Self::with_owner_records(
             config,
-            RuntimeOwnerRecordStore::new(data_dir),
+            Some(
+                RuntimeOwnerRecordStore::new(data_dir)
+                    .context("failed to prepare Runtime Fleet owner records")?,
+            ),
             builtin_tool_leases,
-        )
+        ))
     }
 
     fn with_owner_records(
@@ -1252,7 +1439,26 @@ impl AgentRuntimeFleetManager {
             self.state.lock().await.plan_acquire(&self.config, &request)
         };
         let (reservation_id, run_lease, residency, completion, eviction) = match plan {
-            FleetAcquirePlan::Ready(lease) => return Ok(lease),
+            FleetAcquirePlan::Ready(lease) => {
+                if request.adapter_kind == AdapterKind::CodexCli
+                    && let Some(records) = &self.owner_records
+                {
+                    records.register(
+                        lease.host.process_id(),
+                        &lease.host,
+                        Some(request.run_lease()),
+                    )?;
+                }
+                if request.adapter_kind == AdapterKind::CodexCli {
+                    eprintln!(
+                        "Codex acquire run={} epoch={} host={} path=reused",
+                        request.agent_run_id,
+                        request.execution_epoch,
+                        lease.host.process_id()
+                    );
+                }
+                return Ok(lease);
+            }
             FleetAcquirePlan::Wait(completion) => return completion.wait().await,
             FleetAcquirePlan::Blocked(message) => bail!(message),
             FleetAcquirePlan::Spawn {
@@ -1327,19 +1533,7 @@ impl AgentRuntimeFleetManager {
             return;
         }
         let host = match startup.await {
-            Ok(host) if host.is_healthy() => host,
-            Ok(host) => {
-                host.shutdown_and_reap().await;
-                Self::fail_start_operation(
-                    &operations,
-                    &state,
-                    &reservation_id,
-                    &completion,
-                    "Runtime process exited during startup",
-                )
-                .await;
-                return;
-            }
+            Ok(host) => host,
             Err(error) => {
                 Self::fail_start_operation(
                     &operations,
@@ -1352,33 +1546,31 @@ impl AgentRuntimeFleetManager {
                 return;
             }
         };
-        if completion.is_cancelled() {
-            let _ = host
-                .shutdown_and_reap_until(Instant::now() + config.stop_timeout)
-                .await;
-            Self::fail_start_operation(
+        // Persist ownership before validation/retirement. A failed startup that
+        // cannot be reaped must retain its Host, lease and capacity for retry.
+        let ownership_error = owner_records.as_ref().and_then(|records| {
+            records
+                .register(
+                    host.process_id(),
+                    &host,
+                    matches!(host, RuntimeProcessHost::Codex(_)).then(|| run_lease.clone()),
+                )
+                .err()
+        });
+        if !host.is_healthy() || completion.is_cancelled() || ownership_error.is_some() {
+            Self::retire_failed_start(
+                &config,
                 &operations,
                 &state,
+                owner_records.as_ref(),
                 &reservation_id,
                 &completion,
-                "Fleet startup reservation was cancelled",
-            )
-            .await;
-            return;
-        }
-        if let Some(records) = &owner_records
-            && let Err(error) = records.register(host.process_id(), &host)
-        {
-            host.shutdown_and_reap().await;
-            Self::fail_start_operation(
-                &operations,
-                &state,
-                &reservation_id,
-                &completion,
-                &format!(
-                    "{:#}",
-                    error.context("failed to persist Runtime process owner record")
-                ),
+                host,
+                if completion.is_cancelled() {
+                    "Fleet startup reservation was cancelled"
+                } else {
+                    "Runtime startup could not commit"
+                },
             )
             .await;
             return;
@@ -1422,24 +1614,67 @@ impl AgentRuntimeFleetManager {
             })()
         };
         match commit {
-            Ok(lease) => completion.complete(Ok(lease)),
-            Err(error) => {
-                let _ = host
-                    .shutdown_and_reap_until(Instant::now() + config.stop_timeout)
-                    .await;
-                if let Some(records) = &owner_records {
-                    records.remove(host.process_id());
+            Ok(lease) => {
+                if matches!(lease.host, RuntimeProcessHost::Codex(_)) {
+                    eprintln!(
+                        "Codex acquire run={} epoch={} host={} path=cold",
+                        run_lease.agent_run_id,
+                        run_lease.execution_epoch,
+                        lease.host.process_id()
+                    );
                 }
-                Self::fail_start_operation(
+                completion.complete(Ok(lease));
+            }
+            Err(error) => {
+                Self::retire_failed_start(
+                    &config,
                     &operations,
                     &state,
+                    owner_records.as_ref(),
                     &reservation_id,
                     &completion,
+                    host,
                     &format!("{error:#}"),
                 )
                 .await;
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn retire_failed_start(
+        config: &AgentRuntimeFleetConfig,
+        operations: &Mutex<()>,
+        state: &Mutex<FleetState>,
+        records: Option<&RuntimeOwnerRecordStore>,
+        reservation_id: &str,
+        completion: &Arc<FleetStartupOperation>,
+        host: RuntimeProcessHost,
+        message: &str,
+    ) {
+        let reaped = host
+            .shutdown_and_reap_until(Instant::now() + config.stop_timeout)
+            .await;
+        let _operation = operations.lock().await;
+        let mut state = state.lock().await;
+        if let Some(entry) = state.processes.get_mut(reservation_id) {
+            entry.host = Some(host.clone());
+            entry.startup = None;
+            entry.state = FleetProcessState::Stopping;
+            entry.retire_after_run = true;
+            if reaped {
+                if entry.adapter_kind == AdapterKind::CodexCli
+                    && let Some(key) = entry.run_lease.clone()
+                {
+                    state.reaped_leases.insert(key);
+                }
+                state.remove_process(reservation_id);
+                if let Some(records) = records {
+                    records.finish_stop(host.process_id());
+                }
+            }
+        }
+        completion.complete(Err(message.to_string()));
     }
 
     async fn fail_start_operation(
@@ -1457,6 +1692,12 @@ impl AgentRuntimeFleetManager {
             .and_then(|entry| entry.startup.as_ref())
             .is_some_and(|current| Arc::ptr_eq(current, completion));
         if owns_reservation {
+            if let Some(entry) = state.processes.get(reservation_id)
+                && entry.adapter_kind == AdapterKind::CodexCli
+                && let Some(key) = entry.run_lease.clone()
+            {
+                state.reaped_leases.insert(key);
+            }
             state.remove_process(reservation_id);
         }
         completion.complete(Err(message.to_string()));
@@ -1488,6 +1729,20 @@ impl AgentRuntimeFleetManager {
             .host
             .shutdown_and_reap_until(Instant::now() + stop_timeout)
             .await;
+        {
+            let state = state.lock().await;
+            if let Some(entry) = state.processes.get(&launch.process_id)
+                && entry.adapter_kind == AdapterKind::CodexCli
+                && let Some(key) = &entry.run_lease
+            {
+                eprintln!(
+                    "Codex stop run={} epoch={} host={} disposition=Stop reaped={reaped}",
+                    key.agent_run_id,
+                    key.execution_epoch,
+                    launch.host.process_id()
+                );
+            }
+        }
         let (committed, failed_retirement) = if reaped {
             let _operation = operations.lock().await;
             let mut state = state.lock().await;
@@ -1499,6 +1754,11 @@ impl AgentRuntimeFleetManager {
                             .as_ref()
                             .is_some_and(|current| Arc::ptr_eq(current, &launch.completion)) =>
                 {
+                    if entry.adapter_kind == AdapterKind::CodexCli
+                        && let Some(key) = entry.run_lease.clone()
+                    {
+                        state.reaped_leases.insert(key);
+                    }
                     state.remove_process(&launch.process_id);
                     (true, None)
                 }
@@ -1521,7 +1781,7 @@ impl AgentRuntimeFleetManager {
             retirement.complete(false);
         }
         if committed && let Some(records) = &owner_records {
-            records.remove(launch.host.process_id());
+            records.finish_stop(launch.host.process_id());
         }
         launch.completion.complete(reaped && committed);
     }
@@ -1539,12 +1799,76 @@ impl AgentRuntimeFleetManager {
         }
     }
 
+    /// Fence reuse as soon as a trusted failure is observed, before terminal
+    /// publication or any slow flush. This never stops a successor's lease.
+    pub(crate) async fn retire_agent_run_on_host(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        host_instance_id: &str,
+    ) -> bool {
+        let _operation = self.operations.lock().await;
+        let mut state = self.state.lock().await;
+        let key = RunLeaseKey {
+            agent_run_id: agent_run_id.to_string(),
+            execution_epoch,
+        };
+        let Some(id) = state.process_by_run.get(&key).cloned() else {
+            return false;
+        };
+        let Some(entry) = state.processes.get_mut(&id) else {
+            return false;
+        };
+        if entry.run_lease.as_ref() != Some(&key)
+            || entry
+                .host
+                .as_ref()
+                .is_none_or(|host| host.process_id() != host_instance_id)
+        {
+            return false;
+        }
+        entry.retire_after_run = true;
+        true
+    }
+
     pub(crate) async fn release(
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
         disposition: FleetReleaseDisposition,
     ) -> bool {
+        self.release_with_outcome(agent_run_id, execution_epoch, disposition)
+            .await
+            != FleetReleaseOutcome::ReapUnconfirmed
+    }
+
+    async fn stop_outcome(&self, key: &RunLeaseKey, stopped: bool) -> FleetReleaseOutcome {
+        let state = self.state.lock().await;
+        if state.reaped_leases.contains(key) || (stopped && !state.process_by_run.contains_key(key))
+        {
+            FleetReleaseOutcome::Reaped
+        } else {
+            FleetReleaseOutcome::ReapUnconfirmed
+        }
+    }
+
+    pub(crate) async fn acknowledge_cleanup(&self, agent_run_id: &str, execution_epoch: i64) {
+        let key = RunLeaseKey {
+            agent_run_id: agent_run_id.to_string(),
+            execution_epoch,
+        };
+        self.state.lock().await.reaped_leases.remove(&key);
+        if let Some(records) = &self.owner_records {
+            records.acknowledge_cleanup(&key);
+        }
+    }
+
+    pub(crate) async fn release_with_outcome(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        disposition: FleetReleaseDisposition,
+    ) -> FleetReleaseOutcome {
         let run_lease = RunLeaseKey {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
@@ -1560,10 +1884,14 @@ impl AgentRuntimeFleetManager {
             let _operation = self.operations.lock().await;
             let mut state = self.state.lock().await;
             let Some(process_id) = state.process_by_run.get(&run_lease).cloned() else {
-                return true;
+                return if state.reaped_leases.contains(&run_lease) {
+                    FleetReleaseOutcome::Reaped
+                } else {
+                    FleetReleaseOutcome::NoMatchingLease
+                };
             };
             let Some(entry) = state.processes.get_mut(&process_id) else {
-                return true;
+                return FleetReleaseOutcome::NoMatchingLease;
             };
             let should_stop = disposition == FleetReleaseDisposition::Stop
                 || (entry.state != FleetProcessState::BusyResident
@@ -1587,7 +1915,8 @@ impl AgentRuntimeFleetManager {
             let ReleasePlan::Stop(stop) = plan else {
                 unreachable!()
             };
-            return self.dispatch_stop_plan(stop).wait().await;
+            let stopped = self.dispatch_stop_plan(stop).wait().await;
+            return self.stop_outcome(&run_lease, stopped).await;
         };
         if let Some(config) = host.builtin_tool_process_config() {
             self.builtin_tool_leases
@@ -1598,6 +1927,15 @@ impl AgentRuntimeFleetManager {
         let stop = {
             let _operation = self.operations.lock().await;
             let mut state = self.state.lock().await;
+            // A concurrent completion may already have released this lease.
+            // Never stop a successor that acquired the same Host in the meantime.
+            if state.process_by_run.get(&run_lease) != Some(&process_id) {
+                return if state.reaped_leases.contains(&run_lease) {
+                    FleetReleaseOutcome::Reaped
+                } else {
+                    FleetReleaseOutcome::NoMatchingLease
+                };
+            }
             let reusable = quiescent
                 && state.process_by_run.get(&run_lease) == Some(&process_id)
                 && state.processes.get(&process_id).is_some_and(|entry| {
@@ -1628,8 +1966,11 @@ impl AgentRuntimeFleetManager {
             }
         };
         match stop {
-            None => true,
-            Some(stop) => self.dispatch_stop_plan(stop).wait().await,
+            None => FleetReleaseOutcome::Reusable,
+            Some(stop) => {
+                let stopped = self.dispatch_stop_plan(stop).wait().await;
+                self.stop_outcome(&run_lease, stopped).await
+            }
         }
     }
 
@@ -1640,26 +1981,46 @@ impl AgentRuntimeFleetManager {
         execution_epoch: i64,
         deadline: Instant,
     ) -> bool {
+        self.stop_agent_run_until_with_outcome(agent_run_id, execution_epoch, deadline)
+            .await
+            != FleetReleaseOutcome::ReapUnconfirmed
+    }
+
+    pub(crate) async fn stop_agent_run_until_with_outcome(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        deadline: Instant,
+    ) -> FleetReleaseOutcome {
         let key = RunLeaseKey {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
         };
+        let persisted_reap = self
+            .owner_records
+            .as_ref()
+            .is_some_and(|records| records.confirmed_stop(&key));
         let plan = {
             let Ok(_operation) = timeout_at(deadline, self.operations.lock()).await else {
-                return false;
+                return FleetReleaseOutcome::ReapUnconfirmed;
             };
             let mut state = self.state.lock().await;
             let Some(id) = state.process_by_run.get(&key).cloned() else {
-                return true;
+                return if state.reaped_leases.contains(&key) || persisted_reap {
+                    FleetReleaseOutcome::Reaped
+                } else {
+                    FleetReleaseOutcome::NoMatchingLease
+                };
             };
             if let Some(entry) = state.processes.get_mut(&id) {
                 entry.retire_after_run = true;
             }
             state.plan_stop(&id)
         };
-        timeout_at(deadline, self.dispatch_stop_plan(plan).wait())
+        let stopped = timeout_at(deadline, self.dispatch_stop_plan(plan).wait())
             .await
-            .unwrap_or(false)
+            .unwrap_or(false);
+        self.stop_outcome(&key, stopped).await
     }
 
     pub(crate) async fn invalidate_camp(&self, camp_id: &str) {
@@ -2094,6 +2455,7 @@ mod tests {
         let host = Arc::new(FakeRuntimeProcessHost {
             process_id: process_id.to_string(),
             shutdown_delay,
+            reap_gate: None,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
@@ -2522,6 +2884,7 @@ mod tests {
         let spawned_host = Arc::new(FakeRuntimeProcessHost {
             process_id: "shutdown-starting-host".to_string(),
             shutdown_delay: Duration::ZERO,
+            reap_gate: None,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
@@ -2592,6 +2955,7 @@ mod tests {
         let spawned_host = Arc::new(FakeRuntimeProcessHost {
             process_id: "force-stop-starting-host".to_string(),
             shutdown_delay: Duration::ZERO,
+            reap_gate: None,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
@@ -2662,6 +3026,7 @@ mod tests {
         let spawned_host = Arc::new(FakeRuntimeProcessHost {
             process_id: "delete-starting-host".to_string(),
             shutdown_delay: Duration::ZERO,
+            reap_gate: None,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
@@ -2803,6 +3168,7 @@ mod tests {
                     RuntimeProcessHost::Fake(Arc::new(FakeRuntimeProcessHost {
                         process_id: process_id.clone(),
                         shutdown_delay: Duration::from_secs(2),
+                        reap_gate: None,
                         reaped: std::sync::atomic::AtomicBool::new(false),
                         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
                         zcode_background: AtomicBool::new(false),
@@ -2999,6 +3365,7 @@ mod tests {
         let slow_host = Arc::new(FakeRuntimeProcessHost {
             process_id: "host-lock-timeout".to_string(),
             shutdown_delay: Duration::from_millis(100),
+            reap_gate: None,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
@@ -3213,6 +3580,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor() {
+        let fleet = AgentRuntimeFleetManager::new(Default::default());
+        let request = |run| {
+            let mut request = acquire_request(run, "camp");
+            request.adapter_kind = AdapterKind::CodexCli;
+            request
+        };
+        fleet
+            .acquire(request("failed"), || async { Ok(fake_host("host-a")) })
+            .await
+            .unwrap();
+        assert!(!fleet.retire_agent_run_on_host("failed", 0, "host-a").await);
+        assert!(
+            !fleet
+                .retire_agent_run_on_host("failed", 1, "other-host")
+                .await
+        );
+        assert!(fleet.retire_agent_run_on_host("failed", 1, "host-a").await);
+        assert_eq!(
+            fleet
+                .release_with_outcome("failed", 1, FleetReleaseDisposition::Reusable)
+                .await,
+            FleetReleaseOutcome::Reaped
+        );
+        let next = fleet
+            .acquire(request("next"), || async { Ok(fake_host("host-b")) })
+            .await
+            .unwrap();
+        assert_eq!(next.host.process_id(), "host-b");
+        assert!(!fleet.retire_agent_run_on_host("failed", 1, "host-a").await);
+        assert_eq!(
+            fleet
+                .release_with_outcome("failed", 1, FleetReleaseDisposition::Stop)
+                .await,
+            FleetReleaseOutcome::Reaped
+        );
+        assert!(next.host.is_healthy());
+        fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
     async fn cancelled_run_retains_its_lease_until_a_confirmed_reap() {
         let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
         insert_fake_process(&fleet, "cancelled", Duration::from_millis(50)).await;
@@ -3221,14 +3629,15 @@ mod tests {
             execution_epoch: 1,
         };
         for _ in 0..2 {
-            assert!(
-                !fleet
-                    .stop_agent_run_until(
+            assert_eq!(
+                fleet
+                    .stop_agent_run_until_with_outcome(
                         &key.agent_run_id,
                         1,
                         Instant::now() + Duration::from_millis(5)
                     )
-                    .await
+                    .await,
+                FleetReleaseOutcome::ReapUnconfirmed
             );
             let state = fleet.state.lock().await;
             assert_eq!(
@@ -3240,20 +3649,44 @@ mod tests {
                 FleetProcessState::Stopping
             );
         }
+        let mut successor =
+            acquire_request("blocked-successor", "rvcamp_01h47kvsy5fk1shh6w1g60eecf");
+        successor.adapter_kind = AdapterKind::CodexCli;
         assert!(
             fleet
-                .stop_agent_run_until(
+                .acquire(successor, || async {
+                    panic!("must not start before the old Host is reaped")
+                })
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fleet
+                .stop_agent_run_until_with_outcome(
                     &key.agent_run_id,
                     1,
                     Instant::now() + Duration::from_secs(1)
                 )
-                .await
+                .await,
+            FleetReleaseOutcome::Reaped
         );
         assert!(fleet.state.lock().await.processes.is_empty());
-        assert!(
+        assert_eq!(
             fleet
-                .stop_agent_run_until(&key.agent_run_id, 1, Instant::now())
-                .await
+                .stop_agent_run_until_with_outcome(&key.agent_run_id, 1, Instant::now())
+                .await,
+            FleetReleaseOutcome::Reaped
+        );
+        fleet.acknowledge_cleanup(&key.agent_run_id, 1).await;
+        assert_eq!(
+            fleet
+                .stop_agent_run_until_with_outcome(
+                    &key.agent_run_id,
+                    1,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await,
+            FleetReleaseOutcome::NoMatchingLease
         );
     }
 
@@ -3306,6 +3739,416 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn scoped_cleanup_receipt_survives_restart_until_durable_ack() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-stop-receipt-{}", uuid::Uuid::new_v4()));
+        crate::platform::prepare_private_directory(&root).unwrap();
+        let store = RuntimeOwnerRecordStore::new(&root).unwrap();
+        let key = RunLeaseKey {
+            agent_run_id: "old-run".into(),
+            execution_epoch: 7,
+        };
+        let record = RuntimeOwnerRecord {
+            run_lease: Some(key.clone()),
+            reaped: true,
+            core_generation: "old-core".into(),
+            pid: u32::MAX,
+            process_group_id: -1,
+            executable_path: "fixture".into(),
+            process_start_identity: None,
+            windows_job_name: None,
+        };
+        crate::platform::atomic_write_private_bytes(
+            &store.record_path("old-host"),
+            &serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+        let fleet = AgentRuntimeFleetManager::with_owner_records(
+            Default::default(),
+            Some(store.clone()),
+            Arc::new(BuiltinToolLeaseRegistry::default()),
+        );
+        assert_eq!(
+            fleet
+                .stop_agent_run_until_with_outcome(
+                    "old-run",
+                    6,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await,
+            FleetReleaseOutcome::NoMatchingLease
+        );
+        assert_eq!(
+            fleet
+                .stop_agent_run_until_with_outcome(
+                    "old-run",
+                    7,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await,
+            FleetReleaseOutcome::Reaped
+        );
+        assert!(store.record_path("old-host").exists());
+        fleet.acknowledge_cleanup("old-run", 7).await;
+        assert!(!store.record_path("old-host").exists());
+        assert_eq!(
+            fleet
+                .stop_agent_run_until_with_outcome(
+                    "old-run",
+                    7,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await,
+            FleetReleaseOutcome::NoMatchingLease
+        );
+
+        #[cfg(windows)]
+        {
+            use crate::managed_process::{
+                ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose,
+                ManagedStdinPolicy, ManagedWindowsArgvDialect,
+            };
+            // Reuse the native Managed Process helper rather than cmd.exe,
+            // whose command-line grammar is not the Microsoft CRT dialect.
+            let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "managed_process::tests::windows_owned_runtime_helper",
+                    "--ignored",
+                ])
+                .env_remove("ROVAI_MANAGED_PROCESS_HELPER_MODE")
+                .current_dir(&root);
+            let spec = ManagedProcessLaunchSpec::capture(
+                &command,
+                ManagedProcessPurpose::RuntimeHost,
+                ManagedStdinPolicy::Null,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "runtime-owner:receipt-test",
+            )
+            .unwrap();
+            let mut child = ManagedProcess::spawn(spec).unwrap();
+            let mut crashed_record = record.clone();
+            crashed_record.reaped = false;
+            // Deliberately use a live unrelated PID: only the persisted launch's
+            // Job can prove cleanup, independently of PID reuse.
+            crashed_record.pid = std::process::id();
+            crashed_record.process_start_identity =
+                owner_process_start_identity(child.id().unwrap());
+            crashed_record.windows_job_name = Some(child.windows_job_name().to_owned());
+            let path = store.record_path("crashed-host");
+            crate::platform::atomic_write_private_bytes(
+                &path,
+                &serde_json::to_vec(&crashed_record).unwrap(),
+            )
+            .unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_secs(5), child.wait())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .success()
+            );
+            // Even an observable empty Job is not a cross-Core exit receipt.
+            assert!(child.tree_is_empty().unwrap());
+            let handshake = root.join("live.pid");
+            let mut live_command = tokio::process::Command::new(std::env::current_exe().unwrap());
+            live_command
+                .args([
+                    "--exact",
+                    "managed_process::tests::windows_owned_runtime_helper",
+                    "--ignored",
+                ])
+                .env("ROVAI_MANAGED_PROCESS_HELPER_MODE", "owned-runtime")
+                .env("ROVAI_MANAGED_PROCESS_HELPER_FILE", &handshake)
+                .current_dir(&root);
+            let live_spec = ManagedProcessLaunchSpec::capture(
+                &live_command,
+                ManagedProcessPurpose::RuntimeHost,
+                ManagedStdinPolicy::Piped,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "runtime-owner:live-receipt-test",
+            )
+            .unwrap();
+            let mut live_child = ManagedProcess::spawn(live_spec).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while std::fs::read_to_string(&handshake)
+                    .ok()
+                    .and_then(|pid| pid.trim().parse::<u32>().ok())
+                    != live_child.id()
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("native helper did not enter its live state");
+            let mut live_record = crashed_record.clone();
+            live_record.windows_job_name = Some(live_child.windows_job_name().to_owned());
+            let live_path = store.record_path("live-host");
+            crate::platform::atomic_write_private_bytes(
+                &live_path,
+                &serde_json::to_vec(&live_record).unwrap(),
+            )
+            .unwrap();
+            let restarted = AgentRuntimeFleetManager::new_with_builtin_tools(
+                Default::default(),
+                &root,
+                Arc::new(BuiltinToolLeaseRegistry::default()),
+            )
+            .unwrap();
+            assert_eq!(
+                restarted
+                    .stop_agent_run_until_with_outcome(
+                        "old-run",
+                        7,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await,
+                FleetReleaseOutcome::NoMatchingLease
+            );
+            assert!(
+                !serde_json::from_slice::<RuntimeOwnerRecord>(&std::fs::read(&live_path).unwrap())
+                    .unwrap()
+                    .reaped
+            );
+            assert!(
+                !serde_json::from_slice::<RuntimeOwnerRecord>(&std::fs::read(&path).unwrap())
+                    .unwrap()
+                    .reaped
+            );
+            // Only the owner with complete process-exit evidence persists this.
+            store.finish_stop("crashed-host");
+            live_child.force_terminate_tree().unwrap();
+            tokio::time::timeout(Duration::from_secs(5), live_child.wait())
+                .await
+                .unwrap()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !live_child.tree_is_empty().unwrap() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("native Job did not finish descendant cleanup");
+            store.finish_stop("live-host");
+            assert_eq!(
+                restarted
+                    .stop_agent_run_until_with_outcome(
+                        "old-run",
+                        6,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await,
+                FleetReleaseOutcome::NoMatchingLease
+            );
+            assert_eq!(
+                restarted
+                    .stop_agent_run_until_with_outcome(
+                        "old-run",
+                        7,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await,
+                FleetReleaseOutcome::Reaped
+            );
+            assert!(path.exists());
+            let retained: RuntimeOwnerRecord =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert!(retained.reaped);
+            drop(child);
+            drop(live_child);
+            // Durable positive evidence remains valid after the Job disappears.
+            assert_eq!(
+                restarted
+                    .stop_agent_run_until_with_outcome(
+                        "old-run",
+                        7,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await,
+                FleetReleaseOutcome::Reaped
+            );
+            restarted.acknowledge_cleanup("old-run", 6).await;
+            assert!(path.exists());
+            restarted.acknowledge_cleanup("old-run", 7).await;
+            assert!(!path.exists());
+            assert!(!live_path.exists());
+
+            // The real Job above is now gone. Neither a live root, an absent
+            // PID, nor PID reuse can replace the missing tree-exit evidence.
+            // These cases used to falsely grant Reaped for the last two rows.
+            for (pid, start_identity) in [
+                (
+                    std::process::id(),
+                    owner_process_start_identity(std::process::id()),
+                ),
+                (u32::MAX, None),
+                (std::process::id(), crashed_record.process_start_identity),
+            ] {
+                crashed_record.pid = pid;
+                crashed_record.process_start_identity = start_identity;
+                crate::platform::atomic_write_private_bytes(
+                    &path,
+                    &serde_json::to_vec(&crashed_record).unwrap(),
+                )
+                .unwrap();
+                let restarted = AgentRuntimeFleetManager::new_with_builtin_tools(
+                    Default::default(),
+                    &root,
+                    Arc::new(BuiltinToolLeaseRegistry::default()),
+                )
+                .unwrap();
+                assert_eq!(
+                    restarted
+                        .stop_agent_run_until_with_outcome(
+                            "old-run",
+                            7,
+                            Instant::now() + Duration::from_secs(1)
+                        )
+                        .await,
+                    FleetReleaseOutcome::NoMatchingLease
+                );
+                assert!(
+                    !serde_json::from_slice::<RuntimeOwnerRecord>(&std::fs::read(&path).unwrap())
+                        .unwrap()
+                        .reaped,
+                    "Job name absence must retain the scoped cleanup obligation"
+                );
+                assert!(path.exists());
+                store.remove("crashed-host");
+            }
+
+            // Old anonymous Jobs and invalid identities cannot prove a tree
+            // empty. Absence of a root PID alone must never grant a receipt.
+            for job_name in [None, Some("invalid-job".to_string())] {
+                crashed_record.windows_job_name = job_name;
+                crashed_record.pid = u32::MAX;
+                crate::platform::atomic_write_private_bytes(
+                    &path,
+                    &serde_json::to_vec(&crashed_record).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    restarted
+                        .stop_agent_run_until_with_outcome(
+                            "old-run",
+                            7,
+                            Instant::now() + Duration::from_secs(1),
+                        )
+                        .await,
+                    FleetReleaseOutcome::NoMatchingLease
+                );
+                assert!(
+                    !serde_json::from_slice::<RuntimeOwnerRecord>(&std::fs::read(&path).unwrap())
+                        .unwrap()
+                        .reaped
+                );
+                store.remove("crashed-host");
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_owner_registration_admits_only_private_or_legacy_inherited_storage() {
+        use std::os::windows::process::CommandExt;
+        let icacls = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("icacls.exe");
+        // This owner covers the private-storage migration seam. The receipt
+        // owner above covers lifecycle/ACK; lower-level ACL tests cannot prove
+        // that Fleet prepares every parent and preserves legacy scoped records.
+        for legacy in [false, true] {
+            let root =
+                std::env::temp_dir().join(format!("rovai-owner-storage-{}", uuid::Uuid::new_v4()));
+            crate::platform::prepare_private_directory(&root).unwrap();
+            let fleet_root = root.join("runtime-fleet");
+            let owners = fleet_root.join("owners");
+            let key = RunLeaseKey {
+                agent_run_id: "old-run".into(),
+                execution_epoch: 7,
+            };
+            if legacy {
+                // Elevated Windows runners can default ordinary child ownership
+                // to Administrators. This migration admits only current-user
+                // ownership: establish that explicitly, then reset only DACLs
+                // to the private parent's inherited policy.
+                crate::platform::prepare_private_directory(&fleet_root).unwrap();
+                crate::platform::prepare_private_directory(&owners).unwrap();
+                crate::platform::atomic_write_private_bytes(
+                    &owners.join("legacy.json"),
+                    &serde_json::to_vec(&RuntimeOwnerRecord {
+                        run_lease: Some(key.clone()),
+                        reaped: true,
+                        core_generation: "old-core".into(),
+                        pid: u32::MAX,
+                        process_group_id: 0,
+                        executable_path: "fixture".into(),
+                        process_start_identity: None,
+                        windows_job_name: None,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+                let reset = std::process::Command::new(&icacls)
+                    .arg(&fleet_root)
+                    .args(["/reset", "/T", "/Q"])
+                    .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+                    .output()
+                    .unwrap();
+                assert!(
+                    reset.status.success(),
+                    "failed to establish inherited-ACL fixture"
+                );
+                assert!(crate::platform::prepare_private_directory(&owners).is_err());
+            }
+            let store = RuntimeOwnerRecordStore::new(&root).unwrap();
+            store
+                .register(
+                    "new-host",
+                    &fake_host("new-host"),
+                    Some(RunLeaseKey {
+                        agent_run_id: "new-run".into(),
+                        execution_epoch: 8,
+                    }),
+                )
+                .unwrap();
+            crate::platform::prepare_private_directory(&root.join("runtime-fleet")).unwrap();
+            crate::platform::prepare_private_directory(&owners).unwrap();
+            crate::platform::open_private_read_file(&store.record_path("new-host")).unwrap();
+            if legacy {
+                assert!(store.confirmed_stop(&key));
+                assert!(store.record_path("legacy").exists());
+                store.acknowledge_cleanup(&key);
+                assert!(!store.record_path("legacy").exists());
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
+        // A broader ACL under the private Core root is not a legacy managed
+        // child and must not be rewritten or silently ignored. Grant Everyone
+        // explicitly so this case does not depend on the machine's TEMP ACL.
+        let root =
+            std::env::temp_dir().join(format!("rovai-owner-untrusted-{}", uuid::Uuid::new_v4()));
+        crate::platform::prepare_private_directory(&root).unwrap();
+        let destination = root.join("runtime-fleet");
+        crate::platform::prepare_private_directory(&destination).unwrap();
+        let grant = std::process::Command::new(icacls)
+            .arg(&destination)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F", "/Q"])
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+            .output()
+            .unwrap();
+        assert!(
+            grant.status.success(),
+            "failed to establish the explicit broad-ACL fixture"
+        );
+        assert!(RuntimeOwnerRecordStore::new(&root).is_err());
+        assert!(crate::platform::prepare_private_directory(&destination).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn force_kill_targets_only_current_generation_and_preserves_unreaped_records() {
@@ -3341,11 +4184,14 @@ mod tests {
         std::fs::write(
             &current_record_path,
             serde_json::to_vec(&RuntimeOwnerRecord {
+                run_lease: None,
+                reaped: false,
                 core_generation: store.core_generation.clone(),
                 pid: current_pid,
                 process_group_id: unsafe { libc::getpgid(current_pid as i32) },
                 executable_path: current_executable,
                 process_start_identity: owner_process_start_identity(current_pid),
+                windows_job_name: None,
             })
             .unwrap(),
         )
@@ -3353,11 +4199,14 @@ mod tests {
         std::fs::write(
             &foreign_record_path,
             serde_json::to_vec(&RuntimeOwnerRecord {
+                run_lease: None,
+                reaped: false,
                 core_generation: "another-generation".to_string(),
                 pid: foreign_pid,
                 process_group_id: unsafe { libc::getpgid(foreign_pid as i32) },
                 executable_path: foreign_executable,
                 process_start_identity: owner_process_start_identity(foreign_pid),
+                windows_job_name: None,
             })
             .unwrap(),
         )
@@ -3365,11 +4214,14 @@ mod tests {
         std::fs::write(
             &mismatched_record_path,
             serde_json::to_vec(&RuntimeOwnerRecord {
+                run_lease: None,
+                reaped: false,
                 core_generation: store.core_generation.clone(),
                 pid: mismatched_pid,
                 process_group_id: unsafe { libc::getpgid(mismatched_pid as i32) },
                 executable_path: "/bin/not-the-owned-runtime".to_string(),
                 process_start_identity: owner_process_start_identity(mismatched_pid),
+                windows_job_name: None,
             })
             .unwrap(),
         )

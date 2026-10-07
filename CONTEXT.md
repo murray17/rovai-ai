@@ -1290,7 +1290,7 @@ A transient, reconstructible observation of where one Product Runtime can or can
 _Avoid_: AdapterInstallation, capability snapshot, Runtime Readiness, installed-product authority
 
 **AdapterInstallation**:
-A shared, durable local launch identity and configuration scope for one Agent Runtime Adapter. Multiple AgentProfiles may reference it, while its verified executable path, observed binary version, and capabilities may change through upgrade or relocation. A removed AgentProfile may retain an inert historical reference, but that reference is not an active launch, health, projection, or deletion blocker.
+A shared durable local launch identity: the selected Adapter, executable entry, authentication scope and generation. It records where and how to launch, not whether the next Run will succeed. Static discovery preserves target and file identity without creating health evidence.
 _Avoid_: Adapter version, immutable binary, immutable executable path
 
 **Managed Default Installation**:
@@ -1298,7 +1298,7 @@ The single Rovai-ai-managed AdapterInstallation that internally resolves an ordi
 _Avoid_: dynamically best Installation, per-Member Installation, custom wrapper
 
 **Verified Installation Relocation**:
-The automatic in-place replacement of a missing AdapterInstallation launch path after an ordered same-Adapter candidate passes full deep probing. A failed alternate candidate is local attempt evidence and cannot stale the current Installation or its last-known-good model catalog. Only a successfully adopted candidate replaces the path, advances the generation and capability snapshot, and preserves the Installation identity and its Member references; frozen AgentRuns remain unchanged.
+The bounded replacement of an unavailable launch path within the same Adapter and authentication identity after static path and consistent file fingerprint checks. The actual task Host then verifies protocol and task requirements before input; relocation does not require an independent health Probe.
 _Avoid_: name-only rebinding, new Installation, rewriting frozen Run Runtime Configuration
 
 **Adapter Capability Snapshot**:
@@ -1310,7 +1310,7 @@ One bounded deep inspection of an AdapterInstallation or ordered relocation cand
 _Avoid_: Adapter Capability Snapshot, Runtime Discovery Observation, readiness proof
 
 **Adapter Capability Snapshot Freshness**:
-The distinction between a time-aged snapshot that is due for background refresh but remains usable while its launch identity still matches, and a stale snapshot whose launch target, configuration, or confirmed admission evidence no longer matches and blocks new AgentRuns.
+The age and launch-identity validity of historical diagnostic/catalog evidence. It affects display and explicit diagnostic refresh, never authorizes or blocks a new real Host initialization.
 _Avoid_: treating age alone as staleness, permanent Ready, refresh due as a Run blocker
 
 **Product Runtime Selection**:
@@ -1322,7 +1322,7 @@ The application-level read state formed from Product Runtime Catalog membership,
 _Avoid_: Member readiness, persisted display label, direct rendering of internal discovery stages, execution admission
 
 **Runtime Resolution Job**:
-Deduplicated background work that resolves or refreshes a Product Runtime through discovery, verified Installation creation or relocation, and deep probing. Core schedules it after startup discovery, later discovery, Runtime installation or update, executable identity change, a model Picker refresh request, cache expiry, an explicit user check, or Dispatch Preflight. Switching a Member's Runtime draft does not schedule it. It owns no Renderer draft or Run input and is never a configuration-save or ordinary message-send gate; AgentRun dispatch independently checks the current Installation and frozen Run Runtime Configuration.
+Deduplicated explicit diagnostic or model-Picker work owned by the existing Check Manager. Startup/rescan only discovers entries; normal dispatch resolves the selected entry and validates the actual task Host. Page entry, Runtime selection and idle time do not schedule deep health checks.
 _Avoid_: AgentRun, form-submit preflight, message-send preflight, synchronous page check, Runtime fallback, mutable Run configuration
 
 **Pending Execution Intent**:
@@ -1334,15 +1334,15 @@ The product-facing label `智能体` (English `Agent`, plural `Agents`) names th
 _Avoid_: using `智能体` for the teammate identity, displaying Adapter Installation, bare Runtime, or English `Ready` as generic end-user labels
 
 **Runtime User Status**:
-The single actionable status shown for one Product Runtime or Member Runtime configuration: `正在检查…`, `可用`, `需要登录`, `未安装`, `版本不支持`, `不可用`, or `暂时无法确认`; no selection is `未配置智能体`. It may include a secondary reason or repair link, but never exposes `found_uninspected`, “已找到”, “尚未检查”, or “已检查”. A still-usable cached success remains `可用` while Core refreshes it in the background.
+The actionable installation state: Settings displays detected entries as 已检测到; ordinary Member information shows the configured product name without routine readiness labels or verification explanations. Missing installations, absent configuration and actionable failures remain visible. Detection does not claim authentication or protocol readiness. Initializing and concrete failures belong to the current Run.
 _Avoid_: Runtime Discovery status, Probe Attempt status, Snapshot lifecycle label, stacked primary statuses
 
 **Runtime Readiness Projection**:
-The advisory AgentProfile read state derived from its optional complete Member Runtime Configuration, Core-internal resolved Runtime binding, and the latest successful Adapter Capability Snapshot. No configuration yields `runtime_not_configured`; a saved fixed model, model option, or permission value that the latest snapshot no longer supports makes the Member unavailable and blocks new AgentRuns. Core never silently creates or rewrites configuration, while already frozen AgentRuns remain unchanged. Member configuration pages read cached evidence immediately and only signal Core to ensure or refresh it in the background. Opening the page, switching the local draft, saving, ordinary member lists, Quick Chat rendering, Thread opening, and message admission perform no deep probe, executable content read, or fingerprint calculation. The actual Runtime launch boundary compares persisted file identity and performs a full fingerprint only after change or missing evidence; a failure blocks execution, schedules background repair, and preserves the user message.
+An advisory projection of complete saved Member configuration and enabled installation. InstalledUnverified can configure and attempt a Run without prior Probe success. Current static permission/identity errors remain actionable; historical health does not lock execution. Real Host validation and input fencing own actual admission.
 _Avoid_: authoritative execution admission, synchronous deep probing or executable hashing during page reads and saves, UI-derived launch safety
 
 **Adapter Permission Configuration**:
-The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values from a verified capability schema. It exists only inside a complete Member Runtime Configuration. When the user explicitly saves a ready configuration, Core may materialize the Adapter's explicitly defined least-restrictive member defaults after validating them against the latest capability snapshot; background resolution and capability refresh never materialize or rewrite those values. The configuration remains distinct from Rovai-ai business Capabilities.
+The Adapter-native permissions explicitly saved with Member Runtime Configuration. Core validates the shipped static schema and preserves chosen values; the actual Host must apply or confirm them before task input. Background discovery never materializes or widens permissions.
 _Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments, enum-order defaults, background permission expansion
 
 **Runtime Default Model Selection**:
@@ -1350,11 +1350,11 @@ A Member model policy that follows the Product Runtime's current default model t
 _Avoid_: current default model snapshot, implicit fixed model, Runtime default model with overridden options
 
 **Explicit Model Selection**:
-A Member model policy that persists one model identifier and only the model-specific options reported for that model by the current Adapter Capability Snapshot.
+The exact model identifier and options saved by the User. Picker metadata assists selection but is not execution authority. The real task Host must validate or explicitly accept the requested model and every option before input; silent replacement is forbidden.
 _Avoid_: arbitrary model string, Runtime Default Model Selection with overrides, cross-Runtime model options
 
 **Member Runtime Configuration**:
-The atomically saved Product Runtime, model policy, and Adapter Permission Configuration for one AgentProfile. Changing the Runtime in an editor replaces only the draft until one version-checked save validates and replaces the whole persisted configuration against a Managed Default Installation. A Ready snapshot can validate the full configuration; Light Ready can validate only Runtime Default Model Selection and the Adapter's static permission descriptors. Every real dispatch still requires Ready through the uniform Dispatch Preflight. If validation cannot complete, nothing is persisted and the AgentProfile remains unconfigured; background discovery never synthesizes a partial or complete configuration.
+The atomically saved Product Runtime, exact model policy and Adapter-native permission values. Saving validates configuration syntax and static permission schema against the selected Installation without requiring historical Ready. Dynamic protocol/model requirements are validated in the real Host before task input. Discovery never creates or rewrites Member configuration.
 _Avoid_: adapter-only persisted selection, independent Runtime and parameter saves, cross-Runtime parameter retention, live form state, silently materialized configuration
 
 **Run Runtime Configuration**:

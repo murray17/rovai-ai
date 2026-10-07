@@ -297,6 +297,12 @@ const api: RovaiApi = {
     recordProvisionedRuntime(version) {
       return ipcRenderer.invoke('rovai:onboarding-record-runtime', version)
     },
+    prepareRuntimeCopies(targets) {
+      return ipcRenderer.invoke('rovai:onboarding-prepare-runtime-copies', targets)
+    },
+    recordRuntimeCopy(agentId, commandId, outcome) {
+      return ipcRenderer.invoke('rovai:onboarding-record-runtime-copy', agentId, commandId, outcome)
+    },
     recordProvisionedThread(threadId) {
       return ipcRenderer.invoke('rovai:onboarding-record-camp', threadId)
     },

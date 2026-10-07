@@ -78,6 +78,7 @@ pub mod mcp_import;
 pub mod mcp_projection;
 pub mod member_avatar;
 pub mod member_studio;
+pub mod member_tool;
 pub mod memory;
 pub mod memory_retrieval;
 pub mod memory_secret;
@@ -98,6 +99,7 @@ pub mod runtime;
 pub mod runtime_activity_mapping;
 pub mod runtime_basis;
 pub mod runtime_compaction_display;
+pub mod runtime_custom_api;
 pub mod runtime_diff;
 pub mod runtime_discovery;
 #[cfg(windows)]

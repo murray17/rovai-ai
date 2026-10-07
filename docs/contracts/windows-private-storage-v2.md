@@ -3,7 +3,7 @@ document_type: contract
 contract: windows-private-storage-v2
 status: accepted
 source_version: v1.15
-last_updated: 2026-08-30
+last_updated: 2026-10-06
 ---
 
 # Windows Private Storage v2
@@ -34,6 +34,12 @@ admission; copied descendants inherit only the private user/SYSTEM ACL and final
 Existing unknown directories with inherited/broader ACL, reparse points, wrong owner or identity drift are rejected rather
 than repaired and reused. Runtime receives only the current Camp's exact `attachments` child, never `<data_dir>`,
 `runtime-files`, `camps`, Authority Attachment or another Camp.
+
+The Runtime Fleet's internal `runtime-fleet/owners` ledger also uses private-directory and atomic private-file primitives.
+Within an already admitted private Core root, only these known managed directories and their owner JSON files may migrate
+the old writer's exact inherited user/SYSTEM ACL to a protected DACL. Broader grants, unknown owners, reparse points and
+wrong object types remain blockers; admission of unknown storage roots is unchanged. A migration/open failure blocks
+Fleet initialization instead of silently dropping durable ownership.
 
 ## 2. Platform qualification
 

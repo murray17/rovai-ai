@@ -887,6 +887,7 @@ mod tests {
                 (Some(&second), vec!["shared", "two"]),
             ] {
                 let mut configuration = RuntimeStartupConfiguration {
+                    custom_api_snapshot: None,
                     program_path: None,
                     environment: vec![RuntimeEnvironmentVariable {
                         name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
@@ -930,6 +931,7 @@ mod tests {
         )
         .unwrap();
         let configuration = RuntimeStartupConfiguration {
+            custom_api_snapshot: None,
             program_path: None,
             environment: vec![RuntimeEnvironmentVariable {
                 name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
@@ -1059,6 +1061,7 @@ mod tests {
             std::os::unix::fs::symlink(&shared, &pi_root).unwrap();
         }
         let configuration = RuntimeStartupConfiguration {
+            custom_api_snapshot: None,
             program_path: None,
             environment: vec![RuntimeEnvironmentVariable {
                 name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),

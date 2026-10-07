@@ -45,10 +45,11 @@ function render(value: AppUpdateSnapshot | null, options: {
   actionError?: AppUpdateActionError
   readOnly?: boolean
   product?: 'desktop' | 'server'
+  canUpdate?: boolean
 } = {}): string {
   return renderToStaticMarkup(createElement(AboutUpdatesSettingsView, {
     snapshot: value,
-    canUpdate: true,
+    canUpdate: options.canUpdate ?? true,
     loading: options.loading ?? false,
     loadError: options.loadError ?? false,
     actionError: options.actionError ?? null,
@@ -84,15 +85,15 @@ describe('AboutUpdatesSettingsView', () => {
   it('always shows the installed version and keeps all update mutations user initiated', () => {
     const markup = render(snapshot())
     expect(markup).toContain('class="about-updates-settings" data-update-read-only="false"')
-    expect(markup).toContain('class="about-update-control" data-update-status="idle"')
+    expect(markup).toContain('data-update-status="idle" role="status"')
     expect(markup).toContain('<h1>关于与更新</h1>')
-    expect(markup).toContain('版本 v0.0.2')
+    expect(markup).toContain('data-installed-version="true">v0.0.2</span>')
     expect(markup).toContain('>检查更新</button>')
     expect(markup).toContain('下载与安装由你决定')
     expect(markup).toContain('更新日志</h2>')
     expect(markup).toContain('已安装版本日志')
     expect(markup).toContain('发布日期：<time dateTime="2026-08-22T08:00:00.000Z">2026年8月22日</time>')
-    expect(markup.match(/Rovai AI v0\.0\.2/g)).toHaveLength(1)
+    expect(markup).toContain('<span class="about-release-version">v0.0.2</span>')
     expect(markup).not.toContain('role="tablist"')
     expect(markup).not.toContain('官方 Releases')
   })
@@ -108,14 +109,15 @@ describe('AboutUpdatesSettingsView', () => {
     }))
     expect(markup).toContain('>下载更新</button>')
     expect(markup).toContain('>重新检查</button>')
-    expect(markup).toContain('等待下载确认')
-    expect(markup).toContain('Rovai AI 0.0.3')
+    expect(markup).toContain('新版本 v0.0.3 可用')
+    expect(markup).toContain('data-app-update-release-version="0.0.3"')
     expect(markup).toContain('role="tablist" aria-label="日志版本"')
     expect(markup).toContain('aria-selected="true" tabindex="0" data-app-update-release-tab="available"')
     expect(markup).toContain('id="about-release-panel-current" role="tabpanel"')
     expect(markup).toContain('v0.0.3')
     expect(markup).toContain('2026年8月24日')
     expect(markup).toContain('启动自动')
+    expect(markup.indexOf('检查记录')).toBeGreaterThan(markup.indexOf('更新日志</h2>'))
     expect(markup).not.toContain('官方 Releases')
   })
 
@@ -127,11 +129,10 @@ describe('AboutUpdatesSettingsView', () => {
       checkedAt: '2026-08-25T08:00:00.000Z',
       lastSuccessfulCheckAt: '2026-08-24T08:00:00.000Z'
     }))
-    expect(markup).toContain('正在重新检查')
-    expect(markup).toContain('现有更新信息会保留')
+    expect(markup).toContain('正在检查更新 · 已知 v0.0.3')
     expect(markup).toContain('disabled="" aria-busy="true"')
     expect(markup).toContain('手动')
-    expect(markup).toContain('Rovai AI 0.0.3')
+    expect(markup).toContain('data-app-update-release-version="0.0.3"')
   })
 
   it('shows stable download progress and transfer detail', () => {
@@ -143,25 +144,28 @@ describe('AboutUpdatesSettingsView', () => {
       totalBytes: 100_000_000,
       bytesPerSecond: 5_000_000
     }))
-    expect(markup).toContain('正在下载 42%')
-    expect(markup).toContain('class="about-update-control" data-update-status="downloading"')
+    expect(markup).toContain('下载中…</button>')
+    expect(markup).not.toContain('正在下载 42%')
+    expect(markup.match(/>42%</g)).toHaveLength(1)
+    expect(markup).toContain('data-update-status="downloading"')
     expect(markup).toContain('<progress max="100" value="42.3"')
     expect(markup).toContain('40.4 MB / 95.4 MB')
     expect(markup).toContain('4.8 MB/s')
-    expect(markup).toContain('下载期间可以继续使用')
+    expect(markup).toContain('正在下载 v0.0.3')
   })
 
   it('marks a read-only host without rendering update actions', () => {
     const markup = render(snapshot({ status: 'up_to_date' }), { readOnly: true })
     expect(markup).toContain('class="about-updates-settings" data-update-read-only="true"')
-    expect(markup).not.toContain('class="about-update-control"')
+    expect(markup).not.toContain('class="about-update-actions"')
+    expect(markup).not.toContain('id="about-update-status"')
+    expect(markup).toContain('已安装版本日志')
   })
 
   it('offers installation only after the update is downloaded', () => {
     const ready = render(snapshot({ status: 'ready_to_install', availableRelease: release }))
     expect(ready).toContain('>安装并重启</button>')
-    expect(ready).toContain('v0.0.3 已准备好')
-    expect(ready).toContain('点击后将安装更新并重新启动')
+    expect(ready).toContain('v0.0.3 已下载')
     expect(ready).not.toContain('<progress')
 
     const installing = render(snapshot({ status: 'installing', availableRelease: release }))
@@ -208,8 +212,26 @@ describe('AboutUpdatesSettingsView', () => {
       failureReason: 'install_failed'
     }))
     expect(installFailed).toContain('>重试安装</button>')
-    expect(installFailed).toContain('Core 与当前 App 仍可继续使用')
+    expect(installFailed).toContain('当前应用仍可使用，可重试安装')
     expect(installFailed).not.toContain('官方 Releases')
+  })
+
+  it('retains Server restart recovery and disables mutations when the bridge is unavailable', () => {
+    const installing = render(snapshot({ status: 'installing', availableRelease: release }), { product: 'server' })
+    expect(installing).toContain('Rovai AI Server')
+    expect(installing).toContain('Server 正在重启，页面会自动恢复连接。')
+    const requestFailed = render(snapshot({ status: 'installing', availableRelease: release }), { product: 'server', actionError: 'install' })
+    expect(requestFailed).toContain('安装请求未完成')
+    expect(requestFailed).toContain('已知版本信息和当前 App 状态没有被清除')
+    expect(requestFailed).not.toContain('Server 正在重启')
+    const failed = render(snapshot({ status: 'check_failed', failureReason: 'restart_unconfirmed' }), { product: 'server' })
+    expect(failed).toContain('尚未确认 Server 恢复连接')
+    expect(failed).toContain('>重试连接</button>')
+    expect(failed).not.toContain('官方 Releases')
+    for (const status of ['available', 'ready_to_install', 'check_failed'] as const) {
+      const markup = render(snapshot({ status, availableRelease: release }), { canUpdate: false })
+      expect(markup).toContain('class="primary-button" type="button" disabled=""')
+    }
   })
 
   it('renders empty and untrusted release notes through the safe markdown boundary', () => {
@@ -383,7 +405,7 @@ describe('AboutUpdatesSettingsView', () => {
     })
     expect(markup).toContain('下载请求未完成')
     expect(markup).toContain('已知版本信息和当前 App 状态没有被清除')
-    expect(markup).toContain('Rovai AI 0.0.3')
+    expect(markup).toContain('data-app-update-release-version="0.0.3"')
   })
 
   it('allows an in-page retry when the initial snapshot read fails', () => {

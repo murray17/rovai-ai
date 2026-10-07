@@ -945,6 +945,7 @@ impl ClineHubAdapter {
 pub(crate) async fn capability_snapshot(
     executable: &Path,
     observed_at: String,
+    data_directory: &Path,
 ) -> Result<crate::agent_profile::AdapterCapabilitySnapshot> {
     use crate::{
         agent_profile::ModelDescriptor,
@@ -966,7 +967,11 @@ pub(crate) async fn capability_snapshot(
         executable_fingerprint(executable)?,
         observed_at.clone(),
     )?;
-    let root = std::env::temp_dir().join(format!("rovai-cline-hub-probe-{}", uuid::Uuid::new_v4()));
+    // Diagnostics can be interrupted by Core exit just like execution. Keep
+    // their kernel ownership ledger in the same startup recovery boundary.
+    let root = data_directory
+        .join("runtime/cline-hub/hosts")
+        .join(format!("probe-{}", uuid::Uuid::new_v4()));
     config::private_dir(&root)?;
     let launch = HubHostLaunch {
         executable: executable.into(),
@@ -978,7 +983,7 @@ pub(crate) async fn capability_snapshot(
     };
     let result = async {
         let (incoming,_receiver) = mpsc::unbounded_channel();
-        let host = ClineHubHost::spawn(&launch,root.join("host"),root.join("history"),incoming).await?;
+        let host = ClineHubHost::spawn(&launch,root.clone(),root.join("history"),incoming).await?;
         let probe = async {
             let created = host.command("session.create",json!({"workspaceRoot":root,"sessionConfig":host.session_config,
                 "runtimeOptions":{"configExtensions":["rules","skills","workflows","plugins","hooks"]}}),None).await?;

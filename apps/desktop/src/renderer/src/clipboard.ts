@@ -49,3 +49,29 @@ export async function writeClipboardText(text: string, html?: string): Promise<b
     }
   }
 }
+
+/** Copy the full decoded image, independently of thumbnail sizing or cropping. */
+export async function writeClipboardImage(image: HTMLImageElement): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    throw new Error('image_clipboard_unavailable')
+  }
+  if (!image.complete || !image.naturalWidth || !image.naturalHeight) {
+    throw new Error('image_unavailable')
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = image.naturalWidth
+  canvas.height = image.naturalHeight
+  try {
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('image_unavailable')
+    context.drawImage(image, 0, 0)
+    const png = new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('image_encoding_failed')), 'image/png')
+    })
+    // Start the write during the user gesture, even when PNG encoding is asynchronous.
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  } finally {
+    canvas.width = 0
+    canvas.height = 0
+  }
+}

@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 pub const NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION: &str = "native_session_bootstrap_v5";
 pub const BOOTSTRAP_FORMATTER_VERSION: i64 = 5;
-pub const SESSION_CHARTER_REVISION: i64 = 19;
+pub const SESSION_CHARTER_REVISION: i64 = 20;
 const NATIVE_BINDING_CHARTER_COMPATIBILITY_REVISION: i64 = 16;
 pub const CODEX_SESSION_GUIDANCE_REVISION: i64 = 1;
 pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 28;
@@ -56,7 +56,7 @@ mod tests {
         });
         let current = native_binding_context_contract();
         let compatibility = native_binding_compatibility_context_contract();
-        assert_eq!(SESSION_CHARTER_REVISION, 19);
+        assert_eq!(SESSION_CHARTER_REVISION, 20);
         assert_eq!(compatibility["sessionCharterRevision"], json!(16));
         assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION, 32);
         assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION, 32);

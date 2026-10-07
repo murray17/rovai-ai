@@ -36,6 +36,13 @@ describe('RuntimeFailureNotice', () => {
   it('uses Rovai internal error only when Core explicitly attributes the origin to Rovai', () => {
     const failure = runtimeFailure('rovai')
     expect(runtimeFailureTitle(failure)).toBe('Rovai 内部错误')
+    failure.phase = 'model_catalog'
+    failure.code = 'runtime_probe_frame_capacity_exceeded'
+    failure.summary = 'Rovai 探测读取容量不足'
+    expect(runtimeFailureTitle(failure)).toBe('Claude Code 模型目录暂时不可用')
+    const markup = renderToStaticMarkup(createElement(RuntimeFailureNotice, { failure }))
+    expect(markup).toContain('Rovai 探测读取容量不足')
+    expect(markup).not.toContain('Claude Code 返回错误')
   })
 
   it.each([

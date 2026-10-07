@@ -7567,7 +7567,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn multi_target_send_admits_waiting_deliveries_without_ready_runtime() {
+    fn multi_target_send_records_configuration_failures_for_each_target() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let created = service
@@ -7617,7 +7617,14 @@ mod slow_tests {
         assert_eq!(row_count(&database, "camp_message"), 1);
         assert_eq!(row_count(&database, "camp_message_delivery"), 2);
         assert_eq!(row_count(&database, "camp_turn"), 0);
-        assert_eq!(row_count(&database, "agent_run"), 0);
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        assert_eq!(snapshot.agent_runs.len(), 2);
+        assert!(snapshot.agent_runs.iter().all(|run| {
+            run.status == "failed"
+                && run.terminal_reason_code.as_deref() == Some("runtime_not_configured")
+        }));
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

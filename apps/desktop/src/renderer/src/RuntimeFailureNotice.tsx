@@ -3,6 +3,9 @@ import type { RuntimeFailureView } from '@contracts'
 
 export function runtimeFailureTitle(failure: RuntimeFailureView): string {
   const runtimeLabel = publicRuntimeLabel(failure.runtimeKind)
+  if (failure.phase === 'model_catalog') {
+    return uiAttribute('{0} 模型目录暂时不可用', String(runtimeLabel))
+  }
   return ({
     runtime: uiAttribute("{0} 返回错误", String(runtimeLabel)),
     compatibility: uiAttribute("{0} 与当前 Rovai 版本不兼容", String(runtimeLabel)),

@@ -472,18 +472,8 @@ async fn process_hub_exit(
     let _ = flush_runtime_monitoring_run(core, run, epoch, "host_exit_flush").await;
     // A socket close provides no native terminal and is never prompt acceptance
     // or a safe retry boundary. The common loss reconciler owns Unknown actions.
-    let result = async {
-        let mut database = core.database.lock().await;
-        let Some(execution) = ExecutionRuntimeService::default().load_agent_run_execution(&database,run,epoch)? else { return Ok::<_,anyhow::Error>(()); };
-        let recovery = ActionSafetyService::default().reconcile_runtime_loss(&mut database,&CommandEnvelope {
-            command_id:uuid::Uuid::new_v4().to_string(),actor:ActorRef::System { component_id:"runtime-recovery-coordinator".into() },camp_id:Some(execution.camp_id.clone()),expected_versions:Vec::new(),execution_epoch:None,
-            payload:ReconcileRuntimeLossCommand {agent_run_id:run.into(),expected_version:execution.version,execution_epoch:epoch,reason:"cline_hub_transport_lost".into()} })?;
-        emit_agent_run_terminal(output,Some(&execution.camp_id),json!({"agentRunId":run,"executionEpoch":epoch,"adapterKind":AdapterKind::ClineCli,"result":recovery.result}));
-        Ok(())
-    }.await;
-    if let Err(error) = result {
-        eprintln!("Cline Hub loss reconciliation failed: {error:#}");
-    }
+    core.reconcile_exited_agent_run(output, run, epoch, "cline_hub_transport_lost")
+        .await;
     core.cline_hub.forget_agent_run(run, epoch).await;
     core.planned_shutdown
         .remove_active(&ActiveExecutionKey::new(run, epoch))

@@ -8,7 +8,7 @@ type ConversationCandidate = Pick<
 
 export function isNewConversationMemberAvailable(member: ConversationCandidate): boolean {
   return member.runtimeConfigured
-    && (member.runtimeReadiness === 'ready' || member.runtimeReadiness === 'light_ready')
+    && (member.runtimeReadiness === 'ready' || member.runtimeReadiness === 'light_ready' || member.runtimeReadiness === 'installed_unverified')
 }
 
 export function newConversationMemberStatus(member: ConversationCandidate): string {

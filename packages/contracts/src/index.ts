@@ -193,6 +193,8 @@ export interface AdapterInstallation {
   pathState: 'valid' | 'path_missing'
   version: number
   referencedProfileCount: number
+  /** Static Adapter permission vocabulary, available before diagnostics. */
+  permissionOptions?: PermissionOptionDescriptor[]
   snapshot: AdapterCapabilitySnapshot | null
   modelCatalog: RuntimeModelCatalogCache
   memberRuntimeDefaults: MemberRuntimeConfiguration | null
@@ -367,7 +369,10 @@ export interface RuntimeStartupSettings {
   runtimeKind: AdapterKind
   revision: number
   configuration: RuntimeStartupConfiguration
+  reconnectRequired: boolean
 }
+export interface RuntimeStartupFieldEdit { path: string[]; before: unknown; after: unknown; label: string }
+export interface RuntimeStartupFieldConflict extends RuntimeStartupFieldEdit { current: unknown }
 
 export interface RuntimeStartupInspection {
   status: 'missing' | 'recognized' | 'version_unverified' | 'authentication_required' | 'ready' | 'check_failed'
@@ -1869,6 +1874,27 @@ export interface AgentRunView {
     | 'planned_shutdown_failed'
     | 'planned_shutdown_cancelled'
     | 'runtime_interrupted'
+    | 'agent_unavailable'
+    | 'member_away'
+    | 'member_removed'
+    | 'runtime_not_configured'
+    | 'runtime_configuration_invalid'
+    | 'runtime_configuration_adapter_mismatch'
+    | 'conversation_runtime_override_unsupported'
+    | 'adapter_installation_missing'
+    | 'adapter_installation_disabled'
+    | 'runtime_permission_adapter_mismatch'
+    | 'runtime_permission_schema_mismatch'
+    | 'runtime_permission_values_invalid'
+    | 'runtime_permission_option_unknown'
+    | 'runtime_permission_option_unsupported'
+    | 'runtime_permission_value_invalid'
+    | 'runtime_permission_value_required'
+    | 'runtime_model_options_invalid'
+    | 'runtime_model_unavailable'
+    | 'runtime_model_option_unknown'
+    | 'runtime_model_option_invalid'
+    | 'runtime_adapter_not_implemented'
     | null
   failure: RuntimeFailureView | null
   runtimeModel: { modelId: string | null } | null
@@ -3235,16 +3261,29 @@ export interface OnboardingProvisioningOperation {
   memberAgentId: string | null
   memberVersionBeforeRuntime: number | null
   memberVersionAfterRuntime: number | null
+  runtimeCopies: OnboardingRuntimeCopy[] | null
   quickChatThreadId: string | null
 }
 
+export interface OnboardingRuntimeCopyTarget {
+  agentId: string
+  expectedVersion: number
+}
+
+export interface OnboardingRuntimeCopy extends OnboardingRuntimeCopyTarget {
+  commandId: string
+  status: 'pending' | 'applied' | 'skipped'
+}
+
+export type OnboardingRuntimeCopyOutcome = 'applied' | 'skipped' | 'retry'
+
 export type OnboardingSnapshot =
   | {
-      schemaVersion: 2
+      schemaVersion: 3
       status: 'uninitialized'
     }
   | {
-      schemaVersion: 2
+      schemaVersion: 3
       status: 'in_progress'
       step: OnboardingStep
       selectedMemberRole: BuiltinMemberAvatarRole | null
@@ -3252,7 +3291,7 @@ export type OnboardingSnapshot =
       provisioning: OnboardingProvisioningOperation | null
     }
   | {
-      schemaVersion: 2
+      schemaVersion: 3
       status: 'completed'
       origin: 'onboarding' | 'runtime_deferred' | 'existing_installation'
       completedAt: string
@@ -3276,6 +3315,8 @@ export interface OnboardingApi {
   ): Promise<OnboardingSnapshot>
   recordProvisionedMember(agentId: string, version: number): Promise<OnboardingSnapshot>
   recordProvisionedRuntime(version: number): Promise<OnboardingSnapshot>
+  prepareRuntimeCopies(targets: OnboardingRuntimeCopyTarget[]): Promise<OnboardingSnapshot>
+  recordRuntimeCopy(agentId: string, commandId: string, outcome: OnboardingRuntimeCopyOutcome): Promise<OnboardingSnapshot>
   recordProvisionedThread(threadId: string): Promise<OnboardingSnapshot>
   complete(): Promise<OnboardingSnapshot>
 }

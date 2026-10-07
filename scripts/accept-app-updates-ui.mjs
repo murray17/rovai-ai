@@ -102,7 +102,7 @@ async function openAboutUpdates(cdp) {
   assert(selected, 'About & Updates Settings entry was unavailable')
   await waitForSelector(cdp, '.about-updates-settings')
   await waitForExpression(cdp,
-    `document.querySelector('.about-identity p > span:first-child')?.textContent === ${JSON.stringify(`版本 v${releaseVersion}`)}`)
+    `document.querySelector('[data-installed-version]')?.textContent === ${JSON.stringify(`v${releaseVersion}`)}`)
 }
 
 async function assertAboutUpdates(cdp, context) {
@@ -128,12 +128,11 @@ async function assertAboutUpdates(cdp, context) {
       heading: surface?.querySelector('h1')?.textContent ?? '',
       description: surface?.querySelector('.settings-page-heading-copy > p:last-child')?.textContent ?? '',
       product: surface?.querySelector('.about-identity strong')?.textContent ?? '',
-      version: surface?.querySelector('.about-identity p > span:first-child')?.textContent ?? '',
+      version: surface?.querySelector('[data-installed-version]')?.textContent ?? '',
       action: action?.textContent?.trim() ?? '',
       actionTag: action?.tagName ?? '',
       actionFocused: document.activeElement === action,
       statusRole: surface?.querySelector('.about-update-status')?.getAttribute('role'),
-      source: surface?.querySelector('.about-update-source')?.textContent ?? '',
       progressVisible: Boolean(surface?.querySelector('progress')),
       releaseVisible: Boolean(surface?.querySelector('.about-release-section')),
       releaseVersion: surface?.querySelector('.about-release-section')?.dataset.appUpdateReleaseVersion,
@@ -153,12 +152,12 @@ async function assertAboutUpdates(cdp, context) {
   assert(state.heading === '关于与更新', `${context} omitted the page heading`)
   assert(state.description === '自动检查新版本，下载与安装由你决定。',
     `${context} used the wrong description`)
-  assert(state.product === 'Rovai AI' && state.version === `版本 v${releaseVersion}`,
+  assert(state.product === 'Rovai AI' && state.version === `v${releaseVersion}`,
     `${context} used the wrong product/version: ${JSON.stringify(state)}`)
   assert(state.action === '检查更新' && state.actionTag === 'BUTTON' && state.actionFocused,
     `${context} did not expose a keyboard-focusable check action`)
-  assert(state.statusRole === 'status' && state.source.includes('GitHub Release'),
-    `${context} omitted updater status/source evidence`)
+  assert(state.statusRole === 'status',
+    `${context} omitted updater status evidence`)
   assert(state.releaseVisible && state.releaseVersion === releaseVersion
     && typeof releaseSummary === 'string' && state.releaseNotesText.includes(releaseSummary)
     && state.releaseDate === releaseMetadata.releaseDate
@@ -269,6 +268,7 @@ async function terminateChild(child) {
 }
 
 async function capture(cdp, path) {
+  await waitForExpression(cdp, `!document.querySelector('.page-zoom-indicator')`)
   const result = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: false,

@@ -85,7 +85,7 @@ Native 结果来迎合断言。探针 16 前六轮通过，第七轮在审批前
 记录没有成为 Core 的已知用量。探针 17 揭示拒绝后重复创建观察 Action 的唯一键冲突，已将拒绝结果
 收为工具证据并复验。探针 18/19 分别修正 nullable threadTurnId 的取消脚手架和未启用的 MCP fixture。
 
-最终探针 22 完整九轮通过：8 次 succeeded 与 1 次 cancelled；first/A→B→A/cold 的实际发送、同 Host
+合并主干前的最终探针 22 完整九轮通过：8 次 succeeded 与 1 次 cancelled；first/A→B→A/cold 的实际发送、同 Host
 暖续接、同完整 ID/Binding/generation 冷恢复、原生 add/read/edit、批准、拒绝、执行中取消和后续任务
 均通过。取消后等待 16 秒，15 秒延迟写入没有发生。探针 21 的三个 Run 另证明真实 MCP tools/call
 一次和原生 Skill 读取。以上最终两组共 38 次 root 模型调用，四桶合计逐 Run 与原生持久历史一致；
@@ -97,9 +97,35 @@ reasoning 与费用均保持 NULL。此前两组的对账证据也保留，共 7
 最早保留的 11 份产品副本一致。没有凭不完整证据回写恢复。最终私有配置修复后，探针 22 的授权源
 Provider/models 和 fixture 源 Provider/models/global-settings 共 5 项前后摘要一致。
 
-验证命令包括 `pnpm test:rust:staged`（完整 workspace 默认层，458 passed / 2 ignored）、
+合并主干前的验证包括 `pnpm test:rust:staged`（完整 workspace 默认层，458 passed / 2 ignored）、
 52 项定向 Rust owner、显式真实 Hub Smoke、`pnpm typecheck`、`pnpm test`（Vitest 2589 项；
 Node 337 passed / 2 skipped）和三项文档治理门禁。没有以此冒称已重跑打包 App 或完整扩展 Rust 层。
+
+## 与当前主干合并后的验证
+
+PR #662 创建时与 `main` 冲突，当前分支合入 `51c8b346`，保留主干的真实 Host 启动验证、共享故障
+收口、原生配置只读边界和现有界面。成员 `installed_unverified` 不是执行阻断，显式诊断与实际任务
+分别验证。旧 Cline ACP 的 3.0.65 门槛在真实 `initialize.agentInfo.version` 检查，不依赖历史 Ready；
+Hub 后端与旧 Binding provenance 不变。当前 Hub 合同移入 Runtime Launch v52；本 Mission 的决定
+D12–D18 重排为 D16–D22，主干已有 D12–D15 保留。
+
+合并后探针 24 再次完成完整九轮（8 succeeded / 1 cancelled），探针 25 完成三轮真实 MCP/Skill。
+38 次原生模型调用逐 Run 对账全部一致，两组各 5 项配置源摘要未变，Host temp、Provider 副本及自有
+Runtime Files Root 均清理。探针 23 因旧 helper 等待成员 Ready 而在创建 Run 前停止，修正 fixture
+后重新运行，未修改产品就绪语义或重放任务。
+
+合并后的默认 Rust workspace 为 459 passed / 2 ignored，ACP 扩展层 69 passed / 2 ignored，
+Vitest 2605 passed、Node 337 passed / 2 skipped，typecheck、fmt 与面向 `origin/main` 的文档门禁通过。
+两个已有恢复 owner 继续覆盖 unknown input 不重放、旧 epoch 拒绝及公开终态：发现共享失败路径的
+清理原因会命中旧取消兼容投影，现将 accepted unknown input 明确标记为失败清理，保留 failed 展示。
+两个恢复 owner 与两个 slow Action owner 均通过，工具审批/执行 fixture 显式保留 accepted input。
+
+中断旧 fixture 的诊断曾留下一个独立 Hub，已用该探针私有 token 关闭。诊断 Host 的 kernel ledger
+现与产品 Host 一同保存在 Core data-dir，纳入启动回收。新增可复验脚本
+[native_hub_diagnostic_recovery_probe.mjs](fixtures/native_hub_diagnostic_recovery_probe.mjs)，参数与上面的
+产品脚本相同。真实验证在 ledger 记录后 SIGKILL 自有隔离 Core：原生 Hub 在重启前仍存活，新 Core
+回收了准确进程和私有 Host 目录，随后普通诊断 Ready；全程零模型输入，Provider 源摘要不变。
+这只证明诊断中断后的同机重启回收，不替代未完成的全故障矩阵。
 
 完整逐项结果见下表；原先 ACP 的 App/Skill/MCP 证据不会自动成为 Hub 证据。
 
@@ -118,7 +144,7 @@ Node 337 passed / 2 skipped）和三项文档治理门禁。没有以此冒称�
 | Narration / Final / Missing-Send | 原生文本和匹配 run.start result、共享结算 | 真实发送与成功终态通过；空最终文本保守失败；纯 Missing-Send 产品复验未做 |
 | Permission / Approval / Workspace | native toolPolicies + ActionSafety | 原生 smoke、Core allow/deny 通过；拒绝无写入，也无重复观察 Action |
 | Built-in rovai CLI | 现有 process config/lease/private IPC | 两成员、first/warm/cold 各一条 source_operation_id 回执通过；全操作目录未重跑 |
-| Usage / Cache / Cost | root afterModel 稀疏数值、native model window | 71 次调用四桶逐 Run 对账通过，窗口 272000；reasoning 缺失 NULL、费用未知 |
+| Usage / Cache / Cost | root afterModel 稀疏数值、native model window | 合并后 38 次调用四桶逐 Run 对账通过（前后累计保留 109 次），窗口 272000；reasoning 缺失 NULL、费用未知 |
 | Retry / Queue / Cancel / Cleanup | native acceptance/run/epoch fence + run.abort + shared tree | 正常关闭、执行中取消、延迟副作用排除和新任务通过；网络/崩溃完整矩阵未验 |
 | Ready / Version / Platform | 无模型 Hub probe、旧 ACP 独立门槛 | 3.0.3 Ready；只 macOS arm64 Preview，不外推其他平台 |
 

@@ -30,7 +30,7 @@ use rovai_core::{
     },
     runtime_probe_process::{
         BoundedCommandOutput, BoundedLineReader, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT,
-        DEFAULT_LINE_LIMIT, ProbeCommandLimits, RuntimeProbeProcess, run_bounded_command,
+        ProbeCommandLimits, RuntimeProbeProcess, run_bounded_command,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -39,7 +39,6 @@ use sha2::{Digest, Sha256};
 use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
 const CODEX_RUNTIME_KIND: &str = "codex-cli";
-const ACP_STDOUT_LIMIT: usize = 4 * 1024 * 1024;
 
 struct ProbeRootCleanup(PathBuf);
 
@@ -201,7 +200,9 @@ pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
     }
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(path.clone()).await;
-    codex_runtime_probe_uncached(path, path_text, fingerprint, probed_at).await
+    let mut result = codex_runtime_probe_uncached(path, path_text, fingerprint, probed_at).await;
+    redact_probe(AdapterKind::CodexCli, &mut result);
+    result
 }
 
 pub async fn acp_capability_probe_at_for_purpose(
@@ -209,7 +210,32 @@ pub async fn acp_capability_probe_at_for_purpose(
     kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
 ) -> AcpCapabilityProbe {
-    acp_probe_at(path, kind, acp_deep_session_probe_enabled(kind), purpose).await
+    let mut probe = acp_probe_at(path, kind, acp_deep_session_probe_enabled(kind), purpose).await;
+    redact_probe(kind, &mut probe.result);
+    if let Some(redactor) = probe_redactor(kind) {
+        for value in [&mut probe.initialize_result, &mut probe.session_result]
+            .into_iter()
+            .flatten()
+        {
+            redactor.value(value);
+        }
+    }
+    probe
+}
+
+fn probe_redactor(kind: AdapterKind) -> Option<rovai_core::runtime_custom_api::CredentialRedactor> {
+    rovai_core::runtime_discovery::custom_api_snapshot(kind)
+        .ok()
+        .flatten()
+        .and_then(|api| api.redactor().ok())
+}
+
+fn redact_probe(kind: AdapterKind, result: &mut AgentRuntimeProbeResult) {
+    if let Some(redactor) = probe_redactor(kind) {
+        let mut value = serde_json::to_value(&*result).expect("serializable probe");
+        redactor.value(&mut value);
+        *result = serde_json::from_value(value).expect("redaction preserves the probe shape");
+    }
 }
 
 fn runtime_launch_disallowed_detail(purpose: RuntimeLaunchPurpose) -> String {
@@ -225,11 +251,13 @@ fn runtime_launch_disallowed_detail(purpose: RuntimeLaunchPurpose) -> String {
 }
 
 pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
-    claude_code_probe_at(path).await
+    let mut probe = claude_code_probe_at(path).await;
+    redact_probe(AdapterKind::ClaudeCodeCli, &mut probe.result);
+    probe
 }
 
 pub async fn antigravity_capability_probe_at(path: &Path) -> AntigravityCapabilityProbe {
-    antigravity_probe_at(path).await
+    antigravity_probe_at(path, true).await
 }
 
 /// Only the existing verified snapshot authorizes omitting full checks. Session
@@ -630,8 +658,12 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     }
 
     let mut auth_command = runtime_command(&canonical, Some(AdapterKind::ClaudeCodeCli));
-    auth_command.args(["auth", "status"]);
-    let auth = bounded_output(&mut auth_command, Duration::from_secs(15)).await;
+    let auth: Result<BoundedCommandOutput> = async {
+        auth_command.args(["auth", "status"]);
+        let output = bounded_output(&mut auth_command, Duration::from_secs(15)).await?;
+        Ok(output)
+    }
+    .await;
     let authenticated = match auth {
         Ok(output) if output.status.success() => {
             serde_json::from_slice::<Value>(&output.stdout.bytes)
@@ -717,25 +749,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         Ok(models) => models,
         Err(error) => {
             let detail = format!("{error:#}");
-            let incompatible = detail.contains("claude_model_catalog_incompatible");
-            let failure = public_probe_failure(
-                AdapterKind::ClaudeCodeCli,
-                if incompatible {
-                    RuntimeFailureOrigin::Compatibility
-                } else {
-                    RuntimeFailureOrigin::Runtime
-                },
-                RuntimeFailurePhase::ModelCatalog,
-                if incompatible {
-                    "runtime_model_catalog_incompatible"
-                } else {
-                    "runtime_model_catalog_unavailable"
-                },
-                "无法获取 Claude Code 模型目录",
-                &detail,
-                &canonical,
-                !incompatible,
-            );
+            let failure = model_catalog_failure(AdapterKind::ClaudeCodeCli, &error, &canonical);
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
@@ -764,7 +778,13 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     }
 }
 
-async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
+/// Antigravity sends input in argv and cannot initialize without it. Its launch
+/// exception checks CLI flags and account/model access, never the display version.
+pub async fn antigravity_launch_preflight_at(path: &Path) -> AntigravityCapabilityProbe {
+    antigravity_probe_at(path, false).await
+}
+
+async fn antigravity_probe_at(path: &Path, include_version: bool) -> AntigravityCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
@@ -790,61 +810,65 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
-    let mut version_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
-    version_command.arg("--version");
-    let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
-    let reported_version = match version {
-        Ok(output) if output.status.success() => {
-            first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
+    let reported_version = if include_version {
+        let mut version_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
+        version_command.arg("--version");
+        let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
+        match version {
+            Ok(output) if output.status.success() => {
+                first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
+            }
+            Ok(output) => {
+                let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
+                let failure = public_probe_failure(
+                    AdapterKind::AntigravityApp,
+                    RuntimeFailureOrigin::Runtime,
+                    RuntimeFailurePhase::Execution,
+                    "runtime_process_failed",
+                    "Antigravity 版本检查失败",
+                    &raw_detail,
+                    &canonical,
+                    true,
+                );
+                return antigravity_probe_failure(
+                    path_text,
+                    fingerprint,
+                    None,
+                    AgentRuntimeProbeStatus::ProbeFailed,
+                    format!(
+                        "Antigravity companion version check failed with {} (outputDigest={})",
+                        output.status,
+                        probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
+                    ),
+                    failure,
+                    probed_at,
+                );
+            }
+            Err(error) => {
+                let raw_detail = error.to_string();
+                let failure = public_probe_failure(
+                    AdapterKind::AntigravityApp,
+                    RuntimeFailureOrigin::Environment,
+                    RuntimeFailurePhase::Spawn,
+                    "runtime_spawn_failed",
+                    "无法启动 Antigravity 检查",
+                    &raw_detail,
+                    &canonical,
+                    true,
+                );
+                return antigravity_probe_failure(
+                    path_text,
+                    fingerprint,
+                    None,
+                    AgentRuntimeProbeStatus::ProbeFailed,
+                    format!("failed to inspect Antigravity companion CLI: {error}"),
+                    failure,
+                    probed_at,
+                );
+            }
         }
-        Ok(output) => {
-            let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
-            let failure = public_probe_failure(
-                AdapterKind::AntigravityApp,
-                RuntimeFailureOrigin::Runtime,
-                RuntimeFailurePhase::Execution,
-                "runtime_process_failed",
-                "Antigravity 版本检查失败",
-                &raw_detail,
-                &canonical,
-                true,
-            );
-            return antigravity_probe_failure(
-                path_text,
-                fingerprint,
-                None,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                format!(
-                    "Antigravity companion version check failed with {} (outputDigest={})",
-                    output.status,
-                    probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
-                ),
-                failure,
-                probed_at,
-            );
-        }
-        Err(error) => {
-            let raw_detail = error.to_string();
-            let failure = public_probe_failure(
-                AdapterKind::AntigravityApp,
-                RuntimeFailureOrigin::Environment,
-                RuntimeFailurePhase::Spawn,
-                "runtime_spawn_failed",
-                "无法启动 Antigravity 检查",
-                &raw_detail,
-                &canonical,
-                true,
-            );
-            return antigravity_probe_failure(
-                path_text,
-                fingerprint,
-                None,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                format!("failed to inspect Antigravity companion CLI: {error}"),
-                failure,
-                probed_at,
-            );
-        }
+    } else {
+        None
     };
 
     let mut help_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
@@ -1115,6 +1139,38 @@ fn probe_output_digest(stdout: &[u8], stderr: &[u8]) -> String {
     format!("sha256:{:x}", digest.finalize())
 }
 
+pub(crate) fn model_catalog_failure(
+    kind: AdapterKind,
+    error: &anyhow::Error,
+    path: &Path,
+) -> RuntimeFailureView {
+    let detail = format!("{error:#}");
+    let incompatible = detail.contains("claude_model_catalog_incompatible");
+    let origin = if incompatible {
+        RuntimeFailureOrigin::Compatibility
+    } else if detail.contains("Claude Code list_models rejected:")
+        || detail.contains("Claude Code initialize rejected:")
+    {
+        RuntimeFailureOrigin::Runtime
+    } else {
+        RuntimeFailureOrigin::Unknown
+    };
+    public_probe_failure(
+        kind,
+        origin,
+        RuntimeFailurePhase::ModelCatalog,
+        if incompatible {
+            "runtime_model_catalog_incompatible"
+        } else {
+            "runtime_model_catalog_unavailable"
+        },
+        "暂时无法获取模型目录",
+        &detail,
+        path,
+        true,
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the probed Runtime and closed public failure fields stay explicit at this boundary"
@@ -1143,7 +1199,20 @@ fn public_probe_failure(
     ]
     .iter()
     .any(|marker| lower.contains(marker));
-    let (origin, code, summary) = if option_incompatible {
+    let local_capacity = [
+        "runtime_probe_frame_capacity_exceeded",
+        "runtime_probe_frame_capacity_invalid",
+        "runtime_probe_frame_allocation_failed",
+    ]
+    .into_iter()
+    .find(|code| raw_detail.contains(code));
+    let (origin, code, summary) = if let Some(code) = local_capacity {
+        (
+            RuntimeFailureOrigin::Rovai,
+            code,
+            "Rovai 探测读取容量不足或配置无效",
+        )
+    } else if option_incompatible {
         (
             RuntimeFailureOrigin::Compatibility,
             "runtime_capability_incompatible",
@@ -1248,7 +1317,7 @@ fn public_probe_status(
 }
 
 /// Uses the same inherited environment and active PATH overlay as an AgentRun.
-/// No model, permission, settings or provider override is installed by discovery.
+/// The same effective custom connection is used by checks and execution.
 async fn claude_code_model_catalog(
     path: &Path,
     deadline: Duration,
@@ -1263,61 +1332,60 @@ async fn claude_code_model_catalog(
         "--verbose",
         "--no-session-persistence",
     ]);
-    let mut process = RuntimeProbeProcess::spawn(
-        &mut command,
-        ACP_STDOUT_LIMIT,
-        DEFAULT_CAPTURE_LIMIT,
-        DEFAULT_LINE_LIMIT,
-        DEFAULT_CLEANUP_TIMEOUT,
-    )
-    .context("failed to start Claude Code model initialization")?;
+    let mut process =
+        RuntimeProbeProcess::spawn(&mut command, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT)
+            .context("failed to start Claude Code model query")?;
     let result = {
         let (stdin, lines) = process.split_io()?;
         let query = async {
-            let request_id = uuid::Uuid::new_v4().to_string();
-            write_json_line(
-                stdin,
-                &json!({
-                    "type": "control_request", "request_id": request_id,
-                    "request": { "subtype": "initialize" },
-                }),
-            )
-            .await?;
+            let mut method = "list_models";
+            let mut request_id = uuid::Uuid::new_v4().to_string();
+            write_claude_catalog_request(stdin, &request_id, method).await?;
             while let Some(line) = lines.next_line().await? {
                 if line.trim().is_empty() {
                     continue;
                 }
-                let message: Value = serde_json::from_str(&line)
-                    .context("claude_model_catalog_incompatible: invalid initialization frame")?;
-                if message.get("type").and_then(Value::as_str) == Some("control_request") {
-                    anyhow::bail!(
-                        "claude_model_catalog_incompatible: initialization requires interactive control"
+                // Borrow routing metadata and skip unrelated initialization fields. A large
+                // commands/agents inventory must not become a second retained JSON tree.
+                let message: ClaudeCatalogMessage<'_> = serde_json::from_str(&line)
+                    .context("claude_model_catalog_incompatible: invalid control frame")?;
+                if message.kind == "control_request" {
+                    bail!(
+                        "claude_model_catalog_incompatible: model query requires interactive control"
                     );
                 }
-                if message.get("type").and_then(Value::as_str) != Some("control_response") {
-                    // system.init describes a current model, not the selectable catalog.
+                if message.kind != "control_response" {
                     continue;
                 }
-                let response = &message["response"];
-                if response.get("request_id").and_then(Value::as_str) != Some(request_id.as_str()) {
+                let Some(response) = message.response else {
+                    continue;
+                };
+                if response.request_id != request_id {
                     continue;
                 }
-                if response.get("subtype").and_then(Value::as_str) != Some("success") {
-                    anyhow::bail!(
-                        "Claude Code initialize rejected: {}",
-                        response
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .unwrap_or("unknown control error")
-                    );
+                if response.subtype != "success" {
+                    let error = response.error.as_deref().unwrap_or("unknown control error");
+                    if method == "list_models" && claude_list_models_unsupported(error) {
+                        method = "initialize";
+                        request_id = uuid::Uuid::new_v4().to_string();
+                        write_claude_catalog_request(stdin, &request_id, method).await?;
+                        continue;
+                    }
+                    bail!("Claude Code {method} rejected: {error}");
                 }
-                return claude_code_models(&response["response"]);
+                let payload = response
+                    .response
+                    .context("claude_model_catalog_incompatible: missing model query response")?;
+                let payload: ClaudeCatalogModels = serde_json::from_str(payload.get())
+                    .context("claude_model_catalog_incompatible: invalid model query response")?;
+                drop(line);
+                return claude_code_models(&json!({"models": payload.models}));
             }
-            anyhow::bail!("Claude Code exited before returning the initialization model catalog")
+            bail!("Claude Code exited before returning the model catalog")
         };
         timeout(deadline, query)
             .await
-            .context("Claude Code model initialization timed out")
+            .context("Claude Code model query timed out")
             .and_then(std::convert::identity)
     };
     // Reap on success, protocol failure and deadline expiry before publishing a result.
@@ -1325,11 +1393,65 @@ async fn claude_code_model_catalog(
     match result {
         Ok(models) => Ok(models),
         Err(error) if !stderr.bytes.is_empty() => Err(error.context(format!(
-            "Claude Code initialization stderr: {}",
+            "Claude Code model query stderr: {}",
             String::from_utf8_lossy(&stderr.bytes)
         ))),
         Err(error) => Err(error),
     }
+}
+
+#[derive(Deserialize)]
+struct ClaudeCatalogMessage<'a> {
+    #[serde(rename = "type")]
+    #[serde(borrow)]
+    kind: std::borrow::Cow<'a, str>,
+    #[serde(borrow)]
+    response: Option<ClaudeCatalogResponse<'a>>,
+}
+
+#[derive(Deserialize)]
+struct ClaudeCatalogResponse<'a> {
+    #[serde(borrow)]
+    subtype: std::borrow::Cow<'a, str>,
+    #[serde(borrow)]
+    request_id: std::borrow::Cow<'a, str>,
+    error: Option<String>,
+    #[serde(borrow)]
+    response: Option<&'a serde_json::value::RawValue>,
+}
+
+#[derive(Deserialize)]
+struct ClaudeCatalogModels {
+    models: Option<Vec<Value>>,
+}
+
+async fn write_claude_catalog_request(
+    stdin: &mut ManagedChildStdin,
+    request_id: &str,
+    method: &str,
+) -> Result<()> {
+    write_json_line(
+        stdin,
+        &json!({
+            "type": "control_request", "request_id": request_id,
+            "request": {"subtype": method},
+        }),
+    )
+    .await
+}
+
+fn claude_list_models_unsupported(error: &str) -> bool {
+    let error = error.trim();
+    [
+        "Unknown control request subtype: ",
+        "Unsupported control request subtype: ",
+        "Unknown control request type: ",
+        "Unsupported control request type: ",
+        "Unknown request type: ",
+        "Unsupported request type: ",
+    ]
+    .iter()
+    .any(|prefix| error.strip_prefix(prefix) == Some("list_models"))
 }
 
 fn claude_code_required_capabilities() -> Vec<String> {
@@ -1757,14 +1879,9 @@ async fn run_acp_probe_with_scope(
     // working directory and its additive configuration belong to this probe;
     // native initialization may persist state, which is not ours to remove.
     command.current_dir(&probe_root).stdin(Stdio::piped());
-    let mut process = RuntimeProbeProcess::spawn(
-        &mut command,
-        ACP_STDOUT_LIMIT,
-        DEFAULT_CAPTURE_LIMIT,
-        DEFAULT_LINE_LIMIT,
-        DEFAULT_CLEANUP_TIMEOUT,
-    )
-    .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
+    let mut process =
+        RuntimeProbeProcess::spawn(&mut command, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT)
+            .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
     let deadline = Duration::from_secs(30);
     let result = {
         let (stdin, lines) = process.split_io()?;
@@ -2287,8 +2404,7 @@ async fn run_trae_prompt_probe(
         if line.trim().is_empty() {
             continue;
         }
-        let message: Value =
-            serde_json::from_str(&line).with_context(|| format!("invalid RPC response: {line}"))?;
+        let message: Value = serde_json::from_str(&line).context("invalid RPC response")?;
         let method = message.get("method").and_then(Value::as_str);
         if method.is_none() && message.get("id").and_then(Value::as_u64) == Some(request_id) {
             if let Some(error) = message.get("error") {
@@ -2759,14 +2875,9 @@ fn classify_acp_probe_failure(detail: &str) -> AgentRuntimeProbeStatus {
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
     let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command.args(["app-server", "--listen", "stdio://"]);
-    let mut process = RuntimeProbeProcess::spawn(
-        &mut command,
-        ACP_STDOUT_LIMIT,
-        DEFAULT_CAPTURE_LIMIT,
-        DEFAULT_LINE_LIMIT,
-        DEFAULT_CLEANUP_TIMEOUT,
-    )
-    .with_context(|| format!("failed to start {} app-server", path.display()))?;
+    let mut process =
+        RuntimeProbeProcess::spawn(&mut command, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT)
+            .with_context(|| format!("failed to start {} app-server", path.display()))?;
     let result = {
         let (stdin, lines) = process.split_io()?;
         let query = async {
@@ -2839,131 +2950,6 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
     }
 }
 
-/// Metadata-only checks, invoked by the Runtime Check Manager or the admitted Run.
-/// Do not persist raw account/config responses (they may contain personal data).
-pub async fn claude_fast_eligibility(
-    runtime: &rovai_core::agent_profile::FrozenAgentRuntimeConfig,
-    cwd: &Path,
-) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
-    use rovai_core::camp_fast::{NativeFastEligibility, claude_fast_version_supported};
-    if !claude_fast_version_supported(runtime.reported_version.as_deref())
-        || custom_fast_environment(AdapterKind::ClaudeCodeCli)
-    {
-        return Ok(NativeFastEligibility::default());
-    }
-    claude_fast_auth(Path::new(&runtime.executable_path), cwd).await
-}
-
-async fn claude_fast_auth(
-    path: &Path,
-    cwd: &Path,
-) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
-    use rovai_core::camp_fast::{NativeFastEligibility, claude_subscription_auth};
-    let mut command = runtime_command(path, Some(AdapterKind::ClaudeCodeCli));
-    command.args(["auth", "status"]).current_dir(cwd);
-    let output = bounded_output(&mut command, Duration::from_secs(15)).await?;
-    let eligible = output.status.success()
-        && serde_json::from_slice::<Value>(&output.stdout.bytes)
-            .is_ok_and(|status| claude_subscription_auth(&status));
-    Ok(NativeFastEligibility {
-        eligible,
-        runtime_default_fast: None,
-    })
-}
-
-pub fn custom_fast_environment(kind: AdapterKind) -> bool {
-    let keys: &[&str] = match kind {
-        AdapterKind::ClaudeCodeCli => &[
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_BASE_URL",
-            "CLAUDE_CODE_USE_BEDROCK",
-            "CLAUDE_CODE_USE_VERTEX",
-            "CLAUDE_CODE_USE_FOUNDRY",
-            "CLAUDE_CODE_USE_AWS",
-            "CLAUDE_CODE_DISABLE_FAST_MODE",
-        ],
-        AdapterKind::CodexCli => &["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"],
-        _ => return true,
-    };
-    keys.iter().any(|key| {
-        rovai_core::runtime_discovery::runtime_environment_variable(kind, key)
-            .is_some_and(|value| !value.is_empty() && value != "0")
-    })
-}
-
-pub async fn codex_fast_eligibility(
-    runtime: &rovai_core::agent_profile::FrozenAgentRuntimeConfig,
-    cwd: &Path,
-) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
-    use rovai_core::camp_fast::{CODEX_FAST_TURN_CAPABILITY, NativeFastEligibility};
-    if !runtime
-        .capabilities
-        .iter()
-        .any(|capability| capability == CODEX_FAST_TURN_CAPABILITY)
-        || custom_fast_environment(AdapterKind::CodexCli)
-    {
-        return Ok(NativeFastEligibility::default());
-    }
-    codex_fast_metadata(
-        Path::new(&runtime.executable_path),
-        cwd,
-        (runtime.model.source == "explicit").then_some(runtime.model.model_id.as_str()),
-    )
-    .await
-}
-
-async fn codex_fast_metadata(
-    path: &Path,
-    cwd: &Path,
-    explicit_model: Option<&str>,
-) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
-    use rovai_core::camp_fast::codex_eligibility;
-    let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
-    command
-        .args(["app-server", "--listen", "stdio://"])
-        .current_dir(cwd);
-    let mut process = RuntimeProbeProcess::spawn(
-        &mut command,
-        ACP_STDOUT_LIMIT,
-        DEFAULT_CAPTURE_LIMIT,
-        DEFAULT_LINE_LIMIT,
-        DEFAULT_CLEANUP_TIMEOUT,
-    )?;
-    let result = {
-        let (stdin, lines) = process.split_io()?;
-        timeout(Duration::from_secs(30), async {
-            write_json_line(stdin, &json!({"id": 1, "method": "initialize", "params": {
-                "clientInfo": {"name": "rovai_fast_check", "version": env!("CARGO_PKG_VERSION")},
-                "capabilities": {"experimentalApi": true}
-            }})).await?;
-            read_rpc_result(lines, 1).await?;
-            write_json_line(stdin, &json!({"method": "initialized", "params": {}})).await?;
-            write_json_line(stdin, &json!({"id": 2, "method": "account/read", "params": {"refreshToken": false}})).await?;
-            let account = read_rpc_result(lines, 2).await?;
-            write_json_line(stdin, &json!({"id": 3, "method": "config/read", "params": {"cwd": cwd, "includeLayers": true}})).await?;
-            let config = read_rpc_result(lines, 3).await?;
-            let mut models = Vec::new();
-            let mut cursor: Option<String> = None;
-            for id in 4..104 {
-                write_json_line(stdin, &json!({"id": id, "method": "model/list", "params": {
-                    "cursor": cursor, "includeHidden": true, "limit": 100
-                }})).await?;
-                let page = read_rpc_result(lines, id).await?;
-                models.extend(page.get("data").and_then(Value::as_array).context("model/list omitted data")?.iter().cloned());
-                cursor = page.get("nextCursor").and_then(Value::as_str).map(str::to_owned);
-                if cursor.is_none() {
-                    return Ok(codex_eligibility(&account, &config, &json!({"data": models}),
-                        explicit_model));
-                }
-            }
-            bail!("model/list exceeded pagination limit")
-        }).await.context("Fast metadata check timed out")?
-    };
-    process.finish().await?;
-    result
-}
-
 async fn write_json_line(stdin: &mut ManagedChildStdin, value: &Value) -> Result<()> {
     stdin
         .write_all(serde_json::to_string(value)?.as_bytes())
@@ -2981,8 +2967,7 @@ async fn read_rpc_result(
         if line.trim().is_empty() {
             continue;
         }
-        let message: Value =
-            serde_json::from_str(&line).with_context(|| format!("invalid RPC response: {line}"))?;
+        let message: Value = serde_json::from_str(&line).context("invalid RPC response")?;
         if message.get("id").and_then(Value::as_u64) != Some(request_id) {
             continue;
         }
@@ -3147,14 +3132,9 @@ async fn codex_runtime_probe_uncached(
 async fn probe_initialize_handshake(path: &Path, require_external_provider: bool) -> Result<()> {
     let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command.args(["app-server", "--listen", "stdio://"]);
-    let mut process = RuntimeProbeProcess::spawn(
-        &mut command,
-        ACP_STDOUT_LIMIT,
-        DEFAULT_CAPTURE_LIMIT,
-        DEFAULT_LINE_LIMIT,
-        DEFAULT_CLEANUP_TIMEOUT,
-    )
-    .with_context(|| format!("failed to start {} app-server", path.display()))?;
+    let mut process =
+        RuntimeProbeProcess::spawn(&mut command, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT)
+            .with_context(|| format!("failed to start {} app-server", path.display()))?;
     let result = {
         let (stdin, lines) = process.split_io()?;
         let handshake = async {
@@ -3182,8 +3162,8 @@ async fn probe_initialize_handshake(path: &Path, require_external_provider: bool
                 if line.trim().is_empty() {
                     continue;
                 }
-                let message: Value = serde_json::from_str(&line)
-                    .with_context(|| format!("invalid initialize response: {line}"))?;
+                let message: Value =
+                    serde_json::from_str(&line).context("invalid initialize response")?;
                 if message.get("id").and_then(Value::as_u64) != Some(1) {
                     continue;
                 }
@@ -3856,81 +3836,6 @@ esac
         );
     }
     #[tokio::test]
-    async fn native_fast_checks_use_the_selected_executable_and_execution_directory() {
-        let directory =
-            env::temp_dir().join(format!("rovai-fast-metadata-{}", uuid::Uuid::new_v4()));
-        let _cleanup = ProbeRootCleanup(directory.clone());
-        let cwd = directory.join("actual workspace 中文");
-        fs::create_dir_all(&cwd).unwrap();
-        let executable = directory.join("selected-runtime");
-        fs::write(&executable, r#"#!/bin/sh
-printf '%s\n' "$PWD" > native-cwd
-printf '%s\n' "$@" > native-argv
-if [ "$1:$2" = 'auth:status' ]; then
-  printf '%s\n' '{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty","subscriptionType":null}'
-  exit 0
-fi
-while IFS= read -r request; do
-  printf '%s\n' "$request" >> native-requests
-  case "$request" in
-    *'"method":"initialize"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
-    *'"method":"account/read"'*) printf '%s\n' '{"id":2,"result":{"account":{"type":"chatgpt"}}}' ;;
-    *'"method":"config/read"'*) printf '%s\n' '{"id":3,"result":{"config":{"model":"selected-model","service_tier":"priority"}}}' ;;
-    *'"cursor":"next"'*) printf '%s\n' '{"id":5,"result":{"data":[{"id":"selected-model","serviceTiers":[{"id":"priority"}],"defaultServiceTier":"default"}],"nextCursor":null}}' ;;
-    *'"method":"model/list"'*) printf '%s\n' '{"id":4,"result":{"data":[],"nextCursor":"next"}}' ;;
-  esac
-done
-"#).unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(claude_fast_auth(&executable, &cwd).await.unwrap().eligible);
-        assert_eq!(
-            fs::read_to_string(cwd.join("native-argv")).unwrap(),
-            "auth\nstatus\n"
-        );
-        let eligibility = codex_fast_metadata(&executable, &cwd, None).await.unwrap();
-        assert!(eligibility.eligible);
-        assert_eq!(
-            eligibility.runtime_default_fast,
-            Some(true),
-            "effective project config wins over model default"
-        );
-        let native_cwd = fs::read_to_string(cwd.join("native-cwd")).unwrap();
-        assert_eq!(
-            Path::new(native_cwd.trim()).canonicalize().unwrap(),
-            cwd.canonicalize().unwrap()
-        );
-        assert_eq!(
-            fs::read_to_string(cwd.join("native-argv")).unwrap(),
-            "app-server\n--listen\nstdio://\n"
-        );
-        let requests: Vec<Value> = fs::read_to_string(cwd.join("native-requests"))
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
-        let methods: Vec<_> = requests
-            .iter()
-            .map(|request| request["method"].as_str().unwrap())
-            .collect();
-        assert_eq!(
-            methods,
-            [
-                "initialize",
-                "initialized",
-                "account/read",
-                "config/read",
-                "model/list",
-                "model/list"
-            ]
-        );
-        assert_eq!(requests[2]["params"]["refreshToken"], false);
-        assert_eq!(
-            requests[3]["params"],
-            json!({"cwd": cwd, "includeLayers": true})
-        );
-    }
-
-    #[tokio::test]
     async fn git_health_uses_only_a_resolved_absolute_executable() {
         let directory = env::temp_dir().join(format!("rovai-git-health-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
@@ -4135,6 +4040,46 @@ done
             public_probe_status(AgentRuntimeProbeStatus::ProbeFailed, &authentication),
             AgentRuntimeProbeStatus::AuthenticationRequired
         );
+        for code in [
+            "runtime_probe_frame_capacity_exceeded",
+            "runtime_probe_frame_capacity_invalid",
+            "runtime_probe_frame_allocation_failed",
+        ] {
+            let failure = model_catalog_failure(
+                AdapterKind::ClaudeCodeCli,
+                &anyhow::anyhow!(code),
+                executable,
+            );
+            assert_eq!(failure.origin, RuntimeFailureOrigin::Rovai);
+            assert_eq!(failure.phase, RuntimeFailurePhase::ModelCatalog);
+            assert_eq!(failure.code, code);
+        }
+        let failure = model_catalog_failure(
+            AdapterKind::ClaudeCodeCli,
+            &anyhow::anyhow!("Claude Code model query timed out"),
+            executable,
+        );
+        assert_eq!(failure.origin, RuntimeFailureOrigin::Unknown);
+        assert_eq!(failure.phase, RuntimeFailurePhase::ModelCatalog);
+        let failure = model_catalog_failure(
+            AdapterKind::ClaudeCodeCli,
+            &anyhow::anyhow!("Claude Code list_models rejected: authentication required"),
+            executable,
+        );
+        assert_eq!(failure.origin, RuntimeFailureOrigin::Runtime);
+        assert_eq!(failure.code, "runtime_authentication_required");
+        assert!(claude_list_models_unsupported(
+            "Unsupported control request subtype: list_models"
+        ));
+        for native_error in [
+            "authentication required",
+            "Policy denied list_models",
+            "list_models timed out",
+            "Unsupported control request subtype: initialize",
+            "Unsupported control request subtype: list_models; authentication required",
+        ] {
+            assert!(!claude_list_models_unsupported(native_error));
+        }
     }
 
     #[tokio::test]

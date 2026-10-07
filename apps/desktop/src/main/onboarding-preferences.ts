@@ -8,6 +8,8 @@ import type {
   ModelSelection,
   OnboardingProvisioningOperation,
   OnboardingRuntimeSelection,
+  OnboardingRuntimeCopy,
+  OnboardingRuntimeCopyTarget,
   OnboardingSnapshot,
   OnboardingStep,
   StructuredError
@@ -38,14 +40,14 @@ const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/
 const MAX_MODEL_OPTIONS_BYTES = 16_384
 
 export const DEFAULT_ONBOARDING_SNAPSHOT: OnboardingSnapshot = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   status: 'uninitialized'
 }
 
 export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | null {
   if (
     !isRecord(value)
-    || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
+    || (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3)
     || typeof value.status !== 'string'
   ) return null
   value = normalizeQuickChatId(value)
@@ -76,7 +78,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
     if (value.runtimeSelection !== null && runtimeSelection === null) return null
     const provisioning = value.provisioning === null
       ? null
-      : parseProvisioning(value.provisioning)
+      : parseProvisioning(value.provisioning, sourceSchemaVersion as number)
     if (value.provisioning !== null && provisioning === null) return null
     if (value.step === 'runtime' && selectedMemberRole === null) return null
     if (provisioning && (
@@ -85,7 +87,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       || provisioning.runtimePermissions.adapterKind !== runtimeSelection.adapterKind
     )) return null
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: 'in_progress',
       step: value.step as OnboardingStep,
       selectedMemberRole,
@@ -108,7 +110,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       && value.origin !== 'runtime_deferred'
       && value.origin !== 'existing_installation'
     ) return null
-    if (value.origin === 'runtime_deferred' && sourceSchemaVersion !== 2) return null
+    if (value.origin === 'runtime_deferred' && sourceSchemaVersion === 1) return null
     if (!isTimestamp(value.completedAt)) return null
     if (value.selectedMemberRole !== null && !isMemberRole(value.selectedMemberRole)) return null
     if (value.memberAgentId !== null && !isStableId(value.memberAgentId)) return null
@@ -124,7 +126,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       || value.quickChatThreadId !== null
     )) return null
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: 'completed',
       origin: value.origin,
       completedAt: value.completedAt,
@@ -212,7 +214,7 @@ export class OnboardingStore {
       if (this.#snapshot.status !== 'uninitialized') return this.get()
       const next: OnboardingSnapshot = hasExistingProductData
         ? {
-            schemaVersion: 2,
+            schemaVersion: 3,
             status: 'completed',
             origin: 'existing_installation',
             completedAt: new Date().toISOString(),
@@ -302,7 +304,7 @@ export class OnboardingStore {
         throw new Error('首次引导初始化已经开始，不能跳过运行配置')
       }
       return this.#commit({
-        schemaVersion: 2,
+        schemaVersion: 3,
         status: 'completed',
         origin: 'runtime_deferred',
         completedAt: new Date().toISOString(),
@@ -348,6 +350,7 @@ export class OnboardingStore {
           memberAgentId: null,
           memberVersionBeforeRuntime: null,
           memberVersionAfterRuntime: null,
+          runtimeCopies: null,
           quickChatThreadId: null
         }
       }
@@ -390,10 +393,53 @@ export class OnboardingStore {
       if (operation.memberVersionAfterRuntime === null) {
         throw new Error('首次引导 Runtime 尚未保存')
       }
+      if (operation.runtimeCopies === null || operation.runtimeCopies.some((target) => target.status === 'pending')) {
+        throw new Error('首次引导初始化尚未完成')
+      }
       if (operation.quickChatThreadId && operation.quickChatThreadId !== threadId) {
         throw new Error('首次引导快速对话检查点不一致')
       }
       return { ...operation, quickChatThreadId: threadId }
+    })
+  }
+
+  prepareRuntimeCopies(targets: unknown): Promise<OnboardingSnapshot> {
+    const parsed = parseRuntimeCopyTargets(targets)
+    if (!parsed) return Promise.reject(new Error('Invalid onboarding Runtime copy targets'))
+    return this.#mutateProvisioning((operation) => {
+      if (operation.memberVersionAfterRuntime === null) throw new Error('首次引导 Runtime 尚未保存')
+      // First durable plan wins, including after a lost checkpoint reply.
+      if (operation.runtimeCopies !== null) return operation
+      if (parsed.some((target) => target.agentId === operation.memberAgentId)) {
+        throw new Error('Invalid onboarding Runtime copy targets')
+      }
+      return {
+        ...operation,
+        runtimeCopies: parsed.map((target) => ({ ...target, commandId: randomUUID(), status: 'pending' }))
+      }
+    })
+  }
+
+  recordRuntimeCopy(agentId: unknown, commandId: unknown, outcome: unknown): Promise<OnboardingSnapshot> {
+    if (!isStableId(agentId) || !isUuid(commandId) || !['applied', 'skipped', 'retry'].includes(outcome as string)) {
+      return Promise.reject(new Error('Invalid onboarding Runtime copy checkpoint'))
+    }
+    return this.#mutateProvisioning((operation) => {
+      const target = operation.runtimeCopies?.find((candidate) => candidate.agentId === agentId)
+      if (!target) throw new Error('Invalid onboarding Runtime copy checkpoint')
+      // An old response cannot settle or rotate a newer attempt.
+      if (target.commandId !== commandId) return operation
+      if (target.status !== 'pending') {
+        if (target.status !== outcome) throw new Error('Invalid onboarding Runtime copy checkpoint')
+        return operation
+      }
+      return {
+        ...operation,
+        runtimeCopies: operation.runtimeCopies!.map((candidate) => candidate !== target ? candidate
+          : outcome === 'retry'
+            ? { ...target, commandId: randomUUID() }
+            : { ...target, status: outcome as 'applied' | 'skipped' })
+      }
     })
   }
 
@@ -406,9 +452,11 @@ export class OnboardingStore {
         || !operation?.memberAgentId
         || operation.memberVersionAfterRuntime === null
         || !operation.quickChatThreadId
+        || operation.runtimeCopies === null
+        || operation.runtimeCopies.some((target) => target.status === 'pending')
       ) throw new Error('首次引导初始化尚未完成')
       return this.#commit({
-        schemaVersion: 2,
+        schemaVersion: 3,
         status: 'completed',
         origin: 'onboarding',
         completedAt: new Date().toISOString(),
@@ -447,6 +495,32 @@ export class OnboardingStore {
   }
 }
 
+function parseRuntimeCopyTargets(value: unknown): OnboardingRuntimeCopyTarget[] | null {
+  if (!Array.isArray(value) || value.length > 3) return null
+  const targets: OnboardingRuntimeCopyTarget[] = []
+  for (const target of value) {
+    if (!hasExactKeys(target, ['agentId', 'expectedVersion'])
+      || !isStableId(target.agentId) || !isPositiveVersion(target.expectedVersion)
+      || targets.some((existing) => existing.agentId === target.agentId)) return null
+    targets.push({ agentId: target.agentId, expectedVersion: target.expectedVersion })
+  }
+  return targets
+}
+
+function parseRuntimeCopies(value: unknown): OnboardingRuntimeCopy[] | null {
+  if (!Array.isArray(value)) return null
+  const copies: OnboardingRuntimeCopy[] = []
+  for (const target of value) {
+    if (!hasExactKeys(target, ['agentId', 'expectedVersion', 'commandId', 'status'])
+      || !isUuid(target.commandId)
+      || !['pending', 'applied', 'skipped'].includes(target.status as string)
+      || copies.some((existing) => existing.commandId === target.commandId)) return null
+    copies.push(target as unknown as OnboardingRuntimeCopy)
+  }
+  if (!parseRuntimeCopyTargets(copies.map(({ agentId, expectedVersion }) => ({ agentId, expectedVersion })))) return null
+  return copies
+}
+
 function onboardingDegradation(code: string, message: string): StructuredError {
   return { code, message, retryable: true, details: {} }
 }
@@ -459,7 +533,7 @@ function isMissingPathError(error: unknown): boolean {
 
 function inProgress(step: OnboardingStep): Extract<OnboardingSnapshot, { status: 'in_progress' }> {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'in_progress',
     step,
     selectedMemberRole: null,
@@ -500,7 +574,7 @@ function parseModelSelection(value: unknown): ModelSelection | null {
   }
 }
 
-function parseProvisioning(value: unknown): OnboardingProvisioningOperation | null {
+function parseProvisioning(value: unknown, schemaVersion: number): OnboardingProvisioningOperation | null {
   value = normalizeQuickChatId(value)
   if (!hasExactKeys(value, [
     'memberCommandId',
@@ -510,7 +584,8 @@ function parseProvisioning(value: unknown): OnboardingProvisioningOperation | nu
     'memberAgentId',
     'memberVersionBeforeRuntime',
     'memberVersionAfterRuntime',
-    'quickChatThreadId'
+    'quickChatThreadId',
+    ...(schemaVersion === 3 ? ['runtimeCopies'] : [])
   ])) return null
   if (!isUuid(value.memberCommandId) || !isUuid(value.runtimeCommandId) || !isUuid(value.campCommandId)) return null
   const runtimePermissions = parseRuntimePermissions(value.runtimePermissions)
@@ -522,11 +597,18 @@ function parseProvisioning(value: unknown): OnboardingProvisioningOperation | nu
   if ((value.memberAgentId === null) !== (value.memberVersionBeforeRuntime === null)) return null
   if (value.memberVersionAfterRuntime !== null && value.memberVersionBeforeRuntime === null) return null
   if (value.quickChatThreadId !== null && value.memberVersionAfterRuntime === null) return null
+  const runtimeCopies = schemaVersion < 3 || value.runtimeCopies === null
+    ? null : parseRuntimeCopies(value.runtimeCopies)
+  if (schemaVersion === 3 && value.runtimeCopies !== null && runtimeCopies === null) return null
+  if (runtimeCopies !== null && (value.memberVersionAfterRuntime === null
+    || runtimeCopies.some((target) => target.agentId === value.memberAgentId
+      || [value.memberCommandId, value.runtimeCommandId, value.campCommandId].includes(target.commandId)))) return null
   return {
     memberCommandId: value.memberCommandId,
     runtimeCommandId: value.runtimeCommandId,
     campCommandId: value.campCommandId,
     runtimePermissions,
+    runtimeCopies,
     memberAgentId: value.memberAgentId,
     memberVersionBeforeRuntime: value.memberVersionBeforeRuntime,
     memberVersionAfterRuntime: value.memberVersionAfterRuntime,

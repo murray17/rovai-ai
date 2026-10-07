@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-06
+last_updated: 2026-10-07
 ---
 
 # v1.72 版本决定
@@ -13,7 +13,7 @@ last_updated: 2026-10-06
 
 - 状态：accepted
 - 日期：2026-09-30
-- 当前权威：[Runtime Launch and Verification v46](../../contracts/runtime-launch-and-verification-v46.md) 与 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)
+- 当前权威：[Runtime Launch and Verification v48](../../contracts/runtime-launch-and-verification-v48.md) 与 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)
 
 ### 背景
 
@@ -268,7 +268,97 @@ User 要求恢复一键新对话在消息模型重构前的草稿行为，并明
 AI 创建队员的专项窗口内生命周期继续由 D09 对应合同约束。
 
 <a id="v1-72-d12"></a>
-## V1.72-D12：Command Code headless 使用冻结的普通 Prompt Bootstrap
+## V1.72-D12：安装发现与真实启动验证解耦
+
+- 状态：accepted
+- 日期：2026-10-05
+- 当前权威：[Runtime Launch v48](../../contracts/runtime-launch-and-verification-v48.md)、[Runtime 边界](../../architecture/runtime-catalog-boundaries.md)、[Camp Member Fast v2](../../contracts/camp-member-fast-v2.md)
+
+### 背景
+
+版本展示和历史探测状态进入配置冻结、队列及派发门禁，CLI 实际可启动时也可能等待手动检测。
+独立 Probe 成功并不能保证下一进程可执行，却增加冷启动成本和两个状态来源。
+
+### 选择
+
+发现只保存安装入口及安全身份；协议、模型与权限在实际执行 Host 的正文屏障内验证。
+保留 Adapter 无法在正文前握手时的最小特例及主动诊断，不以历史健康结果授权运行。
+
+### 后果与替代方案
+
+保留现有字段和快照便于诊断，无 schema 迁移；旧 Ready 不再是调度通行证。
+取消必须覆盖初始化等待，配置失败也须产生可见 Run，模型选择延迟到真实 Host 确认。
+未选择 LKG、额外健康快照、重试调度或后台轮询，因为它们保留双重准入并增加状态复杂度；
+也不直接删除门禁后发送正文，实际初始化验证必须先于输入。
+
+
+<a id="v1-72-d13"></a>
+## V1.72-D13：Fast 偏好直接交给真实 Runtime
+
+- 状态：accepted
+- 日期：2026-10-06
+- 当前权威：[Camp Member Fast v3](../../contracts/camp-member-fast-v3.md)、[Runtime 边界](../../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)
+
+### 背景与选择
+
+可选速度偏好依赖资格预测，增加子进程并可能把明确关闭值丢弃、意外继承原生 Fast 默认。
+沿用现有三态存储、绑定代次及冻结，删除资格授权；关闭语义由支持路径的明确参数和开发回归保证，
+不以每次运行观察确认或历史成功为条件。真实反馈只描述当前 Run，不反写偏好。
+
+### 后果与替代方案
+
+旧资格列无需立即迁移；不可靠的原生默认保持未知，部分 Runtime 会拒绝或忽略可选设置。
+明确拒绝按原错误处理，不做兼容重启或重放。未选择恢复自动资格检查、扩展能力缓存或维护旧版参数回退，
+因为它们继续混淆用户意图与实际生效，并可能扩大费用范围或污染后续 Turn。
+
+<a id="v1-72-d14"></a>
+## V1.72-D14：连接编辑以原生来源为权威，不另建 Key 副本
+
+- 状态：superseded
+- 日期：2026-10-04
+- 后续撤销：User 于 2026-10-07 取消连接编辑；原生配置不改写，执行只读兼容与脱敏保留。
+- 当前权威：[Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md)、[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#claude-code-与-codex-原生配置)与[启动设置 UI](../../ui/components/app-shell-navigation.md#原生连接设置)
+
+### 背景与选择
+
+用户要求已经可用的 CLI 配置直接复用，并明确取消自动复制 Key 到 Rovai 私存。采用 Claude Code 与 Codex
+原生配置的字段编辑；连接方式独立记录，官方登录继续归 CLI 管理。配置身份参与既有执行兼容性判断，
+凭据只保留来源和摘要，不建立第二套有效连接或凭据同步体系。
+
+### 后果与替代方案
+
+编辑共享文件可能影响外部 CLI，必须在设置页说明；无法无损切换的原生版本／来源组合须明确报错。
+保留凭据副本可使旧快照更易重放，却会创造迁移、同步和清理责任，故拒绝该方案。复制整个 Home 会影响
+Skills、MCP 和会话，亦不采用。字段级合并及原生文件原子写入是必要边界，不扩成通用供应商平台。
+
+<a id="v1-72-d15"></a>
+## V1.72-D15：保存切换原生连接，撤回双路径保留与启动覆盖
+
+- 状态：superseded
+- 日期：2026-10-04
+- 后续撤销：User 于 2026-10-07 取消连接编辑；原生配置不改写，执行只读兼容与脱敏保留。
+- 当前权威：[Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md)、[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#claude-code-与-codex-原生配置)与[启动设置 UI](../../ui/components/app-shell-navigation.md#原生连接设置)
+
+### 背景与选择
+
+D14 的原生来源权威继续保留；用户进一步撤回“保存官方后仍须保留另一套 API”的承诺。选择只在用户保存时
+修改原生配置，未保存的完整表单与新 Key 仅留在编辑会话内。正常执行交给 CLI 自己读取连接和认证，不再持久化
+独立模式或启动时重建 provider、临时文件与认证屏蔽。已有队员参数、权限、协作及恢复兼容性继续沿用。
+原生托管存储可能保存 API Key，不能把不透明凭据直接当作官方账号。设置时复用原生账号类型读取，未知保持未知；观察与文件基线分离，保存不等待账号状态；
+首屏先返回本地字段，辅助来源／身份／版本读取放到独立的一次补充请求，结果不能覆盖编辑中的草稿。来源限制只约束受影响字段，不能清空整表；未知写入目标不因默认文件存在而被推定有效。
+来源位置缓存按实际入口与配置目录区分，普通环境变量不使其失效；明确换入口／目录后在同一编辑会话补充确认，按真实修改保留草稿，不恢复保存前的同步识别。
+明确保存官方选择时用原生 ChatGPT 登录方式字段排除 API 类型，而不解密、复制或删除钥匙串对象。
+这仍属于保存时编辑原生配置，不恢复执行时的额外认证判断；模型调用与登录刷新继续由 CLI 负责。
+
+### 后果与替代方案
+
+保存官方后，再用 API 可能需要重新填写，这换取了单一原生配置权威和更少的版本／认证兼容分支。OAuth 不删除，
+共享配置影响如实说明；无法写回的已知有效覆盖在保存时报告。拒绝继续保留两条路径及运行时覆盖，也不采用
+启动前写文件、退出后还原的方案，避免并发进程互相改变配置。前端保存前往返切换必须无损，失败保留全部草稿。
+
+
+<a id="v1-72-d16"></a>
+## V1.72-D16：Command Code headless 使用冻结的普通 Prompt Bootstrap
 
 - 状态：accepted
 - 日期：2026-09-27
@@ -295,8 +385,8 @@ Command Code 的官方 headless NDJSON 提供精确 Session 恢复，但没有�
 - 改写共享 `AGENTS.md`：会把成员私有的冻结 Bootstrap 投到项目／用户级并造成跨成员串线。
 - 自封 ACP 代理：只改接口形状，不能补出上游缺失的高权限投递和审批保证。
 
-<a id="v1-72-d13"></a>
-## V1.72-D13：Cline 先在 macOS arm64 开放真实开发预览
+<a id="v1-72-d17"></a>
+## V1.72-D17：Cline 先在 macOS arm64 开放真实开发预览
 
 - 状态：accepted
 - 日期：2026-10-04
@@ -316,8 +406,8 @@ Cline 已有 shared ACP Host 和隔离真实模型证据，但尚未完成全部
 却不能满足本次开发包的使用要求。此决定只允许开发预览，不接受 Cline 的尚未确认 Plugin Rule 提案，
 也不把现有 FirstPayload 的试运行结果等同于 Bootstrap 或压缩连续性的正式资格。
 
-<a id="v1-72-d14"></a>
-## V1.72-D14：成功的模糊匹配编辑保留为补丁片段
+<a id="v1-72-d18"></a>
+## V1.72-D18：成功的模糊匹配编辑保留为补丁片段
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -335,8 +425,8 @@ Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation �
 行号及实际旧字节的限制；不会据此提升 Runtime 资格。没有选择执行前后读取文件或 Git 捕获，因为并发写入、非 Git
 工作区及完整状态归属会引入另一套观测权威。继续只显示路径可保持旧边界，却不能满足用户审阅已执行修改的要求。
 
-<a id="v1-72-d15"></a>
-## V1.72-D15：Command Code 使用官方 ACP 与必需 System Mod 开发预览
+<a id="v1-72-d19"></a>
+## V1.72-D19：Command Code 使用官方 ACP 与必需 System Mod 开发预览
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -347,7 +437,7 @@ Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation �
 User 在消息 `677d610d-e4cf-4ffb-aba2-d4ebb021cbcd` 与 `1bd0ab39-6939-40cd-9653-b472b3b69082`
 要求修复 System Bootstrap、warm 及全部可接能力。1.74.1 已有官方多 Session ACP，继续仅用 one-shot 会
 丢失可接的常驻能力。选择共享 ACP Host/Fleet，macOS arm64 开放 Preview；新产品路径采用带 readiness 与
-逐 Session 绑定校验的官方 System Mod，替代 D12 的候选 first_payload。完整输入变化由
+逐 Session 绑定校验的官方 System Mod，替代 D16 的候选 first_payload。完整输入变化由
 [revision 5](model-context-change-command-code-acp.md)记录，Cline 的缺失插件反例独立保留。
 
 ### 后果与替代方案
@@ -359,8 +449,8 @@ MCP 同名选择已有 native_wins_skip，避免改写原生全局/项目配置�
 Preview 不代表完整资格：原生账号额度、自定义 BYOK 目录和压缩等未验证轴仍公开记录。
 
 
-<a id="v1-72-d16"></a>
-## V1.72-D16：macOS ACP 按内核身份回收独立进程组，并保留重启记录
+<a id="v1-72-d20"></a>
+## V1.72-D20：macOS ACP 按内核身份回收独立进程组，并保留重启记录
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -381,8 +471,8 @@ ACP 另行观察 leader，保留有界的末帧消费。结果未知的公开 ba
 自动回收，也不等价于 Windows Job 对未观测后代的内核级限制。
 
 
-<a id="v1-72-d17"></a>
-## V1.72-D17：Cline 正常 System Rule 交付与 Command 原生 MCP 配置
+<a id="v1-72-d21"></a>
+## V1.72-D21：Cline 正常 System Rule 交付与 Command 原生 MCP 配置
 
 - 状态：accepted
 - 日期：2026-10-06
@@ -406,13 +496,13 @@ Core 把分配结果写入 Host 私有 mcp.json，保留原生同名优先，更
 原生 MCP 发现成功不代表当前自定义 BYOK 调用成功；未通过项保留，两个 Runtime 仍为 Preview。
 
 
-<a id="v1-72-d18"></a>
-## V1.72-D18：Cline 新会话采用独立 Native Hub，保留旧 ACP 后端
+<a id="v1-72-d22"></a>
+## V1.72-D22：Cline 新会话采用独立 Native Hub，保留旧 ACP 后端
 
 - 状态：accepted
 - 日期：2026-10-07
 - 确认：User 消息 `c023f19a-9f1c-4558-b4d4-1bbab3ddffe9`（Thread 80）
-- 当前权威：[Cline 实施边界](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)、[Runtime Launch v46](../../contracts/runtime-launch-and-verification-v46.md#cline-native-hub)、[Native Hub 输入说明](model-context-change-cline-native-hub.md)
+- 当前权威：[Cline 实施边界](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)、[Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md#cline-native-hub)、[Native Hub 输入说明](model-context-change-cline-native-hub.md)
 
 ### 背景与选择
 

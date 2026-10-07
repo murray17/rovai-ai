@@ -1,5 +1,5 @@
 import type { AppUpdateSnapshot } from '@contracts'
-import { uiAttribute } from './interface-language'
+import { getInterfaceLanguage, uiAttribute } from './interface-language'
 
 export type AppUpdateBadgePresentation = {
   kind: 'available' | 'downloading' | 'ready' | 'installing' | 'failed'
@@ -17,7 +17,7 @@ export function appUpdateBadgePresentation(
     case 'available':
       return {
         kind: 'available',
-        label: uiAttribute('更新可用'),
+        label: getInterfaceLanguage() === 'en' ? 'Update' : uiAttribute('有更新'),
         accessibleLabel: uiAttribute('Rovai AI {0} 更新可用', displayedVersion)
       }
     case 'checking':
@@ -32,7 +32,7 @@ export function appUpdateBadgePresentation(
     case 'downloading':
       return {
         kind: 'downloading',
-        label: `${Math.round(snapshot.downloadPercent ?? 0)}%`,
+        label: uiAttribute('下载 {0}%', Math.round(snapshot.downloadPercent ?? 0)),
         accessibleLabel: uiAttribute('正在下载 Rovai AI {0}，{1}%', displayedVersion, Math.round(snapshot.downloadPercent ?? 0))
       }
     case 'ready_to_install':
@@ -50,13 +50,13 @@ export function appUpdateBadgePresentation(
     case 'download_failed':
       return {
         kind: 'failed',
-        label: uiAttribute('重试下载'),
+        label: uiAttribute('下载失败'),
         accessibleLabel: uiAttribute('Rovai AI {0} 下载失败，需要重试', displayedVersion)
       }
     case 'install_failed':
       return {
         kind: 'failed',
-        label: uiAttribute('重试安装'),
+        label: uiAttribute('安装失败'),
         accessibleLabel: uiAttribute('Rovai AI {0} 安装失败，需要重试', displayedVersion)
       }
     case 'idle':

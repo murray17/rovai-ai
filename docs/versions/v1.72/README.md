@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-06
+last_updated: 2026-10-07
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -16,7 +16,7 @@ last_updated: 2026-10-06
 User 消息 80 要求 Cline 新会话切换到已验证的 Native Hub。当前分支新增 `cline-hub-v1`，使用
 用户所选官方 CLI 的独立认证 Hub，复用共享 Fleet、Binding、投递、审批、Builtin CLI 和监控结算。
 原生 off/basic/agentic 从实际配置/默认传入，不加入自有压缩器；旧 ACP Binding 保留原后端。
-仍为 macOS arm64 Preview。取舍见 [V1.72-D18](decisions.md#v1-72-d18)，精确上下文及兼容说明见
+仍为 macOS arm64 Preview。取舍见 [V1.72-D22](decisions.md#v1-72-d22)，精确上下文及兼容说明见
 [Native Hub 输入说明](model-context-change-cline-native-hub.md)，验证范围见
 [产品接入矩阵](../../research/cline-runtime/hub-adapter-implementation.md)。本次无 schema 迁移，
 未改变 current_version；此前实验 shim、ACP 和 Hub 最小探针不替代产品验收。
@@ -50,13 +50,13 @@ Cline observer v2 补齐原生模型配置快照与实际 Provider/模型匹配�
 [窗口补采](../../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
 
 Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
-macOS arm64 按 [V1.72-D13](decisions.md#v1-72-d13)开放开发 `Preview`，其余平台保持 `NotQualified`；
+macOS arm64 按 [V1.72-D17](decisions.md#v1-72-d17)开放开发 `Preview`，其余平台保持 `NotQualified`；
 完整资格仍在实施。Command Code 随后接入官方 1.74.1 ACP 与共享 Fleet，Migration 185 升至 schema **135**，
 也仅在 macOS arm64 开放 Preview。按 User 后续修复要求，Bootstrap 从旧候选 first_payload 改为受管
-System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D15](decisions.md#v1-72-d15)
+System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D19](decisions.md#v1-72-d19)
 记录加载门禁、逐 Session 绑定与失败收敛。Cline 随后按 User 明确指示改为正常 System Rule，
 不再以故意缺失插件的极端场景阻挡。冻结 B 逐 Session 绑定、user P 独立，见
-[Cline System revision 2](model-context-change-cline-system.md)及 [V1.72-D17](decisions.md#v1-72-d17)。
+[Cline System revision 2](model-context-change-cline-system.md)及 [V1.72-D21](decisions.md#v1-72-d21)。
 共享 Core 的 Command 门禁与常驻接线已过；原生默认 BYOK 路径已解决先前额度阻碍，真实模型 A→B→A、
 exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证通过。显式自定义模型切换仍被上游拒绝，
 因此保留原生默认哨兵而不伪造目录。Cline ACP 未传 compaction 配置，真实探针未得到完成信号。完整 14 轴对照与实际验证见
@@ -67,7 +67,7 @@ exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证
 超过 75 秒无迟到写入、cleanup 后排队输入自动成功均通过。Command 官方 resume/load 会接受不存在历史，
 已增加官方 session/list 精确 ID/cwd 门禁；有效 cold 的 Session/Binding/generation 保留通过。
 范围、失败候选和平台限制见[故障恢复验收](../../research/runtime-monitoring/command-cline-fault-recovery-2026-10-05.md)
-与 [V1.72-D16](decisions.md#v1-72-d16)，不改变两者 Preview 或未闭合的上游差异。
+与 [V1.72-D20](decisions.md#v1-72-d20)，不改变两者 Preview 或未闭合的上游差异。
 
 2026-10-06 追加完成 Command 原生私有 MCP 配置与 Cline System 新包真实验收：两者 first/warm/cold、
 文件工具与显式 CLI 发送通过；MCP cwd、字面 env/headers、原生同名优先和更新/撤销边界通过。
@@ -77,6 +77,40 @@ exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证
 本切片更新 Runtime Catalog/Monitoring 架构、兼容性清单、研究矩阵、测试说明与当前决定导航。
 活动目录加入 Cline 的保守 run_level 条目，复用既有 ACP typed kind，不改变 activity-v4 或旧 Runtime 解释。
 既有 Usage/Execution Metrics 合同足以表达数值，无新字段合同、Renderer 布局或根 README 支持声明。
+
+## 并行实施：Member CLI
+
+User 于 2026-10-06 确认[提示词与接口 r1](model-context-change-member-cli.md)，授权实施、PR 和合入 main。
+仅新增 member list/get/update，保留 create；六个身份字段和同一复合头像资产由 Core 原子 PATCH。
+复用创建记录授权、命令幂等、版本、Run tmp 和失效通知，无数据库迁移、Runtime 配置或成员关系扩权。
+当前字段合同见 [Transport v36](../../contracts/builtin-tool-transport-v36.md)。确定性回归与真实任务 Gate 状态
+记录在[实施计划](implementation-plan.md#member-cli-最小增量)。
+
+## 并行修复：Claude Code 模型发现与 Runtime 探测可用性
+
+按用户确认，删除 256 KiB 单行与 4 MiB 累计 stdout 探测门槛，改为默认 64 MiB、按需增长、可调的单帧容量。
+Claude 优先 list_models，仅明确不支持才兼容 initialize，两者共享超时和进程回收。目录失败保留已有模型、
+选项和缓存标识，不阻止原样保存／执行；保留原生默认选择，不纳入任意模型 ID 输入、能力缓存、复杂重试或资源调度。
+正式握手与真实原生拒绝保持有效。规范见 [Runtime Launch v48](../../contracts/runtime-launch-and-verification-v48.md#模型发现与探测容量)，
+实现与环境证据见[验收记录](runtime-probe-availability-verification.md)。本地完整前端／默认 Rust 回归通过，
+Claude 2.1.280 专用查询与 2.1.100 旧协议回退分别实测通过；Windows 2.1.289 未实测，不推断通过。
+
+## 已撤销：Claude Code 与 Codex 自定义 API 配置
+
+User 于 2026-10-07 明确取消此功能。移除两种智能体的连接方式、登录状态、地址、Key 和自定义模型表单，
+退出原生写回、目录生成及专用观察接口。程序路径、环境变量、显式检查和本地保存继续保留。
+已有原生文件、凭据及模型目录保持原样，执行由原生 CLI 处理；只读快照兼容与输出脱敏保留。
+模型选择回到原生目录，不增加推理强度 fallback。当前合同为 [Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md)，
+实现与验证见[实施计划](implementation-plan.md#2026-10-07-移除自定义-api-配置)。此前编辑器的验证仅为历史证据，
+见[原验收记录](runtime-custom-api-verification.md)。
+
+## 设置保存收窄为本地提交
+
+按用户 2026-10-07 的说明，保存不再触发环境捕获、程序发现、模型元数据命令、账号查询、Host 重启或列表重载。
+普通启动设置继续保留字段合并、CAS 及后继执行兼容性；原生连接编辑随后按 User 要求退出。环境捕获与发现文件校验不占保存提交锁；
+旧检查发布仍重验代次。新边界由 [Runtime Launch v51](../../contracts/runtime-launch-and-verification-v51.md) 拥有，
+界面按回执结束加载；后续移除范围由 v52 覆盖。实施与确定性验证记录在 [实施计划](implementation-plan.md)。
+此项属于用户明确指定的可逆控制流调整，不新增高迁移成本的架构决定。
 
 ## 并行修复：HTML 内部诊断 CSP 归因
 
@@ -213,7 +247,7 @@ v0.4.1 发布后补齐候选版本的日期兼容：macOS 合并清单保留日�
 Claude Code 保留 `--print` 结构化输出，增加 stream-json 输入与 stdio 权限处理。原生 request_id
 与 tool_use_id 分别绑定审批回复和实际工具结果，复用 Action/Approval Dock。初始化成功才发送任务，
 会话 idle 与末轮结果共同控制 stdin 关闭；取消与断线撤销请求。当前合同见
-[Runtime Launch and Verification v46](../../contracts/runtime-launch-and-verification-v46.md)，取舍见
+[Runtime Launch and Verification v49](../../contracts/runtime-launch-and-verification-v49.md)，取舍见
 [V1.72-D06](decisions.md#v1-72-d06)。
 
 审批选项补充原生建议的显式记忆：一次允许不保存规则，记忆由 Claude 保存选中的范围和 destination，
@@ -245,13 +279,20 @@ Claude Code 保留 `--print` 结构化输出，增加 stream-json 输入与 stdi
 当前行为见[队员配置 UI 合同](../../ui/components/member-identity.md#应用运行配置到其他队员)，证据见
 [实施记录](implementation-plan.md#2026-10-02-队员运行配置应用)。
 
+## 训练营默认队员 Runtime 配置复制
+
+2026-10-05：训练营配置成功时，将用户选定的 Runtime、完整模型参数及默认权限自动应用到其余未配置的
+内置队员；首次会话仍只加入选中队员。复用现有 Core 单队员命令，Desktop schema 3 持久化逐人计划与恢复
+检查点。已配置、已移除和并发修改的目标保留原状，已完成用户不补写；不新增 Core 表、模型上下文或训练页面。
+当前字段与恢复边界见 [First-run Onboarding v6](../../contracts/first-run-onboarding-v6.md)，验证记录见实施计划。
+
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.71 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[版本决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.72 |
 | Decisions | 已更新 | [V1.72-D01](decisions.md#v1-72-d01)记录独立 Lark provider；[V1.72-D02](decisions.md#v1-72-d02)记录侧栏摘要与范围读取；[V1.72-D03](decisions.md#v1-72-d03)记录 Lark 入站附件复用与 Host 隔离；[V1.72-D04](decisions.md#v1-72-d04)记录钉钉签名链接与旧排队卡收口；[V1.72-D05](decisions.md#v1-72-d05)记录发送前邀请；[V1.72-D06](decisions.md#v1-72-d06)记录 Claude 原生双向审批，并新增 [V1.72-D07](decisions.md#v1-72-d07) 记录 Thread 命名及旧绑定兼容，均同步当前决定导航 |
-| Contracts | 已更新 | 发布 [Lark Channel v1](../../contracts/lark-channel-v1.md)与 [Feishu Channel v17](../../contracts/feishu-channel-v17.md)，Feishu v16 降为历史；补充 [Navigation Read v1](../../contracts/navigation-read-v1.md)、[Skills Rebuild v2](../../contracts/skills-rebuild-v2.md)、[App Update v7](../../contracts/app-update-v7.md)（继承 v6 日期来源，增加双语发布与 Renderer 显示副本选择）、[Runtime Launch v46](../../contracts/runtime-launch-and-verification-v46.md)与钉钉出站 [DingTalk Channel v14](../../contracts/dingtalk-channel-v14.md)；Composer 邀请只组合现有成员加入与发送命令，不改变两者合同；公开命名由 [Thread Naming v1](../../contracts/thread-naming-v1.md) 覆盖，新上下文与工具输出分别为 [ContextManifest v32](../../contracts/context-manifest-evidence-v32.md) 和 [Built-in Transport v33](../../contracts/builtin-tool-transport-v33.md) |
+| Contracts | 已更新 | 新增 [First-run Onboarding v6](../../contracts/first-run-onboarding-v6.md)，以 Desktop schema 3 冻结逐人 Runtime 复制与恢复；发布 [Lark Channel v1](../../contracts/lark-channel-v1.md)与 [Feishu Channel v17](../../contracts/feishu-channel-v17.md)，Feishu v16 降为历史；补充 [Navigation Read v1](../../contracts/navigation-read-v1.md)、[Skills Rebuild v2](../../contracts/skills-rebuild-v2.md)、[App Update v7](../../contracts/app-update-v7.md)（继承 v6 日期来源，增加双语发布与 Renderer 显示副本选择）、[Runtime Launch v49](../../contracts/runtime-launch-and-verification-v49.md)与钉钉出站 [DingTalk Channel v14](../../contracts/dingtalk-channel-v14.md)；Composer 邀请只组合现有成员加入与发送命令，不改变两者合同；公开命名由 [Thread Naming v1](../../contracts/thread-naming-v1.md) 覆盖，新上下文与工具输出分别为 [ContextManifest v32](../../contracts/context-manifest-evidence-v32.md) 和 [Built-in Transport v33](../../contracts/builtin-tool-transport-v33.md) |
 | Architecture | 已更新 | 新增 [Lark 渠道架构](../../architecture/lark-channel.md)；[飞书渠道架构](../../architecture/feishu-channel.md)移除 `larksuite.com` 并改指 v17；[侧栏刷新](../../architecture/desktop-navigation-refresh.md)与[Skills 来源](../../architecture/skills.md)说明局部读取及目录缓存；[钉钉渠道架构](../../architecture/dingtalk-channel.md)补齐原生附件出站与重试边界；[Public Camp Composer](../../architecture/camp-composer-draft.md#发送)说明邀请与发布命令边界；[Desktop App Updates](../../architecture/desktop-app-updates.md)补齐随包发布日期来源；[架构导航](../../architecture/README.md) 明确 Thread 命名覆盖与稳定存储边界；[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)说明 Claude 权限回调边界 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)增加 Lark 页签、品牌显示与未验收提示，并明确只读网页执行台的历史区、生产组件及重连呈现；[Camp 命名](../../contracts/channel-camp-naming-v1.md)和[统一侧栏](../../ui/components/app-shell-navigation.md)补齐 Lark 来源及范围刷新；[结构化 Mention](../../ui/components/structured-mentions.md#member-typeahead)和[会话工作区](../../ui/components/conversation-workspace.md#camp-composer)说明待邀请反馈；公开英文名称统一为 Thread，中文继续用对话，草稿和导航持久状态兼容旧字段 |
 | Runtime Activity | 确认无需更新 | Canonical Activity、Adapter mapping 与 Registry 的事件语义保持；Thread 只更新公开范围字段及读取投影，原始证据先验摘要 |
@@ -309,3 +350,34 @@ macOS/Web 不增加入口。托盘及第二次启动恢复原窗口，明确退�
 2026-10-04 [上下文可用性收口](../../research/runtime-monitoring/live-context-usability-2026-10-04.md)
 按 Execution Metrics v7 解除输入确认等待、复用有效实际模型窗口，并接入 ZCode 运行中事件触发读取。
 旧轮次记录保留当时的限制；当前规则以 v7 为准。
+
+## 并行交付：Runtime 安装发现与真实启动验证
+
+启动和 rescan 只发现入口，安装展示“可用”，检查成功不追加说明；配置保存、Run 创建及派发不依赖历史 Ready。
+协议、认证、显式模型/选项和权限在承载任务的 Host 内验证后发送正文；初始化及失败复用 Run 状态。
+保留 Antigravity 和显式 Fast 最小兼容性检查，Fast 资格改为主动查询。
+当前边界见 [Runtime Launch v49](../../contracts/runtime-launch-and-verification-v49.md)与
+[Camp Member Fast v2](../../contracts/camp-member-fast-v2.md)，理由见 [V1.72-D12](decisions.md#v1-72-d12)。
+不改变 schema、版本指针、权限默认、会话隔离、输入去重或模型上下文；不新增 LKG、健康快照或轮询。
+验证记录见[实施记录](implementation-plan.md#2026-10-05-runtime-轻量启动)。
+
+
+## 并行交付：Fast 偏好直接应用
+
+User 于 2026-10-06 确认移除 Fast 专用资格链，沿用现有表、事务、三态及 Run 冻结。
+Claude 直接传临时 settings，Codex 直接传单 Turn 档位；不再启动 Fast 版本、认证、schema 或元数据检查。
+关闭值不被资格过滤，运行反馈只在对应 Run 中展示，不写回偏好。无迁移、资格管理器、兼容重启或 #642 链路重做。
+当前规范见 [Camp Member Fast v3](../../contracts/camp-member-fast-v3.md)，理由见 [V1.72-D13](decisions.md#v1-72-d13)。
+验证范围与限制见[实施记录](implementation-plan.md#2026-10-06-fast-偏好直接应用)。
+
+后续收口保留 Thread 队员级存储与冻结，控件恢复二态；正常 Claude/Codex Host 初始化返回值补充
+未覆盖时的显示初值，不解析原生配置、不启动额外探测，也不回写用户选择。
+本轮验证见[二态与初始化值实施记录](implementation-plan.md#2026-10-06-fast-二态与初始化值)。
+
+
+## 并行修复：Codex 失败 Host 回收
+
+User 于 2026-10-06 授权在独立 worktree 实施并推送分支。Codex 仅原生 completed 有资格复用，失败进程沿既有清理门禁
+和 worker 回收；初始化失败保留受管进程，冷恢复验证精确 Thread，未知投递沿既有 v6 轮换，正文不自动重放。
+当前规范见 [Runtime Launch v49](../../contracts/runtime-launch-and-verification-v49.md)，改动与验证范围见
+[实施记录](implementation-plan.md#2026-10-06-codex-host-失败恢复)。不改变数据库 schema、Runtime 容量策略或模型上下文。

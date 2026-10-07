@@ -16,9 +16,9 @@ use windows_sys::Win32::{
         },
         CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GetAce, GetAclInformation,
         GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetTokenInformation,
-        OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-        PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_GROUPS,
-        TOKEN_QUERY, TOKEN_USER, TokenLogonSid, TokenUser,
+        INHERITED_ACE, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
+        SECURITY_ATTRIBUTES, TOKEN_GROUPS, TOKEN_QUERY, TOKEN_USER, TokenLogonSid, TokenUser,
     },
     Storage::FileSystem::FILE_ALL_ACCESS,
     System::Threading::{GetCurrentProcess, OpenProcessToken},
@@ -26,6 +26,8 @@ use windows_sys::Win32::{
 
 const ACCESS_ALLOWED_ACE_TYPE_VALUE: u8 = 0;
 const LOCAL_SYSTEM_SID: &str = "S-1-5-18";
+// winnt.h JOB_OBJECT_ALL_ACCESS is a composite macro omitted by windows-sys.
+const JOB_OBJECT_ALL_ACCESS: u32 = 0x001f_003f;
 
 #[derive(Debug)]
 struct PrivateDaclMismatch(String);
@@ -43,6 +45,7 @@ pub(crate) enum PrivateObjectKind {
     Directory,
     File,
     NamedPipe,
+    Job,
 }
 
 /// Owns a self-relative security descriptor allocated by Windows.
@@ -59,7 +62,9 @@ pub(crate) struct PrivateSecurityDescriptor {
 impl PrivateSecurityDescriptor {
     pub(crate) fn new(kind: PrivateObjectKind) -> Result<Self> {
         let principal_sid = match kind {
-            PrivateObjectKind::Directory | PrivateObjectKind::File => current_windows_user_sid()?,
+            PrivateObjectKind::Directory | PrivateObjectKind::File | PrivateObjectKind::Job => {
+                current_windows_user_sid()?
+            }
             PrivateObjectKind::NamedPipe => current_windows_logon_sid()?,
         };
         let sddl = match kind {
@@ -71,6 +76,9 @@ impl PrivateSecurityDescriptor {
             }
             PrivateObjectKind::NamedPipe => {
                 format!("D:P(A;;GA;;;SY)(A;;GA;;;{principal_sid})")
+            }
+            PrivateObjectKind::Job => {
+                format!("O:{principal_sid}D:P(A;;GA;;;SY)(A;;GA;;;{principal_sid})")
             }
         };
         let sddl_wide = wide_nul(&sddl);
@@ -106,11 +114,34 @@ impl PrivateSecurityDescriptor {
     }
 
     pub(crate) fn verify_file_handle(&self, handle: HANDLE) -> Result<()> {
-        if self.kind == PrivateObjectKind::NamedPipe {
-            bail!("named-pipe descriptors cannot admit filesystem objects");
+        if !matches!(
+            self.kind,
+            PrivateObjectKind::Directory | PrivateObjectKind::File
+        ) {
+            bail!("kernel-object descriptors cannot admit filesystem objects");
         }
         let security = SecurityInfo::from_file_handle(handle)?;
         security.verify_private_policy(self.kind, &self.principal_sid)
+    }
+
+    /// The old managed-directory writer inherited the admitted parent's exact
+    /// user/SYSTEM ACL. Broader grants and unknown owners are not migration inputs.
+    pub(crate) fn verify_inherited_file_handle(&self, handle: HANDLE) -> Result<()> {
+        if !matches!(
+            self.kind,
+            PrivateObjectKind::Directory | PrivateObjectKind::File
+        ) {
+            bail!("kernel-object descriptors cannot admit inherited filesystem objects");
+        }
+        SecurityInfo::from_file_handle(handle)?.verify_policy(self.kind, &self.principal_sid, true)
+    }
+
+    pub(crate) fn verify_job_handle(&self, handle: HANDLE) -> Result<()> {
+        if self.kind != PrivateObjectKind::Job {
+            bail!("only Job descriptors can admit Jobs");
+        }
+        SecurityInfo::from_handle(handle, SE_KERNEL_OBJECT, true)?
+            .verify_private_policy(self.kind, &self.principal_sid)
     }
 
     /// Only an observed DACL mismatch is repairable. Failed reads and unknown
@@ -124,8 +155,11 @@ impl PrivateSecurityDescriptor {
     }
 
     pub(crate) fn apply_file_dacl(&self, handle: HANDLE) -> Result<()> {
-        if self.kind == PrivateObjectKind::NamedPipe {
-            bail!("named-pipe descriptors cannot repair filesystem objects");
+        if !matches!(
+            self.kind,
+            PrivateObjectKind::Directory | PrivateObjectKind::File
+        ) {
+            bail!("kernel-object descriptors cannot repair filesystem objects");
         }
         SecurityInfo::from_file_handle(handle)?.verify_file_owner(&self.principal_sid)?;
         let mut present = 0;
@@ -247,6 +281,15 @@ impl SecurityInfo {
     }
 
     fn verify_private_policy(&self, kind: PrivateObjectKind, current_user_sid: &str) -> Result<()> {
+        self.verify_policy(kind, current_user_sid, false)
+    }
+
+    fn verify_policy(
+        &self,
+        kind: PrivateObjectKind,
+        current_user_sid: &str,
+        inherited: bool,
+    ) -> Result<()> {
         if kind != PrivateObjectKind::NamedPipe {
             self.verify_file_owner(current_user_sid)?;
         }
@@ -262,9 +305,14 @@ impl SecurityInfo {
             return Err(io::Error::last_os_error())
                 .context("failed to inspect Windows security descriptor control flags");
         }
-        if control & SE_DACL_PROTECTED == 0 {
+        if (control & SE_DACL_PROTECTED != 0) == inherited {
             return Err(PrivateDaclMismatch(
-                "filesystem object DACL is not protected from inheritance".to_string(),
+                if inherited {
+                    "legacy storage object DACL is not inherited"
+                } else {
+                    "filesystem object DACL is not protected from inheritance"
+                }
+                .to_string(),
             )
             .into());
         }
@@ -299,12 +347,16 @@ impl SecurityInfo {
 
         let expected_flags = match kind {
             PrivateObjectKind::Directory => (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8,
-            PrivateObjectKind::File | PrivateObjectKind::NamedPipe => 0,
-        };
+            PrivateObjectKind::File | PrivateObjectKind::NamedPipe | PrivateObjectKind::Job => 0,
+        } | if inherited { INHERITED_ACE as u8 } else { 0 };
         // CreateNamedPipe maps generic rights in the supplied descriptor to
         // the file-object rights exposed by the created pipe. GA therefore
         // admits as FILE_ALL_ACCESS when the post-creation DACL is read back.
-        let expected_mask = FILE_ALL_ACCESS;
+        let expected_mask = if kind == PrivateObjectKind::Job {
+            JOB_OBJECT_ALL_ACCESS
+        } else {
+            FILE_ALL_ACCESS
+        };
         let mut entries = Vec::with_capacity(2);
         for index in 0..acl_info.AceCount {
             let mut raw_ace: *mut c_void = null_mut();

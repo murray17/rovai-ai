@@ -7,7 +7,6 @@ import { mkdir, copyFile, chmod, writeFile, readFile, access, rm, readdir } from
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { startQualificationCore } from '../../../../scripts/lib/qualification-core.mjs'
-import { configureProductRuntime } from '../../../../scripts/configure-product-runtime.mjs'
 import { createConfiguredCampAndSend, composerDocumentForAddress } from '../../../../scripts/lib/create-configured-camp.mjs'
 import { seedCompletedOnboardingForAcceptance } from '../../../../scripts/lib/dev-desktop.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from '../../../../scripts/lib/runtime-camp-files-root.mjs'
@@ -144,7 +143,24 @@ try {
     agents.push(result.payload.agentId)
   }
   report.agents = agents
-  const installation = await configureProductRuntime(core.request, runtimeKind, agents)
+  // The current Core leaves member readiness installed_unverified until actual
+  // execution. A successful diagnostic must not become a member readiness gate.
+  await core.request('runtime.product.check', { runtimeKind })
+  const installation = (await core.request('runtime.installations.list')).find(candidate =>
+    candidate.adapterKind === runtimeKind && candidate.installationClass === 'managed_default'
+      && candidate.authScope === 'default' && candidate.memberRuntimeDefaults)
+  assert.equal(installation?.snapshot?.probeStatus, 'ready', 'explicit owned Hub diagnostic required')
+  for (const agentId of agents) {
+    const profile = await core.request('members.get', { agentId })
+    const configured = await core.request('members.runtime.set', { commandId: randomUUID(), command: {
+      agentId, expectedVersion: profile.version, adapterKind: runtimeKind,
+      model: installation.memberRuntimeDefaults.model, permissions: installation.memberRuntimeDefaults.permissions
+    } })
+    assert.equal(configured.status, 'applied', JSON.stringify(configured))
+    const selected = await core.request('members.get', { agentId })
+    assert.equal(selected.runtimeConfiguration?.adapterKind, runtimeKind)
+    assert(['ready', 'installed_unverified'].includes(selected.runtimeReadiness?.status))
+  }
   report.readiness = { status: installation.snapshot.probeStatus, protocols: installation.snapshot.protocols, version: installation.snapshot.reportedVersion }
   const first = 'Remember HUB_MEMORY_A_950871. Run rovai send --help, then use the bundled rovai send --public-only exactly once to publish your System identity and the memory marker. Do not use any other command or modify files. After publishing, finish the native turn with a brief non-empty final response.'
   const sent = await createConfiguredCampAndSend(core.request, { commandId: randomUUID(), name: 'Native Hub isolated product acceptance', workspace: { projectPath: workspace }, memberAgentIds: agents, defaultLeadAgentId: agents[0], address: { mode: 'explicit', agentIds: [agents[0]] }, body: first, purpose: 'Native Hub product acceptance' })

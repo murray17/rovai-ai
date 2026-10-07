@@ -147,36 +147,42 @@ pub struct RuntimeExecutableCandidate {
 
 impl RuntimeExecutableCandidate {
     pub fn entrypoint_locator_identity_is_current(&self) -> bool {
-        let Some(expected) = self.entrypoint_locator_identity.as_ref() else {
-            return true;
+        entrypoint_locator_identity_is_current(self.entrypoint_locator_identity.as_ref())
+    }
+}
+
+pub fn entrypoint_locator_identity_is_current(
+    expected: Option<&RuntimeEntrypointLocatorIdentity>,
+) -> bool {
+    let Some(expected) = expected else {
+        return true;
+    };
+    #[cfg(windows)]
+    {
+        let Some(resolved) = inspect_codex_cmd_shim(Path::new(&expected.canonical_shim_path))
+        else {
+            return false;
         };
-        #[cfg(windows)]
-        {
-            let Some(resolved) = inspect_codex_cmd_shim(Path::new(&expected.canonical_shim_path))
-            else {
-                return false;
-            };
-            let expected_kind = match resolved.package_manager {
-                PackageManagerShimKind::Npm => "npm_cmd_shim",
-                PackageManagerShimKind::Pnpm => "pnpm_cmd_shim",
-            };
-            if expected.entrypoint_kind != expected_kind {
-                return false;
-            }
-            capture_resolved_windows_command_shim(
-                Path::new(&expected.canonical_shim_path),
-                &resolved.executable,
-            )
-            .ok()
-            .map(|identity| resolved_locator_identity(expected_kind, identity))
-            .as_ref()
-                == Some(expected)
+        let expected_kind = match resolved.package_manager {
+            PackageManagerShimKind::Npm => "npm_cmd_shim",
+            PackageManagerShimKind::Pnpm => "pnpm_cmd_shim",
+        };
+        if expected.entrypoint_kind != expected_kind {
+            return false;
         }
-        #[cfg(not(windows))]
-        {
-            let _ = expected;
-            false
-        }
+        capture_resolved_windows_command_shim(
+            Path::new(&expected.canonical_shim_path),
+            &resolved.executable,
+        )
+        .ok()
+        .map(|identity| resolved_locator_identity(expected_kind, identity))
+        .as_ref()
+            == Some(expected)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = expected;
+        false
     }
 }
 
@@ -734,6 +740,23 @@ fn effective_startup_configuration(
                 .get()
                 .and_then(|store| store.read().ok()?.get(&kind).cloned())
         })
+}
+
+/// Only native checks use the current scoped configuration. Executions use their frozen snapshot.
+pub fn custom_api_snapshot(
+    kind: AdapterKind,
+) -> anyhow::Result<Option<crate::runtime_custom_api::CustomApiSnapshot>> {
+    let Some(configuration) = effective_startup_configuration(kind) else {
+        return Ok(None);
+    };
+    let Some(snapshot) = configuration.custom_api_snapshot else {
+        return Ok(None);
+    };
+    Ok(
+        crate::runtime_custom_api::native::read(&snapshot.context, None)
+            .ok()
+            .map(|current| current.snapshot(&snapshot.context, false)),
+    )
 }
 
 fn configured_environment_variable(kind: AdapterKind, key: &str) -> Option<OsString> {
@@ -1923,6 +1946,7 @@ mod tests {
         let configured = search.with_startup_configuration(
             AdapterKind::CodexCli,
             crate::runtime_startup::RuntimeStartupConfiguration {
+                custom_api_snapshot: None,
                 program_path: Some(
                     directory
                         .join("manual/codex")
@@ -2439,6 +2463,88 @@ mod windows_tests {
                 .compatibility_fingerprint,
             "a package-manager rewrite must fence the old Runtime snapshot even when codex.exe is unchanged"
         );
+
+        #[cfg(feature = "slow-tests")]
+        {
+            use crate::agent_profile::{AgentProfileService, DiscoveredRuntimeEntry};
+
+            let (mut database, database_root) = crate::test_support::fresh_schema_database_fast();
+            let service = AgentProfileService::default();
+            let verify_entry = |candidate: &RuntimeExecutableCandidate| {
+                DiscoveredRuntimeEntry {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: candidate.path.to_string_lossy().into_owned(),
+                    executable_fingerprint: executable_fingerprint(&candidate.path).unwrap(),
+                    source: candidate.source,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
+                }
+                .verify()
+                .unwrap()
+            };
+            let installation_id = service
+                .commit_discovered_runtime_entry(&mut database, verify_entry(&second), None)
+                .unwrap();
+            let mut target = executable.clone();
+            for relocated in [false, true] {
+                if relocated {
+                    // npm can move a hoisted platform package under the main
+                    // package while keeping the user's codex.cmd entry fixed.
+                    let nested = root
+                        .join("node_modules/@openai/codex/node_modules/@openai/codex-win32-x64");
+                    fs::create_dir_all(nested.parent().unwrap()).unwrap();
+                    fs::rename(root.join("node_modules/@openai/codex-win32-x64"), &nested).unwrap();
+                    target = nested.join("vendor/x86_64-pc-windows-msvc/bin/codex.exe");
+                    assert!(!executable.exists());
+                } else {
+                    fs::write(&target, b"upgraded native codex executable").unwrap();
+                }
+                // The locator is needed precisely when the old target's file
+                // identity can no longer authorize a launch.
+                database
+                    .connection()
+                    .execute("DELETE FROM runtime_executable_identity", [])
+                    .unwrap();
+                let saved = service
+                    .runtime_entrypoint_locator_identity(&database, &installation_id)
+                    .unwrap()
+                    .expect("no snapshot or file identity may hide the saved shim path");
+                let rebound = search
+                    .candidates_with_override(
+                        AdapterKind::CodexCli,
+                        [PathBuf::from(&saved.canonical_shim_path)],
+                        None,
+                    )
+                    .into_iter()
+                    .next()
+                    .unwrap();
+                assert_eq!(
+                    rebound.path,
+                    runtime_visible_path(target.canonicalize().unwrap())
+                );
+                assert!(rebound.entrypoint_locator_identity_is_current());
+                service
+                    .commit_discovered_runtime_entry(
+                        &mut database,
+                        verify_entry(&rebound),
+                        Some(&installation_id),
+                    )
+                    .unwrap();
+                let installation = service
+                    .managed_installation(&database, AdapterKind::CodexCli, "default")
+                    .unwrap()
+                    .unwrap();
+                assert!(installation.snapshot.is_none());
+                assert_eq!(installation.id, installation_id);
+                assert_eq!(
+                    service
+                        .runtime_entrypoint_locator_identity(&database, &installation_id)
+                        .unwrap(),
+                    rebound.entrypoint_locator_identity
+                );
+            }
+            drop(database);
+            fs::remove_dir_all(database_root).unwrap();
+        }
 
         fs::remove_dir_all(root).unwrap();
     }

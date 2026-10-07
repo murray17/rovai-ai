@@ -163,7 +163,14 @@ async fn run() -> Result<u8> {
     };
     let context = load_context()?;
     let auth = context.auth()?;
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = if operation == "member.update" {
+        input["requestId"]
+            .as_str()
+            .context("member.update requestId is missing")?
+            .to_string()
+    } else {
+        Uuid::new_v4().to_string()
+    };
     let request = BuiltinToolIpcRequest {
         ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         auth,
@@ -1371,7 +1378,7 @@ fn print_root_help() {
 }
 
 fn root_help_text(managed_runtime: bool) -> String {
-    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member create\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.\n".to_string();
+    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.\n".to_string();
     if !managed_runtime {
         text.push_str("\nUser Automation:\n  rovai app --help\n\nAgent operations keep their process-private transport. `rovai app` uses the running Desktop App's separate User Automation transport.\n");
     }
@@ -1523,6 +1530,9 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
         if description.name == "mission.update" {
             writeln!(output,"\nProvide at least one content field; omitted fields remain unchanged.\nUse mission status to change status.").expect("writing help to a String cannot fail");
         }
+        if description.name == "member.update" {
+            writeln!(output, "\nProvide at least one change. Clear optional text with \"\"; clear personalityTraits with [] in JSON. displayName cannot be empty.\nIf an image fails, fix the image; do not silently drop it and save only text. For multiline text, use a UTF-8 JSON file.").expect("writing help to a String cannot fail");
+        }
         let examples = operation_help_examples(&description.name);
         writeln!(output, "\nExamples:").expect("writing help to a String cannot fail");
         for example in examples {
@@ -1552,6 +1562,33 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
             if argument.required { " required" } else { "" },
         )
         .expect("writing help to a String cannot fail");
+        if description.name == "member.update" {
+            let teaching = match argument.field.as_str() {
+                "agentId" => "A current Thread member, or a member you created in this Thread.",
+                "avatarCenterX" => {
+                    "Supply center X, center Y and size together to crop the source. Centers: 0-1; size: 0.12-1; the crop must fit inside the source."
+                }
+                "avatarFile" => {
+                    "Run-readable PNG/JPEG source. Replaces the portrait and generates its icon; omit the crop fields to use the default crop."
+                }
+                "avatarSize" => {
+                    "With all crop fields and no avatarFile, re-crop the existing source without replacing the portrait."
+                }
+                "clearAvatar" => {
+                    "Clear both images. Cannot combine with avatarFile or any crop field."
+                }
+                "expectedVersion" => {
+                    "Use member get's version. On conflict, read again and decide whether a new update is needed."
+                }
+                "requestId" => {
+                    "Generate one lowercase UUID for this update. Reuse it only for an exact retry allowed by error.recovery; never change the patch under that ID."
+                }
+                _ => "",
+            };
+            if !teaching.is_empty() {
+                write_indented_help(output, teaching);
+            }
+        }
         if description.name == "thread.runs" {
             let teaching = match argument.field.as_str() {
                 "active" => {
@@ -1882,6 +1919,12 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
         "mission.update" => &["rovai mission update --title \"Directory navigation\""],
         "mission.status" => &["rovai mission status --status needs_you"],
         "thread.message.send" => &CAMP_MESSAGE_SEND_HELP_EXAMPLES,
+        "member.list" => &["rovai member list"],
+        "member.get" => &["rovai member get --agent-id agent_27"],
+        "member.update" => &[
+            "rovai member update --agent-id agent_27 --expected-version 3 --request-id 51d668e1-6dc7-4f39-80b2-0555f823715a --team-role 'Researcher'",
+            "rovai member update --input-file member-update.json",
+        ],
         "member.create" => &[
             "rovai member create --creation-key 2b945f3f-4b45-4ae5-92b2-739fce600338 --display-name 'Nova' --team-role 'Researcher'",
             "rovai member create --input-file confirmed-member.json",
@@ -2133,6 +2176,89 @@ mod tests {
             )
             .is_err()
         );
+        let update = builtin_tool_description("member.update").unwrap();
+        let direct = parse_and_validate_operation_input(
+            &update,
+            &[
+                "--agent-id".into(),
+                "agent_2".into(),
+                "--expected-version".into(),
+                "3".into(),
+                "--request-id".into(),
+                "51d668e1-6dc7-4f39-80b2-0555f823715a".into(),
+                "--avatar-center-x".into(),
+                "0.5".into(),
+                "--avatar-center-y".into(),
+                "0.5".into(),
+                "--avatar-size".into(),
+                "0.5".into(),
+                "--avatar-file".into(),
+                "./missing-avatar.png".into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(direct["avatarSize"], 0.5);
+        assert_eq!(direct["expectedVersion"], 3);
+        assert!(direct.get("teamRole").is_none());
+        // Core resolves against the authenticated Run, not the CLI or JSON cwd.
+        // Passing the source through must not require its existence.
+        assert_eq!(direct["avatarFile"], "./missing-avatar.png");
+        let path = std::env::temp_dir().join(format!("member-update-{}.json", Uuid::new_v4()));
+        std::fs::write(&path, serde_json::to_vec(&direct).unwrap()).unwrap();
+        let from_file = parse_and_validate_operation_input(
+            &update,
+            &["--input-file".into(), path.to_string_lossy().into_owned()],
+        )
+        .unwrap();
+        assert_eq!(from_file, direct);
+        assert!(
+            parse_and_validate_operation_input(
+                &update,
+                &[
+                    "--input-file".into(),
+                    path.to_string_lossy().into_owned(),
+                    "--team-role".into(),
+                    "unexpected".into()
+                ]
+            )
+            .is_err()
+        );
+        let create = builtin_tool_description("member.create").unwrap();
+        let create_input = parse_and_validate_operation_input(
+            &create,
+            &[
+                "--creation-key".into(),
+                "51d668e1-6dc7-4f39-80b2-0555f823715a".into(),
+                "--display-name".into(),
+                "Avatar path fixture".into(),
+                "--avatar-file".into(),
+                "./missing-avatar.png".into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(create_input["avatarFile"], "./missing-avatar.png");
+        std::fs::write(&path, serde_json::to_vec(&create_input).unwrap()).unwrap();
+        assert_eq!(
+            parse_and_validate_operation_input(
+                &create,
+                &["--input-file".into(), path.to_string_lossy().into_owned()],
+            )
+            .unwrap(),
+            create_input
+        );
+        for (description, mut input) in [(update, direct), (create, create_input)] {
+            input["avatarFile"] = json!(path.with_file_name("missing-avatar.png"));
+            std::fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+            assert_eq!(
+                parse_and_validate_operation_input(
+                    &description,
+                    &["--input-file".into(), path.to_string_lossy().into_owned()],
+                )
+                .unwrap(),
+                input
+            );
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -2175,6 +2301,9 @@ mod tests {
     fn exact_help_surface_covers_the_current_catalog_and_no_family_aliases() {
         let exact_paths: &[&[&str]] = &[
             &["send", "--help"],
+            &["member", "list", "--help"],
+            &["member", "get", "--help"],
+            &["member", "update", "--help"],
             &["member", "create", "--help"],
             &["task", "create", "--help"],
             &["task", "get", "--help"],
@@ -2201,7 +2330,7 @@ mod tests {
             &["mission", "update", "--help"],
             &["mission", "status", "--help"],
         ];
-        assert_eq!(exact_paths.len(), 26);
+        assert_eq!(exact_paths.len(), 29);
         for path in exact_paths {
             let args = path
                 .iter()

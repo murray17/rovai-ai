@@ -1170,9 +1170,6 @@
   border-radius: 50%;
   background: var(--muted);
 }
-.member-editor-runtime-status.status-available > i {
-  background: var(--success);
-}
 .member-editor-runtime-health-wrap code,
 .member-editor-runtime-health-wrap .runtime-status-detail {
   color: var(--muted);

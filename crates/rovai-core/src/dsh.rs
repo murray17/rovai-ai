@@ -9,7 +9,7 @@ use tokio::process::Command;
 use crate::{agent_profile::AdapterKind, command::canonical_json_digest};
 
 pub const MINIMUM_VERSION: &str = "0.1.5-rc.2";
-pub const BOOTSTRAP_REVISION: &str = "dsh-create-file-diff-v3";
+pub const BOOTSTRAP_REVISION: &str = "dsh-responses-tool-compat-v4";
 const BOOTSTRAP_PLUGIN: &str = include_str!("dsh/bootstrap.mjs");
 const MAX_OBSERVED_FILE_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 
@@ -43,17 +43,17 @@ pub fn supported_version(version: Option<&str>) -> bool {
 /// Observe only this Runtime's native configuration. Values never enter argv,
 /// prompts or diagnostics; changes invalidate process and Native Binding reuse.
 pub fn native_configuration_digest(cwd: &Path) -> Result<String> {
-    let home = crate::runtime_discovery::runtime_environment_variable(
-        AdapterKind::DeepseekHarness,
-        "DSH_HOME",
-    )
-    .map(std::path::PathBuf::from)
-    .or_else(|| {
-        crate::runtime_discovery::runtime_home_directory(AdapterKind::DeepseekHarness)
-            .map(|p| p.join(".dsh"))
-    })
-    .context("DeepSeek Harness native Home is unavailable")?;
-    configuration_digest(&home, cwd)
+    configuration_digest(&native_home()?, cwd)
+}
+
+fn native_home() -> Result<std::path::PathBuf> {
+    crate::runtime_discovery::runtime_environment_variable(AdapterKind::DeepseekHarness, "DSH_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            crate::runtime_discovery::runtime_home_directory(AdapterKind::DeepseekHarness)
+                .map(|p| p.join(".dsh"))
+        })
+        .context("DeepSeek Harness native Home is unavailable")
 }
 
 fn configuration_digest(home: &Path, cwd: &Path) -> Result<String> {
@@ -85,6 +85,55 @@ pub fn configure_host(
     permissions: &Value,
     mcp_server_names: &[String],
 ) -> Result<()> {
+    let tool_compat = responses_tool_compat(&native_home()?.join("settings.yaml"))?;
+    configure_host_with_tool_compat(
+        command,
+        root,
+        cwd,
+        permissions,
+        mcp_server_names,
+        tool_compat,
+    )
+}
+
+/// Only project non-secret defaults into the composition layer. Native user
+/// settings (including model-level overrides) still have the final say. DSH's
+/// pi-ai adapter otherwise omits `strict`, allowing Responses endpoints to
+/// require optional shell arguments such as `justification`.
+fn responses_tool_compat(settings_path: &Path) -> Result<Option<Value>> {
+    let bytes = match fs::read(settings_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => bail!("dsh_native_configuration_unreadable"),
+    };
+    // Parser errors can contain scalar values from this credential-bearing file.
+    let settings: Value = serde_yaml::from_slice(&bytes)
+        .map_err(|_| anyhow::anyhow!("dsh_native_settings_invalid"))?;
+    let Some(providers) = settings
+        .pointer("/llm-pi-ai/providers")
+        .and_then(Value::as_object)
+    else {
+        return Ok(None);
+    };
+    let defaults: serde_json::Map<String, Value> = providers
+        .iter()
+        .filter(|(_, provider)| {
+            provider["api"] == "openai-responses"
+                && provider.pointer("/compat/supportsStrictMode").is_none()
+        })
+        .map(|(route, _)| (route.clone(), json!({"compat":{"supportsStrictMode":true}})))
+        .collect();
+    Ok((!defaults.is_empty()).then(|| json!({"id":"llm-pi-ai","config":{"providers":defaults}})))
+}
+
+fn configure_host_with_tool_compat(
+    command: &mut Command,
+    root: &Path,
+    cwd: &Path,
+    permissions: &Value,
+    mcp_server_names: &[String],
+    tool_compat: Option<Value>,
+) -> Result<()> {
     let sandbox = permissions
         .get("sandbox_mode")
         .and_then(Value::as_str)
@@ -109,7 +158,7 @@ pub fn configure_host(
     let plugin_path = root.join("bootstrap.mjs");
     fs::write(&plugin_path, BOOTSTRAP_PLUGIN)?;
     private_file(&plugin_path)?;
-    let patch = json!([
+    let mut patch = json!([
         {"id":"sandbox-policy","config":{"mode":sandbox,"workspaceRoot":cwd}},
         {"id":"approval","config":{"policy":approval}},
         // The interactive preset service seeds native settings over the two
@@ -123,6 +172,9 @@ pub fn configure_host(
         {"id":"acp","inject":["acpAppStartup","rovaiDshReady"]},
         {"insert":[{"id":"rovai-bootstrap","name":plugin_path,"config":{"bindingRoot":binding_root,"observationRoot":observation_root,"mcpServerNames":mcp_server_names}}]}
     ]);
+    if let Some(tool_compat) = tool_compat {
+        patch.as_array_mut().unwrap().push(tool_compat);
+    }
     let patch_path = root.join("rovai.patch.json");
     fs::write(&patch_path, serde_json::to_vec(&patch)?)?;
     private_file(&patch_path)?;
@@ -629,6 +681,67 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn responses_tool_defaults_preserve_native_overrides_and_private_settings() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-dsh-responses-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.yaml");
+        assert_eq!(responses_tool_compat(&path).unwrap(), None);
+        let settings = json!({
+            "llm-pi-ai":{"providers":{
+                "gateway":{"api":"openai-responses","baseURL":"https://private.invalid/v1",
+                    "headers":{"Authorization":"private-test-credential"},
+                    "models":[{"id":"model","compat":{"supportsStrictMode":false}}]},
+                "explicit-off":{"api":"openai-responses","compat":{"supportsStrictMode":false}},
+                "explicit-on":{"api":"openai-responses","compat":{"supportsStrictMode":true}},
+                "invalid-null":{"api":"openai-responses","compat":{"supportsStrictMode":null}},
+                "completions":{"api":"openai-completions"},
+                "anthropic":{"api":"anthropic-messages"},
+                "native-default":{}
+            }},
+            "unrelated":{"credential":"another-private-test-value"}
+        });
+        let original = serde_yaml::to_string(&settings).unwrap();
+        fs::write(&path, &original).unwrap();
+        let compat = responses_tool_compat(&path).unwrap();
+        assert_eq!(
+            compat,
+            Some(json!({"id":"llm-pi-ai","config":{"providers":{
+                "gateway":{"compat":{"supportsStrictMode":true}}
+            }}}))
+        );
+        let mut command = Command::new("dsh");
+        configure_host_with_tool_compat(
+            &mut command,
+            &root,
+            &root,
+            &json!({"sandbox_mode":"workspace-write","approval_policy":"ask"}),
+            &[],
+            compat,
+        )
+        .unwrap();
+        let patch = fs::read_to_string(root.join("rovai.patch.json")).unwrap();
+        assert!(!patch.contains("private-test"));
+        assert!(!patch.contains("private.invalid"));
+        assert!(!patch.contains("\"models\""));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(
+            serde_json::from_str::<Value>(&patch).unwrap()[5]["id"],
+            "llm-pi-ai"
+        );
+        for settings in [json!({}), json!({"llm-pi-ai":{"providers":{}}})] {
+            fs::write(&path, serde_json::to_vec(&settings).unwrap()).unwrap();
+            assert_eq!(responses_tool_compat(&path).unwrap(), None);
+        }
+        fs::write(&path, "credential: [private-test-credential").unwrap();
+        assert_eq!(
+            responses_tool_compat(&path).unwrap_err().to_string(),
+            "dsh_native_settings_invalid"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn frozen_permissions_preserve_native_values_without_rewriting_native_home() {
         let root =
             std::env::temp_dir().join(format!("rovai-dsh-permissions-{}", uuid::Uuid::new_v4()));
@@ -636,12 +749,13 @@ mod tests {
         for sandbox in ["read-only", "workspace-write", "danger-full-access"] {
             for approval in ["ask", "never"] {
                 let mut command = Command::new("dsh");
-                configure_host(
+                configure_host_with_tool_compat(
                     &mut command,
                     &root,
                     &root,
                     &json!({"sandbox_mode":sandbox,"approval_policy":approval}),
                     &[],
+                    None,
                 )
                 .unwrap();
                 let patch: Value =

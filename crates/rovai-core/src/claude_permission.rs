@@ -277,11 +277,12 @@ mod tests {
 
     #[test]
     fn native_permission_ids_and_exact_input_bind_frozen_approval_options() {
+        let execution_root = std::env::temp_dir().join("rovai-claude-permission-project");
         let request = json!({"type":"control_request", "request_id":"request-1", "session_id":"session-1",
             "request":{"subtype":"can_use_tool", "tool_use_id":"tool-1", "tool_name":"Bash",
                 "input":{"command":"rovai send --public-only --body hello", "description":"Send update"}}});
         let convert = |request: &Value| {
-            intercepted_action_request("run-1", 3, "session-1", Path::new("/tmp/project"), request)
+            intercepted_action_request("run-1", 3, "session-1", &execution_root, request)
         };
         let action = convert(&request).unwrap();
         match &action.input {
@@ -290,7 +291,7 @@ mod tests {
                     argv,
                     &vec!["rovai send --public-only --body hello".to_string()]
                 );
-                assert_eq!(cwd, "/tmp/project");
+                assert_eq!(cwd.as_str(), execution_root.to_str().unwrap());
             }
             _ => panic!("Claude Bash must keep the exact command for Approval"),
         }

@@ -75,7 +75,7 @@ export function runtimeAvailabilityPresentation(
   if (!availability) {
     return pending
       ? presentation('checking')
-      : presentation('unknown', uiAttribute('尚无最近一次检查结果，系统将在后台继续确认。'))
+      : presentation('unknown', uiAttribute('尚未检测到可执行入口。'))
   }
 
   switch (availability.status) {
@@ -83,20 +83,9 @@ export function runtimeAvailabilityPresentation(
     case 'checking':
       return presentation('checking')
     case 'found_uninspected':
-      return presentation(
-        'unknown',
-        uiAttribute('已找到可执行文件，但轻度启动验证尚未形成有效结果。')
-      )
     case 'light_ready':
-      return presentation(
-        'available',
-        uiAttribute('已通过轻度启动验证；登录、模型与运行能力将在检查或首次任务时确认。')
-      )
     case 'installed_unverified':
-      return presentation(
-        'unknown',
-        uiAttribute('旧安装尚未形成轻度启动证据；请重新检测或检查状态。')
-      )
+      return presentation('available')
     case 'ready':
       if (availability.runtimeKind === 'zcode-app') {
         return presentation(
@@ -231,45 +220,12 @@ export function memberRuntimePresentation(
     )
   }
 
-  if (agent.runtimeReadiness.status === 'light_ready') {
-    if (
-      availabilityStatus.status === 'authentication_required'
-      || availabilityStatus.status === 'not_installed'
-      || availabilityStatus.status === 'version_unsupported'
-      || availabilityStatus.status === 'unavailable'
-      || availabilityStatus.status === 'not_qualified'
-      || availabilityStatus.status === 'unsupported'
-    ) {
-      return availabilityStatus
-    }
-    return presentation(
-      'available',
-      uiAttribute('当前配置可用于发起任务；登录、模型与运行能力将在任务的执行前检查中确认。')
-    )
+  if (agent.runtimeReadiness.status === 'light_ready' || agent.runtimeReadiness.status === 'installed_unverified') {
+    if (availabilityStatus.status === 'not_qualified' || availabilityStatus.status === 'unsupported') return availabilityStatus
+    return presentation('available')
   }
 
-  const blockerCodes = new Set(
-    agent.runtimeReadiness.blockers.map((blocker) => blocker.code)
-  )
-  if (
-    agent.runtimeReadiness.status === 'installed_unverified'
-    || blockerCodes.has('runtime_verification_deferred')
-  ) {
-    if (
-      availabilityStatus.status === 'authentication_required'
-      || availabilityStatus.status === 'not_installed'
-      || availabilityStatus.status === 'version_unsupported'
-      || availabilityStatus.status === 'unavailable'
-      || availabilityStatus.status === 'not_qualified'
-      || availabilityStatus.status === 'unsupported'
-    ) {
-      return availabilityStatus
-    }
-    return presentation(
-      'unknown',
-      uiAttribute('旧安装尚未形成轻度启动证据；请重新检测或检查状态。')
-    )
-  }
+  const blockerCodes = new Set(agent.runtimeReadiness.blockers.map((blocker) => blocker.code))
   if (blockerCodes.has('runtime_authentication_required')) {
     return presentation('authentication_required', uiAttribute('请先完成该智能体的登录。'))
   }
@@ -307,12 +263,12 @@ export function memberRuntimePresentation(
 
 export function runtimeReadinessLabel(
   status: AgentProfile['runtimeReadiness']['status']
-): string {
+): string | null {
   return ({
     runtime_not_configured: uiAttribute('未配置智能体'),
     needs_attention: uiAttribute('不可用'),
-    light_ready: uiAttribute('可用'),
-    installed_unverified: uiAttribute('不可用，待检查'),
-    ready: uiAttribute('可用')
+    light_ready: null,
+    installed_unverified: null,
+    ready: null
   })[status]
 }

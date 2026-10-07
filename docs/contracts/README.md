@@ -1,14 +1,14 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-10-03
+last_updated: 2026-10-07
 ---
 
 # 长期接口合同
 
 User 的主称呼、结构化提及及冻结恢复见 [User Naming v1](user-naming-v1.md)。
 
-公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)；当前模型与 CLI 版本见 [ContextManifest v32](context-manifest-evidence-v32.md)、[Built-in Tool Transport v34](builtin-tool-transport-v34.md)。
+公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)；当前模型与 CLI 版本见 [ContextManifest v32](context-manifest-evidence-v32.md)、[Built-in Tool Transport v36](builtin-tool-transport-v36.md)。
 
 本目录保存跨版本、字段级且可由测试直接验证的接口合同。[Version Decisions](../decisions/README.md)解释为什么选择某个边界，
 Architecture 解释组件如何组成，Version 概览记录交付范围；它们都不复制本目录的完整 wire shape。
@@ -73,7 +73,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Single Chat v1（历史）](single-chat-v1.md) | Camp 内本地单聊的领域复用、Source Ref Draft/Runtime 解析、Conversation-local Pending FIFO、封闭 Built-in policy、公共水位、私有 terminal 路由与迟到 fence |
 | [Cancellation Settlement v2（当前）](cancellation-settlement-v2.md) | 取消 Run 统一为 cancelled；效果证据保留但不产生公共待确认提示，清理与后续调度边界不变 |
 | [Cancellation Settlement v1（历史）](cancellation-settlement-v1.md) | 取消事务按发送/效果证据区分 cancelled 与 failed/accepted_input_outcome_unknown 的旧规则 |
-| [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
+| [Camp Member Fast v3（当前）](camp-member-fast-v3.md) | Camp/member/保存绑定代次的三态偏好直接保存、执行冻结、原生参数与本次运行观察 |
 | [Runtime Images v5（当前）](runtime-images-v5.md) | 保留结构化图片观察与存储；自动公屏只接受 Codex 原生生图及已完成、精确关联的 Antigravity 生图，历史未知来源默认隐藏，显式发送附件不变 |
 | [Runtime Images v4（历史）](runtime-images-v4.md) | v3 来源/读取/去重不变；Runtime 图片并入 Agent 图片区，按作者分区并采用 Agent 原比例与用户 72px 两种 Gallery variant；自动展示来源由 v5 收紧 |
 | [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
@@ -97,7 +97,13 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v46（当前）](runtime-launch-and-verification-v46.md) | 继承 v45；Claude 原生英文选项和显式规则记忆，建议范围、destination 与 suppression 保真 |
+| [Runtime Launch and Verification v52（当前）](runtime-launch-and-verification-v52.md) | 继承 v51；移除 Claude/Codex 原生连接编辑，保留本地启动设置、原生执行、只读兼容与脱敏 |
+| [Runtime Launch and Verification v51](runtime-launch-and-verification-v51.md) | 继承 v50；保存只做本地提交，不触发发现、检查、目录或 Host 工作；保存回执不含完整 Key，界面按回执结束保存 |
+| [Runtime Launch and Verification v50（历史）](runtime-launch-and-verification-v50.md) | 继承 v49；Owner 设置回显可读的原生静态 API Key，默认隐藏，查看不写入，不增加持久副本 |
+| [Runtime Launch and Verification v49（历史）](runtime-launch-and-verification-v49.md) | 继承 v48；Codex 可信原生终态决定复用、事务清理门禁、明确回收证据和精确冷恢复 |
+| [Runtime Launch and Verification v48（历史）](runtime-launch-and-verification-v48.md) | 继承 v47 真实 Host 验证；Claude Code/Codex 原生配置复用、字段合并、无 Key 副本、真实连接方式与执行兼容性 |
+| [Runtime Launch and Verification v47（历史）](runtime-launch-and-verification-v47.md) | 继承 v46；静态安装发现、真实 Host 初始化屏障、版本未知可运行与诊断解耦 |
+| [Runtime Launch and Verification v46（历史）](runtime-launch-and-verification-v46.md) | 继承 v45；Claude 原生英文选项和显式规则记忆，建议范围、destination 与 suppression 保真 |
 | [Runtime Launch and Verification v45（历史）](runtime-launch-and-verification-v45.md) | 继承 v44；Claude Code 双向 stream-json 原生审批、stdin 生命周期与 Run fence；仅允许一次/拒绝由 v46 扩展 |
 | [Runtime Launch and Verification v44（历史）](runtime-launch-and-verification-v44.md) | 继承 v43；官方 ZCode 新版 Provider Registry 的资源、握手、选模、Probe 和账号边界 |
 | [Runtime Launch and Verification v43（历史）](runtime-launch-and-verification-v43.md) | 继承 v42；Claude Code 同进程多结果流逐条校验，EOF 后只用最后结果结算和生成最终正文 fallback |
@@ -134,7 +140,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [Desktop Runtime Availability v2（当前）](desktop-runtime-availability-v2.md) | 严格 lease/ticket 后原位逐版本事务、receipt 续跑、旧 manifest 恢复、独立瞬时重试与统一会话启动反馈；generation/capability 不变 |
 | [Desktop Runtime Availability v1（历史）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core、SQLite 准入、copy/switch 与结构化 failure；旧 manifest 恢复仍保留，普通升级执行策略由 v2 替代 |
-| [First-run Onboarding v5（当前）](first-run-onboarding-v5.md) | v4 admission/provisioning 不变；Active Camp starter 进入可恢复的 Desktop-local Composer snapshot |
+| [First-run Onboarding v6（当前）](first-run-onboarding-v6.md) | schema 3；训练营自动复制所选 Runtime、模型与权限到其余未配置内置队员，逐人冻结、恢复与冲突保护；已完成用户不补写 |
+| [First-run Onboarding v5（历史）](first-run-onboarding-v5.md) | v4 admission/provisioning 不变；Active Camp starter 进入可恢复的 Desktop-local Composer snapshot |
 | [Interface Language v1（当前）](interface-language-v1.md) | 通用偏好 schema 5、中英文界面文案、切换失败恢复及内置队员候选资料边界 |
 | [First-run Onboarding v4（历史）](first-run-onboarding-v4.md) | v3 admission/provisioning 不变；第四页 starter 改为 mounted Renderer 输入，不持久 public Draft |
 | [First-run Onboarding v3（历史）](first-run-onboarding-v3.md) | v2 schema/flow 不变；首次安装改用 Full Core authority origin，损坏偏好只在内存降级且保留原文件 |
@@ -329,7 +336,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Memory Capture v3（当前）](memory-capture-v3.md) | v2 边界加 complete exact-Scope View、copyable Revision target、active body aggregate quota、64 KiB production projection limit 与 Memory-domain clean break |
 | [Memory Capture v2 (historical)](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 flat Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
 | [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
-| [Built-in Tool Transport v35（当前）](builtin-tool-transport-v35.md) | thread.runs、read addressing、Agent Output 8；旧 Session 和 Bootstrap 保持 |
+| [Built-in Tool Transport v36（当前）](builtin-tool-transport-v36.md) | 封闭 member list/get/update、Core PATCH、复合图片与现有请求幂等；无 Runtime 或成员关系扩权 |
+| [Built-in Tool Transport v35（历史）](builtin-tool-transport-v35.md) | thread.runs、read addressing、Agent Output 8；旧 Session 和 Bootstrap 保持 |
 | [Built-in Tool Transport v34（历史）](builtin-tool-transport-v34.md) | User 主称呼与双别名；新 Agent Output 7，旧 receipt 原字节复用 |
 | [Built-in Tool Transport v33（历史）](builtin-tool-transport-v33.md) | Thread 命名与冻结 Session 身份保持 |
 | [Built-in Tool Transport v32（历史）](builtin-tool-transport-v32.md) | Task 无版本更新，四类 Agent 结果删除 availableActions，CLI/输出版本轮换 |

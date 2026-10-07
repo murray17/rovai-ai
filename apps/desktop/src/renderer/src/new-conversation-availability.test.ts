@@ -11,7 +11,7 @@ describe('new conversation member availability', () => {
     [false, 'light_ready', false, '未配置智能体'],
     [false, 'runtime_not_configured', false, '未配置智能体'],
     [true, 'runtime_not_configured', false, '未配置智能体'],
-    [true, 'installed_unverified', false, '智能体不可用'],
+    [true, 'installed_unverified', true, '可用'],
     [true, 'needs_attention', false, '智能体不可用']
   ] as const)('configured=%s readiness=%s', (runtimeConfigured, runtimeReadiness, available, label) => {
     const member = { runtimeConfigured, runtimeReadiness }

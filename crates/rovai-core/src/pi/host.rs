@@ -994,13 +994,27 @@ impl PiHost {
                 activation_failure(PiActivationFailureKind::ActivationFailed, error)
             })?;
         }
-        let available_models = self
-            .command("get_available_models", json!({}))
-            .await
-            .map_err(|error| {
-                activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
-            })?;
+        let options = frozen_runtime.model.options.as_object().ok_or_else(|| {
+            activation_failure(
+                PiActivationFailureKind::ConfigurationFailed,
+                "Pi model options must be an object",
+            )
+        })?;
+        for (key, value) in options {
+            if key != "thinking_level" || !value.is_string() {
+                return Err(activation_failure(
+                    PiActivationFailureKind::ConfigurationFailed,
+                    format!("unsupported Pi model option: {key}"),
+                ));
+            }
+        }
         if frozen_runtime.model.model_id != PI_RUNTIME_DEFAULT_MODEL_ID {
+            let available_models = self
+                .command("get_available_models", json!({}))
+                .await
+                .map_err(|error| {
+                    activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+                })?;
             let (provider, model_id) = parse_explicit_model_id(&frozen_runtime.model.model_id)
                 .map_err(|error| {
                     activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
@@ -1068,6 +1082,16 @@ impl PiHost {
             validate_host_model_state(&state, &frozen_runtime.model.model_id).map_err(|error| {
                 activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
             })?;
+        if options
+            .get("thinking_level")
+            .and_then(Value::as_str)
+            .is_some_and(|requested| requested != thinking_level)
+        {
+            return Err(activation_failure(
+                PiActivationFailureKind::ConfigurationFailed,
+                "Pi did not apply the selected thinking level",
+            ));
+        }
         let managed_session_state = self
             .managed_session_state
             .read()
@@ -2746,14 +2770,14 @@ mod tests {
             &executable,
             r###"#!/bin/sh
 set -eu
-fixture_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+fixture_dir=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")" && pwd)
 request_log="$fixture_dir/requests.jsonl"
 event_log="$fixture_dir/events.jsonl"
 shutdown_marker="$fixture_dir/shutdown"
 probe_root_log="$fixture_dir/probe-root"
 printf '%s\n' "$PWD" > "$probe_root_log"
 session_dir="$PWD/sessions"
-mkdir -p "$session_dir"
+/bin/mkdir -p "$session_dir"
 session_number=1
 session_id="00000000-0000-4000-8000-000000000001"
 session_file=""
@@ -2776,8 +2800,8 @@ write_session() {
 }
 
 emit_managed_session_state() {
-  host_instance_id=$(sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
-  host_binding_generation=$(sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
+  host_instance_id=$(/usr/bin/sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
+  host_binding_generation=$(/usr/bin/sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
   event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":3,\\"extensionVersion\\":\\"rovai-pi-host-v8\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
   printf '%s\n' "$event" >> "$event_log"
   printf '%s\n' "$event"
@@ -2788,8 +2812,8 @@ trap 'printf stopped > "$shutdown_marker"; exit 0' TERM INT
 
 while IFS= read -r request; do
   printf '%s\n' "$request" >> "$request_log"
-  request_id=$(printf '%s\n' "$request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-  request_type=$(printf '%s\n' "$request" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+  request_id=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  request_type=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
   case "$request_type" in
     get_state)
       emit_managed_session_state
@@ -2928,19 +2952,19 @@ done
             &executable,
             r###"#!/bin/sh
 set -eu
-fixture_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+fixture_dir=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")" && pwd)
 request_log="$fixture_dir/requests.jsonl"
 trap 'exit 0' TERM INT
 while IFS= read -r request; do
   printf '%s\n' "$request" >> "$request_log"
-  request_id=$(printf '%s\n' "$request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-  request_type=$(printf '%s\n' "$request" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+  request_id=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  request_type=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
   case "$request_type" in
     get_state)
       printf '{"type":"response","id":"%s","success":true,"command":"get_state","data":{}}\n' "$request_id"
       ;;
     abort)
-      sleep 0.15
+      /bin/sleep 0.15
       printf '{"type":"response","id":"%s","success":true,"command":"abort","data":{}}\n' "$request_id"
       ;;
     *)

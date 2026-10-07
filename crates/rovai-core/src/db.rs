@@ -43034,6 +43034,7 @@ mod tests {
             event_count
         );
         let configuration = crate::runtime_startup::RuntimeStartupConfiguration {
+            custom_api_snapshot: None,
             program_path: None,
             environment: vec![crate::runtime_startup::RuntimeEnvironmentVariable {
                 name: "HTTP_PROXY".into(),

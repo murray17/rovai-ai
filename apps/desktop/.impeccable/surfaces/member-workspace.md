@@ -1,5 +1,5 @@
 ---
-version: 17
+version: 18
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -45,7 +45,8 @@ the splitter. The detail scrolls internally instead of shrinking identity or act
 The header uses the controlled portrait plus a separate circular icon. Presence and Runtime are two
 distinct inline facts: “在队” is static; “{Runtime} →” uses arrow, hover, focus and an accessible name
 to show it opens existing Runtime configuration. An unconfigured teammate says “未配置智能体 →” once.
-Keep full configured Runtime status in the accessible name and in the configuration section. Do not put
+Keep actionable Runtime status in the accessible name and in the configuration section; normal configured
+states show only the product name, without a readiness suffix or verification explanation. Do not put
 the Runtime fact in a grey card or merge the two meanings.
 
 ## Roster and order
@@ -67,10 +68,12 @@ Reorder rows directly
 actions provide keyboard movement within the same presence group. The resize divider remains available.
 Runtime shortcuts show the existing product logo in a 22px carrier; an unconfigured teammate uses a neutral
 minus glyph. Attention, unsupported and unqualified states add a small `!` marker. Loading retains the
-product identity with a checking label. Each shortcut has a full accessible label/status tooltip and scrolls
+product identity with a checking label. Each shortcut has an accessible action label and product tooltip;
+only checking or actionable states add status/detail. It scrolls
 to that teammate's Runtime configuration. A small dirty dot and accessible “有未保存更改” label identify pending edits.
-`light_ready` 可以使用“可用”主状态，但完整 accessible label 说明登录、模型与能力仍待显式检查或首次实际
-任务确认。加载或复扫期间保留产品图标并标注检查中，不得把延迟验证画成失败。
+`ready`、`light_ready` 和 `installed_unverified` 不附加“可用”或“可尝试运行”，也不在 tooltip、accessible
+label 或配置区常驻解释验证机制。配置区保留已知版本。加载或复扫期间保留产品图标并按现有状态标注检查中，
+不得把延迟验证画成失败。
 
 ## Detail and editing
 
@@ -92,8 +95,8 @@ that Runtime. The Runtime, model and permissions save atomically through the exi
 “高级设置”, summary-model configuration or “对话压缩模型”.
 
 For any `light_ready` installation, expose Runtime default model plus only permissions described by the
-static Adapter schema. Supporting copy says login, model and capability verification happens on explicit
-check or the real task's uniform Dispatch Preflight. Do not offer explicit models before a verified catalog. TRAE uses the same model
+static Adapter schema. Login, model and capability validation happens in the real task Host; do not add
+routine copy explaining that mechanism. Do not offer explicit models before a verified catalog. TRAE uses the same model
 catalog cache and Picker behavior as every other Runtime; its permission draft still defaults to the statically
 admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the existing compact switch pattern for
 `trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.
@@ -102,7 +105,7 @@ Desktop, Web and Mobile; it does not fall back to the Steel brand family.
 Use the accepted understated permission guidance from the [member configuration UI contract](../../../../docs/ui/components/member-identity.md#队员配置页): ordinary recommendation text appears only inside an open menu, with one short line below switches. The inline permission switch face and its minimum height are both 36px. Guidance never changes a saved value or draft, and language changes preserve both.
 
 Model rows keep Runtime display names separate from opaque selection IDs and show the Runtime description when
-provided, with the full text available on hover. Claude's initialize catalog uses this same Picker; no family-specific
+provided, with the full text available on hover. Claude's native control catalog uses this same Picker; no family-specific
 rows or inferred version labels are supplied by Renderer.
 
 Opening the model Picker uses Core-owned stale-while-revalidate state. Fresh catalogs display immediately;

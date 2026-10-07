@@ -1,6 +1,6 @@
 import { newCommandId } from '../../shared/command-id'
 import { useThreadClient } from './camp-client'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { AdapterInstallation, AgentProfile, ThreadMemberFastView, ThreadSnapshot, StoredCommandResult } from '@contracts'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { readErrorMessage } from './error-message'
@@ -9,7 +9,6 @@ type FastEntry = {
   scope: string
   projection: string
   value: ThreadMemberFastView | null | undefined
-  failed: boolean
 }
 
 export type ThreadMemberFastControls = {
@@ -17,22 +16,19 @@ export type ThreadMemberFastControls = {
   save(agentId: string, fastOverride: boolean): Promise<void>
 }
 
-// One workspace owns both surfaces. Metadata and writes are coalesced per Thread/member,
+// One workspace owns both surfaces. Writes are coalesced per Thread/member,
 // while entry identity fences late results after a binding, projection or Thread change.
 export function useThreadMemberFast(
   snapshot: ThreadSnapshot,
   profiles: Map<string, AgentProfile>,
   installations: AdapterInstallation[],
-  retrySurface: string | null,
   onNotify: (message: string) => void
 ): ThreadMemberFastControls {
   const client = useThreadClient()
   const [, refresh] = useState(0)
   const entries = useRef(new Map<string, FastEntry>())
-  const checks = useRef(new Set<string>())
   const saves = useRef(new Set<string>())
   const mounted = useRef(false)
-  const previousSurface = useRef(retrySurface)
   const targets = new Map(snapshot.members.flatMap(member => {
     const profile = profiles.get(member.agentId)
     const runtime = profile?.runtimeConfiguration
@@ -41,11 +37,8 @@ export function useThreadMemberFast(
     const installation = runtimeEditorInstallation(installations, runtime.adapterKind)
     const scope = JSON.stringify([
       snapshot.thread.id, snapshot.thread.projectPath, member.membershipStatus, member.profilePresence,
-      member.fast?.runtimeBindingRevision, profile?.version, runtime.adapterKind, runtime.model,
-      installation?.id, installation?.authScope, installation?.executablePath, installation?.enabled,
-      installation?.generation, installation?.snapshot?.executableFingerprint,
-      installation?.snapshot?.authenticationStatus, installation?.snapshot?.probeStatus,
-      installation?.snapshot?.lastSuccessfulProbeAt, installation?.snapshot?.staleAt
+      member.fast?.runtimeBindingRevision, runtime.adapterKind,
+      installation?.id, installation?.authScope, installation?.executablePath
     ])
     return [[member.agentId, { scope, projection: JSON.stringify(member.fast ?? null), value: member.fast }]] as const
   }))
@@ -67,28 +60,8 @@ export function useThreadMemberFast(
         // Profile refresh can arrive before the Thread projection. Never reuse the old
         // projection for a changed binding merely because the same object is still present.
         value: previous && previous.scope !== target.scope && previous.projection === target.projection
-          ? undefined : target.value,
-        failed: false
+          ? undefined : target.value
       })
-    }
-  })
-  useEffect(() => {
-    const retry = retrySurface !== null && retrySurface !== previousSurface.current
-    previousSurface.current = retrySurface
-    for (const [agentId, entry] of entries.current) {
-      if (retry && entry.failed) { entry.value = undefined; entry.failed = false }
-      const key = requestKey(agentId)
-      if (entry.value !== undefined || checks.current.has(key)) continue
-      checks.current.add(key)
-      void client.request<ThreadMemberFastView | null>('threads.members.fast.check', {
-        threadId: snapshot.thread.id, agentId
-      }).then(value => {
-        if (entries.current.get(agentId) === entry) entry.value = value
-      }).catch(() => {
-        if (entries.current.get(agentId) !== entry) return
-        entry.value = null
-        entry.failed = true
-      }).finally(() => { checks.current.delete(key); changed() })
     }
   })
   const get: ThreadMemberFastControls['get'] = agentId => {
@@ -113,11 +86,17 @@ export function useThreadMemberFast(
         commandId: newCommandId(),
         command: { threadId: snapshot.thread.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
       })
-      if (!mounted.current || entries.current.get(agentId) !== entry) return
+      const current = entries.current.get(agentId)
+      if (!mounted.current || !current || current.scope !== entry.scope) return
+      // An initialization-only projection can arrive while this save is pending.
+      // Keep its entry, but still apply this receipt unless a newer choice arrived.
+      if (current !== entry && current.value?.fastOverride !== value.fastOverride) return
       if (result.status !== 'applied') throw new Error('队员配置已变化，请稍后重试。')
-      entry.value = (result.payload as { fast?: ThreadMemberFastView | null }).fast ?? null
+      current.value = (result.payload as { fast?: ThreadMemberFastView | null }).fast ?? null
     } catch (error) {
-      if (mounted.current && entries.current.get(agentId) === entry) {
+      const current = entries.current.get(agentId)
+      if (mounted.current && current?.scope === entry.scope
+        && (current === entry || current.value?.fastOverride === value.fastOverride)) {
         onNotify(readErrorMessage(error, '响应模式未保存，请重试。'))
       }
     } finally { saves.current.delete(key); changed() }

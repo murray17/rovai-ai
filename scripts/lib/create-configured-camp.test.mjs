@@ -35,7 +35,7 @@ test('configured Camp helper sends an explicit recipient as ComposerDocument V2'
         return {
           commandResult: {
             status: 'accepted',
-            payload: { agentRunIds: ['run_test'] }
+            payload: { threadMessageId: 'message_test' }
           }
         }
       default:
@@ -52,6 +52,7 @@ test('configured Camp helper sends an explicit recipient as ComposerDocument V2'
 
   assert.equal(result.payload.campId, 'camp_test')
   assert.equal(result.payload.threadId, 'camp_test')
+  assert.equal(result.payload.threadMessageId, 'message_test')
   assert.deepEqual(calls.map(({ method }) => method), [
     'threads.creationPreflight',
     'threads.create',

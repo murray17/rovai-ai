@@ -330,8 +330,16 @@ function MemberSidebarRow({
     ? adapterLabel(agent.runtimeConfiguration.adapterKind)
     : uiAttribute('智能体')
   const configured = Boolean(agent.runtimeConfiguration?.adapterKind)
-  const runtimeLabel = configured ? uiAttribute("{0}，{1}，{2}；打开运行配置", String(agent.displayName), String(product), String(runtime.label)) : uiAttribute("{0}，未配置智能体；打开运行配置", String(agent.displayName))
-  const runtimeTooltip = configured ? `${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}` : uiAttribute('未配置智能体')
+  const runtimeLabel = !configured
+    ? uiAttribute("{0}，未配置智能体；打开运行配置", agent.displayName)
+    : runtime.status === 'available'
+      ? uiAttribute("{0}，{1}；打开运行配置", agent.displayName, product)
+      : uiAttribute("{0}，{1}，{2}；打开运行配置", agent.displayName, product, runtime.label)
+  const runtimeTooltip = !configured
+    ? uiAttribute('未配置智能体')
+    : runtime.status === 'available'
+      ? product
+      : `${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`
   return (
     <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
     <div

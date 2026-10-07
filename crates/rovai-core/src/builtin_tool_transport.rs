@@ -12,13 +12,13 @@ use crate::{
     team_tool_catalog::builtin_tool_definitions,
 };
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 35;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 36;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 2;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 35;
-pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 8;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v35";
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 36;
+pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 9;
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v36";
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
@@ -179,11 +179,26 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 27] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 30] = [
     BuiltinToolCliIdentity {
         operation: "thread.message.send",
         group: "send",
         action: "",
+    },
+    BuiltinToolCliIdentity {
+        operation: "member.list",
+        group: "member",
+        action: "list",
+    },
+    BuiltinToolCliIdentity {
+        operation: "member.get",
+        group: "member",
+        action: "get",
+    },
+    BuiltinToolCliIdentity {
+        operation: "member.update",
+        group: "member",
+        action: "update",
     },
     BuiltinToolCliIdentity {
         operation: "member.create",
@@ -857,6 +872,31 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
                 });
             }
         }
+        "member.list" | "member.get" | "member.update" => {
+            for code in ["member.access_denied", "member.user_confirmation_required"] {
+                errors.push(BuiltinToolErrorContract {
+                    code: code.into(),
+                    recovery: BuiltinToolRecovery::Stop,
+                });
+            }
+            if operation == "member.update" {
+                errors.push(BuiltinToolErrorContract {
+                    code: "version_conflict".into(),
+                    recovery: BuiltinToolRecovery::RefreshThenDecide,
+                });
+                for code in [
+                    "member.invalid_patch",
+                    "member.invalid_identity",
+                    "member.avatar_invalid",
+                    "agent_profile.display_name_conflict",
+                ] {
+                    errors.push(BuiltinToolErrorContract {
+                        code: code.into(),
+                        recovery: BuiltinToolRecovery::FixInput,
+                    });
+                }
+            }
+        }
         "member.create" => {
             for code in [
                 "member.invalid_creation_key",
@@ -956,7 +996,10 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
     match operation {
         "thread.message.send" => Ok("camp-message-send-v2"),
         "memory.write" => Ok("memory-write-v2"),
-        "member.create"
+        "member.list"
+        | "member.get"
+        | "member.update"
+        | "member.create"
         | "team.create_task"
         | "team.get_task"
         | "team.list_tasks"
@@ -1125,9 +1168,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 35);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 35);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v35");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 36);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 36);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v36");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -1137,8 +1180,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 27);
-        assert_eq!(commands.len(), 27);
+        assert_eq!(operations.len(), 30);
+        assert_eq!(commands.len(), 30);
     }
 
     #[test]

@@ -71,12 +71,24 @@ impl Core {
         &self,
         interactive: bool,
     ) -> Result<Arc<RuntimeSearchEnvironment>> {
-        // Serialize capture/publication with settings save. Load saved values *after*
-        // capture, and never publish a copy of an editor's uncommitted overlay.
-        let _update = self.runtime_search_update.lock().await;
+        // A stalled shell reader must not hold the local configuration commit lock.
+        // Rebase generation and saved values at publication so an intervening Save
+        // cannot be overwritten by this older capture.
         let search = self.read_runtime_check_environment(interactive).await?;
+        let _update = self.runtime_search_update.lock().await;
+        let generation = self
+            .runtime_search_environment
+            .read()
+            .await
+            .generation()
+            .checked_add(1)
+            .context("Runtime search generation exhausted")?;
         let configurations = rovai_core::runtime_startup::load_all(&*self.database.lock().await)?;
-        let search = Arc::new(search.with_startup_configurations(configurations));
+        let search = Arc::new(
+            search
+                .with_generation(generation)
+                .with_startup_configurations(configurations),
+        );
         let summary = search.summary();
         self.database
             .lock()

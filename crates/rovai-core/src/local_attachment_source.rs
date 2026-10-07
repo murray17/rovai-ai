@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::{
     db::Database,
     local_attachment_snapshot::{DIRECTORY_MEDIA_TYPE, normalize_display_name},
+    runtime::resolve_agent_local_path,
 };
 
 pub const EMPTY_SOURCE_ATTACHMENTS_JSON: &str = "[]";
@@ -409,12 +410,7 @@ pub fn observe_agent_source_attachments(
     paths
         .iter()
         .map(|requested| {
-            let requested = Path::new(requested);
-            let path = if requested.is_absolute() {
-                requested.to_path_buf()
-            } else {
-                execution_root.join(requested)
-            };
+            let path = resolve_agent_local_path(Path::new(requested), execution_root);
             let name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -782,6 +778,22 @@ mod tests {
                 .map(|source_ref| source_ref.source_path.clone())
                 .collect::<Vec<_>>()
         );
+        let observed = observe_agent_source_attachments(
+            &["./file.txt".into(), directory.to_str().unwrap().into()],
+            &root,
+        )
+        .unwrap();
+        assert_eq!(
+            observed[0].source_path,
+            root.join("./file.txt").to_str().unwrap()
+        );
+        assert_eq!(observed[1].source_path, directory.to_str().unwrap());
+        let missing = root.join("./missing.txt");
+        assert_eq!(
+            resolve_agent_local_path(Path::new("./missing.txt"), &root),
+            missing
+        );
+        assert_eq!(resolve_agent_local_path(&missing, &directory), missing);
         fs::remove_dir_all(root).unwrap();
     }
 

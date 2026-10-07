@@ -594,6 +594,16 @@ impl ManagedProcess {
         None
     }
 
+    #[cfg(windows)]
+    pub(crate) fn windows_job_name(&self) -> &str {
+        self.child.job_name()
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn windows_process_start_identity(pid: u32) -> Option<u64> {
+        windows::process_start_identity(pid)
+    }
+
     pub fn take_stdin(&mut self) -> Option<ManagedChildStdin> {
         #[cfg(unix)]
         {
@@ -706,8 +716,8 @@ impl ManagedProcess {
         ))
     }
 
-    /// The Job, not the root PID or a sent termination request, proves that
-    /// every owned Windows descendant has exited. Query failure stays unknown.
+    /// Complete Job membership plus exact process-exit evidence proves that
+    /// every owned Windows descendant has exited. Missing evidence stays unknown.
     #[cfg(windows)]
     pub(crate) fn tree_is_empty(&self) -> io::Result<bool> {
         self.child.tree_is_empty()
@@ -1540,6 +1550,7 @@ mod tests {
                 "--nocapture",
             ])
             .env(WINDOWS_HELPER_MODE, "child")
+            .env("ROVAI_MANAGED_PROCESS_FORK_AFTER_PROBE", "1")
             .env(WINDOWS_HELPER_FILE, &handshake);
         let spec = ManagedProcessLaunchSpec::capture(
             &command,
@@ -1572,16 +1583,47 @@ mod tests {
             .trim()
             .parse::<u32>()
             .expect("grandchild handshake PID was invalid");
-        assert!(windows::process_is_running_for_test(grandchild_pid).unwrap());
+        let grandchild = windows::TestProcess::open(grandchild_pid).unwrap();
+        assert!(grandchild.is_running().unwrap());
+        assert!(!process.tree_is_empty().unwrap());
+
+        // A member created after the first observation must also be included.
+        // Freeze this interleaving with files, not scheduler-dependent sleeps.
+        let fork = handshake.with_extension("fork");
+        let late_handshake = handshake.with_extension("late.pid");
+        std::fs::write(&fork, b"fork").unwrap();
+        let late_pid = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(pid) = std::fs::read_to_string(&late_handshake)
+                    .ok()
+                    .and_then(|pid| pid.trim().parse::<u32>().ok())
+                {
+                    break pid;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("late descendant did not start");
+        let late_child = windows::TestProcess::open(late_pid).unwrap();
+        assert!(late_child.is_running().unwrap());
 
         process.force_terminate_tree().unwrap();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while windows::process_is_running_for_test(grandchild_pid).unwrap()
+        while (grandchild.is_running().unwrap() || late_child.is_running().unwrap())
             && tokio::time::Instant::now() < deadline
         {
+            if process.tree_is_empty().unwrap() {
+                assert!(
+                    !grandchild.is_running().unwrap() && !late_child.is_running().unwrap(),
+                    "Tree reported reaped but the retained process handle is unsignaled: pid={grandchild_pid}, created={}",
+                    grandchild.creation_time
+                );
+            }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(!windows::process_is_running_for_test(grandchild_pid).unwrap());
+        assert!(!grandchild.is_running().unwrap());
+        assert!(!late_child.is_running().unwrap());
         tokio::time::timeout(Duration::from_secs(2), stdout_reader)
             .await
             .expect("stdout handle remained inherited after Job termination")
@@ -1594,7 +1636,33 @@ mod tests {
             .await
             .expect("stderr handle remained inherited after Job termination")
             .unwrap();
+        // A duplicate notification cannot replace a lost member, even with an
+        // empty Job. Unknown evidence also cannot become true on a later poll.
+        process
+            .child
+            .repeat_pending_exit_check_for_test(grandchild_pid);
+        assert!(!process.tree_is_empty().unwrap());
+        assert!(process.tree_is_empty().unwrap());
+        process
+            .child
+            .post_member_notification_for_test(grandchild_pid);
+        assert!(process.tree_is_empty().unwrap());
+        process.child.discard_exit_witness_for_test(grandchild_pid);
+        process
+            .child
+            .post_member_notification_for_test(process.id().unwrap());
+        assert!(!process.tree_is_empty().unwrap());
+        process
+            .child
+            .post_member_notification_for_test(grandchild_pid);
+        assert!(process.tree_is_empty().unwrap());
+        process.child.post_member_notification_for_test(0);
+        assert!(process.tree_is_empty().is_err());
+        assert!(process.tree_is_empty().is_err());
+        drop(process);
         let _ = std::fs::remove_file(handshake);
+        let _ = std::fs::remove_file(fork);
+        let _ = std::fs::remove_file(late_handshake);
     }
 
     #[cfg(windows)]
@@ -1672,6 +1740,7 @@ mod tests {
             "rovai-managed-process-owner-kill-{}.pid",
             uuid::Uuid::new_v4()
         ));
+        let job_receipt = handshake.with_extension("job");
         let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -1684,7 +1753,9 @@ mod tests {
             .spawn()
             .expect("failed to spawn Job owner helper");
         let handshake_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        while !handshake.is_file() && tokio::time::Instant::now() < handshake_deadline {
+        while (!handshake.is_file() || !job_receipt.is_file())
+            && tokio::time::Instant::now() < handshake_deadline
+        {
             if owner.try_wait().unwrap().is_some() {
                 break;
             }
@@ -1695,18 +1766,20 @@ mod tests {
             .trim()
             .parse::<u32>()
             .expect("owned Runtime handshake PID was invalid");
-        assert!(windows::process_is_running_for_test(runtime_pid).unwrap());
+        let runtime = windows::TestProcess::open(runtime_pid).unwrap();
+        assert!(runtime.is_running().unwrap());
 
         owner.kill().expect("failed to force-kill Job owner");
         owner.wait().expect("failed to reap Job owner");
         let termination_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while windows::process_is_running_for_test(runtime_pid).unwrap()
-            && tokio::time::Instant::now() < termination_deadline
-        {
+        while runtime.is_running().unwrap() && tokio::time::Instant::now() < termination_deadline {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(!windows::process_is_running_for_test(runtime_pid).unwrap());
+        assert!(!runtime.is_running().unwrap());
+        // Cross-Core proof is covered by Fleet's durable-receipt owner: the
+        // test's retained process handle is unavailable to a restarted Core.
         let _ = std::fs::remove_file(handshake);
+        let _ = std::fs::remove_file(job_receipt);
     }
 
     #[cfg(windows)]
@@ -1788,8 +1861,28 @@ mod tests {
             return;
         }
         let handshake = std::env::var_os(WINDOWS_HELPER_FILE).expect("missing helper file");
-        std::fs::write(handshake, std::process::id().to_string())
+        std::fs::write(&handshake, std::process::id().to_string())
             .expect("failed to write grandchild handshake");
+        if std::env::var_os("ROVAI_MANAGED_PROCESS_FORK_AFTER_PROBE").is_some() {
+            let path = PathBuf::from(&handshake);
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !path.with_extension("fork").exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(path.with_extension("fork").exists());
+            let mut late_child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "managed_process::tests::windows_owned_runtime_helper",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env(WINDOWS_HELPER_MODE, "owned-runtime")
+                .env(WINDOWS_HELPER_FILE, path.with_extension("late.pid"))
+                .spawn()
+                .expect("failed to spawn late descendant");
+            assert!(late_child.try_wait().unwrap().is_none());
+        }
         std::thread::sleep(Duration::from_secs(30));
     }
 
@@ -1836,7 +1929,12 @@ mod tests {
             "runtime-owner:force-kill-test",
         )
         .unwrap();
-        let _runtime = ManagedProcess::spawn(spec).expect("failed to spawn owned Runtime");
+        let runtime = ManagedProcess::spawn(spec).expect("failed to spawn owned Runtime");
+        std::fs::write(
+            PathBuf::from(&handshake).with_extension("job"),
+            runtime.windows_job_name(),
+        )
+        .expect("failed to persist Runtime Job identity");
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !std::path::Path::new(&handshake).is_file() && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));

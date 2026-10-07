@@ -1,5 +1,5 @@
 ---
-version: 18
+version: 20
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -9,6 +9,7 @@ related_targets:
   - "apps/desktop/src/renderer/src/SkillSettings.tsx"
   - "apps/desktop/src/renderer/src/McpSettings.tsx"
   - "apps/desktop/src/renderer/src/AboutUpdatesSettings.tsx"
+  - "apps/desktop/src/renderer/src/RuntimeStartupSettings.tsx"
 ---
 
 # Settings workspace surface brief
@@ -179,11 +180,11 @@ The Agent Runtime catalog displays Pi Coding Agent as “PI” immediately after
 
 Runtime settings show the reviewed user-facing Runtime catalog, which may omit a closed internal identity that
 has not completed any product qualification. User-facing states are limited to
-checking, installed but awaiting first-run verification, available, needs handling, needs login, not
-installed, unsupported, unavailable and temporarily unknown. A successful bounded light launch and identity
-result reads “可用” and means the executable can be selected and tried; supporting copy says login, models and
-capabilities are confirmed by explicit check or first task. A path-only result remains temporarily unknown,
-never synthetic checking. Do not expose internal “found/not checked”, fingerprint or
+checking, available, needs handling, needs login, not installed, unsupported, unavailable and temporarily
+unknown. An admitted executable that has been found reads “可用” and can be selected and tried.
+Do not append execution-verification explanations or a separate success message after a check; the status
+badge carries the result. Failed or deferred checks keep actionable feedback. Do not expose internal
+“found/not checked”, fingerprint or
 attempt stages. Do not show discovery summaries (source, entrypoint kind, candidate extension, native target
 resolution or version probe outcome) in Runtime rows on any platform. Executable paths are editable in the dedicated startup settings page; fingerprint, backoff
 and audit remain inside advanced diagnostics.
@@ -213,8 +214,9 @@ Renderer-only preview and must not be relabeled “待支持”.
 
 Kimi Code is a Product Runtime Catalog row and is qualified on macOS arm64, macOS x64 and Windows x64.
 Each platform follows the ordinary machine availability flow after platform admission. Settings never
-renders the private provider file, token or base URL, and does not expose a Rovai-owned switch that forces
-Kimi/MiniMax thinking off.
+imports or renders the private native provider file, stored token or native base URL. The explicit custom
+API form below owns only its user-entered override; there is no Rovai-owned switch that forces Kimi/MiniMax
+thinking off.
 
 If an existing teammate references an unqualified Runtime, preserve the Runtime/model/permission/parameter
 subobject byte-for-byte through unrelated profile edits. Show the frozen values read-only and keep identity,
@@ -250,11 +252,14 @@ Coverage, clean-break and freshness semantics local to that page.
 
 ## 关于与更新
 
-About & Updates belongs to the Support group and extends the same borderless `1040px` settings track,
-open section rhythm used by reviewed settings pages. Identity and installed version share one row; update
-actions align with the release summary. Check history is collapsed initially with fixed-width fact labels. The first viewport
-shows the installed Rovai AI version and one primary action. It is a compact updater surface, not an
-updater dashboard or installation wizard.
+About & Updates belongs to the Support group and uses a borderless `880px` reading track. Product identity
+and the installed version share the top row with one primary action; a single status line follows, adding
+a reason for failures or installation. Keep the 34px mark, compact 19px product name and neutral actions.
+Release notes follow immediately, with explicit version numbers in the keyboard-accessible tabs (or one
+version label without a candidate), publication date and 13px prose. Do not repeat the release title below
+the version selector. Check history follows the notes, collapsed initially with fixed-width fact labels.
+The first viewport keeps the installed version and the primary action visible. Desktop-hosted Web stays
+read-only, and Server retains its reconnect recovery and exact release links.
 
 Packaged Main checks the official stable `murray17/rovai-ai` GitHub Release channel five seconds after the
 first window load and again six hours after each automatic check settles. Checking never starts a download.
@@ -270,14 +275,18 @@ badge and the next automatic round may create another generation.
 
 The ordinary Settings footer keeps its remembered-section behavior. When an actionable release exists, a
 separate focusable badge beside Settings deep-links to About without overwriting `lastSettingsSection`; the
-About row inside Settings repeats the badge as non-interactive status. Available, checking/downloading,
+About row inside Settings repeats the badge as non-interactive status. The ordinary badge is a transparent
+34px target with 11.5px text; Settings status uses 11px text and an independently sized inline layout, never
+the navigation icon's 22px slot. Failure labels state download/install failure; retry belongs to the page.
+Narrow English rails may put the update entry on its own row. Available, checking/downloading,
 ready/installing and failed states use different icon/copy and accessible names, not color alone.
 
 The page keeps the installed version visible through idle, checking, available, downloading, up-to-date,
 ready-to-install, installing and recoverable check/download/install failure states. Its bundled, version-matched
 release notes and publication date remain visible offline after an install. A known newer release is a separate fact and remains visible
 when a later check fails. When a newer release exists, the page defaults to its notes and offers keyboard-accessible
-tabs to switch between new and installed versions; the switch does not start a network request. An absent source has
+tabs to switch between new and installed versions; the switch does not start a network request. The update
+shortcut focuses the notes heading and scrolls only as far as needed to reveal it, preserving nearby actions. An absent source has
 an explicit empty state. A duplicate first version heading is removed only from the display copy; long notes scroll
 within a bounded region, and all notes use the shared safe Markdown renderer. Renderer receives no remote HTML, local
 installer path or updater credential.
@@ -289,7 +298,8 @@ installer path or updater credential.
 [更新架构](../../../../docs/architecture/desktop-app-updates.md#多语言发布与展示)。最终仍通过共享
 `SafeMarkdown`，不改写发布快照；语言变化不重挂载页面或改变更新资格。
 
-Downloading shows determinate percent, transferred/total bytes and speed without blocking navigation or
+Downloading shows one visible percentage beside the progress bar, transferred/total bytes and speed;
+the disabled primary action says only “下载中…”. It does not block navigation or
 ordinary App use. Repeated download requests visibly remain one operation. Download completion changes the
 primary action to “安装并重启”; `ready_to_install` never quits by itself. A synchronous install failure leaves
 the App and Core usable and offers retry. Fixed GitHub Releases/support links appear only when the updater is
@@ -311,9 +321,9 @@ refresh or chevron icon, and the settings gear as consistent columns. Settings r
 and missing Runtimes admitted on the current platform. Preserve actual installation/login guide content.
 
 The startup page reuses the 1040px content track and an at-most-800px form. Show Runtime identity, program
-path with native picker and restore-auto action, the inline check result, then environment rows. Values start
-masked and have reveal/delete controls. Keep errors actionable and local; no empty-state explanation, top-right
-unsaved badge or repeated “next launch”/“does not change system variables” small print.
+path with native picker and restore-auto action, the inline check result, then environment rows. Environment values start masked and have reveal/delete controls. Keep errors
+actionable and local; no empty-state explanation, top-right unsaved badge or repeated “next launch”/
+“does not change system variables” small print.
 
 “放弃更改” and “保存” remain visible from first load. Both are disabled while clean or submitting and enabled
 when values change; save validates rather than requiring a prior manual check. Save failure preserves the
@@ -325,3 +335,14 @@ the draft; returning to the catalog asks before discarding an unsaved draft. Beh
 Draft checks and restore-auto previews read fresh private search inputs. Failed previews must not fall back
 to the saved program/version as though it had just been checked. Editing or leaving invalidates older
 preview responses. A fallback search source retains a local warning without exposing environment values.
+
+### Local startup settings only
+
+Claude Code and Codex no longer expose the native connection editor. Remove official/API mode selection,
+login status, address, Key, Claude model mappings and the custom Codex model list. Keep program path,
+explicit checks, masked environment values and the existing save/discard row. Do not add replacement help,
+a disabled entry or an alternative connection editor. Existing native files remain unchanged.
+
+Save ends from its local receipt and shows “已保存”; it does not call parent reloads, native observation or
+runtime checks. Preserve failed drafts and field conflict recovery. Native login/install guides remain in
+the Runtime catalog. Behavior is owned by [Runtime Launch v52](../../../../docs/contracts/runtime-launch-and-verification-v52.md).

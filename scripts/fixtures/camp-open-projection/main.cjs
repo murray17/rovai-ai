@@ -40,6 +40,13 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--image-context-menu') {
+      const report = await require('../assert-image-context-menu.cjs')(window, run, capture, dirname(userData))
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, report }))
+      app.exit(0)
+      return
+    }
     if (mode === '--block-pagination') {
       const report = await require('../assert-block-pagination.cjs')(window, run, capture)
       assert.equal(errors.length, 0, errors.join('\n'))

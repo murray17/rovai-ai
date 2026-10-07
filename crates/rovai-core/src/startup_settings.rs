@@ -37,8 +37,12 @@ struct DraftParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SaveParams {
     runtime_kind: AdapterKind,
-    expected_revision: u64,
-    configuration: RuntimeStartupConfiguration,
+    #[serde(default)]
+    edits: Option<Vec<runtime_startup::FieldEdit>>,
+    #[serde(default)]
+    configuration: Option<RuntimeStartupConfiguration>,
+    #[serde(default)]
+    expected_revision: Option<u64>,
 }
 
 impl Core {
@@ -54,7 +58,7 @@ impl Core {
                 let mut settings = runtime_startup::load(&database, params.runtime_kind)?;
                 // Present legacy explicit installations as the current preference until
                 // the first edit. Restoring automatic discovery then becomes explicit.
-                if settings.revision == 0 {
+                if settings.revision == 0 && settings.configuration.program_path.is_none() {
                     let service = AgentProfileService::default();
                     if let Some(installation) = service
                         .managed_installation(&database, params.runtime_kind, "default")?
@@ -73,11 +77,16 @@ impl Core {
                         );
                     }
                 }
-                Ok(serde_json::to_value(settings)?)
+                Ok(serde_json::to_value(runtime_startup::public(settings))?)
             }
             "runtime.startup.inspect" | "runtime.startup.check" => {
-                let params: DraftParams = serde_json::from_value(params)?;
-                let configuration = params.configuration.validated(cfg!(windows))?;
+                let params: DraftParams = serde_json::from_value(params)
+                    .map_err(|_| anyhow::anyhow!("启动设置输入格式无效。"))?;
+                let configuration = runtime_startup::resolve_draft(
+                    &*self.database.lock().await,
+                    params.runtime_kind,
+                    params.configuration,
+                )?;
                 if method == "runtime.startup.check" {
                     self.check_runtime_startup(params.runtime_kind, configuration)
                         .await
@@ -87,69 +96,94 @@ impl Core {
                 }
             }
             "runtime.startup.save" => {
-                let params: SaveParams = serde_json::from_value(params)?;
-                let kind = params.runtime_kind;
-                ensure!(
-                    current_runtime_platform_blocker(kind).is_none(),
-                    "当前平台不支持这个运行时。"
-                );
-                let configuration = params.configuration.validated(cfg!(windows))?;
+                let params: SaveParams = serde_json::from_value(params)
+                    .map_err(|_| anyhow::anyhow!("启动设置输入格式无效。"))?;
                 let _update = self.runtime_search_update.lock().await;
-                {
-                    let database = self.database.lock().await;
-                    let saved = runtime_startup::load(&database, kind)?;
-                    if saved.revision > 0 && saved.configuration == configuration {
-                        return Ok(serde_json::to_value(saved)?);
-                    }
-                }
-                let search = if configuration.program_path.is_none() {
-                    // Restore-auto previews use fresh discovery inputs. Capture them
-                    // again under the save lock, then merge the latest saved settings.
-                    // Nothing is published until the revision CAS below succeeds.
-                    let search = self.read_runtime_check_environment(true).await?;
-                    let configurations = runtime_startup::load_all(&*self.database.lock().await)?;
-                    search.with_startup_configurations(configurations)
-                } else {
-                    let current = self.runtime_search_environment.read().await.clone();
-                    current.as_ref().clone().with_generation(
-                        current
-                            .generation()
-                            .checked_add(1)
-                            .context("Runtime generation exhausted")?,
-                    )
-                }
-                .with_startup_configuration(kind, configuration.clone());
-                if configuration.program_path.is_some() {
-                    let draft_search = search.clone();
-                    let observation = tokio::task::spawn_blocking(move || {
-                        discover_runtime_path(kind, &draft_search)
-                    })
-                    .await?;
-                    ensure!(
-                        observation.discovery_status == RuntimeDiscoveryStatus::Found,
-                        "所选程序不存在或无法执行，请重新选择。"
-                    );
-                }
-                let settings = {
-                    let mut database = self.database.lock().await;
-                    runtime_startup::save(
-                        &mut database,
-                        kind,
-                        params.expected_revision,
-                        configuration,
-                        search.generation(),
-                    )?
-                };
-                search.activate_for_runtime_commands();
-                *self.runtime_search_environment.write().await = Arc::new(search);
-                self.native_skill_discovery.invalidate_cache();
-                // No fleet invalidation: a live host retains its captured process environment.
-                drop(_update);
-                self.run_runtime_discovery().await;
-                Ok(serde_json::to_value(settings)?)
+                self.save_runtime_startup(params).await
             }
             _ => anyhow::bail!("Unknown startup settings method"),
         }
+    }
+
+    async fn save_runtime_startup(&self, params: SaveParams) -> Result<Value> {
+        let kind = params.runtime_kind;
+        ensure!(
+            current_runtime_platform_blocker(kind).is_none(),
+            "当前平台不支持这个运行时。"
+        );
+        let initial_legacy_save = params.configuration.is_some();
+        let edits = match (params.edits, params.configuration, params.expected_revision) {
+            (Some(edits), None, None) => edits,
+            (None, Some(configuration), Some(revision)) => {
+                let saved = runtime_startup::load(&*self.database.lock().await, kind)?;
+                let same = saved.configuration.program_path == configuration.program_path
+                    && saved.configuration.environment == configuration.environment;
+                if same && saved.revision > 0 {
+                    return Ok(serde_json::to_value(runtime_startup::saved_response(
+                        saved,
+                    ))?);
+                }
+                ensure!(
+                    saved.revision == revision,
+                    "启动设置已被更新，请保留草稿并再次保存。"
+                );
+                runtime_startup::ordinary_edits(kind, &saved.configuration, &configuration)
+            }
+            _ => anyhow::bail!("启动设置保存格式无效。"),
+        };
+        let prepared = runtime_startup::prepare_save(&*self.database.lock().await, kind, edits)?;
+        if !prepared.conflicts.is_empty() {
+            return Ok(
+                json!({"status":"conflict", "latest":runtime_startup::saved_response(prepared.current), "conflicts":prepared.conflicts}),
+            );
+        }
+        if prepared.edits.is_empty() && !(initial_legacy_save && prepared.current.revision == 0) {
+            return Ok(serde_json::to_value(runtime_startup::saved_response(
+                prepared.current,
+            ))?);
+        }
+        // Saving only publishes local configuration. Retain the captured
+        // PATH; discovery, shell reads and native commands belong to their
+        // explicit operations, never this transaction.
+        let current = self.runtime_search_environment.read().await.clone();
+        let search = current.as_ref().clone().with_generation(
+            current
+                .generation()
+                .checked_add(1)
+                .context("Runtime generation exhausted")?,
+        );
+        if prepared
+            .edits
+            .iter()
+            .any(|edit| edit.path == ["programPath"])
+            && let Some(path) = &prepared.configuration.program_path
+        {
+            ensure!(
+                rovai_core::runtime_discovery::is_runtime_entrypoint_file(std::path::Path::new(
+                    path
+                )),
+                "所选程序不存在或无法执行，请重新选择。"
+            );
+        }
+        let settings = {
+            let mut database = self.database.lock().await;
+            runtime_startup::commit_save(&mut database, kind, prepared, search.generation())?
+        };
+        let search = if settings.reconnect_required {
+            search
+        } else {
+            search.with_generation(self.runtime_search_environment.read().await.generation())
+        }
+        .with_startup_configuration(kind, settings.configuration.clone());
+        search.activate_for_runtime_commands();
+        *self.runtime_search_environment.write().await = Arc::new(search);
+        if settings.reconnect_required {
+            self.native_skill_discovery.invalidate_cache();
+        }
+        // No fleet invalidation: a live host retains its captured process environment.
+        Ok(serde_json::to_value(runtime_startup::saved_response(
+            settings,
+        ))?)
     }
 
     pub(crate) async fn inspect_runtime_startup(
@@ -269,7 +303,6 @@ impl Core {
         self.runtime_check_requests
             .send(RuntimeCheckRequest {
                 search: self.runtime_search_environment.read().await.clone(),
-                fast_target: None,
                 startup_preview: Some(preview.clone()),
                 runtime_kind: kind,
                 purpose: RuntimeLaunchPurpose::AvailabilityCheck,

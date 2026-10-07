@@ -104,6 +104,9 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.runtime-startup-form') && !document.querySelector('.runtime-startup-page').getAttribute('aria-busy').includes('true')")
     assert.equal(await run("[...document.querySelectorAll('.runtime-startup-actions button')].filter(b => b.disabled).length"), 2)
     assert.equal(await run("getComputedStyle(document.querySelector('.runtime-startup-actions')).display"), 'flex')
+    assert.equal(await run("document.querySelectorAll('.runtime-custom-api, .runtime-connection-choice, .runtime-api-model-row').length"), 0)
+    assert.equal(await run("window.settingsTest.requests.filter(r => r.method==='runtime.startup.observe').length"), 0)
+
     await click('.runtime-startup-section:nth-of-type(2) .quiet-button')
     await click('input[aria-label="变量名 1"]')
     await run("document.execCommand('insertText',false,'HTTP_PROXY')"); await settle()
@@ -116,8 +119,11 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.runtime-startup-form .inline-error')")
     assert.equal(await run("document.querySelector('input[aria-label=\"变量名 1\"]').value"), 'HTTP_PROXY')
     assert.equal(await run("document.querySelector('.runtime-startup-actions button[type=submit]').disabled"), false)
+    const beforeLocalSave = await run('window.settingsTest.requests.length')
     await click('.runtime-startup-actions button[type=submit]')
     await waitFor("document.querySelector('.runtime-startup-actions button[type=submit]').disabled")
+    assert.deepEqual(await run('window.settingsTest.requests.slice('+beforeLocalSave+').map(r => r.method)'), ['runtime.startup.save'])
+    assert.equal(await run("document.querySelector('.runtime-startup-actions [role=status]').textContent"), '已保存')
     assert.equal(await run("window.settingsTest.requests.filter(r => r.method==='runtime.startup.check').length"), 0)
     assert.equal(await run("window.settingsTest.state.startup['codex-cli'].configuration.environment[0].name"), 'HTTP_PROXY')
     await click('.runtime-startup-section:nth-of-type(2) .quiet-button')
@@ -160,6 +166,19 @@ app.whenReady().then(async () => {
       window.webContents.setZoomFactor(1)
     }
 
+    await click('.runtime-startup-back')
+    await click('.runtime-product-settings[aria-label="Claude Code 启动设置"]')
+    await waitFor("document.querySelector('.runtime-startup-form') && document.querySelector('.runtime-startup-page').getAttribute('aria-busy')==='false'")
+    assert.equal(await run("document.querySelectorAll('.runtime-custom-api, .runtime-connection-choice, .runtime-api-model-row').length"), 0)
+    assert.equal(await run("document.querySelector('.runtime-startup-form').textContent.includes('API Key')"), false)
+    for (const theme of ['day', 'night']) {
+      await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+      window.setContentSize(1040, 700)
+      await noOverflow(`claude/${theme}/1040`); await capture(`claude-startup-${theme}`)
+      window.webContents.setZoomFactor(2)
+      await noOverflow(`claude/${theme}/200%`)
+      window.webContents.setZoomFactor(1)
+    }
     await navigate('general')
     window.setContentSize(1440, 920)
     console.error('settings fixture: runtime regression passed')
@@ -272,12 +291,12 @@ app.whenReady().then(async () => {
 
     await navigate('about', 'server_download_failed')
     const serverReleaseLink = 'https://github.com/murray17/rovai-ai/releases/tag/v0.0.7'
-    assert.equal(await run("document.querySelector('.about-update-fallback-actions a').href"), serverReleaseLink)
+    assert.equal(await run("document.querySelector('.about-update-fallback a').href"), serverReleaseLink)
     await click('[data-app-update-release-tab="current"]')
     assert.equal(await run("document.querySelector('.about-release-section').dataset.appUpdateReleaseVersion"), '0.0.6')
-    assert.equal(await run("document.querySelector('.about-update-fallback-actions a').href"), serverReleaseLink)
+    assert.equal(await run("document.querySelector('.about-update-fallback a').href"), serverReleaseLink)
     await navigate('about', 'server_no_candidate')
-    assert.equal(await run("document.querySelector('.about-update-fallback-actions a').href"), 'https://github.com/murray17/rovai-ai/releases')
+    assert.equal(await run("document.querySelector('.about-update-fallback a').href"), 'https://github.com/murray17/rovai-ai/releases')
 
     await navigate('channels')
     await waitFor('document.hasFocus()')

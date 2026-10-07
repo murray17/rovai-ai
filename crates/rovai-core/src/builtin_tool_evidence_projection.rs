@@ -12,6 +12,7 @@ use crate::{
     },
     command::canonical_json_digest,
     member_studio::MEMBER_CREATE_TOOL_NAME,
+    member_tool::{MEMBER_GET_TOOL_NAME, MEMBER_LIST_TOOL_NAME, MEMBER_UPDATE_TOOL_NAME},
     memory_retrieval::{MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME},
     memory_tool::MEMORY_WRITE_TOOL_NAME,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
@@ -131,6 +132,32 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
             );
             insert_identifier(&mut projected, "taskId", input.get("taskId"));
             insert_content_facts(&mut projected, input.get("body"));
+        }
+        MEMBER_LIST_TOOL_NAME => {}
+        MEMBER_GET_TOOL_NAME | MEMBER_UPDATE_TOOL_NAME => {
+            insert_identifier(&mut projected, "agentId", input.get("agentId"));
+            insert_i64(
+                &mut projected,
+                "expectedVersion",
+                input.get("expectedVersion"),
+            );
+            if operation == MEMBER_UPDATE_TOOL_NAME {
+                projected.insert(
+                    "changedFields".into(),
+                    json!(
+                        input
+                            .as_object()
+                            .map(|input| input
+                                .keys()
+                                .filter(|key| !matches!(
+                                    key.as_str(),
+                                    "agentId" | "requestId" | "expectedVersion"
+                                ))
+                                .collect::<Vec<_>>())
+                            .unwrap_or_default()
+                    ),
+                );
+            }
         }
         MEMBER_CREATE_TOOL_NAME => {
             insert_identifier(&mut projected, "creationKey", input.get("creationKey"));
@@ -395,6 +422,18 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
                 result.get("effectiveRecipients"),
             );
             insert_string_array(&mut projected, "deliveryIds", result.get("deliveryIds"));
+        }
+        MEMBER_LIST_TOOL_NAME => {
+            insert_identifier(&mut projected, "threadId", result.get("threadId"));
+            projected.insert(
+                "memberCount".into(),
+                json!(result["items"].as_array().map_or(0, Vec::len)),
+            );
+        }
+        MEMBER_GET_TOOL_NAME | MEMBER_UPDATE_TOOL_NAME => {
+            insert_identifier(&mut projected, "agentId", result.get("agentId"));
+            insert_i64(&mut projected, "version", result.get("version"));
+            insert_bool(&mut projected, "changed", result.get("changed"));
         }
         MEMBER_CREATE_TOOL_NAME => {
             insert_identifier(&mut projected, "agentId", result.get("agentId"));
@@ -1156,6 +1195,30 @@ mod tests {
         let encoded = serde_json::to_string(&projected).unwrap();
         assert!(!encoded.contains("/private/run/avatar.png"));
         assert!(!encoded.contains("avatarFile\""));
+        let update = projection(
+            MEMBER_UPDATE_TOOL_NAME,
+            json!({"agentId":"agent_27","expectedVersion":1,"avatarFile":"/private/run/new.png","workingPrinciples":"requested text"}),
+            json!({"agentId":"agent_27","version":2,"changed":true}),
+        );
+        assert_eq!(
+            update["canonicalInput"]["changedFields"],
+            json!(["avatarFile", "workingPrinciples"])
+        );
+        assert!(
+            !serde_json::to_string(&update)
+                .unwrap()
+                .contains("/private/run/new.png")
+        );
+        let get = projection(
+            MEMBER_GET_TOOL_NAME,
+            json!({"agentId":"agent_27"}),
+            json!({"agentId":"agent_27","version":2,"images":{"icon":"/private/run/managed.png","portrait":null}}),
+        );
+        assert!(
+            !serde_json::to_string(&get)
+                .unwrap()
+                .contains("/private/run/managed.png")
+        );
     }
 
     #[test]

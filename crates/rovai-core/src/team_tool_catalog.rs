@@ -17,6 +17,7 @@ use crate::{
     },
     camp_message_send_teaching::CAMP_MESSAGE_SEND_SUMMARY,
     member_studio::{MEMBER_CREATE_TOOL_NAME, MemberCreateInput, member_create_input_schema},
+    member_tool::*,
     memory_retrieval::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME, MemoryReadInput,
         MemoryRetrievalService, MemorySearchInput, MemoryViewInput,
@@ -44,7 +45,12 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         return serde_json::from_value::<crate::thread_runs::ThreadRunsInput>(input.clone())?
             .validate();
     }
+    if canonical_name == MEMBER_UPDATE_TOOL_NAME {
+        return serde_json::from_value::<MemberUpdateInput>(input.clone())?.validate();
+    }
     let valid = match canonical_name {
+        MEMBER_LIST_TOOL_NAME => Ok(()),
+        MEMBER_GET_TOOL_NAME => serde_json::from_value::<MemberGetInput>(input.clone()).map(|_| ()),
         CAMP_MESSAGE_SEND_TOOL_NAME => {
             serde_json::from_value::<ThreadMessageSendInput>(input.clone()).map(|_| ())
         }
@@ -1109,6 +1115,27 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
                     }
                 }
             }
+        }),
+        json!({
+            "name": MEMBER_LIST_TOOL_NAME,
+            "title": "Member list",
+            "description": "List all current Thread members, including yourself and away members, with IDs, names, roles, responsibilities and Default Lead flags. Exclude departed or removed members. This does not discover the global roster.",
+            "inputSchema": member_list_input_schema(),
+            "outputSchema": member_list_output_schema()
+        }),
+        json!({
+            "name": MEMBER_GET_TOOL_NAME,
+            "title": "Member get",
+            "description": "Read a member's six identity fields, version and icon/portrait paths. The target must be a current Thread member or a member you created in this Thread, verified by Core. Image paths last only for this Run; null paths have a separate image status.",
+            "inputSchema": member_get_input_schema(),
+            "outputSchema": member_get_output_schema()
+        }),
+        json!({
+            "name": MEMBER_UPDATE_TOOL_NAME,
+            "title": "Member update",
+            "description": "Patch a member's global Profile only at the User's explicit request in a direct user-triggered Run. Use the version from member get and send only intended changes. Omitted fields stay unchanged; text and image references commit together. Saving does not refresh an existing Session.",
+            "inputSchema": member_update_input_schema(),
+            "outputSchema": member_update_output_schema()
         }),
         json!({
             "name": MEMBER_CREATE_TOOL_NAME,

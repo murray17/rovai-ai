@@ -781,7 +781,7 @@ export function SettingsSidebarNavigation<Section extends string>({
                   key={item.key}
                   onClick={() => onSectionChange(item.key)}
                 >
-                  <span aria-hidden="true"><NavigationIcon name={item.icon} /></span>
+                  <span className="settings-sidebar-icon" aria-hidden="true"><NavigationIcon name={item.icon} /></span>
                   <strong>{uiAttribute(item.label)}</strong>
                   {item.key === 'about' && updateBadge && (
                     <span

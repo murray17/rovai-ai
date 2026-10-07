@@ -65,10 +65,11 @@ pub(crate) struct ControlWrite {
 }
 
 pub(crate) struct ClaudeControl {
+    credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     session_id: String,
     permission_mode: String,
     initialize_id: String,
-    initialization: Mutex<Option<oneshot::Sender<std::result::Result<(), String>>>>,
+    initialization: Mutex<Option<oneshot::Sender<std::result::Result<Value, String>>>>,
     state: Mutex<ControlState>,
     writer: mpsc::UnboundedSender<ControlWrite>,
     changed: Notify,
@@ -82,12 +83,13 @@ impl ClaudeControl {
         events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
     ) -> (
         Arc<Self>,
-        impl std::future::Future<Output = Result<()>>,
+        impl std::future::Future<Output = Result<Value>>,
         mpsc::UnboundedReceiver<ControlWrite>,
     ) {
         let (writer, receiver) = mpsc::unbounded_channel();
         let (initialized, initialization) = oneshot::channel();
         let control = Arc::new(Self {
+            credential_redactor: None,
             session_id,
             permission_mode,
             initialize_id: format!("rovai-initialize-{}", uuid::Uuid::new_v4()),
@@ -106,7 +108,31 @@ impl ClaudeControl {
         (control, ready, receiver)
     }
 
-    fn emit(&self, event_type: &'static str, payload: Value) {
+    pub(crate) fn set_credential_redactor(
+        &mut self,
+        redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
+    ) {
+        self.credential_redactor = redactor;
+    }
+
+    pub(crate) fn redact_frame(&self, value: &Value) -> Result<Vec<u8>> {
+        let mut value = value.clone();
+        if let Some(redactor) = &self.credential_redactor {
+            redactor.value(&mut value);
+        }
+        Ok(serde_json::to_vec(&value)?)
+    }
+
+    pub(crate) fn redact_text(&self, value: &str) -> String {
+        self.credential_redactor
+            .as_ref()
+            .map_or_else(|| value.to_owned(), |redactor| redactor.text(value))
+    }
+
+    fn emit(&self, event_type: &'static str, mut payload: Value) {
+        if let Some(redactor) = &self.credential_redactor {
+            redactor.value(&mut payload);
+        }
         if let Some(events) = &self.events {
             let _ = events.send(ClaudeCodeRuntimeEvent {
                 event_type,
@@ -215,7 +241,7 @@ impl ClaudeControl {
                         Err("Claude Code initialized with a different permission mode".to_string())
                     } else {
                         self.state.lock().unwrap().initialized = true;
-                        Ok(())
+                        Ok(response["response"].clone())
                     }
                 } else {
                     Err("Claude Code rejected protocol initialization".to_string())

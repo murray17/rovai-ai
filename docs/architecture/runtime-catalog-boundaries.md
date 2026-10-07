@@ -14,7 +14,7 @@ last_updated: 2026-10-06
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md)。实测版本和能力只由
+[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -47,7 +47,7 @@ selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并�
 `command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
 Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
 原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
-[V1.72-D15](../versions/v1.72/decisions.md#v1-72-d15)仅在 macOS arm64 开放开发 Preview，其余平台
+[V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)仅在 macOS arm64 开放开发 Preview，其余平台
 NotQualified；没有 qualification evidence，不声称 First-Class。旧 headless 传输只保留研究/兼容测试。
 
 Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
@@ -92,7 +92,7 @@ ACP 的 3.0.65 最低版本仍由 ACP 初始化拥有；Hub 用实际认证协�
 没有新增版本白名单。Hub 当前支持 Cline 原生保存或环境中的 BYOK；订阅/OAuth 的凭据解析尚未准入。
 原生费用、缺失 token 桶和无法确认的压缩事件保持未知。实现、真实验证和剩余差异见
 [Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md)；取舍见
-[V1.72-D18](../versions/v1.72/decisions.md#v1-72-d18)，上下文见
+[V1.72-D22](../versions/v1.72/decisions.md#v1-72-d22)，上下文见
 [Native Hub 输入说明](../versions/v1.72/model-context-change-cline-native-hub.md)。
 旧 ACP 的 Rule/Plugin 与历史验收见 [System revision 2](../versions/v1.72/model-context-change-cline-system.md)。
 
@@ -127,48 +127,49 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 显式程序路径失效时保持缺失，不能换用自动候选；用户恢复自动后再使用原有发现来源。
 草稿浅检不写安装，草稿深检复用 Check Manager 的并发、deadline 与清理 owner，结果只回到编辑器。
 环境只传入对应 Runtime 进程与原生配置读取，既不修改系统环境，也不投影到公共上下文。
-字段、CAS、迁移和错误边界由 [Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md)拥有。
+字段、CAS、迁移和错误边界由 [Runtime Launch v52](../contracts/runtime-launch-and-verification-v52.md)拥有。
 
 主动正式检查在后端先读取最新基础环境、加载已保存启动设置，再将不可变环境快照交给 Check Manager。
 刷新后的请求不与旧搜索代数合并；结果写回与保存/刷新共用更新锁并重验代数和程序身份。
 草稿检查只复用读取步骤，在临时快照叠加草稿；不发布全局环境、安装、正式可用性或模型缓存。
 列表和指南共用正式入口；重新检测仍是目录浅检，不是主动检查的前置操作。
 
-## 浅检测与按需深检
+保存是一次本地提交：复用已捕获环境，校验目标、字段与版本，写入并返回修订。它不重新读取 Shell/PATH，
+不扫描 Runtime、不查询身份或目录、不重启 Host，也不在返回后自动排队这些操作。显式程序路径只作本地文件校验。
+新配置按原规则失效缓存、冻结与 Host 兼容性；既有 Run 按生命周期完成，后继执行仍需匹配新来源摘要。
+环境捕获与发现文件校验在提交锁外进行，晚到发布重验代次并加载最新设置，不能使保存等待外部任务。
 
-只有平台准入为 `qualified` 或 `preview` 的 Adapter 才参加 Core 启动和 Runtime 重扫。它们只建立 executable path、权限、metadata/fingerprint 与 Adapter 声明为无副作用的
-有界 one-shot 身份证据。所有 Runtime 都只有在命令成功、输出未超限且识别到基础版本/身份时才写入 `light_ready`；
-`found_uninspected` 既不是 light-ready，也不是 checking。`light_ready` 可以驱动成员 Runtime-default 配置和
-“可用”主状态，但只表示 executable 已通过轻度启动验证、可选择和尝试运行。认证、协议、模型、Session 与
-capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
+### Claude Code 与 Codex 原生配置
 
-发现结束、页面进入和成员选择不排队深检；模型 Picker 按 60 秒/24 小时策略请求刷新。fingerprint 变化只替换
-当前静态快照并立即使旧 Ready 失效；旧 capabilities、认证、动态 permission 与 Session compatibility 不迁移。
-Runtime Check Manager 以内部 attempt identity、总 deadline、每 Runtime 单飞和全局并发二统一收口 success、
-stable failure、superseded、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
-和整进程树 cleanup。
+原生连接编辑已按 User 要求退出。启动设置只拥有程序路径与普通子进程环境，不再读取到表单或编辑
+原生地址、Key、连接方式和模型列表，不再观察账号或生成原生目录。移除入口不修改任何已有原生配置，
+原生 CLI 继续读取其文件、环境、认证与模型设置。
 
-Managed Runtime resolution 不在 Adapter Deep Probe 外重复执行 version gate；Adapter 自己的 version、认证、
-capability、协议和模型检查共同构成一轮完整 Probe。每轮 Probe 前后复核同一 executable 的轻量 file identity；
-开始可读而结束变化或无法复核时，无论 Probe 成功、直接错误还是 cleanup timeout，本轮都被 Runtime 更新
-supersede。首次发生时在原 attempt/deadline 内重新解析 path、canonicalize、计算当前 SHA 并最多重试一次；
-第二次仍变化则 deferred，不提交 snapshot、failure、diagnostic，也不唤醒等待执行。Execution 触发的 deferred
-只建立三秒进程内冷却；冷却期 Scheduler 不启动新 Probe，过期后的下一次 tick 自动获得新的有界 attempt，
-不要求打开 Picker、手动检查或重启 App。
+执行仍保留只读连接摘要、凭据来源引用和输出脱敏，以保持旧快照与 Host/binding 兼容隔离；
+内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
+推理强度 fallback。边界由 [Runtime Launch v52](../contracts/runtime-launch-and-verification-v52.md)拥有。
+
+<a id="浅检测与按需深检"></a>
+## 安装发现与真实 Host 验证
+
+启动与 rescan 只解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity；
+不执行 `--version` 或协议深检。发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
+安装记录不伪造 Ready、认证或能力；旧快照只供主动诊断和模型 Picker 参考。
+
+配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台、目标及文件身份后启动真实 Host。
+真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
+默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
+运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。
+
+主动诊断沿用有界 Runtime Check Manager 和进程清理，Probe 前后仍校验目标身份；其结果不授权运行。
+Antigravity 的正文只能进入 argv，因此保留有界 help/models 无正文预检；Fast 可选偏好直接进入真实 Host，不再进行资格预检。
+特例和字段由 [Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md)拥有，不扩展为统一健康门禁。
 
 ### Machine Ready 与 Adapter 行为证据
 
-机器 Ready 只回答“当前 canonical executable/fingerprint 是否能用当前结构化协议建立可配置 Session”。
-Availability Check 与 Dispatch Preflight 必须共享同一 Adapter-specific requirements、evidence builder 与 persisted
-snapshot validator；任一入口写入的 `ready` 必须正好可被 Scheduler 接受。若 requirements 变化，旧 snapshot
-先降级，不能因数据库已有较弱 `ready` 而跳过 Dispatch Preflight。
-
-TRAE 的统一 Machine Ready 精确定义为：非空 version、当前 executable identity/fingerprint、ACP v1
-`initialize`、成功 `session/new` 与非空 Session ID、非空动态 model catalog、非空 permission/mode catalog，以及
-current model/mode 均存在于相应 options 的 coherent Session config shape。成功结构化 handshake 产生
-authenticated 分类；不发送模型 Prompt、system marker、文件写入/拒绝、sleep/cancel、Tool side effect 或
-`session/set_config_option`。这些行为可以形成 Adapter/version/platform qualification evidence，但不成为每台机器
-或每次 Dispatch 的 Ready 前置条件。
+历史 Machine Ready 是特定 Probe 的诊断证据，不能替代本次 Host 的初始化。
+TRAE 真实 Session 必须确认当前权限模式及所请求的模型选项；默认模型无需额外等待完整目录。
+独立 Adapter/version/platform 行为验收继续单独记录，不在每个任务前执行工具副作用或行为测试。
 
 ### Runtime advertised catalog 与 managed Skill delivery
 
@@ -184,57 +185,24 @@ catalog。Rovai 只有在唯一内容的项目 Skill 同时通过新 Session adv
 
 ## Camp 队员 Fast 边界
 
-Camp Fast service 只拥有成员局部三态偏好、保存绑定代次和安全 metadata 缓存；原生 Adapter 拥有认证、
-模型资格、默认设置解析和实际执行状态。普通 Camp 投影只读缓存，不调用 Runtime。用户展开队员浮层后，
-Renderer 对没有有效结果的 Claude/Codex 绑定静默调用既有 Fast 检查接口；请求进入 Runtime Check Manager，
-同 Runtime 串行、全局预算、deadline 与子进程清理保持原有边界。页面缓存复用结果和在途请求，不新增轮询或原生配置解析。
-
-新 Run 冻结偏好，Claude 使用一次 inline settings，Codex 使用原生单 Turn 字段。Fast 不参与 Host/Session
-兼容性，因此无需重建 Thread；不触碰用户全局设置。实际执行前复核资格，失败只停止下发覆盖，不清除
-Camp 意图。模型变化仅失效资格缓存，权限变化不影响 Fast；实际绑定变化才清除覆盖。
-未知默认保持未知，实际观察仅进入当前 Run 的 Evidence/Usage，不回写 Camp 或生成 Canonical Activity。字段合同见
-[Camp Member Fast v1](../contracts/camp-member-fast-v1.md)，理由见
-[V1.34-D01](../versions/v1.34/decisions.md#v1-34-d01)。
+Camp Fast service 拥有可空偏好、保存绑定代次与 Run 冻结。活跃 Claude/Codex 绑定直接显示二态控件，首次保存
+在现有事务/表中写入；不依赖版本、账号资格、schema 导出或健康快照。真实 Host 直接传递冻结参数，关闭值
+不能因资格未知而丢弃。正常 Host 初始化的原生默认复用现有字段作显示初值，用户选择优先；
+未启动或字段缺失时按钮不高亮，内部保持未知且不生成关闭覆盖。普通运行观察只属于对应 Run Evidence/Usage，不反写偏好。
+通用诊断、必要的认证/显式模型/权限验证与输入去重保持。没有 Fast 兼容重启、后台查询或新的资格管理器。
+字段由 [Camp Member Fast v3](../contracts/camp-member-fast-v3.md)拥有。
 
 ## 模型目录缓存与执行事实
 
-模型目录是 Product Runtime Availability snapshot 的一部分，但其配置体验与执行事实分离。首次目录仍由完整
-检查形成；已验证且身份及相关能力证据仍有效的 Runtime 复用既有原生目录读取步骤轻量刷新，入口细节见
-[Runtime Launch v41](../contracts/runtime-launch-and-verification-v41.md#目录展示与保存恢复)。轻量刷新只更新目录
-与独立 `model_catalog_succeeded_at`，不更新完整验证时间或 Ready 证据。旧数据从原成功时间回填，不用迁移时间。
-`light_ready`、`installed_unverified`、failed attempt 或 synthetic descriptor 不能制造动态目录。Core 从目录成功时间统一投影 `fresh`（60 秒内）、
-`stale`（60 秒至 24 小时）、`expired`（24 小时及以上）、`unavailable` 与 `invalidated`，Renderer 不自行计算
-TTL。
+模型目录只服务 Picker 和主动诊断，沿用既有 60 秒/24 小时缓存及身份失效规则，不新增缓存或 LKG。
+打开 Picker 才按需使用既有有界 Check Manager 刷新；页面打开、Runtime 切换及默认模型任务均不触发目录刷新。
+历史目录可用于展示，不能证明当前 executable 支持某个模型，也不能形成运行授权。
+刷新只写明确取得的目录证据；失败保留原诊断记录，Superseded 不提交错误身份的结果。
 
-当前 executable fingerprint 改变时，旧 Deep Probe 不再构成当前 Runtime Ready evidence。发现事务可以只保留
-旧成功 snapshot 的 models 与原目录成功时间作为 stale LKG；即使原成功不足 60 秒也不能投影 fresh，
-24 小时上限继续从原成功时间计算且不得刷新。LKG 只服务模型下拉，不证明新 binary 支持相同模型，不继承
-capability/auth/permission/session evidence，也不能绕过当前 fingerprint 的 Dispatch Preflight。
-
-切换队员 Runtime 只读取 Installation，不启动进程。打开模型 Picker 进入既有 `runtime.modelCatalog.open` seam：
-fresh 直接返回，stale 或同一已验证身份的 expired 历史目录立即展示并后台单飞刷新；没有可展示历史时才等待。
-展示资格不放宽 `is_serviceable` 或新选择的保存校验。身份变化仍按原 LKG 失效规则处理。
-该入口的 `waitForRefresh=true` 供保存恢复等待成功写回，`scheduled`/`joined` 不是刷新成功。完整检查可以满足
-目录等待者，轻量刷新不能满足完整验证；复用原 Check Manager 的串行、deadline 和清理，不新增调度器。
-各适配器写回前复核 installation generation、executable identity 与相关证据；首次使用、身份或相关验证失效
-仍走原完整检查。省去重复版本/行为验证不等于省去读取目录所需的原生认证和连接，也不改变平台准入资格。
-刷新失败只追加 failed Probe Attempt，保留成功 snapshot。Superseded 刷新不追加
-attempt，等待式 Picker 返回 `deferred`；当前 fingerprint 尚未 Ready 时，未过期 LKG 继续以 stale 服务。只有
-当前 Installation canonical path 自身的确定 fingerprint/identity 变化才可撤销当前 Ready；其他搜索候选的失败是
-candidate-local transient attempt，不得修改当前 snapshot 的 `stale_at`。备用候选只有完整 deep probe 成功并
-即将正式采用时，才能替换 Installation 并推进 generation。确定的安装或 capability identity 变化同样立即
-失效。account/provider 变化只有 Adapter 提供稳定、非敏感 identity
-evidence 时才自动比较，不能从凭据内容或错误文案猜测。
-
-Picker catalog 用于建立新的显式选择或修改模型参数。Core 以数据库配置为准：绑定与保存的环境 generation、
-模型和全部模型参数未变化时，只改权限不受目录年龄、暂时失败或目录移除原模型拦截，权限仍正常校验。
-旧配置只有可从原时间证据确认绑定身份时才回填 generation，未知身份历史仍走正常验证。
-保存明确拒绝为 `runtime_model_catalog_refresh_required` 时，编辑器在同一保存状态内等待刷新并最多重提一次，
-保留原 expectedVersion、使用新 commandId；其他拒绝或结果未知不自动重试。失败与并发冲突保留草稿，
-新的无效模型或参数要求调整，不静默替换。页面不常态展示 TTL，错误码只留诊断，主要提示使用中文。
-不为人工修改或技术恢复的损坏数据提供兼容修复。真实 AgentRun
-仍在 Host/Session 建立后核对当前目录，不存在或无法核对即 fail closed。`runtime_default` 不依赖 catalog，
-内部 sentinel 只用于审计和冻结，Adapter 不向真实 Runtime 发送该 sentinel。
+Core 原子保存显式模型和选项的精确意图及静态权限配置；过期、缺失目录或历史失败不阻止保存。
+真实 Host 负责原生握手和选项传递，不静默替换或忽略。Claude Code 将已有模型 ID 与可传递的显式选项交给
+原生 CLI 判定；不能仅因枚举缺失或目录不包含该 ID 而拒绝正文。其他 Adapter 的原生模型设置协议保持原合同。
+默认模型不依赖目录，内部 sentinel 只用于审计和冻结，不向原生 Runtime 发送。
 
 成员配置只拥有模型策略，不拥有某次 Run 的实际模型。使用 `runtime_default` 时，Core 只能从当前
 Thread/Session 的 Runtime-native 结构化字段记录首个实际模型，并按 AgentRun execution epoch、default-only、
@@ -243,10 +211,16 @@ Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime
 
 ### Claude Code 原生模型目录
 
-Claude Code 通过选中的原生 CLI，以 stream-json 双向控制协议发送一次无 Prompt `initialize`。
-精确关联的成功响应 `models` 是唯一候选目录来源，`--help` 只检查命令参数。Probe 继承原生环境与
+Claude Code 通过选中的原生 CLI，以 stream-json 双向控制协议优先发送无 Prompt `list_models`。
+只有匹配 request_id 的明确“不支持 list_models”错误才回退一次 `initialize.models`，两次请求共享
+30 秒总预算；超时、退出、认证、策略和其他错误不触发回退，不建立能力缓存或最低版本门槛。
+精确关联的成功响应 `models` 是候选目录来源，`--help` 只检查命令参数。Probe 继承原生环境与
 active PATH，使用 `--no-session-persistence`，不追加 model、settings、权限或 Provider 覆盖。
-整个握手沿用 `RuntimeProbeProcess` 的 30 秒 deadline、有界输出和进程树回收。
+整个查询沿用 `RuntimeProbeProcess` 的超时、取消和进程树回收。协议读取只限制当前未完成帧，默认
+64 MiB、按需增长，通过 Core 环境变量 `ROVAI_RUNTIME_PROBE_MAX_FRAME_BYTES` 配置字节数。
+删除 256 KiB 单行和 4 MiB 历史累计门槛；解析完成的帧释放，stderr 继续有界保存并持续消费。
+超限完整失败并报告本地读取容量，不截断 JSON 后继续，不作为原生 CLI 拒绝。此规则覆盖复用读取器的
+Claude、ACP、Codex 模型／初始化及 Codex 原生配置查询，不删除文件、日志、图片等其他边界。
 
 `value` 保留为选择 ID，显示名称与描述独立；原生单条模型元数据进入统一 descriptor 的
 `runtimeMetadata`，包括 Runtime 明确给出的别名、resolved ID 和能力。整份 account/初始化响应不进入
@@ -255,9 +229,12 @@ active PATH，使用 `--no-session-persistence`，不追加 model、settings、�
 
 新目录复用统一快照、Picker、缓存和刷新；help 时代旧目录缺少原生 entry 证据，不能再服务选择或作为 LKG，
 但保存的队员配置保留。原生成功目录在刷新失败时继续按已有 stale/expired 边界读取，失败不能更新成功时间。
-`model.catalog.initialize` 是当前 Claude Ready 必需证据，旧配置在执行前重新验证。显式模型 ID 继续
-原样传给 `--model`；运行时默认省略该参数。字段与错误边界见
-[Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md)。
+`model.catalog.initialize` 保留为既有持久化能力名，专用查询或兼容查询均可建立该目录证据；查询失败
+不制造 Ready，界面独立表达目录不可用。已有模型和选项可原样保存并执行；默认项由用户主动选择，
+本期不增加任意模型 ID 输入。正式会话仍完成 initialize 协议／权限握手，但不再据其目录拒绝已有配置。
+显式模型 ID 原样传给 `--model`，effort 原样传给 `--effort`；不能传递的键或非字符串选项明确拒绝，
+不把未知原生枚举值静默删除。运行时默认省略模型参数。字段与错误边界见
+[Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md)。
 
 ## 内部诊断与公开 Runtime failure
 
@@ -279,7 +256,7 @@ ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md)。
+[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -290,25 +267,10 @@ last-known-good。此增量不修改其他 Runtime 的执行路径或 Availabili
 `session/load` HistoryRestore；所有 load replay 在当前 prompt 前进入独立 quarantine，失败才建立
 `session/new`。禁止 `--resume AUTO`、私有 Session 文件解析和最近 Session 扫描。
 
-TRAE 参加正常 light discovery：启动和显式 rescan 通过统一 Probe process owner 执行有界
-`traecli --version`，成功持久化 `light_ready` 并在设置页显示“可用”，失败持久化 `light_failed`。轻检仍只
-证明 executable identity，可以配置和尝试执行，不能声明登录、ACP、模型、权限或 Session Ready。
-
-用户点击“检查可用性”授权 `AvailabilityCheck` 启动一次 TRAE ACP Host。Probe 使用保守
-`permission_mode=default`，只执行版本、initialize 与 session/new，并要求动态模型/权限目录；它不发送 Prompt、
-模型请求、工具或 Approval 行为测试。成功提交 Ready，随后的 discovery event 不重复静态落库覆盖该 Ready。
-Installation Refresh、Health Probe 与 Dispatch Preflight 和其他 Runtime 一样可以启动有界 TRAE Probe；旧
-`installed_unverified` 仍可读取，但不能配置或执行。
-
-成员可以在 `light_ready` 下原子保存 Runtime default model 与静态声明的
-`permission_mode=default|bypass_permissions`，新 draft 默认后者，但 Scheduler 必须先完成统一 Dispatch Preflight
-并得到 Ready 才能启动正式 AgentRun。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host。相同
-path/fingerprint 且 Adapter permission schema digest 相同的轻检复扫保留 Ready；任一权限 descriptor 改变时
-降级为 light snapshot，等待显式检查、Picker 刷新或统一 Dispatch Preflight 重新验证。
-
-TRAE 的模型 Picker、cache status、60 秒/24 小时窗口、失败保留和显式模型 AgentRun 校验与其他 Runtime
-共用同一模块。产品代码不增加 TRAE-specific cache 或 refresh policy；只有真实 Runtime acceptance/smoke
-在本机串行运行，避免第三方密钥或状态文件竞争。
+TRAE 与其他 Runtime 一样只做静态入口发现。用户主动诊断可以运行保守的 ACP 初始化检查，结果只供排障。
+配置使用静态声明的 `permission_mode=default|bypass_permissions`，默认值保持现状；任务启动时真实 Session
+必须确认所选模式、协议及显式模型选项，成功后同一 Host 执行。历史 `installed_unverified` 不阻断配置或运行。
+兼容 IdleWarm 继续按原 Host/Session 规则复用；TRAE 真实验收串行执行，避免第三方密钥或状态文件竞争。
 
 冷 Host HistoryRestore 只在 executable fingerprint、installation/protocol、Host config、canonical workspace、
 workspace access/isolation、模型和权限均兼容时尝试。Host initialize 后先把精确 Session route 标为
@@ -344,7 +306,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md)，
+字段级行为见 [Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -373,7 +335,7 @@ output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等�
 三者的普通检查沿用正式运行的原生 Home 选择，包括未设置的 Home override；Grok BYOK 不再复制配置。
 临时 cwd、Kiro additive agent、既有非交互认证、无消息 Session 检查和有界进程清理保留，不发送 Prompt。
 只清理 Probe 自有资源；原生初始化可能联网或落盘，检查不保证模型生成、余额或任意项目配置。
-自动化回归与真实模型 smoke 继续由调用方提供隔离环境，详见 [Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md)。
+自动化回归与真实模型 smoke 继续由调用方提供隔离环境，详见 [Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md)。
 
 仍保留两项独立差异：Kiro 通过临时 `.kiro/agents/rovai.json` 与 `--agent rovai` 追加 MCP；Kimi 通过
 Rovai 专属 env 文件提供进程级模型配置。两者分别评估，本次不改变默认 Agent、MCP 或 Provider 投递机制。
@@ -425,7 +387,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md)，证据状态见
+[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -524,7 +486,7 @@ Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp F
 macOS x64 和 Windows x64 各自绑定 Pi 专属 immutable evidence revision，均为 `qualified / reasonCode=null`；普通
 discovery、检查、成员选择、Diagnostics 与 AgentRun 对三平台开放，UI 走正式 Runtime 展示且不再标记实验性。
 平台晋升不新增 Pi 已明确 unsupported/hidden 的能力。字段级行为见
-[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md)，
+[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -551,7 +513,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v46](../contracts/runtime-launch-and-verification-v46.md)。
+[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)。
 复用 Kimi Host 时从当前 AgentRun 的冻结配置设置 Session 模式，不继承原 Host 创建时的模式；注入 Host 的
 Provider 环境按生效键值计算私有兼容摘要，注释或无关文件格式变化不触发替换，环境值变化则替换 Host。
 CodeBuddy 的显式模型通过 Host 启动参数 `--model` 选择，因此它参与进程兼容；Runtime-default
@@ -613,6 +575,14 @@ set_config_option 设置并核对。普通 Probe 使用该 Runtime 原生 Home�
 ACP composition 的 provider/model 是该入口自己的 native default，独立于交互入口的
 agent-default-model settings。BYOK 仍通过原生 llm-pi-ai providers 与 ACP profile patch 配置，
 Rovai 显式选模使用真实 catalog ID；产品不读取其他 Runtime 的凭据。
+
+Host 为原生 `settings.yaml` 中显式采用 `openai-responses`、且未声明
+`compat.supportsStrictMode` 的 Provider 添加 composition 层默认值 `true`。该开关表示端点接受
+`strict` 字段；DSH 的普通工具由此显式发送 `strict: false`，保留可选参数。原生 settings 中
+Provider / Model 的显式开关仍按原生优先级生效，其他协议不增加默认值。Host patch 只投影路由名与布尔值，
+不复制 endpoint、headers、模型列表或凭据，也不改写原生 settings、工具参数或 sandbox/approval 校验。
+Bootstrap revision 参与已有配置摘要，使旧 Host 不继续复用。实测范围与配置来源限制见
+[Responses 工具兼容验收](../research/deepseek-harness-runtime/responses-tools-2026-10-04.md)。
 
 共享 ACP Host/Fleet 拥有 resident_multi_session、租约、LRU 与停止。Run-local MCP evidence 与 Session 模型
 不进入进程兼容键；真实 MCP 定义、权限、cwd、原生 settings/credentials/profile 配置摘要变化会 fence 复用。

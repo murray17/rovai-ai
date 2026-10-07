@@ -265,14 +265,13 @@ last_updated: 2026-09-25
   覆盖，Unix bare command 才由 OS 按该 PATH 查找、相对 path 才按该 cwd 锚定，Windows 才在本次 launch 内按
   `.exe → .cmd → .bat` 封闭解析。参数始终保持结构化且不经过 Shell，解析结果不回写 Runtime 配置或跨恢复缓存；不能按
   Host 模板提前解析后再改变执行上下文。
-- 静态 discovery/rescan 只允许路径、权限、文件身份和 Adapter 声明的无副作用有界身份命令。纯找到可执行文件是 `found_uninspected`；身份命令成功才可形成 `light_ready`，但二者都不声称认证、协议、模型、Session 或 capability Ready。启动、页面打开、成员选择、过期和重扫不自动深检；深检只由用户明确检查、模型 Picker 的按需刷新或真实 Run 的统一 Dispatch Preflight 触发。
-- Runtime Check Manager 是 deep-verification attempt 生命周期的唯一所有者：同 Runtime 最多一个在途 attempt，全局上限为二，执行优先于显式检查。Ready/StableFailure/Superseded/error/timeout/panic/abort/cancel/shutdown 经同一 finalize 收口，提交必须同时匹配 search generation 与 fingerprint；短命进程必须有独立进程树、绝对 deadline、有界输出和有界 cleanup。Managed resolution 不在 Adapter Deep Probe 外重复启动 version gate；每轮包含 version 在内的完整 Probe 前后复核 executable file identity。首次被更新取代时在原 attempt/deadline 内重新绑定当前 path/fingerprint 并最多重试一次；第二次仍变化只 deferred，不持久化失败或唤醒执行，并在三秒进程内冷却后允许 Scheduler 自动发起新的有界 attempt。
-- executable fingerprint 变化立即撤销旧 Deep Probe 对当前 Runtime 的 Ready、capability、认证、动态权限与 Session compatibility 资格。旧成功 models 与原 `lastSuccessfulProbeAt` 可以在既有 24 小时窗口内作为 stale LKG 保留，到期即 expired；它只服务模型选择体验，不能证明当前 binary 的模型支持或绕过 Dispatch Preflight。公开 `lastProbeAttempt` 只投影当前 snapshot fingerprint 的 attempt，旧行只保留历史诊断价值。
-- TRAE 参加与其他 Runtime 相同的 light discovery、Availability Check、Installation Refresh、Health Probe 与 Dispatch Preflight 生命周期。`AvailabilityCheck` 与 `DispatchPreflight` 共享唯一 Machine Ready 合同：非空 version、当前 executable identity/fingerprint、ACP v1 `initialize`、`session/new` 与非空 Session ID、非空动态 model catalog、非空 permission/mode catalog，以及 current model/mode 都存在于相应 options 的 coherent Session config shape。检查不发送 Prompt、system marker、文件拒绝、sleep/cancel、Tool 副作用或 `session/set_config_option`；这些只属于独立 Adapter/version/platform 行为证据。旧 `ready` 缺少当前合同任一证据时先降级，不能让弱检查跳过 Scheduler 门禁。旧 `installed_unverified` 只可作为历史读状态，不再是可配置或可执行入口。TRAE 的本机真实进程验收必须串行，第三方密钥或状态文件竞争不形成产品分支。
-- `MemberRuntimeConfiguration` 是成员唯一持久、公开投影的 Runtime 值，将 Product Runtime、model policy 和 Adapter-native permissions 作为一个 exact-version 原子值保存。通常只有当前 capability evidence 可验证的完整配置才能提交；`light_ready` 只允许已声明的 runtime-default model 和静态 permission descriptor。所有 Product Runtime 的新配置默认使用 Adapter 已验证的原生最高权限，Kimi 为 `yolo`、TRAE 为 `bypass_permissions`；用户仍可显式选择较窄模式。背景发现不代用户创建、扩权、补全或改写配置，capability/permission schema 漂移只改变 Readiness 并要求显式重存。
+- 历史 capability snapshot、Probe attempt 和目录缓存仅供诊断/展示，不授权或否决新的真实启动，不新增 LKG、健康快照、轮询或重试调度。入口已检测到只代表可以尝试，版本未知不阻断任务；失败进入本次 Run 并展示具体原因。
+- Runtime Check Manager 仅拥有主动诊断及目录检查的有界 attempt：同 Runtime 单飞、全局并发二、deadline、前后身份围栏与进程树清理保持。Superseded 不提交错误身份结果；普通执行不进入此诊断队列，也不因历史失败等待其成功。
+- 所有 Runtime 的启动/rescan 只做静态安装发现，不运行批量 version 或深检。真实 Host 在输入前验证必要协议、显式模型/选项与权限，默认模型不等待完整目录。TRAE 模式须由本次 Session 明确确认；无历史 Ready 仍可尝试启动。
+- `MemberRuntimeConfiguration` 原子保存产品 Runtime、精确模型意图及 Adapter 静态权限配置；背景发现不创建、扩权或改写。历史 Probe/目录不成为配置保存和运行门禁，动态模型与权限应用在真实 Host 验证。既有 Adapter 权限默认保持，用户仍可选择较窄模式。
 - 成员保存的 model policy 与单次 AgentRun 的实际模型观测是不同事实。`runtime_default` 只在 Runtime-native、结构化且可归因到当前 Thread/Session 的字段出现时记录首个模型；目录默认值、请求参数、冻结配置、Usage 或文本输出不得补推。观测按 Run execution epoch、default-only、write-once 持久化，缺失或拒绝不改变 Run 终态，也不回写成员配置。
 - `ResolvedRuntimeBinding` 只是调度、诊断和 Run 冻结使用的内部执行状态，不进入普通 AgentProfile 读取或成员编辑。用户发送先按消息、目标和冻结配置完成业务接受，Runtime resolution、workspace launchability 和完整执行 Preflight 由 Scheduler 在真实执行边界重查；失败形成诚实 Run 结果，不回滚已接受消息或静默改派目标。
-- AgentRun 冻结 Adapter、Installation、auth scope、model 语义和 permission 的逻辑 Runtime 身份，初始版本和 fingerprint 是不可变审计 evidence。排队/恢复等待 Run 只能经 Core-owned pre-dispatch command 在同一逻辑身份内有界重新发现、深检、原子 rebind 并重跑门禁；每 Run 最多一次，身份改变、二次漂移或无法重建信任必须 fail closed。
+- AgentRun 冻结 Adapter、Installation、auth scope、模型及权限的逻辑身份。排队 Run 可经 Core-owned 命令在同一身份内有界解析并原子 rebind，再由真实 Host 验证；不静默改换账户、Runtime 或权限，不先执行独立深检。输入已接收或接收未知时不自动重放。
 - 普通成员界面只展示产品选择和可操作 Readiness；可执行路径、来源、fingerprint、attempt、退避、自动迁移与 rebind 证据只属于高级诊断。本地数据对旧的部分路径偏好采用 clean break，不保留双读或自动补全字段。
 
 <a id="runtime-process-verification"></a>
@@ -294,7 +293,6 @@ last_updated: 2026-09-25
 - Codex Adapter 在 thread start/resume 前通过 native `config/read(includeLayers=true, cwd=executionRoot)` 发现有效 top-level MCP 名称，只将不同名的 Rovai Server 以 thread-scoped addition 传入。Codex process compatibility 只包含真正 process-scoped 输入，不包含 Conversation Home 或 thread MCP；每次 acquire 都重新发现并 finalise 本 Run 的 additive projection。
 - Codex 旧 Host 即使 IdleWarm，仍可能持有同一 Native Thread 的 writer lock。进程兼容摘要改变时，Adapter 必须在 replacement Host 执行 thread/resume 前要求 Fleet 回收不兼容旧 Host；活动 Run 等待正常收口，回收失败阻断 replacement，不能同时以两个进程续接同一 Thread。
 - Pi 使用独立 JSONL RPC、v7 薄 managed extension 与统一 Fleet。正式 Host 固定以 `--mode rpc --no-themes --approve --extension` 信任本次项目并保留 Pi 原生 Built-in tools、Extensions、Skills、Context files、Prompt templates 与用户 Settings；`--approve` 不是 Tool Approval，Rovai 不修改全局 trust、不重建完整环境，也不在失败后用 `--no-extensions` 静默降级。Pi Resident Host 可以串行切换多个 Session，但一次只能拥有一个 Run；其复用 identity 是 canonical workspace + process digest，当前 lease 的 Camp/member 只用于精确失效并随领取更新，其他 Runtime 的 member-scoped identity 不变。Session、Bootstrap、Skills、model 和 Prompt 都是 bind/session 输入而不是 process LRU key；MCP Assignment 与配置完全不参与 Pi compatibility、复用、恢复或 LRU。Pi 自身按 `(agent_run_id, execution_epoch)` singleflight，且在任何 cleanup/release/remove 前拒绝低于 active epoch 的请求，创建提交再次 fencing；所有回调只删除 exact Run+epoch。公共 Fleet 另以 Starting reservation 保证同 Run 单飞且不让不同 Run 的 spawn 互相阻塞。恢复优先实际 `switch_session` 到 Core 私有完整 canonical file，并由 `get_state` 同时核对 full Session ID、file 与 cwd；只有明确的 `ResumeContinuityLost` 记录 continuity lost 并最多创建一个新 Session，Host/RPC/model/binding 等其他失败直接返回。完整 locator 不进入任何公开事件、Activity、diagnostic 或 read model。Machine Ready Probe 必须用临时 `--session-dir` 与 private `--session` seed 初始化空 Session，全程禁止 Prompt、Tool、MCP 和 Provider 调用；付费行为只在显式 smoke/qualification suite 执行，不能把测试 Session 写入用户历史。
-- Runtime launch 明确区分 discovery、light verification、用户授权 deep probe 和执行期验证，且每次子进程启动必须通过中央 purpose policy。Probe/check attempt 由 Manager 拥有、按 generation/fingerprint fencing，使用比产品执行更窄的进程与权限边界；Probe 期间 identity 变化使整轮结果 superseded，未验证身份或 stale LKG 不能冒充 Ready。
 - ACP Session 建立后的 `available_commands_update`、config/mode/session-info catalog、Idle usage metadata 与已准入 lifecycle extension 可以在无 Active Prompt 时合法到达。Host 将其路由为 Session metadata/内部 lifecycle，不进入 Prompt output，也不因无 Prompt 自动标记协议违规；未知 Idle shape 仍 fail closed。`session/load` response 后的迟到 replay 继续在有界 settling/quiet window 内隔离。
 
 <a id="runtime-recovery-shutdown"></a>
@@ -326,7 +324,7 @@ last_updated: 2026-09-25
 - Claude Code 的 `--print` 权限询问经原生双向 stream-json 控制通道接入同一 Action/Approval。
   request_id 用于审批回复，tool_use_id 用于实际结果；Run/epoch/Session 由进程绑定。不完整或失效
   请求拒绝。允许一次只回填原 input，不保存原生规则；取消与断线撤销待处理 ID，工具执行成功只能
-  由对应结果确认。字段与生命周期由 [Runtime Launch v46](../contracts/runtime-launch-and-verification-v46.md) 拥有。
+  由对应结果确认。字段与生命周期由 [Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md) 拥有。
 
 - TRAE 的 light check、显式 availability verification、cold resume、HistoryRestore 和 replay quarantine 使用独立的用户授权、Session ID 校验和有界恢复路径；恢复响应 ID 不一致时 fail closed。
 - Product execution qualification 是 `AdapterKind × HostPlatformKey` 的封闭准入。存在安装或能启动进程不等于平台合格；不合格组合保留配置但阻止执行，并提供结构化 reason/evidence。

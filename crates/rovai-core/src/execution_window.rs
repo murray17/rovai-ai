@@ -214,7 +214,7 @@ fn select_items(
           FROM agent_run_execution_evidence e LEFT JOIN owners o ON o.id = e.id
           WHERE e.agent_run_id = ?1
             AND e.event_type IN ('agent.text.block', 'agent.text.delta', 'runtime.plan', 'runtime.plan.delta',
-              'runtime.diagnostic', 'runtime.compaction.display', 'activity.started', 'activity.completed', 'runtime.action')
+              'runtime.diagnostic', 'runtime.fast.observed', 'runtime.compaction.display', 'activity.started', 'activity.completed', 'runtime.action')
             AND e.kind <> 'reasoning_summary'
         ), items AS (
           SELECT item_key, MIN(first_sequence) AS first_sequence,

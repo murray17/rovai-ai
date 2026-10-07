@@ -29,6 +29,8 @@ export interface OnboardingProvisioningApi {
     | 'beginProvisioning'
     | 'recordProvisionedMember'
     | 'recordProvisionedRuntime'
+    | 'prepareRuntimeCopies'
+    | 'recordRuntimeCopy'
     | 'recordProvisionedThread'
     | 'complete'
   >
@@ -174,6 +176,55 @@ export async function provisionFirstRun(
       await api.onboarding.recordProvisionedRuntime(version)
     )
     onCheckpoint(current)
+  }
+
+  if (current.provisioning.runtimeCopies === null) {
+    // Read after identity initialization so English seeds use their current versions.
+    const members = await api.request<AgentProfile[]>('members.list')
+    const targets = presets.flatMap((seed) => {
+      const member = members.find((candidate) => candidate.avatarRef === seed.avatarRef
+        && candidate.presence !== 'removed' && candidate.removedAt === null)
+      return member && member.agentId !== memberAgentId && member.runtimeConfiguration === null
+        ? [{ agentId: member.agentId, expectedVersion: member.version }]
+        : []
+    })
+    current = requireProvisioningSnapshot(await api.onboarding.prepareRuntimeCopies(targets))
+    onCheckpoint(current)
+  }
+
+  for (const target of current.provisioning.runtimeCopies!) {
+    if (target.status !== 'pending') continue
+    const selection = current.runtimeSelection!
+    // Replay the exact durable command after an unknown outcome. Never refresh
+    // expectedVersion: a later user edit must win over this initial default.
+    const result = await api.request<StoredCommandResult>('members.runtime.set', {
+      commandId: target.commandId,
+      command: {
+        agentId: target.agentId,
+        expectedVersion: target.expectedVersion,
+        adapterKind: selection.adapterKind,
+        model: selection.model,
+        permissions: current.provisioning.runtimePermissions
+      }
+    })
+    const changed = result.status === 'rejected' && [
+      'agent_profile.version_conflict', 'version_conflict',
+      'agent_profile.removed', 'agent_profile.not_found'
+    ].includes(result.code)
+    if (result.status !== 'rejected') {
+      assertApplied(result, uiAttribute('保存队员运行配置'))
+      if (result.payload.version !== target.expectedVersion + 1) {
+        throw new Error(uiAttribute('运行配置已保存，但返回的检查点不完整。'))
+      }
+    }
+    current = requireProvisioningSnapshot(await api.onboarding.recordRuntimeCopy(
+      target.agentId, target.commandId,
+      changed ? 'skipped' : result.status === 'rejected' ? 'retry' : 'applied'
+    ))
+    onCheckpoint(current)
+    // Rejected commands are durably replayed by Core. Rotate only a known
+    // rejection before exposing retry; transport failures retain the old ID.
+    if (!changed) assertApplied(result, uiAttribute('保存队员运行配置'))
   }
 
   if (!current.provisioning.quickChatThreadId) {

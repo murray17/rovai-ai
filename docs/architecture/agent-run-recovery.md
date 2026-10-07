@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-native-turn-and-isolation-boundaries
-last_updated: 2026-09-19
+last_updated: 2026-10-06
 ---
 
 # AgentRun Recovery
@@ -82,3 +82,16 @@ Delivery 才按正常调度领取。计划关闭复用同一清理事实，但�
 - ContextManifest、Execution Evidence、Git observation 和 workspace 现场不因失败或 cleanup 删除；
 - UI 只给出可操作的失败/停止状态，诊断与审计仍保留精确 input outcome 和 isolation 证据；
 - Task、Mission、Automation occurrence 与 ChannelDelivery 各自结算，不从 Run 失败自动推断业务完成。
+
+## 7. Codex Host 完成与失败
+
+[Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md)把原生结果、业务交付和进程回收分开。
+Codex 原生 completed 才申请 warm；最终失败、取消和中断通过既有清理 worker 停止，错误是否可分类不影响资格。
+终态事务与 Delivery claim 共享数据库边界，清理门禁先于后继 claim；等待进程退出不持有全局锁。
+
+Fleet 的小型释放结果区分复用、回收、租约不存在和回收未确认。Codex 进程先纳入 Fleet 再初始化；停止未确认
+保留受管记录和容量。既有 owner record 记录 Run/epoch 及确认回收回执，数据库 ACK 后清除对应证明。
+这只是原有停止操作的证据，不是独立调度器、Cleanup Coordinator 或持久化 Native Outcome。
+
+可信失败后可精确恢复原生 Thread；恢复错误或 ID 不符明确失败，不在当前执行中回退空 Thread。输入结果未知继续
+沿用第 3 节的隔离和默认轮换。正常成功不退化为每轮冷启动，也不增加输入重放。

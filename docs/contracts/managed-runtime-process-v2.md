@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-05
+last_updated: 2026-10-07
 ---
 
 # Managed Runtime Process v2
@@ -134,6 +134,22 @@ shim locator 改写也必须递增 Installation generation、撤销旧 Ready sna
 Job handle 非 inheritable，并由 Core generation 独占。planned shutdown 先执行既有 graceful protocol；deadline
 后关闭/终止 Job 并有界等待 reap。Core crash/force-kill 导致最后 Job handle 关闭时，OS 收口受管后代。
 
+Windows Managed Process 为每次启动创建带随机身份的 `Global\Rovai.Runtime.<UUID>` Job，创建时使用
+受保护的当前用户/SYSTEM DACL，拒绝复用已有名字；不设置 breakaway。全局 namespace 使 launch 身份不依赖 Windows
+登录 Session；名称不承担退出证明。控制 handle 仍由启动代际拥有、不可继承。
+Job 活跃数归零、名称消失、根进程退出均不能单独证明后代已完成异步终止及在途 I/O 取消。
+当前 owner 在空 Job 上、启动任何进程前关联私有 IOCP；既有 `tree_is_empty()` 在有界清理期间读取成员通知，
+保留不可继承的进程 handle，并确认这些 handle 已 signaled，或通知对应的进程对象已不存在。
+去重成员数必须严格等于最后读取的 Job 生命周期 `TotalProcesses`，且 `ActiveProcesses` 为零，才提交回收凭据。
+最终计数在所有观察成员退出后读取，防止先前快照遗漏清理期间新建的后代；重复通知不能抵消缺失成员。
+每轮通知读取及成员退出核验分别有数量上限，不占用全局调度锁，也不新增后台轮询。通知丢失、Job 内 PID 复用导致少计、
+计数异常或无法查询退出时保持未确认；不以等待次数或固定延时补齐证据。
+
+Fleet 只保存内部 Job 身份用于归属定位；跨 Core 无法继承完整成员与退出证明，只接受已有持久化、精确 Run/epoch
+的已回收凭据。没有凭据的 scoped 记录，即使 Job 可查询且活跃数为零，也继续阻塞相关后继输入。
+恢复不按记录中的 PID 终止进程，不通过轮换 Native Session 或重新登录解除门禁。
+本期不增加跨 Core 的 Job handle 保活服务。Codex 当前代际的 bounded reap 使用上述证明，再提交既有回收凭据。
+
 Unix 直接启动目标进程并保留 process group、stdio、环境快照与退出回收语义；Windows 保留原子 Job、
 handle list 与受控 entrypoint。所有 Runtime/Probe/derived child 都不经过 Rovai 的 `sandbox-exec` 包装。
 Runtime 可以自行创建原生沙箱，其可用性由 Runtime 配置和实际宿主环境决定。
@@ -156,7 +172,7 @@ Core 在开放 readiness 前处理前代 ledger；仅同次系统启动且原 ow
 
 这是既有 Unix 回收的补强，不是 Windows Job/cgroup：未观测且已消失的中间祖先、跨 UID 后代、Core 停止后
 直到再次启动前的空窗不受此记录保证。macOS 使用 XNU libproc 的固定结构与 PID-version signal 接口，
-字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D16](../versions/v1.72/decisions.md#v1-72-d16)。
+字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D20](../versions/v1.72/decisions.md#v1-72-d20)。
 
 Linux ACP Host 在原生 cancel、graceful stop 或强制回收之前，先由 Managed Process 捕获同 UID 后代的
 父子关系与启动身份，并持有 pidfd。原生取消使父进程退出或后代重新挂靠后，仍通过已捕获的 pidfd 终止后代；
@@ -211,3 +227,8 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 - [V1.39-D09](../versions/v1.39/decisions.md#v1-39-d09)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Planned Shutdown](../architecture/planned-shutdown.md)
+- [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+- [Windows Kernel Object Namespaces](https://learn.microsoft.com/en-us/windows/win32/termserv/kernel-object-namespaces)
+- [Windows Job Completion Notifications](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_associate_completion_port)
+- [Windows Object Lifecycle](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/life-cycle-of-an-object)
+- [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess)

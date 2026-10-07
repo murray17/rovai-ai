@@ -646,7 +646,7 @@ app
           assert.equal((await geometry()).overflow, false)
           assert.equal(
             await run(
-              `(() => { const status = document.querySelector('${active}.member-editor-runtime-status'); const range = document.createRange(); range.selectNodeContents(status); return range.getBoundingClientRect().height <= status.getBoundingClientRect().height && status.scrollWidth <= status.clientWidth })()`
+              `(() => { const control = document.querySelector('${active}.member-runtime-picker'); const range = document.createRange(); range.selectNodeContents(control); return range.getBoundingClientRect().height <= control.getBoundingClientRect().height && control.scrollWidth <= control.clientWidth })()`
             ),
             true
           )

@@ -2468,7 +2468,13 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 .get("observedServiceTier")
                 .and_then(Value::as_str)
                 .filter(|tier| matches!(*tier, "priority" | "fast" | "default" | "standard"));
-            serde_json::json!({ "state": state, "observedServiceTier": tier })
+            let disabled_reason = payload
+                .get("disabledReason")
+                .and_then(Value::as_str)
+                .and_then(|reason| {
+                    crate::runtime_failure::sanitize_public_runtime_error(reason, &[])
+                });
+            serde_json::json!({ "state": state, "observedServiceTier": tier, "disabledReason": disabled_reason })
         }
         RUNTIME_COMPACTION_DISPLAY_EVENT => serde_json::json!({
             "schemaVersion": payload.get("schemaVersion"),
@@ -5182,6 +5188,7 @@ mod tests {
                     &json!({
                         "state": state,
                         "observedServiceTier": tier,
+                        "disabledReason": "native reason; api_key=private-secret",
                         "rawDetail": "private-token",
                     }),
                 )
@@ -5191,10 +5198,24 @@ mod tests {
             assert_eq!(observed.execution_epoch, execution_epoch);
             assert_eq!(observed.payload["state"], state);
             assert_eq!(observed.payload["observedServiceTier"], expected_tier);
+            assert_eq!(
+                observed.payload["disabledReason"],
+                "native reason; api_key=[redacted]"
+            );
             assert!(observed.payload.get("rawDetail").is_none());
             assert!(
                 observed.canonical.is_none(),
                 "Fast metadata is not a tool activity"
+            );
+            let window =
+                crate::execution_window::read_page(&mut database, &camp_id, &run_id, None, 1)
+                    .unwrap();
+            assert_eq!(window.evidence.len(), 1);
+            assert_eq!(window.evidence[0].id, observed.id);
+            assert_eq!(window.evidence[0].payload["state"], state);
+            assert_eq!(
+                window.evidence[0].payload["disabledReason"], "native reason; api_key=[redacted]",
+                "the logical execution window must expose the sanitized native feedback"
             );
         }
 

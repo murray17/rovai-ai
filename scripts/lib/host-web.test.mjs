@@ -612,7 +612,8 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
 
 // This process owner proves that both Host entrances drive persisted schedules
 // without a Renderer tick. The ordinary Delivery scheduler may leave the work
-// waiting or claim it into an AgentRun; domain tests own execution and recovery.
+// waiting, claim it into an AgentRun, or record the missing Runtime configuration;
+// domain tests own execution and recovery.
 test('Host clock consumes scheduled occurrences with Web stopped and in standalone mode', { timeout: 180_000 }, async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-host-clock-')))
   const dataDir = join(fixture, 'data')
@@ -669,9 +670,11 @@ test('Host clock consumes scheduled occurrences with Web stopped and in standalo
       SELECT occurrence.status, occurrence.reason, occurrence.camp_id,
              occurrence.trigger_message_id, occurrence.trigger_delivery_id,
              delivery.status AS delivery_status,
-             delivery.claimed_agent_run_id
+             delivery.claimed_agent_run_id, delivery.failure_code,
+             agent_run.status AS agent_run_status, agent_run.last_error_code
       FROM automation_run AS occurrence
       LEFT JOIN camp_message_delivery AS delivery ON delivery.id = occurrence.trigger_delivery_id
+      LEFT JOIN agent_run ON agent_run.id = delivery.claimed_agent_run_id
       WHERE occurrence.automation_id = ?
     `).all(id)
     const waitForOccurrence = async (id, due) => {
@@ -683,8 +686,13 @@ test('Host clock consumes scheduled occurrences with Web stopped and in standalo
       assert.ok(runs[0].camp_id, 'an admitted occurrence owns a Camp')
       assert.ok(runs[0].trigger_message_id, 'an admitted occurrence owns its system message')
       assert.ok(runs[0].trigger_delivery_id, 'an admitted occurrence owns its Delivery')
-      assert.ok(['waiting', 'claimed'].includes(runs[0].delivery_status))
-      if (runs[0].delivery_status === 'claimed') {
+      assert.ok(['waiting', 'claimed', 'failed'].includes(runs[0].delivery_status), JSON.stringify(runs[0]))
+      if (runs[0].delivery_status === 'failed') {
+        assert.ok(runs[0].claimed_agent_run_id, 'a failed Delivery owns an AgentRun')
+        assert.equal(runs[0].failure_code, 'runtime_not_configured', 'only the fixture\'s missing Runtime may fail delivery')
+        assert.equal(runs[0].agent_run_status, 'failed')
+        assert.equal(runs[0].last_error_code, 'runtime_not_configured')
+      } else if (runs[0].delivery_status === 'claimed') {
         assert.ok(runs[0].claimed_agent_run_id, 'a claimed Delivery owns an AgentRun')
       } else {
         assert.equal(runs[0].claimed_agent_run_id, null, 'a waiting Delivery is not owned by an AgentRun')

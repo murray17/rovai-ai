@@ -18,9 +18,9 @@ import {
 describe('Runtime user status projection', () => {
   it.each([
     ['detecting', '正在检查…'],
-    ['found_uninspected', '暂时无法确认'],
+    ['found_uninspected', '可用'],
     ['light_ready', '可用'],
-    ['installed_unverified', '暂时无法确认'],
+    ['installed_unverified', '可用'],
     ['checking', '正在检查…'],
     ['ready', '可用'],
     ['authentication_required', '需要登录'],
@@ -68,9 +68,9 @@ describe('Runtime user status projection', () => {
     })
 
     expect(result).toEqual({
-      status: 'unknown',
-      label: '暂时无法确认',
-      detail: '已找到可执行文件，但轻度启动验证尚未形成有效结果。'
+      status: 'available',
+      label: '可用',
+      detail: null
     })
   })
 
@@ -129,15 +129,15 @@ describe('Runtime user status projection', () => {
     })
   })
 
-  it('uses the same outcome vocabulary for member list readiness', () => {
-    expect(runtimeReadinessLabel('ready')).toBe('可用')
+  it('only labels member readiness when configuration needs attention', () => {
+    expect(runtimeReadinessLabel('ready')).toBeNull()
     expect(runtimeReadinessLabel('runtime_not_configured')).toBe('未配置智能体')
     expect(runtimeReadinessLabel('needs_attention')).toBe('不可用')
-    expect(runtimeReadinessLabel('light_ready')).toBe('可用')
-    expect(runtimeReadinessLabel('installed_unverified')).toBe('不可用，待检查')
+    expect(runtimeReadinessLabel('light_ready')).toBeNull()
+    expect(runtimeReadinessLabel('installed_unverified')).toBeNull()
   })
 
-  it('presents legacy unverified installations as requiring a new check', () => {
+  it('allows installed entries to attempt real initialization', () => {
     const traeAvailability = availability('installed_unverified', 'trae-cn-cli')
     const agent = {
       ...profile({
@@ -160,9 +160,9 @@ describe('Runtime user status projection', () => {
       'trae-cn-cli',
       traeAvailability
     )
-    expect(result.status).toBe('unknown')
-    expect(result.label).toBe('暂时无法确认')
-    expect(result.detail).toContain('请重新检测或检查状态')
+    expect(result.status).toBe('available')
+    expect(result.label).toBe('可用')
+    expect(result.detail).toBeNull()
   })
 
   it('keeps Windows not-qualified distinct from machine availability', () => {

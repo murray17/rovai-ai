@@ -992,7 +992,11 @@ function MemberDetailHeader({
               className={`member-header-runtime status-${runtime.status}`}
               type="button"
               onClick={onRuntime}
-              aria-label={agent.runtimeConfiguration?.adapterKind ? uiAttribute("{0}，{1}；打开运行配置", String(adapterLabel(agent.runtimeConfiguration.adapterKind)), String(runtime.label)) : uiAttribute("未配置智能体；打开运行配置")}
+              aria-label={agent.runtimeConfiguration?.adapterKind
+                ? uiAttribute("{0}，{1}；打开运行配置",
+                    runtime.status === 'available' ? agent.displayName : adapterLabel(agent.runtimeConfiguration.adapterKind),
+                    runtime.status === 'available' ? adapterLabel(agent.runtimeConfiguration.adapterKind) : runtime.label)
+                : uiAttribute("未配置智能体；打开运行配置")}
               title={uiAttribute("打开运行配置")}
             >
               <i aria-hidden="true" />
@@ -1325,21 +1329,21 @@ export const MemberRuntimeForm = forwardRef<
             }}
           />
 
-          <div
+          {(runtimeStatus.status !== 'available' || reportedVersion) && <div
             className={`member-editor-runtime-health-wrap status-${runtimeStatus.status}`}
             role="status"
             aria-live="polite"
           >
             <div className="member-editor-runtime-health">
-              <span
+              {runtimeStatus.status !== 'available' && <span
                 className={`member-editor-runtime-status status-${runtimeStatus.status}`}
               >
                 <i aria-hidden="true" />
                 {runtimeStatus.label}
-              </span>
+              </span>}
               {reportedVersion && <code>{reportedVersion}</code>}
             </div>
-            {runtimeStatus.detail && (
+            {runtimeStatus.status !== 'available' && runtimeStatus.detail && (
               <small className="runtime-status-detail">
                 {runtimeStatus.detail}
               </small>
@@ -1357,7 +1361,7 @@ export const MemberRuntimeForm = forwardRef<
                   ><UiText zh={"前往智能体"} /></button>
                 </div>
               )}
-          </div>
+          </div>}
         </div>
 
         {selectedKind && (
@@ -1468,7 +1472,7 @@ export function RuntimeInstallationsPanel({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<{ runtimeKind: AdapterKind; mode: 'install' | 'login' } | null>(null)
-  const [checkFeedback, setCheckFeedback] = useState<{ runtimeKind: AdapterKind; error: string | null } | null>(null)
+  const [checkFeedback, setCheckFeedback] = useState<{ runtimeKind: AdapterKind; error: string } | null>(null)
   const guideId = useId()
   const availability = health?.runtimeAvailability ?? []
   const hasEnabledRuntime =
@@ -1491,7 +1495,6 @@ export function RuntimeInstallationsPanel({
       } finally {
         await onReload()
       }
-      setCheckFeedback({ runtimeKind, error: null })
     } catch (nextError) {
       setCheckFeedback({ runtimeKind, error: errorMessage(nextError) })
     } finally {
@@ -1515,7 +1518,7 @@ export function RuntimeInstallationsPanel({
   }
 
   if (settingsRuntime) return <RuntimeStartupSettings key={settingsRuntime} runtimeKind={settingsRuntime} health={health}
-    onBack={() => setSettingsRuntime(null)} onReload={onReload} />
+    onBack={() => setSettingsRuntime(null)} />
 
   return (
     <>
@@ -1571,12 +1574,8 @@ export function RuntimeInstallationsPanel({
             const isOpen = guide !== null && expanded?.runtimeKind === runtimeKind
             const checking = busy === `check-${runtimeKind}`
             const feedback = checkFeedback?.runtimeKind === runtimeKind ? (
-              <p className={`runtime-guide-feedback${checkFeedback.error ? ' is-error' : ''}`} role={checkFeedback.error ? 'alert' : 'status'}>
-                {checkFeedback.error ?? (presentation.status === 'not_installed'
-                  ? uiAttribute("仍未检测到程序。请确认已在终端完成安装，再重新检测。")
-                  : presentation.status === 'authentication_required'
-                    ? uiAttribute("仍需登录。请在终端完成账号或模型配置后重试。")
-                    : uiAttribute("检测完成：{0}。{1}", String(presentation.label), String(item?.failure ? '' : presentation.detail ?? '')))}
+              <p className="runtime-guide-feedback is-error" role="alert">
+                {checkFeedback.error}
               </p>
             ) : null
             return (

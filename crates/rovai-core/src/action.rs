@@ -12,7 +12,10 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     db::Database,
-    runtime::{PermissionSemantics, recompute_camp_turn, settle_abortive_agent_run_in_tx},
+    runtime::{
+        PermissionSemantics, fail_lost_agent_run_in_tx, pump_target_after_run_terminal,
+        recompute_camp_turn, settle_abortive_agent_run_in_tx,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2622,7 +2625,7 @@ impl ActionSafetyService {
         database: &mut Database,
         envelope: &CommandEnvelope<ReconcileRuntimeLossCommand>,
     ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
                 &envelope.actor,
                 ActorRef::System { component_id }
@@ -2703,15 +2706,23 @@ impl ActionSafetyService {
                     Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
                 ));
             }
-            if invocation_kind == "batch" {
-                let settlement = crate::runtime::settle_lost_agent_run_in_tx(
-                    transaction, &envelope.payload.agent_run_id, &envelope.actor, &now,
-                )?;
-                return Ok(CommandHandlerResult::applied(
-                    "agent_run.failed",
-                    json!({ "agentRunId": envelope.payload.agent_run_id, "status": settlement.terminal_status }),
-                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
-                ));
+            // This command is entered after the matching Host's exit. An input
+            // that may have executed has no remaining owner and cannot be replayed.
+            let input_may_have_executed: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM runtime_input_delivery
+                 WHERE agent_run_id = ?1
+                   AND (status IN ('accepted', 'delivery_unknown')
+                     OR (status = 'prepared' AND dispatch_started_at IS NOT NULL)))",
+                [&envelope.payload.agent_run_id],
+                |row| row.get(0),
+            )?;
+            if input_may_have_executed {
+                return fail_lost_agent_run_in_tx(
+                    transaction,
+                    &envelope.payload.agent_run_id,
+                    &envelope.actor,
+                    &envelope.payload.reason,
+                );
             }
             let actions_marked_unknown = transaction.execute(
                 r#"
@@ -2890,7 +2901,11 @@ impl ActionSafetyService {
                 }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
-        })
+        })?;
+        if !execution.replayed && execution.result.code == "agent_run.failed" {
+            pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
+        }
+        Ok(execution)
     }
 
     pub fn fail_runtime_delivery(
@@ -5290,6 +5305,13 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     fn runtime_loss_closes_an_unanswered_intercepted_request_and_fails_the_run() {
         let mut fixture = fixture("ask");
+        // A native intercepted request follows accepted task input.
+        crate::test_support::insert_test_runtime_input(
+            &fixture.database,
+            &fixture.agent_run_id,
+            1,
+            "accepted",
+        );
         let service = ActionSafetyService::default();
         let prepare = intercepted_prepare_envelope(&fixture, "action-runtime-lost", "request-1");
         service
@@ -5375,6 +5397,13 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     fn runtime_loss_marks_a_dispatched_intercepted_action_unknown() {
         let mut fixture = fixture("allow");
+        // A native intercepted request follows accepted task input.
+        crate::test_support::insert_test_runtime_input(
+            &fixture.database,
+            &fixture.agent_run_id,
+            1,
+            "accepted",
+        );
         let service = ActionSafetyService::default();
         let prepare = intercepted_prepare_envelope(&fixture, "action-runtime-unknown", "request-2");
         service

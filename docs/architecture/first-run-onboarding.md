@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-first-run-component-boundary
 status: accepted
-last_updated: 2026-09-30
+last_updated: 2026-10-05
 ---
 
 # First-run Onboarding
@@ -14,7 +14,7 @@ last_updated: 2026-09-30
 | Electron Main | Owns the private state machine, validates closed snapshots and serializes atomic writes; it initializes only from an admitted Full Core authority origin. |
 | Preload bridge | Exposes typed reads and transitions; it does not expose initialization or direct file access. |
 | Renderer onboarding gate | Replaces the normal App shell while a page is unfinished, performs real Runtime discovery/health checks, projects either configured selection or the zero-usable empty page, and persists user choices through Main. |
-| Provisioning saga | Converts the saved selection into idempotent existing Core commands, records stage checkpoints and commits the Camp restore target before completion. |
+| Provisioning saga | Converts the saved selection into idempotent existing Core commands, freezes and copies the configuration to other unconfigured built-in members, records per-target checkpoints and commits the Camp restore target before completion. |
 | Core member/runtime services | Retain or create the selected profile and apply the selected model plus Adapter-owned default permissions with normal command/version rules. |
 | Core Camp service | Creates the durable Active Quick Chat Camp and remains the sole authority for membership, Default Lead and messages. |
 | Desktop-local Composer | Owns the Active Camp starter snapshot after page 3; starter selection only replaces that local input and never bypasses the user-send boundary. |
@@ -34,7 +34,8 @@ Electron ready
         -> usable Runtime exists:
            -> persist provisioning command IDs + normalized Runtime permissions
            -> retain/create member
-           -> configure Runtime/model/default permissions
+           -> configure selected member Runtime/model/default permissions
+           -> freeze eligible built-in targets and copy the same configuration
            -> create Active Quick Chat Camp "初次集结"
            -> commit Camp restorable location
            -> completed(onboarding)
@@ -53,14 +54,21 @@ Core initially seeds four Chinese built-in profiles. Before recording the select
 English onboarding initializes every present factory profile with its English preset only when it has no Runtime
 configuration and all six identity fields still exactly match the Chinese factory preset. It uses existing versioned
 `members.update` commands: the selected member retains the provisioning member command ID; other seeds use IDs
-derived from that command ID and their member ID. Only the selected member receives Runtime configuration and joins
-the first Camp, using its returned version. Customized, configured or removed profiles retain their saved identity;
+derived from that command ID and their member ID. The selected member receives Runtime configuration using its
+returned version. Afterward, the saga reads the latest profiles and copies the same frozen Runtime/model/options/permissions to the other present, unconfigured
+built-in members. Only the selected member joins the first Camp. Customized, configured or removed profiles retain
+their saved identity;
 a language switch after onboarding never translates saved member data. If initialization stops partway before the
 member checkpoint, recovery recognizes already initialized English profiles and writes only the remaining seeds.
 
 ## Recovery boundary
 
-The saga has one durable checkpoint after each effect. Command IDs and the exact normalized Runtime permission payload
+The saga has one durable checkpoint after each effect. The additional Runtime copies freeze target versions and
+command IDs before the first copy; each member settles independently. Unknown outcomes replay the exact command.
+Known version conflicts/removal settle as skipped; other known rejections allocate a new command ID before retry.
+The copy plan must be settled before completion, and later user edits are never overwritten.
+
+Command IDs and the exact normalized Runtime permission payload
 are frozen together before effects, so a crash between a Core commit and the following Desktop checkpoint is resolved
 by the existing command replay contract without payload drift. Recovery uses the frozen operation and does not depend
 on the selected Installation still being discoverable. A crash after a checkpoint skips that stage. The restorable
@@ -80,7 +88,7 @@ and member configuration surfaces.
 - First-run admission uses Full Core's ticketed `authorityState.current.origin`; Desktop never infers it from a filename.
 - A corrupt or unreadable onboarding file uses an in-memory default and warning while preserving the original; Core readiness is independent.
 - An unfinished mandatory page is never represented only in React or browser storage.
-- Valid schema 1 state is normalized to schema 2 without losing an unfinished page or provisioning checkpoint.
+- Valid schema 1/2 state is normalized to schema 3 without losing an unfinished page or provisioning checkpoint. Completed installations never reopen for configuration backfill.
 - Permissions are copied once from the selected Adapter Installation, frozen with the command IDs and never invented
   or subsequently reinterpreted by onboarding UI.
 - The empty Runtime page is shown only after scanning settles without a directly continuable Runtime; a scan error is
@@ -95,7 +103,7 @@ and member configuration surfaces.
 ## References
 
 - [Camp 资源不变量](foundational-invariants.md#camp-resources)
-- [First-run Onboarding v5](../contracts/first-run-onboarding-v5.md)
+- [First-run Onboarding v6](../contracts/first-run-onboarding-v6.md)
 - [Availability-first Runtime](availability-first-runtime.md)
 - [Camp Activation Lifecycle](camp-activation-lifecycle.md)
 - [Camp Composer Draft](camp-composer-draft.md)

@@ -88,6 +88,7 @@ All Members 候选继续显示广播说明，范围仍是发送时 Camp 中的�
 
 Member 人物信息卡保持非模态，宽 392px，采用“布局 2”：左侧 128px 受控 4:5 portrait，右侧依次显示名称、
 团队角色、Presence、智能体、专业职责、工作准则和性格底色。它不是队员页链接、Dialog 或全局 Toast。
+正常配置时智能体一栏只显示产品名称（例如 `Codex CLI`）；未配置或异常时才附加必要状态。
 点击外部或 Esc 关闭，Popover 不设 focus trap；拖选文本不得误触打开。Atom 本身不进入独立 tab 顺序；需要
 键盘激活时由编辑器 command 统一处理。
 

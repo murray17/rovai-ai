@@ -2,7 +2,7 @@
 document_type: ui-component-spec
 authority: first-run-onboarding-presentation
 status: accepted
-last_updated: 2026-09-30
+last_updated: 2026-10-05
 ---
 
 # 首次训练与“初次集结”
@@ -24,10 +24,12 @@ Full Core authority ready 后，前三页才作为全窗口 mandatory gate 挂�
 界面语言与“设置 → 通用”共用一个偏好。欢迎页切换后立即更新当前文案及尚未保存的四位内置候选资料，
 保持已选角色、步骤和主题；偏好保存失败时回到最近保存的语言并在欢迎页显示可重试错误。开始
 provisioning 后不能再切换候选或语言。正常配置分支在完成前按所选语言初始化全部四位未经修改、未配置的
-默认队员；仅所选队员获得 Runtime 配置并加入首次会话。已编辑、已配置或已移除的队员保留原资料；训练结束后，
+默认队员；所选队员及其余未配置的内置队员使用同一份 Runtime、模型、推理参数和默认权限，仅所选队员加入首次会话。
+配置复制在「开始对话」后的初始化阶段完成，不增加页面；中断后从逐人检查点恢复。已有配置、已移除或期间被另行修改的
+目标不覆盖；已完成训练营的用户不自动补写。已编辑、已配置或已移除的队员保留原身份资料；训练结束后，
 队员资料、输入草稿、消息、Runtime 输出和持久 Camp 标题不随界面语言变化。
 
-Desktop 用已完成 onboarding 快照中的 `quickChatCampId` 识别首次会话；仅在该会话仍使用默认标题
+Desktop 用已完成 onboarding 快照中的 `quickChatThreadId` 识别首次会话；仅在该会话仍使用默认标题
 `初次集结` 时，英文界面将侧栏、共享顶栏、最近对话、跳转搜索、提醒浮层和可访问名称显示为 `First Chat`。
 这是显示投影，不写回 Core 标题；重命名后显示用户保存的名字，同名的其他会话保持原文。
 跳转搜索同时接受当前显示名和保存的标题，打开、重命名与删除仍使用原 Camp 身份与数据。
@@ -100,7 +102,7 @@ Camp Composer 规则恢复。仅辅助技术可见的 live status 说明“内�
 
 ## References
 
-- [First-run Onboarding v5](../../contracts/first-run-onboarding-v5.md)
+- [First-run Onboarding v6](../../contracts/first-run-onboarding-v6.md)
 - [Desktop Bootstrap Shell](bootstrap-shell.md)
 - [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)
 - [Camp 会话工作区](conversation-workspace.md)

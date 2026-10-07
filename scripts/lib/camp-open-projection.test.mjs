@@ -28,6 +28,8 @@ test('command interaction keeps disclosure anchors through async results and acc
 
 test('public Camp draft survives projection refresh and remount without a private pending queue', { timeout: 60_000 }, t => runFixture(t, '--composer-local-draft'))
 
+test('image menus copy full image pixels, save original bytes and work in the lightbox', { timeout: 90_000 }, t => runFixture(t, '--image-context-menu'))
+
 async function runFixture(t, mode = '--camp-open') {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-camp-open-projection-test-'))

@@ -534,7 +534,7 @@ describe('Agent leading Member Mention Markdown rendering', () => {
     expect(markup).toContain('aria-expanded="false"')
     expect(markup).toContain('aria-controls=')
     expect(markup).toContain('<span>展开</span>')
-    expect(markup).toContain('aria-live="polite">其余内容已收起，共 21 行</span>')
+    expect(markup).toMatch(/aria-live="polite"[^>]*>其余内容已收起，共 21 行<\/span>/u)
     expect(markup).not.toContain('message-long-ellipsis')
     expect(markup).not.toContain('>…</span>')
   })

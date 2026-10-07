@@ -18,6 +18,7 @@ import {
   modelCatalogCanValidateOptions,
   modelCatalogStatusCopy,
   runtimeDraftForMember,
+  runtimeModelSelectionAvailable,
   runtimeEditorInstallation
 } from './MemberRuntimeParameters'
 
@@ -246,22 +247,28 @@ describe('member runtime parameters', () => {
       revalidateAfter: null,
       expiresAt: null
     }
+    const saved = {
+      mode: 'explicit' as const,
+      modelId: 'claude-opus-5',
+      options: { effort: 'future-level' }
+    }
+    const draft = draftFromDefaults({
+      ...installation.memberRuntimeDefaults!, model: saved
+    })
+    expect(draft.model).toEqual(saved)
+    expect(runtimeModelSelectionAvailable(installation, draft.model)).toBe(true)
+    expect(runtimeModelSelectionAvailable(installation, { mode: 'runtime_default' })).toBe(true)
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
       adapterKind,
       installation,
-      draft: {
-        model: {
-          mode: 'explicit',
-          modelId: 'claude-opus-5',
-          options: {}
-        },
-        permissions: installation.memberRuntimeDefaults!.permissions
-      },
+      draft,
       disabled: false,
       onChange: () => undefined
     }))
 
     expect(markup).toContain('模型，claude-opus-5')
+    if (adapterKind === 'claude-code-cli') expect(markup).toContain('future-level')
+    expect(draft.model).toEqual(saved)
     expect(markup).not.toContain('已失效')
   })
 

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
@@ -109,6 +109,15 @@ pub struct AgentRunWorkspace {
     pub execution_root: String,
     pub access: String,
     pub isolation: String,
+}
+
+/// Resolve a local input without touching the filesystem or changing symlinks.
+pub fn resolve_agent_local_path(path: &Path, execution_root: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        execution_root.join(path)
+    }
 }
 
 impl AgentRunWorkspace {
@@ -1918,7 +1927,7 @@ impl ExecutionRuntimeService {
                 SET workspace_json = COALESCE(workspace_json, ?2),
                     starting_git_observation_json =
                         COALESCE(starting_git_observation_json, ?8),
-                    status = 'running', wait_reason = NULL, wait_deadline_at = NULL,
+                    status = 'running', wait_reason = 'runtime_initializing', wait_deadline_at = NULL,
                     runtime_recovery_required = 0,
                     execution_epoch = ?3, execution_lease_owner = ?4,
                     execution_lease_expires_at = ?5,
@@ -2278,7 +2287,10 @@ impl ExecutionRuntimeService {
             if run.version != envelope.payload.expected_version
                 || run.execution_epoch != envelope.payload.execution_epoch
                 || run.status != "waiting"
-                || run.wait_reason.as_deref() != Some("network_recovery")
+                || !matches!(
+                    run.wait_reason.as_deref(),
+                    Some("network_recovery" | "runtime_recovery")
+                )
                 || !run.runtime_recovery_required
             {
                 return Ok(rejected(
@@ -2324,7 +2336,7 @@ impl ExecutionRuntimeService {
                         manual_retry_allowed = 0,
                         version = version + 1, updated_at = ?4
                     WHERE id = ?1 AND status = 'waiting'
-                      AND wait_reason = 'network_recovery'
+                      AND wait_reason IN ('network_recovery', 'runtime_recovery')
                       AND runtime_recovery_required = 1
                       AND version = ?2 AND execution_epoch = ?3
                     "#,
@@ -2368,7 +2380,7 @@ impl ExecutionRuntimeService {
                 SET wait_reason = 'runtime_recovery',
                     version = version + 1, updated_at = ?4
                 WHERE id = ?1 AND status = 'waiting'
-                  AND wait_reason = 'network_recovery'
+                  AND wait_reason IN ('network_recovery', 'runtime_recovery')
                   AND runtime_recovery_required = 1
                   AND version = ?2 AND execution_epoch = ?3
                   AND cancel_requested_at IS NULL
@@ -3604,7 +3616,7 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<SucceedAgentRunCommand>,
     ) -> Result<CommandExecution> {
-        self.succeed_agent_run_with_terminal_reason(database, envelope, None)
+        self.succeed_agent_run_with_terminal_reason(database, envelope, None, false)
     }
 
     pub fn succeed_agent_run_during_planned_shutdown(
@@ -3624,6 +3636,30 @@ impl ExecutionRuntimeService {
             database,
             envelope,
             Some("planned_shutdown_completed"),
+            false,
+        )
+    }
+
+    pub fn succeed_agent_run_requiring_cleanup(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SucceedAgentRunCommand>,
+        permit: Option<&TerminalSettlementPermit>,
+    ) -> Result<CommandExecution> {
+        if permit.is_some_and(|permit| {
+            !permit.authorizes(
+                &envelope.payload.agent_run_id,
+                envelope.payload.execution_epoch,
+                RuntimeTerminalOutcome::Succeeded,
+            )
+        }) {
+            anyhow::bail!("planned shutdown terminal permit does not match the success target");
+        }
+        self.succeed_agent_run_with_terminal_reason(
+            database,
+            envelope,
+            permit.map(|_| "planned_shutdown_completed"),
+            true,
         )
     }
 
@@ -3632,6 +3668,7 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<SucceedAgentRunCommand>,
         terminal_reason_code: Option<&str>,
+        cleanup_required: bool,
     ) -> Result<CommandExecution> {
         if envelope.payload.native_turn_id.trim().is_empty() {
             anyhow::bail!("nativeTurnId must not be empty");
@@ -3665,6 +3702,7 @@ impl ExecutionRuntimeService {
                     &target,
                     envelope,
                     terminal_reason_code,
+                    cleanup_required,
                 );
             }
             let adapter_kind = target
@@ -3754,6 +3792,8 @@ impl ExecutionRuntimeService {
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     terminal_resolution_source = 'runtime_terminal',
                     terminal_reason_code = ?7,
+                    cancel_requested_at = CASE WHEN ?8 THEN COALESCE(cancel_requested_at, ?3) ELSE cancel_requested_at END,
+                    cancel_reason_code = CASE WHEN ?8 THEN COALESCE(cancel_reason_code, 'runtime_host_release_pending') ELSE cancel_reason_code END,
                     final_conversation_message_id = NULL,
                     final_camp_message_id = ?2,
                     ending_git_observation_json = ?6,
@@ -3769,6 +3809,7 @@ impl ExecutionRuntimeService {
                     envelope.payload.execution_epoch,
                     ending_git_observation,
                     terminal_reason_code,
+                    cleanup_required,
                 ],
             )?;
             if updated != 1 {
@@ -4211,7 +4252,12 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<FailAgentRunCommand>,
     ) -> Result<CommandExecution> {
-        self.fail_agent_run_with_terminal_source(database, envelope, Some("runtime_terminal"))
+        self.fail_agent_run_with_terminal_source(
+            database,
+            envelope,
+            Some("runtime_terminal"),
+            false,
+        )
     }
 
     pub fn fail_agent_run_without_runtime_terminal(
@@ -4219,7 +4265,18 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<FailAgentRunCommand>,
     ) -> Result<CommandExecution> {
-        self.fail_agent_run_with_terminal_source(database, envelope, None)
+        self.fail_agent_run_with_terminal_source(database, envelope, None, true)
+    }
+
+    /// Native failure provenance and process cleanup are independent facts.
+    /// The cleanup intent commits with the terminal under the same database
+    /// transaction used by Delivery claim; no successor Run can slip between.
+    pub fn fail_agent_run_requiring_cleanup(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<FailAgentRunCommand>,
+    ) -> Result<CommandExecution> {
+        self.fail_agent_run_with_terminal_source(database, envelope, Some("runtime_terminal"), true)
     }
 
     fn fail_agent_run_with_terminal_source(
@@ -4227,6 +4284,7 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<FailAgentRunCommand>,
         terminal_resolution_source: Option<&str>,
+        cleanup_required: bool,
     ) -> Result<CommandExecution> {
         if envelope.payload.error_code.trim().is_empty() {
             anyhow::bail!("AgentRun errorCode must not be empty");
@@ -4246,6 +4304,21 @@ impl ExecutionRuntimeService {
             let Some(target) = target else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
+            if terminal_resolution_source.is_none()
+                && target.runtime_adapter_kind.as_deref() == Some("codex-cli")
+                && target.version == envelope.payload.expected_version
+                && target.execution_epoch == envelope.payload.execution_epoch
+                && envelope.camp_id.as_deref() == Some(target.camp_id.as_str()) {
+                let uncertain: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM runtime_input_delivery WHERE agent_run_id = ?1
+                     AND (status IN ('accepted', 'delivery_unknown') OR (status = 'prepared' AND dispatch_started_at IS NOT NULL)))",
+                    [&target.agent_run_id], |row| row.get(0),
+                )?;
+                if uncertain {
+                    return fail_lost_agent_run_in_tx(transaction, &target.agent_run_id, &envelope.actor,
+                        "Codex input outcome could not be reconciled after a nonterminal failure");
+                }
+            }
             if let Some(rejection) = validate_terminal_target(
                 transaction,
                 envelope.camp_id.as_deref(),
@@ -4255,124 +4328,14 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejection);
             }
-            let error_details_ref = envelope
-                .payload
-                .error_detail
-                .as_ref()
-                .map(|detail| json!({ "detail": detail }).to_string());
-            let public_runtime_failure_json = envelope
-                .payload
-                .failure
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?;
-            let ending_git_observation = envelope
-                .payload
-                .ending_git_observation
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?;
-            let updated = transaction.execute(
-                r#"
-                UPDATE agent_run
-                SET status = 'failed', wait_reason = NULL, wait_deadline_at = NULL,
-                    runtime_recovery_required = 0,
-                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
-                    cancel_requested_at = CASE
-                        WHEN ?9 IS NULL THEN COALESCE(cancel_requested_at, ?5)
-                        ELSE cancel_requested_at
-                    END,
-                    cancel_reason_code = CASE
-                        WHEN ?9 IS NULL THEN COALESCE(
-                            cancel_reason_code,
-                            'runtime_terminal_unconfirmed'
-                        )
-                        ELSE cancel_reason_code
-                    END,
-                    terminal_resolution_source = ?9,
-                    terminal_reason_code = NULL,
-                    last_error_code = ?2, last_error_details_ref = ?3,
-                    public_runtime_failure_json = ?10,
-                    manual_retry_allowed = ?4,
-                    ending_git_observation_json = ?8,
-                    ended_at = ?5, version = version + 1, updated_at = ?5
-                WHERE id = ?1 AND status = 'running'
-                  AND version = ?6 AND execution_epoch = ?7
-                "#,
-                params![
-                    target.agent_run_id,
-                    envelope.payload.error_code,
-                    error_details_ref,
-                    i64::from(envelope.payload.manual_retry_allowed),
-                    target.now,
-                    envelope.payload.expected_version,
-                    envelope.payload.execution_epoch,
-                    ending_git_observation,
-                    terminal_resolution_source,
-                    public_runtime_failure_json,
-                ],
-            )?;
-            if updated != 1 {
-                anyhow::bail!("AgentRun changed inside its failure transaction");
-            }
-            append_domain_event(
+            settle_failed_agent_run_in_tx(
                 transaction,
-                "agent_run.failed",
-                &target.camp_id,
-                ("agent_run", &target.agent_run_id),
+                &target,
                 &envelope.actor,
-                Some(envelope.payload.execution_epoch),
-                &json!({
-                    "errorCode": envelope.payload.error_code,
-                    "errorDetail": envelope.payload.error_detail,
-                    "failure": envelope.payload.failure,
-                    "manualRetryAllowed": envelope.payload.manual_retry_allowed,
-                    "endingGitObservation": envelope.payload.ending_git_observation,
-                    "terminalResolutionSource": terminal_resolution_source,
-                }),
-            )?;
-            settle_materialized_delivery_for_agent_run(
-                transaction,
-                AgentRunDeliverySettlement {
-                    agent_run_id: &target.agent_run_id,
-                    agent_run_status: "failed",
-                    agent_run_error_code: Some(&envelope.payload.error_code),
-                    terminal_resolution_source,
-                    terminal_reason_code: None,
-                    actor: &envelope.actor,
-                    execution_epoch: Some(envelope.payload.execution_epoch),
-                    now: &target.now,
-                },
-            )?;
-            let camp_turn_status = if target.camp_turn_id.is_empty() {
-                settle_run_deliveries(
-                    transaction,
-                    &target.agent_run_id,
-                    "failed",
-                    Some(&envelope.payload.error_code),
-                    &target.now,
-                )?;
-                None
-            } else {
-                Some(recompute_camp_turn(
-                    transaction,
-                    &target.camp_id,
-                    &target.camp_turn_id,
-                    &envelope.actor,
-                    Some(envelope.payload.execution_epoch),
-                    &target.now,
-                )?)
-            };
-            Ok(CommandHandlerResult::applied(
-                "agent_run.failed",
-                json!({
-                    "agentRunId": target.agent_run_id,
-                    "threadTurnId": (!target.camp_turn_id.is_empty())
-                        .then_some(target.camp_turn_id),
-                    "threadTurnStatus": camp_turn_status,
-                }),
-                Some(entity_ref("agent_run", &target.agent_run_id)),
-            ))
+                &envelope.payload,
+                terminal_resolution_source,
+                cleanup_required,
+            )
         })?;
         if !execution.replayed && execution.result.code == "agent_run.failed" {
             pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
@@ -4738,6 +4701,8 @@ impl ExecutionRuntimeService {
                 execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                 terminal_resolution_source = 'runtime_terminal',
                 terminal_reason_code = ?3,
+                cancel_requested_at = CASE WHEN runtime_adapter_kind = 'codex-cli' THEN ?7 ELSE cancel_requested_at END,
+                cancel_reason_code = CASE WHEN runtime_adapter_kind = 'codex-cli' THEN 'runtime_host_release_pending' ELSE cancel_reason_code END,
                 last_error_code = ?4, last_error_details_ref = ?5,
                 public_runtime_failure_json = ?9,
                 manual_retry_allowed = ?6,
@@ -4831,6 +4796,190 @@ impl ExecutionRuntimeService {
     }
 }
 
+// Both normal Runtime failures and confirmed Host loss use the same terminal
+// write, Delivery settlement and cleanup intent. Callers validate their own
+// admission facts before entering this transaction-local settlement.
+fn settle_failed_agent_run_in_tx(
+    transaction: &Transaction<'_>,
+    target: &TerminalTarget,
+    actor: &ActorRef,
+    failure: &FailAgentRunCommand,
+    terminal_resolution_source: Option<&str>,
+    cleanup_required: bool,
+) -> Result<CommandHandlerResult> {
+    let error_details_ref = failure
+        .error_detail
+        .as_ref()
+        .map(|detail| json!({ "detail": detail }).to_string());
+    let public_runtime_failure_json = failure
+        .failure
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let ending_git_observation = failure
+        .ending_git_observation
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let updated = transaction.execute(
+        r#"
+        UPDATE agent_run
+        SET status = 'failed', wait_reason = NULL, wait_deadline_at = NULL,
+            runtime_recovery_required = 0,
+            execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+            cancel_requested_at = CASE
+                WHEN ?11 THEN COALESCE(cancel_requested_at, ?5)
+                ELSE cancel_requested_at
+            END,
+            cancel_reason_code = CASE
+                WHEN ?11 THEN COALESCE(cancel_reason_code,
+                    CASE WHEN ?2 = 'accepted_input_outcome_unknown'
+                         THEN 'accepted_input_outcome_unknown'
+                         WHEN ?9 IS NULL THEN 'runtime_terminal_unconfirmed'
+                         ELSE 'runtime_terminal_host_failed' END
+                )
+                ELSE cancel_reason_code
+            END,
+            terminal_resolution_source = ?9,
+            terminal_reason_code = NULL,
+            last_error_code = ?2, last_error_details_ref = ?3,
+            public_runtime_failure_json = ?10,
+            manual_retry_allowed = ?4,
+            ending_git_observation_json = ?8,
+            ended_at = ?5, version = version + 1, updated_at = ?5
+        WHERE id = ?1 AND status IN ('running', 'waiting')
+          AND version = ?6 AND execution_epoch = ?7
+        "#,
+        params![
+            target.agent_run_id,
+            failure.error_code,
+            error_details_ref,
+            i64::from(failure.manual_retry_allowed),
+            target.now,
+            failure.expected_version,
+            failure.execution_epoch,
+            ending_git_observation,
+            terminal_resolution_source,
+            public_runtime_failure_json,
+            cleanup_required,
+        ],
+    )?;
+    if updated != 1 {
+        anyhow::bail!("AgentRun changed inside its failure transaction");
+    }
+    append_domain_event(
+        transaction,
+        "agent_run.failed",
+        &target.camp_id,
+        ("agent_run", &target.agent_run_id),
+        actor,
+        Some(failure.execution_epoch),
+        &json!({
+            "errorCode": failure.error_code,
+            "errorDetail": failure.error_detail,
+            "failure": failure.failure,
+            "manualRetryAllowed": failure.manual_retry_allowed,
+            "endingGitObservation": failure.ending_git_observation,
+            "terminalResolutionSource": terminal_resolution_source,
+        }),
+    )?;
+    settle_materialized_delivery_for_agent_run(
+        transaction,
+        AgentRunDeliverySettlement {
+            agent_run_id: &target.agent_run_id,
+            agent_run_status: "failed",
+            agent_run_error_code: Some(&failure.error_code),
+            terminal_resolution_source,
+            terminal_reason_code: None,
+            actor,
+            execution_epoch: Some(failure.execution_epoch),
+            now: &target.now,
+        },
+    )?;
+    let camp_turn_status = if target.camp_turn_id.is_empty() {
+        settle_run_deliveries(
+            transaction,
+            &target.agent_run_id,
+            "failed",
+            Some(&failure.error_code),
+            &target.now,
+        )?;
+        None
+    } else {
+        Some(recompute_camp_turn(
+            transaction,
+            &target.camp_id,
+            &target.camp_turn_id,
+            actor,
+            Some(failure.execution_epoch),
+            &target.now,
+        )?)
+    };
+    Ok(CommandHandlerResult::applied(
+        "agent_run.failed",
+        json!({
+            "agentRunId": target.agent_run_id,
+            "threadTurnId": (!target.camp_turn_id.is_empty())
+                .then_some(&target.camp_turn_id),
+            "threadTurnStatus": camp_turn_status,
+        }),
+        Some(entity_ref("agent_run", &target.agent_run_id)),
+    ))
+}
+
+/// The caller has fenced a confirmed lost execution by Run/version/epoch.
+/// Accepted or uncertain input cannot be dispatched again after that loss.
+pub(crate) fn fail_lost_agent_run_in_tx(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+    actor: &ActorRef,
+    reason: &str,
+) -> Result<CommandHandlerResult> {
+    let target =
+        load_terminal_target(transaction, agent_run_id)?.context("lost AgentRun does not exist")?;
+    if !matches!(target.status.as_str(), "running" | "waiting")
+        || target.cancel_requested_at.is_some()
+        || target.final_conversation_message_id.is_some()
+        || target.final_camp_message_id.is_some()
+    {
+        return Ok(rejected(
+            "runtime_loss.fenced",
+            "AgentRun is no longer active",
+        ));
+    }
+    close_abortive_run_effects(
+        transaction,
+        agent_run_id,
+        &target.now,
+        AbortiveEffectClosureReason::runtime_loss(),
+    )?;
+    // Cleanup still gates the lane. Discard only continuation metadata, keeping
+    // the accepted boundary and immutable input/output evidence intact.
+    transaction.execute(
+        "UPDATE conversation SET native_session_id = NULL,
+             native_binding_compatibility_digest = NULL,
+             version = version + 1, updated_at = ?2 WHERE id = ?1",
+        params![target.conversation_id, target.now],
+    )?;
+    settle_failed_agent_run_in_tx(
+        transaction,
+        &target,
+        actor,
+        &FailAgentRunCommand {
+            agent_run_id: agent_run_id.to_string(),
+            expected_version: target.version,
+            execution_epoch: target.execution_epoch,
+            error_code: "accepted_input_outcome_unknown".to_string(),
+            error_detail: Some(reason.to_string()),
+            failure: None,
+            manual_retry_allowed: false,
+            ending_git_observation: None,
+        },
+        None,
+        true,
+    )
+}
+
 struct AbortiveEffectClosure {
     actions_marked_unknown: usize,
     actions_closed: usize,
@@ -4863,7 +5012,7 @@ impl AbortiveEffectClosureReason<'static> {
             approval_reason: "runtime_request_lost",
             approval_resolver_id: "runtime-recovery-coordinator",
             runtime_delivery_error: "runtime_request_lost",
-            prepared_input_error: "runtime_connection_lost",
+            prepared_input_error: "runtime_request_lost",
             prepared_input_disposition: AbortivePreparedInputDisposition::DispatchEvidence,
         }
     }
@@ -5032,6 +5181,7 @@ fn persist_single_chat_success(
     target: &TerminalTarget,
     envelope: &CommandEnvelope<SucceedAgentRunCommand>,
     terminal_reason_code: Option<&str>,
+    cleanup_required: bool,
 ) -> Result<CommandHandlerResult> {
     let final_output_digest = canonical_content_digest(&[StructuredThreadMessageSegment::Text {
         text: envelope.payload.final_output.clone(),
@@ -5091,6 +5241,8 @@ fn persist_single_chat_success(
             execution_lease_owner = NULL, execution_lease_expires_at = NULL,
             terminal_resolution_source = 'runtime_terminal',
             terminal_reason_code = ?7,
+            cancel_requested_at = CASE WHEN ?9 THEN COALESCE(cancel_requested_at, ?3) ELSE cancel_requested_at END,
+            cancel_reason_code = CASE WHEN ?9 THEN COALESCE(cancel_reason_code, 'runtime_host_release_pending') ELSE cancel_reason_code END,
             final_conversation_message_id = ?2,
             final_camp_message_id = NULL,
             ending_git_observation_json = ?6,
@@ -5112,6 +5264,7 @@ fn persist_single_chat_success(
             ending_git_observation,
             terminal_reason_code,
             target.conversation_id,
+            cleanup_required,
         ],
     )?;
     if updated != 1 {
@@ -6268,7 +6421,10 @@ pub(crate) fn pump_targets_after_runs_terminal(
     Ok(())
 }
 
-fn pump_target_after_run_terminal(database: &mut Database, agent_run_id: &str) -> Result<()> {
+pub(crate) fn pump_target_after_run_terminal(
+    database: &mut Database,
+    agent_run_id: &str,
+) -> Result<()> {
     let target = database
         .connection()
         .query_row(
@@ -7008,6 +7164,7 @@ fn entity_ref(entity_type: &str, entity_id: &str) -> EntityReference {
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests {
     use super::*;
+    use crate::test_support::insert_test_runtime_input;
     use crate::{
         agent_profile::{
             AdapterKind, AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
@@ -7241,6 +7398,7 @@ mod tests {
             purpose: "resume safely".to_string(),
             effective_config: json!({}),
             runtime: FrozenAgentRuntimeConfig {
+                custom_api: None,
                 camp_fast: None,
                 adapter_kind: AdapterKind::CodexCli,
                 installation_id: "adapter-test-codex".to_string(),
@@ -7994,55 +8152,186 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    fn insert_test_runtime_input(
-        database: &Database,
-        agent_run_id: &str,
-        execution_epoch: i64,
-        status: &str,
-    ) {
-        let now = chrono::Utc::now().to_rfc3339();
-        database
-            .connection()
-            .execute_batch("PRAGMA foreign_keys = OFF;")
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO runtime_input_delivery(
-                    id, agent_run_id, execution_epoch, context_manifest_id,
-                    native_binding_id, native_binding_generation,
-                    boundary_camp_message_sequence, dynamic_payload_digest,
-                    status, native_input_id, prepared_at, accepted_at,
-                    resolved_at, updated_at,
-                    runtime_attachment_auth_receipt_version,
-                    runtime_attachment_auth_receipt_json,
-                    runtime_attachment_auth_receipt_digest,
-                    runtime_request_digest
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7, ?8, ?9, ?10, ?10, ?9,
-                    1, '{"schemaVersion":1}', 'sha256:test-auth', 'sha256:test-request'
+    // Owns the live Host-loss transaction, which startup and transport-retry
+    // tests do not exercise. Reuse the existing claimed Run/input fixture.
+    #[test]
+    fn runtime_loss_settles_uncertain_input_and_fences_old_or_terminal_executions() {
+        for (input_status, waiting, dispatched, launch_failure) in [
+            ("accepted", false, false, false),
+            ("accepted", true, false, false),
+            ("delivery_unknown", true, false, false),
+            ("prepared", false, true, false),
+            ("not_accepted", false, false, false),
+            ("delivery_unknown", false, true, true),
+        ] {
+            let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+                claimed_run_for_planned_shutdown("required");
+            insert_test_runtime_input(&database, &agent_run_id, execution_epoch, input_status);
+            if dispatched {
+                database.connection().execute(
+                    "UPDATE runtime_input_delivery SET dispatch_started_at = prepared_at WHERE agent_run_id = ?1",
+                    [&agent_run_id],
+                ).unwrap();
+            }
+            if waiting {
+                database.connection().execute(
+                    "UPDATE agent_run SET status = 'waiting', wait_reason = 'delivery_unknown', runtime_recovery_required = 1 WHERE id = ?1",
+                    [&agent_run_id],
+                ).unwrap();
+            }
+            let version: i64 = database
+                .connection()
+                .query_row(
+                    "SELECT version FROM agent_run WHERE id = ?1",
+                    [&agent_run_id],
+                    |row| row.get(0),
                 )
-                "#,
-                params![
-                    format!("test-input-{agent_run_id}-{execution_epoch}"),
-                    agent_run_id,
-                    execution_epoch,
-                    format!("test-manifest-{agent_run_id}-{execution_epoch}"),
-                    format!("test-binding-{agent_run_id}-{execution_epoch}"),
-                    format!("sha256:{agent_run_id}:{execution_epoch}"),
-                    status,
-                    (status == "accepted")
-                        .then(|| format!("native-input-{agent_run_id}-{execution_epoch}")),
-                    now,
-                    (status == "accepted").then_some(now.as_str()),
-                ],
-            )
+                .unwrap();
+            let envelope = |epoch, version| CommandEnvelope {
+                command_id: Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-recovery-coordinator".to_string(),
+                },
+                camp_id: Some(camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: crate::action::ReconcileRuntimeLossCommand {
+                    agent_run_id: agent_run_id.clone(),
+                    expected_version: version,
+                    execution_epoch: epoch,
+                    reason: "codex_host_exited".to_string(),
+                },
+            };
+            let service = crate::action::ActionSafetyService::default();
+            assert_eq!(
+                service
+                    .reconcile_runtime_loss(&mut database, &envelope(execution_epoch - 1, version))
+                    .unwrap()
+                    .result
+                    .code,
+                "runtime_loss.fenced"
+            );
+            database.connection().execute("UPDATE conversation SET native_session_id = 'old-native' WHERE id = (SELECT conversation_id FROM agent_run WHERE id = ?1)", [&agent_run_id]).unwrap();
+            let result = if launch_failure {
+                ExecutionRuntimeService::default().fail_agent_run_without_runtime_terminal(
+                    &mut database,
+                    &adapter_envelope(
+                        "launch-unknown",
+                        &camp_id,
+                        FailAgentRunCommand {
+                            agent_run_id: agent_run_id.clone(),
+                            expected_version: version,
+                            execution_epoch,
+                            error_code: "runtime_launch_failed".into(),
+                            error_detail: None,
+                            failure: None,
+                            manual_retry_allowed: true,
+                            ending_git_observation: None,
+                        },
+                    ),
+                )
+            } else {
+                service.reconcile_runtime_loss(&mut database, &envelope(execution_epoch, version))
+            }
             .unwrap();
-        database
-            .connection()
-            .execute_batch("PRAGMA foreign_keys = ON;")
-            .unwrap();
+            if input_status == "not_accepted" {
+                assert_eq!(result.result.code, "agent_run.runtime_loss_reconciled");
+                assert!(
+                    ExecutionRuntimeService::default()
+                        .load_dispatchable_agent_run(&database, &agent_run_id)
+                        .unwrap()
+                        .is_some()
+                );
+            } else {
+                assert_eq!(result.result.code, "agent_run.failed");
+                let binding: Option<String> = database.connection().query_row("SELECT native_session_id FROM conversation WHERE id = (SELECT conversation_id FROM agent_run WHERE id = ?1)", [&agent_run_id], |row| row.get(0)).unwrap();
+                assert!(
+                    binding.is_none(),
+                    "unknown outcome must rotate the old native binding"
+                );
+                let state = database
+                    .connection()
+                    .query_row(
+                        "SELECT status, wait_reason, runtime_recovery_required, last_error_code,
+                            cancel_requested_at IS NOT NULL, cancel_acknowledged_at IS NULL,
+                            execution_epoch, execution_lease_owner, manual_retry_allowed
+                     FROM agent_run WHERE id = ?1",
+                        [&agent_run_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, bool>(2)?,
+                                row.get::<_, String>(3)?,
+                                row.get::<_, bool>(4)?,
+                                row.get::<_, bool>(5)?,
+                                row.get::<_, i64>(6)?,
+                                row.get::<_, Option<String>>(7)?,
+                                row.get::<_, bool>(8)?,
+                            ))
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(
+                    state,
+                    (
+                        "failed".into(),
+                        None,
+                        false,
+                        "accepted_input_outcome_unknown".into(),
+                        true,
+                        true,
+                        execution_epoch,
+                        None,
+                        false
+                    )
+                );
+                let preserved: String = database
+                    .connection()
+                    .query_row(
+                        "SELECT status FROM runtime_input_delivery WHERE agent_run_id = ?1",
+                        [&agent_run_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    preserved,
+                    if dispatched {
+                        "delivery_unknown"
+                    } else {
+                        input_status
+                    }
+                );
+                assert!(
+                    ExecutionRuntimeService::default()
+                        .load_dispatchable_agent_run(&database, &agent_run_id)
+                        .unwrap()
+                        .is_none()
+                );
+                assert_eq!(
+                    service
+                        .reconcile_runtime_loss(
+                            &mut database,
+                            &envelope(execution_epoch, version + 1)
+                        )
+                        .unwrap()
+                        .result
+                        .code,
+                    "runtime_loss.fenced"
+                );
+                assert_eq!(
+                    ExecutionRuntimeService::default()
+                        .list_cancellation_candidates(&database, 100)
+                        .unwrap()
+                        .iter()
+                        .filter(|run| run.agent_run_id == agent_run_id)
+                        .count(),
+                    1
+                );
+            }
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]
@@ -8123,6 +8412,30 @@ mod tests {
                     payload: ArmAgentRunNetworkRecoveryCommand {
                         agent_run_id: agent_run_id.clone(),
                         expected_version: waiting_version,
+                        execution_epoch,
+                        attempt: 1,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            armed.result.code,
+            "agent_run.network_recovery_attempt_admitted"
+        );
+        let armed = service
+            .arm_network_recovery_attempt(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-readmit-deferred-claim".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ArmAgentRunNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: armed.result.payload["version"].as_i64().unwrap(),
                         execution_epoch,
                         attempt: 1,
                     },
@@ -8253,7 +8566,14 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(state, ("running".to_string(), None, version));
+        assert_eq!(
+            state,
+            (
+                "running".to_string(),
+                Some("runtime_initializing".to_string()),
+                version
+            )
+        );
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -8489,7 +8809,9 @@ mod tests {
 
     #[test]
     fn runtime_terminal_provenance_is_not_fabricated_for_core_launch_failures() {
-        for runtime_terminal_observed in [false, true] {
+        for (runtime_terminal_observed, cleanup_required) in
+            [(false, true), (true, false), (true, true)]
+        {
             let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
                 claimed_run_for_planned_shutdown("required");
             let execution = ExecutionRuntimeService::default()
@@ -8515,7 +8837,9 @@ mod tests {
                 },
             );
             let service = ExecutionRuntimeService::default();
-            let terminal = if runtime_terminal_observed {
+            let terminal = if runtime_terminal_observed && cleanup_required {
+                service.fail_agent_run_requiring_cleanup(&mut database, &envelope)
+            } else if runtime_terminal_observed {
                 service.fail_agent_run(&mut database, &envelope)
             } else {
                 service.fail_agent_run_without_runtime_terminal(&mut database, &envelope)
@@ -8544,12 +8868,19 @@ mod tests {
                 state.0.as_deref(),
                 runtime_terminal_observed.then_some("runtime_terminal")
             );
-            if runtime_terminal_observed {
+            if !cleanup_required {
                 assert!(state.1.is_none());
                 assert!(state.2.is_none());
             } else {
                 assert!(state.1.is_some());
-                assert_eq!(state.2.as_deref(), Some("runtime_terminal_unconfirmed"));
+                assert_eq!(
+                    state.2.as_deref(),
+                    Some(if runtime_terminal_observed {
+                        "runtime_terminal_host_failed"
+                    } else {
+                        "runtime_terminal_unconfirmed"
+                    })
+                );
             }
             assert!(state.3.is_none());
             assert_eq!(
@@ -10026,19 +10357,6 @@ mod tests {
         let fast_target = crate::camp_fast::target(&database, &camp_id, "agent_2")
             .unwrap()
             .unwrap();
-        let selected_runtime = crate::camp_fast::runtime_for_target(&database, &fast_target)
-            .unwrap()
-            .unwrap();
-        crate::camp_fast::record_eligibility(
-            &database,
-            &fast_target,
-            &selected_runtime,
-            &crate::camp_fast::NativeFastEligibility {
-                eligible: true,
-                runtime_default_fast: Some(false),
-            },
-        )
-        .unwrap();
         let preference = |command_id: &str, enabled| {
             user_envelope(
                 command_id,
@@ -10168,7 +10486,16 @@ mod tests {
         assert_eq!(rebound.result.code, "agent_run.runtime_rebound");
         assert_eq!(rebound.result.payload["version"], 2);
 
-        let state: (String, i64, String, String, String, String, i64, String) = database
+        let state: (
+            String,
+            i64,
+            Option<String>,
+            String,
+            Option<String>,
+            String,
+            i64,
+            String,
+        ) = database
             .connection()
             .query_row(
                 r#"
@@ -10196,12 +10523,9 @@ mod tests {
             .unwrap();
         assert_eq!(state.0, "queued");
         assert_eq!(state.1, 2);
-        assert_eq!(Some(state.2.as_str()), frozen.reported_version.as_deref());
+        assert_eq!(state.2.as_deref(), frozen.reported_version.as_deref());
         assert_eq!(state.3, frozen.executable_fingerprint);
-        assert_eq!(
-            Some(state.4.as_str()),
-            effective.reported_version.as_deref()
-        );
+        assert_eq!(state.4.as_deref(), effective.reported_version.as_deref());
         assert_eq!(state.5, effective.executable_fingerprint);
         assert_eq!(state.6, 1);
         let effective_config: Value = serde_json::from_str(&state.7).unwrap();

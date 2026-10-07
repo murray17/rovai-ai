@@ -154,6 +154,80 @@ pub fn public_runtime_failure_from_output(
     )
 }
 
+/// Only call with `turn.error` from an identity-checked failed Codex Turn.
+/// Tool output, stderr, model prose and intermediate retry notifications are
+/// deliberately outside this boundary.
+pub fn public_codex_terminal_failure(
+    default_code: &str,
+    error: Option<&serde_json::Value>,
+    sensitive_paths: &[(&Path, &str)],
+) -> RuntimeFailureView {
+    let detail = error.and_then(|value| {
+        value
+            .as_str()
+            .or_else(|| value.get("message").and_then(serde_json::Value::as_str))
+    });
+    let info = error
+        .and_then(|value| value.get("codexErrorInfo"))
+        .filter(|value| !value.is_null());
+    let status = info.and_then(|info| {
+        [
+            "httpConnectionFailed",
+            "responseStreamConnectionFailed",
+            "responseStreamDisconnected",
+            "responseTooManyFailedAttempts",
+        ]
+        .into_iter()
+        .find_map(|variant| {
+            info.get(variant)
+                .and_then(|value| value.get("httpStatusCode"))
+                .and_then(serde_json::Value::as_u64)
+        })
+    });
+    if info.and_then(serde_json::Value::as_str) == Some("unauthorized") || status == Some(401) {
+        return RuntimeFailureView::new(
+            AdapterKind::CodexCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Authentication,
+            "runtime_authentication_required",
+            "本次运行时认证被拒绝。",
+            detail.and_then(|text| sanitize_public_runtime_error(text, sensitive_paths)),
+            true,
+        );
+    }
+    if let Some(info) = info {
+        // A structured, non-authentication error wins over misleading text.
+        let (code, summary) = match (info.as_str(), status) {
+            (Some("usageLimitExceeded"), _) => ("runtime_quota_exceeded", "运行时额度不足"),
+            (_, Some(429)) => ("runtime_rate_limited", "请求过于频繁"),
+            _ => (default_code, "Codex CLI 未能完成运行"),
+        };
+        return RuntimeFailureView::new(
+            AdapterKind::CodexCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            code,
+            summary,
+            detail.and_then(|text| sanitize_public_runtime_error(text, sensitive_paths)),
+            true,
+        );
+    }
+    let mut failure = public_runtime_failure_from_output(
+        AdapterKind::CodexCli,
+        RuntimeFailureOrigin::Runtime,
+        RuntimeFailurePhase::Execution,
+        default_code,
+        "Codex CLI 未能完成运行",
+        detail,
+        sensitive_paths,
+        true,
+    );
+    if failure.code == "runtime_authentication_required" {
+        failure.summary = "本次运行时认证被拒绝。".to_string();
+    }
+    failure
+}
+
 fn classify_high_value_runtime_error(
     runtime_kind: AdapterKind,
     default_phase: RuntimeFailurePhase,
@@ -601,6 +675,45 @@ fn truncate_chars(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_terminal_classification_prefers_protocol_evidence() {
+        use serde_json::json;
+        for (error, expected) in [
+            (
+                json!({"message":"opaque", "codexErrorInfo":"unauthorized"}),
+                "runtime_authentication_required",
+            ),
+            (
+                json!({"message":"opaque", "codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":401}}}),
+                "runtime_authentication_required",
+            ),
+            (
+                json!({"message":"unauthorized", "codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":429}}}),
+                "runtime_rate_limited",
+            ),
+            (
+                json!({"message":"unauthorized", "codexErrorInfo":"other"}),
+                "runtime_turn_failed",
+            ),
+            (
+                json!({"message":"token expired"}),
+                "runtime_authentication_required",
+            ),
+            (
+                json!({"message":"tool returned 401"}),
+                "runtime_turn_failed",
+            ),
+            (json!(null), "runtime_turn_failed"),
+        ] {
+            let failure = public_codex_terminal_failure("runtime_turn_failed", Some(&error), &[]);
+            assert_eq!(failure.code, expected);
+            if expected == "runtime_authentication_required" {
+                assert_eq!(failure.summary, "本次运行时认证被拒绝。");
+            }
+            failure.validate().unwrap();
+        }
+    }
 
     #[test]
     fn sanitizes_runtime_errors_without_exposing_paths_secrets_or_payloads() {

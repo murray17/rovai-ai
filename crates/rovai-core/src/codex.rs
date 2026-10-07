@@ -46,7 +46,7 @@ use crate::{
     builtin_tool_runtime::BuiltinToolProcessConfig,
     runtime_fleet::{
         AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
-        RuntimeCompatibilityKey, RuntimeProcessHost,
+        FleetReleaseOutcome, RuntimeCompatibilityKey, RuntimeProcessHost,
     },
 };
 
@@ -134,6 +134,8 @@ impl CodexRuntimeOwner {
 }
 
 pub(crate) struct CodexHost {
+    initialized: tokio::sync::OnceCell<()>,
+    credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
     stdin: Mutex<ManagedChildStdin>,
@@ -144,6 +146,8 @@ pub(crate) struct CodexHost {
     incoming: mpsc::UnboundedSender<CodexIncoming>,
     alive: AtomicBool,
     executable_path: PathBuf,
+    #[cfg(windows)]
+    windows_job_name: String,
     builtin_tools: Option<BuiltinToolProcessConfig>,
 }
 
@@ -351,17 +355,21 @@ struct PendingRpc {
 }
 
 impl CodexHost {
-    async fn spawn_with_executable(
+    async fn spawn_uninitialized(
         codex_path: &Path,
         cwd: &Path,
         incoming: mpsc::UnboundedSender<CodexIncoming>,
         builtin_tools: Option<BuiltinToolProcessConfig>,
+        custom_api: Option<rovai_core::runtime_custom_api::CustomApiSnapshot>,
     ) -> Result<Arc<Self>> {
         let mut command = Command::new(codex_path);
         rovai_core::runtime_discovery::configure_runtime_command(
             rovai_core::agent_profile::AdapterKind::CodexCli,
             &mut command,
         );
+        if let Some(api) = &custom_api {
+            api.assert_current()?;
+        }
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
         }
@@ -387,7 +395,11 @@ impl CodexHost {
             .take_stderr()
             .context("Codex app-server stderr was unavailable")?;
         let host = Arc::new(Self {
+            initialized: tokio::sync::OnceCell::new(),
+            credential_redactor: custom_api.as_ref().and_then(|api| api.redactor().ok()),
             host_instance_id: uuid::Uuid::new_v4().to_string(),
+            #[cfg(windows)]
+            windows_job_name: child.windows_job_name().to_owned(),
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
@@ -401,31 +413,20 @@ impl CodexHost {
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
-        let initialized = host
-            .rpc(
-                "initialize",
-                json!({
-                    "clientInfo": {
-                        "name": "rovai",
-                        "title": "Rovai-ai",
-                        "version": env!("CARGO_PKG_VERSION")
-                    },
-                    "capabilities": {
-                        "experimentalApi": true
-                    }
-                }),
-            )
-            .await
-            .context("Codex app-server initialize failed");
-        if let Err(error) = initialized {
-            host.shutdown().await;
-            return Err(error);
-        }
-        if let Err(error) = host.notify("initialized", json!({})).await {
-            host.shutdown().await;
-            return Err(error.context("Codex app-server initialized notification failed"));
-        }
         Ok(host)
+    }
+
+    async fn initialize(&self) -> Result<()> {
+        self.initialized.get_or_try_init(|| async {
+            self.rpc("initialize", json!({
+                "clientInfo": {"name": "rovai", "title": "Rovai-ai", "version": env!("CARGO_PKG_VERSION")},
+                "capabilities": {"experimentalApi": true}
+            })).await.context("Codex app-server initialize failed")?;
+            self.notify("initialized", json!({})).await
+                .context("Codex app-server initialized notification failed")?;
+            Ok::<_, anyhow::Error>(())
+        }).await?;
+        Ok(())
     }
 
     fn spawn_stdout_reader(host: Arc<Self>, stdout: ManagedChildStdout) {
@@ -434,7 +435,7 @@ impl CodexHost {
             loop {
                 match lines.next_line().await {
                     Ok(Some(line)) if !line.trim().is_empty() => {
-                        let message = match serde_json::from_str::<Value>(&line) {
+                        let mut message = match serde_json::from_str::<Value>(&line) {
                             Ok(message) => message,
                             Err(error) => {
                                 host.broadcast_stderr(format!(
@@ -444,6 +445,9 @@ impl CodexHost {
                                 continue;
                             }
                         };
+                        if let Some(redactor) = &host.credential_redactor {
+                            redactor.value(&mut message);
+                        }
                         // Keep routing and queue insertion atomic with cancellation's
                         // unbind + ingress barrier. Otherwise cancellation could enqueue
                         // its barrier after routing selected an owner but before this
@@ -600,6 +604,10 @@ impl CodexHost {
     }
 
     async fn broadcast_stderr(&self, text: String) {
+        let text = self
+            .credential_redactor
+            .as_ref()
+            .map_or_else(|| text.clone(), |redactor| redactor.text(&text));
         for owner in self.owners().await {
             let _ = self
                 .incoming
@@ -619,16 +627,17 @@ impl CodexHost {
         &self.executable_path
     }
 
+    #[cfg(windows)]
+    pub(crate) fn windows_job_name(&self) -> &str {
+        &self.windows_job_name
+    }
+
     pub(crate) fn builtin_tool_process_config(&self) -> Option<&BuiltinToolProcessConfig> {
         self.builtin_tools.as_ref()
     }
 
     pub(crate) fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Acquire)
-    }
-
-    async fn shutdown(&self) {
-        self.shutdown_and_reap().await;
     }
 
     pub(crate) async fn is_quiescent(&self) -> bool {
@@ -641,10 +650,30 @@ impl CodexHost {
             return false;
         };
         let _ = child.force_terminate_tree();
-        matches!(
+        if !matches!(
             tokio::time::timeout_at(deadline, child.wait()).await,
             Ok(Ok(_))
-        )
+        ) {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            tokio::time::timeout_at(deadline, async {
+                loop {
+                    match child.tree_is_empty() {
+                        Ok(true) => return true,
+                        Ok(false) => tokio::time::sleep(Duration::from_millis(10)).await,
+                        Err(_) => return false,
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false)
+        }
+        #[cfg(not(windows))]
+        {
+            true
+        }
     }
 
     pub(crate) async fn shutdown_and_reap(&self) {
@@ -729,7 +758,7 @@ pub struct CodexRuntime {
     host: Arc<CodexHost>,
     thread_id: RwLock<Option<String>>,
     observed_model_id: RwLock<Option<String>>,
-    thread_service_tier: RwLock<Option<String>>,
+    native_fast_default: RwLock<Option<bool>>,
     action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
     completed_agent_message: RwLock<Option<String>>,
@@ -742,24 +771,7 @@ struct CodexTurnDiffSnapshot {
     diff: String,
 }
 
-#[derive(Debug)]
-pub(crate) struct CodexLiveModelValidationError {
-    pub code: &'static str,
-    model_id: String,
-    detail: String,
-}
-
-impl std::fmt::Display for CodexLiveModelValidationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "{} for explicit model {}: {}",
-            self.code, self.model_id, self.detail
-        )
-    }
-}
-
-impl std::error::Error for CodexLiveModelValidationError {}
+pub(crate) use rovai_core::agent_runtime_adapter::LiveModelValidationError as CodexLiveModelValidationError;
 
 struct CodexThreadStartOptions<'a> {
     developer_instructions: Option<&'a str>,
@@ -793,7 +805,7 @@ impl CodexRuntime {
             host,
             thread_id: RwLock::new(None),
             observed_model_id: RwLock::new(None),
-            thread_service_tier: RwLock::new(None),
+            native_fast_default: RwLock::new(None),
             action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
             completed_agent_message: RwLock::new(None),
@@ -851,7 +863,15 @@ impl CodexRuntime {
         native_mcp_server_names_from_config_read(&response)
     }
 
-    pub async fn validate_explicit_model(&self, model_id: &str) -> Result<()> {
+    pub async fn authentication_available(&self) -> Result<bool> {
+        let account = self
+            .rpc("account/read", json!({"refreshToken": false}))
+            .await?;
+        Ok(account.get("account").is_some_and(Value::is_object)
+            || account.get("requiresOpenaiAuth").and_then(Value::as_bool) == Some(false))
+    }
+
+    pub async fn validate_explicit_model(&self, model_id: &str, options: &Value) -> Result<()> {
         let mut cursor: Option<String> = None;
         let mut pages = 0_u8;
         loop {
@@ -889,6 +909,10 @@ impl CodexRuntime {
                         .and_then(Value::as_bool)
                         .unwrap_or(false)
             }) {
+                let catalog = rovai_core::agent_runtime_adapter::codex_models(&response)?;
+                rovai_core::agent_runtime_adapter::validate_live_model_selection(
+                    &catalog, model_id, options,
+                )?;
                 return Ok(());
             }
             cursor = response
@@ -927,13 +951,18 @@ impl CodexRuntime {
             .and_then(Value::as_str)
             .context("Codex thread response did not include thread.id")?
             .to_string();
+        if existing_thread_id.is_some_and(|expected| expected != thread_id) {
+            bail!("Codex resumed a different Native Thread than requested");
+        }
         self.host.bind_thread(&thread_id, &self.owner).await?;
         *self.thread_id.write().await = Some(thread_id.clone());
         *self.observed_model_id.write().await = observed_model_id;
-        *self.thread_service_tier.write().await = result
+        *self.native_fast_default.write().await = result
             .get("serviceTier")
             .and_then(Value::as_str)
-            .map(str::to_owned);
+            .and_then(rovai_core::camp_fast::ObservedFastState::from_tier)
+            .and_then(rovai_core::camp_fast::ObservedFastState::fast_default);
+
         Ok(thread_id)
     }
 
@@ -968,61 +997,6 @@ impl CodexRuntime {
             .context("Codex turn response did not include turn.id")?
             .to_string();
         Ok(turn_id)
-    }
-
-    pub async fn fast_eligibility(
-        &self,
-        cwd: &Path,
-        model: Option<&str>,
-    ) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
-        if crate::health::custom_fast_environment(AdapterKind::CodexCli) {
-            return Ok(rovai_core::camp_fast::NativeFastEligibility::default());
-        }
-        let account = self
-            .rpc("account/read", json!({"refreshToken": false}))
-            .await?;
-        let config = self
-            .rpc("config/read", json!({"cwd": cwd, "includeLayers": true}))
-            .await?;
-        let mut models = Vec::new();
-        let mut cursor: Option<String> = None;
-        for _ in 0..100 {
-            let page = self
-                .rpc(
-                    "model/list",
-                    json!({"includeHidden": true, "limit": 100, "cursor": cursor}),
-                )
-                .await?;
-            models.extend(
-                page.get("data")
-                    .and_then(Value::as_array)
-                    .context("model/list omitted data")?
-                    .iter()
-                    .cloned(),
-            );
-            cursor = page
-                .get("nextCursor")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if cursor.is_none() {
-                let observed_model = self.observed_model_id().await;
-                let mut eligibility = rovai_core::camp_fast::codex_eligibility(
-                    &account,
-                    &config,
-                    &json!({"data": models}),
-                    model.or(observed_model.as_deref()),
-                );
-                if let Some(tier) = self.thread_service_tier.read().await.as_deref() {
-                    eligibility.runtime_default_fast = match tier {
-                        "priority" | "fast" => Some(true),
-                        "default" | "standard" => Some(false),
-                        _ => None,
-                    };
-                }
-                return Ok(eligibility);
-            }
-        }
-        anyhow::bail!("model/list exceeded pagination limit")
     }
 
     pub async fn interrupt(&self) -> Result<()> {
@@ -1068,6 +1042,10 @@ impl CodexRuntime {
 
     pub async fn observed_model_id(&self) -> Option<String> {
         self.observed_model_id.read().await.clone()
+    }
+
+    pub async fn native_fast_default(&self) -> Option<bool> {
+        *self.native_fast_default.read().await
     }
 
     pub async fn turn_id(&self) -> Option<String> {
@@ -1466,6 +1444,7 @@ impl CodexCliRuntimeAdapter {
         let spawn_cwd = cwd.to_path_buf();
         let spawn_incoming = self.incoming.clone();
         let spawn_builtin_tools = builtin_tools.clone();
+        let spawn_custom_api = frozen_runtime.custom_api.clone();
         let compatibility =
             RuntimeCompatibilityKey::member(camp_id, agent_id, runtime_compatibility_digest);
         // A different Codex Host can keep the same thread's native writer lock
@@ -1483,11 +1462,12 @@ impl CodexCliRuntimeAdapter {
                     compatibility,
                 },
                 move || async move {
-                    let host = CodexHost::spawn_with_executable(
+                    let host = CodexHost::spawn_uninitialized(
                         &spawn_executable,
                         &spawn_cwd,
                         spawn_incoming,
                         Some(spawn_builtin_tools),
+                        spawn_custom_api,
                     )
                     .await?;
                     Ok(RuntimeProcessHost::Codex(host))
@@ -1497,6 +1477,7 @@ impl CodexCliRuntimeAdapter {
         let _process_id = &fleet_lease.process_id;
         let _residency = fleet_lease.residency;
         let host = fleet_lease.host.into_codex()?;
+        host.initialize().await?;
         let runtime = CodexRuntime::from_host(
             CodexRuntimeOwner::AgentRun {
                 agent_run_id: agent_run_id.to_string(),
@@ -1542,27 +1523,23 @@ impl CodexCliRuntimeAdapter {
             .cloned()
     }
 
-    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) -> bool {
-        let runtime = {
-            let mut runtimes = self.agent_run_runtimes.lock().await;
-            if runtimes
-                .get(agent_run_id)
-                .is_some_and(|runtime| runtime.agent_run_epoch() == Some(execution_epoch))
-            {
-                runtimes.remove(agent_run_id)
-            } else {
-                None
-            }
-        };
-        if let Some(runtime) = runtime {
-            runtime.detach().await;
-        }
-        self.fleet
-            .release(agent_run_id, execution_epoch, FleetReleaseDisposition::Stop)
+    pub async fn forget_agent_run(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> FleetReleaseOutcome {
+        self.complete_agent_run(agent_run_id, execution_epoch, FleetReleaseDisposition::Stop)
             .await
     }
 
-    pub async fn complete_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+    /// Only a fenced native terminal may request reuse. Cleanup callers must
+    /// explicitly choose Stop; business delivery success is not native success.
+    pub async fn complete_agent_run(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        disposition: FleetReleaseDisposition,
+    ) -> FleetReleaseOutcome {
         let runtime = {
             let mut runtimes = self.agent_run_runtimes.lock().await;
             if runtimes
@@ -1578,12 +1555,8 @@ impl CodexCliRuntimeAdapter {
             runtime.detach().await;
         }
         self.fleet
-            .release(
-                agent_run_id,
-                execution_epoch,
-                FleetReleaseDisposition::Reusable,
-            )
-            .await;
+            .release_with_outcome(agent_run_id, execution_epoch, disposition)
+            .await
     }
 
     pub async fn forget_camp(&self, camp_id: &str) {
@@ -2239,12 +2212,12 @@ pub struct CompletedTurn {
 }
 
 impl CompletedTurn {
-    pub fn error_message(&self) -> Option<&str> {
-        self.error.as_ref().and_then(|error| {
-            error
-                .as_str()
-                .or_else(|| error.get("message").and_then(Value::as_str))
-        })
+    pub(crate) fn release_disposition(&self) -> FleetReleaseDisposition {
+        if self.status == "completed" {
+            FleetReleaseDisposition::Reusable
+        } else {
+            FleetReleaseDisposition::Stop
+        }
     }
 }
 
@@ -2263,6 +2236,12 @@ pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
         .and_then(Value::as_str)
         .context("turn/completed did not include turn.status")?
         .to_string();
+    if !matches!(
+        status.as_str(),
+        "completed" | "failed" | "cancelled" | "interrupted"
+    ) {
+        bail!("turn/completed did not contain a trusted terminal status");
+    }
     let final_agent_message = turn
         .get("items")
         .and_then(Value::as_array)
@@ -2309,6 +2288,7 @@ mod tests {
 
     fn process_compatibility_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CodexCli,
             installation_id: "codex-test".to_string(),
@@ -2393,7 +2373,9 @@ mod tests {
             .await
             .unwrap();
         let first_host_id = first.host_instance_id().to_string();
-        adapter.complete_agent_run("run-1", 1).await;
+        adapter
+            .complete_agent_run("run-1", 1, FleetReleaseDisposition::Reusable)
+            .await;
         let second = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-2",
@@ -2408,7 +2390,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(second.host_instance_id(), first_host_id);
-        adapter.complete_agent_run("run-2", 1).await;
+        adapter
+            .complete_agent_run("run-2", 1, FleetReleaseDisposition::Reusable)
+            .await;
 
         next.host_config_digest = "sha256:host-v2".to_string();
         let replacement_digest =
@@ -2432,9 +2416,248 @@ mod tests {
             !first.host.is_alive(),
             "old writer must be reaped before replacement"
         );
-        adapter.complete_agent_run("run-3", 1).await;
+        adapter
+            .complete_agent_run("run-3", 1, FleetReleaseDisposition::Reusable)
+            .await;
         fleet.shutdown_all().await;
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    // Owns the process/credential/session seam. All credentials and protocol
+    // messages are fixtures; no installed Runtime or account is accessed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_warm_host_is_reaped_and_cold_resume_reads_updated_credentials_without_replay() {
+        for (status, update_before_failure) in [
+            ("failed", true),
+            ("failed", false),
+            ("cancelled", false),
+            ("interrupted", false),
+            ("unknown_error", false),
+        ] {
+            let root =
+                std::env::temp_dir().join(format!("rovai-codex-recovery-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("credentials"), "fixture-v1").unwrap();
+            let executable = root.join("codex");
+            make_test_executable(&executable, &r#"#!/usr/bin/python3
+import json, os, sys
+root = os.path.dirname(__file__)
+credential = open(os.path.join(root, 'credentials')).read()
+turn = 0
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req['method']
+    if 'id' not in req: continue
+    result = {}
+    if method in ('thread/start', 'thread/resume'):
+        thread = req['params'].get('threadId', 'native-fixture')
+        if os.path.exists(os.path.join(root, 'wrong-thread')): thread = 'wrong-thread'
+        result = {'thread': {'id': thread}}
+        with open(os.path.join(root, 'sessions'), 'a') as f: f.write(method + ':' + thread + '\n')
+    if method == 'turn/start':
+        turn += 1
+        result = {'turn': {'id': 'turn-' + str(turn)}}
+        with open(os.path.join(root, 'inputs'), 'a') as f: f.write(json.dumps(req['params']['input']) + '\n')
+    print(json.dumps({'id': req['id'], 'result': result}), flush=True)
+    if method == 'turn/start':
+        for retry in [True, False]:
+            print(json.dumps({'method':'error', 'params':{'threadId':'native-fixture', 'turnId':result['turn']['id'], 'willRetry':retry, 'error':{'message':'unauthorized'}}}), flush=True)
+        failed = credential == 'fixture-v1' and turn == 2
+        status = '__STATUS__' if failed else 'completed'
+        error = {'message':'opaque', 'codexErrorInfo':'unauthorized'} if status != 'unknown_error' else {'message':'unclassified'}
+        if status == 'unknown_error': status = 'failed'
+        print(json.dumps({'method':'turn/completed', 'params':{'threadId':'native-fixture', 'turn':{'id':result['turn']['id'], 'status':status, 'error':error if failed else None, 'items':[] if failed else [{'type':'agentMessage','text':'tool 401; quote unauthorized'}]}}}), flush=True)
+"#.replace("__STATUS__", status));
+            let fleet = Arc::new(AgentRuntimeFleetManager::new(Default::default()));
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let adapter = CodexCliRuntimeAdapter::new(incoming, fleet.clone());
+            let frozen = process_compatibility_runtime(&executable);
+            let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+                path: root.join("builtin.sock").to_string_lossy().into_owned(),
+            };
+            let tools = BuiltinToolProcessConfig::create(&executable, &endpoint, &root).unwrap();
+            let mut hosts = Vec::new();
+            for round in 1..=3 {
+                if (round == 2 && update_before_failure) || (round == 3 && !update_before_failure) {
+                    std::fs::write(root.join("credentials"), "fixture-v2").unwrap();
+                }
+                let run = format!("run-{round}");
+                let runtime = adapter
+                    .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                        agent_run_id: &run,
+                        execution_epoch: 1,
+                        camp_id: "camp-fixture",
+                        agent_id: "agent-fixture",
+                        cwd: &root,
+                        frozen_runtime: &frozen,
+                        runtime_compatibility_digest: "stable",
+                        builtin_tools: &tools,
+                    })
+                    .await
+                    .unwrap();
+                hosts.push(runtime.host_instance_id().to_string());
+                let thread = runtime
+                    .start_or_resume_thread_with_config(
+                        &root,
+                        (round > 1).then_some("native-fixture"),
+                        CodexThreadStartOptions {
+                            developer_instructions: None,
+                            sandbox: "workspace-write",
+                            approval_policy: "on-request",
+                            model: None,
+                            config: None,
+                            runtime_workspace_roots: None,
+                            ephemeral: false,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(thread, "native-fixture");
+                runtime
+                    .start_turn_with_config(&format!("input-{round}"), None, None, None)
+                    .await
+                    .unwrap();
+                let mut retries = 0;
+                let completed = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        if let CodexIncoming::Message { message, .. } =
+                            receiver.recv().await.unwrap()
+                        {
+                            if message["method"] == "error" {
+                                retries += 1;
+                                assert!(runtime.host.is_alive());
+                                continue;
+                            }
+                            if message["method"] == "turn/completed" {
+                                break completed_turn(&message["params"]).unwrap();
+                            }
+                        }
+                    }
+                })
+                .await
+                .unwrap();
+                assert_eq!(retries, 2, "willRetry=false is not a terminal");
+                let disposition = completed.release_disposition();
+                assert_eq!(
+                    disposition,
+                    if round == 2 {
+                        FleetReleaseDisposition::Stop
+                    } else {
+                        FleetReleaseDisposition::Reusable
+                    }
+                );
+                runtime.clear_turn(Some(&completed.turn_id)).await;
+                assert_eq!(
+                    adapter.complete_agent_run(&run, 1, disposition).await,
+                    if round == 2 {
+                        FleetReleaseOutcome::Reaped
+                    } else {
+                        FleetReleaseOutcome::Reusable
+                    }
+                );
+                if round == 2 {
+                    assert!(!runtime.host.is_alive());
+                    // A late success cannot reverse the decision.
+                    assert_eq!(
+                        adapter
+                            .complete_agent_run(&run, 1, FleetReleaseDisposition::Reusable)
+                            .await,
+                        FleetReleaseOutcome::Reaped
+                    );
+                }
+                if round == 3 {
+                    assert_eq!(
+                        adapter
+                            .complete_agent_run("run-2", 0, FleetReleaseDisposition::Stop)
+                            .await,
+                        FleetReleaseOutcome::NoMatchingLease
+                    );
+                    assert!(runtime.host.is_alive());
+                }
+            }
+            assert_eq!(hosts[0], hosts[1]);
+            assert_ne!(hosts[1], hosts[2]);
+            assert_eq!(
+                std::fs::read_to_string(root.join("sessions")).unwrap(),
+                "thread/start:native-fixture\nthread/resume:native-fixture\nthread/resume:native-fixture\n"
+            );
+            let inputs = std::fs::read_to_string(root.join("inputs")).unwrap();
+            assert_eq!(inputs.lines().count(), 3);
+            for round in 1..=3 {
+                assert_eq!(inputs.matches(&format!("input-{round}")).count(), 1);
+            }
+            // Reject a provider that silently starts a different thread.
+            std::fs::write(root.join("wrong-thread"), "fixture").unwrap();
+            let runtime = adapter
+                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                    agent_run_id: "run-4",
+                    execution_epoch: 1,
+                    camp_id: "camp-fixture",
+                    agent_id: "agent-fixture",
+                    cwd: &root,
+                    frozen_runtime: &frozen,
+                    runtime_compatibility_digest: "stable",
+                    builtin_tools: &tools,
+                })
+                .await
+                .unwrap();
+            assert!(
+                runtime
+                    .start_or_resume_thread_with_config(
+                        &root,
+                        Some("native-fixture"),
+                        CodexThreadStartOptions {
+                            developer_instructions: None,
+                            sandbox: "workspace-write",
+                            approval_policy: "on-request",
+                            model: None,
+                            config: None,
+                            runtime_workspace_roots: None,
+                            ephemeral: false,
+                        }
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("inputs")).unwrap(),
+                inputs
+            );
+            assert_eq!(
+                adapter.forget_agent_run("run-4", 1).await,
+                FleetReleaseOutcome::Reaped
+            );
+            fleet.shutdown_all().await;
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn only_closed_native_terminal_statuses_choose_release() {
+        for (status, disposition) in [
+            ("completed", FleetReleaseDisposition::Reusable),
+            ("failed", FleetReleaseDisposition::Stop),
+            ("cancelled", FleetReleaseDisposition::Stop),
+            ("interrupted", FleetReleaseDisposition::Stop),
+        ] {
+            for items in [
+                json!([]),
+                json!([{"type":"agentMessage","text":"unauthorized"}]),
+                json!([{"type":"commandExecution","aggregatedOutput":"401"}]),
+            ] {
+                let completed =
+                    completed_turn(&json!({"turn":{"id":"t", "status":status, "items":items}}))
+                        .unwrap();
+                assert_eq!(completed.release_disposition(), disposition);
+            }
+        }
+        for status in ["inProgress", "unknown", ""] {
+            assert!(
+                completed_turn(&json!({"turn":{"id":"t", "status":status}, "willRetry":false}))
+                    .is_err()
+            );
+        }
     }
 
     #[test]
@@ -2609,48 +2832,226 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn real_host_catalog_rejects_a_missing_explicit_model_without_fallback() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-codex-live-model-validation-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let executable = root.join("codex");
-        make_test_executable(
-            &executable,
-            r#"#!/bin/sh
-IFS= read -r initialize || exit 1
-printf '%s\n' '{"id":1,"result":{}}'
-IFS= read -r initialized || exit 1
-IFS= read -r model_list || exit 1
-printf '%s\n' '{"id":2,"result":{"data":[{"id":"gpt-current","hidden":false}],"nextCursor":null}}'
-while IFS= read -r ignored; do :; done
-"#,
-        );
-        let (incoming, _receiver) = mpsc::unbounded_channel();
-        let host = CodexHost::spawn_with_executable(&executable, &root, incoming, None)
-            .await
-            .unwrap();
-        let runtime = CodexRuntime::from_host(
-            CodexRuntimeOwner::AgentRun {
-                agent_run_id: "run-live-model-validation".to_string(),
-                execution_epoch: 1,
-            },
-            Some("camp-live-model-validation".to_string()),
-            host.clone(),
-        );
-
-        let error = runtime
-            .validate_explicit_model("claude-opus-5")
-            .await
-            .expect_err("a model absent from the real host catalog must fail closed");
-        let validation = error
-            .downcast_ref::<CodexLiveModelValidationError>()
-            .expect("the launch layer needs a typed model failure");
-        assert_eq!(validation.code, "runtime_model_unavailable");
-
-        host.shutdown().await;
-        std::fs::remove_dir_all(root).unwrap();
+    async fn real_host_validates_before_input_and_executes_in_the_same_process() {
+        for scenario in [
+            "default",
+            "explicit",
+            "missing",
+            "invalid_option",
+            "unknown_option",
+            "auth_required",
+            "init_failure",
+            "fast_rejected",
+        ] {
+            let root = std::env::temp_dir()
+                .join(format!("rovai-codex-live-launch-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("codex");
+            make_test_executable(&executable, &r#"#!/usr/bin/python3
+import json, os, sys, time
+root = os.path.dirname(__file__)
+scenario = '__SCENARIO__'
+with open(os.path.join(root, 'starts'), 'a') as log: log.write('start\n')
+if '--version' in sys.argv or 'generate-json-schema' in sys.argv:
+    time.sleep(30)
+    sys.exit(1)
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request['method']
+    with open(os.path.join(root, 'requests'), 'a') as log: log.write(method + '\n')
+    if 'id' not in request: continue
+    response = {'id': request['id'], 'result': {}}
+    if method == 'initialize' and scenario == 'init_failure':
+        response = {'id': request['id'], 'error': {'code': -32600, 'message': 'protocol incompatible'}}
+    elif method == 'account/read':
+        response['result'] = {'account': None, 'requiresOpenaiAuth': scenario == 'auth_required'}
+    elif method == 'model/list':
+        response['result'] = {'data': [{'id': 'selected', 'supportedReasoningEfforts': [{'reasoningEffort': 'low'}]}]}
+    elif method in ('thread/start', 'thread/resume'):
+        response['result'] = {'thread': {'id': 'thread-fixture'}}
+        if scenario == 'default':
+            response['result']['serviceTier'] = 'priority' if method == 'thread/start' else 'default'
+    elif method == 'turn/start':
+        with open(os.path.join(root, 'turns'), 'a') as log: log.write(json.dumps(request['params']) + '\n')
+        if scenario == 'fast_rejected':
+            response = {'id': request['id'], 'error': {'code': -32602, 'message': 'serviceTierForTurn was rejected'}}
+        else:
+            response['result'] = {'turn': {'id': 'turn-fixture'}}
+    print(json.dumps(response), flush=True)
+"#.replace("__SCENARIO__", scenario));
+            // Default launches must also work after discarding the entire Host,
+            // without a version check or historical protocol evidence.
+            let attempts = if scenario == "default" { 3 } else { 1 };
+            for attempt in 0..attempts {
+                let (incoming, _receiver) = mpsc::unbounded_channel();
+                let fleet = Arc::new(AgentRuntimeFleetManager::new(Default::default()));
+                let adapter = CodexCliRuntimeAdapter::new(incoming, fleet.clone());
+                let frozen = process_compatibility_runtime(&executable);
+                let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+                    path: root.join("builtin.sock").to_string_lossy().into_owned(),
+                };
+                let tools =
+                    BuiltinToolProcessConfig::create(&executable, &endpoint, &root).unwrap();
+                let result = adapter
+                    .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                        agent_run_id: "launch-fixture",
+                        execution_epoch: 1,
+                        camp_id: "camp-fixture",
+                        agent_id: "agent-fixture",
+                        cwd: &root,
+                        frozen_runtime: &frozen,
+                        runtime_compatibility_digest: "launch-fixture",
+                        builtin_tools: &tools,
+                    })
+                    .await;
+                if scenario == "init_failure" {
+                    assert!(result.is_err());
+                } else {
+                    let runtime = result.unwrap();
+                    let authenticated = runtime.authentication_available().await.unwrap();
+                    assert_eq!(authenticated, scenario != "auth_required");
+                    let options = match scenario {
+                        "invalid_option" => json!({"reasoning_effort":"high"}),
+                        "unknown_option" => json!({"unadvertised":"low"}),
+                        _ => json!({"reasoning_effort":"low"}),
+                    };
+                    let validation =
+                        if authenticated && !matches!(scenario, "default" | "fast_rejected") {
+                            runtime
+                                .validate_explicit_model(
+                                    if scenario == "missing" {
+                                        "gone"
+                                    } else {
+                                        "selected"
+                                    },
+                                    &options,
+                                )
+                                .await
+                        } else {
+                            Ok(())
+                        };
+                    let expected_error = match scenario {
+                        "missing" => Some("runtime_model_unavailable"),
+                        "invalid_option" => Some("runtime_model_option_invalid"),
+                        "unknown_option" => Some("runtime_model_option_unknown"),
+                        _ => None,
+                    };
+                    assert_eq!(
+                        validation
+                            .as_ref()
+                            .err()
+                            .and_then(|error| error.downcast_ref::<CodexLiveModelValidationError>())
+                            .map(|error| error.code),
+                        expected_error
+                    );
+                    if authenticated && validation.is_ok() {
+                        runtime
+                            .start_or_resume_thread_with_config(
+                                &root,
+                                (attempt == 1).then_some("thread-fixture"),
+                                CodexThreadStartOptions {
+                                    developer_instructions: None,
+                                    sandbox: "workspace-write",
+                                    approval_policy: "on-request",
+                                    model: None,
+                                    config: None,
+                                    runtime_workspace_roots: None,
+                                    ephemeral: true,
+                                },
+                            )
+                            .await
+                            .unwrap();
+                        assert_eq!(
+                            runtime.native_fast_default().await,
+                            (scenario == "default").then_some(attempt != 1),
+                            "start/resume baseline arrives before the single task input"
+                        );
+                        assert!(!root.join("turns").exists() || attempt > 0);
+                        let turn = runtime
+                            .start_turn_with_config(
+                                "task-body",
+                                None,
+                                None,
+                                if scenario == "fast_rejected" {
+                                    Some("default")
+                                } else {
+                                    [None, Some("priority"), Some("default")][attempt]
+                                },
+                            )
+                            .await;
+                        if scenario == "fast_rejected" {
+                            assert!(
+                                turn.unwrap_err()
+                                    .to_string()
+                                    .contains("serviceTierForTurn was rejected")
+                            );
+                        } else {
+                            turn.unwrap();
+                        }
+                    }
+                }
+                assert_eq!(
+                    adapter.forget_agent_run("launch-fixture", 1).await,
+                    FleetReleaseOutcome::Reaped,
+                    "initialization/validation failures must retain a managed Host until confirmed reap"
+                );
+                fleet.acknowledge_cleanup("launch-fixture", 1).await;
+                fleet.shutdown_all().await;
+            }
+            if scenario == "default" {
+                let turns = std::fs::read_to_string(root.join("turns")).unwrap();
+                for (line, expected) in turns.lines().zip([None, Some("priority"), Some("default")])
+                {
+                    let params: Value = serde_json::from_str(line).unwrap();
+                    assert_eq!(
+                        params.get("serviceTierForTurn").and_then(Value::as_str),
+                        expected
+                    );
+                    assert!(params.get("serviceTier").is_none());
+                }
+                assert_eq!(
+                    turns.lines().count(),
+                    3,
+                    "one input per Host, no replay for missing optional feedback"
+                );
+            }
+            if scenario == "fast_rejected" {
+                let turns = std::fs::read_to_string(root.join("turns")).unwrap();
+                assert_eq!(turns.lines().count(), 1, "never replay ambiguous input");
+                let params: Value = serde_json::from_str(turns.lines().next().unwrap()).unwrap();
+                assert_eq!(params["serviceTierForTurn"], "default");
+                assert!(params.get("serviceTier").is_none());
+            }
+            let requests = std::fs::read_to_string(root.join("requests")).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.join("starts"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                attempts
+            );
+            assert_eq!(
+                requests
+                    .lines()
+                    .filter(|method| *method == "turn/start")
+                    .count(),
+                attempts
+                    * usize::from(matches!(scenario, "default" | "explicit" | "fast_rejected"))
+            );
+            if matches!(scenario, "default" | "fast_rejected") {
+                assert!(!requests.contains("model/list"));
+                assert!(!requests.contains("config/read"));
+                assert_eq!(
+                    requests
+                        .lines()
+                        .filter(|method| *method == "account/read")
+                        .count(),
+                    attempts,
+                    "only existing Host authentication, no extra Fast account check"
+                );
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[tokio::test]
@@ -2669,6 +3070,7 @@ while IFS= read -r ignored; do :; done
         )
         .unwrap();
         let runtime_config = FrozenAgentRuntimeConfig {
+            custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CodexCli,
             installation_id: "smoke".to_string(),
@@ -2814,7 +3216,9 @@ while IFS= read -r ignored; do :; done
         .await
         .unwrap();
         let first_host = first.host_instance_id().to_string();
-        adapter.complete_agent_run("run-1", 1).await;
+        adapter
+            .complete_agent_run("run-1", 1, FleetReleaseDisposition::Reusable)
+            .await;
         let successor_builtin_tools =
             BuiltinToolProcessConfig::create(&executable, &endpoint, &directory).unwrap();
         let successor = adapter
@@ -3409,7 +3813,10 @@ while IFS= read -r ignored; do :; done
                 "codexErrorInfo": "serverOverloaded"
             }))
         );
-        assert_eq!(completed.error_message(), Some("model unavailable"));
+        assert_eq!(
+            completed.error.as_ref().unwrap()["message"],
+            "model unavailable"
+        );
     }
 
     #[test]

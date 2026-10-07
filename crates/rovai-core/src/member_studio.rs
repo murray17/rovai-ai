@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -16,7 +16,8 @@ use crate::{
     member_avatar::{
         MemberAvatarImportError, MemberAvatarImportErrorKind, import_managed_member_avatar,
     },
-    team_tool::AuthenticatedTeamToolRun,
+    runtime::resolve_agent_local_path,
+    team_tool::{AuthenticatedTeamToolRun, TeamToolService},
 };
 
 pub const MEMBER_CREATE_TOOL_NAME: &str = "member.create";
@@ -47,19 +48,19 @@ pub struct MemberCreateOutcome {
 }
 
 #[derive(Debug)]
-pub struct MemberCreateError {
+pub struct MemberOperationError {
     pub code: &'static str,
     pub message: &'static str,
     pub details: Option<Value>,
 }
 
-impl std::fmt::Display for MemberCreateError {
+impl std::fmt::Display for MemberOperationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "{}: {}", self.code, self.message)
     }
 }
 
-impl std::error::Error for MemberCreateError {}
+impl std::error::Error for MemberOperationError {}
 
 pub fn member_create_input_schema() -> Value {
     json!({
@@ -89,6 +90,32 @@ pub fn member_create_input_schema() -> Value {
     })
 }
 
+/// Called by Core after authenticating the Run, before create/update import.
+pub fn resolve_member_avatar_input(
+    database: &Database,
+    run: &AuthenticatedTeamToolRun,
+    operation: &str,
+    input: &mut Value,
+) -> Result<()> {
+    if !matches!(
+        operation,
+        MEMBER_CREATE_TOOL_NAME | crate::member_tool::MEMBER_UPDATE_TOOL_NAME
+    ) {
+        return Ok(());
+    }
+    let Some(Value::String(path)) = input.get_mut("avatarFile") else {
+        return Ok(());
+    };
+    let (_, workspace) = TeamToolService::default()
+        .agent_file_ingress_scope(database, &run.agent_run_id, run.execution_epoch)?
+        .context("AgentRun file ingress is unavailable")?;
+    *path = resolve_agent_local_path(Path::new(path), workspace.path())
+        .into_os_string()
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("AgentRun avatar path must be UTF-8"))?;
+    Ok(())
+}
+
 pub fn create_member(
     database: &mut Database,
     data_dir: &Path,
@@ -108,7 +135,7 @@ pub fn create_member(
         &input.working_principles,
         &input.growth_topic,
     )
-    .map_err(|_| MemberCreateError {
+    .map_err(|_| MemberOperationError {
         code: "member.invalid_identity",
         message: "One or more member identity fields are invalid; fix the confirmed card and try again",
         details: None,
@@ -145,7 +172,7 @@ pub fn create_member(
         .create_profile_with_creation_source(database, &envelope, Some(authenticated_run))
         .map_err(|error| {
             if error.downcast_ref::<CommandGatewayError>().is_some() {
-                anyhow::Error::new(MemberCreateError {
+                anyhow::Error::new(MemberOperationError {
                     code: "member.creation_key_conflict",
                     message: "creationKey was already used with different member details",
                     details: None,
@@ -222,8 +249,22 @@ fn require_direct_user_trigger(
     database: &Database,
     authenticated_run: &AuthenticatedTeamToolRun,
 ) -> Result<()> {
-    let trigger = database
-        .connection()
+    if has_direct_user_input(database.connection(), authenticated_run)? {
+        return Ok(());
+    }
+    Err(MemberOperationError {
+        code: "member.user_confirmation_required",
+        message: "Create a member only from a direct user-triggered run after showing the final member card and receiving confirmation",
+        details: None,
+    }
+    .into())
+}
+
+pub(crate) fn has_direct_user_input(
+    connection: &Connection,
+    authenticated_run: &AuthenticatedTeamToolRun,
+) -> Result<bool> {
+    let trigger = connection
         .query_row(
             r#"
             SELECT EXISTS(
@@ -246,33 +287,25 @@ fn require_direct_user_trigger(
             |row| row.get::<_, bool>(0),
         )
         .optional()?;
-    if trigger == Some(true) {
-        return Ok(());
-    }
-    Err(MemberCreateError {
-        code: "member.user_confirmation_required",
-        message: "Create a member only from a direct user-triggered run after showing the final member card and receiving confirmation",
-        details: None,
-    }
-    .into())
+    Ok(trigger == Some(true))
 }
 
-fn invalid_creation_key() -> MemberCreateError {
-    MemberCreateError {
+fn invalid_creation_key() -> MemberOperationError {
+    MemberOperationError {
         code: "member.invalid_creation_key",
         message: "creationKey must be a canonical lowercase UUID",
         details: None,
     }
 }
 
-fn map_avatar_error(error: MemberAvatarImportError) -> MemberCreateError {
+fn map_avatar_error(error: MemberAvatarImportError) -> MemberOperationError {
     match error.kind {
-        MemberAvatarImportErrorKind::Invalid => MemberCreateError {
+        MemberAvatarImportErrorKind::Invalid => MemberOperationError {
             code: "member.avatar_invalid",
             message: "The avatar file could not be safely imported; fix the image or retry without --avatar-file",
             details: None,
         },
-        MemberAvatarImportErrorKind::CreationKeyConflict => MemberCreateError {
+        MemberAvatarImportErrorKind::CreationKeyConflict => MemberOperationError {
             code: "member.creation_key_conflict",
             message: "creationKey is already bound to a different avatar",
             details: None,
@@ -289,5 +322,37 @@ mod tests {
         let schema = member_create_input_schema();
         assert_eq!(schema["required"], json!(["creationKey", "displayName"]));
         assert_eq!(schema["properties"]["avatarFile"]["type"], "string");
+        use crate::team_tool_catalog::validate_builtin_tool_input as validate;
+        let base = json!({"agentId":"agent_1","requestId":"51d668e1-6dc7-4f39-80b2-0555f823715a","expectedVersion":1,"teamRole":""});
+        assert!(validate("member.update", &base).is_ok());
+        for (field, value) in [
+            ("teamRole", Value::Null),
+            ("displayName", json!("")),
+            ("expectedVersion", json!(0)),
+            ("requestId", json!("51D668E1-6DC7-4F39-80B2-0555F823715A")),
+            ("runtime", json!({})),
+            ("portraitRef", json!("x")),
+            ("avatarCenterX", json!(0.5)),
+        ] {
+            let mut input = base.clone();
+            input[field] = value;
+            assert!(validate("member.update", &input).is_err(), "{input}");
+        }
+        for patch in [
+            json!({}),
+            json!({"clearAvatar":false}),
+            json!({"clearAvatar":true,"avatarFile":"source.png"}),
+            json!({"clearAvatar":true,"avatarCenterX":0.5,"avatarCenterY":0.5,"avatarSize":0.5}),
+        ] {
+            let mut input = base.clone();
+            input.as_object_mut().unwrap().remove("teamRole");
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            assert!(validate("member.update", &input).is_err(), "{input}");
+        }
+        assert!(validate("member.list", &json!({"agentId":"agent_1"})).is_err());
+        assert!(validate("member.get", &json!({"agentId":"agent_1","runtime":true})).is_err());
     }
 }

@@ -122,3 +122,13 @@ brief 只拥有具体 surface 的信息优先级和构图；它不能覆盖全�
 历史会话事件样例已移入
 [prototype archive](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/archive/arctic-dawn/README.md)，明确不具有生产权威。理解版本演进请从
 [版本索引](../versions/README.md)进入；历史文档不能覆盖本索引或当前生产事实。
+
+## Runtime 安装与执行状态
+
+设置页入口存在显示“可用”，不附带执行验证说明；检查成功只更新状态，不追加成功提示行。
+检查失败保留具体原因与处理入口。队员信息、名册入口和配置区正常时不显示常驻可用性标签或验证说明；
+智能体名称保留，配置区可显示已知版本，未配置、检查中及需要处理的问题按需提示。不暗示认证或协议已验证。
+正在启动的 Run 显示“正在初始化 Runtime”，配置及启动失败显示具体可操作原因，修复后正常重试。
+Fast 直接保存三态偏好，运行时传递原生参数；页面、浮层及切换不启动资格检查。
+行为由 [Runtime Launch v48](../contracts/runtime-launch-and-verification-v48.md)与
+[Camp Member Fast v3](../contracts/camp-member-fast-v3.md)拥有。
