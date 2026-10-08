@@ -1608,5 +1608,98 @@
       "coldLoadOk": true,
       "nativeSourcesUnchanged": true
     }
+  },
+  "productClosure": {
+    "app": {
+      "sourceCommit": "11dfcae91af5789848db798db9daed998df7f252",
+      "channel": "isolated packaged macOS arm64 App",
+      "coreSha256": "e70c592113efa10d903e8e5abe8011087c8ae384ede96409687ebe0cf764db40",
+      "signature": "codesign --verify --deep --strict passed (ad-hoc)",
+      "contract": "v1.72",
+      "projectionSchema": 138,
+      "receipt188": true,
+      "catalog": {
+        "rows": [
+          "Claude Code",
+          "Codex CLI",
+          "GitHub Copilot",
+          "OpenCode",
+          "Kiro",
+          "Qoder",
+          "CodeBuddy",
+          "Qwen Code",
+          "TRAE CLI",
+          "Kimi Code",
+          "Grok Build",
+          "DeepSeek Harness",
+          "Command Code",
+          "ZCode",
+          "Antigravity",
+          "PI"
+        ],
+        "clineVisible": false,
+        "commandCodeVisible": true,
+        "clineAdmission": [
+          {
+            "evidenceRevision": null,
+            "platform": "macos-arm64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          },
+          {
+            "evidenceRevision": null,
+            "platform": "macos-x64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          },
+          {
+            "evidenceRevision": null,
+            "platform": "windows-x64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          },
+          {
+            "evidenceRevision": null,
+            "platform": "linux-x64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          }
+        ],
+        "hostPlatform": "macos-arm64"
+      },
+      "observedOwnedProcessCount": 5,
+      "ownedProcessesRemainingAfterQuit": [],
+      "dailyAppRestarted": false,
+      "realModelRunsInThisAppSmoke": 0
+    },
+    "rustWorkspace": {
+      "passed": 464,
+      "ignored": 2
+    },
+    "vitest": {
+      "files": 239,
+      "passed": 2615
+    },
+    "typecheck": "passed",
+    "windowsCompile": {
+      "commit": "11dfcae91af5789848db798db9daed998df7f252",
+      "result": "success",
+      "url": "https://github.com/murray17/rovai-ai/actions/runs/37811369379"
+    },
+    "prCI": {
+      "commit": "11dfcae91af5789848db798db9daed998df7f252",
+      "result": "success",
+      "url": "https://github.com/murray17/rovai-ai/actions/runs/37811367066"
+    },
+    "credentialScan": {
+      "filesScanned": 155,
+      "sensitiveReferencesChecked": 4,
+      "matchingFiles": [],
+      "rawValuesPrinted": false
+    }
   }
 }

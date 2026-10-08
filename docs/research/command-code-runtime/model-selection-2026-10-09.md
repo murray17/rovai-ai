@@ -105,3 +105,24 @@ first/warm 为同 PID，cold 为新 PID、同原生 Session；cold 正确回忆�
 不把 CLI 目录硬塞入 ACP，不以重启加 `--model` 冒充会话切换，不修改用户默认模型或日常安装来掩盖错误。
 本轮未向上游提交 Issue/评论，也未更改 Command 的生产认证、MCP、Bootstrap 或 Host 生命周期。
 此前 BYOK deferred MCP tools 未调用的问题仍独立保留，不能用本轮普通文本请求成功宣称修复。
+
+## 产品收口与合流验证
+
+`16c660f6` 撤下 Cline 的可见目录、安装指南及成员选择，保留官方 ACP 实现与历史数据；
+`11dfcae9` 合并主干，保留续做修复，并以 Migration 188/schema 138 收敛两种既有 186 来源。
+macOS 通用进程树保留身份核验和可选持久账本，取消前使用新鲜快照，避免漏掉刚 fork 的子进程。
+这些合流修改不修补 Command 原生的模型目录缺口。
+
+- Rust workspace：464 通过、2 个人工 Smoke 忽略。迁移回滚/重开、共享 ACP、进程归属与恢复、
+  Claude、Antigravity、续做、退出和用户锚点的定向回归通过；锚点使用 `slow-tests`，不以零匹配代替执行。
+- 前端类型检查、239 个 Vitest 文件/2615 项测试、相关 Node 测试、文档门禁、格式及 diff 检查通过。
+- `11dfcae9` 的 [PR CI](https://github.com/murray17/rovai-ai/actions/runs/37811367066) 与
+  [Windows workspace/all-targets 编译](https://github.com/murray17/rovai-ai/actions/runs/37811369379) 通过。
+- 同一提交的 macOS arm64 ad-hoc 包通过签名检查；独立 userData/Skill Library 的真实设置页显示
+  16 个 Runtime，无 Cline，有 Command Code；Core 的四个平台 Cline admission 均为 `not_qualified`。
+  新库为 schema 138，188 收据存在。正常退出后观察到的 5 个所属进程全部退出，日常 App 未重启。
+- 此次 App Smoke 只验证隐藏入口、Core 启动与退出，未新增模型 Run。上述六轮真实生成属于原生协议测试。
+  155 个公开变更文件与实际敏感引用精确匹配扫描为零命中，不输出匹配源内容。
+
+打包 Core SHA-256：`e70c592113efa10d903e8e5abe8011087c8ae384ede96409687ebe0cf764db40`。
+PR #662 保持未合并；Command Code 继续 Preview，Cline 当前不向用户开放。
