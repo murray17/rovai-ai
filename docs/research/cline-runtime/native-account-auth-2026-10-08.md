@@ -71,6 +71,23 @@ User 85 要求保留 Native Hub、让实际 Cline 读取和刷新凭据；User 8
 实际安装的原生刷新失败可能只给 requires re-authentication，Rovai 保留原生事实，不把普通网络错误自动理解为退出登录。
 不删除凭据、不切换 Provider/账号/计费来源、不重发未知输入。明确原生拒绝与传输未知仍按共享终态结算。
 
+## 登录选择回归
+
+打包零模型测试 `account-packaged-login-09/10` 暴露一次产品错误：fresh search 只重新读取环境，
+没有叠加已保存 RuntimeStartupConfiguration，登录可能使用全局安装及默认凭据源。不是 OAuth 服务故障。
+失败保留；修复为在 help/login 前重新读取本机已保存配置并加入同一搜索快照，避免绕过用户选择。
+这两次自有授权进程均已随 App 关闭回收，未提交授权码；真实日常凭据摘要前后相同。
+后续 `account-selected-login-11` 正式 Core fixture 已通过所选绝对路径、私有源、原生输出脱敏、输入、取消、再次完成及活动登录退出；零模型请求，临时 Host 清空，真实源未改。最终重新打包的 `account-packaged-login-12` 经真实 Renderer/preload/Core 重复通过同一零模型矩阵，ad-hoc 签名通过。它专门拥有此回归，不能再用纯 Login 单测替代。
+
+## 自动化与凭据检查
+
+Rust 默认 workspace 463 passed / 2 ignored；Cline extended 9 passed / 2 ignored；workspace all-targets/all-features check、
+typecheck、Vitest 2605、Node 335 passed / 2 skipped、Desktop bridge、settings Electron 日夜/1040×700/200% 交互、
+fmt 和通用文档门禁通过。首次全量前端测试发现一个新增英文文案缺失，补齐后全量通过。
+724 个账号验收文件（数据库、原生历史、报告和临时配置）未命中真实 access/refresh token；
+34 个公开变更文件未命中原生凭据或私有 BYOK 端点。所有验收自有 Host 目录已清空；持久原生源未删除。
+本轮没有实际凭据刷新写入；文件未变是本次观察，不是禁止未来 Cline 原生写回的承诺。
+
 ## 复现与证据
 
 产品入口：`fixtures/native_hub_product_probe.mjs --native-account --settings-source <授权原生 settings> ...`，

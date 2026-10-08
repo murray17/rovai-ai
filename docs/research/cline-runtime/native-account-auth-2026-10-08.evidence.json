@@ -308,5 +308,85 @@
     "sourceChanged": false,
     "passed": true,
     "hostTempRemaining": []
-  }
+  },
+  "loginRoutingFailures": [
+    {
+      "fixture": "account-packaged-login-09",
+      "passed": false,
+      "reason": "fresh discovery omitted saved startup configuration",
+      "ownedHostsRemaining": []
+    },
+    {
+      "fixture": "account-packaged-login-10",
+      "passed": false,
+      "reason": "fresh discovery omitted saved startup configuration",
+      "ownedHostsRemaining": []
+    }
+  ],
+  "loginRoutingRegression": {
+    "modelInputs": 0,
+    "loginFixture": {
+      "packagedRendererToCore": false,
+      "selectedAbsoluteProgram": true,
+      "explicitStart": true,
+      "privateOutputRedacted": true,
+      "input": true,
+      "cancel": true,
+      "subsequentCompletion": true,
+      "realOAuth": false,
+      "shutdownActiveLogin": true
+    },
+    "sourceChanged": false,
+    "passed": true,
+    "hostTempRemaining": []
+  },
+  "validation": {
+    "rustWorkspace": {
+      "passed": 463,
+      "ignored": 2
+    },
+    "clineExtended": {
+      "passed": 9,
+      "ignored": 2
+    },
+    "vitest": {
+      "passed": 2605
+    },
+    "node": {
+      "passed": 335,
+      "skipped": 2
+    },
+    "settingsElectronInteraction": "passed across day/night, 1040x700 and 200% zoom",
+    "desktopBridge": "passed",
+    "typecheck": "passed",
+    "documentationGates": "passed",
+    "fmt": "passed",
+    "allTargetsAllFeatures": "passed",
+    "adHocMacArm64Signature": "passed"
+  },
+  "packagedLoginRoutingRegression": {
+    "modelInputs": 0,
+    "packagedRendererToCore": true,
+    "loginFixture": {
+      "packagedRendererToCore": true,
+      "selectedAbsoluteProgram": true,
+      "explicitStart": true,
+      "privateOutputRedacted": true,
+      "input": true,
+      "cancel": true,
+      "subsequentCompletion": true,
+      "realOAuth": false,
+      "shutdownActiveLogin": true
+    },
+    "sourceChanged": false,
+    "passed": true,
+    "hostTempRemaining": []
+  },
+  "credentialProtection": {
+    "accountFixtureFilesScanned": 724,
+    "rawAccessOrRefreshTokenCopiesFound": 0,
+    "changedPublicFilesScanned": 34,
+    "rawCredentialOrPrivateEndpointMatches": 0
+  },
+  "packagedCoreSha256": "61d29ebf0c4be056e3671af351805f83d5f94ae66997f507a28e020851be8a4d"
 }

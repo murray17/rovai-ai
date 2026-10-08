@@ -42,6 +42,7 @@ function aboutSnapshot() {
 const channelListeners = new Set(), webListeners = new Set()
 let pendingChannelAction = null
 let pendingStartupInspection = null
+let pendingClineLogin = null
 const emitChannels = () => channelListeners.forEach(fn => fn(clone(state.channels)))
 async function channelAction(action, kind) {
   await request(`channels.${action}`, { kind })
@@ -121,6 +122,16 @@ Object.assign(window, { rovai: {
   exportMonitoring: async () => null, exportDiagnostics: async () => null,
   request: async (method, params = {}) => {
     await request(method, params)
+    if (method === 'runtime.clineLogin.start') {
+      state.clineLogin = { attemptId: `fixture-login-${requests.length}`, status: 'running', output: 'Native login: https://auth.invalid/?user_code=fixture-code' }
+      if (state.deferClineLogin) { state.deferClineLogin = false; return new Promise(resolve => { pendingClineLogin = () => resolve(clone(state.clineLogin)) }) }
+      return clone(state.clineLogin)
+    }
+    if (method === 'runtime.clineLogin.read') return clone(state.clineLogin)
+    if (method === 'runtime.clineLogin.cancel' || method === 'runtime.clineLogin.input') {
+      state.clineLogin = { ...state.clineLogin, status: method.endsWith('cancel') ? 'cancelled' : 'completed', output: '' }
+      return clone(state.clineLogin)
+    }
     if (method === 'runtime.startup.get') return clone(state.startup[params.runtimeKind] ?? { runtimeKind: params.runtimeKind, revision: 0, configuration: { programPath: null, environment: [] } })
     if (method === 'runtime.startup.save') {
       const previous = state.startup[params.runtimeKind] ?? { runtimeKind: params.runtimeKind, revision: 0, configuration: { programPath: null, environment: [] } }
@@ -205,6 +216,7 @@ function Fixture() {
 }
 window.settingsTest = {
   requests, state,
+  finishClineLoginStart: () => pendingClineLogin?.(),
   releaseHostStatus: () => releaseHostStatus?.(),
   updateChannel: (kind, patch) => {
     Object.assign(state.channels.channels.find(channel => channel.kind === kind), patch)

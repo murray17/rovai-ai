@@ -9,7 +9,7 @@ import {startPackagedHubAcceptance} from './native_hub_packaged_client.mjs'
 import {startQualificationCore} from '../../../../scripts/lib/qualification-core.mjs'
 import {seedCompletedOnboardingForAcceptance} from '../../../../scripts/lib/dev-desktop.mjs'
 import {removeEphemeralRuntimeCampFilesRoot} from '../../../../scripts/lib/runtime-camp-files-root.mjs'
-const {values}=parseArgs({options:{'native-account':{type:'boolean',default:false},root:{type:'string'},core:{type:'string'},app:{type:'string'},cline:{type:'string'},'settings-source':{type:'string'}}})
+const {values}=parseArgs({options:{'login-fixture':{type:'boolean',default:false},'native-account':{type:'boolean',default:false},root:{type:'string'},core:{type:'string'},app:{type:'string'},cline:{type:'string'},'settings-source':{type:'string'}}})
 for(const key of ['root','core','cline','settings-source'])assert(values[key],`${key} required`)
 const root=resolve(values.root),source=resolve(values['settings-source']),cli=resolve(values.cline)
 await mkdir(root,{mode:0o700})
@@ -91,7 +91,7 @@ try{
  assert(availability.failure.summary.includes('尚未登录'))
  assert.deepEqual(await readdir(hosts),[])
  proof.unloggedExplicit=true
- if(values.app){
+ if(values.app||values['login-fixture']){
   // Private selected-CLI fixture owns product login IO/cancellation only. It is
   // not an OAuth qualification and never reads the real account source.
   const fake=join(root,'login-cli-fixture')
@@ -99,8 +99,11 @@ try{
   await writeFile(join(settings,'unlogged.json'),JSON.stringify({version:1,lastUsedProvider:'openai-codex',providers:{'openai-codex':{tokenSource:'oauth',settings:{provider:'openai-codex',auth:{accountId:'synthetic-account'}}}}}),{mode:0o600})
   const selected=await core.request('runtime.startup.get',{runtimeKind:'cline-cli'})
   await core.request('runtime.startup.save',{runtimeKind:'cline-cli',expectedRevision:selected.revision,configuration:{programPath:fake,environment:[{name:'CLINE_PROVIDER_SETTINGS_PATH',value:join(settings,'unlogged.json')}]}})
+  const stored=await core.request('runtime.startup.get',{runtimeKind:'cline-cli'})
+  assert.equal(stored.configuration.programPath,fake)
   let login=await core.request('runtime.clineLogin.start')
   for(let i=0;i<100&&!login.output.includes('auth.invalid');i++){await sleep(30);login=await core.request('runtime.clineLogin.read',{attemptId:login.attemptId})}
+  proof.loginObservation={status:login.status,outputBytes:login.output.length,syntheticLinkPresent:login.output.includes('auth.invalid')}
   assert(login.output.includes('auth.invalid'));assert(!login.output.includes('fixture-must-not-render'))
   await core.request('runtime.clineLogin.input',{attemptId:login.attemptId,input:'continue'})
   login=await core.request('runtime.clineLogin.cancel',{attemptId:login.attemptId})
@@ -110,7 +113,7 @@ try{
   for(let i=0;i<100&&login.status==='running';i++){await sleep(30);login=await core.request('runtime.clineLogin.read',{attemptId:login.attemptId})}
   assert.equal(login.status,'completed');assert.equal(login.output,'')
   await core.request('runtime.clineLogin.start')
-  proof.packagedLoginFixture={selectedAbsoluteProgram:true,explicitStart:true,privateOutputRedacted:true,input:true,cancel:true,subsequentCompletion:true,realOAuth:false}
+  proof.loginFixture={packagedRendererToCore:Boolean(values.app),selectedAbsoluteProgram:true,explicitStart:true,privateOutputRedacted:true,input:true,cancel:true,subsequentCompletion:true,realOAuth:false}
  }
  proof.sourceChanged=await digest(join(source,'providers.json'))!==before
  if(!values['native-account'])assert.equal(proof.sourceChanged,false)
@@ -118,7 +121,7 @@ try{
 }finally{
  await core.stop()
  proof.hostTempRemaining=await readdir(hosts)
- if(proof.packagedLoginFixture){assert.deepEqual(proof.hostTempRemaining,[]);proof.packagedLoginFixture.shutdownActiveLogin=true}
+ if(proof.loginFixture){assert.deepEqual(proof.hostTempRemaining,[]);proof.loginFixture.shutdownActiveLogin=true}
  proof.runtimeFilesRemoved=await removeEphemeralRuntimeCampFilesRoot(data,{temporaryDirectory:root})
  await rm(join(settings,'providers.json'),{force:true});proof.privateProviderCopyRemoved=true
  await writeFile(join(root,'evidence.json'),JSON.stringify(proof,null,2),{mode:0o600})

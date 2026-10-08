@@ -77,7 +77,12 @@ impl Core {
             current_runtime_platform_blocker(kind).is_none(),
             "当前平台不支持 Cline 原生登录。"
         );
+        // Fresh shell discovery does not contain saved per-Runtime preferences.
+        // Reapply the selected path and credential source before either help or
+        // login is invoked; otherwise an unrelated global CLI could authorize.
         let search = self.read_runtime_check_environment(true).await?;
+        let configurations = runtime_startup::load_all(&*self.database.lock().await)?;
+        let search = search.with_startup_configurations(configurations);
         let observation = discover_runtime_path(kind, &search);
         let path = PathBuf::from(
             observation

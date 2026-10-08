@@ -101,7 +101,8 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
   用最小私有 CLI 子进程验证交互、脱敏、取消后进程退出、单源租约、后续登录及未确认 owner 阻断。
   归入 extended-tests，纯函数不能证明内核进程所有权释放；不使用模型/真实 token，不代表 OAuth 刷新通过。
 - 既有 `cline_hub::failure::tests` 增加认证/订阅/网络分类；既有产品 Smoke 增加显式 `--native-account`，
-  无静态 key、直接引用授权原生源，保留失败记录。Renderer 登录交互由现有 settings-workspace fixture 承接。
+  无静态 key、直接引用授权原生源，保留失败记录。既有 diagnostic/recovery fixture 扩展已保存路径与凭据源的 Core 登录路由，
+  发现并防止 fresh discovery 丢失已保存配置的回归。Renderer 登录交互由现有 settings-workspace fixture 承接。
 
 最小命令：`cargo test -p rovai-core --features extended-tests --lib cline`、`pnpm test:settings-workspace`。
 真实账号/刷新/并发结论必须来自独立[验收矩阵](../research/cline-runtime/native-account-auth-2026-10-08.md)。
