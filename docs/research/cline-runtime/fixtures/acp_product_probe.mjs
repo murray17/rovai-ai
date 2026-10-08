@@ -289,7 +289,7 @@ print('ACP_PARALLEL_'+letter)
     report.skillMarkerObserved = true
   }
   if (core.capture) {
-    await core.capture(join(root, 'packaged-app.png'))
+    await core.capture(join(root, 'packaged-app.png'), threadId)
     report.packagedRendererToCore = true
   }
   report.passed = true

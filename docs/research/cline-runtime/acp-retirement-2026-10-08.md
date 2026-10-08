@@ -2,7 +2,7 @@
 document_type: runtime-research
 runtime: cline-cli
 authority: research-evidence-only
-status: verification-in-progress
+status: implemented-with-native-limitations
 admission: preview
 observed_version: 3.0.3
 observed_platform: macos-arm64
@@ -53,7 +53,10 @@ ACP buildConfig 仍未交付 compaction；本轮不注入、不重做长上下�
   首个独立 fixture 曾在输入发送前遇到 Fleet startup could not commit；保留失败，原因未证实。第二个新 fixture 未换来源通过。
 - stdio MCP 实际 tools/call 一次与原生 Skill 标记读取通过（三轮真实请求）。
 - BYOK cold 同样因原生 load 方法缺失而换代，后续生成不能算 exact cold。
-- 打包 App、最终构建与 CI：正在验证，完成后在此更新。
+- 最终代码 `9b8fa131` 打包 App：账号 7 轮为 6 成功 / 1 预期取消，覆盖 first、同 Host warm、双成员 barrier、审批及取消后继续；BYOK first/warm 两轮通过。
+  Renderer → preload → packaged Core → 所选 `cline --acp` 完成真实请求，随后通过界面精确 Thread 查找读回公开回复（零新增输入）。
+- 无凭据原生源：正式 ACP 诊断返回 `runtime_authentication_required`、认证状态 unknown；零模型输入、零自动登录、无 Provider/计费回退。
+  正向产品夹具按预期在 Ready 断言退出，不能将此负例的 `passed=false` 误称模型成功。撤销授权和实际网络中断未另行制造。
 - 原生完整 System 输入中的精确出现次数尚未取得本机观察证据；私有 Rule 文件唯一性与 user 层 B=0 由代码/合同测试验证。
 - 真实刷新、首次完整授权、外部 Cline 并发刷新、压缩后恢复与完整多平台 Runtime 矩阵未验证。
 
@@ -65,3 +68,26 @@ ACP buildConfig 仍未交付 compaction；本轮不注入、不重做长上下�
 旧报告和负例保留，复现脚本链接固定退役前 ada6f6c1；不将旧 Hub 成绩计入本表。
 
 当前可复用夹具：[ACP 产品验收](fixtures/acp_product_probe.mjs)、[打包 App 通道](fixtures/packaged_client.mjs)。
+
+## 最终检查与可复核证据
+
+代码切换提交 `3fee7e4f`，主干合流 `91e5fe56`，最终实现 `9b8fa131d77e8b98feb79667d4a74c699bca0336`。
+后续提交只整理此报告、脱敏证据和验收夹具的界面读回；不改变该提交的 Rust/Renderer 执行代码。
+[允许公开的结构化证据](evidence/acp-retirement-2026-10-08.json)仅保留状态、Host/Session/Binding 关系、计数及摘要，
+不含 Provider 文件、凭据、原始模型上下文或授权链接。
+
+- `cargo test --workspace`：462 通过，2 项既有忽略；`cargo check --workspace --all-targets --all-features` 通过。
+- 共享 ACP 69 通过 / 2 项原生人工 smoke 忽略，Cline 3 通过，Fleet 23 通过，Pi/原生来源过滤组 23 通过 / 1 项真实 Runtime smoke 忽略。
+  通用进程 4 通过、macOS 内核身份与重启账本 2 通过；未重新跑其他 Runtime 的完整模型矩阵。
+- 迁移过滤组 23 项及既有 Runtime catalog owner 扩展均通过。合并保留 main 的 Mission 描述 Atom 和续做授权，
+  以完整结构识别 184/185 分叉来源，原子合流到 187/schema 137，覆盖回滚和重开。
+- 前端类型检查、238 文件 / 2611 项 Vitest、相关 Node/IPC 与设置工作区回归通过；通用文档及 base diff 门通过。
+- `pnpm package:mac` 与 arm64 ad-hoc 签名校验通过；仅启动独立验收 App，未替换或重启日常 App。
+- [Windows workspace/all-targets 编译](https://github.com/murray17/rovai-ai/actions/runs/37795323664)在最终实现提交通过；这不等于 Windows Cline Runtime 真机资格。
+
+全仓生产引用检查只剩旧 Missing-Send 结果的被动反序列化及拒绝，以及通用账本对 `runtime/cline-hub/hosts`
+的旧自有进程回收路径。负向测试继续拒绝旧协议；不保留任何 Hub 启动、探测、恢复器或后备实现。
+`tokio-tungstenite`/`tungstenite` 已无消费者并从锁文件删除；`futures-util` 仍是其他库的传递依赖，未按名称误删。
+
+收口时保留的范围：本机 Cline 3.0.3 的精确 cold 不通过，ACP compact 未修复；原生完整 System 输入中 B 的精确次数、
+首次完整授权、真实刷新、外部刷新并发及压缩后恢复仍未验证。普通 warm/并行保持 Preview，不以这些未验证项增加封禁。

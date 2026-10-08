@@ -91,9 +91,28 @@ export async function startPackagedAcceptance({ app, data, cwd, onNotification }
     assert(health, 'packaged full Core did not become ready')
     assert.equal(await realpath(health.database.path), await realpath(join(data, 'rovai.sqlite')))
     return { pid: child.pid, request, stop,
-      async capture(path) {
-        await evaluate('(() => { const item = [...document.querySelectorAll("button")].find(node => node.textContent?.includes("Official ACP isolated product acceptance")); item?.click(); return Boolean(item) })()')
-        await sleep(1000)
+      async capture(path, threadId) {
+        assert(threadId, 'capture requires the actual accepted Thread')
+        assert(await evaluate('(() => { const button = document.querySelector(".conversation-jump"); button?.click(); return Boolean(button) })()'))
+        for (let i = 0; i < 100; i++) {
+          if (await evaluate('Boolean(document.querySelector(".command-palette-input"))')) break
+          await sleep(100)
+        }
+        await evaluate('document.querySelector(".command-palette-input").focus()')
+        await send('Input.insertText', { text: threadId })
+        let opened = false
+        for (let i = 0; i < 100 && !opened; i++) {
+          opened = await evaluate('(() => { const item = document.querySelector(".command-palette-item"); item?.click(); return Boolean(item) })()')
+          if (!opened) await sleep(100)
+        }
+        assert(opened, 'the accepted Thread must be navigable in the packaged UI')
+        let publicReplyVisible = false
+        for (let i = 0; i < 150 && !publicReplyVisible; i++) {
+          publicReplyVisible = await evaluate('document.body.innerText.includes("ACP_PRODUCT_MEMBER_A")')
+          if (!publicReplyVisible) await sleep(100)
+        }
+        assert(publicReplyVisible, 'packaged UI must render the actual public reply')
+        await sleep(300)
         const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
         await writeFile(path, Buffer.from(image.data, 'base64'), { mode: 0o600 })
       }

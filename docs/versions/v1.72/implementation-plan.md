@@ -1241,3 +1241,11 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
 - Migration 184/185 的双来源由完整 schema 识别，186 汇合 Runtime catalog/续做，187 保留或回填 Mission 描述到 schema 137。
 - 扩展已有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，覆盖 main/135 结构化 Atom、部分结构拒绝、失败回滚和重开库；保留 Mission 描述及 continuation 的原 owner。未新增平行测试体系。
 - 主干 Runtime Launch v53 和 D17/D18 保留原编号；本分支决定顺延 D19–D27，现行后端由 v54/D27 拥有。
+
+## 2026-10-08 官方 ACP 切换交付
+
+- 最终实现 `9b8fa131`：共享 ACP 69 项、Fleet/Pi/进程与迁移 owner、Rust workspace/all-feature 编译、前端类型及 2611 项测试通过。
+- Windows runner 对该提交执行 workspace/all-targets 编译通过；macOS arm64 App 签名与真实账号/BYOK 主路径通过。
+- 打包账号 6 成功 / 1 预期取消，独立双成员并行、同 Host warm、审批与取消后继续成立；BYOK 打包 first/warm 两轮通过。
+- 无凭据诊断返回原生 authentication_required，未自动登录。3.0.3 load 广告与实际不符仍是明确 native cold 缺口，ACP compact 不宣称修复。
+- 最终边界、负例、真实/模拟验证区分和公开证据见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)。PR #662 更新后保留未合并。

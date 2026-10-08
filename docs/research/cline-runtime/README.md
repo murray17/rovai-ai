@@ -6,7 +6,7 @@ status: implementation-in-progress
 admission: preview
 observed_version: 3.0.3
 observed_platform: macos-arm64
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # Cline 官方 Runtime 接入
