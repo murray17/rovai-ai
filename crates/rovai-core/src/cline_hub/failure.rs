@@ -52,6 +52,8 @@ impl HubFailure {
             "reauthorization_required"
         } else if message.contains("not logged in") || message.contains("no saved credentials") {
             "not_logged_in"
+        } else if message.contains("api key is missing") {
+            "credentials_unavailable"
         } else if message.contains("insufficient_quota")
             || message.contains("insufficient credits")
             || message.contains("no active subscription")
@@ -110,6 +112,7 @@ impl HubFailure {
                     "session_not_found" => "Cline 未找到原生会话",
                     "authentication_failed" => "Cline 原生认证失败",
                     "not_logged_in" => "Cline 尚未登录",
+                    "credentials_unavailable" => "Cline 未取得原生认证凭据",
                     "reauthorization_required" => "Cline 要求重新授权",
                     "account_access_denied" => "Cline 账号的订阅或模型权限不足",
                     "service_unavailable" => "Cline 原生服务暂时不可达",
@@ -149,6 +152,7 @@ impl HubFailure {
                 Self::Native {
                     category: "authentication_failed"
                         | "not_logged_in"
+                        | "credentials_unavailable"
                         | "reauthorization_required",
                     ..
                 }
@@ -243,6 +247,11 @@ mod tests {
             ),
             ("command_failed", "no saved credentials", "not_logged_in"),
             (
+                "",
+                "OpenAI API key is missing. secret-details",
+                "credentials_unavailable",
+            ),
+            (
                 "command_failed",
                 "insufficient_quota secret-details",
                 "account_access_denied",
@@ -272,8 +281,8 @@ mod tests {
             AdapterKind::ClineCli,
             RuntimeFailureOrigin::Compatibility,
             RuntimeFailurePhase::Authentication,
-            "cline_hub_native_auth_requires_api_key",
-            "Cline Hub 需要 API key",
+            "cline_hub_native_not_logged_in",
+            "Cline 原生报告尚未登录",
             None,
             false,
         ));

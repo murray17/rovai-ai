@@ -1,6 +1,6 @@
 //! Explicit user interaction only. Native authorization output lives in bounded
 //! memory, never a transcript, event, database, diagnostic or model input.
-use super::{auth, config};
+use super::config;
 use crate::managed_process::{ManagedChildStdin, ManagedProcess};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -21,7 +21,6 @@ pub(super) struct Login {
     pub id: String,
     process: Mutex<ManagedProcess>,
     input: Mutex<Option<ManagedChildStdin>>,
-    lease: Mutex<Option<auth::NativeAuthLease>>,
     output: StdMutex<String>,
     status: StdMutex<&'static str>,
     cancel: AtomicBool,
@@ -49,34 +48,16 @@ impl Login {
             bail!("cline_native_login_installation_changed");
         }
         if !help.contains("--provider") || !help.contains("Authenticate") {
-            return Err(auth::failure(
-                "cline_hub_native_login_unsupported",
-                "所选 Cline 没有可用的原生登录入口",
-                "本次安装的认证帮助不支持已确认的 Provider 登录参数；不会调用其他全局 CLI。",
-            ));
+            bail!("cline_hub_native_login_unsupported");
         }
         let paths = crate::cline::runtime_native_paths()?;
-        if let Some(parent) = paths.providers.parent() {
-            if !parent.exists() {
-                config::private_dir(parent)?;
-            }
-        }
         let mut preparation = config::HostPreparation::create(&root)?;
-        let mut lease = auth::NativeAuthLease::acquire(&paths.providers, &root)?;
         let mut command = tokio::process::Command::new(executable);
         crate::runtime_discovery::configure_runtime_command(AdapterKind::ClineCli, &mut command);
         command
             .args(["auth", "--provider", "openai-codex"])
             .current_dir(&root)
             .env("CLINE_PROVIDER_SETTINGS_PATH", &paths.providers);
-        for name in [
-            "CLINE_API_KEY",
-            "OPENAI_API_KEY",
-            "OPENAI_BASE_URL",
-            "OPENAI_API_BASE",
-        ] {
-            command.env_remove(name);
-        }
         let spec = ManagedProcessLaunchSpec::capture(
             &command,
             ManagedProcessPurpose::RuntimeOneShot,
@@ -84,14 +65,7 @@ impl Login {
             ManagedWindowsArgvDialect::MicrosoftCrt,
             "cline-native-login",
         )?;
-        lease.before_spawn()?;
-        let mut process = match ManagedProcess::spawn(spec) {
-            Ok(process) => process,
-            Err(error) => {
-                lease.process_absent()?;
-                return Err(error.into());
-            }
-        };
+        let mut process = ManagedProcess::spawn(spec)?;
         preparation.process_started();
         let tracked = process
             .track_descendants(&root.join("owned-processes"))
@@ -101,13 +75,11 @@ impl Login {
                     &root.join(config::OWNED_HOST_MARKER),
                     super::PROTOCOL.as_bytes(),
                 )
-            })
-            .and_then(|()| lease.tracked());
+            });
         if let Err(error) = tracked {
             let _ = process.force_terminate_tree();
             let _ = tokio::time::timeout(Duration::from_secs(2), process.wait()).await;
             if process.captured_tree_is_empty().unwrap_or(false) {
-                lease.process_absent()?;
                 std::fs::remove_dir_all(&root)?;
             }
             return Err(error);
@@ -123,7 +95,6 @@ impl Login {
             id: uuid::Uuid::new_v4().to_string(),
             process: Mutex::new(process),
             input: Mutex::new(input),
-            lease: Mutex::new(Some(lease)),
             output: StdMutex::new(String::new()),
             status: StdMutex::new("running"),
             cancel: AtomicBool::new(false),
@@ -185,19 +156,10 @@ impl Login {
             };
             worker.input.lock().await.take();
             let cleanup = worker.reap().await;
-            let saved = config::read_json(&paths.providers).ok().flatten();
-            let valid = saved.as_ref().is_some_and(|saved| {
-                matches!(
-                    auth::select(saved, "openai-codex", None),
-                    Ok(auth::Authentication::NativeAccount)
-                )
-            });
             *worker.status.lock().unwrap() = if !cleanup {
                 "cleanup_unconfirmed"
             } else if worker.cancel.load(Ordering::Acquire) {
                 "cancelled"
-            } else if status == "completed" && !valid {
-                "failed"
             } else {
                 status
             };
@@ -248,13 +210,6 @@ impl Login {
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         for _ in 0..50 {
             if process.captured_tree_is_empty().unwrap_or(false) {
-                let mut lease = self.lease.lock().await;
-                if let Some(lease) = lease.as_mut() {
-                    if lease.process_absent().is_err() {
-                        return false;
-                    }
-                }
-                lease.take();
                 let _ = std::fs::remove_dir_all(&self.root);
                 return true;
             }
@@ -280,17 +235,37 @@ mod tests {
     };
     use std::os::unix::fs::PermissionsExt;
 
-    // A real child is necessary to verify that pipe interaction, exclusive
-    // refresh ownership and cancellation end at kernel-confirmed process exit.
+    // A real child proves private interaction, independent login processes and
+    // cancellation ending only at kernel-confirmed process exit.
     #[tokio::test]
     async fn login_interaction_is_private_and_cancel_releases_only_proven_empty_ownership() {
         let root = std::env::temp_dir().join(format!("rovai-cline-login-{}", uuid::Uuid::new_v4()));
         config::private_dir(&root).unwrap();
         let source = root.join("providers.json");
-        let settings = json!({"version":1,"providers":{"openai-codex":{"settings":{"provider":"openai-codex","auth":{"accountId":"fixture-account"}},"tokenSource":"oauth"}}});
+        let settings = json!({"nativeFormat":"unknown-to-rovai"});
         config::private_file(&source, &serde_json::to_vec(&settings).unwrap()).unwrap();
+        let legacy = root.join(format!(
+            ".rovai-auth-{}",
+            crate::command::canonical_json_digest(&json!(source.canonicalize().unwrap())).unwrap()
+        ));
+        config::private_file(
+            &legacy.join("owner.json"),
+            br#"{"schemaVersion":1,"state":"starting"}"#,
+        )
+        .unwrap();
+        config::private_file(&legacy.join("lease.lock"), b"").unwrap();
+        let legacy_lock = std::fs::File::open(legacy.join("lease.lock")).unwrap();
+        assert_eq!(
+            unsafe {
+                libc::flock(
+                    std::os::fd::AsRawFd::as_raw_fd(&legacy_lock),
+                    libc::LOCK_EX | libc::LOCK_NB,
+                )
+            },
+            0
+        );
         let executable = root.join("selected-cline");
-        config::private_file(&executable,b"#!/bin/sh\nif [ \"$2\" = \"--help\" ]; then echo 'Authenticate --provider'; exit 0; fi\nprintf '%s\\n' 'Login link https://auth.invalid/?user_code=fixture-code' 'access_token=never-render-this'\nIFS= read -r answer\nif [ \"$answer\" = finish ]; then exit 0; fi\nexec /bin/sleep 60\n").unwrap();
+        config::private_file(&executable,b"#!/bin/sh\n[ \"$CLINE_API_KEY\" = preserved-fixture-key ] || exit 17\nif [ \"$2\" = \"--help\" ]; then echo 'Authenticate --provider'; exit 0; fi\nprintf '%s\\n' 'Login link https://auth.invalid/?user_code=fixture-code' 'access_token=never-render-this'\nIFS= read -r answer\nif [ \"$answer\" = finish ]; then exit 0; fi\nexec /bin/sleep 60\n").unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         let search = RuntimeSearchEnvironment::for_test_paths(1, Vec::new())
             .with_startup_configuration(
@@ -298,10 +273,16 @@ mod tests {
                 RuntimeStartupConfiguration {
                     program_path: None,
                     custom_api_snapshot: None,
-                    environment: vec![RuntimeEnvironmentVariable {
-                        name: "CLINE_PROVIDER_SETTINGS_PATH".into(),
-                        value: source.to_string_lossy().into_owned(),
-                    }],
+                    environment: vec![
+                        RuntimeEnvironmentVariable {
+                            name: "CLINE_PROVIDER_SETTINGS_PATH".into(),
+                            value: source.to_string_lossy().into_owned(),
+                        },
+                        RuntimeEnvironmentVariable {
+                            name: "CLINE_API_KEY".into(),
+                            value: "preserved-fixture-key".into(),
+                        },
+                    ],
                 },
             );
         let first = with_runtime_configuration(
@@ -323,10 +304,6 @@ mod tests {
         .await
         .unwrap();
         assert!(!first.view().to_string().contains("never-render-this"));
-        assert!(auth::NativeAuthLease::acquire(&source, &root.join("other")).is_err());
-        assert!(first.stop().await);
-        assert_eq!(first.view()["output"], "");
-        assert!(!root.join("first").exists());
         let second = with_runtime_configuration(
             AdapterKind::ClineCli,
             &search,
@@ -345,11 +322,13 @@ mod tests {
         assert_eq!(second.view()["status"], "completed");
         assert_eq!(second.view()["output"], "");
         assert_eq!(config::read_json(&source).unwrap().unwrap(), settings);
-        let mut unconfirmed =
-            auth::NativeAuthLease::acquire(&source, &root.join("unconfirmed")).unwrap();
-        unconfirmed.before_spawn().unwrap();
-        drop(unconfirmed);
-        assert!(auth::NativeAuthLease::acquire(&source, &root.join("must-not-spawn")).is_err());
+        assert!(
+            first.running(),
+            "other login does not own this process or credential source"
+        );
+        assert!(first.stop().await);
+        assert_eq!(first.view()["output"], "");
+        assert!(!root.join("first").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

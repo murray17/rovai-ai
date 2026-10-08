@@ -3601,7 +3601,7 @@
   "未能复制图片，请重试或保存图片。": "Could not copy the image. Try again or save it.",
   "未能保存图片，请重试。": "Could not save the image. Try again.",
   "请按 Cline 提示完成浏览器授权。": "Follow Cline’s instructions to authorize in your browser.",
-  "原生登录已完成。": "Native login completed.",
+  "原生登录流程已完成。": "Native login flow completed.",
   "原生登录未完成，可重新尝试。": "Native login did not complete. You can try again.",
   "登录已取消。": "Login cancelled.",
   "登录已超时，请重新尝试。": "Login timed out. Please try again.",

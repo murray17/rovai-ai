@@ -207,7 +207,7 @@ app.whenReady().then(async () => {
     await click('.cline-native-login input')
     await window.webContents.insertText('fixture-authorization-answer')
     await key('Enter')
-    await waitFor("document.querySelector('.cline-native-login [role=status]').textContent.includes('原生登录已完成')")
+    await waitFor("document.querySelector('.cline-native-login [role=status]').textContent.includes('原生登录流程已完成')")
     assert.equal(await run("window.settingsTest.requests.filter(r=>r.method==='runtime.clineLogin.input').at(-1).params.input"), 'fixture-authorization-answer')
     assert.equal(await run("document.querySelector('.cline-native-login input')"), null)
     await waitFor("window.settingsTest.requests.some(r=>r.method==='runtime.startup.check' && r.params.runtimeKind==='cline-cli') && !document.querySelector('.runtime-startup-page').getAttribute('aria-busy').includes('true')")

@@ -540,6 +540,7 @@ Cline 仅冻结 `cline-hub-v1`；删除 ACP Host、3.0.65 门槛、Plugin observ
 User 85（`6dbd9e73-aef0-45cd-afcc-0688d3c4cf39`）要求 Cline 自己认证，User 87
 （`a8b7cc52-e1b9-4293-9e65-278962e9823f`）进一步授权直接使用已登录账号。选择引用持久原生认证文件，
 允许 Cline 自行写回，不复制日常 refresh token 创建伪独立授权。Rovai 仅管理认证来源和进程所有权。
+以下为 User 85/87 阶段选择，已由 D24 取消认证独占与强制 cold：
 实际安装只有实例内刷新合并，故账号 Host 结束即回收，同文件单个 Rovai 登录/Hub 进程；忙时明确拒绝。
 接受每轮 cold 成本，避免 IdleWarm 长期占有认证源；不为了共享刷新器而合并成员可变 System 环境。
 外部原生 CLI 不服从此锁，不能宣称所有 Cline 进程的刷新安全；实际刷新及外部并发资格单独保留。
@@ -549,3 +550,27 @@ overflow recovery/retry、压缩取消、多 Session 压力及其他平台仍须
 Host 采用 member scope 且固定 B，不在活跃原生 Session 之间修改共享 Rule。配置差异可能增加
 Host 重建，接受此成本以保证身份隔离。不保留不存在的旧会话兼容；历史实验及证据只作追溯。未选择另装 SDK、客户端压缩贡献、包装 ACP 或接管用户 Hub；它们无法满足本轮
 原生安装、配置权威和恢复证据边界。
+
+
+<a id="v1-72-d24"></a>
+## V1.72-D24：Cline 认证交还原生，恢复普通 warm 与并行
+
+- 状态：accepted
+- 日期：2026-10-08
+- 确认：User 消息 `21603f57-49eb-4683-b1e2-903e5ae7da11`（Thread 89）
+- 当前权威：[Runtime Launch v53](../../contracts/runtime-launch-and-verification-v53.md#cline-native-hub)、[Cline 实施边界](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)
+
+### 背景与选择
+
+D23 后续的原生认证实现把未验证刷新风险变成 Provider/账号字段门槛和文件级独占，账号每轮必须 cold，
+多个成员无法同时使用用户已配置的原生来源。User 明确优先日常可用性并撤销这些附加策略。
+所有认证直接引用所选原生来源，Cline 自己认证和保存刷新结果；Rovai 仅控制任务、隔离成员配置并反馈原生结果。
+删除专属认证模块、锁和模式标记，复用共享 Fleet，不增加替代账号服务或兼容门槛。
+
+### 后果与替代方案
+
+多个成员各有独立 Hub 和冻结 Rule/MCP；原生刷新并发能力与普通并行请求分别记录，不因缺资格证据禁止执行。
+旧 starting 锁记录不再参与启动；通用内核身份账本照常回收自有进程。正常 token 轮换与无关 Provider 更新不重绑。
+未保留单一刷新所有者，因为它继续阻断本轮要求的 warm 和多成员；未共享一个 Hub，因为那需要另证成员配置隔离。
+不通过复制 refresh token 建立伪独立账号。已授权的原生日常凭据可能被 Cline 更新，Rovai 自身不写回或删除。
+登录成功仅说明原生命令完成；保持 Preview，首次授权、真实刷新和外部并发刷新未验证范围不被写成通过。

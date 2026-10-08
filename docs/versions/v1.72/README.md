@@ -17,8 +17,8 @@ User 消息 80 要求 Cline 新会话切换到已验证的 Native Hub。当前�
 用户所选官方 CLI 的独立认证 Hub，复用共享 Fleet、Binding、投递、审批、Builtin CLI 和监控结算。
 原生 off/basic/agentic 从实际配置/默认传入，不加入自有压缩器。User 消息 83 确认没有旧会话，
 现已删除 Cline ACP 后端、版本门槛与兼容查询。User 85/87 要求原生认证并授权直接使用已登录账号；
-BYOK 保留，ChatGPT 原生账号由 Cline 读取持久源文件，取消每 Host OAuth 副本，新增显式登录及同源进程互斥。
-已有账号的真实 first/续接/cold 请求已观察到成功；首次产品登录、实际刷新、并发及压缩资格分别记录在
+User 89 进一步取消认证字段准入、同源进程互斥与账号强制 cold；所有认证直接引用原生源，恢复共享 Fleet warm/并行。
+已有账号的真实 first/续接/cold 请求已观察到成功；首次产品登录、实际刷新与压缩资格分别记录在
 [原生账号报告](../../research/cline-runtime/native-account-auth-2026-10-08.md)，不由登录元数据或零模型检查推断。
 仍为 macOS arm64 Preview。取舍见 [V1.72-D23](decisions.md#v1-72-d23)，精确上下文及兼容说明见
 [Native Hub 输入说明](model-context-change-cline-native-hub.md)，验证范围见
@@ -124,7 +124,7 @@ Claude 2.1.280 专用查询与 2.1.100 旧协议回退分别实测通过；Windo
 User 于 2026-10-07 明确取消此功能。移除两种智能体的连接方式、登录状态、地址、Key 和自定义模型表单，
 退出原生写回、目录生成及专用观察接口。程序路径、环境变量、显式检查和本地保存继续保留。
 已有原生文件、凭据及模型目录保持原样，执行由原生 CLI 处理；只读快照兼容与输出脱敏保留。
-模型选择回到原生目录，不增加推理强度 fallback。当前合同为 [Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md)，
+模型选择回到原生目录，不增加推理强度 fallback。当前合同为 [Runtime Launch v53](../../contracts/runtime-launch-and-verification-v53.md)，
 实现与验证见[实施计划](implementation-plan.md#2026-10-07-移除自定义-api-配置)。此前编辑器的验证仅为历史证据，
 见[原验收记录](runtime-custom-api-verification.md)。
 

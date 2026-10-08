@@ -1,5 +1,4 @@
 //! Native Cline Hub transport. This module does not implement or translate ACP.
-mod auth;
 mod config;
 mod events;
 mod failure;
@@ -79,8 +78,6 @@ pub(crate) struct ClineHubHost {
     root: PathBuf,
     session_config: Value,
     models: Vec<crate::agent_profile::ModelDescriptor>,
-    auth_lease: Mutex<Option<auth::NativeAuthLease>>,
-    native_account: bool,
     sessions: Mutex<HashMap<String, ()>>,
     builtin_tools: Option<BuiltinToolProcessConfig>,
 }
@@ -148,7 +145,6 @@ impl ClineHubHost {
         let (child, socket, daemon_pid, configuration) =
             platform::launch(request, &root, &history).await?;
         let (sink, mut source) = socket.split();
-        let native_account = configuration.auth_lease.is_some();
         let host = Arc::new(Self {
             id: uuid::Uuid::new_v4().to_string(),
             executable: request.executable.clone(),
@@ -162,8 +158,6 @@ impl ClineHubHost {
             root,
             session_config: configuration.session,
             models: configuration.models,
-            auth_lease: Mutex::new(configuration.auth_lease),
-            native_account,
             sessions: Mutex::new(HashMap::new()),
             builtin_tools: request.builtin_tools.clone(),
         });
@@ -428,13 +422,6 @@ impl ClineHubHost {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         while Instant::now() < deadline {
             if child.captured_tree_is_empty().unwrap_or(false) {
-                let mut lease = self.auth_lease.lock().await;
-                if let Some(lease) = lease.as_mut() {
-                    if lease.process_absent().is_err() {
-                        return false;
-                    }
-                }
-                lease.take();
                 let _ = std::fs::remove_dir_all(&self.root);
                 return true;
             }
@@ -540,13 +527,22 @@ impl ClineHubRuntime {
                         Some("aborted" | "cancelled") => "aborted",
                         _ => "failed",
                     };
-                    (
-                        result["text"]
-                            .as_str()
-                            .filter(|s| !s.trim().is_empty())
-                            .map(str::to_owned),
-                        reason,
-                    )
+                    if result["finishReason"] == "error" {
+                        // A matched run.start reply may carry an execution error
+                        // inside ok:true. Classify it without publishing raw text;
+                        // this is a known failure, never permission to replay.
+                        *runtime.failure.write().await =
+                            Some(HubFailure::native(&json!({"message":result["text"]})));
+                        (None, reason)
+                    } else {
+                        (
+                            result["text"]
+                                .as_str()
+                                .filter(|s| !s.trim().is_empty())
+                                .map(str::to_owned),
+                            reason,
+                        )
+                    }
                 }
                 Ok(Err(failure)) => {
                     let reason = if failure.is_native()
@@ -875,9 +871,6 @@ impl ClineHubAdapter {
         drop(active);
         *runtime.host.owner.write().await = Weak::new();
         let reusable = reusable
-            // Until native cross-process refresh is qualified, account Hosts
-            // relinquish the credential source only after their whole tree exits.
-            && !runtime.host.native_account
             && runtime.settled.load(Ordering::Acquire)
             && runtime.host.is_quiescent().await;
         self.fleet
@@ -1035,7 +1028,8 @@ pub(crate) async fn capability_snapshot(
     let mut failure = None;
     if let Ok(models) = &result {
         snapshot.probe_status = "ready".into();
-        snapshot.authentication_status = "authenticated".into();
+        // Session creation is not a real model request or proof of login.
+        snapshot.authentication_status = "unknown".into();
         snapshot.protocols = vec![PROTOCOL.into()];
         snapshot.native_session_compatibility_key = Some(format!("cline-cli:{PROTOCOL}"));
         snapshot.capabilities = [

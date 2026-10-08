@@ -15,6 +15,10 @@ User 消息 80（`c023f19a-9f1c-4558-b4d4-1bbab3ddffe9`）授权将 Cline 改为
 `cline-hub-v1`。User 消息 83 确认没有旧会话，现已删除 Cline ACP 后端、版本门槛和兼容查询。
 当前只开放 macOS arm64 Preview，未提升 First-Class 或扩大其他平台资格。
 
+
+本文件保留前阶段验收事实。User 89 已撤销后续认证字段准入、整文件独占与账号强制 cold；
+当前实现与增量结果见 [原生认证简化复验](native-auth-warm-parallel-2026-10-08.md)，不沿用历史限制。
+
 ## 官方入口与共享边界
 
 本机选中入口仍为 Homebrew `cline/bin/cline` 3.0.3，启动同安装的 arm64 Mach-O；Hub build 0.0.41、

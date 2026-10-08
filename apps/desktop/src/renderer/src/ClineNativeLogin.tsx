@@ -5,7 +5,7 @@ import { UiText, uiAttribute } from './interface-language'
 
 type Attempt = { attemptId: string; status: 'running' | 'completed' | 'failed' | 'cancelled' | 'expired' | 'cleanup_unconfirmed'; output: string }
 const LABELS: Record<Attempt['status'], string> = {
-  running: '请按 Cline 提示完成浏览器授权。', completed: '原生登录已完成。',
+  running: '请按 Cline 提示完成浏览器授权。', completed: '原生登录流程已完成。',
   failed: '原生登录未完成，可重新尝试。', cancelled: '登录已取消。', expired: '登录已超时，请重新尝试。',
   cleanup_unconfirmed: '原生登录进程尚未退出，请重试取消。'
 }

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdir, copyFile, chmod, writeFile, readFile, access, rm, readdir } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, access, rm, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { startQualificationCore } from '../../../../scripts/lib/qualification-core.mjs'
@@ -12,7 +12,7 @@ import { seedCompletedOnboardingForAcceptance } from '../../../../scripts/lib/de
 import { startPackagedHubAcceptance } from './native_hub_packaged_client.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from '../../../../scripts/lib/runtime-camp-files-root.mjs'
 
-const { values } = parseArgs({ options: { root: { type: 'string' }, core: { type: 'string' }, app: { type: 'string' }, 'long-context': { type: 'boolean', default: false }, 'native-account': { type: 'boolean', default: false }, 'single-member': { type: 'boolean', default: false }, cline: { type: 'string' }, 'settings-source': { type: 'string' }, extended: { type: 'boolean', default: false }, 'lifecycle-only': { type: 'boolean', default: false }, 'extensions-only': { type: 'boolean', default: false } } })
+const { values } = parseArgs({ options: { root: { type: 'string' }, core: { type: 'string' }, app: { type: 'string' }, 'long-context': { type: 'boolean', default: false }, 'native-account': { type: 'boolean', default: false }, 'single-member': { type: 'boolean', default: false }, parallel: { type: 'boolean', default: false }, cline: { type: 'string' }, 'settings-source': { type: 'string' }, extended: { type: 'boolean', default: false }, 'lifecycle-only': { type: 'boolean', default: false }, 'extensions-only': { type: 'boolean', default: false } } })
 for (const key of ['root', 'core', 'cline', 'settings-source']) assert(values[key], `${key} required`)
 const root = resolve(values.root)
 await mkdir(root, { mode: 0o700 })
@@ -23,10 +23,6 @@ const settings = join(native, 'data/settings')
 await mkdir(settings, { recursive: true, mode: 0o700 })
 await mkdir(workspace, { mode: 0o700 })
 seedCompletedOnboardingForAcceptance(data)
-for (const file of values['native-account'] ? [] : ['providers.json', 'models.json']) {
-  await copyFile(join(values['settings-source'], file), join(settings, file))
-  await chmod(join(settings, file), 0o600)
-}
 const skillMarker = `HUB_SKILL_${randomUUID()}`
 if (values['extensions-only']) {
   const skillRoot = join(native, 'skills/hub-native-acceptance')
@@ -40,12 +36,12 @@ const configurationDigest = async path => {
   catch (error) { if (error.code === 'ENOENT') return null; throw error }
 }
 const protectedConfigurations = [
-  ...(values['native-account'] ? ['global-settings.json'] : ['providers.json', 'models.json', 'global-settings.json']).map(file => ({ scope: 'fixture-native-source', file, path: join(settings, file) })),
-  ...['providers.json', 'models.json'].map(file => ({ scope: 'authorized-settings-source', file, path: join(values['settings-source'], file), nativeWriteAuthorized: values['native-account'] }))
+  ...['global-settings.json'].map(file => ({ scope: 'fixture-native-source', file, path: join(settings, file) })),
+  ...['providers.json', 'models.json'].map(file => ({ scope: 'authorized-settings-source', file, path: join(values['settings-source'], file), nativeWriteAuthorized: true }))
 ]
 for (const configuration of protectedConfigurations) configuration.before = await configurationDigest(configuration.path)
 await writeFile(join(data, 'mcp.json'), '{"mcpServers":{}}', { mode: 0o600 })
-const sourceProviders = JSON.parse(await readFile(join(values['native-account'] ? values['settings-source'] : settings, 'providers.json'), 'utf8'))
+const sourceProviders = JSON.parse(await readFile(join(values['settings-source'], 'providers.json'), 'utf8'))
 if (values['native-account']) {
   assert.equal(sourceProviders.lastUsedProvider, 'openai-codex')
   assert.equal(sourceProviders.providers['openai-codex'].tokenSource, 'oauth')
@@ -88,14 +84,14 @@ print(json.dumps({'bindings':[dict(r) for r in c.execute('select id,agent_id,nat
   assert.equal(result.status, 0, result.stderr)
   return JSON.parse(result.stdout)
 }
-async function collect(label, sent, marker, { denyFirst = false, cancel = false } = {}) {
+async function collect(label, sent, marker, { denyFirst = false, cancel = false, agentId } = {}) {
   assert.equal((sent.commandResult ?? sent).status, 'accepted', JSON.stringify(sent))
   const old = new Set(report.turns.map(turn => turn.run.id))
   let run, snapshot, cancellationRequested = false
   const resolved = new Set()
   for (let count = 0; count < (values['long-context'] ? 1200 : 300); count++) {
     snapshot = await core.request('threads.snapshot', { threadId })
-    run = snapshot.agentRuns.find(run => !old.has(run.id))
+    run = snapshot.agentRuns.find(run => !old.has(run.id) && (!agentId || run.agentId === agentId))
     const actions = snapshot.actions.filter(action => action.agentRunId === run?.id)
     for (const approval of snapshot.approvals.filter(approval => approval.status === 'pending'
       && !resolved.has(approval.id) && actions.some(action => action.id === approval.actionId))) {
@@ -111,16 +107,10 @@ async function collect(label, sent, marker, { denyFirst = false, cancel = false 
       resolved.add(approval.id)
     }
     if (cancel && !cancellationRequested && run && await exists(join(workspace, 'cancel.started'))) {
-      if (values['native-account']) {
-        // The accepted Run is still executing a native tool. A competing owned
-        // diagnostic must fail before creating another refresh-capable daemon.
-        const competing = await core.request('runtime.product.check', { runtimeKind: 'cline-cli' })
-        assert.equal(competing.ready, false)
-        const observed = (await core.request('runtime.installations.list')).find(candidate =>
-          candidate.adapterKind === 'cline-cli' && candidate.installationClass === 'managed_default')
-        assert.equal(observed.lastProbeAttempt.failure.code, 'cline_hub_auth_scope_busy')
-        report.authConcurrency = { activeRunId: run.id, competingDiagnostic: 'cline_hub_auth_scope_busy', competingModelInputs: 0 }
-      }
+      // A live account Host no longer excludes another Host using the same source.
+      const competing = await core.request('runtime.product.check', { runtimeKind: 'cline-cli' })
+      assert.equal(competing.ready, true)
+      report.competingDiagnostic = { activeRunId: run.id, ready: true, modelInputs: 0 }
       let version = run.version
       for (let attempt = 0; attempt < 5; attempt++) {
         const result = await core.request('agentRuns.cancel', { commandId: randomUUID(), command: { threadId, agentRunId: run.id, expectedVersion: version } })
@@ -149,7 +139,7 @@ async function turn(agent, label, body, marker, options) {
   if (!options?.cancel) body += ' After publishing, finish the native turn with a brief non-empty final response.'
   return collect(label, await core.request('thread.messages.send', { commandId: randomUUID(), threadId,
     content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agent] }, body), sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
-    execution: { taskId: null, purpose: 'isolated Native Hub acceptance', completionRole: 'required' } }), marker, options)
+    execution: { taskId: null, purpose: 'isolated Native Hub acceptance', completionRole: 'required' } }), marker, { ...options, agentId: agent })
 }
 try {
   await start()
@@ -157,7 +147,7 @@ try {
   const current = await core.request('runtime.startup.get', { runtimeKind })
   await core.request('runtime.startup.save', { runtimeKind, expectedRevision: current.revision, configuration: {
     programPath: resolve(values.cline), environment: [{ name: 'CLINE_DIR', value: native }, { name: 'CLINE_DATA_DIR', value: join(native, 'data') },
-      ...(values['native-account'] ? [{ name: 'CLINE_PROVIDER_SETTINGS_PATH', value: join(resolve(values['settings-source']), 'providers.json') }] : [])] } })
+      { name: 'CLINE_PROVIDER_SETTINGS_PATH', value: join(resolve(values['settings-source']), 'providers.json') }] } })
   const agents = []
   for (const letter of ['A', 'B']) {
     const result = await core.request('members.create', { commandId: randomUUID(), command: {
@@ -208,12 +198,46 @@ try {
     assert(evidence().runs.every(run => run.runtime_protocol_version === 'cline-hub-v1'))
     const host = label => report.hosts.find(host => host.run === report.turns.find(turn => turn.label === label).run.id)?.host
     assert(host('first') && host('cold'))
-    if (values['native-account']) assert.notEqual(host('first'), host('warm'), 'single refresh owner is reaped between native account turns')
-    else assert.equal(host('first'), host('warm'))
+    assert.equal(host('first'), host('warm'), 'ordinary Fleet must reuse the same compatible Host')
     assert.notEqual(host('first'), host('cold'))
   }
-  if (values.extended || values['lifecycle-only']) {
-    if (!values['lifecycle-only']) {
+  if (values.parallel) {
+    // Both tools wait for the other member, so sequential success cannot pass.
+    await writeFile(join(workspace, 'parallel_barrier.py'), `import pathlib,sys,time
+letter=sys.argv[1]; peer='B' if letter=='A' else 'A'
+pathlib.Path('parallel-'+letter+'.started').write_text(letter)
+end=time.monotonic()+75
+while not pathlib.Path('parallel-'+peer+'.started').exists():
+ if time.monotonic()>end: raise RuntimeError('parallel peer never started')
+ time.sleep(0.1)
+pathlib.Path('parallel-'+letter+'.done').write_text(letter)
+print('HUB_PARALLEL_'+letter)
+`, { mode: 0o600 })
+    for (const agentId of agents) {
+      const profile = await core.request('members.get', { agentId })
+      const updated = await core.request('members.runtime.set', { commandId: randomUUID(), command: {
+        agentId, expectedVersion: profile.version, adapterKind: 'cline-cli', model: profile.runtimeConfiguration.model,
+        permissions: { adapterKind: 'cline-cli', schemaVersion: 1, values: { mode: 'act', auto_approve: 'false' } }
+      } })
+      assert.equal(updated.status, 'applied')
+    }
+    const messages = await Promise.all(agents.map((agentId, i) => {
+      const letter = ['A', 'B'][i]
+      return turn(agentId, `parallel-${letter}`, `Execute exactly python3 parallel_barrier.py ${letter} with the native command tool, waiting until it exits successfully. Do not read or edit the script or any other file, and do not delegate. It waits for the other member. Then publish exactly once using bundled rovai CLI with HUB_PARALLEL_${letter} and your own System identity.`, `HUB_PARALLEL_${letter}`)
+    }))
+    for (const [i, letter] of ['A', 'B'].entries()) {
+      assert.equal(await readFile(join(workspace, `parallel-${letter}.done`), 'utf8'), letter)
+      assert(messages[i].includes(`HUB_PRODUCT_MEMBER_${letter}`))
+      assert(!messages[i].includes(`HUB_PRODUCT_MEMBER_${i ? 'A' : 'B'}`))
+      assert(report.approvals.some(approval => approval.label === `parallel-${letter}`))
+    }
+    const runs = ['A', 'B'].map(letter => report.turns.find(turn => turn.label === `parallel-${letter}`).run.id)
+    const hosts = runs.map(run => report.hosts.find(host => host.run === run)?.host)
+    assert(hosts.every(Boolean)); assert.notEqual(hosts[0], hosts[1])
+    report.parallel = { source: 'same-native-provider-file', separateHosts: true, barrierPassed: true, runIds: runs, separateApprovalsAndSends: true }
+  }
+  if (values.extended || values['lifecycle-only'] || values.parallel) {
+    if (!values['lifecycle-only'] && !values.parallel) {
       await turn(agents[0], 'files', 'Use native apply_patch to add hub-file.txt with one line: one. Read it with native read_files. Use native apply_patch to change that line to two. Then publish exactly once with bundled rovai CLI: HUB_FILE_OK. The final bytes must be exactly two without a trailing newline. Do not use shell for editing.', 'HUB_FILE_OK')
       assert.equal(await readFile(join(workspace, 'hub-file.txt'), 'utf8'), 'two')
       const fileRun = report.turns.at(-1).run.id
@@ -227,12 +251,12 @@ try {
       permissions: { adapterKind: 'cline-cli', schemaVersion: 1, values: { mode: 'act', auto_approve: 'false' } }
     } })
     assert.equal(updated.status, 'applied', JSON.stringify(updated))
-    if (!values['lifecycle-only']) {
+    if (!values['lifecycle-only'] && !values.parallel) {
       await turn(agents[0], 'allow', 'Use native apply_patch to create allowed.txt with the exact bytes allowed, without a trailing newline. Then publish exactly once using bundled rovai CLI: HUB_ALLOWED. Do not use shell to write files.', 'HUB_ALLOWED')
       assert.equal(await readFile(join(workspace, 'allowed.txt'), 'utf8'), 'allowed')
       assert(report.approvals.some(approval => approval.label === 'allow' && approval.kind === 'allow_once'))
     }
-    await turn(agents[0], 'deny', 'Your FIRST tool call must be native apply_patch to create denied.txt containing denied. Expect it to be denied: do not retry or use another tool to write it. After denial, use bundled rovai CLI to publish exactly once HUB_DENIED.', 'HUB_DENIED', { denyFirst: true })
+    if (!values.parallel) await turn(agents[0], 'deny', 'Your FIRST tool call must be native apply_patch to create denied.txt containing denied. Expect it to be denied: do not retry or use another tool to write it. After denial, use bundled rovai CLI to publish exactly once HUB_DENIED.', 'HUB_DENIED', { denyFirst: true })
     assert.equal(await exists(join(workspace, 'denied.txt')), false)
     await turn(agents[0], 'cancel', "Run exactly this shell command and wait for it to finish: printf started > cancel.started; sleep 15; printf late > cancelled.txt. Do not publish yet.", null, { cancel: true })
     await sleep(16_000)
@@ -329,8 +353,8 @@ try {
   if (report.configurationIntegrity.some(configuration => !configuration.unchanged && !configuration.nativeWriteAuthorized)) {
     report.passed = false; report.error ??= 'source native configuration changed'; process.exitCode = 1
   }
-  await rm(join(settings, 'providers.json'), { force: true })
-  report.privateProviderCopyRemoved = !values['native-account']
+  report.providerCopiesCreated = false
+  assert.equal(await exists(join(settings, 'providers.json')), false)
   report.authentication = values['native-account'] ? 'native-openai-codex-no-static-key' : 'byok'
   await save('report.private.json', report)
   console.log(JSON.stringify({ root, passed: report.passed ?? false, error: report.error, turns: report.turns.length }))

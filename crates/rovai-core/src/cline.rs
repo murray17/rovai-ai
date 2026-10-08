@@ -55,8 +55,8 @@ pub struct NativePaths {
 }
 
 impl NativePaths {
-    /// CLINE_DATA_DIR is the data directory itself, unlike --data-dir. ACP
-    /// branches before the CLI flag handler, so use the official environment.
+    /// Resolve the selected native sources before Host-specific CLINE_DIR and
+    /// CLINE_DATA_DIR isolate Rules, tools and session history.
     pub fn resolve(home: &Path, env: impl Fn(&str) -> Option<String>) -> Self {
         let path = |key: &str, fallback: PathBuf| {
             env(key)
@@ -85,57 +85,72 @@ impl NativePaths {
     }
 }
 
-/// Normal OAuth rotation is not a new account or a new Native Binding. Only
-/// known volatile fields of an explicitly OAuth record are excluded; account,
-/// provider, endpoint, unknown metadata and all BYOK keys still fence reuse.
-fn provider_configuration_identity(mut value: Value) -> Value {
-    if let Some(providers) = value["providers"].as_object_mut() {
-        for entry in providers.values_mut() {
-            if entry["tokenSource"] != "oauth"
-                || !entry["settings"]["auth"]["accountId"]
-                    .as_str()
-                    .is_some_and(|id| !id.trim().is_empty())
-            {
-                continue;
-            }
-            if let Some(record) = entry.as_object_mut() {
-                record.remove("updatedAt");
-            }
-            if let Some(auth) = entry
-                .pointer_mut("/settings/auth")
-                .and_then(Value::as_object_mut)
-            {
-                for name in ["accessToken", "refreshToken", "expiresAt", "idToken"] {
-                    auth.remove(name);
-                }
-            }
+/// Observe only the effective Provider. Native credentials remain native;
+/// rotation is not a new Binding, even when optional account metadata is absent.
+fn provider_configuration_identity(value: &Value, provider: Option<&str>) -> Value {
+    let mut selected = provider
+        .map(|id| value["providers"][id].clone())
+        .unwrap_or(Value::Null);
+    if let Some(record) = selected.as_object_mut() {
+        record.remove("updatedAt");
+    }
+    if let Some(auth) = selected
+        .pointer_mut("/settings/auth")
+        .and_then(Value::as_object_mut)
+    {
+        for name in ["accessToken", "refreshToken", "expiresAt", "idToken"] {
+            auth.remove(name);
         }
     }
-    value
+    let mut metadata = value.clone();
+    if let Some(root) = metadata.as_object_mut() {
+        for name in ["providers", "lastUsedProvider", "updatedAt"] {
+            root.remove(name);
+        }
+    }
+    json!({"provider":provider,"configuration":selected,"metadata":metadata})
 }
 
 /// The digest contains hashes, never credential values.
 pub fn native_configuration_digest(paths: &NativePaths) -> Result<String> {
+    let explicit_provider = crate::runtime_discovery::runtime_environment_variable(
+        crate::agent_profile::AdapterKind::ClineCli,
+        "CLINE_PROVIDER",
+    )
+    .and_then(|value| value.into_string().ok())
+    .filter(|value| !value.trim().is_empty());
+    // Unknown/unreadable Provider formats belong to Cline, not an auth gate.
+    let saved = fs::read(&paths.providers)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let provider = explicit_provider.as_deref().or_else(|| {
+        saved
+            .as_ref()
+            .and_then(|value| value["lastUsedProvider"].as_str())
+    });
+    let catalog = paths
+        .providers
+        .parent()
+        .context("Cline provider parent unavailable")?
+        .join("models.json");
     let mut entries = Vec::new();
-    for path in [
-        &paths.providers,
-        &paths.settings,
-        &paths.mcp,
-        &paths
-            .providers
-            .parent()
-            .context("Cline provider parent unavailable")?
-            .join("models.json"),
-    ] {
+    for path in [&paths.providers, &paths.settings, &paths.mcp, &catalog] {
         let digest = match fs::read(path) {
-            Ok(bytes) => Some(if path == &paths.providers {
+            Ok(bytes) => Some(if path == &paths.providers && saved.is_some() {
                 canonical_json_digest(&provider_configuration_identity(
-                    serde_json::from_slice(&bytes).context("cline_native_config_invalid")?,
+                    saved.as_ref().unwrap(),
+                    provider,
                 ))?
+            } else if path == &catalog && provider.is_some() {
+                match serde_json::from_slice::<Value>(&bytes) {
+                    Ok(value) => canonical_json_digest(&value["providers"][provider.unwrap()])?,
+                    Err(_) => format!("{:x}", Sha256::digest(bytes)),
+                }
             } else {
                 format!("{:x}", Sha256::digest(bytes))
             }),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) if path == &paths.providers => Some("unreadable".into()),
             Err(_) => bail!("cline_native_configuration_unreadable"),
         };
         entries.push((path.clone(), digest));
@@ -147,7 +162,7 @@ pub fn native_configuration_digest(paths: &NativePaths) -> Result<String> {
         ));
     }
     canonical_json_digest(
-        &json!({"revision": "cline-native-hub-config-v2", "config": paths.config, "data": paths.data, "files": entries}),
+        &json!({"revision": "cline-native-hub-config-v3", "config": paths.config, "data": paths.data, "files": entries}),
     )
 }
 
@@ -576,33 +591,62 @@ mod tests {
     use super::*;
     #[test]
     fn native_refresh_keeps_binding_identity_but_account_and_byok_changes_fence_it() {
-        let initial = json!({"providers":{"openai-codex":{"tokenSource":"oauth","updatedAt":"before",
-            "settings":{"provider":"openai-codex","model":"native-model","auth":{"accessToken":"old","refreshToken":"old-refresh","expiresAt":1,"accountId":"account-a"}}},
-            "byok":{"tokenSource":"manual","settings":{"apiKey":"static"}}}});
-        let identity = provider_configuration_identity(initial.clone());
+        let initial = json!({"lastUsedProvider":"selected","providers":{"selected":{"updatedAt":"before",
+            "settings":{"provider":"unknown-native-provider","model":"native-model","baseUrl":"https://native.invalid","apiKey":"static",
+            "auth":{"accessToken":"old","refreshToken":"old-refresh","expiresAt":1}}},
+            "unrelated":{"settings":{"apiKey":"other"}}}});
+        // No tokenSource or accountId prerequisite; mixed/unknown auth belongs to Cline.
+        let identity = provider_configuration_identity(&initial, Some("selected"));
+        for pointer in ["/providers/selected", "/providers/selected/settings"] {
+            let mut changed = initial.clone();
+            changed.pointer_mut(pointer).unwrap()["nativeMetadata"] = json!("changed");
+            assert_ne!(
+                provider_configuration_identity(&changed, Some("selected")),
+                identity
+            );
+        }
+        let mut changed = initial.clone();
+        changed["providers"]["selected"]["tokenSource"] = json!("changed");
+        assert_ne!(
+            provider_configuration_identity(&changed, Some("selected")),
+            identity
+        );
         let mut refreshed = initial.clone();
-        refreshed["providers"]["openai-codex"]["updatedAt"] = json!("after");
-        refreshed["providers"]["openai-codex"]["settings"]["auth"]["accessToken"] = json!("new");
-        refreshed["providers"]["openai-codex"]["settings"]["auth"]["refreshToken"] =
-            json!("new-refresh");
-        refreshed["providers"]["openai-codex"]["settings"]["auth"]["expiresAt"] = json!(2);
-        assert_eq!(provider_configuration_identity(refreshed.clone()), identity);
+        refreshed["providers"]["selected"]["updatedAt"] = json!("after");
+        for field in ["accessToken", "refreshToken", "expiresAt", "idToken"] {
+            refreshed["providers"]["selected"]["settings"]["auth"][field] = json!("rotated");
+        }
+        refreshed["providers"]["unrelated"]["settings"]["apiKey"] = json!("unrelated update");
+        refreshed["lastUsedProvider"] = json!("unrelated");
+        assert_eq!(
+            provider_configuration_identity(&refreshed, Some("selected")),
+            identity
+        );
         for pointer in [
-            "/providers/openai-codex/settings/auth/accountId",
-            "/providers/openai-codex/settings/provider",
-            "/providers/openai-codex/settings/model",
-            "/providers/openai-codex/tokenSource",
-            "/providers/byok/settings/apiKey",
+            "/providers/selected/settings/provider",
+            "/providers/selected/settings/model",
+            "/providers/selected/settings/apiKey",
+            "/providers/selected/settings/baseUrl",
         ] {
             let mut switched = refreshed.clone();
             *switched.pointer_mut(pointer).unwrap() = json!("different");
             assert_ne!(
-                provider_configuration_identity(switched),
+                provider_configuration_identity(&switched, Some("selected")),
                 identity,
                 "{pointer}"
             );
         }
-        assert_eq!(identity["providers"]["byok"], initial["providers"]["byok"]);
+        refreshed["providers"]["selected"]["settings"]["auth"]["accountId"] = json!("account-a");
+        let account = provider_configuration_identity(&refreshed, Some("selected"));
+        refreshed["providers"]["selected"]["settings"]["auth"]["accountId"] = json!("account-b");
+        assert_ne!(
+            provider_configuration_identity(&refreshed, Some("selected")),
+            account
+        );
+        assert_ne!(
+            provider_configuration_identity(&initial, Some("unrelated")),
+            identity
+        );
     }
     #[test]
     fn native_metrics_keep_sparse_usage_and_verified_context_windows() {

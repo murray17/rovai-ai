@@ -192,7 +192,6 @@ pub(super) struct NativeConfiguration {
     pub session: Value,
     pub discovery: PathBuf,
     pub models: Vec<crate::agent_profile::ModelDescriptor>,
-    pub auth_lease: Option<super::auth::NativeAuthLease>,
 }
 
 /// Only the selected native provider's persisted model catalog is authoritative
@@ -218,7 +217,9 @@ fn native_models(
                 .map(|(id, _)| id.clone()),
         );
     }
-    ids.insert(selected.to_owned());
+    if !selected.is_empty() {
+        ids.insert(selected.to_owned());
+    }
     ids.into_iter()
         .map(|id| crate::agent_profile::ModelDescriptor {
             is_default: id == selected,
@@ -236,7 +237,7 @@ fn native_models(
 pub(super) const OWNED_HOST_MARKER: &str = ".rovai-cline-hub-host";
 
 /// Own only a newly created Host directory. Before spawn, unwinding (including
-/// cancellation) removes credentials. After spawn, only the process ledger may
+/// cancellation) removes temporary configuration. After spawn, only the process ledger may
 /// authorize deletion; a live or unconfirmed process must retain its files.
 pub(super) struct HostPreparation {
     root: PathBuf,
@@ -327,19 +328,22 @@ pub(super) async fn configure(
     servers: &BTreeMap<String, McpServerDefinition>,
 ) -> Result<NativeConfiguration> {
     let paths = crate::cline::runtime_native_paths()?;
-    let saved = read_json(&paths.providers)?.unwrap_or(Value::Null);
+    // Metadata is a best-effort hint. Cline owns parsing and authentication.
+    let saved = read_json(&paths.providers)
+        .ok()
+        .flatten()
+        .unwrap_or(Value::Null);
     let provider = environment("CLINE_PROVIDER")
         .or_else(|| saved["lastUsedProvider"].as_str().map(str::to_owned))
-        .context("cline_native_provider_unconfigured")?;
+        .unwrap_or_default();
     let settings = &saved["providers"][&provider]["settings"];
     let model = if selected_model.is_none() {
         environment("CLINE_MODEL")
             .or_else(|| settings["model"].as_str().map(str::to_owned))
-            .context("cline_native_model_unconfigured")?
+            .unwrap_or_default()
     } else {
         selected_model.unwrap().to_owned()
     };
-    let authentication = super::auth::select(&saved, &provider, environment("CLINE_API_KEY"))?;
     let catalog = read_json(
         &paths
             .providers
@@ -354,29 +358,7 @@ pub(super) async fn configure(
     }
     let compaction = compaction_setting(&preferences, &native_help(executable).await?)?;
     private_dir(history)?;
-    let (providers_path, auth_lease, projection) = match &authentication {
-        super::auth::Authentication::ApiKey(_) => (
-            root.join("providers.json"),
-            None,
-            Some(super::auth::byok_projection(&saved, &provider)?),
-        ),
-        super::auth::Authentication::NativeAccount => (
-            paths.providers.canonicalize()?,
-            Some(super::auth::NativeAuthLease::acquire(
-                &paths.providers,
-                root,
-            )?),
-            None,
-        ),
-    };
-    write_native_files(
-        root,
-        &paths,
-        bootstrap,
-        servers,
-        projection.as_ref(),
-        &preferences,
-    )?;
+    write_native_files(root, &paths, bootstrap, servers, &preferences)?;
     let preferences_path = root.join("global-settings.json");
     let config = root.join("config");
     let mcp_path = root.join("mcp.json");
@@ -408,30 +390,17 @@ pub(super) async fn configure(
         .current_dir(cwd)
         .env("CLINE_DIR", config)
         .env("CLINE_DATA_DIR", history)
-        .env("CLINE_PROVIDER_SETTINGS_PATH", providers_path)
+        .env("CLINE_PROVIDER_SETTINGS_PATH", &paths.providers)
         .env("CLINE_GLOBAL_SETTINGS_PATH", preferences_path)
         .env("CLINE_MCP_SETTINGS_PATH", mcp_path)
         .env("CLINE_HUB_DISCOVERY_PATH", &discovery)
         .env("CLINE_SESSION_BACKEND_MODE", "local");
-    let mut session = json!({"providerId":provider,"modelId":model,
-        "cwd":cwd,"workspaceRoot":cwd,"compaction":compaction});
-    match authentication {
-        super::auth::Authentication::ApiKey(key) => session["apiKey"] = json!(key),
-        super::auth::Authentication::NativeAccount => {
-            // Only the child changes. No ambient BYOK or endpoint override may
-            // silently change this explicitly selected native account source.
-            for name in [
-                "CLINE_API_KEY",
-                "OPENAI_API_KEY",
-                "OPENAI_BASE_URL",
-                "OPENAI_API_BASE",
-                "OPENAI_ORG_ID",
-                "OPENAI_ORGANIZATION",
-                "OPENAI_PROJECT_ID",
-            ] {
-                command.env_remove(name);
-            }
-        }
+    let mut session = json!({"cwd":cwd,"workspaceRoot":cwd,"compaction":compaction});
+    if !provider.is_empty() {
+        session["providerId"] = json!(provider);
+    }
+    if !model.is_empty() {
+        session["modelId"] = json!(model);
     }
     for field in ["baseUrl", "reasoningEffort"] {
         if let Some(value) = settings.get(field) {
@@ -446,7 +415,6 @@ pub(super) async fn configure(
         session,
         discovery,
         models,
-        auth_lease,
     })
 }
 
@@ -455,16 +423,11 @@ fn write_native_files(
     paths: &crate::cline::NativePaths,
     bootstrap: &str,
     servers: &BTreeMap<String, McpServerDefinition>,
-    saved: Option<&Value>,
     preferences: &Value,
 ) -> Result<()> {
-    // BYOK gets only the selected provider. Native account credentials remain
-    // in their persistent source; Cline owns reading and writing that source.
-    let providers_path = root.join("providers.json");
+    // Native Cline reads and updates the selected persistent Provider source.
+    // Host-owned configuration never contains a Provider credential snapshot.
     let preferences_path = root.join("global-settings.json");
-    if let Some(saved) = saved {
-        private_file(&providers_path, &serde_json::to_vec(saved)?)?;
-    }
     private_file(&preferences_path, &serde_json::to_vec(&preferences)?)?;
     let config = root.join("config");
     private_dir(&config.join("rules"))?;
@@ -525,6 +488,8 @@ mod tests {
         private_dir(paths.mcp.parent().unwrap()).unwrap();
         fs::write(&paths.mcp, r#"{"mcpServers":false}"#).unwrap();
         let source = fs::read(&paths.mcp).unwrap();
+        let providers = br#"{"unknown":"native-format","auth":{"refreshToken":"fixture-only"}}"#;
+        private_file(&paths.providers, providers).unwrap();
         let root = base.join("host");
         {
             let _preparation = HostPreparation::create(&root).unwrap();
@@ -533,23 +498,21 @@ mod tests {
                 &paths,
                 "frozen identity",
                 &BTreeMap::new(),
-                Some(
-                    &json!({"providers":{"native":{"settings":{"apiKey":"isolated-test-secret"}}}}),
-                ),
                 &json!({}),
             );
             assert_eq!(
                 result.unwrap_err().to_string(),
                 "cline_native_mcp_config_invalid"
             );
-            assert!(root.join("providers.json").is_file());
+            assert!(!root.join("providers.json").exists());
             assert!(root.join("global-settings.json").is_file());
         }
         assert!(
             !root.exists(),
-            "failed preparation must remove its credentials"
+            "failed preparation must remove its private configuration"
         );
         assert_eq!(fs::read(&paths.mcp).unwrap(), source);
+        assert_eq!(fs::read(&paths.providers).unwrap(), providers);
         {
             let mut preparation = HostPreparation::create(&root).unwrap();
             preparation.process_started();

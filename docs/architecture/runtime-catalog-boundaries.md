@@ -88,11 +88,14 @@ off/basic/agentic；未设置时核验所选 CLI 的实际 help 默认，无效�
 Rovai 不修改安装 wrapper、二进制或 node_modules，也不下载另一套 SDK/Core。Rule/MCP/运行偏好仍按 Host 隔离；
 用户明确选择的持久原生账号文件允许 Cline 自身登录和刷新写回。
 
-Hub 用实际认证协议和原生 Session 探测判断能力，不设版本白名单。BYOK 保留原生保存或环境中的静态 key；
-账号模式按已确认的 openai-codex 原生配置引用持久凭据文件，Cline 负责读取/刷新/保存，Rovai 不复制 OAuth。
-同文件 Rovai 登录与 Hub 采用进程全生命周期互斥，账号 Host 结束即回收，下轮保持同 Binding cold；
-不把成员共用一个可变 Rule/MCP 环境。外部 CLI 不参与此锁，实际刷新与外部并发仍需独立资格。
-登录必须由用户在设置中显式发起，使用所选安装；未知来源/端点冲突不回退。见[原生账号验收](../research/cline-runtime/native-account-auth-2026-10-08.md)。
+Hub 用实际连接认证协议和原生 Session 探测判断能力，不设版本或认证 Provider 白名单。
+所有认证直接引用所选原生 Provider 源，不生成每 Host 凭据副本；原生负责读取、优先级、刷新及保存。
+缺 accountId、未知认证字段、混合 Key/OAuth 均不作为执行准入条件。零模型探测不推断登录成功。
+账号和 BYOK 都按共享 Fleet 进入 IdleWarm、cold 与多成员并行；各自保留冻结 Rule、MCP 和 Session。
+旧认证文件锁退出启动/登录路径，通用进程账本及崩溃回收保留。不修改普通认证环境或隐式切换计费。
+实际刷新及外部并发仍单独记录，未验证不默认禁止运行。显式登录仅显示原生命令结果，不验证自定义账号结构。
+当前选择见 [V1.72-D24](../versions/v1.72/decisions.md#v1-72-d24)，历史账号证据见
+[原生账号验收](../research/cline-runtime/native-account-auth-2026-10-08.md)。
 模型目录读取所选 Provider 的
 原生本地 models.json，保留当前配置模型；不声称可发现所有远端模型或切换 Provider。
 原生完整历史接口无分页；WebSocket 接收单帧和消息上限为 64 MiB，发送请求上限为 16 MiB，超限明确失败且不裁剪原生历史。
@@ -134,7 +137,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 显式程序路径失效时保持缺失，不能换用自动候选；用户恢复自动后再使用原有发现来源。
 草稿浅检不写安装，草稿深检复用 Check Manager 的并发、deadline 与清理 owner，结果只回到编辑器。
 环境只传入对应 Runtime 进程与原生配置读取，既不修改系统环境，也不投影到公共上下文。
-字段、CAS、迁移和错误边界由 [Runtime Launch v52](../contracts/runtime-launch-and-verification-v52.md)拥有。
+字段、CAS、迁移和错误边界由 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)拥有。
 
 主动正式检查在后端先读取最新基础环境、加载已保存启动设置，再将不可变环境快照交给 Check Manager。
 刷新后的请求不与旧搜索代数合并；结果写回与保存/刷新共用更新锁并重验代数和程序身份。
@@ -154,7 +157,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 
 执行仍保留只读连接摘要、凭据来源引用和输出脱敏，以保持旧快照与 Host/binding 兼容隔离；
 内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
-推理强度 fallback。边界由 [Runtime Launch v52](../contracts/runtime-launch-and-verification-v52.md)拥有。
+推理强度 fallback。边界由 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)拥有。
 
 <a id="浅检测与按需深检"></a>
 ## 安装发现与真实 Host 验证

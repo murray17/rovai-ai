@@ -29,7 +29,12 @@ Cline 仅使用所选官方 CLI 启动的独立认证 Hub，冻结协议 `cline-
 已测 BYOK 发送、warm/cold、审批、取消、stdio MCP、原生 Skill 读取；九轮主流程包含一个预期取消，另有三轮扩展。
 后续已直接复用用户授权的 ChatGPT 原生账号，无静态 Key 的正式 Adapter 九轮为8成功/1预期取消；
 BYOK first/warm/cold 三轮回归成功。账号凭据由 Cline 在持久原生源读取/写回，无每 Host OAuth 副本。
-同文件 Rovai 登录/Hub 采用单进程降级、每轮回收；首次产品登录、真实刷新、外部 CLI 并发仍未完成资格。
+User 89 后取消认证字段门槛、全文件独占与账号强制 cold，所有认证直引原生源，恢复共享 Fleet warm/并行。
+账号正式 Adapter 八轮为7成功/1预期取消：同 Host warm、同 Session/Binding cold、两个独立成员 Hub 的工具 barrier
+并行、分别审批/发送与取消后恢复通过。BYOK 同来源 first/warm/cold 三轮通过；另保留一个原因未证实的首轮失败，未切换来源。
+真实 Core 崩溃回收、准备失败、原生缺凭据/认证拒绝/服务不可达及私有登录 fixture 通过。
+本节证据为 Core 路径；打包 App 结果单独记录。首次完整产品授权、真实刷新和外部 CLI 并发刷新仍未验证，
+不作为普通运行的额外准入条件。见[认证简化复验](research/cline-runtime/native-auth-warm-parallel-2026-10-08.md)。
 详见[原生账号矩阵](research/cline-runtime/native-account-auth-2026-10-08.md)。模型目录限当前 Provider 的本地原生目录。
 原生明确失败与传输未知分开，均不自动重发；准备失败清理独占私有副本，spawn 后依进程账本回收。
 平台专属启动用条件编译隔离。完整历史接收单帧/消息限制 64 MiB，恢复请求限制 16 MiB，超限明确失败、不截断历史。

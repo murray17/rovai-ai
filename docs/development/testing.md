@@ -99,7 +99,9 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 135 及缺失 186 收据。SQLite 结构、事务和重开边界不能由纯 parser 代替；定向命令为
 `cargo test -p rovai-core --features extended-tests --lib migration`，默认门禁仍为 `pnpm test:rust:pr`。
 
-## Cline 原生账号认证 owner（2026-10-08）
+## Cline 原生账号认证初版 owner（2026-10-08，历史）
+
+本节是 User 85/87 阶段记录；当前测试归属与退役说明见下方 User 89 简化小节。
 
 - `cline_hub::auth::tests::auth_source_and_projection_preserve_selected_metadata_without_oauth_copies`
   拥有账号/BYOK/未知来源与端点冲突、无关 OAuth 不复制及选中原生元数据保留的纯函数边界。
@@ -115,6 +117,21 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 
 最小命令：`cargo test -p rovai-core --features extended-tests --lib cline`、`pnpm test:settings-workspace`。
 真实账号/刷新/并发结论必须来自独立[验收矩阵](../research/cline-runtime/native-account-auth-2026-10-08.md)。
+
+## Cline 认证简化的测试变更（2026-10-08，User 89）
+
+`cline_hub/auth.rs` 与其 `auth_source_and_projection_preserve_selected_metadata_without_oauth_copies`
+测试一同退役：Provider/字段/端点准入、凭据投影与全生命周期认证锁已退出生产合同。
+现有配置准备 owner 保留失败清理、live/preexisting 所有权边界，改断言不创建 Provider 副本、源文件不变。
+现有 login owner 保留交互、脱敏、取消/整树清理；以未知账号格式、并存登录及持锁的旧 starting 记录
+取代已退出的互斥/账号元数据准入断言。原生退出成功仅表示流程完成。
+现有配置 identity owner 扩展缺 tokenSource/accountId 的轮换、无关 Provider 更新和当前 Key/账号/端点变化。
+原生错误 owner 的 typed-error 传播 case 改用仍有效的原生未登录错误；拒绝/未知/脱敏断言全部保留。
+没有新增 Rust 测试函数，未改动共享进程、Migration、权限或输入重放测试。
+
+最小命令仍为 `cargo test -p rovai-core --features extended-tests --lib cline`。
+已有产品脚本增加同源双成员 barrier 与各自审批/发送，并统一验证同 Host warm；BYOK 也直引原生来源。
+真实刷新与首次授权不由模拟 fixture 或既有登录请求推断。
 
 ## Cline Hub 评审修正与测试退役（2026-10-08）
 

@@ -44,10 +44,12 @@ impl ClineHubRuntime {
             self.observed_model.store(true, Ordering::Release);
         } else if name == "rovai.afterModel" {
             let message = &context["assistantMessage"];
-            if message["modelInfo"]["id"] != self.host.session_config["modelId"]
-                || message["modelInfo"]["provider"] != self.host.session_config["providerId"]
-            {
-                bail!("cline_hub_native_model_changed");
+            for (configured, observed) in [("modelId", "id"), ("providerId", "provider")] {
+                if let Some(expected) = self.host.session_config[configured].as_str()
+                    && message["modelInfo"][observed].as_str() != Some(expected)
+                {
+                    bail!("cline_hub_native_model_changed");
+                }
             }
             let Some(id) = message["id"].as_str().filter(|s| !s.is_empty()) else {
                 return Ok(());
@@ -67,8 +69,8 @@ impl ClineHubRuntime {
                     metrics[key] = json!(value);
                 }
             }
-            let provider = &self.host.session_config["providerId"];
-            let model = &self.host.session_config["modelId"];
+            let provider = &message["modelInfo"]["provider"];
+            let model = &message["modelInfo"]["id"];
             let window = model.as_str().and_then(|id| {
                 self.host.session_config["knownModels"][id]["contextWindow"].as_i64()
             });

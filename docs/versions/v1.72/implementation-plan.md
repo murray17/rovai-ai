@@ -1096,7 +1096,7 @@ JavaScript 全套与文档门禁在仅含受版本控制文件及本次补丁的
 ## 2026-10-07 移除自定义 API 配置
 
 基线 `a5e202ab`，分支 `rovai/remove-custom-api`；已整合原本的本地保存修复及主线 `f67682c8`。
-按 User 明确取消要求执行 [Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md)。
+按 User 明确取消要求执行 [Runtime Launch v53](../../contracts/runtime-launch-and-verification-v53.md)。
 
 - 移除 Claude/Codex 官方/API 单选、连接登录状态、URL、Key、模型映射及模型列表；普通启动设置保持。
 - Core、Desktop 与 Web 均退出 `runtime.startup.observe`，封闭输入拒绝旧连接补丁和 `apiKey/customApi`。
@@ -1154,3 +1154,15 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
   旧版备份为 `/Applications/Rovai AI.backup-before-remove-custom-api-20261007-9e09d4b1.app`，保留不删除。
 - 日常 App/Helper/Host PID `39161/39165/39166/39167/39168` 安装后均存活，日常数据未改动。
   新版本已安装，当前会话仍运行旧版；退出后应从规范安装路径显式打开新版，不从备份启动。
+
+
+## 2026-10-08 Cline 原生认证简化（User 89）
+
+- 删除 `cline_hub/auth.rs` 的认证选择/白名单/字段准入/Provider 投影与 `NativeAuthLease`。
+- Hub 与显式登录统一直引原生源，保留普通环境；账号与 BYOK 均按 Fleet 复用、回收及并行。
+- 当前 Provider 的非挥发配置参与兼容性；缺可读账号标识不阻断，轮换及无关 Provider 更新不重绑。
+- 登录 completed 改为原生命令流程完成；零模型检查 authenticationStatus 保持 unknown。
+- 原生匹配回复 `ok:true / finishReason:error` 也进入已有脱敏错误分类，输入不重放。
+- 代码、真实负例、账号 warm/双成员并行、BYOK 和 App 结果见
+  [本轮报告](../../research/cline-runtime/native-auth-warm-parallel-2026-10-08.md)。
+- 无 schema 或其他 Runtime 改造，保留 Preview；首次完整授权、真实刷新和外部并发刷新未验证不再封禁普通执行。
