@@ -9004,6 +9004,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: crate::mission::CreateMissionCommand {
+                        description_content: None,
                         title: "Context identity".to_string(),
                         description: "Use the internal Mission ID in new context.".to_string(),
                         project_path: workspace.to_string_lossy().into_owned(),

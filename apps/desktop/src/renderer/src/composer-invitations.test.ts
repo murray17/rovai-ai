@@ -30,7 +30,7 @@ describe('composerInvitationTargets', () => {
       .toEqual([])
   })
 
-  it('blocks unavailable identities and only invites in active Threads', () => {
+  it('blocks unavailable identities and outsiders when invitations are disabled', () => {
     expect(composerInvitationTargets(
       ['away', 'unknown', 'outside'], members, profiles, true
     )).toEqual({ inviteAgentIds: ['outside'], unavailableAgentIds: ['away', 'unknown'] })

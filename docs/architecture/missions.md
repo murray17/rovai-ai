@@ -115,7 +115,7 @@ board return, retaining the same Camp draft and preview ownership. Renderer cons
 Core's cleanup capability and does not infer it from Mission status. Deletion defaults to leaving worktree and
 branch in place. Optional cleanup records its intent in the same transaction that deletes the Mission, removes
 the card immediately, and exposes only failed orphan work through the existing cleanup route; retained resources
-never enter that route. Protocol and failure behavior live in [Mission v11](../contracts/mission-v11.md); UI in
+never enter that route. Protocol and failure behavior live in [Mission v12](../contracts/mission-v12.md); UI in
 [Mission board](../ui/components/mission-board.md). Reasons for the durable workspace and simplified model
 interface are in [V1.59-D11](../versions/v1.59/decisions.md#v1-59-d11); the explicit minimal cleanup choice is in
 [V1.59-D14](../versions/v1.59/decisions.md#v1-59-d14). Global discovery and current-only mutation are explained
@@ -123,3 +123,18 @@ by [V1.61-D01](../versions/v1.61/decisions.md#v1-61-d01). Status/message decoupl
 [V1.62-D01](../versions/v1.62/decisions.md#v1-62-d01); asynchronous cleanup ordering is explained by
 [V1.62-D02](../versions/v1.62/decisions.md#v1-62-d02); managed branch and observed checkout separation is
 explained by [V1.62-D04](../versions/v1.62/decisions.md#v1-62-d04).
+
+
+## Inline member references
+
+Mission descriptions use a closed text/member-reference sequence, with the same stable identity as message
+mentions. The Mission owns content; Camp continues to own membership. User definition transactions reuse the
+Camp member-admission helper to add referenced outsiders atomically with the description, including normal
+membership events and lifetime generations. A rejected invitation rolls back any earlier additions before its
+command receipt is committed. No message, Delivery, Task or Runtime is created by saving.
+
+The shared Composer has a Mission mode for individual references and Enter-to-newline. It has no Skill or
+broadcast semantics in this surface. Renderer derives pending invitations from the current document and current
+membership; it does not maintain a second invite list. Core validates identities again at save. Model-facing
+Mission reads retain the existing readable `description` field, while UI reads receive the ordered structure.
+Storage/upgrade and legacy text replacement semantics are owned by [Mission v12](../contracts/mission-v12.md).

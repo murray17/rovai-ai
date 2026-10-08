@@ -1,4 +1,5 @@
-import {runMissionAcceptance,runMissionCheckoutViewAcceptance,runMissionDeleteTraceAcceptance,runMissionLargeDiffAcceptance} from './acceptance'
+import { missionDescriptionText, missionMentionIds } from '../../../apps/desktop/src/renderer/src/mission-description'
+import {runMissionMentionAcceptance,runMissionAcceptance,runMissionCheckoutViewAcceptance,runMissionDeleteTraceAcceptance,runMissionLargeDiffAcceptance} from './acceptance'
 import React from 'react'
 import {createRoot} from 'react-dom/client'
 import {BusinessApp} from '../../../apps/desktop/src/renderer/src/BusinessApp'
@@ -104,19 +105,25 @@ function admitMissionNotification(missionId: string, kind: 'open_camp_message' |
  events.forEach(fn => fn({ method: 'notification_episode.changed', params: {} }))
  return messageId
 }
+let failNextMissionSave = false
+function projectDescription(m: any, command: any) {
+  if (!command.descriptionContent) return
+  m.description = missionDescriptionText(command.descriptionContent, profiles)
+  m.memberAgentIds = [...new Set([...m.memberAgentIds, ...missionMentionIds(command.descriptionContent)])]
+}
 const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.add(fn);return()=>events.delete(fn)},missionAttachments:{
  update:async(_commandId:string,patch:any,keepAttachmentIds:string[],attachments:any[])=>{
   calls.push({method:'missions.updateWithAttachments',p:{patch,keepAttachmentIds,attachments}})
   const m=items.find(item=>item.missionId===patch.missionId)!
   if(patch.expectedDetailsVersion!==m.detailsVersion)return {...applied({missionId:m.missionId}),status:'rejected',code:'mission.details_version_conflict'}
   const next=[...(m.attachments??[]).filter(attachment=>keepAttachmentIds.includes(attachment.id)),...attachments.map(({id,file,kindHint})=>({id,displayName:file.name,kind:kindHint,mediaType:kindHint==='directory'?'inode/directory':file.type||null,byteSize:kindHint==='directory'?null:file.size,fileCount:kindHint==='directory'?null:1,previewKind:kindHint==='file'&&file.type.startsWith('image/')?'image':'none',availability:'unknown'}))]
-  const detailsChanged=patch.title!==undefined&&patch.title!==m.title||patch.description!==undefined&&patch.description!==m.description||JSON.stringify(next)!==JSON.stringify(m.attachments??[])
-  Object.assign(m,patch,{attachments:next,detailsVersion:m.detailsVersion+(detailsChanged?1:0),updatedAt:new Date().toISOString()});delete (m as any).expectedDetailsVersion;changed();return applied({missionId:m.missionId,changed:detailsChanged||patch.tags!==undefined})
+  const detailsChanged=patch.descriptionContent!==undefined&&JSON.stringify(patch.descriptionContent)!==JSON.stringify(m.descriptionContent)||patch.title!==undefined&&patch.title!==m.title||patch.description!==undefined&&patch.description!==m.description||JSON.stringify(next)!==JSON.stringify(m.attachments??[])
+  Object.assign(m,patch,{attachments:next,detailsVersion:m.detailsVersion+(detailsChanged?1:0),updatedAt:new Date().toISOString()});delete (m as any).expectedDetailsVersion;projectDescription(m,patch);changed();return applied({missionId:m.missionId,changed:detailsChanged||patch.tags!==undefined})
  },
  create:async(_commandId:string,command:any,attachments:any[])=>{
   calls.push({method:'missions.createWithAttachments',p:{command,attachments}})
   const m={...items[0],...command,attachments:attachments.map(({id,file,kindHint})=>({id,displayName:file.name,kind:kindHint,mediaType:kindHint==='directory'?'inode/directory':file.type||null,byteSize:kindHint==='directory'?null:file.size,fileCount:kindHint==='directory'?null:1,previewKind:kindHint==='file'&&file.type.startsWith('image/')?'image':'none',availability:'unknown'})),number:Math.max(0,...items.map(item=>item.number))+1,missionId:'created-'+items.length,threadId:'rvcamp_01h47kvsy5fk1shh6w1g60eed'+items.length,status:'not_started',sourceMessageId:null,detailsVersion:1,hasUnread:false,runningAgentIds:[],startAvailable:true,workspaceEverCreated:false,workspaceResourcesPresent:false,cleanupAvailable:false,createdAt:now,updatedAt:now}
-  items.unshift(m);changed();return applied({threadId:m.threadId,missionId:m.missionId})
+  projectDescription(m,m);items.unshift(m);changed();return applied({threadId:m.threadId,missionId:m.missionId})
  }
 },request:async(method:string,p:any={})=>{
  calls.push({method,p});const c=p.command??p,m=items.find(m=>m.missionId===c.missionId||m.threadId===c.threadId)
@@ -131,26 +138,28 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  if(method==='navigation.snapshot')return nav
  if(method==='navigation.threads')return {throughGlobalSequence:nav.throughGlobalSequence,groupKeys:[],threads:[]}
  if(method==='navigation.findCamp')return items.find(m=>m.threadId===p.threadId)?{...snapshot(items.find(m=>m.threadId===p.threadId)!).thread}:null
- if(method==='camps.exists')return !!m
- if(method==='camps.open'||method==='camps.enter'){
+ if(method==='threads.exists')return !!m
+ if(method==='threads.open'||method==='threads.enter'){
   if(typeof p.traceId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(p.traceId))throw new Error('missing field `traceId`')
   return structuredClone(snapshot(m!))
  }
- if(method==='camp.messages.around')return {schemaVersion:1,threadId:c.threadId,anchorMessageId:c.messageId,sourceAvailable:true,messages:structuredClone(snapshot(m!).messages)}
+ if(method==='thread.messages.around')return {schemaVersion:1,threadId:c.threadId,anchorMessageId:c.messageId,sourceAvailable:true,messages:structuredClone(snapshot(m!).messages)}
  if(method==='navigation.campViewed'){if(m)m.hasUnread=false;return {threadId:c.threadId,lastSeenGlobalSequence:c.throughGlobalSequence,changed:true,navigation:{throughGlobalSequence:c.throughGlobalSequence,groupKeys:[],threads:[]}}}
- if(method==='camp.composerDraft.get'){if(!drafts.has(c.threadId))drafts.set(c.threadId,{...structuredClone(initialDraft),threadId:c.threadId,body:'',content:{schemaVersion:1,segments:[]},attachments:[]});return structuredClone(drafts.get(c.threadId))}
- if(method==='camp.composerDraft.save'){const d=drafts.get(c.threadId);Object.assign(d,{content:c.content,body:c.content.segments.map((s:any)=>s.text??'').join(''),revision:d.revision+1});return structuredClone(d)}
- if(method==='camp.pendingInputs.get')return {threadId:c.threadId,executionActive:false,items:[],editSession:null,submissionOutcomes:[]}
- if(method==='notifications.inbox')return {schemaVersion:8,items:[],unreadCount:0,throughChangeSequence:notificationSequence,nextCursor:null}
+ if(method==='thread.composerDraft.get'){if(!drafts.has(c.threadId))drafts.set(c.threadId,{...structuredClone(initialDraft),threadId:c.threadId,body:'',content:{schemaVersion:1,segments:[]},attachments:[]});return structuredClone(drafts.get(c.threadId))}
+ if(method==='thread.composerDraft.save'){const d=drafts.get(c.threadId);Object.assign(d,{content:c.content,body:c.content.segments.map((s:any)=>s.text??'').join(''),revision:d.revision+1});return structuredClone(d)}
+ if(method==='thread.pendingInputs.get')return {threadId:c.threadId,executionActive:false,items:[],editSession:null,submissionOutcomes:[]}
+ if(method==='notifications.inbox')return {schemaVersion:9,items:[],unreadCount:0,throughChangeSequence:notificationSequence,nextCursor:null}
  if(method==='notifications.preference.get')return {version:1,updatedAt:now,headsUpEnabled:true,approvalHeadsUpEnabled:true,userMentionHeadsUpEnabled:true,turnCompletedHeadsUpEnabled:true,turnIncompleteHeadsUpEnabled:true,singleChatHeadsUpEnabled:true,missionNeedsYouHeadsUpEnabled:true,missionStatusHeadsUpEnabled:true,taskStatusHeadsUpEnabled:false,missionStatuses:['completed'],taskStatuses:['completed','blocked','cancelled']}
- if(method==='notifications.changesSince')return {schemaVersion:8,requestedAfterChangeSequence:c.afterChangeSequence,nextChangeSequence:notificationSequence,throughChangeSequence:notificationSequence,retainedFloorChangeSequence:0,hasMore:false,resetRequired:false,changes:notificationJournal.filter(change=>change.changeSequence>c.afterChangeSequence)}
+ if(method==='notifications.changesSince')return {schemaVersion:9,requestedAfterChangeSequence:c.afterChangeSequence,nextChangeSequence:notificationSequence,throughChangeSequence:notificationSequence,retainedFloorChangeSequence:0,hasMore:false,resetRequired:false,changes:notificationJournal.filter(change=>change.changeSequence>c.afterChangeSequence)}
  if(method==='notifications.acknowledgeVisibleSources'||method==='notifications.acknowledge')return applied()
  if(method==='events.subscribe')return {schemaVersion:1,events:[],throughGlobalSequence:10}
  if(method==='workspaces.inspect')return {name:'rovai-ai',projectPath:p.path,gitObservation:{state:'git_valid',branch:'main',head:'a'.repeat(40),repositoryRoot:p.path,objectFormat:'sha1',dirty:false,reason:null}}
  if(method==='missions.update'){
-  if((c.title!==undefined||c.description!==undefined)&&c.expectedDetailsVersion!==m!.detailsVersion)return {...applied({missionId:m!.missionId}),status:'rejected',code:'mission.details_version_conflict'}
-  const detailsChanged=(c.title!==undefined&&c.title!==m!.title)||(c.description!==undefined&&c.description!==m!.description)
-  Object.assign(m!,c,{detailsVersion:m!.detailsVersion+(detailsChanged?1:0),updatedAt:new Date().toISOString()});delete (m! as any).expectedDetailsVersion;changed();return applied({missionId:m!.missionId,changed:detailsChanged||c.tags!==undefined})
+  if(failNextMissionSave){failNextMissionSave=false;throw new Error('fixture save failure')}
+
+  if((c.title!==undefined||c.description!==undefined||c.descriptionContent!==undefined)&&c.expectedDetailsVersion!==m!.detailsVersion)return {...applied({missionId:m!.missionId}),status:'rejected',code:'mission.details_version_conflict'}
+  const detailsChanged=(c.descriptionContent!==undefined&&JSON.stringify(c.descriptionContent)!==JSON.stringify(m!.descriptionContent))||(c.title!==undefined&&c.title!==m!.title)||(c.description!==undefined&&c.description!==m!.description)
+  Object.assign(m!,c,{detailsVersion:m!.detailsVersion+(detailsChanged?1:0),updatedAt:new Date().toISOString()});delete (m! as any).expectedDetailsVersion;projectDescription(m,c);changed();return applied({missionId:m!.missionId,changed:detailsChanged||c.tags!==undefined})
  }
  if(method==='missions.status'){m!.status=c.status;changed();return applied({missionId:m!.missionId,changed:true})}
  if(method==='missions.workspace.cleanup'){
@@ -192,9 +201,9 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
   return {file:structuredClone(file),hunks:[{oldStart:1,newStart:1,lines:[{kind:'deletion',text:`old-${file.id}`,oldLine:1,newLine:null},{kind:'addition',text:`new-${file.id}`,oldLine:null,newLine:1}]}],patch:''}
  }
  if(method==='missions.diffSession.release')return {released:true}
- if(method==='missions.create'){const m={...items[0],...c,number:Math.max(0,...items.map(item=>item.number))+1,missionId:'created-'+items.length,threadId:'rvcamp_01h47kvsy5fk1shh6w1g60eed'+items.length,status:'not_started',hasUnread:false,workspaceEverCreated:false,workspaceResourcesPresent:false,cleanupAvailable:false};items.unshift(m);changed();return applied({threadId:m.threadId,missionId:m.missionId})}
- if(method==='camps.changeDefaultLead'){m!.defaultLeadAgentId=c.successorAgentId;snapshot(m!).thread.defaultLeadAgentId=c.successorAgentId;changed();return applied()}
- if(method==='camps.delete'){
+ if(method==='missions.create'){const m={...items[0],...c,number:Math.max(0,...items.map(item=>item.number))+1,missionId:'created-'+items.length,threadId:'rvcamp_01h47kvsy5fk1shh6w1g60eed'+items.length,status:'not_started',hasUnread:false,workspaceEverCreated:false,workspaceResourcesPresent:false,cleanupAvailable:false};projectDescription(m,m);items.unshift(m);changed();return applied({threadId:m.threadId,missionId:m.missionId})}
+ if(method==='threads.changeDefaultLead'){m!.defaultLeadAgentId=c.successorAgentId;snapshot(m!).thread.defaultLeadAgentId=c.successorAgentId;changed();return applied()}
+ if(method==='threads.delete'){
   if(c.workspaceDisposition==='cleanup'&&m!.workspaceResourcesPresent)orphanCleanups.push(workspaceFor(m!,'cleanup_pending'))
   items.splice(items.indexOf(m!),1);changed();return accepted({threadId:m!.threadId,operationId:p.commandId,workspaceCleanupScheduled:c.workspaceDisposition==='cleanup'})
  }
@@ -203,7 +212,7 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
 const preferences:any={appearance:{get:async()=>appearance,onChanged:()=>()=>{}},generalPreferences:new Proxy({}, {get:(_,key)=>async(...args:any[])=>{if(key==='setNewConversationDefaults')prefs.newConversationDefaults=args[0];return prefs}}),navigationPreferences:new Proxy({}, {get:()=>async()=>navigationPrefs})}
 const navigationHistory={initial:{entries:[{kind:'missions' as const}],index:0},write:(state:any)=>state,go:async()=>false,listen:()=>()=>{}}
 const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{calls.push({method:"fixture.file.open",p:req});return model.fileApi.open({...req,...(req.threadId?{threadId:initial.thread.id}:{})} as any)}},preferences,navigationHistory,selectWorkspaceDirectory:async()=>({name:'rovai-ai',projectPath:'/workspace/rovai-ai'})}
-;(window as any).missionQA={items,calls,errors:[],run:runMissionAcceptance,runCheckoutView:runMissionCheckoutViewAcceptance,runDeleteTrace:runMissionDeleteTraceAcceptance,runLargeDiff:runMissionLargeDiffAcceptance,admitMissionNotification,
+;(window as any).missionQA={items,calls,errors:[],runMentions:runMissionMentionAcceptance,failNextMissionSave:()=>{failNextMissionSave=true},run:runMissionAcceptance,runCheckoutView:runMissionCheckoutViewAcceptance,runDeleteTrace:runMissionDeleteTraceAcceptance,runLargeDiff:runMissionLargeDiffAcceptance,admitMissionNotification,
  seedScrollableLanes,clearScrollableLanes,
  failNextMissionRefresh:()=>{failNextMissionRefresh=true},missionRefreshPending:()=>missionRefreshPending,
  failNextMissionStart:()=>{failNextMissionStart=true},

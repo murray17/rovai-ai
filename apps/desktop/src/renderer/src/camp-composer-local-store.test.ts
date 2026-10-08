@@ -132,4 +132,32 @@ describe('local Thread Composer drafts', () => {
       sent: lead, threadMessageId: 'message-2', addressedAgentIds: ['lead'], members
     }).continuationIntent).toBeNull()
   })
+
+  it('preserves an accepted invitation route until the membership projection arrives', () => {
+    const pendingMembers = members.filter((member) => member.isDefaultLead)
+    const next = nextLocalThreadComposerDraftAfterSend({
+      sent: {
+        ...emptyLocalThreadComposerDraft('camp-a'),
+        content: { version: 2, segments: [
+          { kind: 'atom', atom: { type: 'member', agentId: 'reviewer', labelFallback: '审查员' } }
+        ] }
+      },
+      threadMessageId: 'first-message',
+      addressedAgentIds: ['reviewer'],
+      members: pendingMembers
+    })
+    expect(next.continuationIntent).toEqual({
+      sourceThreadMessageId: 'first-message',
+      recipient: { agentId: 'reviewer', displayName: '审查员', recipientAvailability: 'available' },
+      recipientSelectionRequired: false
+    })
+    const storage = new MemoryStorage()
+    saveLocalThreadComposerDraft(next, storage)
+    expect(loadLocalThreadComposerDraft('camp-a', storage)).toEqual(next)
+    const typed: ThreadComposerDraftView = {
+      ...next, body: '继续', content: { version: 2, segments: [{ kind: 'text', text: '继续' }] }
+    }
+    expect(materializeLocalContinuation(typed, pendingMembers)).toEqual(typed)
+    expect(materializeLocalContinuation(typed, members).body).toBe('@审查员 继续')
+  })
 })

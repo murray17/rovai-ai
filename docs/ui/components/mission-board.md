@@ -84,7 +84,7 @@ safe retry.
 
 Production Edit opens only from the card/list right-click or Shift+F10 menu. It reuses the same wide writing
 dialog; prototype-only previews may expose a direct shortcut. Name, description, tags and source attachments
-remain editable. Project and the combined member/lead chip are visible but locked. Cancel and Save remain at
+remain editable. Project and existing member/lead management remain locked in the definition dialog; references can add outsiders on save. Cancel and Save remain at
 the right; the attachment action stays at the left. Save is disabled until normalized content or the attachment
 set differs and validates against 1–200 name / 12,000 description limits. It submits the internal revision
 captured when opened. A stale edit stays open, replaces all editable fields with the latest definition and asks
@@ -208,6 +208,24 @@ focus request even when there is no notification acknowledgement waiter; snapsho
 the positioning or steal the user's subsequent focus. Status history uses the actor and new status only,
 such as “爱丽丝 将状态改为‘未开始’”, for both user and Agent changes.
 
-Business and ownership rules are defined by [Mission v11](../../contracts/mission-v11.md), not this presentation
+Business and ownership rules are defined by [Mission v12](../../contracts/mission-v12.md), not this presentation
 contract. Theme and ordinary conversation behavior remain under [DESIGN.md](../../../DESIGN.md) and
 [Camp workspace](conversation-workspace.md).
+
+## Description member mentions
+
+Creation and editing reuse the message Composer's individual member atoms, search, invite layer, caret menu,
+clipboard and keyboard behavior. `@` and the footer mention button open current-Mission choices followed by
+“邀请其他队员”; names and roles can search outsiders directly. Enter selects a candidate when open and otherwise
+inserts a line; Escape dismisses the candidate menu. No broadcast or Skill selector appears in a Mission.
+Plain pasted `@name` stays text. Member atoms delete as a unit and remain tied to their IDs after rename.
+
+Referenced outsiders appear in a compact “新建时加入” / “保存时加入” row with a cancel action; the primary action
+reads “邀请并新建” / “邀请并保存”. The row is derived from distinct referenced IDs, so deleting the final mention
+cancels a pending invitation, and cancel removes all that member's mentions. Explicitly selected existing members
+are retained. Selection has no server effect. Save validates identities and commits description plus memberships
+atomically; failures retain the draft for correction/retry. A successful save does not start the Mission.
+
+Mission reading renders the same blue inline names and a basic member-profile popover; unavailable references
+retain their ID and are visually unavailable. Creation dismissal retains structured content alongside the existing
+draft. Editing keeps its revision conflict behavior. Day/Night and narrow layouts share this implementation.

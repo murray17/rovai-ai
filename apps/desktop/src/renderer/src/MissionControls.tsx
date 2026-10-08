@@ -16,6 +16,7 @@ export function useMissionStatuses(): { id: Status; label: string }[] {
 }
 const People = createContext<AgentProfile[]>([])
 export function MissionPeopleProvider({agents,children}:{agents:AgentProfile[];children:ReactNode}) {return <People.Provider value={agents}>{children}</People.Provider>}
+export function useMissionPeople() { return useContext(People) }
 function usePeople() {const agents=useContext(People);return (id:string)=>agents.find(agent=>agent.agentId===id) ?? {avatarRef:null,displayName:id,teamRole:''}}
 
 

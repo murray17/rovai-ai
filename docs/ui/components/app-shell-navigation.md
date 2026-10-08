@@ -142,8 +142,8 @@ macOS 与 Web 设置展开后不显示上述三个按钮，也不提供调宽操
 
 快捷键复用 `shouldHandlePrimaryShortcut`：Mac 为 ⌘[ / ⌘]，Windows 为 Ctrl+[ / Ctrl+]。
 冒泡到稳定容器后才处理；输入框、编辑器、终端、IME、已消费事件和模态工作面不触发全局导航。
-macOS 在根层读取 mouseup 的 button=3/4；Windows 互斥使用宿主 `app-command`，忽略 Renderer 的同次侧键。
-支持的原生 Mac swipe 也发送到同一接口。Main 不执行默认 Chromium 导航，所有监听随容器/窗口清理。
+Desktop 不监听或拦截 `mouseup` / `auxclick` 的 button=3/4，也不把 Windows `app-command` 映射为历史导航。
+鼠标侧键保留给用户的系统或设备配置。支持的原生 Mac swipe 仍发送到同一接口；所有监听随容器/窗口清理。
 
 历史不写文件、数据库、localStorage 或 sessionStorage，不引入 schema/存储迁移。
 最小化、托盘隐藏、原窗口内普通数据刷新不清空；前端重载、窗口销毁或新的 App 会话重新初始化。
@@ -284,9 +284,7 @@ Claude Code / Codex 的自定义 API 配置功能已退出。启动页只显示�
 普通字段冲突继续按项选择并保留草稿。已有本机原生配置不删除、不重写，连接由原生 CLI 使用；
 完整边界见 [Runtime Launch v54](../../contracts/runtime-launch-and-verification-v54.md)。
 
-Cline 启动设置另外提供显式 ChatGPT 原生登录/重新登录。只调用当前已保存的所选安装；有未保存编辑时先保存。
-授权中锁定来源编辑，保留取消及原生输入；授权输出仅当前交互可见，退出页面即取消，迟到启动结果也须取消。
-原生命令完成后单独检查 Session 可用性，不把退出码当作真实模型请求成功。自动检查和普通任务不启动浏览器授权。
+Cline 使用共享原生认证引导；正常检查和模型任务不自动启动登录。
 
 ## 宿主平台交互
 

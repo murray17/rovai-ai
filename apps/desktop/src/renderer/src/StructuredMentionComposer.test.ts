@@ -105,6 +105,10 @@ describe('StructuredMentionComposer V2', () => {
     expect(structuredMentionOptions(catalog, '', true)).toEqual([
       { kind: 'back_to_camp' }, { kind: 'member', member: outsider }
     ])
+    expect(structuredMentionOptions(catalog, '', false, false).map(option => option.kind)).toEqual([
+      'member', 'member', 'invite_other'
+    ])
+    expect(structuredMentionOptions(catalog, '所有', false, false)).toEqual([])
     const fullThread = Array.from({ length: 60 }, (_, index) => ({
       ...members[0], agentId: `camp-${index}`
     }))

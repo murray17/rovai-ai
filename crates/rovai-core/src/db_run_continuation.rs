@@ -52,6 +52,14 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             "Run continuation requires v1.72/schema 135"
         );
         let before = public_history_claim_preserved_evidence_digest(&tx)?;
+        // Main/135 owns structured Mission descriptions instead of the Preview
+        // catalog. Converge both catalog entries without touching those rows.
+        if !cline_runtime_v184_schema_matches(&tx)? {
+            rewrite_cline_runtime_closed_sets(&tx, false)?;
+        }
+        if !command_code_runtime_v185_schema_matches(&tx)? {
+            rewrite_command_code_runtime_closed_sets(&tx, false)?;
+        }
         // The main/134 branch already owns this exact schema. Preserve it;
         // Preview/135 adds it here. Both advance with one transactional receipt.
         if !schema_matches(&tx)? {
@@ -79,11 +87,17 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             before == public_history_claim_preserved_evidence_digest(&tx)?,
             "Continuation migration changed existing model evidence"
         );
-        validate_migration_foreign_keys(&tx, &["agent_run_input", "camp_run_continuation"])?;
+        let tables = DSH_RUNTIME_TABLES
+            .iter()
+            .chain(DSH_SKILL_TABLES.iter())
+            .copied()
+            .chain(["agent_run_input", "camp_run_continuation"])
+            .collect::<Vec<_>>();
+        validate_migration_foreign_keys(&tx, &tables)?;
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::Current(_)
+                DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version==136
             ),
             "Continuation schema admission failed"
         );
@@ -98,6 +112,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(connection: &Connection) {
+    mission_description::downgrade_for_test(connection);
     if !connection
         .table_exists(None, "camp_run_continuation")
         .unwrap()

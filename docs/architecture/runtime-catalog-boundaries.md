@@ -47,7 +47,7 @@ selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并�
 `command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
 Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
 原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
-[V1.72-D20](../versions/v1.72/decisions.md#v1-72-d20)仅在 macOS arm64 开放开发 Preview，其余平台
+[V1.72-D22](../versions/v1.72/decisions.md#v1-72-d22)仅在 macOS arm64 开放开发 Preview，其余平台
 NotQualified；没有 qualification evidence，不声称 First-Class。旧 headless 传输只保留研究/兼容测试。
 
 Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
@@ -90,7 +90,7 @@ ACP compaction 缺口保留，不能沿用 Hub 的压缩结论。当前范围见
 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)、
 [ACP 退役验收](../research/cline-runtime/acp-retirement-2026-10-08.md)及
 [输入说明](../versions/v1.72/model-context-change-cline-acp.md)，理由见
-[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)。
+[V1.72-D27](../versions/v1.72/decisions.md#v1-72-d27)。
 
 ## 可执行准入
 

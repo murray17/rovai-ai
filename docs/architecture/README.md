@@ -14,7 +14,7 @@ last_updated: 2026-10-08
 <!-- architecture-index:begin -->
 | 架构 | 内容 |
 | --- | --- |
-| [Missions](missions.md) | 内部 ID 贯通 Agent、UI 展示编号、全局只读/当前写入、独立状态、Core-owned 启动/执行投影、结构化附件、持久工作区与累计 Git Diff |
+| [Missions](missions.md) | 内部 ID 贯通 Agent、UI 展示编号、全局只读/当前写入、独立状态、Core-owned 启动/执行投影、描述个人提及与原子入队、结构化附件、持久工作区与累计 Git Diff |
 | [统一 Rust Host](unified-rust-host.md) | Desktop 与三平台 Server 共用的应用运行层、Web、身份、source refs 和平台验证边界 |
 | [Rovai AI 多 Agent 协作架构](system-views.md) | 系统全景、Peer 与轻量 Lead、身份与 Runtime、Conversation/AgentRun、A2A、协作组织与任务责任、Rovai CLI Toolkit、动态上下文、记忆治理与成长、技术栈与单次 AgentRun 生命周期的可视化介绍 |
 | [Runtime 图片](runtime-images.md) | 结构化观察与保留、Adapter 确认的原生生图公屏来源、混合文件生命周期、Camp-scoped 按需读取、消息内来源合并及作者感知 Gallery variant；与显式渠道文件交付分离 |

@@ -49,4 +49,4 @@ Agent 声明的 session/resume。恢复结束前不发送新输入。load 重放
 ACP compaction 配置缺口仍存在。删除 Hub 配置注入、help 默认解析及所有相关启动依赖；不加入私有字段、
 环境 hack、运行时 patch、/compact、模型总结或 overflow 重试器。原生上下文错误如实反馈。
 保持 macOS arm64 Preview；其他平台的 workspace 构建与 Runtime 实测资格分别记录。
-决定理由：[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)。
+决定理由：[V1.72-D27](../versions/v1.72/decisions.md#v1-72-d27)。

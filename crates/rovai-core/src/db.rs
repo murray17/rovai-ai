@@ -4,6 +4,8 @@ mod attachment_paths;
 mod member_creation;
 #[path = "db_mission_context.rs"]
 mod mission_context;
+#[path = "db_mission_description.rs"]
+mod mission_description;
 #[path = "db_mission_details.rs"]
 mod mission_details;
 #[path = "db_notification_model.rs"]
@@ -316,7 +318,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 136;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 137;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -777,6 +779,7 @@ struct CurrentMigrationState {
     v184: bool,
     v185: bool,
     v186: bool,
+    v187: bool,
 }
 
 impl CurrentMigrationState {
@@ -798,11 +801,19 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v187 {
+            let mut previous = *self;
+            previous.v187 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && self.v186
+                && previous.admits("v1.72", 136, classifier);
+        }
         if self.v186 {
             let mut previous = *self;
             previous.v186 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            return contract == "v1.72"
+                && schema == 136
                 && self.v185
                 && previous.admits("v1.72", 135, classifier);
         }
@@ -3341,7 +3352,8 @@ pub(crate) fn classify_database_contract(
         || (migrations.v183 && !pending_draft::schema_matches(connection)?)
         || (migrations.v184 && !runtime_v184_source_schema_matches(connection, migrations.v185)?)
         || (migrations.v186 && !run_continuation::schema_matches(connection)?)
-        || (migrations.v185 && !command_code_runtime_v185_schema_matches(connection)?)
+        || (migrations.v185 && !runtime_v185_source_schema_matches(connection, migrations.v186)?)
+        || (migrations.v187 && !mission_description::schema_matches(connection)?)
         || (migrations.v156
             && !migrations.v157
             && !attachment_paths::schema_matches(connection)?
@@ -4119,6 +4131,7 @@ fn legacy_main_context_source(
         || migrations.v182
         || migrations.v183
         || migrations.v184
+        || migrations.v185
         || !migrations.admits(
             "v1.72",
             marker.projection_schema_version,
@@ -4601,19 +4614,19 @@ fn runtime_v184_source_schema_matches(
     has_v185: bool,
 ) -> rusqlite::Result<bool> {
     let cline = cline_runtime_v184_schema_matches(connection)?;
-    if has_v185 {
-        return Ok(cline);
-    }
     if cline {
-        return Ok(!connection.table_exists(None, "camp_run_continuation")?);
+        return Ok(has_v185 || !connection.table_exists(None, "camp_run_continuation")?);
     }
     if !run_continuation::schema_matches(connection)? {
         return Ok(false);
     }
     // A main/134 source has no partial Preview catalog expansion.
-    for (tables, token) in [
-        (&DSH_RUNTIME_TABLES[..], "'cline-cli'"),
-        (&DSH_SKILL_TABLES[..], "'cline'"),
+    for (tables, tokens) in [
+        (
+            &DSH_RUNTIME_TABLES[..],
+            ["'cline-cli'", "'command-code-cli'"],
+        ),
+        (&DSH_SKILL_TABLES[..], ["'cline'", "'command_code'"]),
     ] {
         for table in tables {
             let sql: String = connection.query_row(
@@ -4621,12 +4634,28 @@ fn runtime_v184_source_schema_matches(
                 [table],
                 |row| row.get(0),
             )?;
-            if sql.contains(token) {
+            if tokens.iter().any(|token| sql.contains(token)) {
                 return Ok(false);
             }
         }
     }
     Ok(true)
+}
+
+// Receipt 185 was independently deployed for the Preview catalog and main's
+// structured Mission descriptions. Admit exact schemas, never the receipt alone.
+fn runtime_v185_source_schema_matches(
+    connection: &Connection,
+    has_v186: bool,
+) -> rusqlite::Result<bool> {
+    let descriptions = mission_description::schema_matches(connection)?;
+    if connection.table_exists(None, "mission_description")? && !descriptions {
+        return Ok(false);
+    }
+    if cline_runtime_v184_schema_matches(connection)? {
+        return command_code_runtime_v185_schema_matches(connection);
+    }
+    Ok(!has_v186 && descriptions && runtime_v184_source_schema_matches(connection, true)?)
 }
 
 fn cline_runtime_v184_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
@@ -5378,7 +5407,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 183),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 184),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 185),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 186)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 186),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 187)
         "#,
         [],
         |row| {
@@ -5500,6 +5530,7 @@ fn load_current_migration_state(
                 v184: row.get(114)?,
                 v185: row.get(115)?,
                 v186: row.get(116)?,
+                v187: row.get(117)?,
             })
         },
     )
@@ -8650,6 +8681,9 @@ impl Database {
             if !self.schema_migration_applied(186)? {
                 migration_step!("migration_186", run_continuation::migrate(self));
             }
+            if !self.schema_migration_applied(187)? {
+                migration_step!("migration_187", mission_description::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -9426,6 +9460,9 @@ impl Database {
         }
         if !self.schema_migration_applied(186)? {
             migration_step!("migration_186", run_continuation::migrate(self));
+        }
+        if !self.schema_migration_applied(187)? {
+            migration_step!("migration_187", mission_description::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -40538,6 +40575,7 @@ mod tests {
         database.migrate_cline_runtime_v184().unwrap();
         database.migrate_command_code_runtime_v185().unwrap();
         run_continuation::migrate(&mut database).unwrap();
+        mission_description::migrate(&mut database).unwrap();
         let successor_run_id = claim_waiting_delivery_batches(&mut database, 1)
             .unwrap()
             .pop()
@@ -40816,8 +40854,42 @@ mod tests {
                 command_code_runtime_v185_schema_matches as Matches,
                 Database::migrate_command_code_runtime_v185 as Migrate,
             ),
+            (
+                186,
+                135,
+                true,
+                rewrite_command_code_runtime_closed_sets as Rewrite,
+                command_code_runtime_v185_schema_matches as Matches,
+                run_continuation::migrate as Migrate,
+            ),
         ] {
             let (mut database, directory) = crate::test_support::seeded_runtime_database();
+            let native_description = if version == 186 {
+                let created = crate::mission::MissionService::default().create(&mut database, &crate::command::CommandEnvelope {
+                    command_id: "main-185-migration".into(), actor: crate::command::ActorRef::User{user_id:"local_user".into()}, camp_id:None, expected_versions:vec![],execution_epoch:None,
+                    payload: serde_json::from_value(serde_json::json!({"title":"Preserved", "descriptionContent":[{"kind":"text","text":"literal @名字\n"},{"kind":"member_mention","agentId":"agent_1"}], "projectPath":"/tmp", "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1"})).unwrap(),
+                }).unwrap();
+                let id = created.result.payload["missionId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                let content: String = database
+                    .connection()
+                    .query_row(
+                        "SELECT content_json FROM mission_description WHERE mission_id=?1",
+                        [&id],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                database
+                    .connection()
+                    .execute_batch("DELETE FROM schema_migration WHERE version=187")
+                    .unwrap();
+                Some((id, content))
+            } else {
+                mission_description::downgrade_for_test(database.connection());
+                None
+            };
             if !main_continuation {
                 run_continuation::downgrade_for_test(database.connection());
             }
@@ -40915,6 +40987,21 @@ mod tests {
             let reopened = Database::open(&directory).unwrap();
             assert!(reopened.schema_migration_applied(version).unwrap());
             assert!(reopened.schema_migration_applied(186).unwrap());
+            assert!(reopened.schema_migration_applied(187).unwrap());
+            if let Some((id, content)) = native_description {
+                let actual: String = reopened
+                    .connection()
+                    .query_row(
+                        "SELECT content_json FROM mission_description WHERE mission_id=?1",
+                        [&id],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    actual, content,
+                    "main's structured atoms must not become literal text"
+                );
+            }
             assert!(run_continuation::schema_matches(reopened.connection()).unwrap());
             assert!(cline_runtime_v184_schema_matches(reopened.connection()).unwrap());
             assert!(command_code_runtime_v185_schema_matches(reopened.connection()).unwrap());
@@ -41046,6 +41133,7 @@ mod tests {
             v184: version >= 184,
             v185: version >= 185,
             v186: version >= 186,
+            v187: version >= 187,
         }
     }
 
@@ -41240,6 +41328,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                187,
+            ),
+            (
+                "v1.72/schema 136 before Mission description convergence",
+                "v1.72",
+                136,
                 186,
             ),
             (
@@ -41762,7 +41856,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(186);
+        let current = migration_state_through(187);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -42307,7 +42401,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(186));
+        assert_eq!(state, migration_state_through(187));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -42680,6 +42774,48 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
+    // Historical sources have no mission_description table. Seed their literal
+    // description directly rather than running the current Mission writer on
+    // a schema that has not yet been admitted for current application use.
+    fn seed_legacy_mission(
+        database: &mut Database,
+        title: &str,
+        description: &str,
+        project: String,
+        tags: &[&str],
+    ) -> (String, String) {
+        let created = crate::collaboration::CollaborationService::default()
+            .create_camp(
+                database,
+                &crate::command::CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: crate::command::ActorRef::User {
+                        user_id: "local_user".into(),
+                    },
+                    camp_id: None,
+                    expected_versions: vec![],
+                    execution_epoch: None,
+                    payload: crate::collaboration::CreateThreadCommand::for_test(project),
+                },
+            )
+            .unwrap();
+        let camp = created.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let mission = format!("rvm_{}", Uuid::now_v7().simple());
+        let connection = database.connection();
+        connection
+            .execute("INSERT INTO mission_number_sequence DEFAULT VALUES", [])
+            .unwrap();
+        let number = connection.last_insert_rowid();
+        connection.execute(
+            "INSERT INTO mission(id,number,camp_id,title,description,status,tags_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'not_started',?6,'created','updated')",
+            rusqlite::params![mission, number, camp, title, description, serde_json::to_string(tags).unwrap()],
+        ).unwrap();
+        (mission, camp)
+    }
+
     // Migration 158 owns atomic schema/receipt admission; the current migration
     // chain must retain opted-out workspace records after Camp cascade. SQL state
     // and restart identity require this isolated DB owner.
@@ -42740,34 +42876,9 @@ mod tests {
             )
             .unwrap();
         let project = database.directory().to_string_lossy().to_string();
-        let result = crate::mission::MissionService::default()
-            .create(
-                &mut database,
-                &crate::command::CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: crate::command::ActorRef::User {
-                        user_id: "local_user".into(),
-                    },
-                    camp_id: None,
-                    expected_versions: vec![],
-                    execution_epoch: None,
-                    payload: crate::mission::CreateMissionCommand {
-                        title: "cleanup".into(),
-                        description: String::new(),
-                        project_path: project,
-                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
-                        member_agent_ids: vec!["agent_1".into()],
-                        default_lead_agent_id: "agent_1".into(),
-                        tags: vec![],
-                        source_attachments: vec![],
-                    },
-                },
-            )
-            .unwrap();
-        let camp = result.result.payload["threadId"].as_str().unwrap();
-        let mission = result.result.payload["missionId"].as_str().unwrap();
+        let (mission, camp) = seed_legacy_mission(&mut database, "cleanup", "", project, &[]);
         database.connection().execute("INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,diagnostic,created_at,updated_at) VALUES('cleanup',?1,?2,?3,'/fixture/repo','/fixture/repo','/fixture/repo/.git','/fixture/worktree','/fixture/worktree','main','rovai/mission/fixture','base','ownership','ready',NULL,'created','updated')",rusqlite::params![mission,camp,host]).unwrap();
-        crate::collaboration::delete_camp_aggregate(database.connection(), camp).unwrap();
+        crate::collaboration::delete_camp_aggregate(database.connection(), &camp).unwrap();
         assert_eq!(
             database
                 .connection()
@@ -42829,34 +42940,13 @@ mod tests {
         downgrade_current_schema_to_v155_source_for_test(preview.connection());
         preview.migrate_missions_v156().unwrap();
         let preview_project = preview.directory().to_string_lossy().to_string();
-        let created = crate::mission::MissionService::default()
-            .create(
-                &mut preview,
-                &crate::command::CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: crate::command::ActorRef::User {
-                        user_id: "local_user".into(),
-                    },
-                    camp_id: None,
-                    expected_versions: vec![],
-                    execution_epoch: None,
-                    payload: crate::mission::CreateMissionCommand {
-                        title: "preview upgrade".into(),
-                        description: "retain me".into(),
-                        project_path: preview_project,
-                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
-                        member_agent_ids: vec!["agent_1".into()],
-                        default_lead_agent_id: "agent_1".into(),
-                        tags: vec!["compatibility".into()],
-                        source_attachments: vec![],
-                    },
-                },
-            )
-            .unwrap();
-        let preview_mission = created.result.payload["missionId"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let (preview_mission, _) = seed_legacy_mission(
+            &mut preview,
+            "preview upgrade",
+            "retain me",
+            preview_project,
+            &["compatibility"],
+        );
         preview.migrate_dsh_runtime_v157().unwrap();
         preview.migrate_mission_context_v158().unwrap();
         assert!(connection_has_v166_data_contract(preview.connection()).unwrap());
@@ -42880,34 +42970,13 @@ mod tests {
         let mut database = fresh_schema_database_v170_at(&directory);
         let project = directory.join("project");
         std::fs::create_dir_all(&project).unwrap();
-        let created = crate::mission::MissionService::default()
-            .create(
-                &mut database,
-                &crate::command::CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: crate::command::ActorRef::User {
-                        user_id: "local_user".into(),
-                    },
-                    camp_id: None,
-                    expected_versions: vec![],
-                    execution_epoch: None,
-                    payload: crate::mission::CreateMissionCommand {
-                        title: "migration survivor".into(),
-                        description: "retain through schema 162".into(),
-                        project_path: project.to_string_lossy().into_owned(),
-                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
-                        member_agent_ids: vec!["agent_1".into()],
-                        default_lead_agent_id: "agent_1".into(),
-                        tags: vec![],
-                        source_attachments: vec![],
-                    },
-                },
-            )
-            .unwrap();
-        let mission_id = created.result.payload["missionId"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let (mission_id, _) = seed_legacy_mission(
+            &mut database,
+            "migration survivor",
+            "retain through schema 162",
+            project.to_string_lossy().into_owned(),
+            &[],
+        );
         downgrade_current_schema_to_v162_source_for_test(database.connection());
         database
             .connection()
@@ -43045,6 +43114,9 @@ mod tests {
         assert!(database.schema_migration_applied(169).unwrap());
         database.migrate_tool_output_v170().unwrap();
         assert!(connection_has_v170_or_current_data_contract(database.connection()).unwrap());
+        // The current reader is used only after the remaining upgrade chain.
+        drop(database);
+        let database = Database::open(&directory).unwrap();
         let migrated = crate::mission::MissionService::default()
             .get(&database, &mission_id)
             .unwrap()

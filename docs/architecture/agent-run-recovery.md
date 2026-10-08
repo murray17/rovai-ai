@@ -2,13 +2,13 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-native-turn-and-isolation-boundaries
-last_updated: 2026-10-06
+last_updated: 2026-10-08
 ---
 
 # AgentRun Recovery
 
 本文描述 App/Core 持续运行期间的运输恢复、Core 重启后的执行收口，以及 AgentRun 终态与旧执行隔离之间的边界。
-当前字段和行为由 [Accepted Input Recovery v7](../contracts/accepted-input-recovery-v7.md)、
+当前字段和行为由 [Accepted Input Recovery v8](../contracts/accepted-input-recovery-v8.md)、
 [Message Delivery v11](../contracts/message-delivery-v11.md)、
 [Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md) 和
 [Planned Shutdown v8](../contracts/planned-shutdown-v8.md)拥有。
@@ -93,13 +93,16 @@ Fleet 的小型释放结果区分复用、回收、租约不存在和回收未�
 保留受管记录和容量。既有 owner record 记录 Run/epoch 及确认回收回执，数据库 ACK 后清除对应证明。
 这只是原有停止操作的证据，不是独立调度器、Cleanup Coordinator 或持久化 Native Outcome。
 
-可信失败后可精确恢复原生 Thread；恢复错误或 ID 不符明确失败，不在当前执行中回退空 Thread。输入结果未知继续
-沿用第 3 节的隔离和默认轮换。正常成功不退化为每轮冷启动，也不增加输入重放。
+可信失败后可精确恢复原生 Thread；普通执行的恢复错误或 ID 不符仍明确失败。用户主动续做按
+[Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)，仅在本次输入尚未投递时允许一次新 Thread
+降级。输入结果未知继续沿用第 3 节的隔离和默认轮换。正常成功不退化为每轮冷启动，也不增加输入重放。
 
-## 7. 用户授权的独立续做
+## 8. 用户授权的独立续做
 
-[AgentRun Continuation v1](../contracts/agent-run-continuation-v1.md) 是新的 User 授权。
+[AgentRun Continuation v2](../contracts/agent-run-continuation-v2.md) 是新的 User 授权。
 命令事务持久化系统操作、来源事实和普通 waiting Delivery；唯一 Scheduler 在旧执行清理完成后领取。
 原 Run 的业务输入集合限定范围，现有 Context builder 重建当前平台事实，不追加证据或恢复教学。
 同一来源可以多次主动继续，状态互不关联；幂等只绑定单次请求。会话兼容时复用当前绑定，换会话保留工作区。
-原生恢复失败的续做必须失败退出，用户显式确认后再开始新会话；普通运输恢复不因本功能扩大。
+点击继续直接授权新执行，无需单独确认新会话。领取时未知 native turn 自动轮换；后续同一绑定的可信
+成功完成可消除更早未知结果对会话选择的影响。兼容判断复用 Runtime，实际恢复失败仅在本次输入尚未
+投递时允许一次已有路径的新会话降级；替换失败仍结束，普通运输恢复不因本功能扩大。

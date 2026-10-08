@@ -28,6 +28,7 @@ interface ComposerTypeaheadRenderState {
 
 export interface ComposerTypeaheadPluginProps {
   match: ComposerTriggerMatch | null
+  memberOnly?: boolean
   selectionScope?: string
   optionCount: number
   getOptionState(match: ComposerTriggerMatch): ComposerTypeaheadOptionState
@@ -54,6 +55,7 @@ export function composerTypeaheadEnterAction(
 /** One bounded selection listener and one keyboard owner for both @ and /. */
 export function ComposerTypeaheadPlugin({
   match,
+  memberOnly = false,
   selectionScope,
   optionCount,
   getOptionState,
@@ -65,6 +67,12 @@ export function ComposerTypeaheadPlugin({
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null)
   const selectedIndexRef = useRef(selectedIndex)
+  const memberOnlyRef = useRef(memberOnly)
+  memberOnlyRef.current = memberOnly
+  const findMatch = useCallback(() => {
+    const found = $findComposerTriggerMatch(editor)
+    return memberOnlyRef.current && found?.kind !== 'member' ? null : found
+  }, [editor])
   const current = useRef({ match, optionCount, getOptionState, onMatchChange, onSelect })
   current.current = { match, optionCount, getOptionState, onMatchChange, onSelect }
   selectedIndexRef.current = selectedIndex
@@ -74,14 +82,14 @@ export function ComposerTypeaheadPlugin({
     const state = current.current
     if (editor.isComposing()) return
     editor.update(() => {
-      const freshMatch = $findComposerTriggerMatch(editor)
+      const freshMatch = findMatch()
       if (!freshMatch) return
       const optionState = state.getOptionState(freshMatch)
       if (composerTypeaheadEnterAction(optionState) !== 'select') return
       const boundedIndex = Math.max(0, Math.min(index, optionState.optionCount - 1))
       if (state.onSelect(boundedIndex, freshMatch)) close()
     }, { tag: HISTORY_PUSH_TAG })
-  }, [close, editor])
+  }, [close, editor, findMatch])
 
   useEffect(() => editor.registerRootListener((root) => {
     setPortalHost(root?.parentElement ?? null)
@@ -89,15 +97,15 @@ export function ComposerTypeaheadPlugin({
 
   useEffect(() => editor.registerEditableListener((editable) => {
     if (!editable) close()
-  }), [close, editor])
+  }), [close, editor, findMatch])
 
   useEffect(() => editor.registerUpdateListener(({ editorState }) => {
     if (editor.isComposing()) return
-    const next = editorState.read(() => $findComposerTriggerMatch(editor))
+    const next = editorState.read(findMatch)
     const previous = current.current.match
     if (composerTriggerMatchesEqual(previous, next)) return
     current.current.onMatchChange(next)
-  }), [editor])
+  }), [editor, findMatch])
 
   useEffect(() => {
     const unregister = [
@@ -122,7 +130,7 @@ export function ComposerTypeaheadPlugin({
       editor.registerCommand(KEY_ENTER_COMMAND, (event) => {
         const state = current.current
         if (editor.isComposing() || event?.isComposing || event?.shiftKey) return false
-        const freshMatch = $findComposerTriggerMatch(editor)
+        const freshMatch = findMatch()
         if (!freshMatch) return false
         const optionState = state.getOptionState(freshMatch)
         const action = composerTypeaheadEnterAction(optionState)
@@ -140,7 +148,7 @@ export function ComposerTypeaheadPlugin({
       editor.registerCommand(KEY_TAB_COMMAND, (event) => {
         if (editor.isComposing()) return false
         const state = current.current
-        const freshMatch = $findComposerTriggerMatch(editor)
+        const freshMatch = findMatch()
         if (!freshMatch) return false
         const optionState = state.getOptionState(freshMatch)
         const action = composerTypeaheadEnterAction(optionState)
@@ -163,7 +171,7 @@ export function ComposerTypeaheadPlugin({
       }, COMMAND_PRIORITY_CRITICAL)
     ]
     return () => unregister.forEach((cleanup) => cleanup())
-  }, [close, editor])
+  }, [close, editor, findMatch])
 
   useEffect(() => {
     setSelectedIndex((index) => optionCount === 0 ? 0 : Math.min(index, optionCount - 1))

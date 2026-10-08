@@ -7,10 +7,13 @@ last_updated: 2026-10-08
 
 # 用户主动继续执行实施记录
 
+本文保留首轮 v1 与后续修正的验证时间线；当前会话策略见末节“2026-10-08 会话自动选择与投递前降级”及
+[Continuation v2](../../contracts/agent-run-continuation-v2.md)。
+
 ## 工作区
 
 - worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-run-continuation`
-- branch：`rovai/run-continuation`；base：`origin/main` / `b20b1f69`；状态：ready。
+- branch：`rovai/run-continuation`；base：`origin/main` / `b20b1f69`；状态：merged（PR #664，原 worktree 已清理）。
 - Governance：无独立主线先行提交要求；已确认 r2 的合同和实施记录随本分支交付。
 - 授权：User 在审阅 r2 后明确要求独立 worktree 实现并推送；[输入对照](model-context-change-run-continuation.md) 已确认。
 - 原工作区既有图片菜单变更及其他 worktree 均保留。
@@ -147,3 +150,57 @@ Agent 入队后变化场景先生成并停止一次续做 Run，再从它继续�
 默认 `pnpm test:rust:pr` 为 453 项通过、1 项既有忽略。另用 `--features slow-tests` 运行既有
 `collaboration::slow_tests::queued_run_remains_dispatchable_after_task_changes`，1 项通过，确认普通
 已准入执行仍遵守原有 Task 变化规则。`pnpm docs:test`、diff-aware 文档治理、Rust 格式及 diff 检查通过。
+
+## 2026-10-08 会话自动选择与投递前降级
+
+User 报告 TRAE 执行的新会话确认弹窗，并要求默认降级、可用性优先。
+只读诊断日常数据库发现：相关 Run 于本地 14:36:23 被停止，
+输入为 `delivery_unknown`、无原生终态；14:36:25 的续做命令被 `new_session_confirmation_required` 拒绝。
+此次未尝试原生恢复，没有该 Thread 的 `continuation_session_unavailable` 事件；“无法恢复”文案把
+“无法确认旧 native turn 已结束”错误表述为实际恢复失败。未更改日常数据库或操作其 Runtime。
+
+现有续做还比普通 Runtime 更严格：generation/key 信息不足时提前换会话，而普通路径允许 Controlled
+恢复；专属 guard 拦截 ACP/Pi 已有降级。当前 [Continuation v2](../../contracts/agent-run-continuation-v2.md)
+移除这两处差异。点击直接受理，领取时未知 native turn 自动轮换，兼容性由原 Runtime 判断；
+Codex 新授权在输入投递前允许一次新 Thread，ACP/Pi 复用既有路径。没有新增 Schema、状态系统或提示词。
+旧未知结果在同一绑定之后已有可信成功完成时不再强制轮换；旧事实保持不变。
+
+提示词前后相同：原业务输入集合、当前动态上下文和既有新会话 bootstrap；不增加“继续”、来源 ID、
+证据或产物摘要。旧执行清理、权限/Task 准入和本次已投递输入不可重放的边界保留。
+
+### 测试 owner 与隔离
+
+沿用 `user_continuation_preserves_source_and_claims_independent_fifo_batches`；将原显式会话确认 owner
+改为 `continuation_rechecks_scope_and_selects_safe_session_at_claim`，覆盖兼容性变化不拒绝、
+Controlled 恢复不被预检查剥夺、未知输入自动轮换、后续完成消除旧未知、其他绑定/较早成功不足、
+投递后不能降级重发，以及领取前业务范围变化。显式确认/恢复失败必须拒绝的断言随 v1 规则退出，
+没有删除或新增 Rust 独立测试函数。新会话按钮对话框断言由直接提交、无对话框和请求幂等断言替代。
+
+工作分支 `rovai/continuation-session-fallback`，基线 `a77b537d59d7cc8c01d520d9fd1d0174a194e1e7`；
+独立 worktree `../rovai-ai-continuation-session-fallback`。真实 Runtime 使用既有
+`node scripts/accept-run-continuation.mjs` 自动验收通道、临时 data-dir/Skill Library/MCP/工作区。
+该入口更新为验证投递前 Stop 沿用原会话、真实恢复失败自动降级并单次投递、当前上下文/文件保留、
+普通消息及同源再次继续复用当前会话、接受后 Stop 自动选择新会话；不接触用户 Thread。
+
+### 本次验证
+
+| 命令／范围 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | 通过 |
+| `pnpm test` | Vitest 238 文件／2604 项通过；Node 334 项通过、2 项平台跳过 |
+| `cargo test --workspace` | 455 项通过、1 项既有忽略 |
+| `cargo test -p rovai-core --features extended-tests --lib delivery_queue:: -- --test-threads=2` | 24 项通过 |
+| `pnpm test:run-continuation-ui` | 隔离 Chrome 生产组件通过尺寸、键盘、连点、同请求核对、重复提交和无弹窗断言 |
+| `cargo build -p rovai-core --bins` | 通过；以下真实专项使用该 worktree 二进制 |
+| `node scripts/accept-run-continuation.mjs` | 真实 Codex 的四项专项通过；原生恢复失败后一次投递，旧 Run 完整基准和文件摘要不变 |
+| `pnpm docs:test`、`pnpm docs:check`、diff-aware docs gate、格式／diff 检查 | 通过 |
+
+最终真实专项为 macOS、Codex CLI 0.159.2，隔离 fixture `rovai-continuation-real-hrQduM`；
+其 `report.json` 记录 Core 二进制、脚本、源码 diff 摘要，以及各次 Run/Session 关联和验证结果。
+TRAE 本轮只有用户报告的只读诊断，其他 Adapter/平台没有真实续做验收；不将共享代码或 Mock UI 通过
+等同于所有 Runtime 已验证。通用 12 Case Judge 未执行，本次提示词不变。
+
+首次 fixture `rovai-continuation-real-a8FgEA` 保留失败报告：四条执行路径均成功，但最终旧 Run 全字段比较
+碰到 Stop 后的异步 `ending_git_observation_recorded` 将 version 从 4 更新为 5。事件确认该写入属于
+Stop Git observer；测试改为等待该独立收尾完成后取基准，再完整复跑通过，没有忽略 version 差异或修改
+生产状态约束。历史 v1 专项的确认/失败行为仅证明当时合同，不能当作 v2 通过证据。

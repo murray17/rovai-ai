@@ -6,7 +6,6 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-    agent_profile::resolve_frozen_runtime,
     camp_content::{StructuredThreadMessageSegment, canonical_content_digest},
     collaboration::append_domain_event,
     command::{
@@ -84,111 +83,63 @@ pub(crate) fn eligible_source(
     ).optional()?)
 }
 
-pub(crate) fn requires_new_session(
-    connection: &Transaction<'_>,
-    source: &ContinuationSource,
+/// Only an unresolved dispatched native turn requires preemptive rotation.
+/// Compatibility and actual resume failures belong to the ordinary Runtime path.
+pub(crate) fn has_unresolved_native_turn(
+    connection: &Connection,
+    conversation_id: &str,
 ) -> Result<bool> {
-    let (session, installation, digest, generation, key): (Option<String>,Option<String>,Option<String>,Option<i64>,Option<String>) = connection.query_row(
-        "SELECT native_session_id, native_adapter_installation_id, native_binding_compatibility_digest,
-                native_installation_generation, native_session_compatibility_key FROM conversation WHERE id=?1",
-        [&source.conversation_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-    // Retain resume failures as history, but let a later native completion on the
-    // current binding supersede them. Input acceptance alone is not completion.
-    let uncertain:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM runtime_input_delivery AS delivery
-        JOIN agent_run AS run ON run.id=delivery.agent_run_id
-        JOIN conversation ON conversation.id=run.conversation_id
-        WHERE run.conversation_id=?1 AND run.status IN ('failed','cancelled') AND COALESCE(run.terminal_resolution_source,'')<>'runtime_terminal'
-          AND (delivery.status IN ('accepted','delivery_unknown') OR (delivery.status='prepared' AND delivery.dispatch_started_at IS NOT NULL))
-          AND (conversation.native_session_id IS NULL OR conversation.native_binding_id IS NULL OR delivery.native_binding_id=conversation.native_binding_id))
-        OR EXISTS(SELECT 1 FROM event_log AS failure
-          WHERE failure.event_type='agent_run.continuation_session_unavailable'
-            AND json_extract(failure.payload_json,'$.conversationId')=?1
-            AND json_extract(failure.payload_json,'$.nativeSessionId') IS ?2
-            AND NOT EXISTS (
-              SELECT 1 FROM event_log AS completed
-              JOIN agent_run AS recovered ON completed.entity_type='agent_run' AND completed.entity_id=recovered.id
-              JOIN runtime_input_delivery AS accepted ON accepted.agent_run_id=recovered.id
-                AND accepted.execution_epoch=completed.execution_epoch
-              JOIN conversation AS current ON current.id=recovered.conversation_id
-              WHERE completed.event_type='agent_run.succeeded' AND completed.global_sequence>failure.global_sequence
-                AND recovered.status='succeeded' AND recovered.terminal_resolution_source='runtime_terminal'
-                AND current.id=?1 AND current.native_session_id IS ?2
-                AND accepted.status='accepted' AND accepted.native_binding_id=current.native_binding_id
-                AND accepted.native_binding_generation=current.native_binding_generation
-                AND accepted.native_input_id=json_extract(completed.payload_json,'$.nativeTurnId')
-            ))",
-        params![source.conversation_id,session],|r|r.get(0))?;
-    if uncertain {
-        return Ok(true);
-    }
-    if session.is_none() {
-        return Ok(false);
-    }
-    let Ok(runtime) =
-        resolve_frozen_runtime(connection, &source.conversation_id, &source.agent_id)?
-    else {
-        return Ok(false);
-    };
-    Ok(
-        installation.as_deref() != Some(runtime.installation_id.as_str())
-            || digest.as_deref() != Some(runtime.binding_compatibility_digest.as_str())
-            || match (
-                key.as_deref(),
-                runtime.native_session_compatibility_key.as_deref(),
-            ) {
-                (Some(a), Some(b)) => a != b,
-                (None, None) => generation != Some(runtime.installation_generation),
-                _ => true,
-            },
-    )
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM runtime_input_delivery AS delivery
+         JOIN agent_run AS run ON run.id=delivery.agent_run_id
+         JOIN conversation AS current ON current.id=run.conversation_id
+         WHERE current.id=?1 AND run.status IN ('failed','cancelled')
+           AND COALESCE(run.terminal_resolution_source,'')<>'runtime_terminal'
+           AND (delivery.status IN ('accepted','delivery_unknown')
+             OR (delivery.status='prepared' AND delivery.dispatch_started_at IS NOT NULL))
+           AND (current.native_session_id IS NULL OR current.native_binding_id IS NULL
+             OR delivery.native_binding_id=current.native_binding_id)
+           AND NOT EXISTS (
+             SELECT 1 FROM event_log AS terminal
+             JOIN event_log AS completed ON completed.global_sequence>terminal.global_sequence
+             JOIN agent_run AS recovered ON completed.entity_type='agent_run' AND completed.entity_id=recovered.id
+             JOIN runtime_input_delivery AS accepted ON accepted.agent_run_id=recovered.id
+               AND accepted.execution_epoch=completed.execution_epoch
+             WHERE terminal.entity_type='agent_run' AND terminal.entity_id=run.id
+               AND terminal.execution_epoch=delivery.execution_epoch
+               AND terminal.event_type IN ('agent_run.failed','agent_run.cancelled')
+               AND completed.event_type='agent_run.succeeded'
+               AND recovered.conversation_id=current.id AND recovered.status='succeeded'
+               AND recovered.terminal_resolution_source='runtime_terminal'
+               AND accepted.status='accepted' AND accepted.native_binding_id=current.native_binding_id
+               AND accepted.native_binding_generation=current.native_binding_generation
+               AND accepted.native_input_id=json_extract(completed.payload_json,'$.nativeTurnId')
+           ))",
+        [conversation_id],
+        |row| row.get(0),
+    )?)
 }
 
-/// Runtime adapters may retain their ordinary recovery behavior, but an explicit
-/// continuation must never silently replace a failed resume with a fresh session.
-pub(crate) fn guard_session_fallback(
-    database: &mut Database,
-    execution: &crate::runtime::AgentRunExecution,
-) -> Result<()> {
-    let tx = database.connection_mut().transaction()?;
-    let continuation:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_run_input AS input
-        JOIN camp_run_continuation ON camp_run_continuation.delivery_id=input.delivery_id WHERE input.agent_run_id=?1)",
-        [&execution.agent_run_id],|r|r.get(0))?;
-    if !continuation {
-        return Ok(());
-    }
-    append_domain_event(
-        &tx,
-        "agent_run.continuation_session_unavailable",
-        Some(&execution.camp_id),
-        Some(("agent_run", &execution.agent_run_id)),
-        &ActorRef::System {
-            component_id: "run-continuation".into(),
-        },
-        Some(execution.execution_epoch),
-        &json!({"conversationId":execution.conversation_id,"nativeSessionId":execution.native_session_id}),
-    )?;
-    tx.commit()?;
-    Err(
-        crate::runtime_failure::RuntimeFailureError::new(session_unavailable_failure(
-            execution.runtime.adapter_kind,
-        ))
-        .into(),
-    )
-}
-
-pub(crate) fn session_unavailable_failure(
-    kind: crate::agent_profile::AdapterKind,
-) -> crate::runtime_failure::RuntimeFailureView {
-    use crate::runtime_failure::{RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView};
-    RuntimeFailureView::new(
-        kind,
-        RuntimeFailureOrigin::Compatibility,
-        RuntimeFailurePhase::Spawn,
-        "continuation_session_unavailable",
-        "原会话无法恢复，请使用新会话继续。",
-        None,
-        false,
-    )
+/// A session-start fallback is only part of a fresh authorized execution. It
+/// must never turn a relaunch after possible input acceptance into a replay.
+pub(crate) fn can_replace_session_before_dispatch(
+    connection: &Connection,
+    run_id: &str,
+    execution_epoch: i64,
+) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_run AS run
+         JOIN agent_run_input AS input ON input.agent_run_id=run.id
+         JOIN camp_run_continuation ON camp_run_continuation.delivery_id=input.delivery_id
+         WHERE run.id=?1 AND run.execution_epoch=?2 AND run.status IN ('running','waiting')
+           AND run.cancel_requested_at IS NULL
+           AND NOT EXISTS(SELECT 1 FROM runtime_input_delivery AS delivery
+               WHERE delivery.agent_run_id=run.id
+                 AND (delivery.status IN ('accepted','delivery_unknown')
+                   OR delivery.dispatch_started_at IS NOT NULL)))",
+        params![run_id, execution_epoch],
+        |row| row.get(0),
+    )?)
 }
 
 pub fn continue_agent_run(
@@ -206,9 +157,6 @@ pub fn continue_agent_run(
         let Some(source)=eligible_source(tx, &command.camp_id, &command.agent_run_id)? else {
             return Ok(rejected("agent_run.continuation_unavailable", "This execution no longer has an available input and member scope"));
         };
-        if !command.use_new_session && requires_new_session(tx, &source)? {
-            return Ok(rejected("agent_run.new_session_confirmation_required", "The original session cannot be resumed; confirm continuing in a new session"));
-        }
         let now=chrono::Utc::now().to_rfc3339();
         let message_id=Uuid::new_v4().to_string();
         let body=if command.use_new_session { format!("你使用新会话继续了{}的执行。", source.display_name) }

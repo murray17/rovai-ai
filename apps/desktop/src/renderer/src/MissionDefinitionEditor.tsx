@@ -1,6 +1,9 @@
+import { MissionDescriptionComposer, type MissionDescriptionComposerHandle } from './MissionDescriptionComposer'
+import { missionMentionIds } from './mission-description'
+import { MemberAvatar } from './MemberAvatar'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ButtonHTMLAttributes, type DragEvent, type ReactNode, type RefObject } from 'react'
 import * as Popover from '@radix-ui/react-popover'
-import type { ThreadMessageAttachmentView, LocalAttachmentSourceView, MissionAttachmentDraft } from '@contracts'
+import type { AgentProfile, MissionDescriptionContent, ThreadMessageAttachmentView, LocalAttachmentSourceView, MissionAttachmentDraft } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import { AttachmentCard, ComposerAttachmentStrip } from './AttachmentCard'
 import { Icon, TagColorDot, tagStyle } from './MissionControls'
@@ -19,7 +22,7 @@ export type MissionDraftAttachment =
   | { kind: 'stored'; attachment: LocalAttachmentSourceView }
   | { kind: 'local'; id: string; file: File; kindHint: 'file' | 'directory' }
 
-export type MissionWritingPlaneHandle = { chooseFiles(): void }
+export type MissionWritingPlaneHandle = { chooseFiles(): void; startMention(): void; flushDescription(): Promise<MissionDescriptionContent> }
 
 export function missionAttachmentDrafts(attachments: MissionDraftAttachment[]): MissionAttachmentDraft[] {
   return attachments
@@ -103,7 +106,10 @@ function MissionAttachmentItem({ attachment, mission, disabled, onRemove, onNoti
 
 export const MissionWritingPlane = forwardRef<MissionWritingPlaneHandle, {
   title: string
-  description: string
+  descriptionContent: MissionDescriptionContent
+  agents: AgentProfile[]
+  memberAgentIds: string[]
+  unavailableAgentIds?: readonly string[]
   attachments: MissionDraftAttachment[]
   disabled: boolean
   attachmentsDisabled?: boolean
@@ -112,17 +118,19 @@ export const MissionWritingPlane = forwardRef<MissionWritingPlaneHandle, {
   descriptionError?: string
   mission?: {threadId: string; missionId: string}
   onTitleChange(value: string): void
-  onDescriptionChange(value: string): void
+  onDescriptionChange(value: MissionDescriptionContent): void
   onAttachmentsChange(value: MissionDraftAttachment[]): void
   onNotify(message: string): void
 }>(({
-  title, description, attachments, disabled, attachmentsDisabled = false, titleInputRef, titleError, descriptionError,
+  title, descriptionContent, agents, memberAgentIds, unavailableAgentIds, attachments, disabled, attachmentsDisabled = false, titleInputRef, titleError, descriptionError,
   mission, onTitleChange, onDescriptionChange, onAttachmentsChange, onNotify
 }, ref) => {
   const inputRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<MissionDescriptionComposerHandle>(null)
+  const pending = missionMentionIds(descriptionContent).filter(id => !memberAgentIds.includes(id))
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
-  useImperativeHandle(ref, () => ({ chooseFiles: () => inputRef.current?.click() }), [])
+  useImperativeHandle(ref, () => ({ chooseFiles: () => inputRef.current?.click(), startMention: () => descriptionRef.current?.startMention(), flushDescription: async () => descriptionRef.current ? descriptionRef.current.flush() : descriptionContent }), [descriptionContent])
   const addFiles = (inputs: AttachmentPreparationInput[]): void => {
     if (disabled || attachmentsDisabled || !inputs.length) return
     const existing = new Set(attachments
@@ -149,7 +157,11 @@ export const MissionWritingPlane = forwardRef<MissionWritingPlaneHandle, {
       {attachments.map((attachment, index) => <MissionAttachmentItem key={attachmentIdentity(attachment)} attachment={attachment} mission={mission} disabled={disabled || attachmentsDisabled} onNotify={onNotify} onRemove={() => onAttachmentsChange(attachments.filter((_, candidate) => candidate !== index))}/>) }
     </ComposerAttachmentStrip>}
     <label className="sr-only" htmlFor="mission-editor-description"><UiText zh={"使命描述"} /></label>
-    <textarea id="mission-editor-description" className="mission-editor-description" aria-label={uiAttribute("使命描述")} placeholder={uiAttribute("告诉队员，这次要完成什么…")} spellCheck={false} value={description} disabled={disabled} aria-invalid={!!descriptionError} onChange={event => onDescriptionChange(event.target.value)}/>
+    <MissionDescriptionComposer ref={descriptionRef} content={descriptionContent} agents={agents} memberAgentIds={memberAgentIds} unavailableAgentIds={unavailableAgentIds} disabled={disabled} identity={mission ? `mission-description:${mission.missionId}` : 'mission-description:new'} onChange={onDescriptionChange} onPasteFiles={files => addFiles(files.map(file => ({file, kindHint:'file'})))}/>
+    {!!pending.length && <div className="mission-pending-members" aria-label={uiAttribute('待加入队员')}><span>{mission ? uiAttribute('保存时加入') : uiAttribute('新建时加入')}</span>{pending.map(id => {
+      const member = agents.find(agent => agent.agentId === id)
+      return <span className="mission-pending-member" key={id}><MemberAvatar agentId={id} displayName={member?.displayName ?? uiAttribute('不可用队员')} avatarRef={member?.avatarRef ?? null} size="mention" decorative/><span>{member?.displayName ?? uiAttribute('不可用队员')}</span><button type="button" disabled={disabled} aria-label={uiAttribute('取消邀请 {0}', member?.displayName ?? id)} onClick={() => onDescriptionChange(descriptionContent.filter(segment => segment.kind !== 'member_mention' || segment.agentId !== id))}>×</button></span>
+    })}</div>}
     {(titleError || descriptionError) && <p className="mission-editor-field-error" role="alert">{titleError || descriptionError}</p>}
     {dragging && <div className="mission-editor-drop-overlay"><div><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg><span><UiText zh={"松开以添加到使命"} /></span></div></div>}
     <input ref={inputRef} type="file" multiple hidden disabled={disabled || attachmentsDisabled} onChange={event => { addFiles(Array.from(event.target.files ?? []).map(file => ({ file, kindHint: 'file' }))); event.target.value = '' }}/>
@@ -161,6 +173,10 @@ export function MissionAttachmentButton({ onClick, disabled }: {onClick(): void;
   return <button type="button" className="mission-editor-icon-button" aria-label={uiAttribute("添加附件")} title={uiAttribute("添加附件 · 支持粘贴或拖入")} onClick={onClick} disabled={disabled}>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 13.5 7-7a3 3 0 0 1 4.25 4.25l-9 9a5 5 0 0 1-7.08-7.08l9-9"/><path d="m16 10-7 7a2 2 0 0 1-2.83-2.83l7-7"/></svg>
   </button>
+}
+
+export function MissionMentionButton({ onClick, disabled }: { onClick(): void; disabled: boolean }): React.JSX.Element {
+  return <button type="button" className="mission-editor-icon-button" aria-label={uiAttribute('提及队员')} title={uiAttribute('提及队员')} onMouseDown={event => event.preventDefault()} onClick={onClick} disabled={disabled}>@</button>
 }
 
 type MissionPropertyChipProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {

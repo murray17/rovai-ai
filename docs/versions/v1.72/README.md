@@ -18,18 +18,19 @@ User 95 已替换此前 Hub 方向。Cline 唯一执行链为选中安装的 `cl
 专属登录 UI/IPC 和测试入口，保留 Pi 结算与通用进程回收。不恢复版本、账号白名单或强制 cold。
 旧 Hub Binding 仅在新输入前按共享不兼容替换，公开数据及原生历史保留；不迁移或重放旧输入。
 当前合同 [Runtime Launch v54](../../contracts/runtime-launch-and-verification-v54.md)，理由
-[V1.72-D25](decisions.md#v1-72-d25)，[输入说明](model-context-change-cline-acp.md)。
+[V1.72-D27](decisions.md#v1-72-d27)，[输入说明](model-context-change-cline-acp.md)。
 实际结果见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)，旧 Hub 报告均为历史证据。
-保持 Preview，ACP compact 缺口和实际安装的能力失败不宣称修复。本次无需 schema 迁移，不改变 current_version。
+保持 Preview，ACP compact 缺口和实际安装的能力失败不宣称修复。后端切换本身不改 schema；主干合流迁移见下节，current_version 不变。
 
 ## 主干与 Preview 数据合流（2026-10-08）
 
-当前 schema 为 **136**。主干的 Migration 184 / schema 134 已用于继续执行，Preview 分支的同编号
-已用于 Cline catalog，另有 Migration 185 / schema 135 的 Command Code catalog。合流按收据、完整
-结构和原有 classifier 共同识别两种 schema 134，拒绝部分结构及仅修改 marker 的来源。Migration 185
-为主干来源原子加入两个 catalog；Migration 186 保留已存在的继续执行结构，或为 Preview 补入它，并
-统一到 schema 136。旧业务行、冻结证据和已存在的继续执行授权不重建、不重投；失败回滚结构与收据。
-下文的 184/134、185/135 描述各分支当时的升级，不能作为当前 schema 值。
+当前 schema 为 **137**。Migration 184 / schema 134 在主干用于继续执行，在 Preview 用于 Cline catalog；
+Migration 185 / schema 135 在主干用于结构化 Mission 描述，在 Preview 用于 Command Code catalog。
+Classifier 按完整结构、收据及旧 classifier 识别来源，拒绝部分结构，不能只凭编号推断已具备能力。
+Migration 186 将两边的 catalog 与继续执行结构汇合到 schema 136；Migration 187 保留主干已有的
+Mission 描述 Atom，或为 Preview 回填原文字，统一到 schema 137。结构、收据与 marker 在同一事务提交。
+旧业务行、冻结证据、结构化提及和继续执行授权不重建、不重投；失败一起回滚。既有迁移 owner 覆盖
+两种 134、两种 135、136 来源和写入失败；下文旧编号仅描述当时分支状态。
 
 ## 并行实施：Command Code 与 Cline
 
@@ -60,13 +61,13 @@ Cline observer v2 补齐原生模型配置快照与实际 Provider/模型匹配�
 [窗口补采](../../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
 
 Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
-macOS arm64 按 [V1.72-D18](decisions.md#v1-72-d18)开放开发 `Preview`，其余平台保持 `NotQualified`；
+macOS arm64 按 [V1.72-D20](decisions.md#v1-72-d20)开放开发 `Preview`，其余平台保持 `NotQualified`；
 完整资格仍在实施。Command Code 随后接入官方 1.74.1 ACP 与共享 Fleet，Migration 185 升至 schema **135**，
 也仅在 macOS arm64 开放 Preview。按 User 后续修复要求，Bootstrap 从旧候选 first_payload 改为受管
-System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D20](decisions.md#v1-72-d20)
+System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D22](decisions.md#v1-72-d22)
 记录加载门禁、逐 Session 绑定与失败收敛。Cline 随后按 User 明确指示改为正常 System Rule，
 不再以故意缺失插件的极端场景阻挡。冻结 B 逐 Session 绑定、user P 独立，见
-[Cline System revision 2](model-context-change-cline-system.md)及 [V1.72-D22](decisions.md#v1-72-d22)。
+[Cline System revision 2](model-context-change-cline-system.md)及 [V1.72-D24](decisions.md#v1-72-d24)。
 共享 Core 的 Command 门禁与常驻接线已过；原生默认 BYOK 路径已解决先前额度阻碍，真实模型 A→B→A、
 exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证通过。显式自定义模型切换仍被上游拒绝，
 因此保留原生默认哨兵而不伪造目录。Cline ACP 未传 compaction 配置，真实探针未得到完成信号。完整 14 轴对照与实际验证见
@@ -77,7 +78,7 @@ exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证
 超过 75 秒无迟到写入、cleanup 后排队输入自动成功均通过。Command 官方 resume/load 会接受不存在历史，
 已增加官方 session/list 精确 ID/cwd 门禁；有效 cold 的 Session/Binding/generation 保留通过。
 范围、失败候选和平台限制见[故障恢复验收](../../research/runtime-monitoring/command-cline-fault-recovery-2026-10-05.md)
-与 [V1.72-D21](decisions.md#v1-72-d21)，不改变两者 Preview 或未闭合的上游差异。
+与 [V1.72-D23](decisions.md#v1-72-d23)，不改变两者 Preview 或未闭合的上游差异。
 
 2026-10-06 追加完成 Command 原生私有 MCP 配置与 Cline System 新包真实验收：两者 first/warm/cold、
 文件工具与显式 CLI 发送通过；MCP cwd、字面 env/headers、原生同名优先和更新/撤销边界通过。
@@ -103,13 +104,15 @@ Automation、预算和文本收尾按业务 deadline／实际失败退避等待�
 ## 并行实施：用户主动继续执行
 
 User 已确认 [r2 输入对照](model-context-change-run-continuation.md) 并授权独立 worktree 实现、推送。
-[AgentRun Continuation v1](../../contracts/agent-run-continuation-v1.md) 将新授权接入现有 waiting lane；
+[AgentRun Continuation v2](../../contracts/agent-run-continuation-v2.md) 将新授权接入现有 waiting lane；
 每次完整选择原业务输入，现有 builder 重建当前上下文，同一来源可多次独立执行。按钮为 24×24 纯图标，
 原卡片状态不关联新 Run。Migration 184 / schema 134 增量保留旧证据；实现与验证见
 [续做实施记录](run-continuation-implementation.md)。
 
 Task 准入修正按 [Camp Message Send v25](../../contracts/camp-message-send-v25.md) 保留发送时明确关联，
 提交和领取均检查全部原业务输入，不依赖 batch Run 的单值 `task_id`；提示词及 Schema 不变。
+2026-10-08 按 User 可用性优先要求取消新会话确认，复用正常 Runtime 的兼容判断，允许投递前一次降级；
+旧输入未知时在清理完成后自动选择新会话，工作区和提示词保持不变。
 
 ## 并行实施：Member CLI
 
@@ -360,7 +363,7 @@ Antigravity 四项与 Context、Qoder 数量、TRAE Context、Kiro 窗口已补�
 
 按 User 的 HTML 交互稿确认与 worktree/PR 合入要求，Run 主线按正文或完整折叠组分页；展开组按独立游标读取，
 首次短内容自动补齐，失败保持内容并在原位重试。无新表、迁移、模型上下文或渠道公开数据变化。
-当前合同为 [Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)，理由见
+当前合同为 [Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)，理由见
 [V1.72-D10](decisions.md#v1-72-d10)，实现与验证见[实施记录](implementation-plan.md#2026-10-02-run-内容块与-command-组分页)。
 跨版本影响：Contract、读取架构、UI 和当前导航已同步；版本指针、Runtime 兼容、原始 Evidence、结果预算与根 README 无需变化。
 
@@ -418,7 +421,22 @@ User 于 2026-10-06 授权在独立 worktree 实施并推送分支。Codex 仅�
 
 ## Run 思考反馈补充
 
-当前思考反馈扩展遵循 [Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)：
+当前思考反馈扩展遵循 [Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)：
 正文、计划和工具之后的根思考均可显示；活动工具与根思考并列，实际压缩、等待/取消/恢复和终态保留优先级。
 Codex/Copilot 的合格原生短标题瞬时替换“思考中”；Claude 暂不接入短标题。实现与验证以任务分支测试和真实
 Runtime Smoke 为证据，不从合同 accepted 状态推断所有 Provider 都能返回标题。
+
+## 一键草稿邀请队外队员
+
+User 于 2026-10-08 授权独立 worktree、PR 与 main 合入。Pending Composer 沿用待邀请交互，
+首条 User inline 消息按 [Pending v5](../../contracts/pending-camp-activation-v5.md)和
+[Send v26](../../contracts/camp-message-send-v26.md)原子加入、激活与投递；Active 保持逐人邀请。
+无数据库或模型上下文格式变更。实施与验证见[实施计划](implementation-plan.md#一键草稿邀请队外队员)。
+
+
+## 并行交付：使命描述提及队员
+
+按 User 确认的交互稿与模型读取示例实现个人提及、保存时邀请队外成员和失败保留草稿。
+[Mission v12](../../contracts/mission-v12.md)冻结结构与原子性，Migration 185 将 schema 134 升至 135；
+模型 `mission get` 继续返回可读 description，不增加字段或修改 Bootstrap/Run Facts。
+决定见 [V1.72-D18](decisions.md#v1-72-d18)，测试与交付证据见[实施记录](mission-member-mentions-implementation.md)。

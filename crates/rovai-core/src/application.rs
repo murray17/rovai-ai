@@ -6446,6 +6446,7 @@ impl Core {
                                     request.runtime_tool_call_id,
                                     &authenticated_run,
                                     crate::mission::UpdateMissionCommand {
+            description_content: None,
                                         mission_id: mission.info.mission_id,
                                         title: input.title,
                                         description: input.description,
@@ -14751,7 +14752,7 @@ impl Core {
                 .payload
         };
         let resumable_session_id = initial_binding.native_session_id.clone();
-        let binding_credential = initial_binding;
+        let mut binding_credential = initial_binding;
         let active_builtin_tools = runtime
             .builtin_tool_process_config()
             .context("Codex Runtime has no Built-in Tool process context")?
@@ -14776,22 +14777,76 @@ impl Core {
         let thread_id = match thread {
             Ok(thread_id) => thread_id,
             Err(error) => {
-                if resumable_session_id.is_some() {
+                let failure = classify_native_resume_failure(&error);
+                let may_replace = {
                     let mut database = self.database.lock().await;
-                    crate::run_continuation::guard_session_fallback(&mut database, execution)?;
+                    if resumable_session_id.is_some()
+                        && resume_disposition == NativeSessionResumeDisposition::Controlled
+                    {
+                        ExecutionRuntimeService::default().record_native_session_resume_failure(
+                            &mut database,
+                            execution,
+                            failure,
+                        )?;
+                    }
+                    resumable_session_id.is_some()
+                        && crate::run_continuation::can_replace_session_before_dispatch(
+                            database.connection(),
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                        )?
+                };
+                if !may_replace {
+                    return Err(error)
+                        .context("Codex Native Session restoration failed; no input was sent");
                 }
-                if resumable_session_id.is_some()
-                    && resume_disposition == NativeSessionResumeDisposition::Controlled
+                // Session activation precedes materialization and dispatch. The
+                // User's new continuation permits one replacement, never a replay
+                // after turn/start or an unbounded retry on the replacement error.
+                launch_permit.check_cancelled()?;
                 {
                     let mut database = self.database.lock().await;
-                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                    ExecutionRuntimeService::default().record_native_session_continuity_lost(
                         &mut database,
                         execution,
-                        classify_native_resume_failure(&error),
+                        "codex_thread_resume",
+                        failure,
                     )?;
                 }
-                return Err(error)
-                    .context("Codex Native Session restoration failed; no input was sent");
+                binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
+                let replacement_bootstrap = {
+                    let mut database = self.database.lock().await;
+                    ContextService
+                        .prepare_session_bootstrap(
+                            &mut database,
+                            &ManagedBlobStore::new(&self.data_dir),
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            CharterDeliveryMode::NativeAppend,
+                        )?
+                        .payload
+                };
+                self.bind_builtin_tool_runtime(
+                    &active_builtin_tools,
+                    execution,
+                    &binding_credential,
+                )
+                .await?;
+                launch_permit.check_cancelled()?;
+                runtime.start_or_resume_agent_thread(
+                    &execution_root,
+                    CodexAgentThreadOptions {
+                        existing_thread_id: None,
+                        developer_instructions: Some(replacement_bootstrap.as_str()),
+                        sandbox_mode,
+                        approval_policy,
+                        model: explicit_model,
+                        attachment_access_root: &attachment_access_root,
+                        external_mcp_servers: &mcp_projection.servers,
+                    },
+                ).await.with_context(|| format!(
+                    "failed to create the single replacement Codex Session after resume failed: {error:#}"
+                ))?
             }
         };
         self.bind_prepared_native_session(execution, &binding_credential, &thread_id)
@@ -15000,10 +15055,6 @@ impl Core {
                         == Some(pi::PiActivationFailureKind::ResumeContinuityLost) =>
             {
                 let failure = classify_native_resume_failure(&error);
-                {
-                    let mut database = self.database.lock().await;
-                    crate::run_continuation::guard_session_fallback(&mut database, execution)?;
-                }
                 {
                     let mut database = self.database.lock().await;
                     if resume_disposition == NativeSessionResumeDisposition::Controlled {
@@ -16435,10 +16486,6 @@ impl Core {
         if binding_credential.native_session_id.is_some()
             && session_continuation == acp::AcpSessionContinuation::New
         {
-            {
-                let mut database = self.database.lock().await;
-                crate::run_continuation::guard_session_fallback(&mut database, execution)?;
-            }
             binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
             if execution.runtime.adapter_kind == AdapterKind::ClineCli {
                 let digest = acp::runtime_compatibility_digest(
@@ -16521,10 +16568,6 @@ impl Core {
                     && error.downcast_ref::<RuntimeFailureError>().is_none() =>
             {
                 let failure = classify_native_resume_failure(&error);
-                {
-                    let mut database = self.database.lock().await;
-                    crate::run_continuation::guard_session_fallback(&mut database, execution)?;
-                }
                 eprintln!(
                     "{} Native Session {:?} failed for AgentRun {}; continuity is lost and a new Session will be created: {error:#}",
                     execution.runtime.adapter_kind.as_str(),
@@ -29323,6 +29366,7 @@ done
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: crate::mission::CreateMissionCommand {
+                        description_content: None,
                         title: "Mission Git background dispatch".into(),
                         description: String::new(),
                         project_path: source.to_string_lossy().into_owned(),
@@ -29911,6 +29955,7 @@ done
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: crate::mission::CreateMissionCommand {
+                            description_content: None,
                             title: "Camp deletion Mission race".into(),
                             description: String::new(),
                             project_path: source.to_string_lossy().into_owned(),

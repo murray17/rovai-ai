@@ -423,6 +423,7 @@ mod tests {
                     expected_versions: vec![],
                     execution_epoch: None,
                     payload: crate::mission::CreateMissionCommand {
+                        description_content: None,
                         title: "workspace lifecycle".into(),
                         description: String::new(),
                         project_path,

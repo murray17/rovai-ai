@@ -4000,10 +4000,6 @@ export type CoreMethod =
   | 'runtime.product.ensure'
   | 'runtime.product.check'
   | 'runtime.startup.get'
-  | 'runtime.clineLogin.start'
-  | 'runtime.clineLogin.read'
-  | 'runtime.clineLogin.input'
-  | 'runtime.clineLogin.cancel'
   | 'runtime.startup.inspect'
   | 'runtime.startup.check'
   | 'runtime.startup.save'
@@ -4344,12 +4340,16 @@ export interface RovaiApi {
   platform: NodeJS.Platform
 }
 
+export type MissionDescriptionContent = Array<
+  | { kind: 'text'; text: string }
+  | { kind: 'member_mention'; agentId: string }
+>
 export type MissionStatus = 'needs_you' | 'not_started' | 'in_progress' | 'completed'
 export interface MissionInfo { missionId: string; title: string; description: string; status: MissionStatus; sourceMessageId: string | null }
 export interface MissionWorkspaceCleanupView { state: 'cleaning' | 'failed' | 'cleaned'; worktreeRemoved: boolean; branchRemoved: boolean; diagnostic: string | null }
-export interface MissionRecord extends MissionInfo { number: number; hasUnread: boolean; threadId: string; projectPath: string; projectBindingKind: ProjectBindingKind; detailsVersion: number; tags: string[]; attachments: LocalAttachmentSourceView[]; createdAt: string; updatedAt: string; memberAgentIds: string[]; defaultLeadAgentId: string | null; runningAgentIds: string[]; startAvailable: boolean; workspaceEverCreated: boolean; workspaceResourcesPresent: boolean; cleanupAvailable: boolean; workspaceCleanup?: MissionWorkspaceCleanupView }
-export interface MissionCreate { title: string; description: string; projectPath: string; projectBindingKind: ProjectBindingKind; memberAgentIds: string[]; defaultLeadAgentId: string; tags: string[] }
-export interface MissionUpdate { missionId: string; title?: string; description?: string; tags?: string[]; expectedDetailsVersion?: number }
+export interface MissionRecord extends MissionInfo { descriptionContent?: MissionDescriptionContent; number: number; hasUnread: boolean; threadId: string; projectPath: string; projectBindingKind: ProjectBindingKind; detailsVersion: number; tags: string[]; attachments: LocalAttachmentSourceView[]; createdAt: string; updatedAt: string; memberAgentIds: string[]; defaultLeadAgentId: string | null; runningAgentIds: string[]; startAvailable: boolean; workspaceEverCreated: boolean; workspaceResourcesPresent: boolean; cleanupAvailable: boolean; workspaceCleanup?: MissionWorkspaceCleanupView }
+export interface MissionCreate { descriptionContent?: MissionDescriptionContent; title: string; description: string; projectPath: string; projectBindingKind: ProjectBindingKind; memberAgentIds: string[]; defaultLeadAgentId: string; tags: string[] }
+export interface MissionUpdate { descriptionContent?: MissionDescriptionContent; missionId: string; title?: string; description?: string; tags?: string[]; expectedDetailsVersion?: number }
 export interface MissionAttachmentDraft { id: string; file: File; kindHint: 'file' | 'directory' }
 export interface MissionAttachmentsApi {
   create(commandId: string, command: MissionCreate, attachments: MissionAttachmentDraft[]): Promise<StoredCommandResult>

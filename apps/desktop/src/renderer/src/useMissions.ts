@@ -23,6 +23,7 @@ export function missionError(error: unknown): string {
     'mission.workspace_branch_missing': uiAttribute('使命本地分支已缺失，无法确认清理范围。'),
     'mission.workspace_cleanup_failed': uiAttribute('使命 Worktree 清理未完成，请重试。'),
     'mission.base_unavailable': uiAttribute('固定比较基准暂不可用，当前无法生成累计文件变更。'),
+    'mission.member_unavailable': uiAttribute('提及的队员已不可用，请移除提及或选择其他队员。'),
     'mission.content_required': uiAttribute('请填写要修改的内容。'),
     'mission.details_version_required': uiAttribute('使命内容版本缺失，请刷新后重试。'),
     'mission.details_version_conflict': uiAttribute('使命内容刚刚发生变化，请基于最新内容重新编辑。'),
@@ -39,6 +40,12 @@ export class MissionCommandRejected extends Error {
   }
 }
 
+export function rejectedMissionMemberIds(error: unknown): string[] {
+  if (!(error instanceof MissionCommandRejected) || error.result.code !== 'mission.member_unavailable') return []
+  const ids = error.result.payload.agentIds
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
+}
+
 export async function missionCommand(client: ThreadClient, method: CoreMethod, command: unknown, commandId = newCommandId()): Promise<StoredCommandResult> {
   const result = await client.request<StoredCommandResult>(method, { commandId, command })
   if (result.status === 'rejected') throw new MissionCommandRejected(result)
@@ -51,7 +58,7 @@ export function unreadMissionCount<T extends Pick<MissionRecord, 'hasUnread'>>(m
 
 /** Thread reads/acks do not invalidate the Mission board. */
 export function shouldRefreshMissionsForEvent(event: CoreEvent, threadIds: ReadonlySet<string>): boolean {
-  if (event.method === 'missions.invalidated') return true
+  if (event.method === 'missions.invalidated' || event.method === 'members.invalidated') return true
   const params = event.params && typeof event.params === 'object' ? event.params as Record<string, unknown> : {}
   if (event.method === 'navigation.invalidated') {
     const reason = typeof params.reason === 'string' ? params.reason : ''

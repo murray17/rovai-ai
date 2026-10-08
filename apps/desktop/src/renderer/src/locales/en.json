@@ -3599,5 +3599,18 @@
   "查看大图": "View full image",
   "已复制图片": "Image copied",
   "未能复制图片，请重试或保存图片。": "Could not copy the image. Try again or save it.",
-  "未能保存图片，请重试。": "Could not save the image. Try again."
+  "未能保存图片，请重试。": "Could not save the image. Try again.",
+  "本使命": "This mission",
+  "返回本使命": "Back to this mission",
+  "查看当前使命队员": "View this mission's members",
+  "待加入队员": "Pending members",
+  "保存时加入": "Join on save",
+  "新建时加入": "Join on create",
+  "取消邀请 {0}": "Cancel invitation for {0}",
+  "邀请并新建": "Invite and create",
+  "邀请并保存": "Invite and save",
+  "提及的队员已不可用，请移除提及或选择其他队员。": "A mentioned member is unavailable. Remove the mention or choose another member.",
+  "编辑使命名称、描述、标签和附件，提及队外队员可在保存时邀请加入。": "Edit the mission title, description, tags and attachments. Mention other members to invite them on save.",
+  "已有队员和队长需通过队伍菜单管理": "Manage existing members and the lead from the team menu",
+  "成员 {0} 待邀请，保存时加入": "Member {0}, invitation pending until save"
 }

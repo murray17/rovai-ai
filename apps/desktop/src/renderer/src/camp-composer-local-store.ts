@@ -281,23 +281,27 @@ export function nextLocalThreadComposerDraftAfterSend(input: {
   const ids = explicitRecipientIds(input.sent.content)
   const broadcast = input.sent.content.segments.some((segment) =>
     segment.kind === 'atom' && segment.atom.type === 'all_members')
-  const recipient = !broadcast && ids.length === 1 && ids[0] !== leadId
+  const recipientId = !broadcast && ids.length === 1 && ids[0] !== leadId
     && input.addressedAgentIds.length === 1 && input.addressedAgentIds[0] === ids[0]
-    ? input.members.find((member) => member.agentId === ids[0]) ?? null
+    ? ids[0]
     : null
-  const continuationIntent = recipient && input.threadMessageId
+  const recipient = input.members.find((member) => member.agentId === recipientId)
+  const mention = input.sent.content.segments.find((segment) =>
+    segment.kind === 'atom' && segment.atom.type === 'member' && segment.atom.agentId === recipientId)
+  // An accepted Pending invitation can precede its membership projection. Keep
+  // the accepted route; materialization still requires a current active member.
+  const available = !recipient || (recipient.membershipStatus === 'active' && recipient.profilePresence === 'present')
+  const continuationIntent = recipientId && input.threadMessageId
     ? {
         sourceThreadMessageId: input.threadMessageId,
         recipient: {
-          agentId: recipient.agentId,
-          displayName: recipient.displayName,
-          recipientAvailability: recipient.membershipStatus === 'active'
-            && recipient.profilePresence === 'present'
-            ? 'available' as const
-            : 'unavailable' as const
+          agentId: recipientId,
+          displayName: recipient?.displayName
+            ?? (mention?.kind === 'atom' && mention.atom.type === 'member' ? mention.atom.labelFallback : undefined)
+            ?? recipientId,
+          recipientAvailability: available ? 'available' as const : 'unavailable' as const
         },
-        recipientSelectionRequired: recipient.membershipStatus !== 'active'
-          || recipient.profilePresence !== 'present'
+        recipientSelectionRequired: !available
       }
     : null
   return emptyLocalThreadComposerDraft(

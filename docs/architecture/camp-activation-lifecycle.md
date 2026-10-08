@@ -28,7 +28,7 @@ one-click entry
           draft row appears; repeated new entries retain separate Thread IDs
      -> send rejected/failed: local input remains
      -> send accepted transaction:
-          Active + camp.activated + CampMessage + waiting Deliveries + presence removal
+          invited members + Active + camp.activated + CampMessage + waiting Deliveries + presence removal
      -> switch / refresh / close before send:
           saved local input can be selected from the client's draft row
           truly empty Pending Camp stays hidden and is eligible for guarded cleanup
@@ -40,7 +40,10 @@ explicit Dialog
 
 The first accepted send is the only Pending-to-Active transition. It validates the one frozen local send snapshot and,
 in one Core transaction, activates the Camp, publishes the message and creates target Deliveries. A rejection or
-rollback leaves the Camp Pending and does not clear the mounted Renderer input.
+rollback leaves the Camp Pending and does not clear the mounted Renderer input. User inline first input may
+invite present outsider Member Atoms in that same transaction. A local savepoint also rolls back tentative invitations
+on a business rejection before the gateway persists its receipt. Shared membership writes own generation, lifetime
+and member-added events; a second first-send contender sees the committed activation and follows Active admission.
 
 Renderer navigation flushes the existing Composer save/attachment queue before unmounting. Ordinary Pending saves
 persist the local snapshot before setting Core presence; a failed write or acknowledgement retains the editor and
@@ -59,7 +62,7 @@ activation trigger; the trigger's deletion rolls back with a failed first-send t
 ## References
 
 - [Camp lifecycle invariants](foundational-invariants.md#camp-lifecycle)
-- [Pending Camp Activation v4](../contracts/pending-camp-activation-v4.md)
+- [Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)
 - [Camp Composer Draft v16](../contracts/camp-composer-draft-v16.md)
 
 ## AI 队员创建
@@ -67,7 +70,7 @@ activation trigger; the trigger's deletion rolls back with a failed first-send t
 名册入口选择一位当前可用协助者后复用普通 Pending Thread。BusinessApp 持有这个入口创建的窗口内草稿 map；
 有输入时仅合并到 Renderer 的侧栏投影，同窗口切换可恢复，刷新与退出不恢复。此入口不写本机 store 或 Core presence。
 普通一键入口采用上方的持久保存流程；两者首条接受的发送都是唯一激活事务。选择与状态边界见
-[Member Creation Flow v1](../contracts/member-creation-flow-v1.md)及[Pending Camp Activation v4](../contracts/pending-camp-activation-v4.md)。
+[Member Creation Flow v1](../contracts/member-creation-flow-v1.md)及[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)。
 
 Member Studio 调用现有 AgentProfile Gateway，在同一创建事务中保存静态入队回执和最近成功协助者。
 ReadModel 只读业务回执表，Renderer 只展示创建时身份；当前 Runtime、Presence 与资料存续由跳转后的队员页处理。

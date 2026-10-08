@@ -86,7 +86,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
       inputMessageIds: [state.snapshot.messages[0].id], anchorMessageId: state.snapshot.messages[0].id,
       executionEvidenceCount: 0, endedAt: now }]
   }
-  const continuation = { mode: 'normal', hold: false, attempts: [] as Array<{ commandId: string; command: { agentRunId: string; useNewSession: boolean } }>,
+  const continuation = { mode: 'normal', hold: false, attempts: [] as Array<{ commandId: string; command: { agentRunId: string; useNewSession?: boolean } }>,
     receipts: new Map<string, unknown>() }
   const editing = new Map<string, unknown>()
   const request = async (method: CoreMethod, input?: unknown): Promise<unknown> => {
@@ -99,9 +99,6 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
         await delay()
         const receipt = continuation.receipts.get(p.commandId)
         if (receipt) return receipt
-        if (continuation.mode === 'new-session' && !p.command.useNewSession) {
-          return { status: 'rejected', code: 'agent_run.new_session_confirmation_required', payload: {} }
-        }
         const result = { ...applied(), code: 'agent_run.continuation_requested', commandId: p.commandId }
         continuation.receipts.set(p.commandId, result)
         const snapshot = structuredClone(state.snapshot)

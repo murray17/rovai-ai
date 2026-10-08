@@ -76,8 +76,8 @@ async function finish(id, expected = 'succeeded') {
   assert.equal(result.status, expected, JSON.stringify(result))
   return result
 }
-async function continueRun(source, useNewSession = false) {
-  return request('agentRuns.continue', { commandId: randomUUID(), command: { threadId, agentRunId: source, useNewSession } })
+async function continueRun(source) {
+  return request('agentRuns.continue', { commandId: randomUUID(), command: { threadId, agentRunId: source } })
 }
 async function cancel(id) {
   const before = run(id)
@@ -85,7 +85,14 @@ async function cancel(id) {
   const receipt = await request('agentRuns.cancel', { commandId: randomUUID(), command: {
     threadId, agentRunId: id, expectedVersion: before.version } })
   assert.equal(receipt.status, 'applied', JSON.stringify(receipt))
-  return finish(id, 'cancelled')
+  await finish(id, 'cancelled')
+  // Stop owns an asynchronous ending Git observation after cleanup ACK. Capture
+  // the immutable source baseline only after that independent write has settled.
+  await waitFor(() => one('SELECT ending_git_observation_json IS NOT NULL AS ready FROM agent_run WHERE id=?', id)?.ready,
+    'Stop ending Git observation')
+  const settled = run(id)
+  report.runs[report.runs.length - 1] = settled
+  return settled
 }
 async function claimed(receipt) {
   assert.equal(receipt.status, 'applied', JSON.stringify(receipt))
@@ -126,20 +133,6 @@ async function restoreSessionFile() {
   await rename(withheld.held, withheld.original)
   withheld = null
 }
-async function resumeFailure(source, originalSession) {
-  await stop()
-  await hideSessionFile(originalSession)
-  await start()
-  const failedId = await claimed(await continueRun(source))
-  const failed = await finish(failedId, 'failed')
-  assert.equal(session().native_session_id, originalSession, 'failed resume must not silently bind an empty session')
-  assert.equal(one('SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=?', failedId).n, 0,
-    'no business input may be prepared or dispatched after this resume failure')
-  assert.equal(one('SELECT count(*) AS n FROM event_log WHERE event_type=? AND entity_id=?',
-    'agent_run.continuation_session_unavailable', failedId).n, 1)
-  assert.match(failed.last_error_code, /continuation_session_unavailable/)
-  return failedId
-}
 
 try {
   await writeFile(join(workspace, 'README.md'), '# Isolated real continuation acceptance\n')
@@ -176,7 +169,7 @@ try {
   ].join('\n')
   // Cold host startup gives the real cancellation command a window
   // before dispatch. An accepted turn without terminal proof is tested separately
-  // below and must still require explicit session replacement.
+  // below and must automatically select a fresh session after cleanup.
   await stop()
   await start()
   const source = await send(taskBody)
@@ -195,23 +188,6 @@ try {
   assert.deepEqual(run(source), stopped)
   await check('stop_before_dispatch_then_continue_in_same_native_session', { source, resumed, nativeSession })
 
-  const failure = await resumeFailure(source, nativeSession)
-  assert.equal((await continueRun(source)).code, 'agent_run.new_session_confirmation_required')
-  await check('actual_resume_failure_sends_no_input_and_creates_no_empty_session', { failure, nativeSession })
-  await stop()
-  await restoreSessionFile()
-  await start()
-  const ordinary = await send('Reply with ORDINARY_SESSION_RECOVERED. Keep the workspace and active tasks unchanged.')
-  await finish(ordinary)
-  assert.equal(session().native_session_id, nativeSession)
-  const afterRecovery = await claimed(await continueRun(source))
-  await finish(afterRecovery)
-  assert.equal(session().native_session_id, nativeSession)
-  await check('ordinary_native_success_supersedes_historical_resume_failure', { ordinary, afterRecovery, nativeSession })
-
-  // A newer failure must require confirmation again, despite the earlier success.
-  const secondFailure = await resumeFailure(source, nativeSession)
-  assert.equal((await continueRun(source)).code, 'agent_run.new_session_confirmation_required')
   await addTask('CURRENT_TASK_FOR_NEW_SESSION')
   const currentProfile = await request('members.get', { agentId: 'agent_1' })
   const changed = await request('members.update', { commandId: randomUUID(), command: {
@@ -222,7 +198,10 @@ try {
   } })
   assert.equal(changed.status, 'applied', JSON.stringify(changed))
   const checkpointDigest = createHash('sha256').update(await readFile(join(workspace, 'checkpoint.txt'))).digest('hex')
-  const replacement = await claimed(await continueRun(source, true))
+  await stop()
+  await hideSessionFile(nativeSession)
+  await start()
+  const replacement = await claimed(await continueRun(source))
   await finish(replacement)
   assert.notEqual(session().native_session_id, nativeSession)
   assert.equal(createHash('sha256').update(await readFile(join(workspace, 'checkpoint.txt'))).digest('hex'), checkpointDigest)
@@ -236,16 +215,37 @@ try {
   assert.equal(finalResult.checkpoint, 'PRESERVED_CHECKPOINT')
   assert.deepEqual(run(source), stopped)
   assert.equal(one('SELECT count(*) AS n FROM camp_turn WHERE camp_id=?', threadId).n, 0)
-  await check('confirmed_new_session_preserves_workspace_and_rebuilds_context', {
-    secondFailure, replacement, replacementSession: session().native_session_id, checkpointDigest
+  assert.equal(one('SELECT count(*) AS n FROM event_log WHERE event_type=? AND entity_id=?',
+    'agent_run.native_session_continuity_lost', replacement).n, 1)
+  assert.equal(one('SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=?', replacement).n, 1,
+    'resume fallback must prepare and dispatch the new business input only once')
+  const replacementSession = session().native_session_id
+  await check('actual_resume_failure_automatically_replaces_session_before_single_dispatch', {
+    replacement, replacementSession, checkpointDigest, originalSession: nativeSession
   })
+  await stop()
+  await restoreSessionFile()
+  await start()
+  const ordinary = await send('Reply with ORDINARY_SESSION_RECOVERED. Keep the workspace and active tasks unchanged.')
+  await finish(ordinary)
+  const repeated = await claimed(await continueRun(source))
+  await finish(repeated)
+  assert.equal(session().native_session_id, replacementSession)
+  assert.deepEqual(run(source), stopped)
+  await check('ordinary_and_repeated_continuation_reuse_current_session', { ordinary, repeated, replacementSession })
 
-  const acceptedStop = await send('In this isolated workspace, write ACCEPTED into accepted-stop.txt and then run sleep 45. Keep checkpoint.txt and tasks unchanged; do not delegate work.')
+  const acceptedStop = await send('In this isolated workspace, if accepted-stop.txt does not exist, write ACCEPTED into it and then run sleep 45. If it exists, skip the sleep and reply ACCEPTED_CONTINUATION_DONE. Keep checkpoint.txt and tasks unchanged; do not delegate work.')
   await waitFor(async () => { try { return (await readFile(join(workspace, 'accepted-stop.txt'), 'utf8')) === 'ACCEPTED' } catch { return false } }, 'accepted input checkpoint before stop')
   const acceptedStopped = await cancel(acceptedStop)
   assert.equal(one("SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=? AND status='accepted'", acceptedStop).n, 1)
-  assert.equal((await continueRun(acceptedStop)).code, 'agent_run.new_session_confirmation_required')
-  await check('accepted_stop_without_native_terminal_requires_confirmation', { acceptedStop, acceptedStopped })
+  const acceptedReplacement = await claimed(await continueRun(acceptedStop))
+  await finish(acceptedReplacement)
+  assert.notEqual(session().native_session_id, replacementSession)
+  assert.deepEqual(run(acceptedStop), acceptedStopped)
+  assert.equal(await readFile(join(workspace, 'checkpoint.txt'), 'utf8'), 'PRESERVED_CHECKPOINT')
+  await check('accepted_stop_without_native_terminal_automatically_selects_new_session', {
+    acceptedStop, acceptedReplacement, replacementSession: session().native_session_id
+  })
   report.passed = true
 } catch (error) {
   report.passed = false

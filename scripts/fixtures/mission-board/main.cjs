@@ -162,6 +162,7 @@ app.whenReady().then(async () => {
     assert(narrow.minimumLaneWidth >= 277, `Narrow Mission lanes collapsed to ${narrow.minimumLaneWidth}px`)
     stage = 'narrow lane navigation'
     await window.webContents.executeJavaScript("document.querySelector('.mission-lane-nav button:last-child')?.click()", true)
+    await settle()
     await waitFor("(() => { const host = document.querySelector('.mission-board-scroll'); const button = document.querySelector('.mission-lane-nav button:last-child'); return !!host && !!button && host.scrollLeft > 20 && button.getAttribute('aria-pressed') === 'true' })()", 'Narrow status control did not move the horizontal board viewport')
     narrowLayout = { narrowLaneWidth: Math.round(narrow.minimumLaneWidth), narrowBoardScrollable: narrow.boardWidth > narrow.hostWidth }
     stage = 'desktop restore'
@@ -169,7 +170,7 @@ app.whenReady().then(async () => {
     await waitFor('window.innerWidth === 1440 && window.innerHeight === 920', 'Mission fixture did not restore its desktop size')
     await window.webContents.executeJavaScript("document.querySelector('.mission-board-scroll')?.scrollTo({ left: 0, behavior: 'auto' })", true)
   }
-  const acceptance = mode === 'large-diff'
+  const acceptance = mode === 'mentions' ? 'window.missionQA.runMentions()' : mode === 'large-diff'
     ? 'window.missionQA.runLargeDiff()'
     : mode === 'checkout-view' ? 'window.missionQA.runCheckoutView()'
       : mode === 'delete-trace' ? 'window.missionQA.runDeleteTrace()' : 'window.missionQA.run()'
@@ -181,7 +182,14 @@ app.whenReady().then(async () => {
     app.exit(1)
     return
   }
-  if (mode === 'large-diff' || mode === 'checkout-view' || mode === 'delete-trace') {
+  if (mode === 'mentions') {
+    for (const theme of ['day', 'night']) {
+      await window.webContents.executeJavaScript(`document.documentElement.dataset.theme = '${theme}'`, true)
+      await settle()
+      writeFileSync(join(dirname(userData), `mission-mentions-${theme}.png`), (await window.webContents.capturePage()).toPNG())
+    }
+  }
+  if (mode === 'mentions' || mode === 'large-diff' || mode === 'checkout-view' || mode === 'delete-trace') {
     console.log(JSON.stringify(report)); app.exit(report.ok ? 0 : 1); return
   }
   report.layouts = narrowLayout

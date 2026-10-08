@@ -1,10 +1,20 @@
+async function fillDescription(element: HTMLElement, text: string): Promise<void> {
+  element.focus()
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  document.execCommand('selectAll')
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  if (text) document.execCommand('insertText', false, text)
+  else element.dispatchEvent(new KeyboardEvent('keydown', {key:'Backspace',code:'Backspace',bubbles:true,cancelable:true}))
+
+}
+
 export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[] }> {
   const qa = (window as any).missionQA
   const check = (value: unknown, message: string): void => { if (!value) throw new Error(message) }
   const frames = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   const until = async (condition: () => unknown, message: string): Promise<void> => {
     for (let i = 0; i < 180; ++i) { await frames(); if (condition()) return }
-    throw new Error(`${message}${qa.errors.length ? `\n${qa.errors.join('\n')}` : ''}\n${JSON.stringify({ drawer: !!document.querySelector('.mission-drawer'), full: !!document.querySelector('.mission-full'), focus: document.activeElement?.outerHTML.slice(0, 300), feedback: [...document.querySelectorAll('[role=alert],.toast')].map(node => node.textContent), recentMethods: qa.calls.slice(-12).map((call:any) => call.method) })}`)
+    throw new Error(`${message}${qa.errors.length ? `\n${qa.errors.join('\n')}` : ''}\n${JSON.stringify({ drawer: !!document.querySelector('.mission-drawer'), full: !!document.querySelector('.mission-full'), focus: document.activeElement?.outerHTML.slice(0, 300), description: document.querySelector('[contenteditable][aria-label="使命描述"]')?.innerHTML, feedback: [...document.querySelectorAll('[role=alert],.toast')].map(node => node.textContent), recentMethods: qa.calls.slice(-12).map((call:any) => call.method) })}`)
   }
   const button = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
     .find(el => el.getAttribute('aria-label') === label || el.textContent?.trim() === label)!
@@ -151,7 +161,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   check(document.querySelector('.mission-edit-dialog .mission-editor-title') && document.querySelector('.mission-edit-dialog .mission-editor-description'), 'Edit uses the wide borderless writing plane')
   check(Math.abs(editDialog.getBoundingClientRect().width - 820) <= 1, 'Edit dialog matches the approved 820px writing width')
   const editTitle = document.querySelector<HTMLInputElement>('.mission-edit-dialog .mission-editor-title')!
-  const editDescription = document.querySelector<HTMLTextAreaElement>('.mission-edit-dialog .mission-editor-description')!
+  const editDescription = document.querySelector<HTMLElement>('.mission-edit-dialog .structured-mention-editor')!
   check(document.activeElement !== editTitle && document.activeElement !== editDescription, 'Edit opens without focusing a writing field')
   check(parseFloat(getComputedStyle(editTitle).borderTopWidth) === 0 && parseFloat(getComputedStyle(editDescription).borderTopWidth) === 0, 'Title and description have no field frame')
   editTitle.focus(); await frames()
@@ -384,9 +394,9 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   await frames()
   editor.focus()
   for (let refresh = 0; refresh < 3; ++refresh) {
-    const previousReads = qa.calls.filter((call:any) => call.method === 'camps.open').length
+    const previousReads = qa.calls.filter((call:any) => call.method === 'threads.open').length
     qa.refreshCamp(qa.items[0].threadId)
-    await until(() => qa.calls.filter((call:any) => call.method === 'camps.open').length > previousReads, 'Source regression refresh reaches the conversation')
+    await until(() => qa.calls.filter((call:any) => call.method === 'threads.open').length > previousReads, 'Source regression refresh reaches the conversation')
     await frames(); await frames()
     check(sourceScrollCount === 1, 'Snapshot refresh must not replay source positioning')
     check(document.activeElement === editor, 'Snapshot refresh must not steal focus back from the Composer')
@@ -435,7 +445,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   await until(() => document.querySelector('input[aria-label="使命名称"]'), 'Create dialog')
   const createDialog = document.querySelector<HTMLElement>('.mission-create-dialog')!
   const createTitle = document.querySelector<HTMLInputElement>('input[aria-label="使命名称"]')!
-  const createDescription = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="使命描述"]')!
+  const createDescription = document.querySelector<HTMLElement>('[contenteditable][aria-label="使命描述"]')!
   check(Math.abs(createDialog.getBoundingClientRect().width - 820) <= 1, 'Create dialog matches the approved 820px writing width')
   check(document.activeElement !== createTitle && document.activeElement !== createDescription, 'Create opens without focusing a writing field')
   check(parseFloat(getComputedStyle(createTitle).borderTopWidth) === 0 && parseFloat(getComputedStyle(createDescription).borderTopWidth) === 0, 'Create title and description have no field frame')
@@ -443,8 +453,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   check(getComputedStyle(createDescription).outlineStyle === 'none' && getComputedStyle(createDescription).boxShadow === 'none', 'Focused description stays visually borderless')
   createDescription.blur()
   fill(createTitle, '草稿保留使命')
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(createDescription, '关闭后仍应恢复的使命描述')
-  createDescription.dispatchEvent(new Event('input', { bubbles: true }))
+  await fillDescription(createDescription, '关闭后仍应恢复的使命描述')
   const creationProperties = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.mission-create-dialog .mission-editor-property'))
   const initialCreationProperties = creationProperties()
   check(initialCreationProperties.every(property => !property.querySelector('.dialog-glyph')), 'Create property controls do not show dropdown arrows')
@@ -508,15 +517,14 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   button('新使命').click()
   await until(() => document.querySelector('.mission-create-dialog'), 'Mission creation can reopen')
   check((document.querySelector('input[aria-label="使命名称"]') as HTMLInputElement).value === '草稿保留使命'
-    && (document.querySelector('textarea[aria-label="使命描述"]') as HTMLTextAreaElement).value === '关闭后仍应恢复的使命描述'
+    && document.querySelector('[contenteditable][aria-label="使命描述"]')?.textContent === '关闭后仍应恢复的使命描述'
     && document.querySelector('.mission-create-dialog [title="mission-brief.md"]')
     && creationProperties()[0].textContent?.includes('示例项目 12')
     && creationProperties()[2].textContent?.includes('交互'), 'Reopening restores the one retained title, description, project, tag and attachment draft')
   fill(document.querySelector<HTMLInputElement>('input[aria-label="使命名称"]')!, '无描述使命')
-  const reopenedDescription = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="使命描述"]')!
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(reopenedDescription, '')
-  reopenedDescription.dispatchEvent(new Event('input', { bubbles: true }))
-  await frames()
+  const reopenedDescription = document.querySelector<HTMLElement>('[contenteditable][aria-label="使命描述"]')!
+  await fillDescription(reopenedDescription, '')
+  await until(() => reopenedDescription.textContent === '', 'Clearing the description updates the editor')
   const create = button('新建')
   check(!button('保存使命') && create, 'One default create action')
   create.click()
@@ -524,7 +532,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   await until(() => !document.querySelector('.new-camp-dialog'), 'Create dialog closes')
   check(!document.querySelector('.mission-workspace-host'), 'Create remains on board')
   const created = qa.items.find((m: any) => m.title === '无描述使命')
-  check(created.description === '' && created.status === 'not_started' && created.projectPath === '/workspace/sample-12' && created.tags.includes('交互') && created.attachments[0]?.displayName === 'mission-brief.md', 'Default create preserves its draft properties and attachment without starting')
+  check(created.description === '' && created.status === 'not_started' && created.projectPath === '/workspace/sample-12' && created.tags.includes('交互') && created.attachments[0]?.displayName === 'mission-brief.md', `Default create preserves its draft properties and attachment without starting: ${JSON.stringify(created)}`)
   check(qa.calls.some((c: any) => c.method === 'missions.createWithAttachments' && c.p.command.title === '无描述使命'), 'Create sends attachments through the private native bridge')
   check(!qa.calls.some((c: any) => c.method === 'missions.start' && c.p.command?.missionId === created.missionId), 'No start request on default create')
   button('新使命').click()
@@ -635,7 +643,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   await until(() => deletionCommitted() || deletionError(), 'Mission deletion either commits or reports its request failure')
   check(!deletionError(), `Mission deletion must not fail before the command is admitted: ${deletionError()}`)
   check(deletionCommitted(), 'Mission card disappears as soon as deletion and cleanup intent commit')
-  const deleteVersionRead = qa.calls.findLast((call:any) => call.method === 'camps.open' && call.p.threadId === deleteMission.threadId)
+  const deleteVersionRead = qa.calls.findLast((call:any) => call.method === 'threads.open' && call.p.threadId === deleteMission.threadId)
   check(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deleteVersionRead?.p.traceId ?? ''), 'Mission deletion reads the exact Camp version with a valid trace ID')
   qa.failOrphanCleanup(true)
   await until(() => document.querySelector('.mission-cleanup-notice')?.textContent?.includes('1 个工作区待清理'), 'Deleted Mission cleanup failure remains on the existing workspace route')
@@ -683,9 +691,9 @@ export async function runMissionDeleteTraceAcceptance(): Promise<{ ok: true; cas
   await until(() => deletionCommitted() || deletionError(), 'Mission deletion neither committed nor reported an error')
   check(!deletionError(), `Mission deletion must not fail before the command is admitted: ${deletionError()}`)
   check(deletionCommitted(), 'Mission deletion did not remove its card')
-  const versionRead = qa.calls.findLast((call:any) => call.method === 'camps.open' && call.p.threadId === mission.threadId)
+  const versionRead = qa.calls.findLast((call:any) => call.method === 'threads.open' && call.p.threadId === mission.threadId)
   check(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(versionRead?.p.traceId ?? ''), 'Mission deletion version read did not carry a valid trace ID')
-  check(qa.calls.some((call:any) => call.method === 'camps.delete' && call.p.command?.threadId === mission.threadId), 'Mission deletion command was not admitted')
+  check(qa.calls.some((call:any) => call.method === 'threads.delete' && call.p.command?.threadId === mission.threadId), 'Mission deletion command was not admitted')
   return { ok: true, cases: ['Mission deletion reads the exact Camp version with a valid trace ID before deleting'] }
 }
 
@@ -808,4 +816,69 @@ export async function runMissionCheckoutViewAcceptance(): Promise<{ ok: true; ca
   check(qa.calls.filter((call: any) => call.method === 'missions.changes').length === readsBeforeClose + 1, 'Unmounting ignores the late response without a follow-up read')
   check(qa.errors.length === 0, qa.errors.join('\n'))
   return { ok: true, cases: ['activity reads changes on demand, retains stale results, and ignores late workspace views'] }
+}
+
+
+export async function runMissionMentionAcceptance() {
+  const qa = (window as any).missionQA
+  const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  const until = async (test: () => unknown, message: string) => { for (let i=0;i<180;i++) { await frame(); if(test()) return } throw new Error(message + JSON.stringify({errors:qa.errors,editor:document.querySelector('.mission-edit-dialog [contenteditable]')?.innerHTML,menu:document.querySelector('.mention-menu')?.textContent,pending:document.querySelector('.mission-pending-members')?.textContent})) }
+  const check = (test: unknown, message: string) => { if (!test) throw new Error(message) }
+  const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === text || node.getAttribute('aria-label') === text)!
+  await until(() => document.querySelector('.mission-board-card'), 'board')
+  const card = document.querySelector<HTMLElement>('.mission-board-card')!
+  card.dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, cancelable:true, clientX:40, clientY:150}))
+  await until(() => document.querySelector('[role=menuitem]'), 'menu')
+  ;[...document.querySelectorAll<HTMLElement>('[role=menuitem]')].find(node => node.textContent?.trim()==='编辑')!.click()
+  await until(() => document.querySelector('.mission-edit-dialog [contenteditable]'), 'editor')
+  const editor = document.querySelector<HTMLElement>('.mission-edit-dialog [contenteditable]')!
+  const originalMembers = [...qa.items[0].memberAgentIds]
+  button('提及队员').click()
+  await until(() => document.querySelector('.mention-menu'), 'mention menu')
+  check(![...document.querySelectorAll('[role=option]')].some(node=>node.textContent?.includes('所有队员')), 'No broadcast in mission')
+  button('邀请其他队员').click()
+  await until(() => document.querySelector('.mention-menu .is-invitable'), 'outside members')
+  const candidate = document.querySelector<HTMLElement>('.mention-menu .is-invitable')!
+  const id = candidate.dataset.agentId!
+  candidate.click()
+  await until(() => document.querySelector('.mission-pending-member'), 'pending invitation')
+  check(qa.items[0].memberAgentIds.length===originalMembers.length, 'Picking does not mutate membership')
+  check(editor.querySelector('[data-composer-atom][data-agent-id]'), 'Stable inline atom')
+  const chooseAgain = async () => {
+    button('提及队员').click()
+    await until(() => document.querySelector('.mention-menu'), 'mention menu reopens')
+    button('邀请其他队员').click()
+    await until(() => document.querySelector('.mention-menu .is-invitable'), 'invite layer reopens')
+    document.querySelector<HTMLElement>(`.mention-menu [data-agent-id="${id}"]`)!.click()
+    await frame()
+  }
+  await chooseAgain()
+  check(editor.querySelectorAll(`[data-composer-atom][data-agent-id="${id}"]`).length === 2 && document.querySelectorAll('.mission-pending-member').length === 1, 'Duplicate references share one invitation')
+  document.querySelector<HTMLButtonElement>('.mission-pending-member button')!.click()
+  await until(() => !editor.querySelector('[data-composer-atom]') && !document.querySelector('.mission-pending-member'), 'Cancel removes every pending reference')
+  check(qa.items[0].memberAgentIds.length===originalMembers.length, 'Cancellation leaves membership unchanged')
+  await chooseAgain()
+  await until(() => document.querySelector('.mission-pending-member'), 'reselected invitation')
+  editor.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',code:'Enter',bubbles:true,cancelable:true}))
+  await frame()
+  check(document.querySelector('.mission-edit-dialog') && !document.querySelector('.mention-menu'), 'Enter inserts a line without saving')
+  qa.failNextMissionSave()
+  button('邀请并保存').click()
+  await until(() => document.querySelector('.mission-edit-dialog [role=alert]'), 'failed save')
+  check(document.querySelector('.mission-pending-member') && editor.querySelector('[data-agent-id]'), 'Failure preserves draft and invitation')
+  check(qa.items[0].memberAgentIds.length===originalMembers.length, 'Failure does not invite')
+  button('邀请并保存').click()
+  await until(() => !document.querySelector('.mission-edit-dialog'), 'retry saved')
+  check(qa.items[0].memberAgentIds.includes(id), 'Save adds member')
+  check(qa.items[0].descriptionContent.some((segment:any)=>segment.kind==='member_mention' && segment.agentId===id), 'Save sends structured identity')
+  check(!qa.calls.some((call:any)=>call.method==='missions.start'), 'Save never starts')
+  document.querySelector<HTMLButtonElement>('.mission-board-card .mission-card-open')!.click()
+  await until(() => document.querySelector('.mission-intro .message-mention-token'), 'read-only mention')
+  const mention = document.querySelector<HTMLElement>('.mission-intro .message-mention-token')!
+  mention.scrollIntoView({block:'center'})
+  await frame()
+  mention.click()
+  await until(() => document.querySelector('.mission-member-profile'), 'member profile')
+  check(!qa.errors.length, 'No renderer errors')
+  return {ok:true,cases:['Mission references stay atomic through editing, invitation, failed save, retry and reading']}
 }

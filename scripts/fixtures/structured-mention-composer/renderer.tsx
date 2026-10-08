@@ -37,7 +37,7 @@ const outsideMember: StructuredMentionMember = {
   displayName: '爱丽丝',
   teamRole: '五号街卖花女',
   mentionable: true,
-  inCamp: false
+  inThread: false
 }
 
 const errors: string[] = []

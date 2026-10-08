@@ -7,7 +7,7 @@ confirmed_revision: 2
 confirmed_by: local_user
 confirmed_at: 2026-10-07
 confirmation_message_id: 12fb654b-48b4-4173-9459-973be554e761
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # 用户主动继续执行：模型输入对照 r2
@@ -94,3 +94,11 @@ User 已在审阅 r2 对照后，于 2026-10-07 明确指示开启 worktree 实�
 Migration 184 / schema 134 只保存内部新授权与输入约束，保留既有模型证据。
 确定性验证证明新 Run 读取当前 Tasks、重新构建动态上下文且只包含原业务消息，不含来源 Run ID 或续做段。
 实际验证与真实模型 Gate 缺口见[实施记录](run-continuation-implementation.md#验证记录)。
+
+## 2026-10-08 会话选择交互修正
+
+User 在消息 `5497df49-8a51-4e13-bf46-26117890fe2f` 要求默认降级、不弹窗，
+并在 `2a828341-8afb-4d88-8378-a2046d69b16a` 明确可用性优先。
+会话确认和恢复失败阻断改由 [Continuation v2](../../contracts/agent-run-continuation-v2.md) 自动处理。
+以上 r2 的原业务输入选择、动态上下文 builder、字段、文本模板与版本完全不变；
+提示词改动前后相同，无新增“继续”、来源 ID、证据或产物摘要。新会话仍走既有 bootstrap 规则。

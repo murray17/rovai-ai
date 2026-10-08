@@ -21,6 +21,7 @@ use crate::{
         LocalAttachmentAvailability, LocalAttachmentSourceRef, LocalAttachmentSourceView,
         parse_source_attachments, serialize_source_attachments,
     },
+    mission_description::{self, DescriptionContent},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +158,7 @@ pub struct MissionListPage {
 pub struct MissionRecord {
     #[serde(flatten)]
     pub info: MissionInfo,
+    pub description_content: DescriptionContent,
     pub number: i64,
     #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
@@ -214,6 +216,8 @@ pub struct CreateMissionCommand {
     pub title: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_content: Option<DescriptionContent>,
     pub project_path: String,
     pub project_binding_kind: ProjectBindingKind,
     pub member_agent_ids: Vec<String>,
@@ -262,6 +266,8 @@ pub struct MissionUpdateInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateMissionCommand {
     pub mission_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_content: Option<DescriptionContent>,
     pub title: Option<String>,
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -423,10 +429,25 @@ impl MissionService {
     ) -> Result<CommandExecution> {
         let input = &envelope.payload;
         validate_content(Some(&input.title), Some(&input.description))?;
+        ensure!(
+            input.description_content.is_none() || input.description.is_empty(),
+            "mission.ambiguous_description"
+        );
+        let content = mission_description::normalize(
+            &input
+                .description_content
+                .clone()
+                .unwrap_or_else(|| mission_description::text_content(&input.description)),
+        )?;
         let tags = normalize_tags(&input.tags)?;
         validate_mission_source_attachments(&input.source_attachments)?;
         let source_attachments_json = serialize_source_attachments(&input.source_attachments)?;
         self.gateway.execute(database, envelope, |tx| {
+            if let Some(rejection) = validate_description_members(tx, &content, None)? { return Ok(rejection); }
+            let description = mission_description::render(tx, &content)?;
+            validate_content(None, Some(&description))?;
+            let mut members = input.member_agent_ids.clone();
+            for id in mission_description::member_ids(&content) { if !members.contains(&id) { members.push(id); } }
             let mission_id = format!("rvm_{}", Uuid::now_v7().simple());
             tx.execute("INSERT INTO mission_number_sequence DEFAULT VALUES", [])?;
             let number = tx.last_insert_rowid();
@@ -434,13 +455,14 @@ impl MissionService {
             let created = create_camp_in_tx(tx, &envelope.actor, envelope.execution_epoch, &CreateThreadCommand {
                 name: Some(input.title.trim().chars().take(80).collect()),
                 project_binding_kind: input.project_binding_kind, project_path: input.project_path.clone(),
-                member_agent_ids: input.member_agent_ids.clone(), default_lead_agent_id: input.default_lead_agent_id.clone(),
+                member_agent_ids: members, default_lead_agent_id: input.default_lead_agent_id.clone(),
                 collaboration_mode: ThreadCollaborationMode::Peer, activation_state: ThreadActivationState::Active,
             }, &camp_id)?;
             if created.status == CommandResultStatus::Rejected { return Ok(created); }
             let now = chrono::Utc::now().to_rfc3339();
             tx.execute("INSERT INTO mission(id,number,camp_id,title,description,status,tags_json,source_attachments_json,details_version,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'not_started',?6,?7,1,?8,?8)",
-                params![mission_id,number,camp_id,input.title.trim(),input.description,serde_json::to_string(&tags)?,source_attachments_json,now])?;
+                params![mission_id,number,camp_id,input.title.trim(),description,serde_json::to_string(&tags)?,source_attachments_json,now])?;
+            mission_description::save(tx, &mission_id, &content)?;
             let mut changes = serde_json::Map::from_iter([
                 ("status".into(), json!("not_started")),
                 ("tagsChanged".into(), json!(!tags.is_empty())),
@@ -464,18 +486,28 @@ impl MissionService {
         ensure!(
             input.title.is_some()
                 || input.description.is_some()
+                || input.description_content.is_some()
                 || input.tags.is_some()
                 || input.source_attachment_update.is_some(),
             "mission.content_required"
         );
+        ensure!(
+            input.description.is_none() || input.description_content.is_none(),
+            "mission.ambiguous_description"
+        );
         validate_content(input.title.as_deref(), input.description.as_deref())?;
+        let content = input
+            .description_content
+            .as_deref()
+            .map(mission_description::normalize)
+            .transpose()?;
         let tags = input.tags.as_deref().map(normalize_tags).transpose()?;
         self.gateway.execute(database, envelope, |tx| {
             let Some(current) = load_record(tx, &input.mission_id)? else { return Ok(reject("mission.not_found")); };
-            if !can_edit(tx, envelope, &current)? || ((tags.is_some() || input.source_attachment_update.is_some()) && !matches!(envelope.actor, ActorRef::User { .. })) {
+            if !can_edit(tx, envelope, &current)? || ((tags.is_some() || input.source_attachment_update.is_some() || content.is_some()) && !matches!(envelope.actor, ActorRef::User { .. })) {
                 return Ok(reject("mission.forbidden"));
             }
-            let edits_details = input.title.is_some() || input.description.is_some() || input.source_attachment_update.is_some();
+            let edits_details = input.title.is_some() || input.description.is_some() || content.is_some() || input.source_attachment_update.is_some();
             if edits_details && matches!(envelope.actor, ActorRef::User { .. }) {
                 let Some(expected) = input.expected_details_version else {
                     return Ok(reject("mission.details_version_required"));
@@ -488,7 +520,16 @@ impl MissionService {
                 }
             }
             let title = input.title.as_deref().map(str::trim).unwrap_or(&current.info.title);
-            let description = input.description.as_deref().unwrap_or(&current.info.description);
+            let next_content = content.clone().unwrap_or_else(|| match input.description.as_deref() {
+                Some(text) if text != current.info.description => mission_description::text_content(text),
+                _ => current.description_content.clone(),
+            });
+            if content.is_some() {
+                if let Some(rejection) = validate_description_members(tx, &next_content, Some(&current.camp_id))? { return Ok(rejection); }
+            }
+            let description = mission_description::render(tx, &next_content)?;
+            validate_content(None, Some(&description))?;
+            let description_changed = next_content != current.description_content;
             let next_tags = tags.as_ref().unwrap_or(&current.tags);
             let next_source_attachments = match &input.source_attachment_update {
                 Some(update) => apply_attachment_update(&current.source_attachments, update)?,
@@ -496,13 +537,37 @@ impl MissionService {
             };
             let mut changes = serde_json::Map::new();
             if title != current.info.title { changes.insert("titleChanged".into(), json!(true)); }
-            if description != current.info.description { changes.insert("descriptionChanged".into(), json!(true)); }
+            if description_changed { changes.insert("descriptionChanged".into(), json!(true)); }
             if next_tags != &current.tags { changes.insert("tagsChanged".into(), json!(true)); }
             if next_source_attachments != current.source_attachments { changes.insert("attachmentsChanged".into(), json!(true)); }
+            if content.is_some() {
+                // Rejections commit their receipt. Roll back all earlier invitations before returning one.
+                tx.execute_batch("SAVEPOINT mission_invitations")?;
+                for agent_id in mission_description::member_ids(&next_content) {
+                    let active = crate::collaboration::is_current_camp_member(tx, &current.camp_id, &agent_id)?;
+                    if active { continue; }
+                    let generation = tx.query_row("SELECT membership_generation FROM camp WHERE id=?1", [&current.camp_id], |r| r.get(0))?;
+                    let joined = crate::collaboration::add_camp_member_in_tx(tx, &CommandEnvelope {
+                        command_id: envelope.command_id.clone(), actor: envelope.actor.clone(), camp_id: Some(current.camp_id.clone()),
+                        expected_versions: vec![], execution_epoch: envelope.execution_epoch,
+                        payload: crate::collaboration::AddThreadMemberCommand {
+                            camp_id: current.camp_id.clone(), agent_id, expected_membership_generation: generation,
+                            capability_overrides: json!({}), source: None,
+                        },
+                    })?;
+                    if joined.status == CommandResultStatus::Rejected {
+                        tx.execute_batch("ROLLBACK TO mission_invitations; RELEASE mission_invitations")?;
+                        return Ok(joined);
+                    }
+                    changes.insert("membersChanged".into(), json!(true));
+                }
+                tx.execute_batch("RELEASE mission_invitations")?;
+            }
             if changes.is_empty() { return Ok(mutation(&input.mission_id, false)); }
-            let details_changed = title != current.info.title || description != current.info.description || next_source_attachments != current.source_attachments;
+            let details_changed = title != current.info.title || description_changed || next_source_attachments != current.source_attachments;
             tx.execute("UPDATE mission SET title=?2,description=?3,tags_json=?4,source_attachments_json=?5,details_version=details_version+?6,updated_at=?7 WHERE id=?1",
                 params![input.mission_id,title,description,serde_json::to_string(next_tags)?,serialize_source_attachments(&next_source_attachments)?,i64::from(details_changed),chrono::Utc::now().to_rfc3339()])?;
+            mission_description::save(tx, &input.mission_id, &next_content)?;
             if changes.contains_key("titleChanged") {
             tx.execute("UPDATE camp SET title=?2,name_origin='user',version=version+1,updated_at=?3 WHERE id=?1",
                 params![current.camp_id,title.chars().take(80).collect::<String>(),chrono::Utc::now().to_rfc3339()])?;
@@ -790,6 +855,43 @@ impl MissionService {
     }
 }
 
+fn validate_description_members(
+    connection: &Connection,
+    content: &[mission_description::DescriptionSegment],
+    camp_id: Option<&str>,
+) -> Result<Option<CommandHandlerResult>> {
+    let mut unavailable = Vec::new();
+    for id in mission_description::member_ids(content) {
+        let profile: Option<String> = connection
+            .query_row(
+                "SELECT profile_status FROM agent_profile WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let membership: Option<(String, Option<String>)> = match camp_id {
+            Some(camp) => connection.query_row("SELECT status,leave_requested_at FROM camp_member WHERE camp_id=?1 AND agent_id=?2", params![camp,id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?,
+            None => None,
+        };
+        let active = membership
+            .as_ref()
+            .is_some_and(|(status, leaving)| status == "active" && leaving.is_none());
+        if !(profile.as_deref() == Some("present") || active && profile.as_deref() == Some("away"))
+            || membership
+                .as_ref()
+                .is_some_and(|(_, leaving)| leaving.is_some())
+        {
+            unavailable.push(id);
+        }
+    }
+    Ok((!unavailable.is_empty()).then(|| {
+        CommandHandlerResult::rejected(
+            "mission.member_unavailable",
+            json!({"agentIds": unavailable}),
+        )
+    }))
+}
+
 fn encode_mission_list_cursor(cursor: &MissionListCursor) -> Result<String> {
     let bytes = serde_json::to_vec(cursor).context("Mission list cursor could not be encoded")?;
     Ok(bytes
@@ -858,6 +960,8 @@ fn load_record(connection: &Connection, id: &str) -> Result<Option<MissionRecord
     else {
         return Ok(None);
     };
+    let description_content = mission_description::load(connection, &mission_id, &description)?;
+    let description = mission_description::render(connection, &description_content)?;
     let source_attachments = parse_source_attachments(&source_attachments_json)?;
     let attachments = source_attachments
         .iter()
@@ -878,6 +982,7 @@ fn load_record(connection: &Connection, id: &str) -> Result<Option<MissionRecord
     let (workspace_ever_created, workspace_resources_present, cleanup_available, workspace_cleanup) =
         crate::mission_workspace::cleanup_projection(connection, &mission_id, &camp_id)?;
     Ok(Some(MissionRecord {
+        description_content,
         has_unread,
         number,
         info: MissionInfo {
@@ -1086,6 +1191,170 @@ mod tests {
             payload,
         }
     }
+    // Owns the new multi-member + description transaction, not generic member policy.
+    #[cfg(feature = "extended-tests")]
+    #[test]
+    fn description_members_commit_together_preserve_identity_and_never_schedule() {
+        use crate::mission_description::DescriptionSegment::{MemberMention, Text};
+        let mut db = crate::test_support::seeded_runtime_database_owned();
+        let service = MissionService::default();
+        let created = service
+            .create(
+                &mut db,
+                &command(CreateMissionCommand {
+                    title: "References".into(),
+                    description: "literal @Alice".into(),
+                    description_content: None,
+                    project_path: "/tmp".into(),
+                    project_binding_kind: ProjectBindingKind::Directory,
+                    member_agent_ids: vec!["agent_1".into()],
+                    default_lead_agent_id: "agent_1".into(),
+                    tags: vec![],
+                    source_attachments: vec![],
+                }),
+            )
+            .unwrap();
+        let id = created.result.payload["missionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let mut update = command(UpdateMissionCommand {
+            mission_id: id.clone(),
+            title: None,
+            description: None,
+            tags: None,
+            description_content: Some(vec![
+                Text {
+                    text: "Ask ".into(),
+                },
+                MemberMention {
+                    agent_id: "agent_2".into(),
+                },
+                Text {
+                    text: " and ".into(),
+                },
+                MemberMention {
+                    agent_id: "agent_3".into(),
+                },
+                MemberMention {
+                    agent_id: "agent_2".into(),
+                },
+            ]),
+            expected_details_version: Some(1),
+            source_attachment_update: None,
+        });
+        let mut invalid = update.clone();
+        invalid.command_id = Uuid::new_v4().to_string();
+        invalid
+            .payload
+            .description_content
+            .as_mut()
+            .unwrap()
+            .push(MemberMention {
+                agent_id: "missing".into(),
+            });
+        assert_eq!(
+            service.update(&mut db, &invalid).unwrap().result.code,
+            "mission.member_unavailable"
+        );
+        assert_eq!(
+            service.get(&db, &id).unwrap().unwrap().member_agent_ids,
+            vec!["agent_1"]
+        );
+        db.connection().execute_batch("CREATE TEMP TRIGGER reject_description BEFORE UPDATE ON mission_description BEGIN SELECT RAISE(ABORT,'fixture description failure'); END;").unwrap();
+        assert!(service.update(&mut db, &update).is_err());
+        let unchanged = service.get(&db, &id).unwrap().unwrap();
+        assert_eq!(unchanged.member_agent_ids, vec!["agent_1"]);
+        assert_eq!(unchanged.details_version, 1);
+        assert_eq!(unchanged.info.description, "literal @Alice");
+        db.connection()
+            .execute_batch("DROP TRIGGER reject_description")
+            .unwrap();
+        assert_eq!(
+            service.update(&mut db, &update).unwrap().result.status,
+            CommandResultStatus::Applied
+        );
+        assert!(service.update(&mut db, &update).unwrap().replayed);
+        let saved = service.get(&db, &id).unwrap().unwrap();
+        assert_eq!(saved.member_agent_ids.len(), 3);
+        assert_eq!(saved.default_lead_agent_id.as_deref(), Some("agent_1"));
+        assert_eq!(saved.details_version, 2);
+        assert_eq!(
+            saved.description_content,
+            update.payload.description_content.clone().unwrap()
+        );
+        let added: i64 = db.connection().query_row("SELECT COUNT(*) FROM event_log WHERE camp_id=?1 AND event_type='camp.member_added'", [&saved.camp_id], |r|r.get(0)).unwrap();
+        assert_eq!(added, 2);
+        assert_eq!(
+            db.connection()
+                .query_row("SELECT COUNT(*) FROM camp_message_delivery", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.connection()
+                .query_row("SELECT COUNT(*) FROM agent_run", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        db.connection()
+            .execute(
+                "UPDATE agent_profile SET display_name='renamed' WHERE id='agent_2'",
+                [],
+            )
+            .unwrap();
+        let renamed = service.get(&db, &id).unwrap().unwrap();
+        assert!(renamed.info.description.contains("@renamed"));
+        assert_eq!(renamed.description_content, saved.description_content);
+        let agent = serde_json::to_value(renamed.agent_info()).unwrap();
+        assert!(agent.get("descriptionContent").is_none());
+        assert_eq!(agent["description"], renamed.info.description);
+        update.command_id = Uuid::new_v4().to_string();
+        assert_eq!(
+            service.update(&mut db, &update).unwrap().result.code,
+            "mission.details_version_conflict"
+        );
+        update.command_id = Uuid::new_v4().to_string();
+        update.payload.expected_details_version = Some(2);
+        update.payload.description_content = None;
+        update.payload.description = Some("Literal @renamed".into());
+        service.update(&mut db, &update).unwrap();
+        let plain = service.get(&db, &id).unwrap().unwrap();
+        assert_eq!(plain.member_agent_ids.len(), 3);
+        assert_eq!(
+            plain.description_content,
+            vec![Text {
+                text: "Literal @renamed".into()
+            }]
+        );
+        let mut create: CreateMissionCommand = serde_json::from_value(json!({
+            "title":"New", "projectPath":"/tmp", "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1",
+            "descriptionContent":[{"kind":"member_mention","agentId":"agent_2"},{"kind":"member_mention","agentId":"agent_2"}]
+        })).unwrap();
+        let created = service.create(&mut db, &command(create.clone())).unwrap();
+        let record = service
+            .get(&db, created.result.payload["missionId"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.member_agent_ids.len(), 2);
+        create
+            .description_content
+            .as_mut()
+            .unwrap()
+            .push(MemberMention {
+                agent_id: "missing".into(),
+            });
+        assert_eq!(
+            service
+                .create(&mut db, &command(create))
+                .unwrap()
+                .result
+                .code,
+            "mission.member_unavailable"
+        );
+    }
+
     #[test]
     fn mission_commands_keep_definition_atomic_patch_only_and_start_status_independent() {
         let mut db = crate::test_support::seeded_runtime_database_owned();
@@ -1093,6 +1362,7 @@ mod tests {
         std::fs::create_dir_all(&directory).unwrap();
         let service = MissionService::default();
         let create = command(CreateMissionCommand {
+            description_content: None,
             title: "使命".repeat(65),
             description: "original".into(),
             project_path: directory.to_str().unwrap().into(),
@@ -1155,6 +1425,7 @@ mod tests {
                 .update(
                     &mut db,
                     &command(UpdateMissionCommand {
+                        description_content: None,
                         mission_id: id.clone(),
                         title,
                         description,
@@ -1189,6 +1460,7 @@ mod tests {
                 .update(
                     &mut db,
                     &command(UpdateMissionCommand {
+                        description_content: None,
                         mission_id: id.clone(),
                         title: Some("new".into()),
                         description: None,
@@ -1207,6 +1479,7 @@ mod tests {
             .update(
                 &mut db,
                 &command(UpdateMissionCommand {
+                    description_content: None,
                     mission_id: id.clone(),
                     title: Some("stale".into()),
                     description: Some("stale".into()),
@@ -1231,6 +1504,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    description_content: None,
                     title: "普通消息执行使命".into(),
                     description: String::new(),
                     project_path: directory.to_str().unwrap().into(),
@@ -1443,6 +1717,7 @@ mod tests {
             )
             .unwrap();
         let mut edit = command(UpdateMissionCommand {
+            description_content: None,
             mission_id: id.clone(),
             title: Some("member edit".into()),
             description: None,
@@ -1798,6 +2073,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    description_content: None,
                     title: "cleanup projection".into(),
                     description: String::new(),
                     project_path,
@@ -1880,6 +2156,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    description_content: None,
                     title: "same execution root".into(),
                     description: String::new(),
                     project_path: crate::test_support::absolute_test_path("/other/repo"),
@@ -2017,6 +2294,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    description_content: None,
                     title: "带附件的使命".into(),
                     description: "附件应随使命定义保存，并在开始时交付。".into(),
                     project_path: workspace.to_string_lossy().into_owned(),
@@ -2060,6 +2338,7 @@ mod tests {
             .update(
                 &mut db,
                 &command(UpdateMissionCommand {
+                    description_content: None,
                     mission_id: mission_id.clone(),
                     title: None,
                     description: None,
@@ -2137,6 +2416,7 @@ mod tests {
             .create(
                 &mut database,
                 &command(CreateMissionCommand {
+                    description_content: None,
                     title: "非 Git 交付".into(),
                     description: String::new(),
                     project_path: workspace.to_string_lossy().into_owned(),
@@ -2224,6 +2504,7 @@ mod tests {
                 .create(
                     &mut database,
                     &command(CreateMissionCommand {
+                        description_content: None,
                         title: title.into(),
                         description: format!("{title} details"),
                         project_path: workspace.to_string_lossy().into_owned(),
@@ -2275,6 +2556,7 @@ mod tests {
             .create(
                 &mut database,
                 &command(CreateMissionCommand {
+                    description_content: None,
                     title: "Epsilon".into(),
                     description: "Created between keyset pages".into(),
                     project_path: workspace.to_string_lossy().into_owned(),

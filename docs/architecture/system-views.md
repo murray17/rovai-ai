@@ -3,7 +3,7 @@ document_type: architecture
 architecture: system-views
 authority: architecture-explanation-and-navigation
 status: accepted
-last_updated: 2026-09-18
+last_updated: 2026-10-08
 ---
 
 # Rovai AI 多 Agent 协作架构
@@ -63,6 +63,8 @@ Rovai 以长期队员为协作主体，通过 Camp 组织共同工作，并连�
 以完成 CSV 导出功能为例，叮叮担任本次 Default Lead，芝士负责评审，咕咕负责验证。三位同伴直接协作：
 跨 Run 的持续责任使用 Task，协作方法使用 Skill，同一请求需要多人参与时直接发送一条多目标公开消息。
 成员回复都是普通消息，进入发起者的 FIFO；Core 不建立 Barrier，也不保证“收齐后一次唤醒”。
+
+![漫画示意：三位同伴对等协作、Task 长期责任、Skill 协作方法，以及多目标消息与 FIFO 回复](assets/system-views/05-gather.svg)
 
 ## 六、一次 AgentRun 的生命周期
 

@@ -91,7 +91,7 @@ Single Chat Pending 接续与 non-batch Run 由自己的提交后通知推进，
 `camp_message_delivery` 全部投影到 `messageDeliveries`，不按消息作者过滤。用户消息没有 `sourceAgentRunId` 仍是
 同一 waiting 队列事实；Renderer 可在 claim 前显示只读排队卡。完整字段与 coverage 边界见
 [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)，展示见
-[Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md)。
+[Run Process Detail Surface v46](../contracts/run-process-detail-surface-v46.md)。
 
 `RUN_INPUT` 与 quote-source 沿用冻结输入可见性；显式 read/search 使用 Camp History v11 的主动查询可见性。公共 Camp 历史对所有受认证
 队员可读；目标 Camp membership 只控制参与、寻址与执行，不是历史 ACL。外层消息可见不代表它引用的 source 可见；
@@ -101,7 +101,7 @@ Single Chat Pending 接续与 non-batch Run 由自己的提交后通知推进，
 ## 终态、停止与恢复
 
 Run 终态按输入 Delivery 分别写入 `settled | failed | cancelled`。普通 Stop 以精确 `agentRunId + version` CAS，只停止被点击
-的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v1](../contracts/agent-run-continuation-v1.md) 提交新的独立授权。Runtime 明确未接受且无
+的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v2](../contracts/agent-run-continuation-v2.md) 提交新的独立授权。Runtime 明确未接受且无
 副作用风险时，可以恢复同一冻结 Run 的运输；accepted/unknown 永不作为未执行重新投递。
 
 Run 显示失败不等于旧执行已隔离。Scheduler 在 claim 前分别检查同一 Camp+Agent 的旧执行隔离和实际共享

@@ -94,9 +94,10 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 
 扩展既有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，保留 schema 133
 与 Preview 134 case，并增加主干 continuation 134 的来源、残缺结构拒绝、两个 catalog 同事务回滚、
-重开后 schema 136 检查；不增加平行 owner。继续执行自己的既有 migration owner 改为 185/135 →
-186/136，保留原 frozen evidence、FK 恢复与 receipt failure case。纯 migration admission owner 补入
-135 及缺失 186 收据。SQLite 结构、事务和重开边界不能由纯 parser 代替；定向命令为
+重开后当前 schema 检查；不增加平行 owner。后续 main/135 的 Mission 描述来源加入同一矩阵，
+验证结构化 Atom 保留、186 catalog 合流失败回滚及 187/137 重开。继续执行与 Mission 描述既有
+migration owner 保留 frozen evidence、FK 恢复与 receipt failure case。纯 admission owner 补入
+135/136 来源及缺失合流收据。SQLite 结构、事务和重开边界不能由纯 parser 代替；定向命令为
 `cargo test -p rovai-core --features extended-tests --lib migration`，默认门禁仍为 `pnpm test:rust:pr`。
 
 ## Cline 官方 ACP 与 Hub 退役 owner（2026-10-08，User 95）

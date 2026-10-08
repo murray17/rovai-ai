@@ -2550,6 +2550,8 @@ describe('task event projections', () => {
       }
     }
     expect(composerDraftNeedsContinuationRepair(draft, members, true)).toBe(true)
+    expect(composerDraftNeedsContinuationRepair(draft, [], true)).toBe(true)
+    expect(composerDraftNeedsContinuationRepair(draft, [{ ...members[0], profilePresence: 'present' }], true)).toBe(false)
     expect(composerDraftNeedsContinuationRepair(draft, members, false)).toBe(false)
     expect(composerDraftNeedsContinuationRepair({
       ...draft,

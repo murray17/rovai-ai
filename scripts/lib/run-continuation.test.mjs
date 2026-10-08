@@ -7,7 +7,7 @@ import test from 'node:test'
 import { buildHostWebParity } from '../review-host-web-parity.mjs'
 import { launchAcceptanceBrowser } from './host-web-browser.mjs'
 
-test('production continuation action preserves source, reconciles lost receipts and confirms session replacement', { timeout: 90_000 }, async () => {
+test('production continuation action preserves source, reconciles lost receipts and submits without session confirmation', { timeout: 90_000 }, async () => {
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-continuation-ui-'))
   let browser
   try {
@@ -56,16 +56,13 @@ test('production continuation action preserves source, reconciles lost receipts 
     assert.equal(await browser.evaluate(`${model}.continuation.receipts.size`), 3)
     assert.equal(await browser.evaluate(`${model}.continuation.attempts.at(-1).commandId === ${model}.continuation.attempts.at(-2).commandId`), true)
 
-    await browser.evaluate(`${model}.continuation.mode='new-session'`)
+    await browser.evaluate(`${model}.continuation.mode='normal'`)
     await browser.click(button)
-    await browser.wait('document.querySelector(".app-dialog") !== null')
-    assert.match(await browser.evaluate('document.querySelector(".app-dialog").textContent'), /当前工作区会保留/)
-    assert.equal(await browser.evaluate(`${model}.continuation.receipts.size`), 3)
-    if (process.env.ROVAI_CONTINUATION_UI_OUTPUT) await browser.capture(join(process.env.ROVAI_CONTINUATION_UI_OUTPUT, 'continuation-session.png'))
-    await browser.click('document.querySelector("[data-dialog-autofocus]")')
-    await browser.wait('document.querySelector(".app-dialog") === null')
+    await browser.wait(`${model}.continuation.receipts.size === 4 && !${button}.disabled`)
+    assert.equal(await browser.evaluate('document.querySelector(".app-dialog") === null'), true)
     assert.equal(await browser.evaluate(`${model}.continuation.receipts.size`), 4)
-    assert.equal(await browser.evaluate(`${model}.continuation.attempts.at(-1).command.useNewSession`), true)
+    assert.equal(await browser.evaluate(`${model}.continuation.attempts.length`), 5)
+    assert.equal(await browser.evaluate(`'useNewSession' in ${model}.continuation.attempts.at(-1).command`), false)
     assert.equal(await browser.evaluate(`JSON.stringify(${model}.get().snapshot.agentRuns)`), original)
     assert.deepEqual(browser.errors, [])
   } catch (error) {

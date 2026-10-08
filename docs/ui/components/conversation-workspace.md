@@ -555,7 +555,7 @@ Desktop 与宽屏 Web 的展开正文首尾、主要过程项间距及相邻 Run
 滚动容器为键盘焦点留出标题安全区，不改变跟随最新、折叠、输入清单或 exact Run 停止语义。
 总览中的队员头像固定为 20×20px，不随 flex 收缩拉伸。左侧状态节点与卡头首行垂直居中并跟随本卡标题，
 展开与停止操作距卡片右边保留 9px。字段与验收边界见
-[Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
+[Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)。
 
 执行浮层入口、右侧标签、消息区“处理中”回执和底部标题共用同一 24×24 心跳路径与 1.65 描边；
 queued 回执的时钟及各执行状态图形不变。
@@ -597,7 +597,7 @@ Renderer 以公开消息和 Delivery ID 跟踪刚提交输入；Scheduler claim 
 不创建 pending-input 占位，也不夺走 Composer 焦点。
 删除待发送消息、无执行发布或离开 Camp 会消费或丢弃意图；其他窗口的发送和后台新 Run 不触发该行为。
 
-单聊与执行台的发送确认前和排队显示“连接中”；开始处理但尚未输出时，未收到明确 phase 显示“执行中”，收到 `thinking` phase 显示“思考中”。正文、计划、工具或 final 到达即移除初始等待提示。执行台与单聊在最新阅读窗口再次收到根 `thinking` phase 时，若 Run 仍运行、没有活动压缩或 final，在正文、计划或 Tool 后均显示一条瞬时思考提示。活动 Tool 保留真实运行状态，可与根思考并列；已结算尾组收口。Codex/Copilot 的已准入原生短标题直接替换“思考中”，缺失或无效时回退；新正文、计划、根 Tool、等待／停止或 Run 终态到来时撤下，不留下历史思考条目。折叠与 Mobile 使用相同标题规则，详见 [Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
+单聊与执行台的发送确认前和排队显示“连接中”；开始处理但尚未输出时，未收到明确 phase 显示“执行中”，收到 `thinking` phase 显示“思考中”。正文、计划、工具或 final 到达即移除初始等待提示。执行台与单聊在最新阅读窗口再次收到根 `thinking` phase 时，若 Run 仍运行、没有活动压缩或 final，在正文、计划或 Tool 后均显示一条瞬时思考提示。活动 Tool 保留真实运行状态，可与根思考并列；已结算尾组收口。Codex/Copilot 的已准入原生短标题直接替换“思考中”，缺失或无效时回退；新正文、计划、根 Tool、等待／停止或 Run 终态到来时撤下，不留下历史思考条目。折叠与 Mobile 使用相同标题规则，详见 [Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)。
 Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、缓存或 disclosure；仅消费不含思考正文的
 `thinking | executing` phase 与独立准入的短标题来切换上述反馈，并把 phase edge 作为匿名公开正文的分段边界。
 Camp 执行卡片的普通等待提示与正文共用字号、行高和文字起点，加载图标放在提示文字后；底部、桌面浮层和手机端切入首行正文时不改变卡片位置或单行高度。
@@ -628,7 +628,7 @@ Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ comm
 纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；单记录生命周期
 改用同 Run、同 epoch、紧邻序号和精确结果 digest 证明关联。混合命令、帮助、
 提前失败或不确定关联保留。底层 Evidence 和 Canonical 身份不变。完整规则见
-[Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
+[Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)。
 
 新 operation 的 started/progress/terminal 按稳定 Evidence ID 合并为一行；Renderer 只接受更高
 `revision/changeSequence`，不以记录数量或固定展示 `sequence` 判断内容是否变化。终态后的输入补齐、结果更新和
@@ -642,7 +642,7 @@ Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ comm
 “<最近一条指令>”。真正收口后只显示 `已完成 x 个步骤`；`x` 统计成功、失败、停止、跳过和结果未知在内的
 全部已结算逻辑操作，各终态不再追加独立数量，具体结果由展开后的 Tool 行表达。分页读取沿用相同的执行结果摘要，不改成“已载入 x 项执行记录”；组摘要统计该组完整的可见逻辑操作，不表示整轮总量；未展开的子项不读取。主线和组内分别维护已载入范围。
 `x` 按去重后的可见逻辑操作计数；同一 Built-in 与已关联 Shell 载体计一步，started/result/delta 和一个 Activity 的多文件行不重复计数。
-精确计数语义见 [Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
+精确计数语义见 [Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)。
 
 Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“已完成 x 个步骤”。
 它复用普通 command 的桌面 28px 行、最右侧状态 icon、文字后展开提示与结果文本框，并保留独立压缩 SVG；同一
@@ -1021,7 +1021,7 @@ Draft Coordinator，因此直接呈现已恢复内容或就绪的默认接收人
 Draft 首次读取只有 loading、ready 和 error。loading 与 error 时正文、附件、Reply/Continuation 和发送不可操作；
 error 在 Composer 上方原位显示“草稿无法加载”、具体错误与“重新加载草稿”，不能渲染可编辑的 revision-zero 空
 Draft。发送和路由 mutation 在第一个异步等待前同步禁用编辑器；本地路由 mutation 改变正文时在解除禁用前回写
-Lexical。发送前需要邀请队员时，先冻结并保存草稿，逐人沿用 Camp 成员加入命令；全部成功后沿用原发送入口。
+Lexical。发送前需要邀请队员时，先冻结并保存草稿。Active 会话逐人沿用成员加入命令，全部成功后发送；Pending 草稿直接以首消息事务原子邀请、激活和发布。
 邀请部分成功时显示已加入与失败名单，消息不发送，草稿与每处 Mention 保留。加入成功后发送失败时提示先查会话
 再重试；成员加入不回滚。发送失败保留正文并恢复交互，成功则以空 Draft/continuation 替换。导航或卸载前的同步本地保存失败时，
 留在当前 Camp、显示保存错误并恢复交互；打开新会话 Dialog、展开或选择 Project 等未卸载 Composer 的动作不
@@ -1249,4 +1249,10 @@ title 和 aria-label 为“继续执行”，键盘可达；提交中禁用。�
 现有时间线／执行区；原卡片终态与输出不变，受理后仍可再次点击，各次 Run 不显示关联状态。
 已知必须更换会话时一次确认“原会话无法恢复，将使用新会话继续。当前工作区会保留。”
 实际恢复失败后当前 Run 明确失败，再由用户选择新会话；无恢复向导。合同见
-[Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
+[Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)。
+
+### 继续执行的会话选择
+
+失败／停止卡片的 24×24 继续图标直接提交，Core 自动复用或选择新会话，不显示会话确认弹窗。
+提交中保持原尺寸并禁用；受理后恢复可点，原 Run 状态和工作区保留。响应未知时沿用同一 commandId 核对。
+恢复失败的投递前降级由 [AgentRun Continuation v2](../../contracts/agent-run-continuation-v2.md) 拥有。

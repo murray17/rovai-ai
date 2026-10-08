@@ -92,7 +92,7 @@ export async function startPackagedAcceptance({ app, data, cwd, onNotification }
     assert.equal(await realpath(health.database.path), await realpath(join(data, 'rovai.sqlite')))
     return { pid: child.pid, request, stop,
       async capture(path) {
-        await evaluate('(() => { const item = [...document.querySelectorAll("button")].find(node => node.textContent?.includes("Native Hub isolated product acceptance")); item?.click(); return Boolean(item) })()')
+        await evaluate('(() => { const item = [...document.querySelectorAll("button")].find(node => node.textContent?.includes("Official ACP isolated product acceptance")); item?.click(); return Boolean(item) })()')
         await sleep(1000)
         const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
         await writeFile(path, Buffer.from(image.data, 'base64'), { mode: 0o600 })

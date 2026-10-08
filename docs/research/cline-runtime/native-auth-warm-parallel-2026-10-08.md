@@ -8,8 +8,8 @@
 按 User 89 / 91，在 `rovai/mission/052` 的 `60dba4a8` 上继续，未回退既有实现。
 认证简化提交为 `4e635b78`；合并主干 `a77b537d` 后的最终运行代码为 `b9a43fb9`。
 合并只拼接 Hub/执行 driver 导入和保留两份版本说明，保留主干的新唤醒、预算与用户信息展示。
-当前合同为 [Runtime Launch v53](../../contracts/runtime-launch-and-verification-v53.md#cline-native-hub)，
-取舍见 [V1.72-D24](../../versions/v1.72/decisions.md#v1-72-d24)。
+当前合同为 [Runtime Launch v53](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/contracts/runtime-launch-and-verification-v53.md#cline-native-hub)，
+取舍见 [V1.72-D26](../../versions/v1.72/decisions.md#v1-72-d26)。
 原始私有结果的摘要与受限字段见[证据 JSON](native-auth-warm-parallel-2026-10-08.evidence.json)。
 
 ## 实现

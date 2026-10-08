@@ -1,3 +1,5 @@
+import { rejectedMissionMemberIds } from './useMissions'
+import { missionDescriptionContent, missionDescriptionText, missionMentionIds, unavailableMissionMentionIds } from './mission-description'
 import { useThreadClient } from './camp-client'
 import { readErrorMessage } from './error-message'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
@@ -10,6 +12,7 @@ import type {
   CreateThreadRequest,
   NewConversationDefaults,
   MissionCreate,
+  MissionDescriptionContent,
   ProjectNavigationGroup,
   WorkspaceInspection,
   WorkspaceSelection
@@ -23,6 +26,7 @@ import { NavigationIcon } from './NavigationIcon'
 import { DialogControlIcon } from './AppDialog'
 import {
   MissionAttachmentButton,
+  MissionMentionButton,
   MissionPropertyChip,
   MissionTagPicker,
   MissionWritingPlane,
@@ -74,7 +78,7 @@ export function NewConversationDialog({
   onOpenChange(open: boolean): void
   onChooseWorkspaceDirectory(): Promise<WorkspaceSelection | null>
   onWorkspaceSelected(workspace: WorkspaceSelection): Promise<void>
-  onCreate(draft: CreateThreadDraft, enableOneClick: boolean, mission?: {description:string; start:boolean; tags:string[]; attachments:ReturnType<typeof missionAttachmentDrafts>}): Promise<void>
+  onCreate(draft: CreateThreadDraft, enableOneClick: boolean, mission?: {description:string; descriptionContent:MissionDescriptionContent; start:boolean; tags:string[]; attachments:ReturnType<typeof missionAttachmentDrafts>}): Promise<void>
 }): React.JSX.Element {
   const client = useThreadClient()
   const mobile = useMobileLayout()
@@ -89,7 +93,12 @@ export function NewConversationDialog({
   const [leadId, setLeadId] = useState('')
   const [optionalOpen, setOptionalOpen] = useState(false)
   const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
+  const [descriptionContent, setDescriptionContent] = useState<MissionDescriptionContent>([])
+  const [rejectedIds, setRejectedIds] = useState<string[]>([])
+  const unavailableIds = useMemo(() => unavailableMissionMentionIds(descriptionContent, agents, selectedMemberIds, rejectedIds), [descriptionContent, agents, selectedMemberIds, rejectedIds])
+  const description = missionDescriptionText(descriptionContent, agents)
+  const setDescription = (text: string) => setDescriptionContent(missionDescriptionContent(text))
+  const pendingMentionIds = missionMentionIds(descriptionContent).filter(id => !selectedMemberIds.includes(id))
   const [tags, setTags] = useState<string[]>([])
   const [attachments, setAttachments] = useState<MissionDraftAttachment[]>([])
   const [expanded, setExpanded] = useState(false)
@@ -134,7 +143,7 @@ export function NewConversationDialog({
   const projectActionsDisabled = projectWorkspaceActionsDisabled(busy, projectAccessReady)
   const projectSubmissionBlocked = workspaceSubmissionBlocked(workspace, projectAccessReady)
   const submissionBlocked = busy || projectSubmissionBlocked || availableMembers.length === 0
-    || hasUnavailableSelection || (selectedMemberIds.length > 0 && !lead) || Boolean(nameError)
+    || isMission && unavailableIds.length > 0 || hasUnavailableSelection || (selectedMemberIds.length > 0 && !lead) || Boolean(nameError)
 
   useEffect(() => {
     if (!open) {
@@ -158,6 +167,7 @@ export function NewConversationDialog({
     setOptionalOpen(false)
     setName('')
     setDescription('')
+    setRejectedIds([])
     setTags([])
     setAttachments([])
     setExpanded(false)
@@ -259,7 +269,7 @@ export function NewConversationDialog({
         memberAgentIds: selectedMemberIds,
         defaultLeadAgentId: leadId,
         collaborationMode: 'peer'
-      }, enableOneClick, isMission ? {description, tags, attachments: missionAttachmentDrafts(attachments), start:(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'start'} : undefined)
+      }, enableOneClick, isMission ? {description: '', descriptionContent: await missionEditorRef.current!.flushDescription(), tags, attachments: missionAttachmentDrafts(attachments), start:(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'start'} : undefined)
       if (isMission) {
         draftInitializedRef.current = false
         setName('')
@@ -270,6 +280,7 @@ export function NewConversationDialog({
         setSubmitError(null)
       }
     } catch (error) {
+      setRejectedIds(rejectedMissionMemberIds(error))
       setSubmitError(errorMessage(error))
     } finally {
       submittingRef.current = false
@@ -316,8 +327,8 @@ export function NewConversationDialog({
           <form className="compact-form" onSubmit={(event) => void submit(event)}>
             <div className={`compact-body camp-fields${isMission ? ' mission-editor-body' : ''}`}>
               {attentionMessage && <p className="compact-inline-note" role="status">{attentionMessage}</p>}
-              {recovery && !busy && <p className="compact-inline-note" role="status"><UiText zh={"上次创建结果尚未确认。"} /><button type="button" className="mission-source-link" onClick={() => { setName(recovery.title); setDescription(recovery.description); setTags(recovery.tags); setAttachments(recoveryAttachments.map(({id, file, kindHint}) => ({kind:'local', id, file, kindHint}))); setWorkspace(recovery.projectBindingKind === 'directory' ? {name:projects.find(p=>p.projectPath===recovery.projectPath)?.name ?? recovery.projectPath,projectPath:recovery.projectPath} : null); setSelectedMemberIds(recovery.memberAgentIds); setLeadId(recovery.defaultLeadAgentId); setSubmitError(null) }}><UiText zh={"恢复上次内容以重试"} /></button></p>}
-              {isMission && <MissionWritingPlane ref={missionEditorRef} titleInputRef={nameInputRef} title={name} description={description} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={!normalizedName ? undefined : nameLength > 200 ? uiAttribute("使命名称最多 200 个字符。") : undefined} descriptionError={Array.from(description).length > 12000 ? uiAttribute("使命描述最多 12,000 个字符。") : undefined} onTitleChange={setName} onDescriptionChange={setDescription} onAttachmentsChange={setAttachments} onNotify={setSubmitError}/>}
+              {recovery && !busy && <p className="compact-inline-note" role="status"><UiText zh={"上次创建结果尚未确认。"} /><button type="button" className="mission-source-link" onClick={() => { setName(recovery.title); setDescriptionContent(missionDescriptionContent(recovery.description, recovery.descriptionContent)); setTags(recovery.tags); setAttachments(recoveryAttachments.map(({id, file, kindHint}) => ({kind:'local', id, file, kindHint}))); setWorkspace(recovery.projectBindingKind === 'directory' ? {name:projects.find(p=>p.projectPath===recovery.projectPath)?.name ?? recovery.projectPath,projectPath:recovery.projectPath} : null); setSelectedMemberIds(recovery.memberAgentIds); setLeadId(recovery.defaultLeadAgentId); setSubmitError(null) }}><UiText zh={"恢复上次内容以重试"} /></button></p>}
+              {isMission && <MissionWritingPlane ref={missionEditorRef} titleInputRef={nameInputRef} title={name} descriptionContent={descriptionContent} agents={agents} memberAgentIds={selectedMemberIds} unavailableAgentIds={unavailableIds} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={!normalizedName ? undefined : nameLength > 200 ? uiAttribute("使命名称最多 200 个字符。") : undefined} descriptionError={unavailableIds.length ? uiAttribute('提及的队员已不可用，请移除提及或选择其他队员。') : Array.from(description).length > 12000 ? uiAttribute("使命描述最多 12,000 个字符。") : undefined} onTitleChange={setName} onDescriptionChange={setDescriptionContent} onAttachmentsChange={setAttachments} onNotify={setSubmitError}/>}
               {!isMission && <><div className="compact-row">
                 <span id="new-camp-workspace-label"><UiText zh={"工作目录"} /></span>
                 <NewConversationPicker mobile={mobile} open={projectMenuOpen} onOpenChange={setProjectMenuOpen} busy={busy} title={uiAttribute("选择工作目录")}
@@ -444,10 +455,10 @@ export function NewConversationDialog({
             </div>
             {isMission
               ? <footer className="compact-footer mission-editor-footer">
-                  <MissionAttachmentButton onClick={() => missionEditorRef.current?.chooseFiles()} disabled={busy || !client.missionAttachments}/>
+                  <div className="mission-editor-tools"><MissionAttachmentButton onClick={() => missionEditorRef.current?.chooseFiles()} disabled={busy || !client.missionAttachments}/><MissionMentionButton onClick={() => missionEditorRef.current?.startMention()} disabled={busy}/></div>
                   <div className="mission-editor-footer-actions"><Dialog.Close asChild><button className="compact-cancel" type="button" disabled={busy}><UiText zh={"取消"} /></button></Dialog.Close>
                     <div className="mission-create-split">
-                      <button className="compact-primary" type="submit" value="save" disabled={submissionBlocked}>{busy ? uiAttribute("正在新建…") : uiAttribute("新建")}</button>
+                      <button className="compact-primary" type="submit" value="save" disabled={submissionBlocked}>{busy ? uiAttribute("正在新建…") : pendingMentionIds.length ? uiAttribute("邀请并新建") : uiAttribute("新建")}</button>
                       <button ref={startSubmitRef} type="submit" value="start" hidden disabled={submissionBlocked}/>
                       <DropdownMenu.Root><DropdownMenu.Trigger asChild><button className="compact-primary mission-create-options" type="button" aria-label={uiAttribute("新建使命选项")} disabled={submissionBlocked}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button></DropdownMenu.Trigger>
                         <DropdownMenu.Portal><DropdownMenu.Content className="compact-menu" align="end" sideOffset={6}>

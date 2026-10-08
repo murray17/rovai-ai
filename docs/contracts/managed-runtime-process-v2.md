@@ -172,7 +172,7 @@ Core 在开放 readiness 前处理前代 ledger；仅同次系统启动且原 ow
 
 这是既有 Unix 回收的补强，不是 Windows Job/cgroup：未观测且已消失的中间祖先、跨 UID 后代、Core 停止后
 直到再次启动前的空窗不受此记录保证。macOS 使用 XNU libproc 的固定结构与 PID-version signal 接口，
-字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D21](../versions/v1.72/decisions.md#v1-72-d21)。
+字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D23](../versions/v1.72/decisions.md#v1-72-d23)。
 
 Linux ACP Host 在原生 cancel、graceful stop 或强制回收之前，先由 Managed Process 捕获同 UID 后代的
 父子关系与启动身份，并持有 pidfd。原生取消使父进程退出或后代重新挂靠后，仍通过已捕获的 pidfd 终止后代；

@@ -1,3 +1,5 @@
+import { MissionDescription } from './MissionDescription'
+import { missionDescriptionContent, missionDescriptionText, missionMentionIds, unavailableMissionMentionIds } from './mission-description'
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type Ref } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Menu from '@radix-ui/react-dropdown-menu'
@@ -10,11 +12,12 @@ import { MobilePageHeader, useMobileLayout } from './MobileLayout'
 import { MissionIcon } from './MissionIcon'
 import { Avatar, CompactDialog, Icon, LabelsEditor, MissionAvatars, MissionContextMenu, MissionFilter, MissionPeopleProvider, MissionPopover, MissionRoster, MissionTags, StatusIcon, FilterStateIcon, TagColorDot, useMissionStatuses, type ContextPosition } from './MissionControls'
 import { RunningText } from './RunningText'
-import { MissionCommandRejected, missionCommand, missionError } from './useMissions'
+import { MissionCommandRejected, missionCommand, missionError, rejectedMissionMemberIds } from './useMissions'
 import { MemberAvatar } from './MemberAvatar'
 import { AttachmentCard, ComposerAttachmentStrip } from './AttachmentCard'
 import {
   MissionAttachmentButton,
+  MissionMentionButton,
   MissionPropertyChip,
   MissionTagPicker,
   MissionWritingPlane,
@@ -91,9 +94,9 @@ export function MissionInteractionProvider({ missions, projects, agents, onChang
     const rect = event.currentTarget.getBoundingClientRect()
     setPosition({ id: m.missionId, kind, x: kind === 'menu' && event.type === 'contextmenu' ? event.clientX : rect.left, y: kind === 'menu' && event.type === 'contextmenu' ? event.clientY : rect.bottom, origin: event.currentTarget })
   }
-  async function change(m: MissionRecord, kind: 'status' | 'update', fields: object) {
+  async function change(m: MissionRecord, kind: 'status' | 'update', fields: object, commandId?: string) {
     try {
-      await missionCommand(client, kind === 'status' ? 'missions.status' : 'missions.update', { missionId: m.missionId, ...fields })
+      await missionCommand(client, kind === 'status' ? 'missions.status' : 'missions.update', { missionId: m.missionId, ...fields }, commandId)
       await onChanged(m.threadId)
     } catch (error) {
       if (error instanceof MissionCommandRejected && error.result.code === 'mission.details_version_conflict') {
@@ -196,7 +199,7 @@ export function MissionInteractionProvider({ missions, projects, agents, onChang
     {position && position.kind !== 'menu' && selected && <MissionPopover position={position} title={position.kind === 'tags' ? uiAttribute("编辑标签") : uiAttribute("使命队员")} onClose={() => setPosition(null)} className={position.kind === 'tags' ? 'mission-label-popover' : 'mission-members-popover'}>
       {position.kind === 'tags' ? <LabelsEditor key={selected.missionId} m={selected} catalog={catalog} onSave={tags => change(selected, 'update', { tags })}/> : <MissionRoster m={selected}/>}
     </MissionPopover>}
-    {editing && <MissionEdit key={editing.missionId} mission={editing} projects={projects} agents={agents} catalog={catalog} onClose={() => setEditing(null)} onSaved={() => onChanged(editing.threadId)} onSave={patch => change(editing, 'update', patch)}/>}
+    {editing && <MissionEdit key={editing.missionId} mission={editing} projects={projects} agents={agents} catalog={catalog} onClose={() => setEditing(null)} onSaved={() => onChanged(editing.threadId)} onSave={(patch, commandId) => change(editing, 'update', patch, commandId)}/>}
     {cleaning && (
       <MissionWorkspaceCleanup key={cleaning.missionId} mission={cleaning} onClose={() => setCleaning(null)} onRequested={async () => { await cleanup(cleaning); setCleaning(null) }}/>
     )}
@@ -213,14 +216,18 @@ function MissionEdit({ mission, projects, agents, catalog, onSave, onSaved, onCl
   projects: ProjectNavigationGroup[]
   agents: AgentProfile[]
   catalog: string[]
-  onSave(patch: Omit<MissionUpdate, 'missionId'>): Promise<void>
+  onSave(patch: Omit<MissionUpdate, 'missionId'>, commandId: string): Promise<void>
   onSaved(): Promise<void>
   onClose(): void
 }) {
   const client = useThreadClient()
-  const [baseline, setBaseline] = useState({ title: mission.title, description: mission.description, tags: mission.tags, attachments: mission.attachments ?? [], version: mission.detailsVersion })
+  const [baseline, setBaseline] = useState({ title: mission.title, description: missionDescriptionContent(mission.description, mission.descriptionContent), tags: mission.tags, attachments: mission.attachments ?? [], version: mission.detailsVersion })
   const [title, setTitle] = useState(mission.title)
-  const [description, setDescription] = useState(mission.description)
+  const [descriptionContent, setDescriptionContent] = useState(() => missionDescriptionContent(mission.description, mission.descriptionContent))
+  const [rejectedIds, setRejectedIds] = useState<string[]>([])
+  const unavailableIds = useMemo(() => unavailableMissionMentionIds(descriptionContent, agents, mission.memberAgentIds, rejectedIds), [descriptionContent, agents, mission.memberAgentIds, rejectedIds])
+  const description = missionDescriptionText(descriptionContent, agents)
+  const pendingMentionIds = missionMentionIds(descriptionContent).filter(id => !mission.memberAgentIds.includes(id))
   const [tags, setTags] = useState(mission.tags)
   const [attachments, setAttachments] = useState<MissionDraftAttachment[]>(() => storedMissionAttachments(mission.attachments))
   const [busy, setBusy] = useState(false)
@@ -229,51 +236,59 @@ function MissionEdit({ mission, projects, agents, catalog, onSave, onSaved, onCl
   const [dialogContent, setDialogContent] = useState<HTMLDivElement | null>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<MissionWritingPlaneHandle>(null)
+  const saveRequest = useRef<{ key: string; commandId: string } | null>(null)
+  const saving = useRef(false)
   const agentById = useMemo(() => new Map(agents.map(agent => [agent.agentId, agent])), [agents])
-  const members = mission.memberAgentIds.map(id => agentById.get(id)).filter((agent): agent is AgentProfile => !!agent)
+  const members = [...new Set([...mission.memberAgentIds, ...pendingMentionIds])].map(id => agentById.get(id)).filter((agent): agent is AgentProfile => !!agent)
   const lead = mission.defaultLeadAgentId ? agentById.get(mission.defaultLeadAgentId) ?? null : null
   const normalizedTitle = title.trim()
   const keepAttachmentIds = keptMissionAttachmentIds(attachments)
   const newAttachments = missionAttachmentDrafts(attachments)
   const attachmentsChanged = newAttachments.length > 0
     || keepAttachmentIds.join('\n') !== baseline.attachments.map(attachment => attachment.id).join('\n')
-  const changed = normalizedTitle !== baseline.title || description !== baseline.description
+  const changed = normalizedTitle !== baseline.title || JSON.stringify(descriptionContent) !== JSON.stringify(baseline.description)
     || tags.join('\n') !== baseline.tags.join('\n') || attachmentsChanged
   const titleError = !normalizedTitle ? uiAttribute('请填写使命标题。') : [...normalizedTitle].length > 200 ? uiAttribute('使命标题最多 200 个字符。') : ''
-  const descriptionError = [...description].length > 12000 ? uiAttribute('使命描述最多 12,000 个字符。') : ''
+  const descriptionError = unavailableIds.length ? uiAttribute('提及的队员已不可用，请移除提及或选择其他队员。') : [...description].length > 12000 ? uiAttribute('使命描述最多 12,000 个字符。') : ''
   const invalid = !!titleError || !!descriptionError
   async function save() {
-    if (!changed || invalid) return
-    const patch: MissionUpdate = {
-      missionId: mission.missionId,
-      ...(normalizedTitle !== baseline.title ? { title: normalizedTitle } : {}),
-      ...(description !== baseline.description ? { description } : {}),
-      ...(tags.join('\n') !== baseline.tags.join('\n') ? { tags } : {}),
-      expectedDetailsVersion: baseline.version
-    }
+    if (!changed || invalid || saving.current) return
+    saving.current = true
     setBusy(true); setError('')
     try {
+      const content = await editorRef.current!.flushDescription()
+      const patch: MissionUpdate = {
+        missionId: mission.missionId,
+        ...(normalizedTitle !== baseline.title ? { title: normalizedTitle } : {}),
+        ...(JSON.stringify(content) !== JSON.stringify(baseline.description) ? { descriptionContent: content } : {}),
+        ...(tags.join('\n') !== baseline.tags.join('\n') ? { tags } : {}),
+        expectedDetailsVersion: baseline.version
+      }
+      const key = JSON.stringify([patch, keepAttachmentIds, newAttachments.map(({id,file,kindHint}) => [id,file.name,file.size,file.lastModified,kindHint])])
+      if (saveRequest.current?.key !== key) saveRequest.current = { key, commandId: newCommandId() }
       if (attachmentsChanged) {
         if (!client.missionAttachments) throw new Error(uiAttribute('当前环境不支持编辑使命附件。'))
-        const result = await client.missionAttachments.update(newCommandId(), patch, keepAttachmentIds, newAttachments)
+        const result = await client.missionAttachments.update(saveRequest.current.commandId, patch, keepAttachmentIds, newAttachments)
         if (result.status === 'rejected') throw new MissionCommandRejected(result)
         await onSaved()
       } else {
         const { missionId: _missionId, ...contentPatch } = patch
-        await onSave(contentPatch)
+        await onSave(contentPatch, saveRequest.current.commandId)
       }
       onClose()
     } catch (error) {
+      if (error instanceof MissionCommandRejected) saveRequest.current = null
+      setRejectedIds(rejectedMissionMemberIds(error))
       if (error instanceof MissionCommandRejected && error.result.code === 'mission.details_version_conflict') {
         try {
           const latest = (await client.request<MissionRecord[]>('missions.list')).find(candidate => candidate.missionId === mission.missionId)
           if (!latest) throw new Error('Mission no longer exists')
-          setBaseline({ title: latest.title, description: latest.description, tags: latest.tags, attachments: latest.attachments ?? [], version: latest.detailsVersion })
-          setTitle(latest.title); setDescription(latest.description); setTags(latest.tags); setAttachments(storedMissionAttachments(latest.attachments))
+          setBaseline({ title: latest.title, description: missionDescriptionContent(latest.description, latest.descriptionContent), tags: latest.tags, attachments: latest.attachments ?? [], version: latest.detailsVersion })
+          setTitle(latest.title); setDescriptionContent(missionDescriptionContent(latest.description, latest.descriptionContent)); setTags(latest.tags); setAttachments(storedMissionAttachments(latest.attachments))
           setError(uiAttribute('使命刚刚被修改，已载入最新内容。请重新编辑后保存。'))
         } catch { setError(uiAttribute('使命刚刚被修改，但最新内容加载失败。请关闭后重试。')) }
       } else setError(missionError(error))
-    } finally { setBusy(false) }
+    } finally { saving.current = false; setBusy(false) }
   }
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}>
     <Dialog.Portal>
@@ -284,20 +299,20 @@ function MissionEdit({ mission, projects, agents, catalog, onSave, onSaved, onCl
           <div className="mission-editor-heading"><Dialog.Title><UiText zh={"编辑使命"} /></Dialog.Title><span>{`M-${String(mission.number).padStart(3, '0')}`}</span></div>
           <div className="mission-editor-header-actions"><button className="mission-editor-icon-button" type="button" aria-label={expanded ? uiAttribute("恢复编辑区域大小") : uiAttribute("展开编辑区域")} title={expanded ? uiAttribute("恢复编辑区域大小") : uiAttribute("展开编辑区域")} onClick={() => setExpanded(value => !value)} disabled={busy}><svg viewBox="0 0 24 24" aria-hidden="true">{expanded ? <><path d="M9 3v6H3M15 21v-6h6M3 9l6-6M21 15l-6 6"/></> : <><path d="M9 3H3v6M15 21h6v-6M3 9l6-6M21 15l-6 6"/></>}</svg></button><Dialog.Close asChild><button className="compact-close" type="button" aria-label={uiAttribute("关闭编辑使命")} disabled={busy}><DialogControlIcon name="close"/></button></Dialog.Close></div>
         </header>
-        <Dialog.Description id="mission-edit-description" className="sr-only"><UiText zh={"编辑使命名称、描述、标签和附件。项目、队员与队长在创建后不可更改。"} /></Dialog.Description>
+        <Dialog.Description id="mission-edit-description" className="sr-only"><UiText zh={"编辑使命名称、描述、标签和附件，提及队外队员可在保存时邀请加入。"} /></Dialog.Description>
         <form className="compact-form" onSubmit={event => { event.preventDefault(); void save() }}>
           <div className="compact-body mission-editor-body">
-            <MissionWritingPlane ref={editorRef} titleInputRef={titleInputRef} title={title} description={description} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={titleError || undefined} descriptionError={descriptionError || undefined} mission={{threadId: mission.threadId, missionId: mission.missionId}} onTitleChange={setTitle} onDescriptionChange={setDescription} onAttachmentsChange={setAttachments} onNotify={setError}/>
+            <MissionWritingPlane ref={editorRef} titleInputRef={titleInputRef} title={title} descriptionContent={descriptionContent} agents={agents} memberAgentIds={mission.memberAgentIds} unavailableAgentIds={unavailableIds} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={titleError || undefined} descriptionError={descriptionError || undefined} mission={{threadId: mission.threadId, missionId: mission.missionId}} onTitleChange={setTitle} onDescriptionChange={setDescriptionContent} onAttachmentsChange={setAttachments} onNotify={setError}/>
             <div className="mission-editor-properties" aria-label={uiAttribute("使命属性")}>
               <MissionPropertyChip icon={<ProjectGlyph/>} locked className="mission-editor-project-property" title={uiAttribute("编辑使命时不能更改项目")} aria-label={uiAttribute("项目：{0}，编辑使命时不能更改", String(missionProject(mission, projects)))}>{missionProject(mission, projects)}</MissionPropertyChip>
-              <MissionPropertyChip icon={<TeamGlyph/>} locked className="mission-editor-team-property mission-editor-team-locked" title={uiAttribute("编辑使命时不能更改队员或队长")} aria-label={uiAttribute("队员与队长：{0} 位队员，{1}，编辑使命时不能更改", String(members.length), String(lead ? uiAttribute("队长 {0}", String(lead.displayName)) : uiAttribute("未设置队长")))}>
+              <MissionPropertyChip icon={<TeamGlyph/>} locked className="mission-editor-team-property mission-editor-team-locked" title={uiAttribute("已有队员和队长需通过队伍菜单管理")} aria-label={uiAttribute("队员与队长：{0} 位队员，{1}", String(members.length), String(lead ? uiAttribute("队长 {0}", String(lead.displayName)) : uiAttribute("未设置队长")))}>
                 <span className="mission-editor-team-summary"><span className="compact-avatar-stack">{members.slice(0, 2).map(member => <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative/>)}{members.length > 2 && <span className="mission-editor-team-overflow" aria-hidden="true">+{members.length - 2}</span>}</span><span className="mission-editor-team-divider" aria-hidden="true"/><span>{lead ? uiAttribute("队长 {0}", String(lead.displayName)) : uiAttribute("未设置队长")}</span></span>
               </MissionPropertyChip>
               <MissionTagPicker tags={tags} catalog={catalog} disabled={busy} portalContainer={dialogContent} onChange={setTags}/>
             </div>
             {error && <p role="alert" className="compact-inline-error mission-editor-error">{error}</p>}
           </div>
-          <footer className="compact-footer mission-editor-footer"><MissionAttachmentButton onClick={() => editorRef.current?.chooseFiles()} disabled={busy || !client.missionAttachments}/><div className="mission-editor-footer-actions"><button className="compact-cancel" type="button" disabled={busy} onClick={onClose}><UiText zh={"取消"} /></button><button className="compact-primary" type="submit" disabled={busy || invalid || !changed}>{busy ? uiAttribute("正在保存…") : uiAttribute("保存")}</button></div></footer>
+          <footer className="compact-footer mission-editor-footer"><div className="mission-editor-tools"><MissionAttachmentButton onClick={() => editorRef.current?.chooseFiles()} disabled={busy || !client.missionAttachments}/><MissionMentionButton onClick={() => editorRef.current?.startMention()} disabled={busy}/></div><div className="mission-editor-footer-actions"><button className="compact-cancel" type="button" disabled={busy} onClick={onClose}><UiText zh={"取消"} /></button><button className="compact-primary" type="submit" disabled={busy || invalid || !changed}>{busy ? uiAttribute("正在保存…") : pendingMentionIds.length ? uiAttribute("邀请并保存") : uiAttribute("保存")}</button></div></footer>
         </form>
       </Dialog.Content>
     </Dialog.Portal>
@@ -378,6 +393,12 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
   const updateActiveLane = (): void => {
     const host = boardScroll.current
     if (!host || view !== 'board') return
+    // The last column cannot always align with the left edge of a narrow viewport.
+    if (host.scrollWidth > host.clientWidth && host.scrollLeft >= host.scrollWidth - host.clientWidth - 2) {
+      const last = visibleStatuses.at(-1)
+      if (last) setActiveLane(current => current === last.id ? current : last.id)
+      return
+    }
     const edge = host.getBoundingClientRect().left + 2
     let nearest: { status: MissionStatus; distance: number } | null = null
     for (const status of visibleStatuses) {
@@ -680,7 +701,7 @@ export function MissionIntro({ mission: m, projects }: { mission: MissionRecord;
   return <>
     <section className="mission-intro" aria-label={uiAttribute("会话使命")} data-mission-id={m.missionId} tabIndex={-1}>
       <div className="mission-intro-top"><span><MissionIcon/><UiText zh={"使命"} /></span><span className="mission-status-readonly"><StatusIcon status={m.status}/>{statuses.find(s => s.id === m.status)?.label}</span></div>
-      <h2>{m.title}</h2>{m.description && <p ref={description} className={`mission-description${expanded ? ' expanded' : ''}`}>{m.description}</p>}
+      <h2>{m.title}</h2>{m.description && <p ref={description} className={`mission-description${expanded ? ' expanded' : ''}`}><MissionDescription mission={m}/></p>}
       {canExpand && <button className="mission-description-toggle" aria-expanded={expanded} onClick={() => setExpanded(v => !v)}>{expanded ? uiAttribute("收起描述") : uiAttribute("展开描述")}<Icon name="chevron"/></button>}
       {!!m.attachments.length && <ComposerAttachmentStrip ariaLabel={uiAttribute("使命附件，使用左右方向键浏览")}>
         {m.attachments.map(attachment => <AttachmentCard key={attachment.id} attachment={attachment} locator={{owner:'mission', threadId:m.threadId, missionId:m.missionId, attachmentRefId:attachment.id}} presentation="composer" onNotify={setAttachmentError}/>) }

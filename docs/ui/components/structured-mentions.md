@@ -57,6 +57,8 @@ All Members 候选继续显示广播说明，范围仍是发送时 Camp 中的�
 正文中的 `agentId` 去重派生“待邀请”名单，不维护第二份持久名单。删除最后一个该身份的 Atom 就取消待邀请；
 删除部分重复 Atom 不取消。状态在路由轨提示“发送时邀请”，主按钮提示“邀请并发送”；待邀请身份只参与
 这次本机发送流程，不会因为选中候选就提前改变 Camp 名册。
+普通一键 Pending 草稿也提供相同候选、Atom 与提示；首次发送直接交给 Core 原子邀请、激活和发布，
+不先调用单独加入命令。失败保留完整输入；本机恢复后仍按最新资料判定待邀请或不可用。
 
 ## Skill Typeahead
 
@@ -161,7 +163,7 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 
 | 层级 | 权威入口 |
 | --- | --- |
-| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)与[Pending Camp Activation v4](../../contracts/pending-camp-activation-v4.md) |
+| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)与[Pending Camp Activation v5](../../contracts/pending-camp-activation-v5.md) |
 | Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
 | Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
 | Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |

@@ -40,30 +40,15 @@ export function NavigationShell({ platform, disabled = false, settings = false, 
       event.preventDefault()
       void input.current.navigation?.[action]()
     }
-    const mouseup = (event: MouseEvent): void => {
-      if (browser || (event.button !== 3 && event.button !== 4)) return
-      // Windows uses WM_APPCOMMAND exclusively; handling its mouseup too would step twice.
-      if (input.current.platform === 'win32' && nativeWindowControls?.onNavigationRequested) return
-      if (event.defaultPrevented || !available()) return
-      event.preventDefault()
-      void input.current.navigation?.[event.button === 3 ? 'back' : 'forward']()
-    }
-    const preventDefaultNavigation = (event: MouseEvent): void => {
-      if (!browser && (event.button === 3 || event.button === 4)) event.preventDefault()
-    }
     const unsubscribe = nativeWindowControls?.onNavigationRequested?.((direction) => {
       if (available()) void input.current.navigation?.[direction]()
     })
     window.addEventListener('keydown', keydown)
-    window.addEventListener('mouseup', mouseup)
-    window.addEventListener('auxclick', preventDefaultNavigation)
     return () => {
       unsubscribe?.()
       window.removeEventListener('keydown', keydown)
-      window.removeEventListener('mouseup', mouseup)
-      window.removeEventListener('auxclick', preventDefaultNavigation)
     }
-  }, [navigation, nativeWindowControls, browser])
+  }, [navigation, nativeWindowControls])
   const [layout, setLayout] = useState<NavigationLayout>(() => {
     try { return parseNavigationLayout(window.localStorage.getItem(NAVIGATION_LAYOUT_KEY)) }
     catch { return parseNavigationLayout(null) }

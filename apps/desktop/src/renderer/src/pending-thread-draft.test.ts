@@ -35,4 +35,21 @@ describe('Pending Thread draft recovery', () => {
     await expect(persistence.persist(draft)).rejects.toThrow('quota')
     expect(request).toHaveBeenCalledTimes(2)
   })
+
+  it('keeps accepted activation across mounts without writing stale Pending presence', async () => {
+    const request = vi.fn().mockRejectedValue(new Error('camp.pending_draft_unavailable'))
+    const client = { request: request as never }
+    const save = vi.fn()
+    const persistence = new PendingThreadDraftPersistence(client, save)
+    persistence.acknowledgeActivation('first')
+    const remounted = new PendingThreadDraftPersistence(client, save)
+    expect(remounted.isActivated('first')).toBe(true)
+    const draft = { ...emptyLocalThreadComposerDraft('first'), body: 'follow-up' }
+    await remounted.persist(draft)
+    await remounted.persist(emptyLocalThreadComposerDraft('first'))
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(request).not.toHaveBeenCalled()
+    await expect(remounted.persist(emptyLocalThreadComposerDraft('second'))).rejects.toThrow('camp.pending_draft_unavailable')
+    expect(new PendingThreadDraftPersistence({ request: request as never }, save).isActivated('first')).toBe(false)
+  })
 })

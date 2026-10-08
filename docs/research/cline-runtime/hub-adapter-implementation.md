@@ -168,7 +168,7 @@ PR #662 创建时与 `main` 冲突，当前分支合入 `51c8b346`，保留主�
 收口、原生配置只读边界和现有界面。成员 `installed_unverified` 不是执行阻断，显式诊断与实际任务
 分别验证。旧 Cline ACP 的 3.0.65 门槛在真实 `initialize.agentInfo.version` 检查，不依赖历史 Ready；
 Hub 后端与旧 Binding provenance 不变。当前 Hub 合同移入 Runtime Launch v52；本 Mission 的决定
-D12–D18 重排为 D16–D22，主干已有 D12–D15 保留。
+D12–D20 重排为 D16–D24，主干已有 D12–D15 保留。
 
 合并后探针 24 再次完成完整九轮（8 succeeded / 1 cancelled），探针 25 完成三轮真实 MCP/Skill。
 38 次原生模型调用逐 Run 对账全部一致，两组各 5 项配置源摘要未变，Host temp、Provider 副本及自有
