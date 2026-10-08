@@ -11,6 +11,9 @@ last_updated: 2026-10-08
 
 # Cline 官方 ACP 与 Native Hub 退役验收
 
+本报告绑定切换时的 3.0.3。User 97 后续授权升级到 3.0.70，账号/BYOK 的精确 cold 已通过；
+ACP 自动压缩缺口仍在，见[升级核验](latest-acp-2026-10-08.md)。下文原始失败记录保留。
+
 按 User 95 在 ada6f6c1 后续树实施，不回滚主干改动。唯一执行入口为所选 `cline --acp`，共享 ACP Client/Host/Fleet。
 没有 Hub fallback、版本/账号字段门槛、认证锁、强制 cold、OAuth 复制或自有刷新。保持 Preview。
 

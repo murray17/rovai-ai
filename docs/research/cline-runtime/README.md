@@ -4,7 +4,7 @@ runtime: cline-cli
 authority: research-evidence-only
 status: implementation-in-progress
 admission: preview
-observed_version: 3.0.3
+observed_version: 3.0.70
 observed_platform: macos-arm64
 last_updated: 2026-10-08
 ---
@@ -13,7 +13,9 @@ last_updated: 2026-10-08
 
 当前方向以 User 95 为准：Cline 唯一入口是用户实际安装的 `cline --acp`，接回共享 ACP Client/Host/Fleet，
 完整删除 Native Hub 和 shim 测试入口。认证交还原生，不恢复版本或账号字段门槛；旧 Hub 隐含历史不迁移。
-[ACP 退役验收](acp-retirement-2026-10-08.md)分别记录当前安装的真实能力与失败，不能沿用旧 Hub 通过结论。
+[3.0.70 升级核验](latest-acp-2026-10-08.md)记录 User 97 授权升级后的账号/BYOK first、warm、exact cold 通过，
+以及仍未接通的 ACP 自动 compaction；[ACP 退役验收](acp-retirement-2026-10-08.md)保留切换时 3.0.3 的真实能力与失败。
+不沿用旧 Hub 通过结论，也不将新版本恢复成功倒算为旧版本通过。
 下文按时间保留研究历史，曾经的“当前”、版本门槛、候选 shim 与 Hub 仅描述当时状态。
 
 Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 ACP，在

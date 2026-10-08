@@ -26,10 +26,14 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 Cline 唯一入口恢复为用户所选 `cline --acp`，共享 Host/Fleet、权限、取消、System Rule、工具与监控。
 没有 Hub 备用、版本门槛或账号串行。旧 Binding 以共享不兼容机制换代，公开历史保持；不迁移或重放原生历史。
-当前 Homebrew 3.0.3 的 initialize 声明 loadSession=true，但实际 session/load 返回 -32601 Method not found。
-该矛盾是实际安装能力限制，不因握手成功标为 cold 通过，也不通过更换 Runtime 掩盖。
-账号/BYOK、warm/cold、并行、App 与工具的逐项结果见 [ACP 退役验收](research/cline-runtime/acp-retirement-2026-10-08.md)。
-ACP compaction 未交付的已知缺口继续保留，不沿用 Hub basic 的压缩证据。保持 macOS arm64 Preview。
+切换时 Homebrew 3.0.3 广告 loadSession=true，但实际 session/load 返回 -32601；保留为原生负例。
+User 97 明确授权升级后，日常命令改用官方 npm 3.0.70，原 Homebrew keg 保留且解除链接。
+新版本账号/BYOK 各三轮打包 App first/warm/cold 全部通过：warm 同 Host，cold 新 Host、同 Session/Binding/generation，
+恢复后实际生成、身份/早期记忆和一次公开发送正确，旧 Usage/Diff 不重复归属；本轮无真实刷新。
+最新逐项证据见 [3.0.70 升级核验](research/cline-runtime/latest-acp-2026-10-08.md)；
+旧并行、App 与工具结果仍绑定 [3.0.3 ACP 退役验收](research/cline-runtime/acp-retirement-2026-10-08.md)，不外推版本。
+3.0.70 普通 CLI 默认 agentic，但 ACP buildConfig 仍未交付 compaction；未另跑长上下文触发，不沿用 Hub basic 证据。
+保持 macOS arm64 Preview，不增加固定版本门槛。
 旧 [Hub 报告](research/cline-runtime/hub-adapter-implementation.md)、
 [认证简化报告](research/cline-runtime/native-auth-warm-parallel-2026-10-08.md)保留成功、失败和原复现提交，均为历史。
 
