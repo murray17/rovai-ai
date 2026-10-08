@@ -12,7 +12,7 @@ import { seedCompletedOnboardingForAcceptance } from '../../../../scripts/lib/de
 import { startPackagedHubAcceptance } from './native_hub_packaged_client.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from '../../../../scripts/lib/runtime-camp-files-root.mjs'
 
-const { values } = parseArgs({ options: { root: { type: 'string' }, core: { type: 'string' }, app: { type: 'string' }, 'long-context': { type: 'boolean', default: false }, cline: { type: 'string' }, 'settings-source': { type: 'string' }, extended: { type: 'boolean', default: false }, 'lifecycle-only': { type: 'boolean', default: false }, 'extensions-only': { type: 'boolean', default: false } } })
+const { values } = parseArgs({ options: { root: { type: 'string' }, core: { type: 'string' }, app: { type: 'string' }, 'long-context': { type: 'boolean', default: false }, 'native-account': { type: 'boolean', default: false }, 'single-member': { type: 'boolean', default: false }, cline: { type: 'string' }, 'settings-source': { type: 'string' }, extended: { type: 'boolean', default: false }, 'lifecycle-only': { type: 'boolean', default: false }, 'extensions-only': { type: 'boolean', default: false } } })
 for (const key of ['root', 'core', 'cline', 'settings-source']) assert(values[key], `${key} required`)
 const root = resolve(values.root)
 await mkdir(root, { mode: 0o700 })
@@ -23,7 +23,7 @@ const settings = join(native, 'data/settings')
 await mkdir(settings, { recursive: true, mode: 0o700 })
 await mkdir(workspace, { mode: 0o700 })
 seedCompletedOnboardingForAcceptance(data)
-for (const file of ['providers.json', 'models.json']) {
+for (const file of values['native-account'] ? [] : ['providers.json', 'models.json']) {
   await copyFile(join(values['settings-source'], file), join(settings, file))
   await chmod(join(settings, file), 0o600)
 }
@@ -35,17 +35,28 @@ if (values['extensions-only']) {
 }
 const save = (file, value) => writeFile(join(root, file), `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
 await writeFile(join(settings, 'global-settings.json'), JSON.stringify({ telemetryOptOut: true, autoUpdateEnabled: false }), { mode: 0o600 })
-const configurationDigest = async path => createHash('sha256').update(await readFile(path)).digest('hex')
+const configurationDigest = async path => {
+  try { return createHash('sha256').update(await readFile(path)).digest('hex') }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error }
+}
 const protectedConfigurations = [
-  ...['providers.json', 'models.json', 'global-settings.json'].map(file => ({ scope: 'fixture-native-source', file, path: join(settings, file) })),
-  ...['providers.json', 'models.json'].map(file => ({ scope: 'authorized-settings-source', file, path: join(values['settings-source'], file) }))
+  ...(values['native-account'] ? ['global-settings.json'] : ['providers.json', 'models.json', 'global-settings.json']).map(file => ({ scope: 'fixture-native-source', file, path: join(settings, file) })),
+  ...['providers.json', 'models.json'].map(file => ({ scope: 'authorized-settings-source', file, path: join(values['settings-source'], file), nativeWriteAuthorized: values['native-account'] }))
 ]
 for (const configuration of protectedConfigurations) configuration.before = await configurationDigest(configuration.path)
 await writeFile(join(data, 'mcp.json'), '{"mcpServers":{}}', { mode: 0o600 })
-const secrets = Object.values(JSON.parse(await readFile(join(settings, 'providers.json'), 'utf8')).providers)
-  .flatMap(provider => ['apiKey', 'baseUrl'].map(key => provider.settings?.[key])).filter(Boolean)
+const sourceProviders = JSON.parse(await readFile(join(values['native-account'] ? values['settings-source'] : settings, 'providers.json'), 'utf8'))
+if (values['native-account']) {
+  assert.equal(sourceProviders.lastUsedProvider, 'openai-codex')
+  assert.equal(sourceProviders.providers['openai-codex'].tokenSource, 'oauth')
+  assert(!sourceProviders.providers['openai-codex'].settings.apiKey, 'must not qualify residual BYOK')
+}
+const secrets = Object.values(sourceProviders.providers)
+  .flatMap(provider => [...['apiKey', 'baseUrl'].map(key => provider.settings?.[key]),
+    ...['accessToken', 'refreshToken', 'idToken'].map(key => provider.settings?.auth?.[key])]).filter(Boolean)
 const redact = text => secrets.reduce((text, secret) => text.replaceAll(secret, '<redacted>'), text)
-for (const key of Object.keys(process.env)) if (/^(ROVAI_|CLINE_)/.test(key)) delete process.env[key]
+for (const key of Object.keys(process.env)) if (/^(ROVAI_|CLINE_)/.test(key)
+  || (values['native-account'] && /^(OPENAI_|ANTHROPIC_API_KEY$)/.test(key))) delete process.env[key]
 const report = { scope: values['long-context'] ? 'long-context' : values['extensions-only'] ? 'extensions' : values['lifecycle-only'] ? 'lifecycle' : values.extended ? 'extended' : 'continuity', selectedCli: resolve(values.cline), turns: [], hosts: [], processes: [], actions: [], approvals: [], privateRoot: root }
 let core, threadId
 const sleep = ms => new Promise(done => setTimeout(done, ms))
@@ -100,6 +111,16 @@ async function collect(label, sent, marker, { denyFirst = false, cancel = false 
       resolved.add(approval.id)
     }
     if (cancel && !cancellationRequested && run && await exists(join(workspace, 'cancel.started'))) {
+      if (values['native-account']) {
+        // The accepted Run is still executing a native tool. A competing owned
+        // diagnostic must fail before creating another refresh-capable daemon.
+        const competing = await core.request('runtime.product.check', { runtimeKind: 'cline-cli' })
+        assert.equal(competing.ready, false)
+        const observed = (await core.request('runtime.installations.list')).find(candidate =>
+          candidate.adapterKind === 'cline-cli' && candidate.installationClass === 'managed_default')
+        assert.equal(observed.lastProbeAttempt.failure.code, 'cline_hub_auth_scope_busy')
+        report.authConcurrency = { activeRunId: run.id, competingDiagnostic: 'cline_hub_auth_scope_busy', competingModelInputs: 0 }
+      }
       let version = run.version
       for (let attempt = 0; attempt < 5; attempt++) {
         const result = await core.request('agentRuns.cancel', { commandId: randomUUID(), command: { threadId, agentRunId: run.id, expectedVersion: version } })
@@ -135,7 +156,8 @@ try {
   const runtimeKind = 'cline-cli'
   const current = await core.request('runtime.startup.get', { runtimeKind })
   await core.request('runtime.startup.save', { runtimeKind, expectedRevision: current.revision, configuration: {
-    programPath: resolve(values.cline), environment: [{ name: 'CLINE_DIR', value: native }, { name: 'CLINE_DATA_DIR', value: join(native, 'data') }] } })
+    programPath: resolve(values.cline), environment: [{ name: 'CLINE_DIR', value: native }, { name: 'CLINE_DATA_DIR', value: join(native, 'data') },
+      ...(values['native-account'] ? [{ name: 'CLINE_PROVIDER_SETTINGS_PATH', value: join(resolve(values['settings-source']), 'providers.json') }] : [])] } })
   const agents = []
   for (const letter of ['A', 'B']) {
     const result = await core.request('members.create', { commandId: randomUUID(), command: {
@@ -170,7 +192,7 @@ try {
   report.threadId = threadId
   await collect('first', sent, 'HUB_PRODUCT_MEMBER_A')
   if (!values['lifecycle-only'] && !values['extensions-only'] && !values['long-context']) {
-    await turn(agents[1], 'member-b', 'Use the bundled rovai CLI to publish exactly one message with your System identity. Do not modify files.', 'HUB_PRODUCT_MEMBER_B')
+    if (!values['single-member']) await turn(agents[1], 'member-b', 'Use the bundled rovai CLI to publish exactly one message with your System identity. Do not modify files.', 'HUB_PRODUCT_MEMBER_B')
     const warm = await turn(agents[0], 'warm', 'Use the bundled rovai CLI to publish exactly once your own System identity and the early memory marker you remember. Do not guess missing memory.', 'HUB_MEMORY_A_950871')
     assert(warm.includes('HUB_PRODUCT_MEMBER_A') && !warm.includes('HUB_PRODUCT_MEMBER_B'))
     await stop()
@@ -182,11 +204,12 @@ try {
     assert(bindings.every(binding => binding.native_session_id === bindings[0].native_session_id
       && binding.native_binding_id === bindings[0].native_binding_id
       && binding.native_binding_generation === bindings[0].native_binding_generation), 'full Session/Binding must survive warm and cold')
-    assert.notEqual(evidence().bindings.find(binding => binding.agent_id === agents[1]).native_session_id, bindings[0].native_session_id)
+    if (!values['single-member']) assert.notEqual(evidence().bindings.find(binding => binding.agent_id === agents[1]).native_session_id, bindings[0].native_session_id)
     assert(evidence().runs.every(run => run.runtime_protocol_version === 'cline-hub-v1'))
     const host = label => report.hosts.find(host => host.run === report.turns.find(turn => turn.label === label).run.id)?.host
     assert(host('first') && host('cold'))
-    assert.equal(host('first'), host('warm'))
+    if (values['native-account']) assert.notEqual(host('first'), host('warm'), 'single refresh owner is reaped between native account turns')
+    else assert.equal(host('first'), host('warm'))
     assert.notEqual(host('first'), host('cold'))
   }
   if (values.extended || values['lifecycle-only']) {
@@ -299,15 +322,16 @@ try {
   report.hostTempRemaining = await readdir(join(data, 'runtime/cline-hub/hosts')).catch(() => [])
   if (report.hostTempRemaining.length) { report.passed = false; report.error ??= 'owned Host temp was not reaped'; process.exitCode = 1 }
   report.runtimeFilesRemoved = await removeEphemeralRuntimeCampFilesRoot(data, { temporaryDirectory: root })
-  report.configurationIntegrity = await Promise.all(protectedConfigurations.map(async ({ scope, file, path, before }) => {
+  report.configurationIntegrity = await Promise.all(protectedConfigurations.map(async ({ scope, file, path, before, nativeWriteAuthorized }) => {
     const after = await configurationDigest(path)
-    return { scope, file, before, after, unchanged: before === after }
+    return { scope, file, before, after, unchanged: before === after, nativeWriteAuthorized: Boolean(nativeWriteAuthorized) }
   }))
-  if (report.configurationIntegrity.some(configuration => !configuration.unchanged)) {
+  if (report.configurationIntegrity.some(configuration => !configuration.unchanged && !configuration.nativeWriteAuthorized)) {
     report.passed = false; report.error ??= 'source native configuration changed'; process.exitCode = 1
   }
   await rm(join(settings, 'providers.json'), { force: true })
-  report.privateProviderCopyRemoved = true
+  report.privateProviderCopyRemoved = !values['native-account']
+  report.authentication = values['native-account'] ? 'native-openai-codex-no-static-key' : 'byok'
   await save('report.private.json', report)
   console.log(JSON.stringify({ root, passed: report.passed ?? false, error: report.error, turns: report.turns.length }))
 }

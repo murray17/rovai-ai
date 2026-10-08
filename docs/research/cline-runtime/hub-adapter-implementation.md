@@ -8,6 +8,8 @@ last_updated: 2026-10-08
 
 # Cline Native Hub 产品接入
 
+> 2026-10-08 认证后续：User 已授权直接使用本机 ChatGPT 登录。最新实现及逐项资格见[原生账号报告](native-account-auth-2026-10-08.md)；下文此前 BYOK 范围保留为当时证据。
+
 User 消息 80（`c023f19a-9f1c-4558-b4d4-1bbab3ddffe9`）授权将 Cline 改为 Native Hub，验证后推送
 当前 Mission 分支，并说明与其他 Runtime 的差异。基线 `d9b76dbd`。新 Binding 现在走独立认证的
 `cline-hub-v1`。User 消息 83 确认没有旧会话，现已删除 Cline ACP 后端、版本门槛和兼容查询。

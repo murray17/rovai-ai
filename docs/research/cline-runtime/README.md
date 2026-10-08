@@ -11,6 +11,8 @@ last_updated: 2026-10-07
 
 # Cline 官方 Runtime 接入
 
+> 2026-10-08 认证后续：User 已授权直接使用本机 ChatGPT 登录。最新实现及逐项资格见[原生账号报告](native-account-auth-2026-10-08.md)；下文此前 BYOK 范围保留为当时证据。
+
 最新产品方向已按 User 消息 80 切换到独立 Native Hub；消息 83 确认没有旧会话，已删除 ACP 后端及兼容逻辑。
 当前实现和验收边界以 [Native Hub 产品矩阵](hub-adapter-implementation.md)为准。下文 ACP、shim
 和最小 Hub 调查按发生顺序保留，不再将“Hub 尚未实现”作为当前状态。
