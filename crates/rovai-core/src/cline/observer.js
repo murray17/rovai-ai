@@ -30,12 +30,17 @@ function emit(kind, payload) {
   const name = `${prefix}-${String(sequence).padStart(8, "0")}.json`;
   const destination = join(root, "observations", name);
   const temporary = `${destination}.tmp`;
-  writeFileSync(temporary, JSON.stringify(record), { mode: 0o600, flag: "wx" });
-  renameSync(temporary, destination);
+  try {
+    writeFileSync(temporary, JSON.stringify(record), { mode: 0o600, flag: "wx" });
+    renameSync(temporary, destination);
+  } catch {
+    // Observations are optional. Stop this lease rather than interrupt Cline.
+    active = undefined;
+  }
 }
 
 export default {
-  name: "rovai-cline-observer-v3",
+  name: "rovai-cline-observer-v4",
   manifest: { capabilities: ["hooks"] },
   setup(_api, context) {
     sessionId = context?.session?.sessionId;
@@ -48,11 +53,18 @@ export default {
       compactionSequence = 0;
       compactionId = undefined;
       if (!root || typeof sessionId !== "string") return;
-      const lease = JSON.parse(readFileSync(join(root, "bindings", `${hash(sessionId)}.json`), "utf8"));
+      let lease;
+      try {
+        lease = JSON.parse(readFileSync(join(root, "bindings", `${hash(sessionId)}.json`), "utf8"));
+      } catch {
+        // Some ACP implementations use a different internal Session identity.
+        // No matching lease means no observation, never permission to infer one.
+        return;
+      }
       const runId = context?.snapshot?.runId;
-      if (lease.schemaVersion !== 1 || lease.sessionId !== sessionId ||
+      if (lease?.schemaVersion !== 1 || lease.sessionId !== sessionId ||
           typeof lease.leaseId !== "string" || typeof runId !== "string") {
-        throw new Error("rovai_cline_observer_lease_mismatch");
+        return;
       }
       active = { leaseId: lease.leaseId, runId };
       emit("run_started", {});

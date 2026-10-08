@@ -2126,7 +2126,7 @@ impl AcpHost {
 
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
         let response_error = message.get("error").map(AcpRpcError::from_response);
-        let mut response = if let Some(error) = response_error.as_ref() {
+        let response = if let Some(error) = response_error.as_ref() {
             Err(error.diagnostic())
         } else {
             Ok(message.get("result").cloned().unwrap_or(Value::Null))
@@ -2147,9 +2147,12 @@ impl AcpHost {
                         .await
                     {
                         Ok(observations) => observations,
-                        Err(error) => {
-                            self.protocol_violated.store(true, Ordering::Release);
-                            response = Err(format!("Cline observer failed: {error:#}"));
+                        Err(_) => {
+                            // Optional numeric evidence cannot replace the native ACP
+                            // terminal result. Reject incomplete observations only.
+                            eprintln!(
+                                "Cline numeric observations unavailable for completed prompt"
+                            );
                             Vec::new()
                         }
                     }
@@ -2233,16 +2236,6 @@ impl AcpHost {
                                 &active_prompt,
                                 response_error.code,
                                 error.clone(),
-                            ));
-                        }
-                        (Err(_), None)
-                            if should_emit_input_disposition && native_response_succeeded =>
-                        {
-                            let _ = self.incoming.send(owner.input_accepted(
-                                self.adapter_kind,
-                                &self.host_instance_id,
-                                &session_id,
-                                &active_prompt,
                             ));
                         }
                         _ => {}

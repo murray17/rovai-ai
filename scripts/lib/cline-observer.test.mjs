@@ -17,8 +17,14 @@ test('Cline official hooks emit only leased, structured observations', async () 
     // The running Host must retain its own snapshot, not reread changed config.
     writeFileSync(join(root, 'model-windows.json'), JSON.stringify({ 'native-provider': { 'native-model': 872000 } }));
     plugin.setup({}, { session: { sessionId: 'native-session' } });
-    assert.throws(() => plugin.hooks.beforeRun({ snapshot: { runId: 'missing-lease' } }));
+    assert.doesNotThrow(() => plugin.hooks.beforeRun({ snapshot: { runId: 'missing-lease' } }));
+    assert.deepEqual(readdirSync(join(root, 'observations')), []);
     const binding = join(root, 'bindings', `${createHash('sha256').update('native-session').digest('hex')}.json`);
+    for (const invalid of ['{', 'null', JSON.stringify({ schemaVersion: 1, sessionId: 'different-session', leaseId: 'other-run' })]) {
+      writeFileSync(binding, invalid);
+      assert.doesNotThrow(() => plugin.hooks.beforeRun({ snapshot: { runId: 'unowned' } }));
+      assert.deepEqual(readdirSync(join(root, 'observations')), []);
+    }
     writeFileSync(binding, JSON.stringify({ schemaVersion: 1, sessionId: 'native-session', leaseId: 'agent-run:2' }));
     plugin.hooks.beforeRun({ snapshot: { runId: 'native-run', messages: ['private input'] } });
     plugin.hooks.beforeRun({ snapshot: { runId: 'child-run', parentAgentId: 'root-agent' } });
@@ -65,6 +71,9 @@ test('Cline official hooks emit only leased, structured observations', async () 
     assert.equal(records[7].tokensAfter, 100);
     assert.equal(records[6].compactionId, records[7].compactionId);
     assert.doesNotMatch(JSON.stringify(records), /private|secret|9999|999|totalCost/);
+    rmSync(join(root, 'observations'), { recursive: true });
+    assert.doesNotThrow(() => plugin.hooks.beforeRun({ snapshot: { runId: 'unwritable' } }));
+    assert.doesNotThrow(() => plugin.hooks.afterRun({ result: { runId: 'unwritable', status: 'completed' } }));
   } finally {
     if (previous === undefined) delete process.env.ROVAI_CLINE_OBSERVER_ROOT;
     else process.env.ROVAI_CLINE_OBSERVER_ROOT = previous;

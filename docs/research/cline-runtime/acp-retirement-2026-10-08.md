@@ -27,7 +27,7 @@ SDK/shim 实验入口及专用依赖。Pi 结算回到 Application 的 Pi 方法
 
 本机 ACP 不加载此前逐 Session Plugin。因此 Bootstrap 使用成员 Host 私有的原生文件 Rule，内容写入后不可变，
 不同 Bootstrap 拒绝在同 Host 覆盖；用户 Rules 使用冻结快照，源变化进入兼容性摘要。System 的 B 与 user 的 P
-仍分开；不再依赖 Cline Plugin Session ID 等于 ACP Session ID。可用的原生 Plugin 仍只观察数值，缺失为未知。
+仍分开；不再依赖 Cline Plugin Session ID 等于 ACP Session ID。可用的原生 Plugin 仍只观察数值，缺失、ID 不匹配或写入失败时放弃观测，不阻断原生执行；完整性不足的数值不能覆盖 ACP 终态。
 未广告的 auto_approve config ID 不盲发：原生请求审批时由共享权限逻辑执行成员的冻结选择，plan 保持原生模式。
 当前模型不在可切换目录时使用共享 runtime-default 哨兵，不伪造模型切换能力。
 

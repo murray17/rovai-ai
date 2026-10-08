@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::{command::canonical_json_digest, mcp::McpServerDefinition};
 use tokio::process::Command;
 
-pub const OBSERVER_REVISION: &str = "cline-plugin-observer-v3";
+pub const OBSERVER_REVISION: &str = "cline-plugin-observer-v4";
 const OBSERVER: &str = include_str!("cline/observer.js");
 pub const BOOTSTRAP_REVISION: &str = "cline-immutable-host-rule-v2";
 const MAX_OBSERVATION_BYTES: u64 = 32 * 1024;

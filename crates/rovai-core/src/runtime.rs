@@ -7509,6 +7509,25 @@ mod tests {
                 .native_session_resume_disposition(),
             NativeSessionResumeDisposition::New
         );
+        // Retired backend keys are passive data; even the same installation
+        // generation must create an ACP Binding, never load the old Hub ID.
+        let mut retired = resume_execution(
+            Some("cline-cli:native-hub-v1:old"),
+            Some("cline-cli:history-restore-v1:current"),
+            1,
+            1,
+        );
+        retired.runtime.adapter_kind = AdapterKind::ClineCli;
+        retired.runtime.protocol_version = "acp-v1".into();
+        assert_eq!(
+            retired.native_session_resume_disposition(),
+            NativeSessionResumeDisposition::New
+        );
+        assert_eq!(
+            retired.native_session_id.as_deref(),
+            Some("session-existing"),
+            "classification must not delete historical identity"
+        );
         assert_eq!(
             resume_execution(Some("session-v1"), None, 1, 2).native_session_resume_disposition(),
             NativeSessionResumeDisposition::Controlled
