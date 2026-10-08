@@ -50,7 +50,6 @@ const GUIDES: Partial<Record<AdapterKind, RuntimeInstallGuide>> = {
   'grok-build': { docs: 'https://docs.x.ai/build/overview' },
   'deepseek-harness': { docs: 'https://github.com/deepseek-ai/deepseek-harness', command: 'npm install -g @deepseek-ai/dsh@latest', launch: 'dsh web', connectModel: true },
   'command-code-cli': { docs: 'https://commandcode.ai/docs/acp', command: 'npm install -g command-code', launch: 'command-code login', connectModel: true },
-  'cline-cli': { docs: 'https://docs.cline.bot/usage/acp', command: 'npm install -g cline', launch: 'cline auth', connectModel: true },
   'zcode-app': { docs: 'https://zcode.z.ai/en/docs/install' },
   'antigravity-app': { docs: 'https://antigravity.google/', desktop: true },
   pi: { docs: 'https://github.com/earendil-works/pi' }

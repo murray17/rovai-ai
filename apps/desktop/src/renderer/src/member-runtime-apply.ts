@@ -5,6 +5,7 @@ import type {
 import { persistedRuntimeConfigurationKey } from './member-runtime-conflict'
 import { MemberRuntimeCommandError, submitMemberRuntimeConfiguration } from './member-runtime-commands'
 import { runtimePlatformAdmissionAllowsUse, runtimePlatformAdmissionFor } from './runtime-status'
+import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 
 export type RuntimeApplyEditorState = { runtimeDirty: boolean; busy: boolean }
 export type RuntimeApplyEnvironment = {
@@ -38,7 +39,7 @@ export function runtimeApplyEligibility(
   if (editor?.runtimeDirty) return 'draft'
   if (runtimeConfigurationsEqual(member.runtimeConfiguration, configuration)) return 'same'
   const kind = member.runtimeConfiguration?.adapterKind
-  if (kind === 'cursor-agent' || (kind && environment.hostPlatform !== null &&
+  if ((kind && !VISIBLE_PRODUCT_RUNTIMES.includes(kind)) || (kind && environment.hostPlatform !== null &&
     !runtimePlatformAdmissionAllowsUse(runtimePlatformAdmissionFor(environment.hostPlatform, environment.admissions, kind)))) return 'locked'
   return 'available'
 }

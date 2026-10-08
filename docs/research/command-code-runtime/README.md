@@ -12,6 +12,10 @@ last_updated: 2026-09-24
 
 # Command Code Runtime 接入研究
 
+2026-10-09：[BYOK 模型选择与跨 Runtime 对照](model-selection-2026-10-09.md)复现 1.74.1/1.79.1
+官方 ACP 拒绝自定义模型，而原生默认、CLI 显式选择和真实 first/warm/cold 可用；核对上游 #993，
+并以 OpenCode ACP、Pi RPC 和同源双 Provider 做路由对照。下文早期 headless 判断为历史。
+
 本文记录实现前的本地检查与候选设计，以及隔离的 headless 传输层实现。它不增加 Product Runtime identity、平台准入或机器 Ready 证据。正式接入必须遵循 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)；产品目录与平台资格分别由 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md) 和 [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md) 决定。
 
 2026-09-25 的 [真实 BYOK Smoke](real-byok-smoke-2026-09-25.md)、[与现有 Runtime 的差异](runtime-comparison-2026-09-25.md)和[当前 Context 基线提案 revision 4](prompt-guidance-v1.70-proposal.md)分别记录原生证据、产品差距和待确认的输入方案；下文保留 1.64.0 的固定 fixture 历史。

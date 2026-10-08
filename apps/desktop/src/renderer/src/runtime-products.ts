@@ -38,8 +38,8 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'pi'
 ]
 
-export const VISIBLE_PRODUCT_RUNTIMES = PRODUCT_RUNTIMES.filter(
-  (runtimeKind) => runtimeKind !== 'cursor-agent'
+export const VISIBLE_PRODUCT_RUNTIMES: AdapterKind[] = PRODUCT_RUNTIMES.filter(
+  (runtimeKind) => runtimeKind !== 'cursor-agent' && runtimeKind !== 'cline-cli'
 )
 
 export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {

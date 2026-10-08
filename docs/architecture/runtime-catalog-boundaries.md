@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-06
+last_updated: 2026-10-09
 ---
 
 # Runtime Catalog Boundaries
@@ -30,9 +30,9 @@ Product Runtime Catalog 当前包含十八种已实现 Adapter。Preview 与它�
 Renderer 当前不展示 Settings Preview row。DeepSeek Harness 通过官方 ACP profile 接入；macOS arm64、macOS x64、
 Windows x64 与 Linux x64 分别绑定平台专属证据并取得 qualified。
 产品目录的机器可判数量、全量检查、诊断分母和
-普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
+普通执行仍只来自逐平台 Admission。Cursor 与暂缓公开的 Cline 保留 closed identity 和历史 reader，但不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
-selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
+selector 同样不展示 Cursor 与 Cline；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
 `qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 保留缺失资格证据，检查详情说明记录未齐备。
 `qualified` 行只在有实际 reported version 时显示版本副文案，否则仅显示居中的产品名，不再回退到静态
@@ -85,12 +85,16 @@ warm 使用正常 Fleet，cold 按广告能力 session/load/resume，重放进�
 旧 Hub Binding 通过不兼容替换推进 generation，公开历史和原生历史保留，不迁移隐含上下文、不重发旧输入。
 通用进程账本仍可回收退役后端的已确认自有进程，但不保留可启动 Hub 的兼容实现。
 
-保持 macOS arm64 Preview。实际安装的方法、Rule、认证、模型请求与冷恢复分别实测，不能以握手成功推断。
-ACP compaction 缺口保留，不能沿用 Hub 的压缩结论。当前范围见
+2026-10-09 按 User 99 暂缓公开：撤回 macOS arm64 Preview，所有平台为 NotQualified；Settings、
+新手引导、成员选择与安装引导均不提供 Cline。既有身份、配置、公开历史及证据可读，不迁移或删除用户数据。
+保留官方 ACP 实现供后续补齐原生能力，普通发现、检查和执行仍服从共享 Admission。
+原因是已安装 3.0.70 的 ACP 仍未交付原生 compaction 配置；普通 CLI 的自动压缩不能当作 ACP 能力。
+方法、Rule、认证、模型请求与冷恢复的既有证据按实际安装保留。当前范围见
 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)、
 [ACP 退役验收](../research/cline-runtime/acp-retirement-2026-10-08.md)及
 [输入说明](../versions/v1.72/model-context-change-cline-acp.md)，理由见
-[V1.72-D27](../versions/v1.72/decisions.md#v1-72-d27)。
+[V1.72-D27](../versions/v1.72/decisions.md#v1-72-d27)与
+[V1.72-D28](../versions/v1.72/decisions.md#v1-72-d28)。
 
 ## 可执行准入
 

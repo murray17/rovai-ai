@@ -54,7 +54,9 @@ describe('applying a saved member Runtime configuration', () => {
   it('protects pending Runtime drafts, ongoing edits and platform-frozen configurations', () => {
     expect(runtimeApplyEligibility(member, configuration, { runtimeDirty: true, busy: false }, environment)).toBe('draft')
     expect(runtimeApplyEligibility(member, configuration, { runtimeDirty: false, busy: true }, environment)).toBe('busy')
-    expect(runtimeApplyEligibility({ ...member, runtimeConfiguration: { ...configuration, adapterKind: 'cursor-agent' } }, configuration, undefined, environment)).toBe('locked')
+    for (const adapterKind of ['cursor-agent', 'cline-cli'] as const) {
+      expect(runtimeApplyEligibility({ ...member, runtimeConfiguration: { ...configuration, adapterKind } }, configuration, undefined, environment)).toBe('locked')
+    }
     const target = { ...member, runtimeConfiguration: configuration }
     const admissions = [{ platform: 'windows-x64', runtimeKind: 'codex-cli', status: 'not_qualified' }] as RuntimePlatformAdmission[]
     expect(runtimeApplyEligibility(target, { ...configuration, model: { mode: 'runtime_default' } }, undefined, { hostPlatform: 'windows-x64', admissions })).toBe('locked')

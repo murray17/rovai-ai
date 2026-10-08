@@ -6,10 +6,21 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Cline 暂缓公开（2026-10-09）
+
+User 99 因原生 ACP 自动 compaction 缺口要求暂不对外暴露 Cline。所有平台回到 NotQualified，
+移除设置、新手引导、成员选择和安装引导入口；已存身份、配置与历史保持可读，官方 ACP 实现保留。
+没有重新引入 Hub、版本或账号白名单。当前范围见 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)，
+理由见 [V1.72-D28](decisions.md#v1-72-d28)。下文 Cline Preview 与各轮成功均为此前实施证据。
+
+Command Code 1.74.1/1.79.1 的 BYOK 默认 first/warm/cold 本轮真实通过，两种 ACP 显式模型选择均被
+原生目录拒绝。OpenCode/Pi 以合成 Provider 完成切换与恢复对照；生产模型目录继续尊重原生广告，
+未伪造显式支持。见[模型选择报告](../../research/command-code-runtime/model-selection-2026-10-09.md)。
 
 ## Cline 官方 ACP 与 Hub 退役（2026-10-08）
 
@@ -20,7 +31,7 @@ User 95 已替换此前 Hub 方向。Cline 唯一执行链为选中安装的 `cl
 当前合同 [Runtime Launch v54](../../contracts/runtime-launch-and-verification-v54.md)，理由
 [V1.72-D27](decisions.md#v1-72-d27)，[输入说明](model-context-change-cline-acp.md)。
 实际结果见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)，旧 Hub 报告均为历史证据。
-保持 Preview，ACP compact 缺口和实际安装的能力失败不宣称修复。后端切换本身不改 schema；主干合流迁移见下节，current_version 不变。
+切换时保持 Preview，现已按上节撤回；ACP compact 缺口和实际安装的能力失败不宣称修复。后端切换本身不改 schema；主干合流迁移见下节，current_version 不变。
 
 ## 主干与 Preview 数据合流（2026-10-08）
 

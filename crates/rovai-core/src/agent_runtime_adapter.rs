@@ -811,9 +811,7 @@ impl AgentRuntimeAdapterRegistry {
                 ),
             };
         }
-        if matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli)
-            && platform == HostPlatformKey::MacosArm64
-        {
+        if kind == AdapterKind::CommandCodeCli && platform == HostPlatformKey::MacosArm64 {
             // Development use is explicit and platform-scoped. The real
             // Installation probe still owns authentication and readiness;
             // Preview carries no First-Class qualification evidence.

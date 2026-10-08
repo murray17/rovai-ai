@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-07
+last_updated: 2026-10-09
 ---
 
 # v1.72 版本决定
@@ -635,3 +635,23 @@ D25 的后端选择被本决定取代；D26 的原生认证来源、普通 warm/
 历史数据与通用进程账本保留，执行/探测/登录/恢复不再具备 Hub 分支。Pi 结算归回 Pi，不随 Hub 删除。
 没有保留 Hub 备用、恢复 shim 或实现自有压缩；已知 ACP 原生方法、Rule 和 compact 差异逐项报告。
 握手、已有登录、真实请求、warm/cold 与刷新分别验收，不用旧 Hub 成绩替代本轮结果。
+
+<a id="v1-72-d28"></a>
+## V1.72-D28：Cline 暂缓公开，保留官方 ACP 与历史数据
+
+- 状态：accepted
+- 日期：2026-10-09
+- 确认：User 消息 `a795b147-1f20-45bd-b5b2-e8dce25d3268`（Thread 99）
+- 当前权威：[Cline 实施边界](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)、[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)
+
+### 背景与选择
+
+3.0.70 的官方 ACP 已通过账号/BYOK first、warm、cold，但其配置仍未接入原生自动 compaction。
+User 要求暂不对外暴露；撤回 D20 的 macOS arm64 Preview，所有平台为 NotQualified，隐藏产品入口与安装引导。
+D27 的唯一官方 ACP 后端保持，已有实现和正负证据保留，后续资格必须重新验证。
+
+### 后果与替代方案
+
+共享 Admission 阻止普通发现、检查和新执行；Renderer 不提供新选择。已保存配置按现有未准入合同只读，
+无关身份编辑仍可保存，历史对话、Session 记录与凭据均不删除。不保留可启动 Hub，不用 Rovai 摘要代替原生压缩。
+本轮优先调查 Command Code 模型目录与 BYOK 切换，不把两个 Runtime 的成功范围相互代用。

@@ -33,9 +33,19 @@ User 97 明确授权升级后，日常命令改用官方 npm 3.0.70，原 Homebr
 最新逐项证据见 [3.0.70 升级核验](research/cline-runtime/latest-acp-2026-10-08.md)；
 旧并行、App 与工具结果仍绑定 [3.0.3 ACP 退役验收](research/cline-runtime/acp-retirement-2026-10-08.md)，不外推版本。
 3.0.70 普通 CLI 默认 agentic，但 ACP buildConfig 仍未交付 compaction；未另跑长上下文触发，不沿用 Hub basic 证据。
-保持 macOS arm64 Preview，不增加固定版本门槛。
+2026-10-09 按 User 99 撤回 macOS arm64 Preview，暂不公开；所有平台 NotQualified，历史证据保留。
+原因与产品边界见 [Cline 实施边界](architecture/runtime-catalog-boundaries.md#cline-实施边界)。不增加固定版本或账号门槛。
 旧 [Hub 报告](research/cline-runtime/hub-adapter-implementation.md)、
 [认证简化报告](research/cline-runtime/native-auth-warm-parallel-2026-10-08.md)保留成功、失败和原复现提交，均为历史。
+
+## 2026-10-09 Command BYOK 模型选择对照
+
+官方 1.74.1 和独立测试安装 1.79.1 均可用原生默认 sub2api/gpt-6-sol 完成 first/warm/cold，
+六轮真实生成及早期 marker 恢复通过；但两种 ACP 模型选择方法都拒绝同一自定义模型 ID。
+原生 CLI 目录和 `--model` 正常，ACP 目录缺少 BYOK；OpenCode 1.18.32 ACP 与 Pi 0.84.4 RPC
+的合成 Provider 对照可正确切换同名跨 Provider 模型，并保留拒绝后的选择与 cold 状态。
+详见[逐项报告](research/command-code-runtime/model-selection-2026-10-09.md)；没有变更 Command 生产后端或日常安装，
+没有修复或重新宣称 MCP、刷新与完整资格。上游 #993 仍开放，Rovai 保留原生默认哨兵。
 
 ## 2026-10-06 Command / Cline 此前补验
 
@@ -97,7 +107,7 @@ AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 F
 
 当前 closed `AdapterKind` 包含十八种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
-Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。后两者只有 macOS arm64 Preview，identity 不代表 First-Class。
+Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。Command Code 只有 macOS arm64 Preview；Cline 暂不公开，所有平台 NotQualified。identity 不代表 First-Class。
 Cursor 在三个目标平台均为 `not_qualified`；Pi、Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。Pi 三个平台分别绑定自己的 adapter-scoped evidence，不继承通用 macOS/Windows、
 Kimi 或 Grok 的平台结论。
