@@ -90,6 +90,22 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+## Cline 原生账号认证 owner（2026-10-08）
+
+- `cline_hub::auth::tests::auth_source_and_projection_preserve_selected_metadata_without_oauth_copies`
+  拥有账号/BYOK/未知来源与端点冲突、无关 OAuth 不复制及选中原生元数据保留的纯函数边界。
+  旧配置 owner 只拥有 MCP 准备清理，不能发现凭据来源与投影错误。
+- `cline::tests::native_refresh_keeps_binding_identity_but_account_and_byok_changes_fence_it`
+  拥有 token 轮换不重绑、账号和 BYOK 变化仍重绑的纯兼容性边界；稀疏 Usage owner 不拥有配置摘要。
+- `cline_hub::login::tests::login_interaction_is_private_and_cancel_releases_only_proven_empty_ownership`
+  用最小私有 CLI 子进程验证交互、脱敏、取消后进程退出、单源租约、后续登录及未确认 owner 阻断。
+  归入 extended-tests，纯函数不能证明内核进程所有权释放；不使用模型/真实 token，不代表 OAuth 刷新通过。
+- 既有 `cline_hub::failure::tests` 增加认证/订阅/网络分类；既有产品 Smoke 增加显式 `--native-account`，
+  无静态 key、直接引用授权原生源，保留失败记录。Renderer 登录交互由现有 settings-workspace fixture 承接。
+
+最小命令：`cargo test -p rovai-core --features extended-tests --lib cline`、`pnpm test:settings-workspace`。
+真实账号/刷新/并发结论必须来自独立[验收矩阵](../research/cline-runtime/native-account-auth-2026-10-08.md)。
+
 ## Cline Hub 评审修正与测试退役（2026-10-08）
 
 User 消息 83 明确删除 Cline ACP 后端，因而退役 `cline_backend_tests`、

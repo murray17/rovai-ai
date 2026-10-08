@@ -45,6 +45,28 @@ impl HubFailure {
             .to_ascii_lowercase();
         let category = if code == "session_not_found" || message.contains("session not found") {
             "session_not_found"
+        } else if message.contains("requires re-authentication")
+            || message.contains("invalid_grant")
+            || message.contains("token revoked")
+        {
+            "reauthorization_required"
+        } else if message.contains("not logged in") || message.contains("no saved credentials") {
+            "not_logged_in"
+        } else if message.contains("insufficient_quota")
+            || message.contains("insufficient credits")
+            || message.contains("no active subscription")
+            || message.contains("subscription required")
+            || message.contains("subscription does not include")
+            || message.contains("does not have access to model")
+        {
+            "account_access_denied"
+        } else if message.contains("fetch failed")
+            || message.contains("econnrefused")
+            || message.contains("enotfound")
+            || message.contains("network error")
+            || message.contains("service unavailable")
+        {
+            "service_unavailable"
         } else if code == "unauthorized"
             || message.contains("authentication")
             || message.contains("invalid api key")
@@ -87,6 +109,10 @@ impl HubFailure {
                 let summary = match *category {
                     "session_not_found" => "Cline 未找到原生会话",
                     "authentication_failed" => "Cline 原生认证失败",
+                    "not_logged_in" => "Cline 尚未登录",
+                    "reauthorization_required" => "Cline 要求重新授权",
+                    "account_access_denied" => "Cline 账号的订阅或模型权限不足",
+                    "service_unavailable" => "Cline 原生服务暂时不可达",
                     "context_limit_exceeded" => "Cline 上下文超过原生限制",
                     "configuration_rejected" => "Cline 拒绝了会话配置",
                     "permission_denied" => "Cline 拒绝了操作权限",
@@ -121,7 +147,9 @@ impl HubFailure {
             if matches!(
                 self,
                 Self::Native {
-                    category: "authentication_failed",
+                    category: "authentication_failed"
+                        | "not_logged_in"
+                        | "reauthorization_required",
                     ..
                 }
             ) {
@@ -208,6 +236,22 @@ mod tests {
                 "context_limit_exceeded",
             ),
             ("invalid_config", "secret-config", "configuration_rejected"),
+            (
+                "command_failed",
+                "openai-codex requires re-authentication.",
+                "reauthorization_required",
+            ),
+            ("command_failed", "no saved credentials", "not_logged_in"),
+            (
+                "command_failed",
+                "insufficient_quota secret-details",
+                "account_access_denied",
+            ),
+            (
+                "command_failed",
+                "fetch failed secret-token",
+                "service_unavailable",
+            ),
             ("secret-code", "secret-message", "command_rejected"),
         ] {
             let failure = HubFailure::native(

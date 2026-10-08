@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # Agent Runtime 兼容性清单
@@ -27,7 +27,10 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 Cline 仅使用所选官方 CLI 启动的独立认证 Hub，冻结协议 `cline-hub-v1`。User 消息 83 确认无旧会话，
 已删除旧 ACP Host、3.0.65 门槛与后端推断。真实本机入口仍为 3.0.3 / Hub 0.0.41，macOS arm64 Preview。
 已测 BYOK 发送、warm/cold、审批、取消、stdio MCP、原生 Skill 读取；九轮主流程包含一个预期取消，另有三轮扩展。
-OAuth/订阅无 API key 的配置尚不支持，非“仅未验证”；模型目录限当前 Provider 的本地原生目录。
+后续已直接复用用户授权的 ChatGPT 原生账号，无静态 Key 的正式 Adapter 九轮为8成功/1预期取消；
+BYOK first/warm/cold 三轮回归成功。账号凭据由 Cline 在持久原生源读取/写回，无每 Host OAuth 副本。
+同文件 Rovai 登录/Hub 采用单进程降级、每轮回收；首次产品登录、真实刷新、外部 CLI 并发仍未完成资格。
+详见[原生账号矩阵](research/cline-runtime/native-account-auth-2026-10-08.md)。模型目录限当前 Provider 的本地原生目录。
 原生明确失败与传输未知分开，均不自动重发；准备失败清理独占私有副本，spawn 后依进程账本回收。
 平台专属启动用条件编译隔离。完整历史接收单帧/消息限制 64 MiB，恢复请求限制 16 MiB，超限明确失败、不截断历史。
 隔离打包 App 九轮（8 成功/1 预期取消）及产品 basic 历史收缩后的同 ID cold 已验；Windows workspace 编译通过，不提升 Cline Windows 资格。

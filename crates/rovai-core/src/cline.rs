@@ -85,18 +85,56 @@ impl NativePaths {
     }
 }
 
-/// The digest contains hashes, never credential values. Native model catalogs
-/// and provider settings must fence an idle Host as well as cold continuation.
+/// Normal OAuth rotation is not a new account or a new Native Binding. Only
+/// known volatile fields of an explicitly OAuth record are excluded; account,
+/// provider, endpoint, unknown metadata and all BYOK keys still fence reuse.
+fn provider_configuration_identity(mut value: Value) -> Value {
+    if let Some(providers) = value["providers"].as_object_mut() {
+        for entry in providers.values_mut() {
+            if entry["tokenSource"] != "oauth"
+                || !entry["settings"]["auth"]["accountId"]
+                    .as_str()
+                    .is_some_and(|id| !id.trim().is_empty())
+            {
+                continue;
+            }
+            if let Some(record) = entry.as_object_mut() {
+                record.remove("updatedAt");
+            }
+            if let Some(auth) = entry
+                .pointer_mut("/settings/auth")
+                .and_then(Value::as_object_mut)
+            {
+                for name in ["accessToken", "refreshToken", "expiresAt", "idToken"] {
+                    auth.remove(name);
+                }
+            }
+        }
+    }
+    value
+}
+
+/// The digest contains hashes, never credential values.
 pub fn native_configuration_digest(paths: &NativePaths) -> Result<String> {
     let mut entries = Vec::new();
     for path in [
         &paths.providers,
         &paths.settings,
         &paths.mcp,
-        &paths.data.join("settings/models.json"),
+        &paths
+            .providers
+            .parent()
+            .context("Cline provider parent unavailable")?
+            .join("models.json"),
     ] {
         let digest = match fs::read(path) {
-            Ok(bytes) => Some(format!("{:x}", Sha256::digest(bytes))),
+            Ok(bytes) => Some(if path == &paths.providers {
+                canonical_json_digest(&provider_configuration_identity(
+                    serde_json::from_slice(&bytes).context("cline_native_config_invalid")?,
+                ))?
+            } else {
+                format!("{:x}", Sha256::digest(bytes))
+            }),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(_) => bail!("cline_native_configuration_unreadable"),
         };
@@ -109,7 +147,7 @@ pub fn native_configuration_digest(paths: &NativePaths) -> Result<String> {
         ));
     }
     canonical_json_digest(
-        &json!({"revision": "cline-native-hub-config-v1", "config": paths.config, "data": paths.data, "files": entries}),
+        &json!({"revision": "cline-native-hub-config-v2", "config": paths.config, "data": paths.data, "files": entries}),
     )
 }
 
@@ -536,6 +574,36 @@ pub fn parse_observations(record: &Value) -> Vec<crate::monitoring::ParsedRuntim
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_refresh_keeps_binding_identity_but_account_and_byok_changes_fence_it() {
+        let initial = json!({"providers":{"openai-codex":{"tokenSource":"oauth","updatedAt":"before",
+            "settings":{"provider":"openai-codex","model":"native-model","auth":{"accessToken":"old","refreshToken":"old-refresh","expiresAt":1,"accountId":"account-a"}}},
+            "byok":{"tokenSource":"manual","settings":{"apiKey":"static"}}}});
+        let identity = provider_configuration_identity(initial.clone());
+        let mut refreshed = initial.clone();
+        refreshed["providers"]["openai-codex"]["updatedAt"] = json!("after");
+        refreshed["providers"]["openai-codex"]["settings"]["auth"]["accessToken"] = json!("new");
+        refreshed["providers"]["openai-codex"]["settings"]["auth"]["refreshToken"] =
+            json!("new-refresh");
+        refreshed["providers"]["openai-codex"]["settings"]["auth"]["expiresAt"] = json!(2);
+        assert_eq!(provider_configuration_identity(refreshed.clone()), identity);
+        for pointer in [
+            "/providers/openai-codex/settings/auth/accountId",
+            "/providers/openai-codex/settings/provider",
+            "/providers/openai-codex/settings/model",
+            "/providers/openai-codex/tokenSource",
+            "/providers/byok/settings/apiKey",
+        ] {
+            let mut switched = refreshed.clone();
+            *switched.pointer_mut(pointer).unwrap() = json!("different");
+            assert_ne!(
+                provider_configuration_identity(switched),
+                identity,
+                "{pointer}"
+            );
+        }
+        assert_eq!(identity["providers"]["byok"], initial["providers"]["byok"]);
+    }
     #[test]
     fn native_metrics_keep_sparse_usage_and_verified_context_windows() {
         let observation = json!({"schemaVersion":1,"sessionId":"session-a","leaseId":"run:1","runId":"native-run","seq":1,"kind":"model_completed","messageId":"native-message","metrics":{"inputTokens":110,"cacheReadTokens":100,"outputTokens":2}});

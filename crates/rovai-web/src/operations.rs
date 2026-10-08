@@ -146,6 +146,14 @@ pub enum Operation {
     RuntimeStartupInspect,
     #[serde(rename = "runtime.startup.check")]
     RuntimeStartupCheck,
+    #[serde(rename = "runtime.clineLogin.start")]
+    ClineLoginStart,
+    #[serde(rename = "runtime.clineLogin.read")]
+    ClineLoginRead,
+    #[serde(rename = "runtime.clineLogin.input")]
+    ClineLoginInput,
+    #[serde(rename = "runtime.clineLogin.cancel")]
+    ClineLoginCancel,
 
     #[serde(rename = "navigation.findThread", alias = "navigation.findCamp")]
     NavigationFindCamp,
@@ -460,6 +468,10 @@ impl Operation {
             Self::RuntimeStartupSave => "runtime.startup.save",
             Self::RuntimeStartupInspect => "runtime.startup.inspect",
             Self::RuntimeStartupCheck => "runtime.startup.check",
+            Self::ClineLoginStart => "runtime.clineLogin.start",
+            Self::ClineLoginRead => "runtime.clineLogin.read",
+            Self::ClineLoginInput => "runtime.clineLogin.input",
+            Self::ClineLoginCancel => "runtime.clineLogin.cancel",
 
             Self::NavigationFindCamp => "navigation.findCamp",
             Self::RunExecutionPage => "agentRunExecution.page",

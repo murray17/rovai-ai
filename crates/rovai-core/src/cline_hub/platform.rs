@@ -35,7 +35,7 @@ pub(super) async fn launch(
     if let Some(tools) = &request.builtin_tools {
         tools.configure_command(&mut command)?;
     }
-    let configuration = config::configure(
+    let mut configuration = config::configure(
         &mut command,
         root,
         history,
@@ -65,7 +65,18 @@ pub(super) async fn launch(
             bail!("cline_hub_builtin_cli_path_not_owned");
         }
     }
-    let mut child = ManagedProcess::spawn(spec)?;
+    if let Some(lease) = configuration.auth_lease.as_mut() {
+        lease.before_spawn()?;
+    }
+    let mut child = match ManagedProcess::spawn(spec) {
+        Ok(child) => child,
+        Err(error) => {
+            if let Some(lease) = configuration.auth_lease.as_mut() {
+                lease.process_absent()?;
+            }
+            return Err(error.into());
+        }
+    };
     preparation.process_started();
     if let Err(error) = child
         .track_descendants(&root.join("owned-processes"))
@@ -76,12 +87,19 @@ pub(super) async fn launch(
             config::private_file(
                 &root.join(config::OWNED_HOST_MARKER),
                 super::PROTOCOL.as_bytes(),
-            )
+            )?;
+            if let Some(lease) = &configuration.auth_lease {
+                lease.tracked()?;
+            }
+            Ok(())
         })
     {
         let _ = child.force_terminate_tree();
         let _ = timeout(Duration::from_secs(2), child.wait()).await;
         if child.captured_tree_is_empty().unwrap_or(false) {
+            if let Some(lease) = configuration.auth_lease.as_mut() {
+                lease.process_absent()?;
+            }
             let _ = std::fs::remove_dir_all(root);
         }
         return Err(error);
@@ -139,6 +157,9 @@ pub(super) async fn launch(
             let _ = child.force_terminate_tree();
             let _ = timeout(Duration::from_secs(2), child.wait()).await;
             if child.captured_tree_is_empty().unwrap_or(false) {
+                if let Some(lease) = configuration.auth_lease.as_mut() {
+                    lease.process_absent()?;
+                }
                 let _ = std::fs::remove_dir_all(root);
             }
             return match other {

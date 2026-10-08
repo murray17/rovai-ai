@@ -103,9 +103,13 @@ pub(super) async fn native_help(executable: &Path) -> Result<String> {
 }
 
 pub(super) async fn native_cli_output(executable: &Path, argument: &str) -> Result<String> {
+    native_cli_arguments(executable, &[argument]).await
+}
+
+pub(super) async fn native_cli_arguments(executable: &Path, arguments: &[&str]) -> Result<String> {
     let mut command = Command::new(executable);
     crate::runtime_discovery::configure_runtime_command(AdapterKind::ClineCli, &mut command);
-    command.arg(argument);
+    command.args(arguments);
     let spec = ManagedProcessLaunchSpec::capture(
         &command,
         ManagedProcessPurpose::RuntimeProbe,
@@ -188,6 +192,7 @@ pub(super) struct NativeConfiguration {
     pub session: Value,
     pub discovery: PathBuf,
     pub models: Vec<crate::agent_profile::ModelDescriptor>,
+    pub auth_lease: Option<super::auth::NativeAuthLease>,
 }
 
 /// Only the selected native provider's persisted model catalog is authoritative
@@ -334,35 +339,44 @@ pub(super) async fn configure(
     } else {
         selected_model.unwrap().to_owned()
     };
-    let key =
-        environment("CLINE_API_KEY").or_else(|| settings["apiKey"].as_str().map(str::to_owned));
-    // Native OAuth refresh/secure storage is not wired through this Hub client.
-    // A login without a reusable native API key is unsupported, not "untested".
-    let key = key.filter(|v| !v.trim().is_empty()).ok_or_else(|| {
-        crate::runtime_failure::RuntimeFailureError::new(
-            crate::runtime_failure::RuntimeFailureView::new(
-                AdapterKind::ClineCli,
-                crate::runtime_failure::RuntimeFailureOrigin::Compatibility,
-                crate::runtime_failure::RuntimeFailurePhase::Authentication,
-                "cline_hub_native_auth_requires_api_key",
-                "Cline Hub 当前需要原生 API key 配置",
-                Some(
-                    "当前接入支持 BYOK；仅有原生 OAuth 或订阅登录、没有 API key 的配置尚不支持。"
-                        .into(),
-                ),
-                false,
-            ),
-        )
-    })?;
-    let catalog = read_json(&paths.data.join("settings/models.json"))?.unwrap_or(Value::Null);
+    let authentication = super::auth::select(&saved, &provider, environment("CLINE_API_KEY"))?;
+    let catalog = read_json(
+        &paths
+            .providers
+            .parent()
+            .context("cline_provider_parent_missing")?
+            .join("models.json"),
+    )?
+    .unwrap_or(Value::Null);
     let preferences = read_json(&paths.settings)?.unwrap_or_else(|| json!({}));
     if !preferences.is_object() {
         bail!("cline_native_settings_invalid");
     }
     let compaction = compaction_setting(&preferences, &native_help(executable).await?)?;
     private_dir(history)?;
-    write_native_files(root, &paths, bootstrap, servers, &saved, &preferences)?;
-    let providers_path = root.join("providers.json");
+    let (providers_path, auth_lease, projection) = match &authentication {
+        super::auth::Authentication::ApiKey(_) => (
+            root.join("providers.json"),
+            None,
+            Some(super::auth::byok_projection(&saved, &provider)?),
+        ),
+        super::auth::Authentication::NativeAccount => (
+            paths.providers.canonicalize()?,
+            Some(super::auth::NativeAuthLease::acquire(
+                &paths.providers,
+                root,
+            )?),
+            None,
+        ),
+    };
+    write_native_files(
+        root,
+        &paths,
+        bootstrap,
+        servers,
+        projection.as_ref(),
+        &preferences,
+    )?;
     let preferences_path = root.join("global-settings.json");
     let config = root.join("config");
     let mcp_path = root.join("mcp.json");
@@ -373,6 +387,8 @@ pub(super) async fn configure(
         "CLINE_HUB_BUILD_ID",
         "CLINE_HUB_PORT",
         "CLINE_SESSION_DATA_DIR",
+        "CLINE_DB_DATA_DIR",
+        "CLINE_TEAM_DATA_DIR",
     ] {
         command.env_remove(name);
     }
@@ -397,8 +413,26 @@ pub(super) async fn configure(
         .env("CLINE_MCP_SETTINGS_PATH", mcp_path)
         .env("CLINE_HUB_DISCOVERY_PATH", &discovery)
         .env("CLINE_SESSION_BACKEND_MODE", "local");
-    let mut session = json!({"providerId":provider,"modelId":model,"apiKey":key,
+    let mut session = json!({"providerId":provider,"modelId":model,
         "cwd":cwd,"workspaceRoot":cwd,"compaction":compaction});
+    match authentication {
+        super::auth::Authentication::ApiKey(key) => session["apiKey"] = json!(key),
+        super::auth::Authentication::NativeAccount => {
+            // Only the child changes. No ambient BYOK or endpoint override may
+            // silently change this explicitly selected native account source.
+            for name in [
+                "CLINE_API_KEY",
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "OPENAI_API_BASE",
+                "OPENAI_ORG_ID",
+                "OPENAI_ORGANIZATION",
+                "OPENAI_PROJECT_ID",
+            ] {
+                command.env_remove(name);
+            }
+        }
+    }
     for field in ["baseUrl", "reasoningEffort"] {
         if let Some(value) = settings.get(field) {
             session[field] = value.clone();
@@ -412,6 +446,7 @@ pub(super) async fn configure(
         session,
         discovery,
         models,
+        auth_lease,
     })
 }
 
@@ -420,14 +455,16 @@ fn write_native_files(
     paths: &crate::cline::NativePaths,
     bootstrap: &str,
     servers: &BTreeMap<String, McpServerDefinition>,
-    saved: &Value,
+    saved: Option<&Value>,
     preferences: &Value,
 ) -> Result<()> {
-    // The native runtime may persist provider metadata while starting a
-    // Session. Give it copies so even those writes cannot touch source settings.
+    // BYOK gets only the selected provider. Native account credentials remain
+    // in their persistent source; Cline owns reading and writing that source.
     let providers_path = root.join("providers.json");
     let preferences_path = root.join("global-settings.json");
-    private_file(&providers_path, &serde_json::to_vec(&saved)?)?;
+    if let Some(saved) = saved {
+        private_file(&providers_path, &serde_json::to_vec(saved)?)?;
+    }
     private_file(&preferences_path, &serde_json::to_vec(&preferences)?)?;
     let config = root.join("config");
     private_dir(&config.join("rules"))?;
@@ -496,7 +533,9 @@ mod tests {
                 &paths,
                 "frozen identity",
                 &BTreeMap::new(),
-                &json!({"providers":{"native":{"settings":{"apiKey":"isolated-test-secret"}}}}),
+                Some(
+                    &json!({"providers":{"native":{"settings":{"apiKey":"isolated-test-secret"}}}}),
+                ),
                 &json!({}),
             );
             assert_eq!(

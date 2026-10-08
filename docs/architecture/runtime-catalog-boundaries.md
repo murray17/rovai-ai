@@ -85,10 +85,15 @@ User 已确认不存在需要兼容的旧 Cline 会话，因此删除 ACP 后端
 Hub 通过原生文件 Rule 交付冻结 B，user 只传 P；每个 root beforeModel 校验 B 恰好一次。
 只读 hook 用于接受证据和稀疏 Usage，不提供 compaction contribution。压缩配置读取原生明确
 off/basic/agentic；未设置时核验所选 CLI 的实际 help 默认，无效配置不当作未设置。
-不会修改用户设置、安装 wrapper、二进制或 node_modules，也不下载另一套 SDK/Core。
+Rovai 不修改安装 wrapper、二进制或 node_modules，也不下载另一套 SDK/Core。Rule/MCP/运行偏好仍按 Host 隔离；
+用户明确选择的持久原生账号文件允许 Cline 自身登录和刷新写回。
 
-Hub 用实际认证协议和原生 Session 探测判断能力，不设版本白名单。当前仅接通原生保存或环境中的 API key/BYOK；
-没有 API key 的原生订阅/OAuth 配置在启动前明确拒绝，尚未实现其认证与刷新路径。模型目录读取所选 Provider 的
+Hub 用实际认证协议和原生 Session 探测判断能力，不设版本白名单。BYOK 保留原生保存或环境中的静态 key；
+账号模式按已确认的 openai-codex 原生配置引用持久凭据文件，Cline 负责读取/刷新/保存，Rovai 不复制 OAuth。
+同文件 Rovai 登录与 Hub 采用进程全生命周期互斥，账号 Host 结束即回收，下轮保持同 Binding cold；
+不把成员共用一个可变 Rule/MCP 环境。外部 CLI 不参与此锁，实际刷新与外部并发仍需独立资格。
+登录必须由用户在设置中显式发起，使用所选安装；未知来源/端点冲突不回退。见[原生账号验收](../research/cline-runtime/native-account-auth-2026-10-08.md)。
+模型目录读取所选 Provider 的
 原生本地 models.json，保留当前配置模型；不声称可发现所有远端模型或切换 Provider。
 原生完整历史接口无分页；WebSocket 接收单帧和消息上限为 64 MiB，发送请求上限为 16 MiB，超限明确失败且不裁剪原生历史。
 匹配 requestId 的明确原生失败与传输结果未知分开；公开错误只保留封闭码、分类和固定安全说明，不自动重发。

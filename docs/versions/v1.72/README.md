@@ -16,7 +16,10 @@ last_updated: 2026-10-07
 User 消息 80 要求 Cline 新会话切换到已验证的 Native Hub。当前分支新增 `cline-hub-v1`，使用
 用户所选官方 CLI 的独立认证 Hub，复用共享 Fleet、Binding、投递、审批、Builtin CLI 和监控结算。
 原生 off/basic/agentic 从实际配置/默认传入，不加入自有压缩器。User 消息 83 确认没有旧会话，
-现已删除 Cline ACP 后端、版本门槛与兼容查询；仅支持 API key/BYOK，OAuth/订阅认证尚未接通。
+现已删除 Cline ACP 后端、版本门槛与兼容查询。User 85/87 要求原生认证并授权直接使用已登录账号；
+BYOK 保留，ChatGPT 原生账号由 Cline 读取持久源文件，取消每 Host OAuth 副本，新增显式登录及同源进程互斥。
+已有账号的真实 first/续接/cold 请求已观察到成功；首次产品登录、实际刷新、并发及压缩资格分别记录在
+[原生账号报告](../../research/cline-runtime/native-account-auth-2026-10-08.md)，不由登录元数据或零模型检查推断。
 仍为 macOS arm64 Preview。取舍见 [V1.72-D22](decisions.md#v1-72-d22)，精确上下文及兼容说明见
 [Native Hub 输入说明](model-context-change-cline-native-hub.md)，验证范围见
 [产品接入矩阵](../../research/cline-runtime/hub-adapter-implementation.md)。本次无 schema 迁移，

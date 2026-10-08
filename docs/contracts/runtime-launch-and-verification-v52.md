@@ -89,5 +89,29 @@ root `beforeRun.snapshot.runId` 才能确认新 Input 已接纳；`run.started`�
 Host 目录必须由本次准备阶段独占创建。进程尚未启动时，配置失败或任务取消均清理该目录；
 成功 spawn 后，准备 guard 将清理权移交内核进程账本，不能因缺 marker 就删除可能仍在使用的配置。
 不支持的平台以条件编译提供 `cline_hub_platform_not_qualified`，不编译 macOS 专属捕获方法。
-当前 API key/BYOK 之外的原生 OAuth/订阅认证尚未实现；缺 API key 返回
-`cline_hub_native_auth_requires_api_key`。模型目录只来自当前 Provider 的本地原生目录及当前配置模型。
+认证来源按所选原生 Provider 判定，空 API key 不推断为 OAuth。显式 BYOK 沿原 session apiKey/baseUrl/model
+交付；临时 Provider 文件只投影当前原生记录并保留其未知元数据，排除无关账号及已知 OAuth 凭据。
+已确认的 `openai-codex` / `tokenSource:oauth` 使用持久原生 Provider 文件；不复制 token、合成 apiKey、
+交换或刷新 OAuth，不在启动时覆盖源文件。账号身份由原生 accountId 区分；缺稳定标识、混合静态 key、
+自定义账号端点或未知认证机制均明确失败，不回退 Provider/计费。原生 Cline 可写回同一文件的刷新状态。
+普通 token/expiry/updatedAt 轮换不改变 Binding；账号、来源、Provider、模型和端点变化仍沿共享兼容性规则处理。
+模型目录只来自当前 Provider 文件相邻的本地 models.json 及当前配置模型。
+
+认证文件旁的私有锁与 owner 记录只保存源作用域和进程账本引用，不保存 token。锁按整个文件划分，
+覆盖 Rovai 登录和 Hub 的完整进程生命周期。当前采用同作用域单个 Rovai 原生进程：忙时在发送前拒绝，
+结束后回收账号 Host，不留 IdleWarm，下一轮使用相同 Session/Binding cold。BYOK warm 不变。
+崩溃后必须按已有内核进程账本证明旧树退出才能交接；starting/所有权不明则阻断。Host/Camp/App 清理
+不删除持久凭据或原生锁。此锁不能协调不遵守它的外部 Cline；不声明跨外部 CLI 的并发刷新资格。
+
+用户可在现有 Cline 启动设置显式登录；自动检查或执行不得发起登录。使用同一绝对可执行路径，先核验
+该安装 `auth --help` 的实际入口，再用参数数组调用原生 `auth --provider openai-codex`，无 shell 拼接。
+私有 Core 方法为 `runtime.clineLogin.start({})`、`read({attemptId})`、`input({attemptId,input})`、
+`cancel({attemptId})`，完整前缀均为 `runtime.clineLogin.`；返回 `{attemptId,status,output}`。
+状态为 running/completed/failed/cancelled/expired/cleanup_unconfirmed。原生输出仅驻留有界内存
+（64 KiB，600 秒），用于当前登录交互，结束清空；输入限 4096 字节单行，不进入事件、数据库、
+公开审计、证据或模型。页面卸载和 Core shutdown 取消自有登录进程，未确认退出时不释放认证所有权。
+completed 仅表示原生命令成功及账号元数据存在，不能冒充真实模型请求通过；随后沿现有检查入口核对原生 Session 可用性，不提交模型输入；也保留显式重新检查。
+
+错误区分未登录、重新授权、订阅/权限不足、原生报告的服务不可达、能力不支持及传输结果未知。
+只公开封闭分类与固定脱敏说明；原生将多种原因合并为重新授权时保留该事实，不臆测网络或撤销原因，
+不删除凭据、不重放未知输入。精确安装及真实刷新/并发资格见[原生账号验收](../research/cline-runtime/native-account-auth-2026-10-08.md)。

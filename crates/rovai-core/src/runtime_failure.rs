@@ -570,7 +570,7 @@ fn contains_private_payload_label(line: &str) -> bool {
     .any(|label| normalized.contains(label))
 }
 
-fn redact_secret_values(mut value: String) -> String {
+pub(crate) fn redact_secret_values(mut value: String) -> String {
     let mut bearer_search_from = 0;
     loop {
         let lower = value.to_ascii_lowercase();

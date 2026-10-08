@@ -822,6 +822,10 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.startup.inspect"
             | "runtime.startup.check"
             | "runtime.startup.save"
+            | "runtime.clineLogin.start"
+            | "runtime.clineLogin.read"
+            | "runtime.clineLogin.input"
+            | "runtime.clineLogin.cancel"
             | "runtime.networkRecovery.wake"
             | "runtime.modelCatalog.open"
             | "workspaces.inspect"
@@ -10842,6 +10846,13 @@ impl Core {
             | "runtime.startup.check"
             | "runtime.startup.save") => {
                 self.handle_runtime_startup(method, request.params.clone())
+                    .await
+            }
+            method @ ("runtime.clineLogin.start"
+            | "runtime.clineLogin.read"
+            | "runtime.clineLogin.input"
+            | "runtime.clineLogin.cancel") => {
+                self.handle_cline_login(method, request.params.clone())
                     .await
             }
             "runtime.discovery.rescan" => {

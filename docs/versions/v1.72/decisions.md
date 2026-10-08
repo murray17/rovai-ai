@@ -518,8 +518,15 @@ Cline 仅冻结 `cline-hub-v1`；删除 ACP Host、3.0.65 门槛、Plugin observ
 
 ### 后果与替代方案
 
-当前 Hub 仅 macOS arm64 Preview、原生 BYOK；原生订阅解析、overflow recovery/retry、压缩取消、
-多 Session 压力及其他平台仍须独立验收。普通阈值压缩不能替代 overflow 资格。
+User 85（`6dbd9e73-aef0-45cd-afcc-0688d3c4cf39`）要求 Cline 自己认证，User 87
+（`a8b7cc52-e1b9-4293-9e65-278962e9823f`）进一步授权直接使用已登录账号。选择引用持久原生认证文件，
+允许 Cline 自行写回，不复制日常 refresh token 创建伪独立授权。Rovai 仅管理认证来源和进程所有权。
+实际安装只有实例内刷新合并，故账号 Host 结束即回收，同文件单个 Rovai 登录/Hub 进程；忙时明确拒绝。
+接受每轮 cold 成本，避免 IdleWarm 长期占有认证源；不为了共享刷新器而合并成员可变 System 环境。
+外部原生 CLI 不服从此锁，不能宣称所有 Cline 进程的刷新安全；实际刷新及外部并发资格单独保留。
+
+当前 Hub 仅 macOS arm64 Preview，BYOK 与已登录 ChatGPT 账号路径分别验收；首次产品登录、实际刷新、
+overflow recovery/retry、压缩取消、多 Session 压力及其他平台仍须独立验收。普通阈值压缩不能替代 overflow 资格。
 Host 采用 member scope 且固定 B，不在活跃原生 Session 之间修改共享 Rule。配置差异可能增加
 Host 重建，接受此成本以保证身份隔离。不保留不存在的旧会话兼容；历史实验及证据只作追溯。未选择另装 SDK、客户端压缩贡献、包装 ACP 或接管用户 Hub；它们无法满足本轮
 原生安装、配置权威和恢复证据边界。
