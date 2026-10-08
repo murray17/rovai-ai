@@ -4,7 +4,7 @@ contract: domain-command-result-v1
 authority: command-result-persistence-replay-and-event-projection
 status: accepted
 version: 1
-last_updated: 2026-09-07
+last_updated: 2026-10-08
 ---
 
 # Domain Command Result v1 Contract
@@ -21,6 +21,10 @@ Core 使用 `command_id + command_type + request_digest_version + request_digest
 
 业务变化、领域事件与唯一 `command.result` 在原有同一 SQLite 事务提交。持久回放必须保留第一次提交的
 完整结果、状态、code、结果实体和 `recorded_at`，不得查询当前业务对象重建旧结果。
+
+进程内推进提示在实际 commit 成功后、文本收尾等可能失败的后处理前发出。提示只表示需要重验数据库，
+不能绕过权限、版本、epoch 或幂等检查；不同推进 owner 不竞争同一个通知许可。重复提示可合并，重放不会
+再次写入业务，启动对账负责恢复已有事实。此约束不增加持久事件表、Job 表或第二套执行状态机。
 
 ## 2. 内部存储编码
 

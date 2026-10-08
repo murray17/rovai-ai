@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # v1.72 实施与验收
@@ -1166,3 +1166,35 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
 - 代码、真实负例、账号 warm/双成员并行、BYOK 和 App 结果见
   [本轮报告](../../research/cline-runtime/native-auth-warm-parallel-2026-10-08.md)。
 - 无 schema 或其他 Runtime 改造，保留 Preview；首次完整授权、真实刷新和外部并发刷新未验证不再封禁普通执行。
+
+## 2026-10-08 移除 Core legacy heartbeat
+
+用户授权范围为完整迁移消费者并删除全局 500ms 循环，保持既有事务、执行、恢复和渠道重试语义。
+替代入口、保留计时器、测试 owner 和实际结果统一记录在[验收记录](heartbeat-removal-verification.md)。
+普通 batch Scheduler 的 claim owner 与 30 秒恢复入口继续保留；没有新增通用 Job 表、事件总线或持久状态机。
+
+## 2026-10-08 取消普通执行默认 24 小时上限
+
+- 基线为 heartbeat 移除提交 `3e6c22fc`，任务分支 `rovai/unbounded-default-execution`。
+- 公共 `freeze_camp_turn_execution_budget` 对缺省预算与显式 null 均冻结为 schema 2、无 deadline；
+  有限时长保持请求值，正数、时长范围和截止时间溢出仍拒绝。Run/A2A 数量限制继续使用原上限。
+- 核对生产创建路径：Single Chat 直接发送与 Pending 发布共用 `admit_single_chat_message`；
+  普通 batch 消息及其排队发布不创建 CampTurn 预算。没有其他入口补回普通 24 小时默认值。
+- 历史 migration 的 86,400 秒常量改名为 `LEGACY_EXECUTION_ELAPSED_SECONDS`，数值与迁移逻辑不变。
+  不新增 migration、不改写历史或已冻结预算。Automation、评测显式策略及操作超时不变。
+- `process_execution_budgets` 生产逻辑没有修改：继续等待有效 deadline；没有 deadline 时仅等通知。
+- 测试扩展既有 owner，没有新增独立测试：公共预算 owner 验证缺省/null、两天时长、数量上限与溢出；
+  Single Chat 发送、私有终态和 FIFO owner 验证新 queued/running Run 推进两天仍无时间取消；
+  FIFO fixture 的显式两天预算在一天未到期、两天时结算并隔离 Run 一次；原 driver 空闲 owner 在 active
+  schema-2 Turn 下验证两天内任务 poll 与 SQLite VM 操作均无增量。原手动停止、恢复、取消、Automation 超时和
+  v47 历史迁移 owner 用作回归。
+- 隔离回归通过：`pnpm test:rust:pr` 453 项通过、1 项既有真实 Runtime smoke 按声明忽略；
+  `cargo test -p rovai-core --features slow-tests --lib <owner>` 覆盖公共预算 3、Single Chat 9、driver 2、
+  Automation 9、Runtime 34、legacy execution budget 2、Camp Open 3，共 62 项；额外使用
+  `--features legacy-migration-tests` 运行 v47 冻结 owner 1 项，总计 63 项不同定向用例通过。
+  所有定向命令先核对 `-- --list` 非零，重复回归不重复计数。
+- `node --test scripts/lib/qualification-evaluation.test.mjs` 22 项通过；`pnpm docs:test` 10 项通过；
+  `cargo fmt --all --check`、`git diff --check` 通过。
+- 文档门禁使用同基线、包含完整改动的干净验证 worktree，执行 `pnpm docs:check` 与
+  `DOCS_BASE_REF=3e6c22fc pnpm docs:check:ci`；日常工作区的本机原型保持原样。
+  仅使用隔离测试 fixture，不启动日常 App 或真实模型；48 小时推进使用确定性测试时间，并非实机连续运行两天。

@@ -169,6 +169,7 @@ impl super::Core {
     pub(crate) fn finish_subsystem(&self, id: &str, result: Result<()>) {
         self.subsystems.finish(id, result);
         self.publish_subsystems();
+        self.execution_wake.runs.notify_one();
     }
 
     /// Runs after ready and is also the explicit in-process retry path. Gates

@@ -3017,10 +3017,37 @@ impl ActionSafetyService {
         })
     }
 
+    pub(crate) fn next_runtime_delivery_wake(
+        &self,
+        database: &Database,
+        observed_through: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+        let at: Option<String> = database.connection().query_row(
+            "SELECT MIN(available_at) FROM runtime_delivery_checkpoint
+             WHERE status = 'pending' AND delivery_kind = 'authorization_resolution' AND available_at > ?1",
+            [observed_through.to_rfc3339()], |row| row.get(0),
+        )?;
+        at.map(|at| {
+            chrono::DateTime::parse_from_rfc3339(&at)
+                .map(|at| at.with_timezone(&chrono::Utc))
+                .map_err(Into::into)
+        })
+        .transpose()
+    }
+
     pub fn list_runtime_delivery_candidates(
         &self,
         database: &Database,
         limit: i64,
+    ) -> Result<Vec<RuntimeDeliveryCandidate>> {
+        self.list_runtime_delivery_candidates_page(database, limit, 0)
+    }
+
+    pub(crate) fn list_runtime_delivery_candidates_page(
+        &self,
+        database: &Database,
+        limit: i64,
+        offset: i64,
     ) -> Result<Vec<RuntimeDeliveryCandidate>> {
         let mut statement = database.connection().prepare(
             r#"
@@ -3053,12 +3080,12 @@ impl ActionSafetyService {
               AND runtime_delivery_checkpoint.native_request_id IS NOT NULL
               AND action_execution.native_response_context_json IS NOT NULL
             ORDER BY runtime_delivery_checkpoint.created_at, runtime_delivery_checkpoint.id
-            LIMIT ?2
+            LIMIT ?2 OFFSET ?3
             "#,
         )?;
         let now = chrono::Utc::now().to_rfc3339();
         statement
-            .query_map(params![now, limit.clamp(1, 100)], |row| {
+            .query_map(params![now, limit.clamp(1, 100), offset], |row| {
                 let native_request_id_json = row.get::<_, String>(12)?;
                 let response_context_json = row.get::<_, String>(13)?;
                 Ok(RuntimeDeliveryCandidate {
@@ -4656,6 +4683,36 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
+        let available_at: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT available_at FROM runtime_delivery_checkpoint WHERE id = ?1",
+                [&delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let available_at = chrono::DateTime::parse_from_rfc3339(&available_at)
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        // A response that became due during the previous scan must still arm an
+        // immediate reminder, even though it is no longer in the wall-clock future.
+        assert_eq!(
+            service
+                .next_runtime_delivery_wake(
+                    &fixture.database,
+                    available_at - chrono::Duration::milliseconds(1),
+                )
+                .unwrap(),
+            Some(available_at)
+        );
+        assert_eq!(
+            service
+                .next_runtime_delivery_wake(&fixture.database, available_at)
+                .unwrap(),
+            None,
+            "an already-observed blocked response must not cause a busy loop"
+        );
         let unleased = service
             .claim_action(
                 &mut fixture.database,

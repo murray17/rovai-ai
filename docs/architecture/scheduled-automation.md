@@ -2,7 +2,7 @@
 document_type: architecture
 authority: scheduled-automation-architecture
 status: accepted
-last_updated: 2026-09-18
+last_updated: 2026-10-08
 ---
 
 # Scheduled Automation Architecture
@@ -51,6 +51,22 @@ occurrence、消息、Run 或重跑模型。定义删除保留已有 Camp、occu
 
 Rust Host 驱动计划，不依赖 Renderer 或 HTTP 连接。App 退出/设备休眠期间不逐条补跑；恢复只记录最近 missed 并计算未来
 时间。计划时间、时钟回拨和平台唤醒资格继续由既有 Host 时间边界拥有。
+
+## 唤醒与等待
+
+Core 启动、定义创建／修改／关闭／删除、执行事实提交及宿主恢复通知会唤醒同一个 Automation 推进者。
+它先结算已结束的 occurrence，再领取到期定义并判断 overlap；仍在运行的 occurrence 继续造成 skipped。
+每次领取上限 16，处理后重新读取最近有效 deadline；missed/overlap 虽然没有 dispatch 也继续消化积压，
+批次之间让出执行权。事务和幂等检查仍拥有实际领取资格，timer 不保存可执行快照。
+
+一次性提醒取 enabled `next_run_at`、active occurrence `timeout_at`、尚未提示到期的通知 `available_at`
+三者最早值。到期通知发给既有 Channel Host；Host 继续拥有投递、失败退避和租约恢复，通知失败不重跑模型。
+已经提示而仍待发送的通知不反复触发零延迟提醒。没有工作时只等待变更和关闭通知。
+
+保留 AutomationClock 的原生睡眠观察、显式 suspend/resume control 与 recovery boundary。只有存在未来
+时间目标时，最多 30 秒重新观察一次时间，以覆盖无通知的墙钟变化；该观察不扫描其他业务，目标未到期
+也不查询 Automation。不确定的原生采样及暂时故障安排 3 秒一次性重试。普通执行器迟到、时钟回拨均不
+被改判为设备睡眠；恢复首个不确定样本不会领取。
 
 ## References
 

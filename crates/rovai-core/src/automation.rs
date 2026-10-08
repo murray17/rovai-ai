@@ -543,6 +543,30 @@ pub struct AutomationService {
 }
 
 impl AutomationService {
+    /// The next reminder is a hint only; claim/settlement re-read authoritative rows.
+    pub(crate) fn next_wake_at(
+        &self,
+        database: &Database,
+        notifications_observed_through: DateTime<Utc>,
+    ) -> Result<Option<DateTime<Utc>>> {
+        let mut statement = database.connection().prepare(
+            "SELECT next_run_at FROM automation WHERE enabled = 1 AND next_run_at IS NOT NULL
+             UNION ALL SELECT timeout_at FROM automation_run
+               WHERE status IN ('running', 'cancelling') AND timeout_at IS NOT NULL
+             UNION ALL SELECT available_at FROM automation_notification_delivery
+               WHERE status = 'pending' AND available_at > ?1",
+        )?;
+        let rows = statement.query_map([timestamp(notifications_observed_through)], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut next = None;
+        for row in rows {
+            let at = parse_timestamp(&row?)?;
+            next = Some(next.map_or(at, |previous: DateTime<Utc>| previous.min(at)));
+        }
+        Ok(next)
+    }
+
     pub fn create(
         &self,
         database: &mut Database,
@@ -1063,6 +1087,7 @@ impl AutomationService {
                 }
             }
             transaction.commit()?;
+            database.execution_wake.delivery.notify_one();
         }
         Ok(dispatches)
     }
@@ -1169,6 +1194,7 @@ impl AutomationService {
             now,
         )?;
         transaction.commit()?;
+        database.execution_wake.execution_changed();
         pump_targets_after_runs_terminal(database, &cancelled_agent_runs)?;
         Ok(())
     }
@@ -1526,6 +1552,9 @@ fn settle_one_run(database: &mut Database, run_id: &str, now: DateTime<Utc>) -> 
     let Some(turn_id) = state.camp_turn_id.as_deref() else {
         let settlement = settle_delivery_occurrence_in_tx(&transaction, &state, now)?;
         transaction.commit()?;
+        if settlement.changed {
+            database.execution_wake.execution_changed();
+        }
         if let Some(agent_run_id) = settlement.cancelled_agent_run_id {
             pump_targets_after_runs_terminal(database, &[agent_run_id])?;
         }
@@ -1548,11 +1577,17 @@ fn settle_one_run(database: &mut Database, run_id: &str, now: DateTime<Utc>) -> 
             now,
         )?;
         transaction.commit()?;
+        if changed {
+            database.execution_wake.execution_changed();
+        }
         return Ok(changed);
     };
     if matches!(turn_status.as_str(), "completed" | "failed" | "cancelled") {
         let changed = settle_terminal_turn_in_tx(&transaction, &state, now)?;
         transaction.commit()?;
+        if changed {
+            database.execution_wake.execution_changed();
+        }
         return Ok(changed);
     }
     let interaction_required = if state.root_agent_run_id.is_some() {
@@ -1609,6 +1644,9 @@ fn settle_one_run(database: &mut Database, run_id: &str, now: DateTime<Utc>) -> 
         .map(|run| run.agent_run_id)
         .collect::<Vec<_>>();
     transaction.commit()?;
+    if changed {
+        database.execution_wake.execution_changed();
+    }
     pump_targets_after_runs_terminal(database, &run_ids)?;
     Ok(changed)
 }
@@ -3335,6 +3373,10 @@ mod tests {
             )
             .expect("full-form update should succeed");
         assert_eq!(updated.result.payload["nextRunAt"], timestamp(due));
+        assert_eq!(
+            service.next_wake_at(&database, due).unwrap(),
+            Some(parse_timestamp(&timestamp(due)).unwrap())
+        );
 
         let dispatches = service
             .claim_due(
@@ -3376,6 +3418,100 @@ mod tests {
             .interrupt_before_runtime(&mut database, &dispatches[0].automation_run_id)
             .expect("test run should settle");
 
+        let before_edit = service
+            .next_wake_at(&database, Utc::now())
+            .unwrap()
+            .unwrap();
+        let mut previous = before_edit;
+        for days in [2, 1] {
+            let target = (before_edit + Duration::days(days)).with_timezone(&chrono::Local);
+            let version = service
+                .get(&database, &automation_id)
+                .unwrap()
+                .unwrap()
+                .version;
+            let updated = service
+                .update(
+                    &mut database,
+                    &user_command(
+                        &format!("replace-deadline-{days}"),
+                        UpdateAutomationCommand {
+                            automation_id: automation_id.clone(),
+                            expected_version: version,
+                            name: None,
+                            prompt: None,
+                            member_id: None,
+                            project_ref: None,
+                            schedule: Some(AutomationSchedule::Once {
+                                date: target.format("%Y-%m-%d").to_string(),
+                                at: target.format("%H:%M").to_string(),
+                            }),
+                            notify_channels: None,
+                            enabled: Some(true),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_ne!(
+                updated.result.status,
+                crate::command::CommandResultStatus::Rejected
+            );
+            let edited = service
+                .next_wake_at(&database, Utc::now())
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                Some(timestamp(edited)),
+                service
+                    .get(&database, &automation_id)
+                    .unwrap()
+                    .unwrap()
+                    .next_run_at
+            );
+            if days == 1 {
+                assert!(
+                    edited < previous,
+                    "an earlier edit must replace the later reminder"
+                );
+            }
+            previous = edited;
+        }
+        let version = service
+            .get(&database, &automation_id)
+            .unwrap()
+            .unwrap()
+            .version;
+        service
+            .close(
+                &mut database,
+                &user_command(
+                    "close-deadline",
+                    CloseAutomationCommand {
+                        automation_id: automation_id.clone(),
+                        expected_version: version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(service.next_wake_at(&database, Utc::now()).unwrap(), None);
+        let version = service
+            .get(&database, &automation_id)
+            .unwrap()
+            .unwrap()
+            .version;
+        service
+            .delete(
+                &mut database,
+                &user_command(
+                    "delete-deadline",
+                    DeleteAutomationCommand {
+                        automation_id,
+                        expected_version: version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(service.next_wake_at(&database, Utc::now()).unwrap(), None);
         remove_test_database(database, directory);
     }
 
@@ -3530,6 +3666,26 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, 2);
+        let observed = Utc::now();
+        assert_eq!(
+            service.next_wake_at(&database, observed).unwrap(),
+            None,
+            "already-announced due notifications must not spin the Automation driver"
+        );
+        let retry_at = observed + Duration::seconds(5);
+        database.connection().execute(
+            "UPDATE automation_notification_delivery SET available_at=?1 WHERE status='pending'",
+            [timestamp(retry_at)],
+        ).unwrap();
+        assert_eq!(
+            service.next_wake_at(&database, observed).unwrap(),
+            Some(parse_timestamp(&timestamp(retry_at)).unwrap())
+        );
+        assert_eq!(service.next_wake_at(&database, retry_at).unwrap(), None);
+        database.connection().execute(
+            "UPDATE automation_notification_delivery SET available_at=?1 WHERE status='pending'",
+            [timestamp(observed)],
+        ).unwrap();
 
         database
             .connection()
@@ -3615,6 +3771,32 @@ mod tests {
             .to_string();
         let due = parse_timestamp(create.result.payload["nextRunAt"].as_str().unwrap()).unwrap();
 
+        // 33 definitions exercise two full 16-row skipped batches plus the tail.
+        for index in 1..33 {
+            service
+                .create(
+                    &mut database,
+                    &user_command(
+                        &format!("missed-batch-{index}"),
+                        CreateAutomationCommand {
+                            name: None,
+                            prompt: "missed backlog".into(),
+                            member_id: "agent_1".into(),
+                            project_ref: AutomationProjectRef::QuickChat,
+                            schedule: AutomationSchedule::Once {
+                                date: local_due.format("%Y-%m-%d").to_string(),
+                                at: local_due.format("%H:%M").to_string(),
+                            },
+                            notify_channels: Vec::new(),
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            service.next_wake_at(&database, due).unwrap(),
+            Some(parse_timestamp(&timestamp(due)).unwrap())
+        );
         let stale_tick = service
             .claim_due(
                 &mut database,
@@ -3643,6 +3825,34 @@ mod tests {
             )
             .expect("missed occurrence should settle");
         assert!(dispatches.is_empty());
+        assert_eq!(
+            service.next_wake_at(&database, due).unwrap(),
+            Some(parse_timestamp(&timestamp(due)).unwrap()),
+            "empty dispatches do not mean skipped backlog has drained"
+        );
+        for _ in 0..2 {
+            assert!(
+                service
+                    .claim_due(
+                        &mut database,
+                        due + Duration::minutes(10),
+                        due + Duration::minutes(10),
+                        &quick_chat_path
+                    )
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert_eq!(service.next_wake_at(&database, due).unwrap(), None);
+        let skipped: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM automation_run WHERE status='skipped' AND reason='missed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(skipped, 33);
         let definition = service.get(&database, &automation_id).unwrap().unwrap();
         assert!(!definition.enabled);
         assert!(definition.next_run_at.is_none());

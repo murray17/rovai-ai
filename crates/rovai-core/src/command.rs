@@ -296,6 +296,10 @@ impl DomainCommandGateway {
         };
         append_command_result(&transaction, envelope, &stored_result)?;
         transaction.commit()?;
+        // Publish the hint at the actual commit, even if post-commit text flushing fails.
+        if stored_result.status != CommandResultStatus::Rejected {
+            database.execution_wake.command_committed(C::TYPE);
+        }
         crate::execution_text::flush_settled(database)?;
 
         crate::thread_compat::project_command_result(C::TYPE, &mut stored_result.payload)?;

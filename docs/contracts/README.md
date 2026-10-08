@@ -453,7 +453,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Composer Draft v3（历史）](camp-composer-draft-v3.md) | v2 reply/continuation 边界不变；ready 附件可以独立构成用户发送 payload，空正文忠实持久化并保留原子消费 |
 | [Camp Composer Draft v2（历史）](camp-composer-draft-v2.md) | v1 reply 边界加 durable recipient continuation、source suppression、发送物化、显式修复与无 Default Lead fallback；仍继承正文非空发送要求 |
 | [Camp Composer Draft v1 (historical)](camp-composer-draft-v1.md) | Structured Content、附件引用、持久 reply intent、exact revision mutation、显式接收者修复与 Draft-only user send；不含 continuation |
-| [Planned Shutdown v8（当前）](planned-shutdown-v8.md) | protocol 3 不变；本地 Composer 可恢复，Scheduler/maintenance 由 shutdown supervisor 共同回收 |
+| [Planned Shutdown v8（当前）](planned-shutdown-v8.md) | protocol 3 不变；本地 Composer 可恢复，Scheduler 与事件／deadline 等待任务由 shutdown supervisor 共同回收 |
 | [Planned Shutdown v7（历史）](planned-shutdown-v7.md) | v6 Core wire/report 不变；退出前只收口已开始的 Renderer-local 输入操作，不持久或恢复 public Composer |
 | [Planned Shutdown v6（历史）](planned-shutdown-v6.md) | v5 Core wire/report 不变；Main 在服务 drain 与 Core shutdown 前等待 Renderer 完成最新 Composer Draft fence |
 | [Planned Shutdown v5（历史）](planned-shutdown-v5.md) | v4 wire/report 不变；退出取消 Run 统一为 cancelled，内部未知效果计数保留；Desktop Composer 前置 fence 由 v6 替代 |
@@ -486,7 +486,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Gather v3（历史）](gather-v3.md) | v2 lifecycle/limits 不变；Completion Input 使用 `agent_v1` request/captured 投影、projected digest 与 schema v3 |
 | [Gather v2（历史）](gather-v2.md) | v1 lifecycle 加当前代最后 captured result、独立回传限额、完整 request 与 completion input v2 |
 | [Gather v1（历史）](gather-v1.md) | GatherRecord/Item、Default Lead 接受、持久 capture/Barrier、completion snapshot/FIFO 与旧 capture budget/input v1 |
-| [Message Delivery v11（当前）](message-delivery-v11.md) | 续做复用 waiting Delivery，独立成批，来源状态不传播 |
+| [Message Delivery v11（当前）](message-delivery-v11.md) | 续做复用 waiting Delivery，独立成批，来源状态不传播；non-batch 改为事件唤醒，移除旧全局维护循环 |
 | [Message Delivery v10（历史）](message-delivery-v10.md) | 继承 v9；claim 原子修复历史 waiting lane 缺失的 Camp-member Conversation，启动扫描与兜底自动恢复 |
 | [Message Delivery v9（历史）](message-delivery-v9.md) | waiting Delivery 是唯一队列；claim 原子创建不可变的多输入 AgentRun，无预算、Gather 或业务重试 |
 | [Message Delivery v8（历史）](message-delivery-v8.md) | Managed v2 Message 的旧 dispatch/attempt 模型 |

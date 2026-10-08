@@ -421,7 +421,7 @@ mod slow_tests {
             rusqlite::params![
                 "open-legacy-turn",
                 crate::execution_budget::CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION,
-                crate::execution_budget::PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
+                crate::execution_budget::LEGACY_EXECUTION_ELAPSED_SECONDS,
                 crate::execution_budget::PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES,
                 crate::execution_budget::PRODUCT_MAX_ACCEPTED_A2A,
                 camps[0].1.len() as i64,

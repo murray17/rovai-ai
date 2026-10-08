@@ -2814,7 +2814,8 @@ mod tests {
                 |row| row.get::<_, i64>(0),
             )
             .unwrap();
-        service
+        while take_run_wake(database) {}
+        let result = service
             .send(
                 database,
                 &user_envelope(
@@ -2829,7 +2830,62 @@ mod tests {
                     },
                 ),
             )
+            .unwrap();
+        if result.result.status != CommandResultStatus::Rejected {
+            assert!(
+                take_run_wake(database),
+                "committed Single Chat sends must wake the run driver"
+            );
+        }
+        result
+    }
+
+    fn take_run_wake(database: &Database) -> bool {
+        std::future::Future::poll(
+            std::pin::pin!(database.execution_wake.runs.notified()).as_mut(),
+            &mut std::task::Context::from_waker(std::task::Waker::noop()),
+        )
+        .is_ready()
+    }
+
+    fn assert_default_run_has_no_time_limit(database: &mut Database, run_id: &str) {
+        let (schema, elapsed, deadline, accepted_at, status):
+            (i64, Option<i64>, Option<String>, String, String) = database.connection().query_row(
+                "SELECT turn.execution_budget_schema_version, turn.execution_budget_elapsed_seconds,
+                        turn.execution_budget_deadline_at, turn.execution_budget_accepted_at, run.status
+                 FROM camp_turn AS turn JOIN agent_run AS run ON run.camp_turn_id = turn.id
+                 WHERE run.id = ?1",
+                [run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            ).unwrap();
+        assert_eq!((schema, elapsed, deadline), (2, None, None));
+        let after_two_days = chrono::DateTime::parse_from_rfc3339(&accepted_at)
             .unwrap()
+            .with_timezone(&chrono::Utc)
+            + chrono::Duration::days(2);
+        assert!(
+            ExecutionRuntimeService::default()
+                .expire_elapsed_camp_turn_execution_budgets(
+                    database,
+                    after_two_days,
+                    after_two_days,
+                    100
+                )
+                .unwrap()
+                .is_empty()
+        );
+        let after: (String, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT status, cancel_requested_at FROM agent_run WHERE id = ?1",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            after,
+            (status, None),
+            "passing 24 hours must not end the Run"
+        );
     }
 
     #[test]
@@ -2850,6 +2906,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        assert_default_run_has_no_time_limit(&mut database, &first_run_id);
         let route_rewrite = database.connection().execute(
             r#"
             UPDATE agent_run
@@ -3141,6 +3198,7 @@ mod tests {
                 [&run_id],
             )
             .unwrap();
+        assert_default_run_has_no_time_limit(&mut database, &run_id);
         // This existing private/public boundary owner also covers approvals and their counts.
         database
             .connection()
@@ -4169,6 +4227,7 @@ mod tests {
                 [&first_run_id],
             )
             .unwrap();
+        while take_run_wake(&database) {}
         runtime
             .succeed_agent_run(
                 &mut database,
@@ -4193,6 +4252,10 @@ mod tests {
             )
             .unwrap();
 
+        assert!(
+            take_run_wake(&database),
+            "terminal commit must wake FIFO publication"
+        );
         let ready = ready_pending_inputs(&database).unwrap();
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].pending_input_id, pending_input_id);
@@ -4207,7 +4270,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(published.result.status, CommandResultStatus::Accepted);
+        assert!(
+            take_run_wake(&database),
+            "publishing the head must wake dispatch"
+        );
         let queued_run_id = published.result.payload["agentRunId"].as_str().unwrap();
+        assert_default_run_has_no_time_limit(&mut database, queued_run_id);
         let queued_refs = load_agent_run_source_attachments(&database, queued_run_id, 0).unwrap();
         assert_eq!(queued_refs.len(), 1);
         assert_eq!(queued_refs[0].id, attachment_id);
@@ -4229,6 +4297,45 @@ mod tests {
             )
             .unwrap();
         assert_eq!(public_messages, 0);
+
+        // A previously frozen finite budget still expires through the same service.
+        // This fixture owns a real Run, so also verify that expiry fences it once.
+        let accepted_at = chrono::Utc::now();
+        let finite = freeze_camp_turn_execution_budget(
+            Some(&crate::execution_budget::ThreadTurnExecutionBudgetRequest {
+                elapsed_seconds: Some(172_800),
+                max_agent_run_responsibilities: 32,
+                max_accepted_a2a: 16,
+            }),
+            accepted_at,
+            1,
+        )
+        .unwrap();
+        database.connection().execute(
+            "UPDATE camp_turn SET execution_budget_schema_version=?1,
+             execution_budget_deadline_at=?2,execution_budget_elapsed_seconds=?3,execution_budget_accepted_at=?4
+             WHERE id=(SELECT camp_turn_id FROM agent_run WHERE id=?5)",
+            params![finite.schema_version, finite.deadline_at, finite.elapsed_seconds, finite.accepted_at, queued_run_id],
+        ).unwrap();
+        let one_day = accepted_at + chrono::Duration::days(1);
+        assert!(
+            runtime
+                .expire_elapsed_camp_turn_execution_budgets(&mut database, one_day, one_day, 100)
+                .unwrap()
+                .is_empty()
+        );
+        let two_days = accepted_at + chrono::Duration::days(2);
+        let expired = runtime
+            .expire_elapsed_camp_turn_execution_budgets(&mut database, two_days, two_days, 100)
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].agent_runs_fenced, 1);
+        assert!(
+            runtime
+                .expire_elapsed_camp_turn_execution_budgets(&mut database, two_days, two_days, 100)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

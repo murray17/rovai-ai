@@ -60,8 +60,8 @@ use crate::database_admission::{
     TicketValidationError,
 };
 use crate::execution_budget::{
-    CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION, PRODUCT_MAX_ACCEPTED_A2A,
-    PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES, PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
+    CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION, LEGACY_EXECUTION_ELAPSED_SECONDS,
+    PRODUCT_MAX_ACCEPTED_A2A, PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES,
 };
 use crate::member_avatar::{
     BUILTIN_PROFILE_AVATARS, LUOKE_AVATAR_REF, MIANZHI_AVATAR_REF, MUWA_AVATAR_REF, QILU_AVATAR_REF,
@@ -156,6 +156,7 @@ pub struct V2RecoverySummary {
 }
 
 pub struct Database {
+    pub(crate) execution_wake: crate::execution_wake::ExecutionWake,
     pub(crate) execution_text: crate::execution_text::ExecutionTextBuffer,
     connection: Connection,
     path: PathBuf,
@@ -6725,6 +6726,7 @@ impl Database {
         connection.execute_batch("PRAGMA query_only = ON")?;
         Ok(Self {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection,
             path: path.into(),
             runtime_camp_files_root,
@@ -6816,6 +6818,7 @@ impl Database {
         configure_runtime_connection(&connection, &path)?;
         let mut database = Self {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection,
             path,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -6940,6 +6943,7 @@ impl Database {
             })?;
             let mut staged = Self {
                 execution_text: Default::default(),
+                execution_wake: Default::default(),
                 connection,
                 path: temporary.clone(),
                 runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -7013,6 +7017,7 @@ impl Database {
         })?;
         Ok(Self {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection,
             path: target,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -7083,6 +7088,7 @@ impl Database {
         progress("authority_open", started.elapsed());
         let mut database = Self {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection: connection?,
             path: path.clone(),
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -7148,6 +7154,7 @@ impl Database {
             })?;
         let mut staged = Self {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection,
             path: path.to_path_buf(),
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -7288,6 +7295,7 @@ impl Database {
         )?;
         let mut database = Self {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection,
             path,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -7362,6 +7370,7 @@ impl Database {
         }
         Ok(Self {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection,
             path,
             runtime_camp_files_root,
@@ -12081,9 +12090,7 @@ impl Database {
     fn migrate_camp_turn_execution_budget_v47(&mut self) -> Result<()> {
         let accepted_at = chrono::Utc::now();
         let deadline_at = accepted_at
-            .checked_add_signed(chrono::Duration::seconds(
-                PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
-            ))
+            .checked_add_signed(chrono::Duration::seconds(LEGACY_EXECUTION_ELAPSED_SECONDS))
             .context("failed to derive the v47 legacy CampTurn deadline")?;
         let transaction = self
             .connection
@@ -12121,7 +12128,7 @@ impl Database {
                 CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION,
                 accepted_at.to_rfc3339(),
                 deadline_at.to_rfc3339(),
-                PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
+                LEGACY_EXECUTION_ELAPSED_SECONDS,
                 PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES,
                 PRODUCT_MAX_ACCEPTED_A2A,
             ],
@@ -40613,6 +40620,7 @@ mod tests {
             connection.execute_batch(&format!("CREATE TRIGGER reject_receipt BEFORE INSERT ON schema_migration WHEN NEW.version = {version} BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;")).unwrap();
             let mut database = Database {
                 execution_text: Default::default(),
+                execution_wake: Default::default(),
                 connection,
                 path: PathBuf::from("unused-memory-fixture"),
                 runtime_camp_files_root: PathBuf::new(),
@@ -42111,6 +42119,7 @@ mod tests {
             }
             let mut database = Database {
                 execution_text: Default::default(),
+                execution_wake: Default::default(),
                 connection,
                 path: PathBuf::new(),
                 runtime_camp_files_root: PathBuf::new(),
@@ -54227,7 +54236,7 @@ mod tests {
         assert_eq!(budget.0, CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION);
         assert!(chrono::DateTime::parse_from_rfc3339(&budget.1).is_ok());
         assert!(chrono::DateTime::parse_from_rfc3339(&budget.2).is_ok());
-        assert_eq!(budget.3, PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS);
+        assert_eq!(budget.3, LEGACY_EXECUTION_ELAPSED_SECONDS);
         assert_eq!(budget.4, PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES);
         assert_eq!(budget.5, PRODUCT_MAX_ACCEPTED_A2A);
         assert_eq!(budget.6, 0);
@@ -54602,6 +54611,7 @@ mod tests {
             .unwrap();
         let mut database = Database {
             execution_text: Default::default(),
+            execution_wake: Default::default(),
             connection,
             path,
             runtime_camp_files_root,

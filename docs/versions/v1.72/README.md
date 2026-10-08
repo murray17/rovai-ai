@@ -91,6 +91,18 @@ exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证
 活动目录加入 Cline 的保守 run_level 条目，复用既有 ACP typed kind，不改变 activity-v4 或旧 Runtime 解释。
 既有 Usage/Execution Metrics 合同足以表达数值，无新字段合同、Renderer 布局或根 README 支持声明。
 
+## 普通执行默认无时间上限
+
+新执行省略预算时沿用 schema 2 的无时限表示；显式有限时长不再统一截断到 24 小时，数量限制、溢出校验、
+Automation 超时与恢复隔离保持。既有冻结预算不改写，预算等待继续按有效 deadline 工作。
+范围与验收见[实施记录](implementation-plan.md#2026-10-08-取消普通执行默认-24-小时上限)。
+
+## 移除 Core 全局 heartbeat
+
+按 User 批复移除 legacy 500ms maintenance：Single Chat/non-batch、取消和 Runtime 授权响应由提交后通知推进；
+Automation、预算和文本收尾按业务 deadline／实际失败退避等待。保留普通 Delivery 的单一 Scheduler 与原有
+低频恢复，不新增持久队列或调度框架。原消费者、计时器和验证边界见[验收记录](heartbeat-removal-verification.md)。
+
 ## 并行实施：用户主动继续执行
 
 User 已确认 [r2 输入对照](model-context-change-run-continuation.md) 并授权独立 worktree 实现、推送。

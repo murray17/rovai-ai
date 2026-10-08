@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: single-chat
 authority: single-chat-component-boundaries-and-data-flow
-last_updated: 2026-09-22
+last_updated: 2026-10-08
 ---
 
 # Single Chat Architecture
@@ -45,7 +45,8 @@ Renderer singleChat.send(body, draftRevision)
             → single_chat_pending_input + Source Refs
             → 清空 Draft，并仅推进 Draft revision
 
-Scheduler 发现该 Conversation 空闲
+提交后通知 / Runtime 条件解除 / 启动对账
+  → 重读数据库，发现该 Conversation 空闲
   → 选择 FIFO 队首
   → 重检 Source Refs、成员和 Runtime readiness
       ├── 成功：原子创建私有 Message/Turn/Run，Pending → published
@@ -60,6 +61,19 @@ Conversation 状态并决定直接准入或 Pending 入队；后台 ACK、final 
 队列以 `conversation_id + enqueue_sequence` 定序。Camp 公屏队列、其他 Single Chat、同一队员的 successor Conversation
 和普通 Scheduler capacity 都不共享这个顺序域。Pending 尚未发布时不占用 ConversationMessage sequence，不创建
 CampTurn/AgentRun，也不推进 Conversation version。
+
+正常发送、Pending 编辑／移除／发布、前一 Run 终态提交、Runtime readiness 与 cleanup 变化主动通知
+non-batch 推进者。通知各自保留一个合并许可，读取状态与进入等待之间的提交不会丢失；通知不代替准入。
+准备期间收到的变化通知同时标记当时的 in-flight Run；本轮扫描跳过它们后，准备完成仍补一次重验。
+重复通知合并；没有新通知且准备未推进时继续等待，准备结果读取失败仍走原退避。
+事务提交后即通知，文本收尾等后续失败不能吞掉提示。`needs_repair` 等待用户，readiness 等待状态变化；
+只有暂时读取／准备失败或既有 cleanup 等待期限安排一次性重试，不以周期扫描维持 FIFO。
+启动对账仍区分旧 Run 恢复与未发布 Pending，不重发旧回复或已接受输入。
+
+新 Single Chat 的直接发送和 Pending 发布通过公共预算入口冻结 `schemaVersion: 2`、`elapsedSeconds: null`、
+`deadlineAt: null`，默认没有总时长上限，也不为这些执行安排预算闹钟。数量限制、手动停止、权限与恢复隔离
+仍生效；旧执行继续按已冻结预算收尾，不批量迁移。有限预算及字段规则见
+[Execution Evaluation v15](../contracts/execution-evaluation-v15.md#case-与-core-冻结证据)。
 
 ## Runtime 与附件数据流
 

@@ -5,7 +5,7 @@ authority: local-input-and-supervised-core-task-settlement
 status: accepted
 version: 8
 source_version: v1.60
-last_updated: 2026-09-19
+last_updated: 2026-10-08
 ---
 
 # Planned Shutdown v8
@@ -19,8 +19,10 @@ quote, attachment or send operation before teardown, but it neither writes a Cor
 local snapshot. Refresh, window recreation and ordinary restart may restore that local snapshot; no other client can
 read or merge it.
 
-The AgentRun Scheduler and the legacy 500ms maintenance loop are sibling tasks owned by `run_core`'s shutdown
-supervisor. Normal shutdown signals and waits for both. If launch handoff exceeds its grace, the supervisor aborts and
-waits for both before considering writer fences quiesced. Cancelling the Scheduler cannot detach a maintenance task or
-leave a slow non-batch preflight running behind an already emitted shutdown report.
+The AgentRun Scheduler and the event/deadline workers are owned by `run_core`'s shutdown supervisor. The legacy
+500ms maintenance loop and its registration are removed. Normal shutdown signals and waits for the Scheduler and
+the complete worker set. If launch handoff exceeds its grace, the supervisor aborts and awaits these owners before
+considering writer fences quiesced. Non-batch preparation, Runtime cleanup and its follow-up projection, and
+Mission/Camp cleanup use Core's existing tracked task set. Cancelling a coordinator cannot detach these writers or
+leave slow preparation running behind an already emitted shutdown report. Unexpected worker exit triggers Core cleanup.
 

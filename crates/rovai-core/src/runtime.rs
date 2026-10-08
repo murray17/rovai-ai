@@ -750,6 +750,7 @@ impl ExecutionRuntimeService {
         &self,
         database: &mut Database,
     ) -> Result<Vec<String>> {
+        let changes_before = database.connection().total_changes();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -801,6 +802,9 @@ impl ExecutionRuntimeService {
             cancelled.push(agent_run_id);
         }
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         Ok(cancelled)
     }
 
@@ -1000,6 +1004,7 @@ impl ExecutionRuntimeService {
         if disposition != NativeSessionResumeDisposition::Controlled {
             return Ok(disposition);
         }
+        let changes_before = database.connection().total_changes();
         let transaction = database.connection_mut().transaction()?;
         let existing = transaction
             .query_row(
@@ -1062,6 +1067,9 @@ impl ExecutionRuntimeService {
             Some(_) => anyhow::bail!("Native Session resume attempt has an invalid status"),
         };
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         Ok(disposition)
     }
 
@@ -1103,6 +1111,7 @@ impl ExecutionRuntimeService {
         continuation: &str,
         failure: NativeSessionResumeFailure,
     ) -> Result<()> {
+        let changes_before = database.connection().total_changes();
         let transaction = database.connection_mut().transaction()?;
         append_domain_event(
             &transaction,
@@ -1129,6 +1138,9 @@ impl ExecutionRuntimeService {
             }),
         )?;
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         Ok(())
     }
 
@@ -1144,6 +1156,7 @@ impl ExecutionRuntimeService {
         }
         let budget_now = observed_budget_now.to_rfc3339();
         let audit_now = audit_now.to_rfc3339();
+        let changes_before = database.connection().total_changes();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1194,6 +1207,9 @@ impl ExecutionRuntimeService {
             }
         }
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         Ok(expired)
     }
 
@@ -1204,6 +1220,7 @@ impl ExecutionRuntimeService {
         expected_version: i64,
         command_id: &str,
     ) -> Result<std::result::Result<Vec<Value>, CommandHandlerResult>> {
+        let changes_before = database.connection().total_changes();
         let transaction = database.connection_mut().transaction()?;
         let version: Option<i64> = transaction
             .query_row("SELECT version FROM camp WHERE id = ?1", [camp_id], |row| {
@@ -1222,6 +1239,9 @@ impl ExecutionRuntimeService {
         let blockers =
             self.settle_camp_deletion_in_transaction(&transaction, camp_id, command_id)?;
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         Ok(Ok(blockers))
     }
 
@@ -1360,6 +1380,15 @@ impl ExecutionRuntimeService {
         database: &Database,
         limit: i64,
     ) -> Result<Vec<AgentRunCancellationCandidate>> {
+        self.list_cancellation_candidates_page(database, limit, 0)
+    }
+
+    pub(crate) fn list_cancellation_candidates_page(
+        &self,
+        database: &Database,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<AgentRunCancellationCandidate>> {
         if !(1..=100).contains(&limit) {
             anyhow::bail!("AgentRun cancellation limit must be between 1 and 100");
         }
@@ -1381,11 +1410,11 @@ impl ExecutionRuntimeService {
               AND agent_run.cancel_acknowledged_at IS NULL
               AND agent_run.status IN ('succeeded', 'failed', 'cancelled')
             ORDER BY agent_run.updated_at, agent_run.id
-            LIMIT ?1
+            LIMIT ?1 OFFSET ?2
             "#,
         )?;
         Ok(statement
-            .query_map([limit], |row| {
+            .query_map([limit, offset], |row| {
                 Ok(AgentRunCancellationCandidate {
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -1426,6 +1455,15 @@ impl ExecutionRuntimeService {
         limit: i64,
     ) -> Result<Vec<QueuedAgentRunCandidate>> {
         self.list_dispatchable_agent_runs_scoped(database, limit, 0, "non_batch", None)
+    }
+
+    pub(crate) fn list_dispatchable_non_batch_agent_runs_page(
+        &self,
+        database: &Database,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<QueuedAgentRunCandidate>> {
+        self.list_dispatchable_agent_runs_scoped(database, limit, offset, "non_batch", None)
     }
 
     pub fn load_dispatchable_agent_run(
@@ -2967,7 +3005,7 @@ impl ExecutionRuntimeService {
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Result<()> {
-        database.connection().execute(
+        let changed = database.connection().execute(
             "UPDATE agent_run SET cancel_acknowledged_at = ?3, updated_at = ?3
              WHERE id = ?1 AND execution_epoch = ?2
                AND status IN ('succeeded', 'failed', 'cancelled')
@@ -2978,6 +3016,10 @@ impl ExecutionRuntimeService {
                 chrono::Utc::now().to_rfc3339()
             ],
         )?;
+        if changed > 0 {
+            database.execution_wake.runs.notify_one();
+            database.execution_wake.delivery.notify_one();
+        }
         Ok(())
     }
 
@@ -4353,6 +4395,7 @@ impl ExecutionRuntimeService {
         if !matches!(protocol_version, 2 | 3) {
             anyhow::bail!("controlled shutdown cycle requires protocol version 2 or 3");
         }
+        let changes_before = database.connection().total_changes();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -4374,6 +4417,9 @@ impl ExecutionRuntimeService {
             anyhow::bail!("controlled shutdown cycle has a conflicting protocol version");
         }
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         Ok(())
     }
 
@@ -4448,6 +4494,7 @@ impl ExecutionRuntimeService {
         complete_cycle: bool,
         prior_settlement_counts: (usize, usize),
     ) -> Result<ControlledShutdownCycleSettlement> {
+        let changes_before = database.connection().total_changes();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -4474,6 +4521,9 @@ impl ExecutionRuntimeService {
         }
         if cycle.1.is_some() {
             transaction.commit()?;
+            if database.connection().total_changes() != changes_before {
+                database.execution_wake.execution_changed();
+            }
             crate::execution_text::flush_settled(database)?;
             return Ok(ControlledShutdownCycleSettlement {
                 core_generation: core_generation.to_string(),
@@ -4598,6 +4648,9 @@ impl ExecutionRuntimeService {
             }
         }
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         crate::execution_text::flush_settled(database)?;
         Ok(ControlledShutdownCycleSettlement {
             core_generation: core_generation.to_string(),
@@ -4626,6 +4679,7 @@ impl ExecutionRuntimeService {
             anyhow::bail!("planned shutdown terminal permit does not match the terminal target");
         }
 
+        let changes_before = database.connection().total_changes();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -4651,6 +4705,9 @@ impl ExecutionRuntimeService {
                 )?
             };
             transaction.commit()?;
+            if database.connection().total_changes() != changes_before {
+                database.execution_wake.execution_changed();
+            }
             crate::execution_text::flush_settled(database)?;
             return Ok(PlannedShutdownTerminalSettlement {
                 agent_run_id: target.agent_run_id,
@@ -4781,6 +4838,9 @@ impl ExecutionRuntimeService {
             )?
         };
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         crate::execution_text::flush_settled(database)?;
         pump_target_after_run_terminal(database, &terminal.agent_run_id)?;
         Ok(PlannedShutdownTerminalSettlement {
@@ -5749,6 +5809,7 @@ fn planned_shutdown_abortive_terminal_facts(
 /// Repair only obsolete manual-retry waits, after startup has settled Run and Delivery recovery.
 /// Run history and pending inputs stay unchanged; the scheduler still owns queue publication.
 pub fn settle_legacy_retry_waits(database: &mut Database) -> Result<()> {
+    let changes_before = database.connection().total_changes();
     let transaction = database.connection_mut().transaction()?;
     let now = chrono::Utc::now().to_rfc3339();
     let turns = {
@@ -5793,6 +5854,9 @@ pub fn settle_legacy_retry_waits(database: &mut Database) -> Result<()> {
         recompute_camp_turn(&transaction, &camp_id, &turn_id, &actor, None, &now)?;
     }
     transaction.commit()?;
+    if database.connection().total_changes() != changes_before {
+        database.execution_wake.execution_changed();
+    }
     Ok(())
 }
 
@@ -6172,6 +6236,7 @@ pub fn recover_legacy_pending_cancellations(database: &mut Database) -> Result<(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
+    let changes_before = database.connection().total_changes();
     let transaction = database.connection_mut().transaction()?;
     let mut settled_run_ids = Vec::new();
     for camp_id in camp_ids {
@@ -6182,6 +6247,9 @@ pub fn recover_legacy_pending_cancellations(database: &mut Database) -> Result<(
         )?);
     }
     transaction.commit()?;
+    if database.connection().total_changes() != changes_before {
+        database.execution_wake.execution_changed();
+    }
     settled_run_ids.sort();
     settled_run_ids.dedup();
     pump_targets_after_runs_terminal(database, &settled_run_ids)?;
@@ -7317,7 +7385,7 @@ mod tests {
                 params![
                     turn_id,
                     crate::execution_budget::CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION,
-                    crate::execution_budget::PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
+                    crate::execution_budget::LEGACY_EXECUTION_ELAPSED_SECONDS,
                     crate::execution_budget::PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES,
                     crate::execution_budget::PRODUCT_MAX_ACCEPTED_A2A,
                     run_ids.len() as i64,

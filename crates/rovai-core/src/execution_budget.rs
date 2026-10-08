@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 pub const CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION: i64 = 1;
 pub const UNBOUNDED_EXECUTION_BUDGET_SCHEMA_VERSION: i64 = 2;
-pub const PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS: i64 = 86_400;
+// Frozen v47 migration policy; never use this as a default for new executions.
+pub const LEGACY_EXECUTION_ELAPSED_SECONDS: i64 = 86_400;
 pub const PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES: i64 = 32;
 pub const PRODUCT_MAX_ACCEPTED_A2A: i64 = 16;
 
@@ -117,10 +118,7 @@ pub fn freeze_camp_turn_execution_budget(
     if root_agent_run_responsibilities < 1 {
         anyhow::bail!("Execution Budget requires at least one root AgentRun responsibility");
     }
-    let elapsed_seconds = requested
-        .map(|budget| budget.elapsed_seconds)
-        .unwrap_or(Some(PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS))
-        .map(|seconds| seconds.min(PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS));
+    let elapsed_seconds = requested.and_then(|budget| budget.elapsed_seconds);
     let max_agent_run_responsibilities = requested
         .map(|budget| budget.max_agent_run_responsibilities)
         .unwrap_or(PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES)
@@ -134,8 +132,8 @@ pub fn freeze_camp_turn_execution_budget(
     }
     let deadline_at = elapsed_seconds
         .map(|seconds| {
-            accepted_at
-                .checked_add_signed(Duration::seconds(seconds))
+            Duration::try_seconds(seconds)
+                .and_then(|duration| accepted_at.checked_add_signed(duration))
                 .ok_or_else(|| anyhow::anyhow!("Execution Budget deadline overflow"))
         })
         .transpose()?;
@@ -155,7 +153,7 @@ pub fn freeze_camp_turn_execution_budget(
 }
 
 // Explicit null opts out of a time limit. An omitted field remains an error;
-// omitting the entire request still selects the ordinary product defaults.
+// omitting the entire request selects an unbounded duration with ordinary count limits.
 pub fn deserialize_required_time_limit<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Option<i64>, D::Error>
@@ -200,11 +198,11 @@ mod tests {
     }
 
     #[test]
-    fn requested_budget_is_clamped_by_product_safety_maxima() {
+    fn default_time_is_unbounded_and_explicit_time_preserves_count_limits() {
         let accepted_at = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
         let frozen = freeze_camp_turn_execution_budget(
             Some(&ThreadTurnExecutionBudgetRequest {
-                elapsed_seconds: Some(PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS + 1),
+                elapsed_seconds: Some(172_800),
                 max_agent_run_responsibilities: PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES + 1,
                 max_accepted_a2a: PRODUCT_MAX_ACCEPTED_A2A + 1,
             }),
@@ -212,10 +210,8 @@ mod tests {
             2,
         )
         .unwrap();
-        assert_eq!(
-            frozen.elapsed_seconds,
-            Some(PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS)
-        );
+        assert_eq!(frozen.schema_version, 1);
+        assert_eq!(frozen.elapsed_seconds, Some(172_800));
         assert_eq!(
             frozen.max_agent_run_responsibilities,
             PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES
@@ -224,10 +220,28 @@ mod tests {
         assert_eq!(frozen.root_agent_run_responsibilities, 2);
         assert_eq!(
             frozen.deadline_at.as_deref(),
-            Some("2026-08-04T00:00:00+00:00")
+            Some("2026-08-05T00:00:00+00:00")
+        );
+        assert!(
+            !execution_deadline_elapsed(
+                frozen.deadline_at.as_deref(),
+                accepted_at + Duration::days(1)
+            )
+            .unwrap()
+        );
+        assert!(
+            execution_deadline_elapsed(
+                frozen.deadline_at.as_deref(),
+                accepted_at + Duration::days(2)
+            )
+            .unwrap()
         );
         let unbounded: ThreadTurnExecutionBudgetRequest = serde_json::from_value(serde_json::json!({"elapsedSeconds":null,"maxAgentRunResponsibilities":32,"maxAcceptedA2a":16})).unwrap();
         let frozen = freeze_camp_turn_execution_budget(Some(&unbounded), accepted_at, 1).unwrap();
+        assert_eq!(
+            freeze_camp_turn_execution_budget(None, accepted_at, 1).unwrap(),
+            frozen
+        );
         assert_eq!(frozen.schema_version, 2);
         assert_eq!(frozen.elapsed_seconds, None);
         assert_eq!(frozen.deadline_at, None);
@@ -247,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn budget_rejects_a_root_execution_that_cannot_fit() {
+    fn budget_rejects_invalid_limits_and_unrepresentable_deadlines() {
         let accepted_at = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
         let error = freeze_camp_turn_execution_budget(
             Some(&ThreadTurnExecutionBudgetRequest {
@@ -260,5 +274,26 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("cannot admit every root"));
+        for (elapsed_seconds, expected) in [
+            (0, "must be positive"),
+            (-1, "must be positive"),
+            (i64::MAX, "deadline overflow"),
+            (Duration::MAX.num_seconds(), "deadline overflow"),
+        ] {
+            let error = freeze_camp_turn_execution_budget(
+                Some(&ThreadTurnExecutionBudgetRequest {
+                    elapsed_seconds: Some(elapsed_seconds),
+                    max_agent_run_responsibilities: 1,
+                    max_accepted_a2a: 0,
+                }),
+                accepted_at,
+                1,
+            )
+            .unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "{elapsed_seconds}: {error}"
+            );
+        }
     }
 }

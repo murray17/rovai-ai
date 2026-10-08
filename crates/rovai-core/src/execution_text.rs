@@ -599,7 +599,7 @@ fn attempt_flush_settled(
 }
 
 pub(crate) fn flush_settled(database: &mut Database) -> Result<()> {
-    // Once a post-commit flush fails, only the maintenance tick owns retry timing. Command
+    // Once a post-commit flush fails, only the text retry worker owns timing. Command
     // replay and unrelated terminal commands must not bypass the backoff or rescan Runs.
     if database.execution_text.retry.is_some() {
         return Ok(());
@@ -612,12 +612,21 @@ pub(crate) fn flush_settled(database: &mut Database) -> Result<()> {
     let result = if let Some(error) = attempt.error {
         buffer.pending_notifications.extend(attempt.finalized);
         schedule_retry(&mut buffer);
+        database.execution_wake.text.notify_one();
         Err(error)
     } else {
         Ok(())
     };
     database.execution_text = buffer;
     result
+}
+
+pub(crate) fn retry_deadline(database: &Database) -> Option<Instant> {
+    database
+        .execution_text
+        .retry
+        .as_ref()
+        .map(|retry| retry.retry_not_before)
 }
 
 pub(crate) fn maintain_settled(database: &mut Database) -> ExecutionTextMaintenanceOutcome {
@@ -1051,9 +1060,38 @@ mod slow_tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let take_hint = |notify: &tokio::sync::Notify| {
+            std::future::Future::poll(
+                std::pin::pin!(notify.notified()).as_mut(),
+                &mut std::task::Context::from_waker(std::task::Waker::noop()),
+            )
+            .is_ready()
+        };
+        let hints = database.execution_wake.clone();
+        for notify in [
+            &hints.runs,
+            &hints.automation,
+            &hints.cancellation,
+            &hints.text,
+        ] {
+            while take_hint(notify) {}
+        }
+        assert!(retry_deadline(&database).is_none());
         database.execution_text.fail_next_settled_finishes = 1;
         let failure = runtime.fail_agent_run(&mut database, &command).unwrap_err();
         assert!(format!("{failure:#}").contains("injected Execution text finalization failure"));
+        for notify in [
+            &hints.runs,
+            &hints.automation,
+            &hints.cancellation,
+            &hints.text,
+        ] {
+            assert!(
+                take_hint(notify),
+                "a committed terminal must wake owners even when finalization fails"
+            );
+        }
+        assert!(retry_deadline(&database).is_some());
         let status: String = database
             .connection()
             .query_row("SELECT status FROM agent_run WHERE id=?1", [run], |row| {
@@ -1125,7 +1163,7 @@ mod slow_tests {
         assert!(maintenance.error.is_none());
         assert_eq!(maintenance.finalized.len(), 3);
         assert!(database.execution_text.blocks.is_empty());
-        assert!(database.execution_text.retry.is_none());
+        assert!(retry_deadline(&database).is_none());
         assert!(
             maintenance
                 .finalized

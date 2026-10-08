@@ -1,6 +1,9 @@
 mod hub_runtime;
 use crate::cline_hub::{ClineHubAdapter, ClineHubRuntime, HubIncoming, HubRuntimeRequest};
 use hub_runtime::*;
+
+mod execution_drivers;
+use execution_drivers::*;
 use rusqlite::OptionalExtension;
 mod config;
 mod conversation_preferences;
@@ -1232,14 +1235,6 @@ async fn join_or_abort_until(
     }
 }
 
-fn abort_agent_run_coordination<S, M>(
-    scheduler: &tokio::task::JoinHandle<S>,
-    maintenance: &tokio::task::JoinHandle<M>,
-) {
-    scheduler.abort();
-    maintenance.abort();
-}
-
 async fn drain_join_set_until<T: 'static>(
     tasks: &mut tokio::task::JoinSet<T>,
     graceful_deadline: tokio::time::Instant,
@@ -2346,6 +2341,8 @@ struct ClaudeInputAcceptanceTarget<'a> {
 }
 
 struct Core {
+    execution_wake: crate::execution_wake::ExecutionWake,
+    non_batch_retry_at: Mutex<Option<tokio::time::Instant>>,
     database: Mutex<Database>,
     subsystems: CoreSubsystems,
     subsystem_initialization: Mutex<SubsystemInitialization>,
@@ -2377,9 +2374,10 @@ struct Core {
     attachment_projection_requests: mpsc::UnboundedSender<String>,
     automation_scheduler_control: RwLock<Option<AutomationSchedulerControl>>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
-    agent_run_cancellation_notify: Notify,
-    delivery_batch_scheduler_notify: Notify,
-    agent_run_cleanup_inflight: Mutex<HashSet<ActiveExecutionKey>>,
+    agent_run_cancellation_notify: Arc<Notify>,
+    delivery_batch_scheduler_notify: Arc<Notify>,
+    agent_run_cleanup_inflight:
+        std::sync::Mutex<HashMap<ActiveExecutionKey, Option<tokio::time::Instant>>>,
     runtime_phases: Mutex<HashMap<String, (i64, crate::runtime_thinking::RuntimeThinking)>>,
     network_recovery: Mutex<NetworkRecoveryQueue>,
     network_recovery_notify: Notify,
@@ -2845,6 +2843,7 @@ impl Core {
     }
 
     fn notify_delivery_batch_scheduler_if_pending(&self, database: &Database) {
+        self.execution_wake.runs.notify_one();
         match has_pending_delivery_batch_work(database) {
             Ok(true) => self.delivery_batch_scheduler_notify.notify_one(),
             Ok(false) => {}
@@ -2853,6 +2852,7 @@ impl Core {
                     "failed to inspect Message Delivery work after a committed state change: {error:#}"
                 );
                 self.delivery_batch_scheduler_notify.notify_one();
+                self.execution_wake.runs.notify_one();
             }
         }
     }
@@ -3324,7 +3324,10 @@ impl Core {
         }
     }
 
-    async fn expire_elapsed_execution_budgets(&self, output: &mpsc::UnboundedSender<String>) {
+    async fn expire_elapsed_execution_budgets(
+        &self,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<usize> {
         let observed_now = camp_turn_execution_budget_now();
         let result = {
             let mut database = self.database.lock().await;
@@ -3336,8 +3339,9 @@ impl Core {
             )
         };
         match result {
-            Ok(expired) if expired.is_empty() => {}
+            Ok(expired) if expired.is_empty() => Ok(0),
             Ok(expired) => {
+                let count = expired.len();
                 emit(
                     output,
                     "camp_turn.execution_budgets_expired",
@@ -3345,8 +3349,10 @@ impl Core {
                 );
                 self.agent_run_cancellation_notify.notify_one();
                 self.delivery_batch_scheduler_notify.notify_one();
+                self.execution_wake.runs.notify_one();
+                Ok(count)
             }
-            Err(error) => eprintln!("CampTurn Execution Budget expiry failed: {error:#}"),
+            Err(error) => Err(error),
         }
     }
 
@@ -3612,6 +3618,7 @@ impl Core {
             "runtime.discovery.updated",
             serde_json::to_value(observation).unwrap_or_else(|_| json!({})),
         );
+        self.execution_wake.runs.notify_one();
     }
 
     async fn publish_verified_runtime_discovery(&self, observation: RuntimeDiscoveryObservation) {
@@ -3629,6 +3636,7 @@ impl Core {
             "runtime.discovery.updated",
             serde_json::to_value(observation).unwrap_or_else(|_| json!({})),
         );
+        self.execution_wake.runs.notify_one();
     }
 
     async fn verify_runtime_entry(
@@ -4295,6 +4303,7 @@ impl Core {
             )?;
         }
         self.delivery_batch_scheduler_notify.notify_one();
+        self.execution_wake.runs.notify_one();
         Ok(())
     }
 
@@ -4314,6 +4323,7 @@ impl Core {
             )?;
         }
         self.delivery_batch_scheduler_notify.notify_one();
+        self.execution_wake.runs.notify_one();
         Ok(())
     }
 
@@ -6855,6 +6865,7 @@ impl Core {
         }
         if delivery_batch_state_changed {
             self.delivery_batch_scheduler_notify.notify_one();
+            self.execution_wake.runs.notify_one();
         }
         if let (Some(authenticated_run), Some(tool_call_id)) =
             (evidence_run.as_ref(), evidence_tool_call_digest)
@@ -7097,6 +7108,10 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut current = self.automation_scheduler_control.write().await;
                 let applied = apply_automation_scheduler_control(&mut current, params);
+                if applied {
+                    self.execution_wake.automation.notify_one();
+                    self.execution_wake.budgets.notify_one();
+                }
                 Ok(json!({
                     "applied": applied,
                     "epoch": current.as_ref().map(|value| value.epoch),
@@ -7186,6 +7201,7 @@ impl Core {
                 drop(database);
                 if state_changed {
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -7206,6 +7222,7 @@ impl Core {
                 drop(database);
                 if state_changed {
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -7246,6 +7263,7 @@ impl Core {
                             "failed to fence an Automation after attachment preparation failed",
                         )?;
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                     return Err(error);
                 }
                 emit(
@@ -7261,6 +7279,7 @@ impl Core {
                     .is_some()
                 {
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -8252,6 +8271,7 @@ impl Core {
                         json!({ "threadId": camp_id, "result": execution.result }),
                     );
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -8286,6 +8306,7 @@ impl Core {
                         json!({ "threadId": camp_id, "result": execution.result }),
                     );
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -8595,6 +8616,7 @@ impl Core {
                 emit_member_roster_if_applied(&self.output, &request.method, &execution);
                 if wake_delivery_scheduler {
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -8625,6 +8647,7 @@ impl Core {
                 emit_member_roster_if_applied(&self.output, &request.method, &execution);
                 if state_changed {
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -9608,6 +9631,7 @@ impl Core {
                 }
                 if execution.result.status != CommandResultStatus::Rejected {
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -10085,6 +10109,7 @@ impl Core {
                         json!({ "threadId": camp_id, "result": execution.result }),
                     );
                     self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -10974,6 +10999,7 @@ impl Core {
         } {
             if command_result_has_delivery_work(&replay.result.payload) {
                 self.delivery_batch_scheduler_notify.notify_one();
+                self.execution_wake.runs.notify_one();
             }
             return Ok(json!({
                 "commandResult": replay.result,
@@ -10995,6 +11021,7 @@ impl Core {
         }
         if command_result_has_delivery_work(&execution.result.payload) {
             self.delivery_batch_scheduler_notify.notify_one();
+            self.execution_wake.runs.notify_one();
         }
         Ok(json!({
             "commandResult": execution.result,
@@ -11034,6 +11061,7 @@ impl Core {
         }
         if command_result_has_delivery_work(&execution.result.payload) {
             self.delivery_batch_scheduler_notify.notify_one();
+            self.execution_wake.runs.notify_one();
         }
         Ok(json!({
             "commandResult": execution.result,
@@ -11894,25 +11922,10 @@ impl Core {
             .await;
     }
 
-    async fn dispatch_non_batch_agent_runs(
-        self: &Arc<Self>,
-        output: &mpsc::UnboundedSender<String>,
-    ) {
-        let candidates = {
-            let database = self.database.lock().await;
-            match ExecutionRuntimeService::default().list_dispatchable_non_batch_agent_runs(
-                &database,
-                NON_BATCH_AGENT_RUN_DISPATCH_LIMIT,
-            ) {
-                Ok(candidates) => candidates,
-                Err(error) => {
-                    eprintln!("failed to scan existing non-batch AgentRuns: {error:#}");
-                    return;
-                }
-            }
-        };
-        self.dispatch_existing_agent_run_candidates(candidates, output)
-            .await;
+    async fn defer_non_batch_dispatch(&self, delay: Duration) {
+        let at = tokio::time::Instant::now() + delay;
+        let mut next = self.non_batch_retry_at.lock().await;
+        *next = Some(next.map_or(at, |previous| previous.min(at)));
     }
 
     async fn dispatch_existing_agent_run_candidates(
@@ -11956,14 +11969,14 @@ impl Core {
         &self,
         now: chrono::DateTime<chrono::Utc>,
         recovery_boundary: chrono::DateTime<chrono::Utc>,
-    ) {
+    ) -> Result<()> {
         let quick_chat_path = self.data_dir.join("quick-chat");
         if let Err(error) = std::fs::create_dir_all(&quick_chat_path) {
             eprintln!(
                 "Scheduled Automation Quick Chat preparation paused at {}: {error}",
                 quick_chat_path.display()
             );
-            return;
+            return Err(error.into());
         }
         let result = {
             let mut database = self.database.lock().await;
@@ -11995,7 +12008,7 @@ impl Core {
         match result {
             Ok((dispatches, settled, claimed, notification_ready)) => {
                 if settled || claimed {
-                    self.delivery_batch_scheduler_notify.notify_one();
+                    self.execution_wake.execution_changed();
                 }
                 if settled || claimed {
                     emit(
@@ -12008,8 +12021,9 @@ impl Core {
                     emit(&self.output, "automation.notification.available", json!({}));
                 }
             }
-            Err(error) => eprintln!("Scheduled Automation processing paused: {error:#}"),
+            Err(error) => return Err(error),
         }
+        Ok(())
     }
 
     async fn dispatch_agent_run_candidate(
@@ -12047,11 +12061,24 @@ impl Core {
                 if expired {
                     self.reject_agent_run_dispatch(&output, &candidate, "runtime_cleanup_unconfirmed",
                         &anyhow::anyhow!("Previous execution cleanup could not be confirmed; retry after Runtime recovery")).await;
+                } else {
+                    let at = chrono::DateTime::parse_from_rfc3339(&requested_at)
+                        .unwrap()
+                        .with_timezone(&chrono::Utc)
+                        + chrono::Duration::seconds(3);
+                    self.defer_non_batch_dispatch(
+                        at.signed_duration_since(chrono::Utc::now())
+                            .to_std()
+                            .unwrap_or_default(),
+                    )
+                    .await;
                 }
                 return;
             }
             Err(error) => {
                 eprintln!("failed to inspect Runtime cleanup fence: {error:#}");
+                self.defer_non_batch_dispatch(RUNTIME_CHECK_EXECUTION_COOLDOWN)
+                    .await;
                 return;
             }
             Ok(None) => {}
@@ -12070,6 +12097,8 @@ impl Core {
                         "failed to read Skill projection access for AgentRun {}: {error:#}",
                         candidate.agent_run_id
                     );
+                    self.defer_non_batch_dispatch(RUNTIME_CHECK_EXECUTION_COOLDOWN)
+                        .await;
                     return;
                 }
             }
@@ -12111,6 +12140,8 @@ impl Core {
             Ok((_runtime, effective_version)) => candidate.version = effective_version,
             Err(failure) => {
                 if failure.code == "runtime_check_deferred" {
+                    self.defer_non_batch_dispatch(RUNTIME_CHECK_EXECUTION_COOLDOWN)
+                        .await;
                     return;
                 }
                 if let Some(effective_version) = failure.effective_version {
@@ -12188,6 +12219,8 @@ impl Core {
                     "failed to claim AgentRun {}: {error:#}",
                     candidate.agent_run_id
                 );
+                self.defer_non_batch_dispatch(RUNTIME_CHECK_EXECUTION_COOLDOWN)
+                    .await;
                 return;
             }
         };
@@ -12611,9 +12644,12 @@ impl Core {
                     }),
                 );
                 self.delivery_batch_scheduler_notify.notify_one();
+                self.execution_wake.runs.notify_one();
             }
             Ok(_) => {}
             Err(rejection_error) => {
+                self.defer_non_batch_dispatch(RUNTIME_CHECK_EXECUTION_COOLDOWN)
+                    .await;
                 eprintln!(
                     "failed to reject AgentRun {} before launch: {rejection_error:#}",
                     candidate.agent_run_id
@@ -12625,55 +12661,80 @@ impl Core {
     async fn dispatch_agent_run_cancellations(
         self: &Arc<Self>,
         output: &mpsc::UnboundedSender<String>,
-    ) {
+    ) -> Result<Option<tokio::time::Instant>> {
         let candidates = {
             let database = self.database.lock().await;
-            match ExecutionRuntimeService::default().list_cancellation_candidates(&database, 32) {
-                Ok(candidates) => candidates,
-                Err(error) => {
-                    eprintln!("failed to scan Runtime cleanup: {error:#}");
-                    return;
+            let mut candidates = Vec::new();
+            let mut offset = 0;
+            loop {
+                let mut page = ExecutionRuntimeService::default()
+                    .list_cancellation_candidates_page(&database, 32, offset)?;
+                let count = page.len();
+                candidates.append(&mut page);
+                if count < 32 {
+                    break;
                 }
+                offset += count as i64;
             }
+            candidates
         };
+        let eligible = candidates
+            .iter()
+            .map(|candidate| {
+                ActiveExecutionKey::new(&candidate.agent_run_id, candidate.execution_epoch)
+            })
+            .collect::<HashSet<_>>();
+        self.agent_run_cleanup_inflight
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|key, retry| retry.is_none() || eligible.contains(key));
+        let mut started = 0;
         for candidate in candidates {
             let key = ActiveExecutionKey::new(&candidate.agent_run_id, candidate.execution_epoch);
-            if !self
-                .agent_run_cleanup_inflight
-                .lock()
-                .await
-                .insert(key.clone())
             {
-                continue;
+                let mut attempts = self
+                    .agent_run_cleanup_inflight
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if attempts
+                    .get(&key)
+                    .is_some_and(|retry| retry.is_none_or(|at| at > tokio::time::Instant::now()))
+                {
+                    continue;
+                }
+                attempts.insert(key.clone(), None);
             }
             let core = self.clone();
             let output = output.clone();
-            tokio::spawn(async move {
-                // Keep the supervisor separate so a worker panic cannot permanently
-                // strand this process-local de-duplication key.
-                let cleanup_core = core.clone();
-                let cleanup = tokio::spawn(async move {
-                    cleanup_core
-                        .finish_agent_run_runtime_cleanup(&output, candidate)
-                        .await
-                });
-                let completed = match cleanup.await {
-                    Ok(completed) => completed,
-                    Err(error) => {
-                        eprintln!(
-                            "Runtime cleanup worker failed for {}/{}: {error}",
-                            key.agent_run_id, key.execution_epoch
-                        );
-                        false
-                    }
-                };
-                core.agent_run_cleanup_inflight.lock().await.remove(&key);
-                if completed {
-                    core.agent_run_cancellation_notify.notify_one();
-                    core.delivery_batch_scheduler_notify.notify_one();
+            let guard = RuntimeCleanupGuard {
+                core: core.clone(),
+                key,
+                completed: false,
+            };
+            let mut tasks = self.agent_run_tasks.lock().await;
+            while let Some(result) = tasks.try_join_next() {
+                if let Err(error) = result {
+                    eprintln!("execution worker failed: {error}");
                 }
+            }
+            tasks.spawn(async move {
+                let mut guard = guard;
+                guard.completed = core
+                    .finish_agent_run_runtime_cleanup(&output, candidate)
+                    .await;
             });
+            started += 1;
+            if started == 32 {
+                break;
+            }
         }
+        Ok(self
+            .agent_run_cleanup_inflight
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+            .filter_map(|at| *at)
+            .min())
     }
 
     async fn finish_agent_run_runtime_cleanup(
@@ -12735,7 +12796,7 @@ impl Core {
         );
         // Git and projection work do not extend the Runtime cleanup budget.
         let core = self.clone();
-        tokio::spawn(async move {
+        self.agent_run_tasks.lock().await.spawn(async move {
             core.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
                 .await;
             if fence == RuntimeCancellationIngressFence::Flushed {
@@ -12966,16 +13027,25 @@ impl Core {
         .unwrap_or(RuntimeCancellationIngressFence::Unproven)
     }
 
-    async fn dispatch_runtime_deliveries(self: &Arc<Self>, output: &mpsc::UnboundedSender<String>) {
+    async fn dispatch_runtime_deliveries(
+        self: &Arc<Self>,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
         let candidates = {
             let database = self.database.lock().await;
-            match ActionSafetyService::default().list_runtime_delivery_candidates(&database, 32) {
-                Ok(candidates) => candidates,
-                Err(error) => {
-                    eprintln!("failed to scan Runtime Delivery candidates: {error:#}");
-                    return;
+            let mut candidates = Vec::new();
+            let mut offset = 0;
+            loop {
+                let mut page = ActionSafetyService::default()
+                    .list_runtime_delivery_candidates_page(&database, 32, offset)?;
+                let count = page.len();
+                candidates.append(&mut page);
+                if count < 32 {
+                    break;
                 }
+                offset += count as i64;
             }
+            candidates
         };
 
         for candidate in candidates {
@@ -13022,7 +13092,7 @@ impl Core {
                         "failed to acquire Runtime Delivery {}: {error:#}",
                         candidate.delivery_id
                     );
-                    continue;
+                    return Err(error);
                 }
             };
             let payload_digest = match acquired.result.payload["payloadDigest"].as_str() {
@@ -13324,6 +13394,7 @@ impl Core {
                 ),
             }
         }
+        Ok(())
     }
 
     async fn fail_leased_runtime_delivery(
@@ -13693,6 +13764,8 @@ impl Core {
         if !self.planned_shutdown.bind_route(&key, binding).await {
             anyhow::bail!("Runtime route did not match the current generation active execution");
         }
+        self.execution_wake.authorization.notify_one();
+        self.agent_run_cancellation_notify.notify_one();
         Ok(())
     }
 
@@ -13774,6 +13847,7 @@ impl Core {
             .settle_planned_shutdown_abortive_terminal(&mut database, permit, &terminal)?;
         drop(database);
         self.delivery_batch_scheduler_notify.notify_one();
+        self.execution_wake.runs.notify_one();
         Ok(settlement)
     }
 
@@ -15862,6 +15936,7 @@ impl Core {
                     }),
                 );
                 self.delivery_batch_scheduler_notify.notify_one();
+                self.execution_wake.runs.notify_one();
                 self.reconcile_skill_projection_after_run_terminal(
                     &current.workspace.execution_root,
                 )
@@ -16712,6 +16787,7 @@ impl Core {
                     emit(output, "agent_run.recovering", payload);
                 }
                 self.delivery_batch_scheduler_notify.notify_one();
+                self.execution_wake.runs.notify_one();
             }
             Ok(_) => {}
             Err(error) => eprintln!("failed to settle exited AgentRun {agent_run_id}: {error:#}"),
@@ -16854,6 +16930,7 @@ impl Core {
         match failure {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
                 self.delivery_batch_scheduler_notify.notify_one();
+                self.execution_wake.runs.notify_one();
                 true
             }
             Ok(_) => false,
@@ -16921,6 +16998,7 @@ impl Core {
         }
         if failure_persisted {
             self.delivery_batch_scheduler_notify.notify_one();
+            self.execution_wake.runs.notify_one();
         }
         if failure_persisted && file_change_ingress_flushed {
             self.project_agent_run_file_changes_after_terminal(
@@ -16997,6 +17075,7 @@ impl Core {
                 }),
             );
             self.delivery_batch_scheduler_notify.notify_one();
+            self.execution_wake.runs.notify_one();
             self.reconcile_skill_projection_after_run_terminal(
                 &candidate.execution_workspace().execution_root,
             )
@@ -17734,6 +17813,10 @@ async fn run_core(
     )?);
     let planned_shutdown = PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string());
     let core = Arc::new(Core {
+        execution_wake: database.execution_wake.clone(),
+        delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
+        agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
+        non_batch_retry_at: Mutex::new(None),
         database: Mutex::new(database),
         subsystems: CoreSubsystems::new(),
         subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
@@ -17777,9 +17860,7 @@ async fn run_core(
         attachment_projection_requests: attachment_projection_tx,
         automation_scheduler_control: RwLock::new(automation_scheduler_control),
         compaction_detector_policies: compaction_detector_policies.clone(),
-        agent_run_cancellation_notify: Notify::new(),
-        delivery_batch_scheduler_notify: Notify::new(),
-        agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
+        agent_run_cleanup_inflight: std::sync::Mutex::new(HashMap::new()),
         runtime_phases: Mutex::new(HashMap::new()),
         network_recovery: Mutex::new(NetworkRecoveryQueue::default()),
         network_recovery_notify: Notify::new(),
@@ -17968,25 +18049,13 @@ async fn run_core(
         output_tx.clone(),
         acp_shutdown_rx,
     ));
-    let (maintenance_shutdown_tx, maintenance_shutdown_rx) = oneshot::channel();
-    let (maintenance_exited_tx, maintenance_exited_rx) = oneshot::channel();
-    let maintenance_core = core.clone();
-    let maintenance_output = output_tx.clone();
-    let mut maintenance_handle = tokio::spawn(async move {
-        process_agent_run_maintenance(
-            maintenance_core,
-            maintenance_output,
-            maintenance_shutdown_rx,
-        )
-        .await;
-        let _ = maintenance_exited_tx.send(());
-    });
+    let (execution_shutdown_tx, execution_shutdown_rx) = tokio::sync::watch::channel(false);
+    let mut execution_workers = start_execution_workers(&core, execution_shutdown_rx);
     let (scheduler_shutdown_tx, scheduler_shutdown_rx) = oneshot::channel();
     let mut scheduler_handle = tokio::spawn(process_agent_run_scheduler(
         core.clone(),
         output_tx.clone(),
         scheduler_shutdown_rx,
-        maintenance_exited_rx,
     ));
     let (network_recovery_shutdown_tx, network_recovery_shutdown_rx) = oneshot::channel();
     let mut network_recovery_handle = tokio::spawn(process_network_recovery(
@@ -18057,7 +18126,13 @@ async fn run_core(
     }
     let mut planned_shutdown_request = None;
 
-    while let Some(request) = input.next_request().await? {
+    while let Some(request) = tokio::select! {
+        request = input.next_request() => request?,
+        stopped = execution_workers.join_next() => {
+            eprintln!("Core execution driver stopped unexpectedly: {stopped:?}");
+            None
+        }
+    } {
         let received_at = Instant::now();
         log_read_request_stage(&request, "request_arrived", None);
         while let Some(result) = background_requests.try_join_next() {
@@ -18207,7 +18282,7 @@ async fn run_core(
         core.planned_shutdown.close_launch_admission();
         let _ = network_recovery_shutdown_tx.send(());
         let _ = scheduler_shutdown_tx.send(());
-        let _ = maintenance_shutdown_tx.send(());
+        let _ = execution_shutdown_tx.send(true);
         let _ = attachment_projection_shutdown_tx.send(());
         let _ = runtime_check_shutdown_tx.send(());
         let _ = fleet_sweeper_shutdown_tx.send(());
@@ -18224,7 +18299,8 @@ async fn run_core(
         if !launch_quiesced {
             eprintln!("planned shutdown launch handoff exceeded the prompt cancellation grace");
             deadline_expired = true;
-            abort_agent_run_coordination(&scheduler_handle, &maintenance_handle);
+            scheduler_handle.abort();
+            execution_workers.abort_all();
             let launch_abort_deadline = std::cmp::min(
                 fence_settlement_deadline,
                 tokio::time::Instant::now() + PLANNED_SHUTDOWN_GUARD_GRACE,
@@ -18317,8 +18393,8 @@ async fn run_core(
             fence_settlement_deadline,
         )
         .await;
-        let maintenance_quiesced = join_or_abort_until(
-            &mut maintenance_handle,
+        let execution_workers_quiesced = drain_join_set_until(
+            &mut execution_workers,
             interrupt_deadline,
             fence_settlement_deadline,
         )
@@ -18463,7 +18539,7 @@ async fn run_core(
             && background_requests_quiesced
             && network_recovery_quiesced
             && scheduler_quiesced
-            && maintenance_quiesced
+            && execution_workers_quiesced
             && attachment_projection_quiesced
             && runtime_checks_quiesced
             && fleet_sweeper_quiesced
@@ -18574,7 +18650,7 @@ async fn run_core(
             || !runtime_discovery_quiesced
             || !background_requests_quiesced
             || !scheduler_quiesced
-            || !maintenance_quiesced
+            || !execution_workers_quiesced
             || !attachment_projection_quiesced
             || !runtime_checks_quiesced
             || !fleet_sweeper_quiesced
@@ -18633,8 +18709,8 @@ async fn run_core(
         let _ = network_recovery_handle.await;
         let _ = scheduler_shutdown_tx.send(());
         let _ = scheduler_handle.await;
-        let _ = maintenance_shutdown_tx.send(());
-        let _ = maintenance_handle.await;
+        let _ = execution_shutdown_tx.send(true);
+        while execution_workers.join_next().await.is_some() {}
         let _ = attachment_projection_shutdown_tx.send(());
         let _ = attachment_projection_handle.await;
         let _ = runtime_check_shutdown_tx.send(());
@@ -19476,6 +19552,7 @@ async fn persist_native_prompt_completion(
         core.finish_native_run(runtime.kind(), agent_run_id, execution_epoch, false)
             .await;
         core.delivery_batch_scheduler_notify.notify_one();
+        core.execution_wake.runs.notify_one();
         core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
             .await;
         return Ok(());
@@ -19574,6 +19651,7 @@ async fn persist_native_prompt_completion(
                     }),
                 );
                 core.delivery_batch_scheduler_notify.notify_one();
+                core.execution_wake.runs.notify_one();
                 core.reconcile_skill_projection_after_run_terminal(
                     &execution.workspace.execution_root,
                 )
@@ -19594,6 +19672,7 @@ async fn persist_native_prompt_completion(
                         .await;
                 }
                 core.delivery_batch_scheduler_notify.notify_one();
+                core.execution_wake.runs.notify_one();
                 core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
                     .await;
                 return Ok(());
@@ -22210,6 +22289,7 @@ async fn persist_acp_prompt_completion(
                 .await;
         }
         core.delivery_batch_scheduler_notify.notify_one();
+        core.execution_wake.runs.notify_one();
         core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
             .await;
         return Ok(());
@@ -22330,6 +22410,7 @@ async fn persist_acp_prompt_completion(
                     }),
                 );
                 core.delivery_batch_scheduler_notify.notify_one();
+                core.execution_wake.runs.notify_one();
                 core.reconcile_skill_projection_after_run_terminal(
                     &execution.workspace.execution_root,
                 )
@@ -22340,6 +22421,7 @@ async fn persist_acp_prompt_completion(
                         .await;
                 }
                 core.delivery_batch_scheduler_notify.notify_one();
+                core.execution_wake.runs.notify_one();
                 core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
                     .await;
                 return Ok(());
@@ -23258,6 +23340,7 @@ async fn process_agent_run_codex_message(
                 core.finish_codex_terminal_host(agent_run_id, execution_epoch, released)
                     .await;
                 core.delivery_batch_scheduler_notify.notify_one();
+                core.execution_wake.runs.notify_one();
                 core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
                     .await;
             }
@@ -23398,6 +23481,7 @@ async fn process_agent_run_codex_message(
                     }),
                 );
                 core.delivery_batch_scheduler_notify.notify_one();
+                core.execution_wake.runs.notify_one();
                 terminal_persisted = true;
                 terminal_execution_root = Some(execution.workspace.execution_root.clone());
                 break;
@@ -23442,6 +23526,7 @@ async fn process_agent_run_codex_message(
     core.finish_codex_terminal_host(agent_run_id, execution_epoch, released)
         .await;
     core.delivery_batch_scheduler_notify.notify_one();
+    core.execution_wake.runs.notify_one();
     core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
         .await;
 }
@@ -23755,7 +23840,7 @@ async fn process_agent_run_exit(
         .await;
 }
 
-async fn dispatch_pending_single_chat_inputs(core: &Core) {
+async fn dispatch_pending_single_chat_inputs(core: &Core) -> Result<()> {
     let candidates = {
         let database = core.database.lock().await;
         rovai_core::single_chat::ready_pending_inputs(&database)
@@ -23764,7 +23849,7 @@ async fn dispatch_pending_single_chat_inputs(core: &Core) {
         Ok(candidates) => candidates,
         Err(error) => {
             eprintln!("Single Chat pending input admission failed: {error:#}");
-            return;
+            return Err(error);
         }
     };
     for command in candidates {
@@ -23818,6 +23903,7 @@ async fn dispatch_pending_single_chat_inputs(core: &Core) {
                     eprintln!(
                         "Single Chat pending input failure could not be recorded: {record_error:#}"
                     );
+                    return Err(record_error);
                 }
                 emit(
                     &core.output,
@@ -23832,13 +23918,13 @@ async fn dispatch_pending_single_chat_inputs(core: &Core) {
             }
         }
     }
+    Ok(())
 }
 
 async fn process_agent_run_scheduler(
     core: Arc<Core>,
     output: mpsc::UnboundedSender<String>,
     mut shutdown: oneshot::Receiver<()>,
-    mut maintenance_exited: oneshot::Receiver<()>,
 ) {
     let mut delivery_batch_fallback = tokio::time::interval_at(
         tokio::time::Instant::now() + DELIVERY_BATCH_FALLBACK_INTERVAL,
@@ -23912,156 +23998,11 @@ async fn process_agent_run_scheduler(
                     None => {}
                 }
             },
-            _ = &mut maintenance_exited => {
-                eprintln!("agent-run maintenance task exited unexpectedly");
-                break 'scheduler;
-            },
             _ = &mut shutdown => break 'scheduler,
         }
     }
     delivery_batch_dispatches.abort_all();
     while delivery_batch_dispatches.join_next().await.is_some() {}
-}
-
-/// Keeps the legacy fixed-interval responsibilities serialized without making
-/// ordinary Camp Delivery notifications wait for their Runtime preflight.
-async fn process_agent_run_maintenance(
-    core: Arc<Core>,
-    output: mpsc::UnboundedSender<String>,
-    mut shutdown: oneshot::Receiver<()>,
-) {
-    let mut automation_clock = crate::automation_clock::AutomationClock::start();
-    let mut interval = tokio::time::interval(Duration::from_millis(500));
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut mcp_cleanup_interval = tokio::time::interval_at(
-        tokio::time::Instant::now() + Duration::from_secs(30),
-        Duration::from_secs(30),
-    );
-    mcp_cleanup_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut pending_execution_interval = tokio::time::interval_at(
-        tokio::time::Instant::now() + Duration::from_secs(15),
-        Duration::from_secs(15),
-    );
-    pending_execution_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut managed_blob_gc_interval = tokio::time::interval_at(
-        tokio::time::Instant::now() + Duration::from_secs(60),
-        Duration::from_secs(60),
-    );
-    managed_blob_gc_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut camp_deletion_interval = tokio::time::interval_at(
-        tokio::time::Instant::now() + Duration::from_secs(1),
-        Duration::from_secs(15),
-    );
-    camp_deletion_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    loop {
-        tokio::select! {
-            _ = interval.tick() => {
-                {
-                    // Hold the same fence used by native suspend/resume control.
-                    let control = core.automation_scheduler_control.read().await;
-                    if let Some((now, boundary)) = automation_clock.tick()
-                        && !control.is_some_and(|value| value.paused)
-                    {
-                        let boundary = control.map_or(boundary, |value| boundary.max(value.recovery_boundary));
-                        core.process_automations(now, boundary).await;
-                    }
-                }
-                core.expire_elapsed_execution_budgets(&output).await;
-                core.dispatch_runtime_deliveries(&output).await;
-                core.dispatch_agent_run_cancellations(&output).await;
-                dispatch_pending_single_chat_inputs(&core).await;
-                core.dispatch_non_batch_agent_runs(&output).await;
-                let text_maintenance = {
-                    let mut database = core.database.lock().await;
-                    maintain_execution_text(&mut database)
-                };
-                if let Some(error) = text_maintenance.error {
-                    eprintln!("Execution text finalization remains pending: {error:#}");
-                }
-                for evidence in text_maintenance.finalized {
-                    let method = evidence.event_type.clone();
-                    emit(&output, &method, json!({
-                        "agentRunId": evidence.agent_run_id,
-                        "executionEpoch": evidence.execution_epoch,
-                        "nativeMethod": "execution-text-maintenance",
-                        "evidenceId": evidence.id,
-                        "revision": evidence.revision,
-                        "changeSequence": evidence.change_sequence,
-                        "outputTruncated": evidence.output_truncated,
-                        "payload": evidence.payload,
-                        "canonical": evidence.canonical,
-                    }));
-                }
-            },
-            _ = core.agent_run_cancellation_notify.notified() => {
-                core.dispatch_agent_run_cancellations(&output).await;
-            },
-            _ = core.mission_workspace_cleanup_notify.notified() => {
-                let cleanup_core=Arc::clone(&core);
-                tokio::spawn(async move {
-                    let _cleanup=cleanup_core.mission_workspace_cleanup_gate.lock().await;
-                    if let Err(error)=cleanup_core.cleanup_mission_workspaces_locked(None).await {
-                        eprintln!("Mission cleanup pending: {error:#}");
-                    }
-                });
-            },
-            _ = core.camp_deletion_notify.notified() => {
-                let deletion_core = Arc::clone(&core);
-                tokio::spawn(async move {
-                    deletion_core.process_camp_deletions().await;
-                });
-            },
-            _ = mcp_cleanup_interval.tick() => {
-                core.cleanup_mcp_projections_best_effort().await;
-                let cleanup_core=Arc::clone(&core);
-                tokio::spawn(async move {
-                    if let Ok(_cleanup)=cleanup_core.mission_workspace_cleanup_gate.try_lock()
-                        && let Err(error)=cleanup_core.cleanup_mission_workspaces_locked(None).await {
-                        eprintln!("Mission cleanup pending: {error:#}");
-                    }
-                });
-            },
-            _ = pending_execution_interval.tick() => {
-                core.recover_pending_execution_intents().await;
-                let projection_recovery = {
-                    let mut database = core.database.lock().await;
-                    AgentRunFileChangeProjector.recover_terminal_runs(
-                        &mut database,
-                        &ManagedBlobStore::new(&core.data_dir),
-                    )
-                };
-                match projection_recovery {
-                    Ok(recovered) if recovered > 0 => emit(
-                        &output,
-                        "agent_run.file_changes_completed",
-                        json!({ "recovered": recovered }),
-                    ),
-                    Ok(_) => {}
-                    Err(error) => eprintln!(
-                        "AgentRun file-change projection recovery remains pending: {error:#}"
-                    ),
-                }
-            },
-            _ = managed_blob_gc_interval.tick() => {
-                let cutoff = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
-                let result = {
-                    let mut database = core.database.lock().await;
-                    ManagedBlobStore::new(&core.data_dir)
-                        .collect_gc_candidates_before(&mut database, &cutoff, 32)
-                };
-                if let Err(error) = result {
-                    eprintln!("Managed Blob candidate collection remains pending: {error:#}");
-                }
-            },
-            _ = camp_deletion_interval.tick() => {
-                let deletion_core = Arc::clone(&core);
-                tokio::spawn(async move {
-                    deletion_core.process_camp_deletions().await;
-                });
-            },
-            _ = &mut shutdown => break,
-        }
-    }
 }
 
 async fn process_network_recovery(
@@ -24524,6 +24465,7 @@ async fn finalize_runtime_check(
     );
 
     drop(update);
+    core.execution_wake.runs.notify_one();
 
     if result
         .as_ref()
@@ -25443,7 +25385,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forced_scheduler_abort_also_reclaims_supervised_maintenance() {
+    async fn forced_scheduler_abort_also_reclaims_execution_workers() {
         struct DropFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);
         impl Drop for DropFlag {
             fn drop(&mut self) {
@@ -25452,28 +25394,36 @@ mod tests {
         }
 
         let scheduler_dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let maintenance_dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let execution_dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let scheduler_flag = scheduler_dropped.clone();
-        let maintenance_flag = maintenance_dropped.clone();
+        let execution_flag = execution_dropped.clone();
         let scheduler = tokio::spawn(async move {
             let _guard = DropFlag(scheduler_flag);
             std::future::pending::<()>().await;
         });
-        let maintenance = tokio::spawn(async move {
-            let _guard = DropFlag(maintenance_flag);
+        let mut workers = tokio::task::JoinSet::new();
+        workers.spawn(async move {
+            let _guard = DropFlag(execution_flag);
             std::future::pending::<()>().await;
         });
         tokio::task::yield_now().await;
 
-        abort_agent_run_coordination(&scheduler, &maintenance);
+        scheduler.abort();
+        workers.abort_all();
         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), scheduler)
             .await
             .expect("scheduler cancellation must settle");
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), maintenance)
+        assert!(
+            drain_join_set_until(
+                &mut workers,
+                tokio::time::Instant::now(),
+                tokio::time::Instant::now() + Duration::from_secs(1),
+            )
             .await
-            .expect("maintenance cancellation must settle");
+        );
+        assert!(workers.is_empty());
         assert!(scheduler_dropped.load(std::sync::atomic::Ordering::SeqCst));
-        assert!(maintenance_dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(execution_dropped.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
@@ -25823,6 +25773,10 @@ mod tests {
         )?);
 
         Ok(Core {
+            execution_wake: database.execution_wake.clone(),
+            delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
+            agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
+            non_batch_retry_at: Mutex::new(None),
             database: Mutex::new(database),
             automation_scheduler_control: RwLock::new(None),
             subsystems: CoreSubsystems::ready_for_test(),
@@ -25854,9 +25808,7 @@ mod tests {
             runtime_check_requests,
             attachment_projection_requests,
             compaction_detector_policies: compaction_detector_policies.clone(),
-            agent_run_cancellation_notify: Notify::new(),
-            delivery_batch_scheduler_notify: Notify::new(),
-            agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
+            agent_run_cleanup_inflight: std::sync::Mutex::new(HashMap::new()),
             runtime_phases: Mutex::new(HashMap::new()),
             network_recovery: Mutex::new(NetworkRecoveryQueue::default()),
             network_recovery_notify: Notify::new(),
@@ -30831,7 +30783,9 @@ for line in sys.stdin:
                 .unwrap();
             assert_eq!(terminal.result.code, "agent_run.failed");
         }
-        core.dispatch_agent_run_cancellations(&core.output).await;
+        core.dispatch_agent_run_cancellations(&core.output)
+            .await
+            .unwrap();
         tokio::time::timeout(Duration::from_secs(2), entered.notified())
             .await
             .unwrap();
@@ -30953,25 +30907,34 @@ for line in sys.stdin:
             core.dispatch_agent_run_cancellations(&core.output),
         )
         .await
-        .expect("the scheduler-facing cleanup scan must not await Runtime cleanup");
-        assert_eq!(core.agent_run_cleanup_inflight.lock().await.len(), 1);
-        core.dispatch_agent_run_cancellations(&core.output).await;
+        .expect("the scheduler-facing cleanup scan must not await Runtime cleanup")
+        .unwrap();
+        assert_eq!(core.agent_run_cleanup_inflight.lock().unwrap().len(), 1);
+        core.dispatch_agent_run_cancellations(&core.output)
+            .await
+            .unwrap();
         assert_eq!(
-            core.agent_run_cleanup_inflight.lock().await.len(),
+            core.agent_run_cleanup_inflight.lock().unwrap().len(),
             1,
             "a second scan must not launch duplicate cleanup for the same execution"
         );
 
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if core.agent_run_cleanup_inflight.lock().await.is_empty() {
+                if core
+                    .agent_run_cleanup_inflight
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(Option::is_some)
+                {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
         .await
-        .expect("an unproven cleanup must release its de-duplication key");
+        .expect("an unproven cleanup must arm its retry and release the active slot");
         {
             let database = core.database.lock().await;
             assert!(
@@ -30983,10 +30946,14 @@ for line in sys.stdin:
                 "an unproven cleanup must remain eligible for a later scan"
             );
         }
-        core.dispatch_agent_run_cancellations(&core.output).await;
-        assert_eq!(core.agent_run_cleanup_inflight.lock().await.len(), 1);
+        core.dispatch_agent_run_cancellations(&core.output)
+            .await
+            .unwrap();
+        assert_eq!(core.agent_run_cleanup_inflight.lock().unwrap().len(), 1);
 
         drop(permit);
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        let cleanup_driver = tokio::spawn(process_runtime_cancellations(core.clone(), stop_rx));
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let acknowledged = {
@@ -30997,7 +30964,7 @@ for line in sys.stdin:
                         .into_iter()
                         .all(|candidate| candidate.agent_run_id != agent_run_id)
                 };
-                if acknowledged && core.agent_run_cleanup_inflight.lock().await.is_empty() {
+                if acknowledged && core.agent_run_cleanup_inflight.lock().unwrap().is_empty() {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
@@ -31005,8 +30972,9 @@ for line in sys.stdin:
         })
         .await
         .expect("background cleanup should acknowledge and release its de-duplication key");
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        stop_tx.send(true).unwrap();
+        cleanup_driver.await.unwrap();
+        core.abort_agent_run_tasks().await;
         ThreadAttachmentStore::new(&core.data_dir)
             .remove_camp(&camp_id)
             .unwrap();

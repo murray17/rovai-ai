@@ -2424,7 +2424,8 @@ button.file-preview-html-feedback:hover,
 .execution-input-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .execution-input-list li { display: grid; min-width: 0; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 7px; padding: 7px 0 0; border-top: 1px solid var(--line); }
 .execution-input-list .member-avatar { --member-avatar-size: 20px; width: 20px; height: 20px; }
-.execution-input-user { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--conversation-user-message-line); border-radius: 50%; color: var(--brand-ink); background: var(--conversation-user-message-surface); font-size: 8px; font-weight: 700; }
+.execution-input-user { display: grid; width: 20px; height: 20px; place-items: center; overflow: hidden; border: 1px solid var(--conversation-user-message-line); border-radius: 50%; color: var(--brand-ink); background: var(--conversation-user-message-surface); font-size: 8px; font-weight: 700; }
+.execution-input-user img { width: 100%; height: 100%; object-fit: cover; }
 .execution-input-placeholder { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); background: var(--surface-subtle); }
 .execution-input-placeholder svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
 .execution-input-list li > div { display: grid; min-width: 0; gap: 2px; }

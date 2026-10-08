@@ -5,7 +5,7 @@ version: 11
 status: accepted
 authority: public-message-delivery-route-reconciliation
 source_version: v1.72
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # Message Delivery v11
@@ -18,3 +18,11 @@ last_updated: 2026-10-07
 幂等限 commandId，不限 source Run。领取后请求只结算其新 Delivery，来源 Run／Delivery 不参与状态传播。
 Migration 184 / schema 134 的专用约束允许同一续做 Delivery 对应同一新 Run 的多个原业务输入，
 普通 Delivery 的单输入和所有 Delivery 的单 Run 归属保持。
+
+The ordinary Scheduler remains the sole owner of batch claims and retains its fixed 30-second recovery
+fallback. The inherited v9 clause retaining a separate 500ms maintenance task is superseded: non-batch Runs
+now wake after committed input, terminal settlement, readiness or resource release; time-dependent duties use
+their own effective deadlines. The legacy loop and its registration are removed. Non-batch preparation remains
+independent of ordinary batch coordination and must not claim or dispatch ordinary batch work. See
+[current execution drivers](../architecture/public-a2a-message-delivery.md) and
+[shutdown ownership](../architecture/planned-shutdown.md).

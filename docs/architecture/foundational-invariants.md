@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-09-25
+last_updated: 2026-10-08
 ---
 
 # 当前基础架构不变量
@@ -562,7 +562,7 @@ last_updated: 2026-09-25
 
   小内容在 SQLite；生命周期输入与结果分别 inline 或进入各自 Managed Blob，详情按需组合而不写第三份副本。输入和结构化结果仍独立执行 64 MiB 上限；新 Tool 普通输出在进入 SQLite/Blob/event/log 前先执行 7,680 UTF-8 字节永久上限，丢失只由 nullable `outputTruncated` 表达，不能复用 Blob preview 标记。失败或输出截断不能改写 operation outcome 或 Files Changed。新 replaceable-content 路径在权威引用事务前持久登记 GC candidate，挂接后解除；引用替换按 detach time 重新登记。Core 维护只处理封闭 owner，宽限后动态复核全部 Managed Blob 外键并保护同进程在途读取；历史无标记 Blob 不扫描清理。
 
-  Camp Open 返回每个有界 Run 的记录计数与独立 `executionEvidenceChangeSequence`；计数不再承担 revision。执行台按视口读取有界正文／完整折叠组页，展开组使用独立子游标；首次短内容有界自动补齐。展示分页继续使用 `sequence`，增量读取使用 `changeSequence`；历史与实时按稳定 ID/revision 去重，旧异步结果不得覆盖新状态。首屏后只预取相邻一页，较早记录按需分页，已保存工具结果与文件 diff 在对应行展开后读取；普通输出已丢失的后缀没有恢复入口。业务终态已提交而正文定稿失败时，同一进程内 block 记录有界退避并由既有 AgentRun maintenance tick 只重试文本；未到期时不扫描持久状态，成功后复用 block event，重试不重放领域命令。进程重启不声称恢复尚未持久化的 block。原生 `userMessage` 的空生命周期不复制 CampMessage；Migration 143 的历史压缩边界保持不变。字段与有界存储见 [Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md)。
+  Camp Open 返回每个有界 Run 的记录计数与独立 `executionEvidenceChangeSequence`；计数不再承担 revision。执行台按视口读取有界正文／完整折叠组页，展开组使用独立子游标；首次短内容有界自动补齐。展示分页继续使用 `sequence`，增量读取使用 `changeSequence`；历史与实时按稳定 ID/revision 去重，旧异步结果不得覆盖新状态。首屏后只预取相邻一页，较早记录按需分页，已保存工具结果与文件 diff 在对应行展开后读取；普通输出已丢失的后缀没有恢复入口。业务终态已提交而正文定稿失败时，同一进程内 block 记录有界退避，按最早 `retry_not_before` 安排一次性唤醒，只重试文本；无失败时不设 retry timer，未到期时不扫描持久状态，成功后复用 block event，重试不重放领域命令。进程重启不声称恢复尚未持久化的 block。原生 `userMessage` 的空生命周期不复制 CampMessage；Migration 143 的历史压缩边界保持不变。字段与有界存储见 [Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md)。
 - Renderer 对文本、结构化数据、二进制/未知类型和链接使用安全、有界渲染；不执行 evidence 内容、不把它当作 Agent 消息、Task 完成证明或可重放命令。保留/回收由权威 Run/Camp 引用和 Managed Blob GC 决定，不因 UI 清理或 Agent 不可见而提前删除。
 - Runtime Monitoring 只拥有 Usage-derived metering：原始 observation、归一化 usage、flush/rollup 和 bounded snapshot 由当前五表合同约束。缺失 token/cache/cost 保持稀疏 unknown，不补零或跨 grain 重复计费。
 - Usage raw observation、normalized grain、flush cursor/lease、rollup 和 bounded snapshot 保持独立身份/幂等键；读取按成员/Run/时间范围限界，retention/rollup 不改写已归一化 grain 或从缺失值补数。Cost 只在精确模型、价格版本、token category/grain 可证明且不重复计费时估算；Coverage、unknown 与数据新鲜度随 Snapshot 返回，UI 不把部分支持展示成完整精确账单。

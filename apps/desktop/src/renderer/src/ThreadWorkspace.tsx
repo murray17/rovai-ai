@@ -6756,6 +6756,7 @@ function ExecutionInputList({
   memberById: Map<string, ThreadSnapshot['members'][number]>
   onRevealMessage(messageId: string): void
 }): JSX.Element {
+  const { profile: currentUserProfile } = useCurrentUserProfile()
   return <ol className="execution-input-list">
     {messageIds.map((messageId) => {
       const message = messageById.get(messageId)
@@ -6765,7 +6766,7 @@ function ExecutionInputList({
       const author = message
         ? message.authorType === 'agent'
           ? authorMember?.displayName ?? message.authorId
-          : uiAttribute('你')
+          : currentUserDisplayName(currentUserProfile)
         : uiAttribute('消息')
       const summary = message
         ? message.body || message.attachments.map((item) => item.displayName).join('、')
@@ -6775,7 +6776,7 @@ function ExecutionInputList({
           ? <MemberAvatar agentId={message.authorId} avatarRef={authorMember?.avatarRef ?? null}
               displayName={author} size="execution" decorative />
           : message
-            ? <span className="execution-input-user" aria-hidden="true"><UiText zh={"你"} /></span>
+            ? <CurrentUserAvatar profile={currentUserProfile} className="execution-input-user" />
             : <span className="execution-input-placeholder" aria-hidden="true"><ExecutionBatchIcon /></span>}
         <div>
           <div><strong>{author}</strong><button type="button" onClick={() => onRevealMessage(messageId)}>

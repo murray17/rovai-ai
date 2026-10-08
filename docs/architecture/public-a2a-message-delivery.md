@@ -74,10 +74,10 @@ Runtime preparation 使用相互独立的 worker，一个慢任务或失败任�
 
 协调任务常驻一个不被普通 wake 重置的 30 秒全局兜底。每次兜底先只读检查 waiting Delivery 或尚未 dispatch 的
 queued batch Run；空闲时不进入 claim 的写事务。终态处理只结算并 wake，不直接领取 successor；网络恢复只派发已明确
-获准的既有 Run，不领取新 Delivery。原 500ms 循环继续承担既有非 batch Run 派发、Automation deadline、取消、
-Single Chat 与维护职责，但不再扫描普通 batch 队列，也不能领取普通 Delivery。该旧周期工作运行在独立、串行
-且不重叠的维护任务中；慢 Single Chat/non-batch Runtime preparation 不得占住普通 batch wake、fallback 或 worker
-completion 的协调循环。
+获准的既有 Run，不领取新 Delivery。legacy 500ms maintenance 循环及其启动注册已经退出。
+Single Chat Pending 接续与 non-batch Run 由自己的提交后通知推进，Runtime preparation 纳入 Core 既有任务集合，
+不占住普通 batch wake、fallback 或 worker completion 的协调循环。Automation、执行预算和文本收尾只在各自
+业务 deadline 或实际失败的 retry deadline 到期时重验。既有低频资源回收仍保留，不承担正常消息推进。
 
 必要 `RUN_INPUT` 优先于可选 Self Active Tasks。`RUN_FACTS.historyHint` 计入完整 payload 预算。队首单条也超过当前 Runtime profile 时，Core 创建明确的 preflight-failed Run，
 不向 Runtime 发送截断内容，并让队列随后继续。完整选择规则见 [Profile 9](../contracts/context-delivery-profile-v9.md)。

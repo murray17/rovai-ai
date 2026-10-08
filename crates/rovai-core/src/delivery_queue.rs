@@ -2859,7 +2859,7 @@ mod tests {
                 .list_dispatchable_non_batch_agent_runs(&fixture.database, 1)
                 .unwrap()
                 .is_empty(),
-            "the legacy 500ms dispatch path must not pick up ordinary batch Runs"
+            "the non-batch dispatch path must not pick up ordinary batch Runs"
         );
 
         fixture

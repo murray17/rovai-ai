@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: planned-shutdown
 authority: planned-core-lifecycle-and-cancel-all-settlement
-last_updated: 2026-09-19
+last_updated: 2026-10-08
 ---
 
 # Planned Shutdown
@@ -81,9 +81,11 @@ planned_shutdown_cancelled 原因，不冒充新 protocol 3 request。业务事�
 不为新执行写 CampTurn Stop intent；历史 CampTurn 仅保留原审计与渠道收口事实。
 未知 Action/Input、历史输出和外部效果证据不删除，terminal_resolution_source 不伪造为 Runtime terminal。
 
-普通 batch Scheduler 与保留旧 500ms 职责的 maintenance 是 `run_core` 直接拥有的 sibling task。关闭监督器
-分别发出信号并等待两者；launch handoff 超时时也同时 abort 并等待，二者都 quiesced 才能通过 writer fence。
-因此父调度器被强制取消不会留下 detached maintenance 或仍占用 launch permit 的慢 preflight。
+普通 batch Scheduler 保留原生命周期。事件／deadline 等待任务与既有低频 housekeeping 由 `run_core` 的
+JoinSet 直接持有，共用退出信号；任一任务意外结束会让 Core 进入退出清理。关闭监督器先停止协调入口，
+launch handoff 超时时 abort，并在 writer fence 前等待整个集合。non-batch preparation、Runtime cleanup
+及其后续投影、Mission/Camp 清理均进入 Core 既有 tracked task set，强制取消协调任务也不会丢失它们的句柄。
+退出报告同时要求协调入口和这些后台工作 quiesced；legacy 500ms maintenance 的独立注册与退出通知已经删除。
 
 ## 5. Startup compensation
 

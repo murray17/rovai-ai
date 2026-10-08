@@ -6548,6 +6548,7 @@ impl ChannelService {
         // Even an empty response can expire, settle or admit work. Keep all
         // maintenance and delivery claims atomic, but never journal the poll.
         let mut settled_run_ids = Vec::new();
+        let changes_before = database.connection().total_changes();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -6637,6 +6638,9 @@ impl ChannelService {
             }
         };
         transaction.commit()?;
+        if database.connection().total_changes() != changes_before {
+            database.execution_wake.execution_changed();
+        }
         crate::runtime::pump_targets_after_runs_terminal(database, &settled_run_ids)?;
         Ok(result)
     }

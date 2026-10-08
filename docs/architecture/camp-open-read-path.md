@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-10-02
+last_updated: 2026-10-08
 ---
 
 # Camp Open Read Path 架构
@@ -70,8 +70,8 @@ Lead。明确依赖某次写入的读取仍在该写入回执后发起。当前�
 
 取消、成功与失败的普通终态继续由 Domain Command Gateway 在业务事务提交后收尾文本；受控关闭和
 planned-shutdown 的直提交流程在自己的提交后调用同一入口，不在 Adapter 回调重复实现。若业务与回执已提交、
-文本定稿失败，原 block 保留单调到期时间，由既有 `process_agent_run_maintenance` tick 到期尝试一次；无失败或
-尚未到期时只读内存，不扫描 Run/Camp。成功复用 block event 更新执行台，失败有界退避；重试绝不重放业务。
+文本定稿失败，原 block 保留单调到期时间，Core 按最早 `retry_not_before` 安排一次性重试；无失败时不设
+重试 timer，尚未到期不扫描 Run/Camp。成功复用 block event 更新执行台，失败有界退避；重试绝不重放业务。
 该进程内状态不承诺跨重启恢复尚未持久化的正文。
 
 ```text
