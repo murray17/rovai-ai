@@ -1,6 +1,8 @@
 # Cline 原生认证简化、warm 与并行复验（2026-10-08）
 
 按 User 89 / 91，在 `rovai/mission/052` 的 `60dba4a8` 上继续，未回退既有实现。
+认证简化提交为 `4e635b78`；合并主干 `a77b537d` 后的最终运行代码为 `b9a43fb9`。
+合并只拼接 Hub/执行 driver 导入和保留两份版本说明，保留主干的新唤醒、预算与用户信息展示。
 当前合同为 [Runtime Launch v53](../../contracts/runtime-launch-and-verification-v53.md#cline-native-hub)，
 取舍见 [V1.72-D24](../../versions/v1.72/decisions.md#v1-72-d24)。
 原始私有结果的摘要与受限字段见[证据 JSON](native-auth-warm-parallel-2026-10-08.evidence.json)。
@@ -42,11 +44,13 @@ Cline 获授权原生写回。日常 App 未停止、覆盖或迁移，外部 Cl
 | Core 重启与清理 | SIGKILL 验收 Core 后仍活着的自有 daemon，在重启时按内核身份回收；连续两次非法 MCP 准备失败无残留 |
 | 未登录 fixture | 实际 Cline 报告缺凭据；正式 Run 显示 credentials_unavailable，不假定零模型 ready 等于已登录 |
 | 原生拒绝/服务不可达 | 实际 Cline 请求 loopback 401/503 fixture，分别得到 authentication_failed/service_unavailable；每个场景一个 Run，无 Rovai 重放或来源切换 |
-| 登录 fixture | 选中 CLI、私有输出脱敏、输入、取消、未知账号格式下退出成功、App/Core 退出清理；这是模拟交互，不是真实首次授权 |
+| 登录 fixture | 最终打包 App 的选中 CLI、私有输出脱敏、输入、取消、未知账号格式下退出成功、活动登录 App/Core 退出清理通过；这是模拟交互，不是真实首次授权 |
 | 旧认证锁 | 现有 Rust 登录 owner 在旧 starting 记录及已持有 OS 锁下完成两个独立登录；锁不再参与准入 |
-| 打包 App | 待最终产物复验，结果完成后在此及证据 JSON 更新 |
+| 打包 App | 最终运行代码 b9a43fb9，Renderer/preload/Core 八轮（7 成功、1 预期取消）再次验证账号 first/warm/cold、双成员 barrier、审批、发送与取消后恢复；相同构建 Core 的 BYOK 三轮成功 |
 
+最终打包 App 也完成三条失败路径与原始服务错误不回显断言；三个负例都是明确失败，不计入成功模型请求。
 所有完成的验收目录中，自有 Host 临时目录归零，Runtime Files Root 清理完成，没有 Provider 副本。
+最终确认自有 App/Core/Hub 已退出，所选 Cline 平台二进制摘要未改变。
 本轮观察到的账号及 BYOK 源摘要未改变；这只是本次事实，不承诺 Cline 刷新时源文件永不改变。
 
 ## 负例与验证边界
@@ -69,5 +73,10 @@ Cline 获授权原生写回。日常 App 未停止、覆盖或迁移，外部 Cl
 
 定向 Cline extended：8 通过、2 个需要真实安装的测试按原理由忽略；默认 workspace Rust：464 通过、2 忽略。
 all-targets/all-features check、typecheck、Vitest 2607、Node 335 通过/2 跳过及通用文档门禁已执行。
-设置页 fixture 的旧“登录已完成”断言随新的“登录流程已完成”文案修正，最终结果见交付补记。
+设置页 fixture 的旧“登录已完成”断言随新的“登录流程已完成”文案修正，复验通过。
+上述完整 Rust/前端检查在合并主干后重跑通过；App 构建及 ad-hoc 签名通过。
+同一运行代码的 [Ubuntu CI](https://github.com/murray17/rovai-ai/actions/runs/37740978566) 与
+[Windows 编译](https://github.com/murray17/rovai-ai/actions/runs/37741195908)通过；Windows 编译不提升 Cline 平台资格。
 测试退役与 successor owner 见[测试指南](../../development/testing.md#cline-认证简化的测试变更2026-10-08user-89)。
+
+最终扫描本轮 60 个公开变更文件及 945 个验收文件，实际源中的 Key、access/refresh/id token 与私有端点匹配为零。
