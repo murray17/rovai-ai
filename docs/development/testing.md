@@ -90,6 +90,15 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+## 主干 / Preview Migration 合流（2026-10-08）
+
+扩展既有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，保留 schema 133
+与 Preview 134 case，并增加主干 continuation 134 的来源、残缺结构拒绝、两个 catalog 同事务回滚、
+重开后 schema 136 检查；不增加平行 owner。继续执行自己的既有 migration owner 改为 185/135 →
+186/136，保留原 frozen evidence、FK 恢复与 receipt failure case。纯 migration admission owner 补入
+135 及缺失 186 收据。SQLite 结构、事务和重开边界不能由纯 parser 代替；定向命令为
+`cargo test -p rovai-core --features extended-tests --lib migration`，默认门禁仍为 `pnpm test:rust:pr`。
+
 ## Cline 原生账号认证 owner（2026-10-08）
 
 - `cline_hub::auth::tests::auth_source_and_projection_preserve_selected_metadata_without_oauth_copies`
@@ -204,6 +213,22 @@ Cline 窗口补采扩展既有 observer/config 两个 Rust owner 和 `scripts/li
 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`、
 `cargo test -p rovai-core --features extended-tests --lib runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`；
 其余定向与真实 Smoke 命令见上述验收记录，默认 workspace 门禁仍按下方路由。
+
+## Run 思考反馈
+
+`runtime_thinking::tests` 拥有两个纯状态 owner：分片短标题的有界解析与清除，以及 root/child/replay/旧 item
+隔离。修复前仅有无文本 phase 推导，既有 owner 没有原生标题解析状态；因此新增最低成本单元测试，
+不新增数据库夹具。最小命令为 `cargo test -p rovai-core --lib runtime_thinking::tests::`。
+
+Claude/Pi 空思考块和 ACP 订阅协商扩展已有 Runtime owner（`--features extended-tests`）；标题不落库复用
+`execution_text::slow_tests::text_blocks_preserve_interleaving_live_reads_and_shutdown_without_fragment_writes`
+（`--features slow-tests`）。前端复用 `App.test.ts`、分页缓存和事件缓冲 owner；
+`node --test scripts/lib/execution-state-transition.test.mjs` 验证真实浏览器布局、旧读取/旧 epoch 隔离与重连恢复。
+
+显式真实模型验收：`node scripts/smoke-runtime-thinking.mjs codex-cli copilot-cli claude-code-cli pi`。
+脚本使用独立 Core data-dir、Skill Library 与 Workspace，只保留 phase/标题长度和终态元数据。
+Pi 默认未开启思考时可用 `ROVAI_THINKING_PI_MODEL` 指定该机器已配置的原生模型 ID，在隔离成员上设置
+`thinking_level=high`；不修改全局配置。可选标题是否实际产生与原生 Runtime/模型有关，未观察到不能报告标题实测成功。
 
 ## Member CLI
 

@@ -1543,6 +1543,8 @@ fn normalize_claude_runtime_events(
     state: &mut ClaudeCodeStreamState,
 ) -> Result<Vec<ClaudeCodeRuntimeEvent>> {
     let mut normalized = Vec::new();
+    let root =
+        crate::runtime::is_root_output(event) && crate::runtime::is_root_output(&event["event"]);
     if event.get("type").and_then(Value::as_str) == Some("stream_event")
         && event.pointer("/event/type").and_then(Value::as_str) == Some("message_delta")
         && event.get("parent_tool_use_id").is_none_or(Value::is_null)
@@ -1673,6 +1675,9 @@ fn normalize_claude_runtime_events(
             if event.pointer("/event/type").and_then(Value::as_str) == Some("message_start") =>
         {
             validate_claude_stream_session(event, expected_session_id)?;
+            if !root {
+                return Ok(normalized);
+            }
             state.message_ordinal = state.message_ordinal.saturating_add(1);
             state.native_message_id = event
                 .pointer("/event/message/id")
@@ -1724,10 +1729,7 @@ fn normalize_claude_runtime_events(
             }
             if block_type == Some("thinking") {
                 validate_claude_stream_session(event, expected_session_id)?;
-                if event
-                    .get("parent_tool_use_id")
-                    .is_some_and(|value| !value.is_null())
-                {
+                if !root {
                     return Ok(normalized);
                 }
                 // The native message ID must survive reconnect/replay. A local
@@ -1740,9 +1742,12 @@ fn normalize_claude_runtime_events(
                     return Ok(normalized);
                 };
                 if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
-                    state
-                        .stream_thinking_items
-                        .insert(index, format!("claude-thinking:{native}:{index}"));
+                    let item_id = format!("claude-thinking:{native}:{index}");
+                    state.stream_thinking_items.insert(index, item_id.clone());
+                    normalized.push(ClaudeCodeRuntimeEvent {
+                        event_type: "agent.thought.started",
+                        payload: serde_json::json!({"itemId": item_id}),
+                    });
                 }
                 return Ok(normalized);
             }
@@ -1786,10 +1791,7 @@ fn normalize_claude_runtime_events(
             };
             if delta.get("type").and_then(Value::as_str) == Some("thinking_delta") {
                 validate_claude_stream_session(event, expected_session_id)?;
-                if event
-                    .get("parent_tool_use_id")
-                    .is_some_and(|value| !value.is_null())
-                {
+                if !root {
                     return Ok(normalized);
                 }
                 let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) else {
@@ -1846,6 +1848,12 @@ fn normalize_claude_runtime_events(
             validate_claude_stream_session(event, expected_session_id)?;
             if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
                 state.partial_tools.remove(&index);
+                if root && let Some(item_id) = state.stream_thinking_items.remove(&index) {
+                    normalized.push(ClaudeCodeRuntimeEvent {
+                        event_type: "agent.thought.completed",
+                        payload: serde_json::json!({"itemId": item_id}),
+                    });
+                }
             }
         }
         Some("assistant") => {
@@ -2032,6 +2040,12 @@ fn normalize_claude_runtime_events(
         }
         _ => {}
     }
+    if !root {
+        for item in &mut normalized {
+            item.payload["runtimeRootOutput"] = serde_json::json!(false);
+        }
+    }
+
     Ok(normalized)
 }
 
@@ -4033,15 +4047,31 @@ mod tests {
             )
             .is_empty()
         );
-        assert!(
-            emit(
-                &mut state,
-                json!({"type":"stream_event","session_id":session_id,
+        let started = emit(
+            &mut state,
+            json!({"type":"stream_event","session_id":session_id,
             "event":{"type":"content_block_start","index":0,
-                "content_block":{"type":"thinking","thinking":""}}})
-            )
-            .is_empty()
+                "content_block":{"type":"thinking","thinking":""}}}),
         );
+        assert_eq!(started[0].event_type, "agent.thought.started");
+        assert_eq!(started[0].payload.as_object().unwrap().len(), 1);
+        for marker in ["subagentId", "parent_tool_use_id", "replay", "snapshot"] {
+            for mut inner in [
+                json!({"type":"message_start","message":{"id":"child"}}),
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"PRIVATE_CHILD"}}),
+                json!({"type":"content_block_stop","index":0}),
+            ] {
+                inner["_meta"] = json!({marker: true});
+                assert!(
+                    emit(
+                        &mut state,
+                        json!({"type":"stream_event","session_id":session_id,"event":inner})
+                    )
+                    .is_empty()
+                );
+            }
+        }
         let first = emit(
             &mut state,
             json!({"type":"stream_event","session_id":session_id,
@@ -4060,6 +4090,17 @@ mod tests {
             second[0].payload["itemId"],
             "claude-thinking:native-message:0"
         );
+        assert!(emit(&mut state, json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"PRIVATE_SIGNATURE"}}})).is_empty());
+        let stopped = emit(
+            &mut state,
+            json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"content_block_stop","index":0}}),
+        );
+        assert_eq!(stopped[0].event_type, "agent.thought.completed");
+        assert_eq!(stopped[0].payload, started[0].payload);
+        assert!(emit(&mut state, json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"LATE"}}})).is_empty());
         let completed = emit(
             &mut state,
             json!({"type":"assistant","session_id":session_id,

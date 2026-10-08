@@ -103,6 +103,28 @@ pub fn normalize_event(message: &Value) -> (&'static str, Value) {
                 }),
             )
         }
+        Some("message_update")
+            if matches!(
+                message
+                    .pointer("/assistantMessageEvent/type")
+                    .and_then(Value::as_str),
+                Some("thinking_start" | "thinking_end")
+            ) =>
+        {
+            let event = if message
+                .pointer("/assistantMessageEvent/type")
+                .and_then(Value::as_str)
+                == Some("thinking_start")
+            {
+                "agent.thought.started"
+            } else {
+                "agent.thought.completed"
+            };
+            (
+                event,
+                json!({"contentIndex": message.pointer("/assistantMessageEvent/contentIndex")}),
+            )
+        }
         Some("message_update") => ("runtime.event", json!({"type": "message_update"})),
         Some("tool_execution_start") => (
             "runtime.action",
@@ -117,6 +139,7 @@ pub fn normalize_event(message: &Value) -> (&'static str, Value) {
         Some("tool_execution_update") => (
             "runtime.action",
             json!({
+                "runtimePhaseBoundary": false,
                 "toolCallId": message.get("toolCallId"),
                 "toolName": message.get("toolName"),
                 "status": "in_progress",
@@ -200,6 +223,12 @@ impl PiTextState {
         let event = message.get("type").and_then(Value::as_str);
         let assistant =
             message.pointer("/message/role").and_then(Value::as_str) == Some("assistant");
+        if assistant
+            && matches!(event, Some("message_start" | "message_end"))
+            && !crate::runtime::is_root_output(message)
+        {
+            return vec![];
+        }
         if event == Some("message_start") && assistant {
             self.message_ordinal += 1;
             self.assistant_active = crate::runtime::is_root_output(message);
@@ -224,17 +253,28 @@ impl PiTextState {
                 }).collect();
         }
         let (event_type, mut payload) = normalize_event(message);
-        if event_type == "agent.thought.delta"
-            && (!self.assistant_active || !crate::runtime::is_root_output(message))
+        if matches!(
+            event_type,
+            "agent.thought.delta" | "agent.thought.started" | "agent.thought.completed"
+        ) && (!self.assistant_active || !crate::runtime::is_root_output(message))
         {
             return vec![];
         }
-        if matches!(event_type, "agent.text.delta" | "agent.thought.delta") {
+        if matches!(
+            event_type,
+            "agent.text.delta"
+                | "agent.thought.delta"
+                | "agent.thought.started"
+                | "agent.thought.completed"
+        ) {
             let index = message
                 .pointer("/assistantMessageEvent/contentIndex")
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             payload["itemId"] = json!(self.item_id(index));
+        }
+        if !crate::runtime::is_root_output(message) {
+            payload["runtimeRootOutput"] = json!(false);
         }
         vec![(event_type, payload)]
     }
@@ -493,6 +533,18 @@ mod tests {
                 .unwrap()
                 .contains("PRIVATE_FULL_BLOCK")
         );
+        for (native, normalized) in [
+            ("thinking_start", "agent.thought.started"),
+            ("thinking_end", "agent.thought.completed"),
+        ] {
+            let frame = json!({"type":"message_update","assistantMessageEvent":{"type":native,"contentIndex":1,"content":"PRIVATE_SIGNATURE"}});
+            let events = state.normalize(&frame);
+            assert_eq!(events[0].0, normalized);
+            assert_eq!(events[0].1["itemId"], thought[0].1["itemId"]);
+            assert_eq!(events[0].1.as_object().unwrap().len(), 2);
+        }
+        assert!(state.normalize(&json!({"type":"message_end","parent_tool_use_id":"child","message":{"role":"assistant","content":[{"type":"text","text":"child"}]}})).is_empty());
+        assert!(!state.normalize(&thinking).is_empty());
         for field in ["subagentId", "parent_tool_use_id", "replay", "snapshot"] {
             let mut excluded = thinking.clone();
             excluded["assistantMessageEvent"]["partial"][field] = json!(true);
@@ -643,6 +695,8 @@ mod tests {
             "args": {"line": 10}
         });
         reconcile_terminal_tool_message(&mut update, &start);
+        let (_, progress) = normalize_event(&update);
+        assert_eq!(progress["runtimePhaseBoundary"], false);
         let mut terminal = json!({
             "type": "tool_execution_end",
             "toolCallId": "tool-read",

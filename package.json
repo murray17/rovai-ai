@@ -168,6 +168,7 @@
     "review:host-web-parity": "node scripts/review-host-web-parity.mjs",
     "review:remote-connection": "node scripts/review-remote-connection.mjs",
     "test:remote-connection-review": "tsc --noEmit -p scripts/fixtures/remote-connection/tsconfig.json && node --test scripts/lib/remote-connection-review.test.mjs",
+    "test:run-continuation-ui": "node --test scripts/lib/run-continuation.test.mjs",
     "test:host-web-parity": "node --test scripts/lib/host-web-parity.test.mjs",
     "test:host-web-mobile": "node --test scripts/lib/host-web-mobile.test.mjs",
     "test:member-creation": "node --test scripts/lib/member-creation.test.mjs",

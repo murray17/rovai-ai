@@ -3,13 +3,13 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-delivery-and-agent-run-boundaries
 status: accepted
-last_updated: 2026-09-24
+last_updated: 2026-10-08
 ---
 
 # Public Camp Message、Delivery 与 AgentRun
 
-本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v24](../contracts/camp-message-send-v24.md)、
-[Message Delivery v10](../contracts/message-delivery-v10.md)、[ContextManifest 30](../contracts/context-manifest-evidence-v30.md)
+本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v25](../contracts/camp-message-send-v25.md)、
+[Message Delivery v11](../contracts/message-delivery-v11.md)、[ContextManifest 30](../contracts/context-manifest-evidence-v30.md)
 与 [Camp History v11](../contracts/camp-history-v11.md)。Single Chat 不使用本主链。
 
 ## 三类事实
@@ -91,7 +91,7 @@ completion 的协调循环。
 `camp_message_delivery` 全部投影到 `messageDeliveries`，不按消息作者过滤。用户消息没有 `sourceAgentRunId` 仍是
 同一 waiting 队列事实；Renderer 可在 claim 前显示只读排队卡。完整字段与 coverage 边界见
 [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)，展示见
-[Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md)。
+[Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md)。
 
 `RUN_INPUT` 与 quote-source 沿用冻结输入可见性；显式 read/search 使用 Camp History v11 的主动查询可见性。公共 Camp 历史对所有受认证
 队员可读；目标 Camp membership 只控制参与、寻址与执行，不是历史 ACL。外层消息可见不代表它引用的 source 可见；
@@ -101,7 +101,7 @@ completion 的协调循环。
 ## 终态、停止与恢复
 
 Run 终态按输入 Delivery 分别写入 `settled | failed | cancelled`。普通 Stop 以精确 `agentRunId + version` CAS，只停止被点击
-的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。产品没有业务重试入口。Runtime 明确未接受且无
+的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v1](../contracts/agent-run-continuation-v1.md) 提交新的独立授权。Runtime 明确未接受且无
 副作用风险时，可以恢复同一冻结 Run 的运输；accepted/unknown 永不作为未执行重新投递。
 
 Run 显示失败不等于旧执行已隔离。Scheduler 在 claim 前分别检查同一 Camp+Agent 的旧执行隔离和实际共享
@@ -131,7 +131,7 @@ Migration 172/schema 122 只扩展新公开 Formatter/Manifest 29、Profile 9 �
 
 Agent Send 在共享解析模块识别行首连续提及中的稳定 `@Principal`，并与显式 `mentionUser` 合并为当前用户结构化身份。
 PublicOnly 只抑制 Agent 路由，仍允许用户提及；通知沿用当前原子、消息局部和幂等投影。显示名称由当前用户资料解析，
-不持久化到身份字段。精确位置、排除规则与未改变的 Runtime final/quote 来源见 [Send v24](../contracts/camp-message-send-v24.md)。
+不持久化到身份字段。精确位置、排除规则与未改变的 Runtime final/quote 来源见 [Send v25](../contracts/camp-message-send-v25.md)。
 
 ## 公开执行查询
 
@@ -140,3 +140,5 @@ PublicOnly 只抑制 Agent 路由，仍允许用户提及；通知沿用当前�
 公开结果统一为 items，不暴露内部来源分类；未形成 Run 的队列条目仅以 null agentRunId 和 queued 表达。
 输入数量使用全部冻结关联，首条预览按 ordinal；队列使用当前队首，不保证未来一次 claim 会处理整组。
 本查询不建立快照分页、缓存或调度管理机制；动态页间变化按命令说明保留明确限制。
+
+用户主动继续复用此队列，但单独成批，普通消息合批不跨过续做请求；旧 Run 与旧投递终态不变。

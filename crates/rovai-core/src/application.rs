@@ -844,6 +844,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "missions.changes"
             | "missions.fileDiff"
             | "agentRuns.cancel"
+            | "agentRuns.continue"
             | "singleChat.sourceAttachments.addFromPath"
             | "singleChat.composerDraft.removeAttachment"
             | "singleChat.pendingInputs.addSourceAttachmentFromPath"
@@ -1133,6 +1134,7 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "camp.messages.withdraw"
             | "userAutomation.camp.send"
             | "agentRuns.cancel"
+            | "agentRuns.continue"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
     )
@@ -1146,6 +1148,7 @@ fn navigation_invalidation_emitted_at_commit_boundary(method: &str) -> bool {
             | "camp.messages.send"
             | "camp.messages.withdraw"
             | "agentRuns.cancel"
+            | "agentRuns.continue"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
     )
@@ -2377,7 +2380,7 @@ struct Core {
     agent_run_cancellation_notify: Notify,
     delivery_batch_scheduler_notify: Notify,
     agent_run_cleanup_inflight: Mutex<HashSet<ActiveExecutionKey>>,
-    runtime_phases: Mutex<HashMap<String, (i64, String)>>,
+    runtime_phases: Mutex<HashMap<String, (i64, crate::runtime_thinking::RuntimeThinking)>>,
     network_recovery: Mutex<NetworkRecoveryQueue>,
     network_recovery_notify: Notify,
     pending_execution_recovery: Mutex<()>,
@@ -10041,6 +10044,28 @@ impl Core {
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "agentRuns.continue" => {
+                let params: UserCommandParams<crate::run_continuation::ContinueAgentRunCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = crate::run_continuation::continue_agent_run(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                let should_notify = execution.result.status == CommandResultStatus::Applied;
+                drop(database);
+                if should_notify {
+                    self.delivery_batch_scheduler_notify.notify_one();
+                    emit(
+                        &self.output,
+                        "agent_run.continuation_requested",
+                        json!({"threadId":camp_id}),
+                    );
+                    emit_navigation_invalidated(&self.output, "agentRuns.continue", Some(&camp_id));
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "agentRuns.cancel" => {
                 let params: UserCommandParams<CancelAgentRunCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -10255,17 +10280,19 @@ impl Core {
                     )?)?
                 };
                 let read_ms = read_started_at.elapsed().as_millis();
+                let phase_epoch = database.connection().query_row(
+                    "SELECT CASE WHEN status = 'running' AND cancel_requested_at IS NULL THEN execution_epoch END FROM agent_run WHERE id = ?1",
+                    [&params.agent_run_id], |row| row.get::<_, Option<i64>>(0),
+                ).ok().flatten();
                 drop(database);
                 let serialization_started_at = Instant::now();
                 let mut value = changes;
-                if let Some((_, phase)) = self
-                    .runtime_phases
-                    .lock()
-                    .await
-                    .get(&params.agent_run_id)
-                    .cloned()
+                if let Some((epoch, phase)) =
+                    self.runtime_phases.lock().await.get(&params.agent_run_id)
+                    && Some(*epoch) == phase_epoch
                 {
-                    value["runtimePhase"] = Value::String(phase);
+                    value["runtimePhase"] = json!(phase.phase());
+                    value["runtimeThinkingTitle"] = json!(phase.title());
                 }
                 let serialization_ms = serialization_started_at.elapsed().as_millis();
                 eprintln!(
@@ -10322,17 +10349,19 @@ impl Core {
                     )?)?
                 };
                 let read_ms = read_started_at.elapsed().as_millis();
+                let phase_epoch = database.connection().query_row(
+                    "SELECT CASE WHEN status = 'running' AND cancel_requested_at IS NULL THEN execution_epoch END FROM agent_run WHERE id = ?1",
+                    [&params.agent_run_id], |row| row.get::<_, Option<i64>>(0),
+                ).ok().flatten();
                 drop(database);
                 let serialization_started_at = Instant::now();
                 let mut value = page;
-                if let Some((_, phase)) = self
-                    .runtime_phases
-                    .lock()
-                    .await
-                    .get(&params.agent_run_id)
-                    .cloned()
+                if let Some((epoch, phase)) =
+                    self.runtime_phases.lock().await.get(&params.agent_run_id)
+                    && Some(*epoch) == phase_epoch
                 {
-                    value["runtimePhase"] = Value::String(phase);
+                    value["runtimePhase"] = json!(phase.phase());
+                    value["runtimeThinkingTitle"] = json!(phase.title());
                 }
                 let serialization_ms = serialization_started_at.elapsed().as_millis();
                 eprintln!(
@@ -11784,18 +11813,26 @@ impl Core {
                 if !has_waiting_delivery_batch_work(&database)? {
                     Vec::new()
                 } else {
+                    let event_boundary: i64 = database.connection().query_row(
+                        "SELECT COALESCE(MAX(global_sequence), 0) FROM event_log",
+                        [],
+                        |row| row.get(0),
+                    )?;
                     let runs = claim_waiting_delivery_batches(
                         &mut database,
                         DELIVERY_BATCH_SCHEDULER_PAGE_LIMIT,
                     )?;
                     let mut statement = database.connection().prepare(
-                        "SELECT DISTINCT camp_id FROM agent_run WHERE id IN (SELECT value FROM json_each(?1)) AND camp_id IS NOT NULL"
+                        "SELECT DISTINCT camp_id FROM agent_run WHERE id IN (SELECT value FROM json_each(?1)) AND camp_id IS NOT NULL
+                         UNION SELECT camp_id FROM event_log WHERE global_sequence > ?2
+                           AND event_type='agent_run.continuation_cancelled' AND camp_id IS NOT NULL"
                     )?;
                     changed_camps.extend(
                         statement
-                            .query_map([serde_json::to_string(&runs)?], |row| {
-                                row.get::<_, String>(0)
-                            })?
+                            .query_map(
+                                rusqlite::params![serde_json::to_string(&runs)?, event_boundary],
+                                |row| row.get::<_, String>(0),
+                            )?
                             .collect::<rusqlite::Result<Vec<_>>>()?,
                     );
                     runs
@@ -14706,6 +14743,10 @@ impl Core {
         let thread_id = match thread {
             Ok(thread_id) => thread_id,
             Err(error) => {
+                if resumable_session_id.is_some() {
+                    let mut database = self.database.lock().await;
+                    crate::run_continuation::guard_session_fallback(&mut database, execution)?;
+                }
                 if resumable_session_id.is_some()
                     && resume_disposition == NativeSessionResumeDisposition::Controlled
                 {
@@ -14926,6 +14967,10 @@ impl Core {
                         == Some(pi::PiActivationFailureKind::ResumeContinuityLost) =>
             {
                 let failure = classify_native_resume_failure(&error);
+                {
+                    let mut database = self.database.lock().await;
+                    crate::run_continuation::guard_session_fallback(&mut database, execution)?;
+                }
                 {
                     let mut database = self.database.lock().await;
                     if resume_disposition == NativeSessionResumeDisposition::Controlled {
@@ -16335,6 +16380,10 @@ impl Core {
         if binding_credential.native_session_id.is_some()
             && session_continuation == acp::AcpSessionContinuation::New
         {
+            {
+                let mut database = self.database.lock().await;
+                crate::run_continuation::guard_session_fallback(&mut database, execution)?;
+            }
             binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
             session_continuation = acp::AcpSessionContinuation::New;
         }
@@ -16376,6 +16425,10 @@ impl Core {
                     && error.downcast_ref::<RuntimeFailureError>().is_none() =>
             {
                 let failure = classify_native_resume_failure(&error);
+                {
+                    let mut database = self.database.lock().await;
+                    crate::run_continuation::guard_session_fallback(&mut database, execution)?;
+                }
                 eprintln!(
                     "{} Native Session {:?} failed for AgentRun {}; continuity is lost and a new Session will be created: {error:#}",
                     execution.runtime.adapter_kind.as_str(),
@@ -20586,6 +20639,22 @@ async fn process_agent_run_acp_message(
         return;
     }
     if adapter_kind == AdapterKind::CopilotCli && method == "github.com/copilot/sessionEvent" {
+        if let Some(intent) = crate::runtime_thinking::copilot_intent(&params) {
+            if let Err(error) = persist_runtime_evidence(
+                core,
+                agent_run_id,
+                execution_epoch,
+                None,
+                "agent.thinking.title",
+                &intent,
+            )
+            .await
+            {
+                eprintln!(
+                    "failed to update Copilot thinking status for AgentRun {agent_run_id}: {error:#}"
+                );
+            }
+        }
         // Drop private events before Evidence or Renderer IPC.
         if usage
             .iter()
@@ -20801,10 +20870,17 @@ fn normalize_acp_event_with_completion(
                 "sessionId": params.get("sessionId"),
                 "messageId": message_id,
                 "messageIdSource": message_id_source,
+                "runtimeRootOutput": crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update),
                 }),
             )
         }
-        Some("agent_thought_chunk") => ("agent.thought.delta", update),
+        Some("agent_thought_chunk") => {
+            let root =
+                crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update);
+            let mut payload = update;
+            payload["runtimeRootOutput"] = json!(root);
+            ("agent.thought.delta", payload)
+        }
         Some("tool_call") | Some("tool_call_update") => {
             let public_command =
                 acp::public_acp_shell_command(adapter_kind, update.get("rawInput"))
@@ -20841,6 +20917,7 @@ fn normalize_acp_event_with_completion(
                 });
             let public_kind = native_kind;
             let mut payload = json!({
+                "runtimeRootOutput": crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update),
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
                 "toolName": update.get("toolName"),
@@ -21308,20 +21385,16 @@ async fn persist_runtime_evidence(
     event_type: &str,
     payload: &Value,
 ) -> Result<Option<AgentRunExecutionEvidence>> {
-    if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
+    let observes_phase = crate::runtime_thinking::RuntimeThinking::observes(event_type, payload);
+    let durable = ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type);
+    if !durable && !observes_phase {
         return Ok(None);
     }
-    let runtime_phase = runtime_phase_transition(event_type, payload);
     let mut database = core.database.lock().await;
-    let phase_admitted = if runtime_phase.is_some() {
-        database.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_run WHERE id = ?1 AND execution_epoch = ?2 AND status IN ('running', 'waiting') AND cancel_requested_at IS NULL)",
-            rusqlite::params![agent_run_id, execution_epoch],
-            |row| row.get::<_, bool>(0),
-        )?
-    } else {
-        false
-    };
+    let phase_admitted = observes_phase && database.connection().query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_run WHERE id = ?1 AND execution_epoch = ?2 AND status = 'running' AND cancel_requested_at IS NULL)",
+        rusqlite::params![agent_run_id, execution_epoch], |row| row.get::<_, bool>(0),
+    )?;
     let recorded = ExecutionEvidenceService.record_runtime_event_with_managed_output_root(
         &mut database,
         &ManagedBlobStore::new(&core.data_dir),
@@ -21341,58 +21414,44 @@ async fn persist_runtime_evidence(
             |row| row.get::<_, bool>(0),
         ).unwrap_or(false);
     let evidence = recorded.map(RecordedExecutionEvidence::into_evidence);
-    drop(database);
-    if phase_admitted && let Some(phase) = runtime_phase {
+    if phase_admitted {
         let mut phases = core.runtime_phases.lock().await;
-        let changed = phases
+        let fresh = phases
             .get(agent_run_id)
-            .is_none_or(|(epoch, current)| *epoch != execution_epoch || current != phase);
-        if changed {
-            phases.insert(
-                agent_run_id.to_string(),
-                (execution_epoch, phase.to_string()),
+            .is_none_or(|(epoch, _)| *epoch != execution_epoch);
+        let entry = phases.entry(agent_run_id.to_string()).or_insert_with(|| {
+            (
+                execution_epoch,
+                crate::runtime_thinking::RuntimeThinking::default(),
+            )
+        });
+        if entry.0 != execution_epoch {
+            *entry = (
+                execution_epoch,
+                crate::runtime_thinking::RuntimeThinking::default(),
             );
         }
+        let changed = entry.1.observe(event_type, payload) || fresh;
+        let phase = entry.1.phase();
+        let title = entry.1.title().map(str::to_owned);
         drop(phases);
         if changed {
             emit(
                 &core.output,
                 "agent_run.runtime_phase_changed",
                 json!({
-                    "agentRunId": agent_run_id,
-                    "executionEpoch": execution_epoch,
-                    "phase": phase,
+                    "agentRunId": agent_run_id, "executionEpoch": execution_epoch,
+                    "phase": phase, "thinkingTitle": title,
                 }),
             );
         }
     }
+    drop(database);
     if should_reproject {
         core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
             .await;
     }
     Ok(evidence)
-}
-
-fn runtime_phase_transition(event_type: &str, payload: &Value) -> Option<&'static str> {
-    let native_reasoning =
-        payload.pointer("/item/type").and_then(Value::as_str) == Some("reasoning");
-    if native_reasoning {
-        return Some(if event_type == "activity.completed" {
-            "executing"
-        } else {
-            "thinking"
-        });
-    }
-    if matches!(
-        event_type,
-        "agent.thought.delta"
-            | "agent.thought.block"
-            | "agent.reasoning.summary.delta"
-            | "agent.reasoning.summary.block"
-    ) {
-        return Some("thinking");
-    }
-    ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type).then_some("executing")
 }
 
 fn observation_hook_compaction_display_event(
@@ -21480,31 +21539,6 @@ async fn persist_prepared_runtime_evidence_batch(
         prepared,
     )?;
     drop(database);
-    let has_public_update = recorded.iter().any(Option::is_some);
-    if has_public_update {
-        let mut phases = core.runtime_phases.lock().await;
-        let changed = phases
-            .get(agent_run_id)
-            .is_none_or(|(epoch, phase)| *epoch != execution_epoch || phase != "executing");
-        if changed {
-            phases.insert(
-                agent_run_id.to_string(),
-                (execution_epoch, "executing".to_string()),
-            );
-        }
-        drop(phases);
-        if changed {
-            emit(
-                &core.output,
-                "agent_run.runtime_phase_changed",
-                json!({
-                    "agentRunId": agent_run_id,
-                    "executionEpoch": execution_epoch,
-                    "phase": "executing",
-                }),
-            );
-        }
-    }
     Ok(recorded
         .into_iter()
         .map(|recorded| recorded.map(RecordedExecutionEvidence::into_evidence))
@@ -24707,7 +24741,8 @@ fn emit_navigation_invalidated(
                 "reason": reason, "threadId": camp_id,
                 "scope": if reason.starts_with("agent_run.") || matches!(reason,
                     "navigation.campViewed" | "delivery_batch.claimed" | "camps.rename" | "camps.members.add" | "camps.members.remove"
-                    | "camps.changeDefaultLead" | "camps.reconcileDefaultLead" | "agentRuns.cancel") { "camp" } else { "group" }
+                    | "camps.changeDefaultLead" | "camps.reconcileDefaultLead" | "agentRuns.cancel"
+            | "agentRuns.continue") { "camp" } else { "group" }
             }),
             None => json!({ "reason": reason, "scope": "all" }),
         },
@@ -29711,6 +29746,7 @@ done
             "camp.messages.withdraw",
             "userAutomation.camp.send",
             "agentRuns.cancel",
+            "agentRuns.continue",
         ] {
             assert!(request_invalidates_navigation(method), "{method}");
         }
@@ -29732,6 +29768,7 @@ done
             "camps.discardPending",
             "camp.messages.send",
             "camp.messages.withdraw",
+            "agentRuns.continue",
         ] {
             assert!(
                 navigation_invalidation_emitted_at_commit_boundary(method),

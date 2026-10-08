@@ -23,7 +23,7 @@ export function message(sequence: number, body: string, authorType: 'user' | 'ag
     authorId: authorType === 'user' ? 'local_user' : agents[0].agentId, sourceAgentRunId: null,
     body, content: [{ kind: 'text', text: body }], quotes: [], attachments: [],
     addressMode: 'default', addressedAgentIds: [agents[0].agentId], replyToThreadMessageId: null,
-    threadTurnId: null, presentation: null, createdAt: now }
+    threadTurnId: null, presentation: null, withdrawn: false, canWithdraw: false, version: 1, createdAt: now }
 }
 export const run: AgentRunView = {
   id: 'review-run', threadTurnId: 'review-turn', conversationId: 'review-conversation', agentId: agents[0].agentId,
@@ -31,7 +31,7 @@ export const run: AgentRunView = {
   status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null,
   terminalResolutionSource: null, terminalReasonCode: null, failure: null, runtimeModel: null,
   executionEpoch: 1, permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 1,
-  a2aParentAgentRunId: null, a2aRootAgentRunId: 'review-run', a2aDepth: 0, executionEvidenceCount: 2,
+  a2aParentAgentRunId: null, a2aRootAgentRunId: 'review-run', a2aDepth: 0, executionEvidenceCount: 2, executionEvidenceChangeSequence: 2,
   hasUnsettledExternalEffects: false, workspace: { path: workspacePath }, startingGitObservation: null, endingGitObservation: null,
   version: 1, createdAt: now, startedAt: now, endedAt: null, updatedAt: now
 }

@@ -1,16 +1,20 @@
 import type { SingleChatRunView } from '@contracts'
-import type { ExecutionProgressItem } from './ui-model'
+import { runtimeThinkingTitleText, type ExecutionProgressItem } from './ui-model'
+import { executionHasActiveCompaction } from './execution-tool-grouping'
 import { uiAttribute } from './interface-language'
 
-export function executionInitialFeedback(
+export function executionPhaseFeedback(
   status: SingleChatRunView['status'],
   items: readonly ExecutionProgressItem[],
   hasFinal = false,
-  runtimePhase?: 'thinking' | 'executing'
+  runtimePhase?: 'thinking' | 'executing',
+  runtimeThinkingTitle?: string | null
 ): string | null {
-  if (hasFinal || items.some((item) => item.kind === 'narration' || item.kind === 'plan' || item.kind === 'tool')) return null
+  if (hasFinal || executionHasActiveCompaction(items)) return null
+  if (status === 'running' && runtimePhase === 'thinking') return runtimeThinkingTitleText(runtimeThinkingTitle) ?? uiAttribute('思考中')
+  if (items.some((item) => item.kind === 'narration' || item.kind === 'plan' || item.kind === 'tool')) return null
   if (status === 'queued') return uiAttribute('连接中')
-  if (status === 'running') return runtimePhase === 'thinking' ? uiAttribute('思考中') : uiAttribute('执行中')
+  if (status === 'running') return uiAttribute('执行中')
   return null
 }
 
@@ -38,5 +42,5 @@ export function executionRunSummary(run: Pick<SingleChatRunView, 'status' | 'sta
   if (run.status === 'cancelled') return uiAttribute('你在 {0}后停止了运行', duration)
   if (run.status === 'failed') return uiAttribute('运行 {0}后失败', duration)
   if (run.status === 'waiting') return uiAttribute('等待继续')
-  return executionInitialFeedback(run.status, []) ?? uiAttribute('等待继续')
+  return executionPhaseFeedback(run.status, []) ?? uiAttribute('等待继续')
 }

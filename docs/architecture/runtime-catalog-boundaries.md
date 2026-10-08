@@ -47,7 +47,7 @@ selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并�
 `command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
 Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
 原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
-[V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)仅在 macOS arm64 开放开发 Preview，其余平台
+[V1.72-D20](../versions/v1.72/decisions.md#v1-72-d20)仅在 macOS arm64 开放开发 Preview，其余平台
 NotQualified；没有 qualification evidence，不声称 First-Class。旧 headless 传输只保留研究/兼容测试。
 
 Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
@@ -99,7 +99,7 @@ Hub 用实际认证协议和原生 Session 探测判断能力，不设版本白�
 匹配 requestId 的明确原生失败与传输结果未知分开；公开错误只保留封闭码、分类和固定安全说明，不自动重发。
 原生费用、缺失 token 桶和无法确认的压缩事件保持未知。实现、真实验证和剩余差异见
 [Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md)；取舍见
-[V1.72-D22](../versions/v1.72/decisions.md#v1-72-d22)，上下文见
+[V1.72-D23](../versions/v1.72/decisions.md#v1-72-d23)，上下文见
 [Native Hub 输入说明](../versions/v1.72/model-context-change-cline-native-hub.md)。
 已退役 ACP 的 Rule/Plugin 历史验收见 [System revision 2](../versions/v1.72/model-context-change-cline-system.md)。
 

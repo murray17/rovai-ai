@@ -339,6 +339,7 @@ mod tests {
         // application rows and frozen evidence through rollback and reopen.
         for source_schema in [129, 130] {
             let mut database = crate::test_support::fresh_schema_database_at(&directory);
+            pending_draft::downgrade_for_test(database.connection());
             if source_schema == 129 {
                 member_creation::downgrade_for_test(database.connection());
             }

@@ -333,6 +333,7 @@ fn is_control_request(method: &str) -> bool {
         method,
         "core.shutdown"
             | "agentRuns.cancel"
+            | "agentRuns.continue"
             | "singleChat.end"
             | "runtime.pendingExecution.cancel"
             | "action.approvals.resolve"

@@ -81,7 +81,7 @@ export function runtimeCompactionActivityStatus(
   return 'recorded'
 }
 
-export function executionHasActiveCompaction(items: ExecutionProgressItem[]): boolean {
+export function executionHasActiveCompaction(items: readonly ExecutionProgressItem[]): boolean {
   return items.some((item) =>
     item.kind === 'compaction' && item.compaction.phase === 'started'
   )

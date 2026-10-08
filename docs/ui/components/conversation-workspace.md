@@ -14,7 +14,7 @@ last_updated: 2026-10-07
   发送失败或结果未知保留当前内容，确认发送成功才清空已发送快照。
 - 等待阶段在执行台展示由 Delivery 支撑的“排队消息”卡，但不伪装尚不存在的 AgentRun，也不提供 Run 停止入口。
   Scheduler claim 后才出现真实 Run，并由真实 Run 接管后续状态与停止语义。
-- 执行区“停止”只 CAS 当前精确 Run。没有公屏通用停止、队列暂停/恢复、Camp 全部停止、业务重试或手工放行入口；终态后队列按正常规则继续。
+- 执行区“停止”只 CAS 当前精确 Run。没有公屏通用停止、队列暂停/恢复、Camp 全部停止或手工放行入口；终态后队列按正常规则继续。
 - accepted/outcome-unknown 对用户显示普通红色失败，不显示“结果未知”产品状态；诊断和 evidence 仍保留内部真实分类。旧执行尚未隔离时，后继消息继续显示等待，不制造必败 Run。
 - 本地用户消息仅在首次目标 claim 前显示撤回；成功后时间线可显示“你撤回了一条消息”。Agent 主动读取可在 claim 前看到原文，撤回后 `camp.read` 仅在原序号返回 `Message withdrawn` 状态项，搜索不再命中原文。
 - Channel-bound Camp 的 Agent 公共发言默认外发；没有 `--to-channel` 或 Run 级外发开关。
@@ -24,10 +24,10 @@ last_updated: 2026-10-07
   Structured Content，也不进入复制、选文引用、搜索、`camp.read` 或渠道正文；显式寻址、广播、零/多接收者和
   Agent 发言不增加前缀。
 
-字段与状态见 [Message Delivery v10](../../contracts/message-delivery-v10.md)、
+字段与状态见 [Message Delivery v11](../../contracts/message-delivery-v11.md)、
 [Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)和
 [Camp History v10](../../contracts/camp-history-v10.md)。本文件后续仍描述的 Core-owned public Draft/Pending、
-CampTurn Stop、Gather 或业务重试均为历史交互，不再适用于当前 public Camp；本机草稿与 recipient
+CampTurn Stop、Gather 或恢复旧 Run 状态的重试均为历史交互，不再适用于当前 public Camp；本机草稿与 recipient
 continuation 是当前 Desktop 行为。
 
 ## 成员 Fast 响应模式
@@ -555,7 +555,7 @@ Desktop 与宽屏 Web 的展开正文首尾、主要过程项间距及相邻 Run
 滚动容器为键盘焦点留出标题安全区，不改变跟随最新、折叠、输入清单或 exact Run 停止语义。
 总览中的队员头像固定为 20×20px，不随 flex 收缩拉伸。左侧状态节点与卡头首行垂直居中并跟随本卡标题，
 展开与停止操作距卡片右边保留 9px。字段与验收边界见
-[Run Process Detail Surface v43](../../contracts/run-process-detail-surface-v43.md)。
+[Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
 
 执行浮层入口、右侧标签、消息区“处理中”回执和底部标题共用同一 24×24 心跳路径与 1.65 描边；
 queued 回执的时钟及各执行状态图形不变。
@@ -597,12 +597,12 @@ Renderer 以公开消息和 Delivery ID 跟踪刚提交输入；Scheduler claim 
 不创建 pending-input 占位，也不夺走 Composer 焦点。
 删除待发送消息、无执行发布或离开 Camp 会消费或丢弃意图；其他窗口的发送和后台新 Run 不触发该行为。
 
-单聊与执行台的发送确认前和排队显示“连接中”；开始处理但尚未输出时，未收到明确 phase 显示“执行中”，收到 `thinking` phase 显示“思考中”。正文、计划、工具或 final 到达即移除初始等待提示。执行台在最新阅读窗口的已结算尾部 Tool 组若再次收到 `thinking` phase，且 Run 仍运行、没有活动 Tool／压缩或后续正文、计划、final，则组收口并在尾部显示一条瞬时“思考中”；新正文、计划、Tool、等待／停止或 Run 终态到来时撤下，不留下历史思考条目。单聊仍不在后续正文尾部追加普通等待提示。
-Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、缓存或 disclosure；仅消费不含正文的
-`thinking | executing` phase 来切换上述等待反馈，并把 phase edge 作为匿名公开正文的分段边界。
+单聊与执行台的发送确认前和排队显示“连接中”；开始处理但尚未输出时，未收到明确 phase 显示“执行中”，收到 `thinking` phase 显示“思考中”。正文、计划、工具或 final 到达即移除初始等待提示。执行台与单聊在最新阅读窗口再次收到根 `thinking` phase 时，若 Run 仍运行、没有活动压缩或 final，在正文、计划或 Tool 后均显示一条瞬时思考提示。活动 Tool 保留真实运行状态，可与根思考并列；已结算尾组收口。Codex/Copilot 的已准入原生短标题直接替换“思考中”，缺失或无效时回退；新正文、计划、根 Tool、等待／停止或 Run 终态到来时撤下，不留下历史思考条目。折叠与 Mobile 使用相同标题规则，详见 [Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
+Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、缓存或 disclosure；仅消费不含思考正文的
+`thinking | executing` phase 与独立准入的短标题来切换上述反馈，并把 phase edge 作为匿名公开正文的分段边界。
 Camp 执行卡片的普通等待提示与正文共用字号、行高和文字起点，加载图标放在提示文字后；底部、桌面浮层和手机端切入首行正文时不改变卡片位置或单行高度。
 运行中 Run 卡片保留原有耗时；终态卡片有用量字段时仅显示 `xxk` 入口，点击的气泡显示 Input Token、Output Token、Cache Read、Cache Write 四项及分隔后的执行耗时。缺失字段显示未知，不加用量合计行、Run 编号或摘要。仅成功且 Input/Output 完整结算时计算入口值 `Input + Output`，Cache 不再叠加。完全没有用量字段的终态卡片使用时钟入口单独查看耗时；迟到用量到达后切换成 token 入口。执行台标题右侧的弱化圆环默认并排显示一位小数百分比，与气泡保持一致（未知为 `—`），读取当前队员 Camp Conversation 的原生 Session 上下文；切换同一会话的 Run 卡片不改变圆环归属。气泡只显示 `used / window` 和比例，单有窗口不显示 `0%`；只有可信原生比例时显示该比例，数量仍为 `— / —`，不反推 used 或窗口。来源、栅栏和字段语义见 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md)。
-需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出时显示“执行中”。成功后才显示“工作了 {时长}”
+需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出且没有思考反馈时显示“执行中”。成功后才显示“工作了 {时长}”
 并自动折叠过程；失败保留明确失败摘要及可操作错误，取消保持停止语义。正文或工具首次到达、单条工具返回、步骤组
 收口都不能触发整轮耗时总结。关闭 Run 后卸载详情；再次打开读取最新窗口。组跨页按稳定操作身份保留展开意图。
 
@@ -628,7 +628,7 @@ Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ comm
 纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；单记录生命周期
 改用同 Run、同 epoch、紧邻序号和精确结果 digest 证明关联。混合命令、帮助、
 提前失败或不确定关联保留。底层 Evidence 和 Canonical 身份不变。完整规则见
-[Run Process Detail Surface v43](../../contracts/run-process-detail-surface-v43.md)。
+[Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
 
 新 operation 的 started/progress/terminal 按稳定 Evidence ID 合并为一行；Renderer 只接受更高
 `revision/changeSequence`，不以记录数量或固定展示 `sequence` 判断内容是否变化。终态后的输入补齐、结果更新和
@@ -642,7 +642,7 @@ Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ comm
 “<最近一条指令>”。真正收口后只显示 `已完成 x 个步骤`；`x` 统计成功、失败、停止、跳过和结果未知在内的
 全部已结算逻辑操作，各终态不再追加独立数量，具体结果由展开后的 Tool 行表达。分页读取沿用相同的执行结果摘要，不改成“已载入 x 项执行记录”；组摘要统计该组完整的可见逻辑操作，不表示整轮总量；未展开的子项不读取。主线和组内分别维护已载入范围。
 `x` 按去重后的可见逻辑操作计数；同一 Built-in 与已关联 Shell 载体计一步，started/result/delta 和一个 Activity 的多文件行不重复计数。
-精确计数语义见 [Run Process Detail Surface v43](../../contracts/run-process-detail-surface-v43.md)。
+精确计数语义见 [Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。
 
 Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“已完成 x 个步骤”。
 它复用普通 command 的桌面 28px 行、最右侧状态 icon、文字后展开提示与结果文本框，并保留独立压缩 SVG；同一
@@ -654,7 +654,7 @@ elapsed、Runtime/事件/Session identity、trigger 与 phase 单独存在时保
 非终态 Run 的 `started` 显示 running 状态并暂停重复的底部进行中提示，`completed` 使用完成状态。
 
 当已投影的最后一个 process item 是 Tool 组且父 Run 仍为 running 时，该尾组在当前 Tool 已结算后继续保持
-provisional 活动态，显示“<最近一条指令>”，也不在下方追加普通等待提示；唯一例外是收到 `thinking` phase 且 Run 内已无活动 Tool 时，组显示“已完成 x 个步骤”，下方由瞬时“思考中”接替。此处活动态表达父 Run
+provisional 活动态，显示“<最近一条指令>”，也不在下方追加普通等待提示；收到根 `thinking` phase 时，已结算组显示“已完成 x 个步骤”，下方由瞬时思考反馈接替；仍有活动 Tool 时保留其真实状态，并可同时显示根思考反馈。此处活动态表达父 Run
 仍在运行，不改写上一条 Tool 的真实终态；下一条连续 Tool 到达后只在同一组原位替换为新指令。
 narration、plan、diagnostic、`thinking` phase、waiting/cancelling 或 Run 终态才构成真实收口边界。该规则按 process/Run 事实
 判断，不使用时间防抖。
@@ -1241,3 +1241,12 @@ Pending 行只展示正文，不展示附件或附件数量；纯附件摘要留
 来源定位使用柔和底色覆盖选区涉及的完整视觉行，包括首尾只选择部分字符的行；其余行和整条消息底色不变。约 3 秒后淡出，尊重 reduced motion，宽度变化重算。来源已变化或无法唯一定位时明确反馈并保留引用文字，不猜测重复句子位置。装饰不妨碍继续选文与复制。
 
 字段、快照、owner、预算及安全边界由 [Message Quotes v1](../../contracts/message-quotes-v1.md)拥有。
+
+## 用户主动继续执行
+
+公开 batch Run 的失败／停止卡片沿用现有布局，在折叠操作旁提供 24×24 的纯图标按钮。
+title 和 aria-label 为“继续执行”，键盘可达；提交中禁用。系统操作记录、waiting 请求和新 Run 使用
+现有时间线／执行区；原卡片终态与输出不变，受理后仍可再次点击，各次 Run 不显示关联状态。
+已知必须更换会话时一次确认“原会话无法恢复，将使用新会话继续。当前工作区会保留。”
+实际恢复失败后当前 Run 明确失败，再由用户选择新会话；无恢复向导。合同见
+[Run Process Detail Surface v45](../../contracts/run-process-detail-surface-v45.md)。

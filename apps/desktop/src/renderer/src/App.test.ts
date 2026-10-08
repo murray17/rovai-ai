@@ -4067,6 +4067,13 @@ describe('task event projections', () => {
       agentId: 'agent_2',
       messageIds: ['message-waiting-1', 'message-waiting-2']
     }])
+    expect(executionDeliveryQueueBatches([waitingDelivery, { ...secondWaitingDelivery, continuationRequest: true },
+      { ...secondWaitingDelivery, id: 'after', createdAt: '2026-07-28T06:04:00Z' }])).toHaveLength(3)
+    expect(executionDeliveryQueueBatches([
+      { ...waitingDelivery, id: 'a-normal' },
+      { ...waitingDelivery, id: 'z-continuation', continuationRequest: true },
+      { ...waitingDelivery, id: 'b-normal' }
+    ])).toHaveLength(3)
     expect(executionDeliveryQueueBatches([{
       ...waitingDelivery,
       dispatchDisposition: 'gather_captured'
@@ -6330,7 +6337,7 @@ describe('task event projections', () => {
       focused: true
     }))
     expect(activeToolMarkup).toContain('aria-label="执行中：pnpm lint"')
-    expect(activeToolMarkup).not.toContain('title="思考中"')
+    expect(activeToolMarkup).toContain('title="思考中"')
 
     const boundaryMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run,
@@ -6346,9 +6353,55 @@ describe('task event projections', () => {
     }))
     expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
     expect(boundaryMarkup).toContain('aria-label="已完成 1 个步骤"')
-    expect(boundaryMarkup).not.toMatch(/Thinking|连接中|思考中/)
+    expect(boundaryMarkup).toContain('title="思考中"')
     expect(boundaryMarkup).not.toMatch(/工作了|处理过程 ·|正在工作/)
 
+    for (const items of [
+      [{ key: 'narration:n', kind: 'narration' as const, body: '已检查正文。' }],
+      [{ key: 'plan:p', kind: 'plan' as const, explanation: '检查计划', plan: [] }],
+      [settledTool, { key: 'narration:n', kind: 'narration' as const, body: '继续检查。' }]
+    ]) {
+      const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+        run, progress: { items, runtimePhase: 'thinking', runtimeThinkingTitle: '检查调用链' },
+        threadId: 'camp-live-tail', focused: true
+      }))
+      expect(markup).toContain('title="检查调用链"')
+      expect(markup).not.toContain('title="思考中"')
+    }
+    const titledCollapsed = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress: { items: [settledTool], runtimePhase: 'thinking', runtimeThinkingTitle: 'Checking state' },
+      threadId: 'camp-live-tail'
+    }))
+    expect(titledCollapsed).toContain('process-disclosure-label">Checking state</span>')
+    for (const phase of ['imminent', 'started', 'completed']) {
+      const compaction = buildLiveExecutionProgress([{
+        id: `compact-${phase}`, agentRunId: run.id, eventType: 'runtime.compaction.display', createdAt: run.createdAt,
+        payload: { schemaVersion: 1, compactionId: 'compact', adapterKind: 'codex-cli', phase }
+      }], run.id)
+      const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+        run, progress: { ...compaction, runtimePhase: 'thinking', runtimeThinkingTitle: '原生短标题' },
+        threadId: 'camp-live-tail', focused: true
+      }))
+      expect(markup.includes('title="原生短标题"')).toBe(phase !== 'started')
+    }
+    for (const state of [
+      { run: { ...run, status: 'waiting' as const, waitReason: 'action_approval' as const } },
+      { run, cancelling: true },
+      { run: { ...run, executionEpoch: run.executionEpoch + 1 } }
+    ]) {
+      const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+        ...state, progress: { items: [], runtimePhase: 'thinking', runtimePhaseEpoch: run.executionEpoch,
+          runtimeThinkingTitle: '旧标题' }, threadId: 'camp-live-tail', focused: true
+      }))
+      expect(markup).not.toContain('title="旧标题"')
+    }
+    for (const runtimeThinkingTitle of ['', 'x'.repeat(81), 'line\nbreak', 'control\u0085inside']) {
+      const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+        run, progress: { items: [settledTool], runtimePhase: 'thinking', runtimeThinkingTitle },
+        threadId: 'camp-live-tail', focused: true
+      }))
+      expect(markup).toContain('title="思考中"')
+    }
     const finalMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run,
       progress: { items: [settledTool], runtimePhase: 'thinking' },

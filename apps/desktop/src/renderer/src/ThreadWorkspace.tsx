@@ -1,3 +1,4 @@
+import { ContinueAgentRunButton } from './ContinueAgentRunButton'
 import { PendingThreadDraftPersistence } from './pending-thread-draft'
 import { MessageModelSummary, ModelSummaryText, ProfileModelFields } from './ThreadModelInformation'
 import { memberRuntimeConfigurationPresentation, modelSummary, runtimeAdapterLabel } from './runtime-model-presentation'
@@ -13,6 +14,7 @@ import { useExecutionDisclosureAnchor } from './useExecutionDisclosureAnchor'
 import { useExecutionMetrics, useExecutionMetricsVisibility } from './useExecutionMetrics'
 import { executionUsageTotal } from './execution-metrics-reader'
 import { RunningText } from './RunningText'
+import { useRuntimePhase } from './useRuntimePhase'
 import { ExecutionContentContext, ExecutionVirtualList } from './ExecutionVirtualList'
 import { ExecutionNarration } from './ExecutionNarration'
 import type { MessageQuoteSnapshot } from '@contracts'
@@ -43,7 +45,7 @@ import {
   CompactionEventRow, ExecutionToolGroupStateContext, FileOperationRow, ModifiedFileRow, RuntimeRetryNotice,
   ToolActivityGroup, ToolCallRow, selectCompletePresentableExecutionEvidence, type ToolCallStep
 } from './ExecutionToolGroup'
-import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
+import { executionPhaseFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { ThreadMemberFastToggle } from './ThreadMemberFastToggle'
 import { useThreadMemberFast, type ThreadMemberFastControls } from './useThreadMemberFast'
@@ -6579,28 +6581,25 @@ export function executionQueueBatches(runs: readonly AgentRunView[]): ExecutionQ
 export function executionDeliveryQueueBatches(
   deliveries: readonly MessageDeliveryView[]
 ): ExecutionDeliveryQueueBatch[] {
-  const byAgent = new Map<string, MessageDeliveryView[]>()
-  for (const delivery of deliveries) {
-    if (!messageDeliveryWaitsInExecutionQueue(delivery)) continue
-    byAgent.set(delivery.recipientAgentId, [
-      ...(byAgent.get(delivery.recipientAgentId) ?? []),
-      delivery
-    ])
+  const byBatch = new Map<string, MessageDeliveryView[]>()
+  const ordinaryBatch = new Map<string, string>()
+  // The snapshot already resolves equal timestamps by the durable queue sequence.
+  const ordered = deliveries.filter(messageDeliveryWaitsInExecutionQueue).slice().sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt))
+  for (const delivery of ordered) {
+    const agent = delivery.recipientAgentId
+    if (delivery.continuationRequest) ordinaryBatch.delete(agent)
+    const key = delivery.continuationRequest ? delivery.id : ordinaryBatch.get(agent) ?? delivery.id
+    if (!delivery.continuationRequest) ordinaryBatch.set(agent, key)
+    byBatch.set(key, [...(byBatch.get(key) ?? []), delivery])
   }
-  return [...byAgent.entries()].map(([agentId, agentDeliveries]) => {
-    const ordered = agentDeliveries.slice().sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
-    )
-    const messageIds = [...new Set(ordered.map((delivery) => delivery.messageId))]
-    return {
-      agentId,
-      deliveries: ordered,
-      messageIds,
-      createdAt: ordered.at(-1)?.createdAt ?? ''
-    }
-  }).sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt) || left.agentId.localeCompare(right.agentId)
-  )
+  return [...byBatch.values()].map((batch) => ({
+    agentId: batch[0].recipientAgentId,
+    deliveries: batch,
+    messageIds: [...new Set(batch.map((delivery) => delivery.messageId))],
+    createdAt: batch.at(-1)?.createdAt ?? ''
+  })).sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt) || left.agentId.localeCompare(right.agentId))
 }
 
 function executionRunDurationLabel(run: AgentRunView, now: number): string {
@@ -7349,6 +7348,9 @@ function ExecutionDrawer({
                   aria-controls={contentId} onClick={() => toggleRun(run.id)}>
                   <ExecutionCardChevron expanded={expanded} />
                 </button>
+                {run.invocationKind === 'batch' && (run.status === 'failed' || run.status === 'cancelled') && inputMessageIds.length > 0 && (
+                  <ContinueAgentRunButton threadId={threadId} agentRunId={run.id} onError={onFileOpenError} />
+                )}
                 {(stopState === 'available' || stopState === 'stopping' || stopState === 'confirming') && (
                   <button className="is-danger" type="button" aria-label={uiAttribute("终止{0}的本次执行", String(runMemberName))}
                     title={uiAttribute("终止本次执行")} disabled={stopState !== 'available'} onClick={() => stopRun(run)}>
@@ -7457,7 +7459,7 @@ function ExecutionDrawer({
   }
 
   const renderDeliveryQueueBatch = (batch: ExecutionDeliveryQueueBatch): JSX.Element => {
-    const expansionKey = `delivery:${batch.agentId}`
+    const expansionKey = `delivery:${batch.deliveries[0].id}`
     const expanded = expandedQueueAgents.has(expansionKey)
     const runMember = memberById.get(batch.agentId)
     const runMemberName = runMember?.displayName ?? batch.agentId
@@ -7467,7 +7469,7 @@ function ExecutionDrawer({
         || sourceMessage.attachments.map((item) => item.displayName).join('、')
         || uiAttribute('排队消息')
       : uiAttribute('排队消息')
-    const contentId = `execution-delivery-queue-content-${batch.agentId}`
+    const contentId = `execution-delivery-queue-content-${batch.deliveries[0].id}`
     const toggle = (): void => setExpandedQueueAgents((current) => {
       const next = new Set(current)
       if (next.has(expansionKey)) next.delete(expansionKey)
@@ -7476,7 +7478,7 @@ function ExecutionDrawer({
     })
     return (
       <li className="execution-process-stage status-queued" data-delivery-queue-agent-id={batch.agentId}
-        key={`delivery-queue:${batch.agentId}`}>
+        key={`delivery-queue:${batch.deliveries[0].id}`}>
         <span className="execution-process-node tone-attention state-queued" aria-hidden="true">
           <ExecutionStatusGlyph status="queued" />
         </span>
@@ -7522,7 +7524,7 @@ function ExecutionDrawer({
     ...deliveryQueueBatches.map((batch) => ({
       kind: 'delivery_queue' as const,
       createdAt: batch.createdAt,
-      id: batch.agentId,
+      id: batch.deliveries[0].id,
       batch
     }))
   ].sort((left, right) =>
@@ -10227,6 +10229,7 @@ function RunExecutionContent({
   windowedEvidence = false,
   liveRevision,
   progress,
+  runtimeFeedback,
   threadId,
   truncatedEvidence,
   historicalEvidence,
@@ -10240,6 +10243,7 @@ function RunExecutionContent({
   windowedEvidence?: boolean
   liveRevision?: unknown
   progress?: LiveExecutionProgress
+  runtimeFeedback: Pick<LiveExecutionProgress, 'runtimePhase' | 'runtimeThinkingTitle'>
   threadId: string
   truncatedEvidence: AgentRunExecutionEvidenceView[]
   historicalEvidence: AgentRunExecutionEvidenceView[] | null
@@ -10345,17 +10349,15 @@ function RunExecutionContent({
   const hasActiveTool = toolActivityGroupHasActiveTool(activeToolItems, run.status)
   const hasActiveCompaction = executionHasActiveCompaction(processItems)
   const trailingProcessItem = groupedProcessItems[groupedProcessItems.length - 1]
-  const runtimePhase = windowedEvidence ? windowPage.runtimePhase : effectiveProgress?.runtimePhase
-  const thinkingAfterTool = run.status === 'running'
+  const { runtimePhase, runtimeThinkingTitle } = runtimeFeedback
+  const showThinkingFeedback = run.status === 'running'
     && runtimePhase === 'thinking'
-    && trailingProcessItem?.kind === 'toolGroup'
     && (!windowedEvidence || !windowPage.hasNewer)
-    && !hasActiveTool
     && !hasActiveCompaction
     && !finalBody
   const liveTailToolGroupKey = run.status === 'running'
     && !cancelling
-    && !thinkingAfterTool
+    && (!showThinkingFeedback || hasActiveTool)
     && trailingProcessItem?.kind === 'toolGroup'
     ? trailingProcessItem.key
     : null
@@ -10366,13 +10368,14 @@ function RunExecutionContent({
   const completeEvidence = selectCompletePresentableExecutionEvidence(
     displayedEvidence ?? truncatedEvidence
   )
-  const initialFeedback = executionInitialFeedback(
+  const initialFeedback = executionPhaseFeedback(
     run.status,
     processItems,
     Boolean(finalBody),
-    runtimePhase
+    runtimePhase,
+    runtimeThinkingTitle
   )
-  const phaseFeedback = thinkingAfterTool ? uiAttribute('思考中') : initialFeedback
+  const phaseFeedback = (!windowedEvidence || !windowPage.hasNewer) ? initialFeedback : null
   const feedback = run.status === 'waiting' ? localizedAgentRunWaitDetail(run.waitReason) ?? uiAttribute('等待继续')
     : run.failure?.code === 'runtime_network_interrupted' ? uiAttribute('正在恢复连接')
       : activeRetryDiagnostic
@@ -10576,9 +10579,9 @@ function RunExecutionContent({
         && !cancelling
         && run.waitReason !== 'recovery_blocked'
         && run.waitReason !== 'network_recovery_blocked'
-        && !hasActiveTool
+        && (!hasActiveTool || showThinkingFeedback)
         && !hasActiveCompaction
-        && liveTailToolGroupKey === null
+        && (liveTailToolGroupKey === null || showThinkingFeedback)
         && feedback
         && (
           <div className={`process-action current${feedback === phaseFeedback ? ' is-phase-feedback' : ''}`} role="status">
@@ -10626,6 +10629,14 @@ export function RunExecutionDisclosure({
 }): JSX.Element | null {
   const client = useThreadClient()
   const mobile = useMobileLayout()
+  const restoredPhase = useRuntimePhase(threadId, run, windowedEvidence)
+  // Current feedback is shared by the summary and content. An empty restored
+  // phase must also clear old feedback, including after Core reconnection.
+  const runtimeFeedback = windowedEvidence ? restoredPhase : {
+    runtimePhase: progress?.runtimePhaseEpoch != null && progress.runtimePhaseEpoch !== run.executionEpoch
+      ? undefined : progress?.runtimePhase,
+    runtimeThinkingTitle: progress?.runtimeThinkingTitle
+  }
   const recovery = useEditingRecovery()
   const recoveryKey = `mobile-run:${threadId}:${run.id}`
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
@@ -10714,6 +10725,7 @@ export function RunExecutionDisclosure({
       windowedEvidence={windowedEvidence}
       liveRevision={liveRevision}
       progress={progress}
+      runtimeFeedback={runtimeFeedback}
       threadId={threadId}
       truncatedEvidence={truncatedEvidence}
       historicalEvidence={historicalEvidence}
@@ -10725,6 +10737,12 @@ export function RunExecutionDisclosure({
     />
   ) : null
 
+  const phaseSummary = executionPhaseFeedback(run.status, progress?.items ?? [], Boolean(finalBody),
+    runtimeFeedback.runtimePhase, runtimeFeedback.runtimeThinkingTitle)
+  const liveSummary = cancelling ? uiAttribute("正在停止")
+    : run.status === 'waiting' ? localizedAgentRunWaitDetail(run.waitReason) ?? uiAttribute("等待继续")
+      : run.failure?.code === 'runtime_network_interrupted' ? uiAttribute("正在恢复连接")
+        : phaseSummary ?? uiAttribute("执行中")
   const liveOpen = !mobile && (active || cancellingActive)
   if (hideSummary) {
     return expanded
@@ -10750,15 +10768,9 @@ export function RunExecutionDisclosure({
     >
       <summary hidden={liveOpen} className={mobile ? 'mobile-run-summary' : undefined}>
         {mobile && <time className="mobile-run-time">{runIntervalLabel(run)}</time>}
-        <span className="process-disclosure-label">{mobile ? localizedAgentRunPresentation(run, cancelling).label : !liveOpen && (nonTerminal
-          ? cancelling ? uiAttribute("正在停止") : run.status === 'waiting' ? localizedAgentRunWaitDetail(run.waitReason) ?? uiAttribute("等待继续")
-            : executionInitialFeedback(
-              run.status,
-              progress?.items ?? [],
-              Boolean(finalBody),
-              progress?.runtimePhase
-            ) ?? uiAttribute("执行中")
-          : executionRunSummary(run, run.updatedAt))}</span>
+        <span className="process-disclosure-label">{nonTerminal
+          ? liveSummary : mobile ? localizedAgentRunPresentation(run, cancelling).label
+            : executionRunSummary(run, run.updatedAt)}</span>
         {mobile && focused && nonTerminal && <span className="current-run-badge"><UiText zh={"当前执行"} /></span>}
         <span className="process-disclosure-slot" aria-hidden="true">
           <svg viewBox="0 0 16 16" focusable="false">

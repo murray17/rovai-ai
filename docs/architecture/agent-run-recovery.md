@@ -8,8 +8,8 @@ last_updated: 2026-10-06
 # AgentRun Recovery
 
 本文描述 App/Core 持续运行期间的运输恢复、Core 重启后的执行收口，以及 AgentRun 终态与旧执行隔离之间的边界。
-当前字段和行为由 [Accepted Input Recovery v6](../contracts/accepted-input-recovery-v6.md)、
-[Message Delivery v10](../contracts/message-delivery-v10.md)、
+当前字段和行为由 [Accepted Input Recovery v7](../contracts/accepted-input-recovery-v7.md)、
+[Message Delivery v11](../contracts/message-delivery-v11.md)、
 [Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md) 和
 [Planned Shutdown v8](../contracts/planned-shutdown-v8.md)拥有。
 
@@ -48,7 +48,7 @@ Runtime 已接受输入但最终结果无法对账时，Core：
 4. 启动既有 Adapter stop/cleanup；
 5. 在隔离确认前阻止相关后继 dispatch。
 
-主界面把它作为普通红色执行失败展示，不要求用户理解 “unknown” 状态，也不提供“结束此运行”或业务重试按钮。
+主界面把它作为普通红色执行失败展示，不要求用户理解 “unknown” 状态，提供用户主动继续图标；不提供手工释放清理门禁。
 新的用户消息只创建新的 waiting Delivery；它不替代对旧结果的事实判断。
 
 Core 重启执行同一分类。pending planned-shutdown cycle 先按其 durable cancel-all intent 收口；其余非终态 Run 再按
@@ -69,7 +69,7 @@ Run 可以先进入失败或取消终态，但 `(CampId, AgentId)` lane 只有�
 ## 5. 精确 Stop
 
 用户 Stop 只接受 `agentRunId + version`，以 CAS 停止精确 Run。目标已终态或版本变化时返回
-`stale/already-terminal`，不得误停 successor。Stop 不暂停队列、不取消未 claim Delivery，也不创建重试机会。
+`stale/already-terminal`，不得误停 successor。Stop 不暂停队列、不取消未 claim Delivery，不自动创建续做请求。
 
 取消事务保留 accepted/delivery_unknown 与可能已执行的效果证据，并请求 Adapter cleanup。只有 cleanup 确认后，后续
 Delivery 才按正常调度领取。计划关闭复用同一清理事实，但其 durable cancel-all cycle、writer/route barrier 和 report
@@ -95,3 +95,11 @@ Fleet 的小型释放结果区分复用、回收、租约不存在和回收未�
 
 可信失败后可精确恢复原生 Thread；恢复错误或 ID 不符明确失败，不在当前执行中回退空 Thread。输入结果未知继续
 沿用第 3 节的隔离和默认轮换。正常成功不退化为每轮冷启动，也不增加输入重放。
+
+## 7. 用户授权的独立续做
+
+[AgentRun Continuation v1](../contracts/agent-run-continuation-v1.md) 是新的 User 授权。
+命令事务持久化系统操作、来源事实和普通 waiting Delivery；唯一 Scheduler 在旧执行清理完成后领取。
+原 Run 的业务输入集合限定范围，现有 Context builder 重建当前平台事实，不追加证据或恢复教学。
+同一来源可以多次主动继续，状态互不关联；幂等只绑定单次请求。会话兼容时复用当前绑定，换会话保留工作区。
+原生恢复失败的续做必须失败退出，用户显式确认后再开始新会话；普通运输恢复不因本功能扩大。

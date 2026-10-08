@@ -22,7 +22,7 @@ Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 AC
 `cline-cli` Adapter 调用 `cline --acp`，复用现有 ACP Host/Fleet。User 消息 72 后已授权独立
 启动 shim 实验；消息 76 改为验证用户实际安装的原生 Hub；在该研究时点生产入口尚未切换。
 本文件记录逐轴的原生实测与 Core 接线进度，不是产品准入决定。macOS arm64 的开发 Preview
-由 [V1.72-D17](../../versions/v1.72/decisions.md#v1-72-d17)拥有，其他平台仍为 NotQualified。
+由 [V1.72-D18](../../versions/v1.72/decisions.md#v1-72-d18)拥有，其他平台仍为 NotQualified。
 
 切换前的[原生 Hub 验证](native-hub-2026-10-07.md)：同一正常发现的 Homebrew 3.0.3 启动了独立、
 可认证且来源一致的 Hub；96 次正式模型对照证实显式 basic 会原生压缩，默认不传与 off 未见压缩。

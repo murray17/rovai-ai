@@ -294,7 +294,7 @@ export function useExecutionWindow(enabled: boolean, threadId: string, run: Agen
     contentCache: store.current?.content ?? null,
     setViewport: (first: number, last: number) => store.current?.setViewport(first, last),
     blocks: store.current?.blocks ?? [],
-    root, evidence, runtimePhase: store.current?.runtimePhase,
+    root, evidence,
     loading: enabled && (store.current?.loading || (!store.current?.loaded && !store.current?.error)),
     direction: store.current?.direction ?? 'latest',
     error: store.current?.error ?? null,

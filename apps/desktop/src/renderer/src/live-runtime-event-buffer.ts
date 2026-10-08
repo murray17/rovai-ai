@@ -4,6 +4,9 @@ const TEXT_EVENTS = new Set(['agent.text.delta', 'agent.text.block'])
 const PRIVATE_REASONING_EVENTS = new Set([
   'agent.thought.delta',
   'agent.thought.block',
+  'agent.thought.started',
+  'agent.thought.completed',
+  'agent.thinking.title',
   'agent.reasoning.summary.delta',
   'agent.reasoning.summary.block'
 ])
@@ -27,12 +30,14 @@ export function appendLiveRuntimeEventBatch(current: LiveRuntimeEvent[], batch: 
   result.forEach((event, index) => { const id = key(event); if (id) positions.set(id, index) })
   for (const event of batch) {
     // Private reasoning never enters Renderer state. Runtime phase is delivered as
-    // a separate content-free event, so dropping these frames loses no UI signal.
+    // a separate bounded phase/title event, so dropping these frames loses no UI signal.
     if (PRIVATE_REASONING_EVENTS.has(event.eventType)) continue
     const id = key(event)
     const index = id === null ? undefined : positions.get(id)
     if (index !== undefined) {
       const previous = result[index]
+      if (event.eventType === 'agent_run.runtime_phase_changed'
+        && (event.executionEpoch ?? 0) < (previous.executionEpoch ?? 0)) continue
       if ((event.revision ?? 0) < (previous.revision ?? 0)) continue
       if (event.revision === previous.revision
         && (event.changeSequence ?? 0) < (previous.changeSequence ?? 0)) continue

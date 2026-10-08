@@ -890,6 +890,8 @@ pub struct ThreadMessageFindSnapshot {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageDeliveryView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuation_request: Option<bool>,
     pub id: String,
     pub message_id: String,
     #[serde(rename = "threadTurnId", alias = "campTurnId")]
@@ -2789,7 +2791,8 @@ fn load_message_deliveries(
                  NULL AS target_conversation_id,
                  current_delivery.recipient_membership_version_at_admission,
                  message.source_agent_run_id,
-                 current_delivery.queue_sequence
+                 current_delivery.queue_sequence,
+                 CASE WHEN EXISTS(SELECT 1 FROM camp_run_continuation WHERE delivery_id=current_delivery.id) THEN 1 END AS continuation_request
           FROM camp_message_delivery AS current_delivery
           JOIN camp_message AS message
             ON message.id = current_delivery.message_id
@@ -2830,7 +2833,8 @@ fn load_message_deliveries(
                  legacy_delivery.target_conversation_id,
                  legacy_delivery.recipient_membership_version_at_admission,
                  legacy_delivery.source_agent_run_id,
-                 legacy_delivery.queue_sequence
+                 legacy_delivery.queue_sequence,
+                 NULL AS continuation_request
           FROM message_delivery AS legacy_delivery
           WHERE legacy_delivery.camp_id = ?1
             AND legacy_delivery.delivery_kind IN ('public_a2a', 'gather_completion')
@@ -2851,7 +2855,7 @@ fn load_message_deliveries(
                recipient_canonical_position, edge_kind,
                target_parent_agent_run_id, return_to_agent_run_id,
                target_conversation_id,
-               recipient_membership_version_at_admission, source_agent_run_id
+               recipient_membership_version_at_admission, source_agent_run_id, continuation_request
         FROM projected_delivery
         ORDER BY
           CASE
@@ -2922,6 +2926,7 @@ fn load_message_deliveries(
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
             Ok(MessageDeliveryView {
+                continuation_request: row.get(30)?,
                 id: row.get(0)?,
                 message_id: row.get(1)?,
                 camp_turn_id: row.get(2)?,
@@ -2946,11 +2951,8 @@ fn load_message_deliveries(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if limit.is_some() {
-        deliveries.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        // Preserve the SQL queue_sequence order when timestamps are equal.
+        deliveries.sort_by(|left, right| left.created_at.cmp(&right.created_at));
     }
     Ok(deliveries)
 }
@@ -4316,6 +4318,7 @@ mod tests {
                 source_agent_run_id TEXT
             );
             CREATE TABLE agent_run (id TEXT, task_id TEXT);
+            CREATE TABLE camp_run_continuation (delivery_id TEXT);
             CREATE TABLE camp_message_delivery (
                 id TEXT PRIMARY KEY, camp_id TEXT, message_id TEXT,
                 recipient_agent_id TEXT,

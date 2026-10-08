@@ -4260,6 +4260,7 @@ fn queue_camp_message_and_runs(
             "addressSource": input.resolution.source,
             "addressedAgentIds": addressed_agent_ids,
             "deliveryIds": delivery_ids,
+            "taskId": input.execution.and_then(|execution| execution.task_id.as_deref()),
         }),
     )?;
     for delivery in &deliveries {

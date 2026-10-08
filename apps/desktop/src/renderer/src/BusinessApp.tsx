@@ -180,6 +180,7 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'camp.membership_reconciliation_completed',
   'camp.default_lead_reconciled',
   'agent_run.cancelled',
+  'agent_run.continuation_requested',
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
   'agent_run.terminal',

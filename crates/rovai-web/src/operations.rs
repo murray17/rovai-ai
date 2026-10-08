@@ -284,6 +284,8 @@ pub enum Operation {
     Approval,
     #[serde(rename = "agentRuns.cancel")]
     CancelRun,
+    #[serde(rename = "agentRuns.continue")]
+    ContinueRun,
     #[serde(rename = "commands.reconcile")]
     Reconcile,
     #[serde(rename = "threads.create", alias = "camps.create")]
@@ -512,6 +514,7 @@ impl Operation {
             Self::WithdrawMessage => "camp.messages.withdraw",
             Self::Approval => "action.approvals.resolve",
             Self::CancelRun => "agentRuns.cancel",
+            Self::ContinueRun => "agentRuns.continue",
             Self::Reconcile => "commands.reconcile",
             Self::CampCreate => "camps.create",
             Self::CampCreationDefaults => "camps.creationPreflight",
@@ -688,5 +691,8 @@ mod tests {
         let withdraw = serde_json::from_value::<Operation>(json!("camp.messages.withdraw"))
             .expect("User message withdrawal should be admitted by the Web Host");
         assert_eq!(withdraw.method(), "camp.messages.withdraw");
+        let continuation =
+            serde_json::from_value::<Operation>(json!("agentRuns.continue")).unwrap();
+        assert_eq!(continuation.method(), "agentRuns.continue");
     }
 }

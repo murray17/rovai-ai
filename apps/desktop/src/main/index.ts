@@ -310,6 +310,7 @@ const allowedMethods = new Set<CoreMethod>([
   'singleChat.end',
   'singleChat.pendingInputs.edit',
   'agentRuns.cancel',
+  'agentRuns.continue',
   'threads.snapshot',
   'agentRunFileChanges.get',
   'agentRunImages.read',

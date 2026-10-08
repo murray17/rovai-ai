@@ -105,3 +105,16 @@ it('flushes pending events on terminal or resubscription and cancels scheduled w
   vi.runAllTimers()
   expect(append).toHaveBeenCalledTimes(1)
 })
+
+it('keeps only the current epoch title and clears it when execution resumes', () => {
+  const phase = (epoch: number, state: string, title?: string): LiveRuntimeEvent => ({
+    ...event(epoch), executionEpoch: epoch, eventType: 'agent_run.runtime_phase_changed',
+    payload: { phase: state, thinkingTitle: title }
+  })
+  let events = appendLiveRuntimeEventBatch([], [phase(2, 'thinking', 'Checking state')])
+  events = appendLiveRuntimeEventBatch(events, [phase(1, 'thinking', 'Old title')])
+  expect(buildLiveExecutionProgress(events, 'run').runtimeThinkingTitle).toBe('Checking state')
+  events = appendLiveRuntimeEventBatch(events, [phase(2, 'executing', 'Must not survive')])
+  expect(buildLiveExecutionProgress(events, 'run').runtimeThinkingTitle).toBeNull()
+  expect(events).toHaveLength(1)
+})

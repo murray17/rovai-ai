@@ -189,6 +189,7 @@ pub(super) fn reconcile(
             receipt(database, params.envelope())
         }
         "agentRuns.cancel" => camp!(CancelAgentRunCommand),
+        "agentRuns.continue" => camp!(crate::run_continuation::ContinueAgentRunCommand),
         "camps.changeDefaultLead" => camp!(ChangeDefaultLeadCommand),
         "camps.members.add" => camp!(AddThreadMemberCommand),
         "camps.members.remove" => camp!(RemoveThreadMemberCommand),

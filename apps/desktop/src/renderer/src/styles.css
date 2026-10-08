@@ -2394,6 +2394,8 @@ button.file-preview-html-feedback:hover,
 .execution-run-operations button.is-danger { border-color: transparent; color: var(--danger); background: var(--danger-soft); }
 .execution-run-operations button.is-danger:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--danger) 12%, var(--danger-soft)); }
 .execution-run-operations button:focus-visible { outline: 2px solid var(--conversation-focus); outline-offset: 2px; }
+.execution-run-operations button.execution-continue { width: 24px; height: 24px; }
+.execution-run-operations .execution-continue svg { width: 14px; height: 14px; }
 .execution-run-operations button:disabled { cursor: wait; opacity: .65; }
 .execution-process-stage.status-running .execution-run-trailing { position: relative; width: 77px; }
 .execution-process-stage.status-running .execution-run-operations { position: absolute; right: 9px; opacity: 0; pointer-events: none; }

@@ -1,8 +1,8 @@
-import type { ActionApprovalView, ThreadPendingInputsView, CoreEvent, CoreMethod, CreateThreadRequest, FilePreviewApi, ResolvedFilePreview } from '@contracts'
+import type { ActionApprovalView, CoreEvent, CoreMethod, CreateThreadRequest, FilePreviewApi, ResolvedFilePreview } from '@contracts'
 import type { ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { agents, approval, threadId, fileText, initial, initialDraft, installations, message, now, run, workspacePath } from './data'
 
-export type Scenario = 'camp' | 'new' | 'running' | 'approval' | 'file' | 'member' | 'mobile-running'
+export type Scenario = 'camp' | 'new' | 'running' | 'approval' | 'file' | 'member' | 'mobile-running' | 'continuation'
 export type Surface = 'desktop' | 'web'
 export function createReviewModel(surface: Surface, scenario: Scenario) {
   const listeners = new Set<() => void>()
@@ -21,7 +21,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
   function showExecution(waiting: boolean) {
     const snapshot = structuredClone(initial)
     snapshot.agentRuns = [{ ...run, executionEvidenceCount: 4, status: waiting ? 'waiting' : 'running', waitReason: waiting ? 'action_approval' : null }]
-    snapshot.turns = [{ id: run.threadTurnId, triggerType: 'camp_message', triggerId: snapshot.messages[0].id,
+    snapshot.turns = [{ id: run.threadTurnId!, triggerType: 'camp_message', triggerId: snapshot.messages[0].id,
       status: waiting ? 'waiting' : 'running', cancelRequestedAt: null, aggregateReasonCode: null,
       executionBudget: { schemaVersion: 1, acceptedAt: now, deadlineAt: '2026-09-12T04:30:00Z', elapsedSeconds: 35,
         maxAgentRunResponsibilities: 50, maxAcceptedA2a: 50, allocatedAgentRunResponsibilities: 1, acceptedA2a: 0,
@@ -81,23 +81,37 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
     }
     change({ snapshot, agents: expandedProfiles })
   }
+  if (scenario === 'continuation') {
+    state.snapshot.agentRuns = [{ ...run, status: 'failed', invocationKind: 'batch', threadTurnId: null,
+      inputMessageIds: [state.snapshot.messages[0].id], anchorMessageId: state.snapshot.messages[0].id,
+      executionEvidenceCount: 0, endedAt: now }]
+  }
+  const continuation = { mode: 'normal', hold: false, attempts: [] as Array<{ commandId: string; command: { agentRunId: string; useNewSession: boolean } }>,
+    receipts: new Map<string, unknown>() }
   const editing = new Map<string, unknown>()
   const request = async (method: CoreMethod, input?: unknown): Promise<unknown> => {
     checkOnline()
     const p = (input ?? {}) as Record<string, any>
     switch (method) {
-      case 'camp.composerDraft.get': return structuredClone(state.draft)
-      case 'camp.composerDraft.save':
-      case 'camp.composerDraft.removeAttachment': {
-        if (p.threadId !== state.draft.threadId || p.expectedRevision !== state.draft.revision) throw new Error('模拟 revision 冲突，原草稿保留。')
-        const next = { ...state.draft, revision: state.draft.revision + 1 }
-        if (method.endsWith('.save')) { next.content = p.content; next.body = p.content.segments.filter((s: any) => s.kind === 'text').map((s: any) => s.text).join('') }
-        else next.attachments = next.attachments.filter(a => a.id !== p.attachmentId)
-        change({ draft: next }); return structuredClone(next)
+      case 'agentRuns.continue': {
+        continuation.attempts.push(structuredClone(p) as typeof continuation.attempts[number])
+        while (continuation.hold) await new Promise(resolve => setTimeout(resolve, 20))
+        await delay()
+        const receipt = continuation.receipts.get(p.commandId)
+        if (receipt) return receipt
+        if (continuation.mode === 'new-session' && !p.command.useNewSession) {
+          return { status: 'rejected', code: 'agent_run.new_session_confirmation_required', payload: {} }
+        }
+        const result = { ...applied(), code: 'agent_run.continuation_requested', commandId: p.commandId }
+        continuation.receipts.set(p.commandId, result)
+        const snapshot = structuredClone(state.snapshot)
+        snapshot.messages.push({ ...message(snapshot.messages.length + 1, '你继续了执行。', 'user'), authorType: 'system' })
+        change({ snapshot })
+        if (continuation.mode === 'response-lost') throw new Error('Simulated response loss after commit')
+        return result
       }
-      case 'camp.pendingInputs.get': return { threadId: state.snapshot.thread.id, executionActive: state.snapshot.agentRuns.some(r => r.status === 'running' || r.status === 'waiting'), items: [], editSession: null, submissionOutcomes: [] } satisfies ThreadPendingInputsView
       case 'skills.list': case 'skills.deliveryGroups.list': return [] // This fixed Camp has no assigned Skills.
-      case 'camps.members.fast.check': return null // No subscription/Fast qualification is fabricated.
+      case 'threads.members.fast.check': return null // No subscription/Fast qualification is fabricated.
       case 'members.list': return structuredClone(state.agents)
       case 'runtime.installations.list': return structuredClone(installations)
       case 'runtime.modelCatalog.open': {
@@ -166,7 +180,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
     exportDiagnostics: async () => unavailable('diagnostic export'), revealDiagnosticsExport: null,
     memberAvatars: { selectSource: async () => unavailable('avatar source'), save: async () => unavailable('avatar save'), read: async () => unavailable('avatar read') },
     selectSkillImportDirectory: async () => unavailable('skill import'), selectRuntimeExecutable: null,
-    revealMcpConfig: null, channels: null,
+    revealMcpConfig: null, channels: null, missionAttachments: null,
     singleChatAttachments: {
       prepare: async () => unavailable('single chat upload'),
       preparePending: async () => unavailable('single chat pending upload'),
@@ -192,9 +206,8 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
         change({ draft: { ...state.draft, revision: revision + 1, attachments: [...state.draft.attachments,
           { id, displayName: file.name, kind: 'file', mediaType: file.type || 'text/plain', byteSize: file.size,
             fileCount: null, previewKind: 'none', availability: 'available' }] } })
-        note('模拟：附件仅暂存在页面内存，未上传 Host。'); return structuredClone(state.draft)
+        note('模拟：附件仅暂存在页面内存，未上传 Host。'); return structuredClone(state.draft.attachments.at(-1)!)
       },
-      preparePending: async () => unavailable('pending upload'),
       preview: async () => unavailable('image preview')
     }
   }
@@ -212,7 +225,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
     return { ok: true, value: { kind: 'file_preview', file } }
   }
   const fileApi: FilePreviewApi = {
-    bindCamp: async () => {}, onExternalUpdate: () => () => {}, open, restore: open,
+    bindThread: async () => {}, onExternalUpdate: () => () => {}, open, restore: open,
     reopen: async () => ({ ok: true, value: { kind: 'file_preview', file } }),
     readText: async req => req.handleId === file.handleId && req.expectedGeneration === file.contentGeneration
       ? { ok: true, value: { text: fileText, contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } } : forbidden(),
@@ -225,7 +238,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
     copyPath: forbidden, chooseAuthorizedRoot: forbidden
   }
   return {
-    client, fileApi, note, get: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn) },
+    client, fileApi, note, continuation, get: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn) },
     setOffline: (offline: boolean) => change({ offline, note: offline ? '模拟离线：编辑保留，命令未重发。' : '模拟重新连接；不代表真实网络恢复验收。' }),
     async send(draft: typeof initialDraft) {
       checkOnline(); change({ busy: true }); await delay()
@@ -233,7 +246,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
       change({ snapshot: { ...state.snapshot, messages: [...state.snapshot.messages, next] },
         draft: { ...initialDraft, threadId: state.snapshot.thread.id, body: '', content: { version: 2, segments: [] }, revision: state.draft.revision + 1 }, busy: false })
       note('模拟发送已追加到当前页面；未调用 Rust、Runtime 或审批服务。'); event()
-      return { threadTurnId: 'review-simulated-turn', agentRunIds: [], addressedAgentIds: [agents[0].agentId] }
+      return { threadTurnId: 'review-simulated-turn', agentRunIds: [], deliveryIds: [], addressedAgentIds: [agents[0].agentId] }
     },
     async resolve(item: ActionApprovalView, optionId: string) {
       checkOnline(); if (state.busy) return

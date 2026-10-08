@@ -228,9 +228,9 @@ last_updated: 2026-09-25
 
 - 公共 CampMessage 与 per-target Delivery 是两个事实。publication 事务为每个显式目标先幂等建立 Camp-member Conversation 路由，再创建一条 waiting Delivery 并冻结 membership lifetime；公开消息不会因 Delivery 失败或取消而撤销，公开也不证明目标已执行。
 - waiting Delivery 是 `(CampId, AgentId)` 的唯一 FIFO 队列。等待阶段没有 queued AgentRun，也不冻结 Runtime 配置。claim 事务先补建旧 waiting lane 缺失的有效目标 Conversation，再分别检查同一 Camp+Agent 旧执行隔离和实际共享 executionRoot 清理，用本次 Runtime payload capability 及正式 `RUN_INPUT.messages[]` 投影/序列化结果原子选择队首可完整交付的连续前缀，创建一个不可变多输入 Run 和 AgentRunInput，再绑定所选 Delivery；启动扫描与固定 fallback 都能触发该自愈，commit 前后崩溃分别恢复 waiting queue 或同一 Run。
-- 来源类型不拆批。用户、Agent、Mission、Automation 与 Channel 消息共同使用当前 Agent 在 claim 时冻结的一份执行配置和权限；消息、引用、Skill 或发送者都不能扩大权限。新消息不能追加到 frozen Run。
-- Delivery 不再携带 forward/return、root/depth、ancestor cycle、预算、attempt generation、手工业务重试或 Gather completion 语义。只有 self-send 继续拒绝。Run 终态单调结算所绑定 Delivery；Stop 精确作用于一个 Run，不取消未 claim Delivery。
-- membership 移除取消旧 lifetime 的 waiting Delivery；重新加入只接收新消息。accepted/unknown 输入不重投；明确未 accepted 的运输恢复只能继续同一 frozen Run。完整合同见 [Message Delivery v10](../contracts/message-delivery-v10.md)。
+- 普通消息来源类型不拆批；用户主动续做是独立批次边界。用户、Agent、Mission、Automation 与 Channel 消息共同使用当前 Agent 在 claim 时冻结的一份执行配置和权限；消息、引用、Skill 或发送者都不能扩大权限。新消息不能追加到 frozen Run。
+- Delivery 不再携带 forward/return、root/depth、ancestor cycle、预算、attempt generation 或 Gather completion 语义。只有 self-send 继续拒绝。Run 终态单调结算所绑定 Delivery；Stop 精确作用于一个 Run，不取消未 claim Delivery。
+- membership 移除取消旧 lifetime 的 waiting Delivery；重新加入只接收新消息。accepted/unknown 输入不重投；明确未 accepted 的运输恢复只能继续同一 frozen Run。完整合同见 [Message Delivery v11](../contracts/message-delivery-v11.md)。
 - Runtime Adapter 的公共输出仍必须越过 publication fence。Current User 是 Core-owned `local_user`；Agent routing 与 User attention 正交，Renderer 不从正文或焦点猜测身份。
 
 <a id="collaboration-gather"></a>
@@ -307,7 +307,7 @@ last_updated: 2026-09-25
   [Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md)。
 - Runtime accepted input 只有在能证明原 Native Turn 的 identity、接受状态和可重连终态时才能恢复。证据不足必须终态为诚实失败并保留 typed unknown evidence，不能重发可能已经产生外部效果的输入；主界面只展示普通红色失败。
 - 新输入的恢复验证冻结 Manifest attachment receipt 的 closed shape/digest，再独立验证 admitted Runtime Files Root identity、精确 Camp root containment 与当前 Camp-root Auth Receipt；不要求 legacy View ready、append-only successor 或 generation 匹配。路径和历史 payload 不重新解析、探测或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
-- Cancellation 在业务事务内把精确目标 Run 结算为 cancelled；Stop 使用 `agentRunId + version` CAS，不暂停 `(CampId, AgentId)` lane、不取消 waiting Delivery，也不能命中 successor。未发送 Input 为 not_accepted；accepted/delivery_unknown 与可能已执行的 Action 证据保留，原输入禁止自动重发。产品不提供业务重试或“用户确认后强制放行”入口。
+- Cancellation 在业务事务内把精确目标 Run 结算为 cancelled；Stop 使用 `agentRunId + version` CAS，不暂停 `(CampId, AgentId)` lane、不取消 waiting Delivery，也不能命中 successor。未发送 Input 为 not_accepted；accepted/delivery_unknown 与可能已执行的 Action 证据保留，原输入禁止自动重发。User 可主动授权新的续做执行；不提供“用户确认后强制放行”入口。
 - Run 业务终态不证明旧执行已经停止。Adapter cleanup/isolation 未确认时，后继 Delivery 只保持 waiting，不创建必败 Run；旧执行仍可能写某 execution root 时，临时阻止该 root 的新 dispatch。没有输出不是隔离证明。unknown 后默认新 Native Session，但换 Session 或撤销 Core 写权限不能替代旧进程清理。
 - 计划关闭保留 protocolVersion 3/report 和既有 writer/route barrier；public Composer 不再有持久 Draft 前置 fence。持久化 cycle 后先统一结算业务，barrier 后补齐再完成 cycle，Runtime 清理只影响清理事实与 deadline。未知外部效果保留，不伪造 Runtime outcome。
 - Diagnostics 是严格只读、最小化数据的 Core view；修复必须是用户显式选择的独立动作。导出集中脱敏，不能把 secret、完整路径、模型输入或 Runtime 原始输出作为便利诊断数据。
@@ -484,7 +484,7 @@ last_updated: 2026-09-25
 
 ### Evidence 与 Canonical Activity
 
-- Runtime source event、Execution Evidence、Canonical Runtime Activity 和 Renderer presentation 是四个显式层。Runtime/Core 只声明它们真实观测或介入的事实；新 command/tool operation 在可靠原生/Core identity 下归约为一条可变生命周期 Evidence，无法可靠关联与独立事实继续使用追加记录；公开文本按独立正文块定稿。生命周期行保留稳定展示 `sequence`，每次有效变更同事务递增行 `revision` 与 Run-wide `changeSequence`，语义重复不推进；所有层继续保留来源和原始观测边界。正文与命令保留原值且不做敏感文本匹配或替换；新 Tool 普通输出只在 Runtime 已完成 Agent 投递后，由统一持久化投影保留最长 7,680 UTF-8 字节，后缀永久舍弃。Core classifier 拥有 canonical 语义；Renderer 只本地化/分组/呈现。任一层都不能用未报告行为、进程消失、命令文本或 UI 提示补写“已执行”。字段与读取边界见 [Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md)。
+- Runtime source event、Execution Evidence、Canonical Runtime Activity 和 Renderer presentation 是四个显式层。Runtime/Core 只声明它们真实观测或介入的事实；新 command/tool operation 在可靠原生/Core identity 下归约为一条可变生命周期 Evidence，无法可靠关联与独立事实继续使用追加记录；公开文本按独立正文块定稿。生命周期行保留稳定展示 `sequence`，每次有效变更同事务递增行 `revision` 与 Run-wide `changeSequence`，语义重复不推进；所有层继续保留来源和原始观测边界。正文与命令保留原值且不做敏感文本匹配或替换；新 Tool 普通输出只在 Runtime 已完成 Agent 投递后，由统一持久化投影保留最长 7,680 UTF-8 字节，后缀永久舍弃。Core classifier 拥有 canonical 语义；Renderer 只本地化/分组/呈现。任一层都不能用未报告行为、进程消失、命令文本或 UI 提示补写“已执行”。字段与读取边界见 [Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md)。
 - Canonical Runtime Activity 是 Core 从已准入 Evidence 当前 revision 构建、持久但可重建的版本化投影，不是新的效果真源。Lifecycle/Read Side 只从选定的 canonical projection 派生，不跳过它直接从 Runtime 标题或 evidence payload 猜状态。terminal-only、迟到 started 和互斥终态使用同一 reducer；迟到字段只补缺失，terminal 不回退，冲突 outcome 保持 `unsettled`。
 - `source_event_key` 与 Core-scoped `operationId` 是严格分离的身份：前者只在一个已声明 observation scope 内去重单个来源事件，后者才能跨 phase/evidence 合并同一操作。Core 只接受协议原生 ID、自有调用/receipt 关联或 Adapter 按封闭规则构造的可证明身份；不用时间、文本、路径或顺序相似性聚合。重放使用同一规则得到同一 identity/归约结果。
 - Activity Domain（历史字段名 `capabilityKind`）是稳定顶层观测域；可选 `semanticKind` 只能在 Evidence 支持时细分，`presentationHint` 永不成为 canonical semantics。Domain/kind 词汇扩展必须在 Mapping Registry 注册、版本化并提供 replay fixture；无证据时保留已有域或 `unknown`。
@@ -552,17 +552,17 @@ last_updated: 2026-09-25
 - Adapter 必须优先从原生 terminal semantic event 提供交给 Agent 的完整公开输出。若未来某个 Adapter 无法提供完整
   terminal aggregate，只能在 Adapter 内使用有硬上限、Run 结束即删除的临时 spool，并在 terminal 生成完整或明确
   truncated 的单一结果；Core 与 Renderer 都不得无限拼接字符串，也不得退回逐片段持久化。Evidence 的普通输出
-  副本随后独立执行 [Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md) 的永久预算。
+  副本随后独立执行 [Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md) 的永久预算。
 
 <a id="evidence-usage"></a>
 
 ### 用户可见 evidence 与 Usage
 
-- AgentRun Execution Evidence 是独立、用户可见但默认不回流 Agent 的权威记录，不归 Task、Message、Activity presentation 或 Runtime cache 所有。新可靠 operation 与公开正文 block 各自只占一个稳定展示位置，以 revision/change sequence 原位更新；无法可靠关联、历史和独立事实仍保留原记录边界。transport delta 只作实时运输。私有 thought/reasoning 在持久化、临时文件、日志和 Renderer state 前丢弃，只派生不含正文的瞬时 `thinking | executing` phase；历史已持久化 reasoning 不回写。取消、失败、受控退出保存已接受的公开内容并标明中断，不把整个 Run 简化为最后一段。
+- AgentRun Execution Evidence 是独立、用户可见但默认不回流 Agent 的权威记录，不归 Task、Message、Activity presentation 或 Runtime cache 所有。新可靠 operation 与公开正文 block 各自只占一个稳定展示位置，以 revision/change sequence 原位更新；无法可靠关联、历史和独立事实仍保留原记录边界。transport delta 只作实时运输。私有 thought/reasoning 在持久化、临时文件、日志和 Renderer state 前丢弃，只派生瞬时 `thinking | executing` phase；经 [Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md) 准入的 Codex/Copilot 原生短标题可单独公开、瞬时展示，完整思考正文与历史已持久化 reasoning 不回写。取消、失败、受控退出保存已接受的公开内容并标明中断，不把整个 Run 简化为最后一段。
 
   小内容在 SQLite；生命周期输入与结果分别 inline 或进入各自 Managed Blob，详情按需组合而不写第三份副本。输入和结构化结果仍独立执行 64 MiB 上限；新 Tool 普通输出在进入 SQLite/Blob/event/log 前先执行 7,680 UTF-8 字节永久上限，丢失只由 nullable `outputTruncated` 表达，不能复用 Blob preview 标记。失败或输出截断不能改写 operation outcome 或 Files Changed。新 replaceable-content 路径在权威引用事务前持久登记 GC candidate，挂接后解除；引用替换按 detach time 重新登记。Core 维护只处理封闭 owner，宽限后动态复核全部 Managed Blob 外键并保护同进程在途读取；历史无标记 Blob 不扫描清理。
 
-  Camp Open 返回每个有界 Run 的记录计数与独立 `executionEvidenceChangeSequence`；计数不再承担 revision。执行台按视口读取有界正文／完整折叠组页，展开组使用独立子游标；首次短内容有界自动补齐。展示分页继续使用 `sequence`，增量读取使用 `changeSequence`；历史与实时按稳定 ID/revision 去重，旧异步结果不得覆盖新状态。首屏后只预取相邻一页，较早记录按需分页，已保存工具结果与文件 diff 在对应行展开后读取；普通输出已丢失的后缀没有恢复入口。业务终态已提交而正文定稿失败时，同一进程内 block 记录有界退避并由既有 AgentRun maintenance tick 只重试文本；未到期时不扫描持久状态，成功后复用 block event，重试不重放领域命令。进程重启不声称恢复尚未持久化的 block。原生 `userMessage` 的空生命周期不复制 CampMessage；Migration 143 的历史压缩边界保持不变。字段与有界存储见 [Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md)。
+  Camp Open 返回每个有界 Run 的记录计数与独立 `executionEvidenceChangeSequence`；计数不再承担 revision。执行台按视口读取有界正文／完整折叠组页，展开组使用独立子游标；首次短内容有界自动补齐。展示分页继续使用 `sequence`，增量读取使用 `changeSequence`；历史与实时按稳定 ID/revision 去重，旧异步结果不得覆盖新状态。首屏后只预取相邻一页，较早记录按需分页，已保存工具结果与文件 diff 在对应行展开后读取；普通输出已丢失的后缀没有恢复入口。业务终态已提交而正文定稿失败时，同一进程内 block 记录有界退避并由既有 AgentRun maintenance tick 只重试文本；未到期时不扫描持久状态，成功后复用 block event，重试不重放领域命令。进程重启不声称恢复尚未持久化的 block。原生 `userMessage` 的空生命周期不复制 CampMessage；Migration 143 的历史压缩边界保持不变。字段与有界存储见 [Run Process Detail Surface v45](../contracts/run-process-detail-surface-v45.md)。
 - Renderer 对文本、结构化数据、二进制/未知类型和链接使用安全、有界渲染；不执行 evidence 内容、不把它当作 Agent 消息、Task 完成证明或可重放命令。保留/回收由权威 Run/Camp 引用和 Managed Blob GC 决定，不因 UI 清理或 Agent 不可见而提前删除。
 - Runtime Monitoring 只拥有 Usage-derived metering：原始 observation、归一化 usage、flush/rollup 和 bounded snapshot 由当前五表合同约束。缺失 token/cache/cost 保持稀疏 unknown，不补零或跨 grain 重复计费。
 - Usage raw observation、normalized grain、flush cursor/lease、rollup 和 bounded snapshot 保持独立身份/幂等键；读取按成员/Run/时间范围限界，retention/rollup 不改写已归一化 grain 或从缺失值补数。Cost 只在精确模型、价格版本、token category/grain 可证明且不重复计费时估算；Coverage、unknown 与数据新鲜度随 Snapshot 返回，UI 不把部分支持展示成完整精确账单。
@@ -632,3 +632,9 @@ last_updated: 2026-09-25
   AgentRun 终态、不证明 Tool Activity，也不从 raw stderr、provider body 或私有日志补写事实。Renderer 在
   精确 non-terminal Run 内明显显示最新可恢复状态；Run 终态后移除 live notice，并继续以权威 terminal failure
   或成功结果为准。
+
+### 用户主动继续执行
+
+[AgentRun Continuation v1](../contracts/agent-run-continuation-v1.md) 允许 User 按次授权新执行，
+复用原业务输入及当前动态上下文。原 Run、旧接受事实和工作区不回滚；同一来源可有多次独立请求。
+续做仍通过唯一 Delivery lane，先清理后领取；不重放 Runtime Delivery、不新增调度器或模型上下文字段。

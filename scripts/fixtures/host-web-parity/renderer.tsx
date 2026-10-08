@@ -25,6 +25,7 @@ const theme = document.documentElement.dataset.reviewTheme ?? params.get('theme'
 document.documentElement.dataset.theme = theme
 document.documentElement.dataset.platform = 'darwin'
 const model = createReviewModel(surface, scenario)
+if (scenario === 'continuation') Object.assign(window, { continuationFixture: model })
 const selectedWorkspace: WorkspaceSelection = { projectPath: workspacePath, name: 'rovai-workspace' }
 
 function FileScenario() {
@@ -93,7 +94,7 @@ function Review() {
         onNewConversation={() => setCreating(true)} onMembers={() => setView('members')}
         onMemory={() => outsideScope('Memory')} onAutomations={() => outsideScope('Automation')}
         onSettings={() => outsideScope('设置')} onOpenProject={() => setCreating(true)} onCreateInProject={() => setCreating(true)}
-        onCamp={() => setView('camp')} onRemoveProject={async () => outsideScope('移除项目')}
+        onThread={() => setView('camp')} onRemoveProject={async () => outsideScope('移除项目')}
         onDelete={async () => outsideScope('删除 Camp')} onRename={async (_, title) => model.rename(title)}
         onError={error => model.note(String(error))} />
       {view === 'camp' && <AppHeader threadTitle={state.snapshot.thread.title} contextLabel="rovai-workspace"

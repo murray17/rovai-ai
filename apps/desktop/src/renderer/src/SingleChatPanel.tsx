@@ -2,6 +2,7 @@ import { useThreadClient } from './camp-client'
 import { useMobileLayout } from './MobileLayout'
 import { newCommandId } from '../../shared/command-id'
 import { RunningText } from './RunningText'
+import { useRuntimePhase } from './useRuntimePhase'
 import { revealMessageQuote } from './message-quote-reveal'
 import { ReturnToLatest } from './ReturnToLatest'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
@@ -50,7 +51,7 @@ import {
   ToolActivityGroup,
   selectCompletePresentableExecutionEvidence
 } from './ExecutionToolGroup'
-import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
+import { executionPhaseFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { SafeMarkdown } from './SafeMarkdown'
 import { shouldSubmitStructuredComposerOnEnter } from './StructuredMentionComposer'
@@ -332,6 +333,7 @@ export function SingleChatRunHistory({
   cancelling?: boolean
   onNotify?(message: string): void
 }): React.JSX.Element {
+  const runtime = useRuntimePhase(threadId, run)
   const terminal = !NON_TERMINAL_RUNS.has(run.status)
   const stopping = !terminal && (cancelling || run.cancelRequestedAt !== null)
   const [open, setOpen] = useState(!terminal)
@@ -356,7 +358,8 @@ export function SingleChatRunHistory({
     [evidence]
   )
   const trailingItem = grouped.at(-1)
-  const liveTailKey = run.status === 'running' && !stopping && trailingItem?.kind === 'toolGroup'
+  const showThinking = runtime.runtimePhase === 'thinking' && run.status === 'running' && !finalMessage
+  const liveTailKey = run.status === 'running' && !stopping && !showThinking && trailingItem?.kind === 'toolGroup'
     ? trailingItem.key
     : null
   const hasActiveTool = toolActivityGroupHasActiveTool(
@@ -367,7 +370,7 @@ export function SingleChatRunHistory({
   const feedback = run.status === 'waiting' ? uiAttribute('等待继续')
     : retry?.kind === 'diagnostic'
       ? uiAttribute("等待 Claude Code 自动重试（{0}/{1}）", String(retry.diagnostic.attempt), String(retry.diagnostic.maxAttempts))
-      : executionInitialFeedback(run.status, processItems, finalMessage !== null)
+      : executionPhaseFeedback(run.status, processItems, finalMessage !== null, runtime.runtimePhase, runtime.runtimeThinkingTitle)
 
   const renderItem = (item: GroupedExecutionProgressItem): React.JSX.Element | null => {
     if (item.kind === 'toolGroup' || item.kind === 'tool') {
@@ -427,7 +430,7 @@ export function SingleChatRunHistory({
           </summary>
           <div className="single-chat-execution-content process-content">
             {grouped.map(renderItem)}
-            {!terminal && !stopping && !hasActiveTool && !hasActiveCompaction && liveTailKey === null && feedback && (
+            {!terminal && !stopping && (!hasActiveTool || showThinking) && !hasActiveCompaction && liveTailKey === null && feedback && (
               <div className="process-action current" role="status">
                 <span className="process-spinner" aria-hidden="true" />
                 <RunningText text={feedback} />

@@ -35,6 +35,7 @@ export class ExecutionWindow {
   hasEarlier = false
   hasNewer = false
   runtimePhase: Page['runtimePhase'] = undefined
+  runtimeThinkingTitle: Page['runtimeThinkingTitle'] = null
   private cursor = 0
   private before: number | null = null
   private neighbor: Page | null = null
@@ -149,6 +150,7 @@ export class ExecutionWindow {
         this.merge([...page.blocks, ...(page.activeBlocks ?? [])])
         this.latestPage = page; this.cursor = page.throughChangeSequence
         this.runtimePhase = page.runtimePhase
+        this.runtimeThinkingTitle = page.runtimePhase === 'thinking' ? page.runtimeThinkingTitle : null
         this.latestDirty = false; this.hasNewer = false; this.viewport = null
       } else if (direction === 'earlier') {
         // A prefetched page may contain an older version of an already loaded operation.
@@ -204,13 +206,14 @@ export class ExecutionWindow {
         }
         this.cursor = page.nextAfterChangeSequence
         this.runtimePhase = page.runtimePhase
+        this.runtimeThinkingTitle = page.runtimePhase === 'thinking' ? page.runtimeThinkingTitle : null
         // Ignore old operation updates outside the contiguous loaded interval.
         const first = this.before === null ? 0 : this.before
         this.merge([...page.blocks, ...(page.refreshedBlocks ?? [])].filter(item => item.sequence >= first
           || this.blocks.some(old => old.sequence === item.sequence)))
         this.latestPage = { schemaVersion: 3, threadId: this.threadId, agentRunId: this.agentRunId,
           requestedBeforeSequence: null, throughSequence: page.throughSequence,
-          throughChangeSequence: this.cursor, runtimePhase: this.runtimePhase, blocks: this.blocks.slice(-this.limit),
+          throughChangeSequence: this.cursor, runtimePhase: this.runtimePhase, runtimeThinkingTitle: this.runtimeThinkingTitle, blocks: this.blocks.slice(-this.limit),
           hasMore: this.hasEarlier || this.blocks.length > this.limit,
           nextBeforeSequence: this.hasEarlier || this.blocks.length > this.limit ? this.blocks.slice(-this.limit)[0]?.sequence ?? null : null }
         this.prune(!accept())

@@ -1623,10 +1623,9 @@ impl AcpHost {
             }
         });
         if host.adapter_kind == AdapterKind::CopilotCli {
-            // Subscribe only to per-call Usage, separate from ACP's
-            // process/session cumulative result.
+            // Subscribe to per-call Usage and the native public intent label.
             initialize_params["clientCapabilities"]["_meta"] = json!({
-                "github.com/copilot": {"events": ["assistant.usage"]}
+                "github.com/copilot": {"events": ["assistant.usage", "assistant.intent"]}
             });
         }
         let initialized = host.rpc("initialize", initialize_params).await;
@@ -8146,7 +8145,8 @@ while IFS= read -r ignored; do :; done
             values: json!({"allow_all": "off"}),
         };
         // Assert the initialize frame emitted by the real Host path. The
-        // verified dialect needs native Usage, never a reasoning subscription.
+        // Native Usage and the optional short intent label are allowed; private
+        // reasoning bodies are never subscribed for public presentation.
         for version in [
             Some("1.0.83"),
             Some("1.0.82"),
@@ -8159,7 +8159,7 @@ while IFS= read -r ignored; do :; done
                 &copilot_root,
                 &copilot,
                 false,
-                Some(json!({"github.com/copilot": {"events": ["assistant.usage"]}})),
+                Some(json!({"github.com/copilot": {"events": ["assistant.usage", "assistant.intent"]}})),
             )
             .await;
         }

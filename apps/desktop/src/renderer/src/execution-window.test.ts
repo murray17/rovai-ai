@@ -98,6 +98,25 @@ describe('continuous execution history', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
+  it('refreshes and clears a transient thinking title without changing evidence or its cursor', async () => {
+    const { request, changes } = source(1)
+    let runtimePhase: 'thinking' | 'executing' = 'thinking'
+    const current = new ExecutionWindow('camp', 'run', 12, request, () => {}, async params => ({
+      ...await changes(params), runtimePhase, runtimeThinkingTitle: '检查调用链'
+    }))
+    await current.latest()
+    const evidenceBefore = current.evidence
+    await current.refresh()
+    expect(current.runtimePhase).toBe('thinking')
+    expect(current.runtimeThinkingTitle).toBe('检查调用链')
+    expect(current.evidence).toBe(evidenceBefore)
+    runtimePhase = 'executing'
+    await current.refresh()
+    expect(current.runtimeThinkingTitle).toBeNull()
+    expect(current.evidence).toBe(evidenceBefore)
+    expect(changes.mock.calls.every(([params]) => params.afterChangeSequence === 1)).toBe(true)
+  })
+
   it('reads larger historical batches, prefetches one neighbor and revisits loaded data offline', async () => {
     const { state, request, changes } = source(1000)
     const current = new ExecutionWindow('camp', 'run', 12, request, () => {}, changes)

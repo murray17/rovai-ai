@@ -356,9 +356,28 @@ D14 的原生来源权威继续保留；用户进一步撤回“保存官方后�
 共享配置影响如实说明；无法写回的已知有效覆盖在保存时报告。拒绝继续保留两条路径及运行时覆盖，也不采用
 启动前写文件、退出后还原的方案，避免并发进程互相改变配置。前端保存前往返切换必须无损，失败保留全部草稿。
 
-
 <a id="v1-72-d16"></a>
-## V1.72-D16：Command Code headless 使用冻结的普通 Prompt Bootstrap
+## V1.72-D16：继续执行是新的 User 授权，接入现有 Delivery lane
+
+- 状态：accepted
+- 日期：2026-10-07
+- 当前权威：[AgentRun Continuation v1](../../contracts/agent-run-continuation-v1.md)、[Accepted Input Recovery v7](../../contracts/accepted-input-recovery-v7.md)、[Message Delivery v11](../../contracts/message-delivery-v11.md)、[AgentRun Recovery](../../architecture/agent-run-recovery.md)
+
+### 背景与选择
+
+停止不代表效果回滚；旧 Run 的 accepted/unknown 投递不能当作未执行。User 希望保留原目标、工作区，
+由一次明确点击开始新执行，同一失败 Run 可多次尝试且状态独立。选择在命令事务中保存新授权，引用原
+业务输入，并重用当前上下文 builder、命令幂等与唯一队列。一次续做有明确批次边界，不引入新生命周期。
+
+### 后果与替代方案
+
+需要增量迁移表示一条授权 Delivery 对应原多条业务输入，并保留其单 Run 归属约束。旧输入事实不改写，
+清理门禁不放宽。拒绝重置旧 Run、复制冻结投递或单后继链，也不建设恢复协调器、效果对账系统或语义审批器。
+提示词不追加来源 ID、证据和恢复指令；会话真正恢复失败时结束当前尝试，显式确认才能以新会话继续。
+
+
+<a id="v1-72-d17"></a>
+## V1.72-D17：Command Code headless 使用冻结的普通 Prompt Bootstrap
 
 - 状态：accepted
 - 日期：2026-09-27
@@ -385,8 +404,8 @@ Command Code 的官方 headless NDJSON 提供精确 Session 恢复，但没有�
 - 改写共享 `AGENTS.md`：会把成员私有的冻结 Bootstrap 投到项目／用户级并造成跨成员串线。
 - 自封 ACP 代理：只改接口形状，不能补出上游缺失的高权限投递和审批保证。
 
-<a id="v1-72-d17"></a>
-## V1.72-D17：Cline 先在 macOS arm64 开放真实开发预览
+<a id="v1-72-d18"></a>
+## V1.72-D18：Cline 先在 macOS arm64 开放真实开发预览
 
 - 状态：accepted
 - 日期：2026-10-04
@@ -406,8 +425,8 @@ Cline 已有 shared ACP Host 和隔离真实模型证据，但尚未完成全部
 却不能满足本次开发包的使用要求。此决定只允许开发预览，不接受 Cline 的尚未确认 Plugin Rule 提案，
 也不把现有 FirstPayload 的试运行结果等同于 Bootstrap 或压缩连续性的正式资格。
 
-<a id="v1-72-d18"></a>
-## V1.72-D18：成功的模糊匹配编辑保留为补丁片段
+<a id="v1-72-d19"></a>
+## V1.72-D19：成功的模糊匹配编辑保留为补丁片段
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -425,8 +444,8 @@ Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation �
 行号及实际旧字节的限制；不会据此提升 Runtime 资格。没有选择执行前后读取文件或 Git 捕获，因为并发写入、非 Git
 工作区及完整状态归属会引入另一套观测权威。继续只显示路径可保持旧边界，却不能满足用户审阅已执行修改的要求。
 
-<a id="v1-72-d19"></a>
-## V1.72-D19：Command Code 使用官方 ACP 与必需 System Mod 开发预览
+<a id="v1-72-d20"></a>
+## V1.72-D20：Command Code 使用官方 ACP 与必需 System Mod 开发预览
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -437,7 +456,7 @@ Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation �
 User 在消息 `677d610d-e4cf-4ffb-aba2-d4ebb021cbcd` 与 `1bd0ab39-6939-40cd-9653-b472b3b69082`
 要求修复 System Bootstrap、warm 及全部可接能力。1.74.1 已有官方多 Session ACP，继续仅用 one-shot 会
 丢失可接的常驻能力。选择共享 ACP Host/Fleet，macOS arm64 开放 Preview；新产品路径采用带 readiness 与
-逐 Session 绑定校验的官方 System Mod，替代 D16 的候选 first_payload。完整输入变化由
+逐 Session 绑定校验的官方 System Mod，替代 D17 的候选 first_payload。完整输入变化由
 [revision 5](model-context-change-command-code-acp.md)记录，Cline 的缺失插件反例独立保留。
 
 ### 后果与替代方案
@@ -449,8 +468,8 @@ MCP 同名选择已有 native_wins_skip，避免改写原生全局/项目配置�
 Preview 不代表完整资格：原生账号额度、自定义 BYOK 目录和压缩等未验证轴仍公开记录。
 
 
-<a id="v1-72-d20"></a>
-## V1.72-D20：macOS ACP 按内核身份回收独立进程组，并保留重启记录
+<a id="v1-72-d21"></a>
+## V1.72-D21：macOS ACP 按内核身份回收独立进程组，并保留重启记录
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -471,8 +490,8 @@ ACP 另行观察 leader，保留有界的末帧消费。结果未知的公开 ba
 自动回收，也不等价于 Windows Job 对未观测后代的内核级限制。
 
 
-<a id="v1-72-d21"></a>
-## V1.72-D21：Cline 正常 System Rule 交付与 Command 原生 MCP 配置
+<a id="v1-72-d22"></a>
+## V1.72-D22：Cline 正常 System Rule 交付与 Command 原生 MCP 配置
 
 - 状态：accepted
 - 日期：2026-10-06
@@ -496,8 +515,8 @@ Core 把分配结果写入 Host 私有 mcp.json，保留原生同名优先，更
 原生 MCP 发现成功不代表当前自定义 BYOK 调用成功；未通过项保留，两个 Runtime 仍为 Preview。
 
 
-<a id="v1-72-d22"></a>
-## V1.72-D22：Cline 采用独立 Native Hub，删除 ACP 后端
+<a id="v1-72-d23"></a>
+## V1.72-D23：Cline 采用独立 Native Hub，删除 ACP 后端
 
 - 状态：accepted
 - 日期：2026-10-07

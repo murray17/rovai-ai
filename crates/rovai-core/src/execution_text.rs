@@ -206,6 +206,9 @@ pub(crate) fn observe(
         event,
         "agent.thought.delta"
             | "agent.thought.block"
+            | "agent.thought.started"
+            | "agent.thought.completed"
+            | "agent.thinking.title"
             | "agent.reasoning.summary.delta"
             | "agent.reasoning.summary.block"
     ) || native_type == Some("reasoning");
@@ -961,8 +964,16 @@ mod slow_tests {
             .unwrap();
         let summary = ExecutionEvidenceService.record_runtime_event(&mut database, &store, run, 2, "activity.completed", &json!({"item":{"type":"reasoning","id":"A","summary":["full summary","second part"]}})).unwrap();
         assert!(summary.is_none());
+        for event in [
+            "agent.thought.started",
+            "agent.thought.completed",
+            "agent.thinking.title",
+        ] {
+            assert!(ExecutionEvidenceService.record_runtime_event(&mut database, &store, run, 2, event,
+                &json!({"itemId":"A","title":"PUBLIC_EPHEMERAL_TITLE","signature":"PRIVATE_SIGNATURE"})).unwrap().is_none());
+        }
         let private_rows: i64 = database.connection().query_row(
-            "SELECT COUNT(*) FROM agent_run_execution_evidence WHERE agent_run_id=?1 AND execution_epoch=2 AND kind='reasoning_summary'",
+            "SELECT COUNT(*) FROM agent_run_execution_evidence WHERE agent_run_id=?1 AND execution_epoch=2",
             [run],
             |row| row.get(0),
         ).unwrap();

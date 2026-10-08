@@ -187,9 +187,18 @@ export type ExecutionProgressItem =
   | { key: string; kind: 'compaction'; compaction: RuntimeCompactionDisplayItem }
   | { key: string; kind: 'tool'; step: ExecutionStep }
 
+/** Titles are plain, single-line native labels; invalid input uses generic feedback. */
+export function runtimeThinkingTitleText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const title = value.trim()
+  return title && Array.from(title).length <= 80 && !/[\x00-\x1f\x7f-\x9f\u2028\u2029]/u.test(title) ? title : null
+}
+
 export type LiveExecutionProgress = {
   items: ExecutionProgressItem[]
   runtimePhase?: 'thinking' | 'executing'
+  runtimeThinkingTitle?: string | null
+  runtimePhaseEpoch?: number
 }
 
 export type DiffLineKind = 'context' | 'addition' | 'deletion' | 'hunk' | 'metadata'
@@ -560,6 +569,8 @@ export function buildLiveExecutionProgress(
   let planExplanation = ''
   let plan: ExecutionPlanStep[] = []
   let runtimePhase: LiveExecutionProgress['runtimePhase']
+  let runtimeThinkingTitle: string | null = null
+  let phaseEpoch = -1
   const diagnosticsById = new Map<string, RuntimeDiagnostic>()
   const fastById = new Map<string, Extract<ExecutionProgressItem, { kind: 'fast' }>>()
   const compactionsById = new Map<string, RuntimeCompactionDisplayItem>()
@@ -633,8 +644,12 @@ export function buildLiveExecutionProgress(
     if (event.eventType === 'agent_run.runtime_phase_changed') {
       const phase = stringField(payload, 'phase')
       if (phase === 'thinking' || phase === 'executing') {
+        const epoch = event.executionEpoch ?? 0
+        if (epoch < phaseEpoch) continue
+        phaseEpoch = epoch
         runtimePhase = phase
-        // The content-free phase edge preserves the public narration boundary
+        runtimeThinkingTitle = phase === 'thinking' ? runtimeThinkingTitleText(payload.thinkingTitle) : null
+        // The phase edge preserves the public narration boundary
         // that private reasoning frames used to imply.
         finishNarrationStream()
       }
@@ -911,7 +926,9 @@ export function buildLiveExecutionProgress(
   })
   return {
     items,
-    runtimePhase
+    runtimePhase,
+    runtimeThinkingTitle,
+    runtimePhaseEpoch: phaseEpoch >= 0 ? phaseEpoch : undefined
   }
 }
 

@@ -10,6 +10,8 @@ mod mission_details;
 pub(crate) mod notification_model;
 #[path = "db_pending_draft.rs"]
 mod pending_draft;
+#[path = "db_run_continuation.rs"]
+mod run_continuation;
 #[path = "db_thread_names.rs"]
 mod thread_names;
 #[path = "db_user_projection.rs"]
@@ -313,7 +315,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 135;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 136;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -773,6 +775,7 @@ struct CurrentMigrationState {
     v183: bool,
     v184: bool,
     v185: bool,
+    v186: bool,
 }
 
 impl CurrentMigrationState {
@@ -794,11 +797,19 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v186 {
+            let mut previous = *self;
+            previous.v186 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && self.v185
+                && previous.admits("v1.72", 135, classifier);
+        }
         if self.v185 {
             let mut previous = *self;
             previous.v185 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            return contract == "v1.72"
+                && schema == 135
                 && self.v184
                 && previous.admits("v1.72", 134, classifier);
         }
@@ -3327,7 +3338,8 @@ pub(crate) fn classify_database_contract(
         || (migrations.v181 && !user_projection::schema_matches(connection)?)
         || (migrations.v182 && !member_creation::schema_matches(connection)?)
         || (migrations.v183 && !pending_draft::schema_matches(connection)?)
-        || (migrations.v184 && !cline_runtime_v184_schema_matches(connection)?)
+        || (migrations.v184 && !runtime_v184_source_schema_matches(connection, migrations.v185)?)
+        || (migrations.v186 && !run_continuation::schema_matches(connection)?)
         || (migrations.v185 && !command_code_runtime_v185_schema_matches(connection)?)
         || (migrations.v156
             && !migrations.v157
@@ -4105,6 +4117,7 @@ fn legacy_main_context_source(
         || migrations.v181
         || migrations.v182
         || migrations.v183
+        || migrations.v184
         || !migrations.admits(
             "v1.72",
             marker.projection_schema_version,
@@ -4581,6 +4594,39 @@ const DSH_RUNTIME_TABLES: [&str; 5] = [
     "native_session_compaction_observer_lease",
 ];
 const DSH_SKILL_TABLES: [&str; 2] = ["skill_group_assignment", "skill_projection_observation"];
+
+fn runtime_v184_source_schema_matches(
+    connection: &Connection,
+    has_v185: bool,
+) -> rusqlite::Result<bool> {
+    let cline = cline_runtime_v184_schema_matches(connection)?;
+    if has_v185 {
+        return Ok(cline);
+    }
+    if cline {
+        return Ok(!connection.table_exists(None, "camp_run_continuation")?);
+    }
+    if !run_continuation::schema_matches(connection)? {
+        return Ok(false);
+    }
+    // A main/134 source has no partial Preview catalog expansion.
+    for (tables, token) in [
+        (&DSH_RUNTIME_TABLES[..], "'cline-cli'"),
+        (&DSH_SKILL_TABLES[..], "'cline'"),
+    ] {
+        for table in tables {
+            let sql: String = connection.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )?;
+            if sql.contains(token) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
 
 fn cline_runtime_v184_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
     for (tables, token) in [
@@ -5330,7 +5376,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 182),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 183),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 184),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 185)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 185),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 186)
         "#,
         [],
         |row| {
@@ -5451,6 +5498,7 @@ fn load_current_migration_state(
                 v183: row.get(113)?,
                 v184: row.get(114)?,
                 v185: row.get(115)?,
+                v186: row.get(116)?,
             })
         },
     )
@@ -8590,6 +8638,9 @@ impl Database {
             if !self.schema_migration_applied(185)? {
                 migration_step!("migration_185", self.migrate_command_code_runtime_v185());
             }
+            if !self.schema_migration_applied(186)? {
+                migration_step!("migration_186", run_continuation::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -9363,6 +9414,9 @@ impl Database {
         }
         if !self.schema_migration_applied(185)? {
             migration_step!("migration_185", self.migrate_command_code_runtime_v185());
+        }
+        if !self.schema_migration_applied(186)? {
+            migration_step!("migration_186", run_continuation::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -28964,6 +29018,11 @@ impl Database {
                     })
                 })
                 .collect::<rusqlite::Result<Vec<_>>>()?;
+            if !cline_runtime_v184_schema_matches(&tx)? {
+                // Main's receipt 184 belongs to continuation, not the Preview
+                // catalog. Add both catalog entries atomically under receipt 185.
+                rewrite_cline_runtime_closed_sets(&tx, false)?;
+            }
             rewrite_command_code_runtime_closed_sets(&tx, false)?;
             anyhow::ensure!(
                 command_code_runtime_v185_schema_matches(&tx)?,
@@ -28986,7 +29045,7 @@ impl Database {
             anyhow::ensure!(
                 matches!(
                     classify_database_contract(&tx)?,
-                    DatabaseContractClassification::Current(_)
+                    DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 135
                 ),
                 "Command Code runtime migration failed current schema admission"
             );
@@ -34546,6 +34605,7 @@ fn downgrade_navigation_summary_for_test(connection: &Connection) {
 
 #[cfg(test)]
 fn downgrade_command_code_catalog_for_test(connection: &Connection) {
+    run_continuation::downgrade_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=185)",
@@ -39143,6 +39203,8 @@ mod tests {
             before,
             "navigation must add no persistent table"
         );
+        // Current read models require the later additive tables as well.
+        database.migrate(false).unwrap();
         assert_eq!(
             serde_json::to_value(
                 crate::read_model::ReadModelService
@@ -40465,6 +40527,10 @@ mod tests {
         thread_names::migrate(&mut database).unwrap();
         user_projection::migrate(&mut database).unwrap();
         member_creation::migrate(&mut database).unwrap();
+        pending_draft::migrate(&mut database).unwrap();
+        database.migrate_cline_runtime_v184().unwrap();
+        database.migrate_command_code_runtime_v185().unwrap();
+        run_continuation::migrate(&mut database).unwrap();
         let successor_run_id = claim_waiting_delivery_batches(&mut database, 1)
             .unwrap()
             .pop()
@@ -40710,16 +40776,18 @@ mod tests {
     }
 
     // Each deployed catalog source owns an atomic CHECK-table + receipt transition.
-    // Keep the schema 133 Cline case while adding schema 134 Command Code.
+    // Receipt 184 was independently deployed by main/continuation and Preview/Cline.
+    // Both exact sources must preserve data and roll back all catalog changes together.
     #[test]
     fn runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts() {
         type Rewrite = fn(&Transaction<'_>, bool) -> Result<()>;
         type Matches = fn(&Connection) -> rusqlite::Result<bool>;
         type Migrate = fn(&mut Database) -> Result<()>;
-        for (version, schema, rewrite, schema_matches, migrate) in [
+        for (version, schema, main_continuation, rewrite, schema_matches, migrate) in [
             (
                 184,
                 133,
+                false,
                 rewrite_cline_runtime_closed_sets as Rewrite,
                 cline_runtime_v184_schema_matches as Matches,
                 Database::migrate_cline_runtime_v184 as Migrate,
@@ -40727,14 +40795,24 @@ mod tests {
             (
                 185,
                 134,
+                false,
+                rewrite_command_code_runtime_closed_sets as Rewrite,
+                command_code_runtime_v185_schema_matches as Matches,
+                Database::migrate_command_code_runtime_v185 as Migrate,
+            ),
+            (
+                185,
+                134,
+                true,
                 rewrite_command_code_runtime_closed_sets as Rewrite,
                 command_code_runtime_v185_schema_matches as Matches,
                 Database::migrate_command_code_runtime_v185 as Migrate,
             ),
         ] {
-            let directory = std::env::temp_dir()
-                .join(format!("rovai-command_code-migration-{}", Uuid::new_v4()));
-            let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            let (mut database, directory) = crate::test_support::seeded_runtime_database();
+            if !main_continuation {
+                run_continuation::downgrade_for_test(database.connection());
+            }
             if version == 184 {
                 downgrade_command_code_catalog_for_test(database.connection());
             }
@@ -40745,6 +40823,11 @@ mod tests {
             {
                 let tx = database.connection().unchecked_transaction().unwrap();
                 rewrite(&tx, true).unwrap();
+                if main_continuation {
+                    rewrite_cline_runtime_closed_sets(&tx, true).unwrap();
+                    tx.execute_batch("DELETE FROM schema_migration WHERE version=186")
+                        .unwrap();
+                }
                 tx.execute_batch(
                 &format!("DELETE FROM schema_migration WHERE version={version}; UPDATE rovai_data_contract SET projection_schema_version={schema} WHERE singleton=1;"),
             )
@@ -40764,6 +40847,23 @@ mod tests {
                 ),
                 "{source_classification:?}"
             );
+            if main_continuation {
+                // A matching marker with a partial continuation schema must fail closed.
+                database
+                    .connection()
+                    .execute_batch(
+                        "SAVEPOINT damaged_source; DROP TRIGGER camp_run_continuation_immutable",
+                    )
+                    .unwrap();
+                assert!(!matches!(
+                    classify_database_contract(database.connection()).unwrap(),
+                    DatabaseContractClassification::SupportedMigrationSource(_)
+                ));
+                database
+                    .connection()
+                    .execute_batch("ROLLBACK TO damaged_source; RELEASE damaged_source")
+                    .unwrap();
+            }
             let before: (i64, i64) = database.connection().query_row(
             "SELECT (SELECT COUNT(*) FROM agent_profile), (SELECT COUNT(*) FROM skill_group_assignment)",
             [],
@@ -40777,6 +40877,10 @@ mod tests {
                     .contains("command_code rollback fixture")
             );
             assert!(!schema_matches(database.connection()).unwrap());
+            if main_continuation {
+                assert!(!cline_runtime_v184_schema_matches(database.connection()).unwrap());
+                assert!(run_continuation::schema_matches(database.connection()).unwrap());
+            }
             assert!(matches!(
                 classify_database_contract(database.connection()).unwrap(),
                 DatabaseContractClassification::SupportedMigrationSource(ref marker)
@@ -40802,6 +40906,14 @@ mod tests {
             drop(database);
             let reopened = Database::open(&directory).unwrap();
             assert!(reopened.schema_migration_applied(version).unwrap());
+            assert!(reopened.schema_migration_applied(186).unwrap());
+            assert!(run_continuation::schema_matches(reopened.connection()).unwrap());
+            assert!(cline_runtime_v184_schema_matches(reopened.connection()).unwrap());
+            assert!(command_code_runtime_v185_schema_matches(reopened.connection()).unwrap());
+            assert!(matches!(
+                classify_database_contract(reopened.connection()).unwrap(),
+                DatabaseContractClassification::Current(_)
+            ));
             drop(reopened);
             std::fs::remove_dir_all(directory).unwrap();
         }
@@ -40925,6 +41037,7 @@ mod tests {
             v183: version >= 183,
             v184: version >= 184,
             v185: version >= 185,
+            v186: version >= 186,
         }
     }
 
@@ -41119,6 +41232,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                186,
+            ),
+            (
+                "v1.72/schema 135 before continuation convergence",
+                "v1.72",
+                135,
                 185,
             ),
             (
@@ -41635,7 +41754,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(185);
+        let current = migration_state_through(186);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -41691,7 +41810,16 @@ mod tests {
         missing_member_creation.v182 = false;
         let mut missing_pending_draft = current;
         missing_pending_draft.v183 = false;
+        let mut missing_convergence = current;
+        missing_convergence.v186 = false;
         let rejected = [
+            (
+                "current marker without catalog/continuation convergence",
+                missing_convergence,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without pending draft retention",
                 missing_pending_draft,
@@ -42170,7 +42298,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(185));
+        assert_eq!(state, migration_state_through(186));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")

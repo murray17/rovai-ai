@@ -103,4 +103,4 @@ Run/Binding 标识和安装身份，不收录 token、完整 Provider、认证 U
 当前三次基本请求的脚手架负例为 `account-single-02`；修正后扩展矩阵为 `account-extended-03`；BYOK 为 `auth-byok-regression-05`。
 公开[封闭证据](native-account-auth-2026-10-08.evidence.json)仅列真实 Run 状态与已知限制。
 当前权威见 [Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md#cline-native-hub)及
-[V1.72-D22](../../versions/v1.72/decisions.md#v1-72-d22)。本报告不提升 Preview 为完整认证/刷新资格。
+[V1.72-D23](../../versions/v1.72/decisions.md#v1-72-d23)。本报告不提升 Preview 为完整认证/刷新资格。
