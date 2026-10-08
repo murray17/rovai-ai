@@ -79,7 +79,7 @@ User 85 要求保留 Native Hub、让实际 Cline 读取和刷新凭据；User 8
 这两次自有授权进程均已随 App 关闭回收，未提交授权码；真实日常凭据摘要前后相同。
 后续 `account-selected-login-11` 正式 Core fixture 已通过所选绝对路径、私有源、原生输出脱敏、输入、取消、再次完成及活动登录退出；零模型请求，临时 Host 清空，真实源未改。最终重新打包的 `account-packaged-login-12` 经真实 Renderer/preload/Core 重复通过同一零模型矩阵，ad-hoc 签名通过。它专门拥有此回归，不能再用纯 Login 单测替代。
 
-## 自动化与凭据检查
+## 自动化与凭据检查（认证三步交付，合流前）
 
 Rust 默认 workspace 463 passed / 2 ignored；Cline extended 9 passed / 2 ignored；workspace all-targets/all-features check、
 typecheck、Vitest 2605、Node 335 passed / 2 skipped、Desktop bridge、settings Electron 日夜/1040×700/200% 交互、
@@ -104,3 +104,33 @@ Run/Binding 标识和安装身份，不收录 token、完整 Provider、认证 U
 公开[封闭证据](native-account-auth-2026-10-08.evidence.json)仅列真实 Run 状态与已知限制。
 当前权威见 [Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md#cline-native-hub)及
 [V1.72-D23](../../versions/v1.72/decisions.md#v1-72-d23)。本报告不提升 Preview 为完整认证/刷新资格。
+
+## 最终主干合流与 App 复验
+
+认证交付提交为 `232ecaf7`（路径与验收）、`1a2255cd`（凭据与所有权）、`728ff463`（显式登录及选择来源）。
+随后合入主干 `ed90fa9b`，运行代码提交为 **`95ded2d2c7c43aa51d4c8ed33bc331d31d2e014e`**。
+主干与 Preview 独立使用 Migration 184，按精确结构区分两种已存在来源，并由 185/186 合流至 schema 136；
+原因与保留边界见[当前版本说明](../../versions/v1.72/README.md#主干与-preview-数据合流2026-10-08)。
+
+该提交重新构建的 macOS arm64 App 通过 ad-hoc 签名；`account-packaged-final-13` 经真实
+Renderer→preload→Core 完成首次、同 Session 续接和 App/Core cold 三轮 succeeded，Binding、generation、
+早期记忆与 System 身份保持。`account-login-final-14` 零模型复验选中 CLI、显式登录、私有输出脱敏、
+输入、取消、再次完成和活动登录退出，临时 Host 均清空。它仍是交互 fixture，不是完整真实 OAuth 授权。
+
+合流后 Rust workspace **465 passed / 2 ignored**、Vitest **2607**、Node **335 passed / 2 skipped**；
+workspace all-targets/all-features、typecheck、fmt、通用与 diff-aware 文档门禁通过。继续执行浏览器测试
+首次在键盘等待处超时；保留负例，同一生产及测试代码复验通过，没有删除或放宽断言。
+[Ubuntu CI](https://github.com/murray17/rovai-ai/actions/runs/37729920420)和
+[Windows runner](https://github.com/murray17/rovai-ai/actions/runs/37729971072)均在 `95ded2d2` 通过。
+Windows 编译通过不构成 Cline Windows Runtime 资格。
+
+额外的扩展 migration 扫描为 **28 passed / 1 failed**。失败 owner 为
+`authority_migration::tests::macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data`，
+本机在任何 migration 执行之前的 `authority_open` 返回 `authority_contract_changed / IdentityChanged`。
+已从 Git 提取合并前 **728ff463** 到独立临时源码目录，运行同一 owner，得到同样失败；该 owner 与
+生产 admission 未在本次合流修改。这个 macOS 元数据重验问题仍未修，不计入通过项。Cline/Command catalog
+两种来源、continuation 迁移、receipt 回滚和重开 owner 均已通过。
+
+最终扫描 **1131** 个账号验收文件与 **96** 个公开变更文件，真实 access/refresh/id token 匹配为零。
+源凭据未复制到 Host；本轮真实源没有变化，仍允许今后由 Cline 原生刷新写回。实际刷新、首次完整产品
+授权和跨外部 Cline 进程刷新并发依然未获资格；本次复验不改变这些结论。

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "date": "2026-10-08",
   "baseline": "8eb7f6485e67b67a7a3e02f5ecda591871fc5a4c",
-  "testedSource": "baseline plus this branch native-auth changes; exact delivery commits in Git history",
+  "testedSource": "232ecaf7, 1a2255cd, 728ff463; merged runtime and packaged revalidation at 95ded2d2",
   "installation": {
     "source": "Homebrew",
     "cliVersion": "3.0.3",
@@ -388,5 +388,100 @@
     "changedPublicFilesScanned": 34,
     "rawCredentialOrPrivateEndpointMatches": 0
   },
-  "packagedCoreSha256": "61d29ebf0c4be056e3671af351805f83d5f94ae66997f507a28e020851be8a4d"
+  "packagedCoreSha256": "61d29ebf0c4be056e3671af351805f83d5f94ae66997f507a28e020851be8a4d",
+  "mergeFollowUp": {
+    "sourceHead": "95ded2d2c7c43aa51d4c8ed33bc331d31d2e014e",
+    "mergedMain": "ed90fa9b",
+    "projectionSchemaVersion": 136,
+    "packagedCoreSha256": "6f0b94f32701fd7629a8c649a6bdf86481d71d05aa8a536c76be1a2570d2e18a",
+    "accountContinuity": {
+      "fixture": "account-packaged-final-13",
+      "passed": true,
+      "sourceHead": "95ded2d2c7c43aa51d4c8ed33bc331d31d2e014e",
+      "packagedRendererToCore": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "d88eea0c-2c55-4264-ad39-028a98753187",
+          "status": "succeeded"
+        },
+        {
+          "label": "warm",
+          "runId": "16d4889b-6719-49b5-8341-51ddc73b2a61",
+          "status": "succeeded"
+        },
+        {
+          "label": "cold",
+          "runId": "b09f8c48-6874-4b2e-a3bc-831e0a6c3f9b",
+          "status": "succeeded"
+        }
+      ],
+      "ownedHostsRemaining": []
+    },
+    "loginInteraction": {
+      "passed": true,
+      "modelInputs": 0,
+      "packagedRendererToCore": true,
+      "loginFixture": {
+        "packagedRendererToCore": true,
+        "selectedAbsoluteProgram": true,
+        "explicitStart": true,
+        "privateOutputRedacted": true,
+        "input": true,
+        "cancel": true,
+        "subsequentCompletion": true,
+        "realOAuth": false,
+        "shutdownActiveLogin": true
+      },
+      "sourceChanged": false,
+      "hostTempRemaining": []
+    },
+    "validation": {
+      "rustWorkspace": {
+        "passed": 465,
+        "ignored": 2
+      },
+      "vitest": {
+        "passed": 2607
+      },
+      "node": {
+        "passed": 335,
+        "skipped": 2
+      },
+      "allTargetsAllFeatures": "passed",
+      "typecheck": "passed",
+      "documentationGates": "passed",
+      "fmt": "passed",
+      "adHocSignature": "passed",
+      "continuationBrowser": {
+        "final": "passed unchanged",
+        "initial": "keyboard wait timeout; negative log retained"
+      },
+      "extendedMigrations": {
+        "passed": 28,
+        "failed": 1,
+        "failure": "authority_migration::tests::macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data",
+        "phase": "authority_open before any migration",
+        "code": "authority_contract_changed / IdentityChanged",
+        "alsoReproducedAt": "728ff463",
+        "productionAndTestUnchanged": true
+      }
+    },
+    "ci": {
+      "ubuntu": {
+        "conclusion": "success",
+        "url": "https://github.com/murray17/rovai-ai/actions/runs/37729920420"
+      },
+      "windows": {
+        "conclusion": "success",
+        "url": "https://github.com/murray17/rovai-ai/actions/runs/37729971072"
+      }
+    },
+    "credentialProtection": {
+      "privateFilesScanned": 1131,
+      "privateCredentialMatches": 0,
+      "publicFilesScanned": 96,
+      "publicCredentialMatches": 0
+    }
+  }
 }
