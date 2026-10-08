@@ -2521,6 +2521,48 @@ export interface ThreadMessageAroundSnapshot {
   anchorMessageId: string
   sourceAvailable: boolean
   messages: ThreadMessageView[]
+  /** Actual next public row after this bounded window; null means no later row at the read watermark. */
+  nextMessageSequence: number | null
+}
+
+/** Scoped Host invalidation metadata; never a replay of private Core events. */
+export interface ThreadMessageChange {
+  threadId: string
+  indexChanged: boolean
+  unavailableMessageIds?: string[]
+  throughGlobalSequence: number
+}
+export interface ThreadReadInvalidation {
+  resync?: boolean
+  messages?: ThreadMessageChange[]
+}
+
+export interface ThreadUserAnchorIndexParams { threadId: string }
+export type ThreadUserAnchorPreviewParams = ThreadMessageAroundParams
+
+export interface ThreadUserAnchorIndex {
+  schemaVersion: 1
+  threadId: string
+  throughGlobalSequence: number
+  totalCount: number
+  items: ThreadUserAnchor[]
+}
+
+export interface ThreadUserAnchor {
+  messageId: string
+  sequence: number
+  title: string
+  messageVersion: number
+}
+
+export interface ThreadUserAnchorPreview {
+  schemaVersion: 1
+  threadId: string
+  messageId: string
+  throughGlobalSequence: number
+  sourceAvailable: boolean
+  /** Earliest valid direct child Agent reply; null does not imply the question was unanswered. */
+  firstReply: { messageId: string; sequence: number; summary: string; messageVersion: number } | null
 }
 
 export interface ThreadMessageAroundParams {
@@ -4214,6 +4256,8 @@ export type CoreMethod =
   | 'agentRunFileChanges.get'
   | 'agentRunImages.read'
   | 'thread.messages.page'
+  | 'thread.messages.anchors'
+  | 'thread.messages.anchorPreview'
   | 'thread.messages.around'
   | 'thread.messages.find'
   | 'thread.messages.withdraw'

@@ -1456,6 +1456,13 @@ fn log_camp_open_projection(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ThreadMessageAnchorIndexParams {
+    #[serde(rename = "threadId", alias = "campId")]
+    camp_id: ThreadId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ThreadMessageAroundParams {
     #[serde(rename = "threadId", alias = "campId")]
     camp_id: ThreadId,
@@ -10169,6 +10176,27 @@ impl Core {
                     params.limit,
                 )?)?)
             }
+            "camp.messages.anchors" => {
+                let params: ThreadMessageAnchorIndexParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let index =
+                    ReadModelService.user_anchors(&mut database, params.camp_id.as_str())?;
+                drop(database);
+                Ok(serde_json::to_value(index.format()?)?)
+            }
+            "camp.messages.anchorPreview" => {
+                let params: ThreadMessageAroundParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let preview = ReadModelService.user_anchor_preview(
+                    &mut database,
+                    params.camp_id.as_str(),
+                    &params.message_id,
+                )?;
+                drop(database);
+                Ok(serde_json::to_value(preview.format()?)?)
+            }
             "camp.messages.around" => {
                 let params: ThreadMessageAroundParams =
                     serde_json::from_value(request.params.clone())?;
@@ -12311,6 +12339,14 @@ impl Core {
                     &mut launch_permit,
                 )
                 .await;
+            if launch_result.is_err() {
+                let mut database = core.database.lock().await;
+                if let Err(error) = ExecutionRuntimeService::default()
+                    .retain_session_after_failed_replacement(&mut database, &execution)
+                {
+                    eprintln!("failed to retain previous Native Session reference: {error:#}");
+                }
+            }
             launch_permit.finish_launch();
             let launch_cancelled = launch_permit.check_cancelled().is_err();
             // New Runs carry only a Camp-scoped root proof. Their terminal path may wake legacy
@@ -15283,6 +15319,139 @@ impl Core {
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
+
+        let session_bootstrap = {
+            let mut database = self.database.lock().await;
+            ContextService
+                .prepare_session_bootstrap(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    CharterDeliveryMode::NativeAppend,
+                )?
+                .payload
+        };
+        let native_turn_id = format!(
+            "claude-code:{}:{}",
+            execution.agent_run_id, execution.execution_epoch
+        );
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "threadId": execution.camp_id,
+                "threadTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentId": execution.agent_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": format!(
+                    "claude-code-process:{}:{}",
+                    execution.agent_run_id, execution.execution_epoch
+                ),
+                "nativeThreadId": native_session_id,
+                "nativeTurnId": native_turn_id,
+            }),
+        );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
+        let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
+        let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
+        let (input_ready_sender, mut input_ready_receiver) = mpsc::unbounded_channel();
+        let run = self.claude_code_cli.run(ClaudeCodeRunRequest {
+            agent_run_id: execution.agent_run_id.clone(),
+            execution_epoch: execution.execution_epoch,
+            workspace: execution.workspace.clone(),
+            permission_semantics: execution.permission_semantics,
+            runtime: execution.runtime.clone(),
+            prompt: String::new(),
+            resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
+            new_native_session_id: is_new_session.then_some(native_session_id.clone()),
+            session_bootstrap: Some(session_bootstrap.clone()),
+            builtin_tools: Some(builtin_tools.clone()),
+            external_mcp_servers: mcp_projection.servers.clone(),
+            attachment_access_root: Some(attachment_access_root.to_path_buf()),
+            persist_session: true,
+            input_accepted: Some(input_accepted_sender),
+            runtime_events: Some(runtime_event_sender),
+            launch_handoff: Some(launch_handoff_sender),
+            input_ready: Some(input_ready_sender),
+        });
+        tokio::pin!(run);
+        let ready: Result<_> = tokio::select! {
+            biased;
+            ready = input_ready_receiver.recv() => match ready {
+                Some(release) => Ok(release),
+                None => Err(run.as_mut().await.err().unwrap_or_else(|| anyhow::anyhow!("Claude Code ended without a dispatch gate"))),
+            },
+            result = &mut run => Err(result.err().unwrap_or_else(|| anyhow::anyhow!("Claude Code ended before native initialization"))),
+        };
+        let release = match ready {
+            Ok(release) => release,
+            Err(error) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                let may_replace = !is_new_session
+                    && error
+                        .downcast_ref::<claude::ClaudeCodeInputNotSent>()
+                        .is_some_and(|failure| failure.session_unavailable)
+                    && {
+                        let database = self.database.lock().await;
+                        crate::run_continuation::can_replace_session_before_dispatch(
+                            database.connection(),
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                        )?
+                    };
+                if !may_replace {
+                    return Err(error);
+                }
+                if !self
+                    .claude_code_cli
+                    .wait_for_agent_run_quiescence(
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                        RUNTIME_CANCELLATION_TOTAL_TIMEOUT,
+                    )
+                    .await
+                {
+                    return Err(error).context(
+                        "Claude Code cleanup is not confirmed; replacement was not started",
+                    );
+                }
+                {
+                    let mut database = self.database.lock().await;
+                    ExecutionRuntimeService::default().record_native_session_continuity_lost(
+                        &mut database,
+                        execution,
+                        "claude_session_initialize",
+                        NativeSessionResumeFailure::Incompatible,
+                    )?;
+                }
+                return Box::pin(self.launch_claude_code_agent_run(PreparedRuntimeLaunch {
+                    execution,
+                    resume_disposition: NativeSessionResumeDisposition::New,
+                    skill_exposure,
+                    mcp_projection,
+                    attachment_admission,
+                    attachment_authorization,
+                    output,
+                    launch_permit,
+                }))
+                .await
+                .context("single replacement Claude Code Session failed");
+            }
+        };
         let materialized = self
             .materialize_agent_run_context(
                 execution,
@@ -15319,18 +15488,6 @@ impl Core {
                 return Err(error);
             }
         };
-        let session_bootstrap = {
-            let mut database = self.database.lock().await;
-            ContextService
-                .prepare_session_bootstrap(
-                    &mut database,
-                    &ManagedBlobStore::new(&self.data_dir),
-                    &execution.agent_run_id,
-                    execution.execution_epoch,
-                    CharterDeliveryMode::NativeAppend,
-                )?
-                .payload
-        };
         if is_new_session {
             self.bind_prepared_native_session(execution, &binding_credential, &native_session_id)
                 .await?;
@@ -15352,68 +15509,23 @@ impl Core {
         if delivery.status != "prepared" {
             anyhow::bail!("Claude Code Runtime Input Delivery is not ready to send");
         }
-        let native_turn_id = format!(
-            "claude-code:{}:{}",
-            execution.agent_run_id, execution.execution_epoch
-        );
         let acceptance_target = ClaudeInputAcceptanceTarget {
             delivery_id: &delivery.id,
             expected_native_session_id: &native_session_id,
             expected_native_turn_id: &native_turn_id,
             is_new_session,
         };
-        emit(
-            output,
-            "agent_run.started",
-            json!({
-                "threadId": execution.camp_id,
-                "threadTurnId": execution.camp_turn_id,
-                "agentRunId": execution.agent_run_id,
-                "agentId": execution.agent_id,
-                "executionEpoch": execution.execution_epoch,
-                "adapterKind": execution.runtime.adapter_kind,
-                "adapterInstallationId": execution.runtime.installation_id,
-                "runtimeVersion": execution.runtime.reported_version,
-                "modelId": execution.runtime.model.model_id,
-                "modelOptions": execution.runtime.model.options,
-                "hostInstanceId": format!(
-                    "claude-code-process:{}:{}",
-                    execution.agent_run_id, execution.execution_epoch
-                ),
-                "nativeThreadId": native_session_id,
-                "nativeTurnId": native_turn_id,
-            }),
-        );
-        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
-        let prompt = prepared_context.rendered_payload.clone();
-        let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
-        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
-        let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         self.begin_agent_run_input_dispatch(execution, &delivery.id, launch_permit)
             .await?;
-        let run = self.claude_code_cli.run(ClaudeCodeRunRequest {
-            agent_run_id: execution.agent_run_id.clone(),
-            execution_epoch: execution.execution_epoch,
-            workspace: execution.workspace.clone(),
-            permission_semantics: execution.permission_semantics,
-            runtime: execution.runtime.clone(),
-            prompt: prompt.clone(),
-            resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
-            new_native_session_id: is_new_session.then_some(native_session_id.clone()),
-            session_bootstrap: Some(session_bootstrap.clone()),
-            builtin_tools: Some(builtin_tools.clone()),
-            external_mcp_servers: mcp_projection.servers.clone(),
-            attachment_access_root: Some(attachment_access_root.to_path_buf()),
-            persist_session: true,
-            input_accepted: Some(input_accepted_sender),
-            runtime_events: Some(runtime_event_sender),
-            launch_handoff: Some(launch_handoff_sender),
-        });
-        tokio::pin!(run);
+        release
+            .send(prepared_context.rendered_payload.clone())
+            .map_err(|_| anyhow::anyhow!("Claude Code exited before input dispatch release"))?;
         let mut early_result = tokio::select! {
             biased;
             handoff = &mut launch_handoff_receiver => {
-                handoff.context("Claude Code launch handoff was lost")?;
+                if handoff.is_err() {
+                    Some(run.as_mut().await)
+                } else {
                 self.complete_active_runtime_route_handoff(
                     execution,
                     RuntimeRouteBinding {
@@ -15428,6 +15540,7 @@ impl Core {
                 )
                 .await?;
                 None
+                }
             }
             result = &mut run => {
                 Some(result)
@@ -16011,6 +16124,123 @@ impl Core {
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
+
+        let resumable_session_id = (resume_disposition != NativeSessionResumeDisposition::New)
+            .then(|| execution.native_session_id.clone())
+            .flatten();
+        let native_turn_id = format!(
+            "agy:{}:{}",
+            execution.agent_run_id, execution.execution_epoch
+        );
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "threadId": execution.camp_id,
+                "threadTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentId": execution.agent_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": format!("agy-process:{}:{}", execution.agent_run_id, execution.execution_epoch),
+                "nativeThreadId": resumable_session_id,
+                "nativeTurnId": native_turn_id,
+            }),
+        );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
+        let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
+        let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
+        let (input_ready_sender, mut input_ready_receiver) = mpsc::unbounded_channel();
+        let run = self.antigravity_app.run(AntigravityRunRequest {
+            agent_run_id: execution.agent_run_id.clone(),
+            execution_epoch: execution.execution_epoch,
+            workspace: execution.workspace.clone(),
+            permission_semantics: execution.permission_semantics,
+            runtime: execution.runtime.clone(),
+            prompt: String::new(),
+            resumable_native_session_id: resumable_session_id.clone(),
+            attachment_access_root: Some(attachment_access_root.to_path_buf()),
+            builtin_tools: Some(builtin_tools.clone()),
+            input_accepted: Some(input_accepted_sender),
+            runtime_events: Some(runtime_event_sender),
+            launch_handoff: Some(launch_handoff_sender),
+            input_ready: Some(input_ready_sender),
+        });
+        tokio::pin!(run);
+        let ready: Result<_> = tokio::select! {
+            biased;
+            ready = input_ready_receiver.recv() => match ready {
+                Some(release) => Ok(release),
+                None => Err(run.as_mut().await.err().unwrap_or_else(|| anyhow::anyhow!("Antigravity ended without a dispatch gate"))),
+            },
+            result = &mut run => Err(result.err().unwrap_or_else(|| anyhow::anyhow!("Antigravity ended before native initialization"))),
+        };
+        let release = match ready {
+            Ok(release) => release,
+            Err(error) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                let may_replace = resumable_session_id.is_some()
+                    && error
+                        .downcast_ref::<antigravity::AntigravityInputNotSent>()
+                        .is_some_and(|failure| failure.session_unavailable)
+                    && {
+                        let database = self.database.lock().await;
+                        crate::run_continuation::can_replace_session_before_dispatch(
+                            database.connection(),
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                        )?
+                    };
+                if !may_replace {
+                    return Err(error);
+                }
+                if !self
+                    .antigravity_app
+                    .wait_for_agent_run_quiescence(
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                        RUNTIME_CANCELLATION_TOTAL_TIMEOUT,
+                    )
+                    .await
+                {
+                    return Err(error).context(
+                        "Antigravity cleanup is not confirmed; replacement was not started",
+                    );
+                }
+                {
+                    let mut database = self.database.lock().await;
+                    ExecutionRuntimeService::default().record_native_session_continuity_lost(
+                        &mut database,
+                        execution,
+                        "antigravity_session_initialize",
+                        NativeSessionResumeFailure::Incompatible,
+                    )?;
+                }
+                return Box::pin(self.launch_antigravity_agent_run(PreparedRuntimeLaunch {
+                    execution,
+                    resume_disposition: NativeSessionResumeDisposition::New,
+                    skill_exposure,
+                    mcp_projection,
+                    attachment_admission,
+                    attachment_authorization,
+                    output,
+                    launch_permit,
+                }))
+                .await
+                .context("single replacement Antigravity Session failed");
+            }
+        };
         let materialized = self
             .materialize_agent_run_context(
                 execution,
@@ -16047,10 +16277,6 @@ impl Core {
                 return Err(error);
             }
         };
-        let prompt = prepared_context.runtime_payload.clone();
-        let resumable_session_id = (resume_disposition != NativeSessionResumeDisposition::New)
-            .then(|| execution.native_session_id.clone())
-            .flatten();
         let proposed_binding_id = prepared_context
             .requires_new_native_session
             .then(|| binding_credential.native_binding_id.clone());
@@ -16080,54 +16306,17 @@ impl Core {
         if input_delivery.status != "prepared" {
             anyhow::bail!("Antigravity Runtime Input Delivery is not ready to send");
         }
-        let native_turn_id = format!(
-            "agy:{}:{}",
-            execution.agent_run_id, execution.execution_epoch
-        );
-        emit(
-            output,
-            "agent_run.started",
-            json!({
-                "threadId": execution.camp_id,
-                "threadTurnId": execution.camp_turn_id,
-                "agentRunId": execution.agent_run_id,
-                "agentId": execution.agent_id,
-                "executionEpoch": execution.execution_epoch,
-                "adapterKind": execution.runtime.adapter_kind,
-                "adapterInstallationId": execution.runtime.installation_id,
-                "runtimeVersion": execution.runtime.reported_version,
-                "modelId": execution.runtime.model.model_id,
-                "modelOptions": execution.runtime.model.options,
-                "hostInstanceId": format!("agy-process:{}:{}", execution.agent_run_id, execution.execution_epoch),
-                "nativeThreadId": resumable_session_id,
-                "nativeTurnId": native_turn_id,
-            }),
-        );
-        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
-        let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
-        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
-        let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         self.begin_agent_run_input_dispatch(execution, &input_delivery.id, launch_permit)
             .await?;
-        let run = self.antigravity_app.run(AntigravityRunRequest {
-            agent_run_id: execution.agent_run_id.clone(),
-            execution_epoch: execution.execution_epoch,
-            workspace: execution.workspace.clone(),
-            permission_semantics: execution.permission_semantics,
-            runtime: execution.runtime.clone(),
-            prompt,
-            resumable_native_session_id: resumable_session_id,
-            attachment_access_root: Some(attachment_access_root.to_path_buf()),
-            builtin_tools: Some(builtin_tools.clone()),
-            input_accepted: Some(input_accepted_sender),
-            runtime_events: Some(runtime_event_sender),
-            launch_handoff: Some(launch_handoff_sender),
-        });
-        tokio::pin!(run);
+        release
+            .send(prepared_context.runtime_payload.clone())
+            .map_err(|_| anyhow::anyhow!("Antigravity exited before input dispatch release"))?;
         let mut early_result = tokio::select! {
             biased;
             handoff = &mut launch_handoff_receiver => {
-                handoff.context("Antigravity launch handoff was lost")?;
+                if handoff.is_err() {
+                    Some(run.as_mut().await)
+                } else {
                 self.complete_active_runtime_route_handoff(
                     execution,
                     RuntimeRouteBinding {
@@ -16142,6 +16331,7 @@ impl Core {
                 )
                 .await?;
                 None
+                }
             }
             result = &mut run => {
                 Some(result)
@@ -16346,6 +16536,17 @@ impl Core {
                     return Err(error).context(delivered.error_code);
                 }
                 let mut database = self.database.lock().await;
+                if error
+                    .downcast_ref::<antigravity::AntigravityInputNotSent>()
+                    .is_some()
+                {
+                    ContextService.mark_input_delivery_not_accepted(
+                        &mut database,
+                        &input_delivery.id,
+                        &format!("{error:#}"),
+                    )?;
+                    return Err(error);
+                }
                 if resume_disposition == NativeSessionResumeDisposition::Controlled {
                     ExecutionRuntimeService::default().record_native_session_resume_failure(
                         &mut database,
@@ -16562,6 +16763,9 @@ impl Core {
             Ok(session_id) => session_id,
             Err(error)
                 if resumable_session_id.is_some()
+                    && error
+                        .downcast_ref::<acp::AcpSessionRestoreError>()
+                        .is_some()
                     && error
                         .downcast_ref::<AcpLiveModelValidationError>()
                         .is_none()
@@ -16965,6 +17169,19 @@ impl Core {
     ) -> bool {
         let failure = {
             let mut database = self.database.lock().await;
+            let service = ExecutionRuntimeService::default();
+            let current = match service.load_agent_run_execution(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            ) {
+                Ok(Some(current)) => current,
+                Ok(None) => return false,
+                Err(error) => {
+                    eprintln!("failed to load current AgentRun failure fence: {error:#}");
+                    return false;
+                }
+            };
             let envelope = CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
                 actor: ActorRef::System {
@@ -16978,7 +17195,7 @@ impl Core {
                 execution_epoch: None,
                 payload: FailAgentRunCommand {
                     agent_run_id: execution.agent_run_id.clone(),
-                    expected_version: execution.version,
+                    expected_version: current.version,
                     execution_epoch: execution.execution_epoch,
                     error_code: error_code.to_string(),
                     error_detail: Some(format!("{error:#}")),
@@ -16987,7 +17204,6 @@ impl Core {
                     ending_git_observation,
                 },
             };
-            let service = ExecutionRuntimeService::default();
             if runtime_terminal_observed {
                 service.fail_agent_run(&mut database, &envelope)
             } else {
@@ -17862,6 +18078,7 @@ async fn run_core(
     let (pi_tx, pi_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
+    database.message_changes = Some(output_tx.clone());
     let (output_control_tx, output_control_rx) = mpsc::channel(1);
     let (runtime_check_tx, runtime_check_rx) = mpsc::unbounded_channel();
     let (attachment_projection_tx, attachment_projection_rx) = mpsc::unbounded_channel();
@@ -22588,6 +22805,13 @@ async fn process_acp_agent_run_exit(
     execution_epoch: i64,
 ) {
     if core.planned_shutdown.shutdown_started() {
+        return;
+    }
+    if core
+        .planned_shutdown
+        .owns_unbound_launch(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        .await
+    {
         return;
     }
     if let Err(error) =

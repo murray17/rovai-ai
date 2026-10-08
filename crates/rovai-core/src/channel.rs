@@ -6549,9 +6549,12 @@ impl ChannelService {
         // maintenance and delivery claims atomic, but never journal the poll.
         let mut settled_run_ids = Vec::new();
         let changes_before = database.connection().total_changes();
+        let message_output = database.message_changes.clone();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let message_changes =
+            crate::message_changes::MessageChanges::begin(&transaction, message_output);
         let result = {
             let now = Utc::now();
             let now_text = now.to_rfc3339();
@@ -6637,7 +6640,7 @@ impl ChannelService {
                 has_outstanding_work,
             }
         };
-        transaction.commit()?;
+        message_changes.commit(transaction)?;
         if database.connection().total_changes() != changes_before {
             database.execution_wake.execution_changed();
         }
@@ -22462,6 +22465,8 @@ mod tests {
                 ),
             )
             .unwrap();
+        let (message_output, mut message_changes) = tokio::sync::mpsc::unbounded_channel();
+        database.message_changes = Some(message_output);
         let resolved = resolve_pending(
             &service,
             &mut database,
@@ -22471,6 +22476,14 @@ mod tests {
         assert_eq!(resolved.result.code, "channel.binding.resolved");
         assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
         let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
+        // Binding resolution publishes external user messages internally; hints follow
+        // actual writes, independently of this non-send command's name, and coalesce.
+        let change: Value = serde_json::from_str(&message_changes.try_recv().unwrap()).unwrap();
+        assert_eq!(change["params"]["threadId"], camp_id);
+        assert_eq!(change["params"]["indexChanged"], true);
+        assert_eq!(change["params"]["unavailableMessageIds"], json!([]));
+        assert!(message_changes.try_recv().is_err());
+
         assert_channel_camp_name(
             &mut database,
             camp_id,

@@ -27,7 +27,8 @@ import { markdownInlineContentPrefix } from './safe-markdown-model'
 import { ExecutionLatestContext, ExecutionReadingContext, useExecutionWindow } from './useExecutionWindow'
 import { ReturnToLatest } from './ReturnToLatest'
 import { UserMessageAnchors } from './UserMessageAnchors'
-import { userMessageAnchors } from './user-message-anchors'
+import { useThreadUserAnchors } from './useThreadUserAnchors'
+import { mergeNavigationMessages, type ThreadUserAnchorNavigation } from './thread-user-anchor-navigation'
 import { prefersReducedMotion } from './reduced-motion'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
@@ -1631,6 +1632,7 @@ function RevealNotificationConversation({ active, onHidePreview }: { active: boo
 
 export function ThreadWorkspace({
   snapshot,
+  userAnchorNavigation,
   missionBoard = null,
   previewTabsInPane = false,
   suppressExecutionAutoOpen = false,
@@ -1690,6 +1692,7 @@ export function ThreadWorkspace({
   onNotifyError
 }: {
   snapshot: ThreadSnapshot
+  userAnchorNavigation?: ThreadUserAnchorNavigation
   missionBoard?: React.ReactNode
   previewTabsInPane?: boolean
   suppressExecutionAutoOpen?: boolean
@@ -1938,6 +1941,7 @@ export function ThreadWorkspace({
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const workspaceShellRef = useRef<HTMLElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const historyLoaderRef = useRef<HTMLDivElement>(null)
   const earlierMessageLoadInFlightRef = useRef(false)
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
@@ -2451,21 +2455,21 @@ export function ThreadWorkspace({
     () => new Map(executionProcesses.map((process) => [process.agentId, process])),
     [executionProcesses]
   )
-  const visibleThreadMessages = useMemo(() => {
-    const messages = new Map<string, ThreadMessageView>()
-    for (const message of anchoredMessages) {
-      if (!message.missionStart) messages.set(message.id, message)
-    }
-    for (const message of snapshot.messages) {
-      if (!message.missionStart) messages.set(message.id, message)
-    }
-    for (const message of optimisticMessages) {
-      if (!message.missionStart && !messages.has(message.id)) messages.set(message.id, message)
-    }
-    return [...messages.values()].sort((left, right) =>
-      left.sequence - right.sequence || left.id.localeCompare(right.id)
-    )
-  }, [anchoredMessages, optimisticMessages, snapshot.messages])
+  const anchorText = useCallback((message: ThreadMessageView) => message.content?.length
+    ? structuredThreadContentPlainText(message.content, snapshot.members, currentUserName)
+    : message.body, [snapshot.members, currentUserName])
+  const anchorNavigation = useThreadUserAnchors(snapshot.thread.id, client, snapshot.messages, optimisticMessages,
+    JSON.stringify([currentUserName, snapshot.members.map(member => [member.agentId, agents.find(agent => agent.agentId === member.agentId)?.displayName ?? member.displayName])]), anchorText, userAnchorNavigation, workspaceEntrySnapshotReady)
+  const visibleThreadMessages = useMemo(() => mergeNavigationMessages(
+    anchoredMessages, anchorNavigation.navigation.windowMessages(), optimisticMessages, snapshot.messages
+  ).filter(message => !message.missionStart),
+  [anchoredMessages, anchorNavigation.window, anchorNavigation.anchors, anchorNavigation.navigation, optimisticMessages, snapshot.messages])
+  const normalStart = messageHistory?.oldestLoadedSequence ?? snapshot.messages[0]?.sequence ?? null
+  const anchorWindowEnd = anchorNavigation.window?.messages.at(-1)?.sequence ?? null
+  const hasAnchorGap = normalStart !== null && anchorWindowEnd !== null && anchorWindowEnd < normalStart
+    && anchorNavigation.window?.nextMessageSequence != null && anchorNavigation.window.nextMessageSequence < normalStart
+  const anchorWindowStart = anchorNavigation.window?.messages[0]?.sequence ?? null
+  const anchorWindowBeforeNormal = normalStart !== null && anchorWindowStart !== null && anchorWindowStart < normalStart
   const visibleMessageById = useMemo(
     () => new Map(visibleThreadMessages.map((message) => [message.id, message])),
     [visibleThreadMessages]
@@ -2497,6 +2501,8 @@ export function ThreadWorkspace({
       visibleThreadMessages
     ]
   )
+  const historyBoundaryId = anchorWindowBeforeNormal
+    ? conversationTimeline.find(item => item.kind === 'camp_message' && item.message.sequence >= normalStart!)?.id : null
   const latestAgentMessageId = useMemo(() => {
     for (let index = conversationTimeline.length - 1; index >= 0; index -= 1) {
       const item = conversationTimeline[index]
@@ -2506,18 +2512,14 @@ export function ThreadWorkspace({
     }
     return null
   }, [conversationTimeline])
-  const userAnchors = useMemo(() => userMessageAnchors(
-    conversationTimeline.flatMap(item => item.kind === 'camp_message' ? [item.message] : []),
-    snapshot.agentRuns,
-    snapshot.turns,
-    message => message.content?.length
-      ? structuredThreadContentPlainText(message.content, snapshot.members, currentUserName)
-      : message.body
-  ), [conversationTimeline, snapshot.agentRuns, snapshot.turns, snapshot.members, currentUserName])
+  const userAnchors = anchorNavigation.anchors
   const groupingFollowsLatest = useCallback(() => !conversationFind.open
     && (timelineReadingPosition.current?.threadId !== snapshot.thread.id
       || timelineReadingPosition.current.position.followingLatest !== false),
   [conversationFind.open, snapshot.thread.id])
+  useEffect(() => {
+    if (conversationView !== 'conversation' || notificationFocus?.active) anchorNavigation.navigation.cancelNavigation()
+  }, [conversationView, notificationFocus?.requestId, notificationFocus?.active, anchorNavigation.navigation])
   const shortPublicMessages = usePublicMessageLayout(
     timelineScrollRef, conversationTimeline, snapshot.thread.id,
     conversationView === 'conversation', groupingFollowsLatest
@@ -2941,6 +2943,7 @@ export function ThreadWorkspace({
   }, [client, focusConversationFindInput, snapshot.thread.id])
 
   const openConversationFind = useCallback((): void => {
+    anchorNavigation.navigation.cancelNavigation()
     if (!conversationFind.open) {
       const timeline = timelineScrollRef.current
       const storedPosition = timelineReadingPosition.current?.threadId === snapshot.thread.id
@@ -2977,7 +2980,7 @@ export function ThreadWorkspace({
       setConversationView('conversation')
     }
     focusConversationFindInput(true)
-  }, [conversationFind.open, focusConversationFindInput, snapshot.thread.id])
+  }, [conversationFind.open, focusConversationFindInput, snapshot.thread.id, anchorNavigation.navigation])
 
   const closeConversationFind = useCallback((restore = true): void => {
     conversationFindRequestGeneration.current += 1
@@ -3030,23 +3033,25 @@ export function ThreadWorkspace({
   const navigateUserAnchor = useCallback((messageId: string): void => {
     const threadId = snapshot.thread.id
     if (conversationFind.open) closeConversationFind(false)
-    // Closing Find changes the reading inset; locate after its layout has committed.
-    window.requestAnimationFrame(() => {
-      const viewport = timelineScrollRef.current
-      if (!viewport || viewport.hidden || mountedThreadId.current !== threadId) return
-      const target = viewport.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
-      if (!target) return
-      timelineReadingPosition.current = {
-        threadId, position: { scrollTop: viewport.scrollTop, followingLatest: false }
-      }
-      target.focus({ preventScroll: true })
-      viewport.scrollTo({
-        top: Math.max(0, viewport.scrollTop + target.getBoundingClientRect().top
-          - viewport.getBoundingClientRect().top - 18),
-        behavior: prefersReducedMotion() ? 'instant' : 'smooth'
-      })
-    })
-  }, [snapshot.thread.id, conversationFind.open, closeConversationFind])
+    // Stop following before a window mounts; otherwise layout restoration can scroll it away.
+    const viewport = timelineScrollRef.current
+    if (viewport) timelineReadingPosition.current = { threadId,
+      position: { scrollTop: viewport.scrollTop, followingLatest: false } }
+    void anchorNavigation.navigation.locate(messageId, visibleMessageById).then(ticket => {
+      if (ticket === null) return
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        const viewport = timelineScrollRef.current
+        if (!viewport || viewport.hidden || mountedThreadId.current !== threadId
+          || !anchorNavigation.navigation.currentNavigation(ticket)) return
+        const target = viewport.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
+        if (!target) return
+        target.focus({ preventScroll: true })
+        viewport.scrollTo({ top: Math.max(0, viewport.scrollTop + target.getBoundingClientRect().top
+          - viewport.getBoundingClientRect().top - 18), behavior: prefersReducedMotion() ? 'instant' : 'smooth' })
+      }))
+    }).catch(error => (onNotifyError ?? onNotify)(readErrorMessage(error)))
+  }, [snapshot.thread.id, conversationFind.open, closeConversationFind, anchorNavigation.navigation,
+    visibleMessageById, onNotifyError, onNotify])
 
   const navigateConversationFind = (direction: 1 | -1): void => {
     const snapshotResult = conversationFind.snapshot
@@ -3328,6 +3333,7 @@ export function ThreadWorkspace({
   ])
 
   const revealQuote = async (quote: MessageQuoteSnapshot): Promise<void> => {
+    anchorNavigation.navigation.cancelNavigation()
     const threadId = snapshot.thread.id
     if (quote.source.scope !== 'camp' || quote.source.campId !== threadId) throw new Error('quote.owner_mismatch')
     const messageId = quote.source.messageId
@@ -3349,6 +3355,7 @@ export function ThreadWorkspace({
   }
 
   const revealReplyParent = async (messageId: string): Promise<void> => {
+    anchorNavigation.navigation.cancelNavigation()
     setConversationView('conversation')
     const existing = timelineScrollRef.current?.querySelector<HTMLElement>(
       `[data-message-id="${CSS.escape(messageId)}"]`
@@ -4530,6 +4537,48 @@ export function ThreadWorkspace({
     }
   }
 
+  const historyLoader = !conversationFind.open && messageHistory?.hasEarlier && (
+                <div ref={historyLoaderRef} key="normal-history-loader"
+                  className={`camp-history-loader is-${earlierMessageStatus}`}
+                  role={earlierMessageStatus === 'error' ? 'alert' : 'status'}
+                  aria-live={earlierMessageStatus === 'error' ? 'assertive' : 'polite'}
+                  aria-atomic="true"
+                >
+                  {earlierMessageStatus === 'error' ? (
+                    <>
+                      <span className="camp-history-error-message"><UiText zh={"较早消息暂时没有加载"} /></span>
+                      <span className="camp-history-separator" aria-hidden="true">·</span>
+                      <button
+                        className="camp-history-text-button"
+                        type="button"
+                        onClick={() => void loadEarlierMessages()}
+                      ><UiText zh={"重试"} /></button>
+                    </>
+                  ) : (
+                    <button
+                      className="camp-history-text-button"
+                      type="button"
+                      disabled={earlierMessageStatus === 'loading'}
+                      onClick={() => void loadEarlierMessages()}
+                    >
+                      {earlierMessageStatus === 'loading' ? (
+                        <>
+                          <span className="camp-history-spinner" aria-hidden="true" />
+                          <span><UiText zh={"正在加载更早消息…"} /></span>
+                        </>
+                      ) : (
+                        <>
+                          <span aria-hidden="true">↑</span>
+                          <span><UiText zh={"加载更早消息"} /></span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <span className="camp-history-separator" aria-hidden="true">·</span>
+                  <span className="camp-history-count"><UiText zh={"已显示 "} />{messageHistory.loadedCount} / {messageHistory.totalCount}<UiText zh={" 条"} /></span>
+                </div>
+              )
+
   const maybeLoadEarlierFromUserInput = (): void => {
     const timeline = timelineScrollRef.current
     if (
@@ -4538,7 +4587,9 @@ export function ThreadWorkspace({
       || conversationFindOpenRef.current
       || earlierMessageStatus !== 'idle'
       || !messageHistory?.hasEarlier
-      || timeline.scrollTop > CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX
+      || !historyLoaderRef.current
+      || Math.abs(historyLoaderRef.current.getBoundingClientRect().bottom
+        - timeline.getBoundingClientRect().top) > CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX
     ) return
 
     void loadEarlierMessages()
@@ -4903,53 +4954,18 @@ export function ThreadWorkspace({
             >
               <div className="timeline-track">
               {missionBoard}
-              {!conversationFind.open && messageHistory?.hasEarlier && (
-                <div
-                  className={`camp-history-loader is-${earlierMessageStatus}`}
-                  role={earlierMessageStatus === 'error' ? 'alert' : 'status'}
-                  aria-live={earlierMessageStatus === 'error' ? 'assertive' : 'polite'}
-                  aria-atomic="true"
-                >
-                  {earlierMessageStatus === 'error' ? (
-                    <>
-                      <span className="camp-history-error-message"><UiText zh={"较早消息暂时没有加载"} /></span>
-                      <span className="camp-history-separator" aria-hidden="true">·</span>
-                      <button
-                        className="camp-history-text-button"
-                        type="button"
-                        onClick={() => void loadEarlierMessages()}
-                      ><UiText zh={"重试"} /></button>
-                    </>
-                  ) : (
-                    <button
-                      className="camp-history-text-button"
-                      type="button"
-                      disabled={earlierMessageStatus === 'loading'}
-                      onClick={() => void loadEarlierMessages()}
-                    >
-                      {earlierMessageStatus === 'loading' ? (
-                        <>
-                          <span className="camp-history-spinner" aria-hidden="true" />
-                          <span><UiText zh={"正在加载更早消息…"} /></span>
-                        </>
-                      ) : (
-                        <>
-                          <span aria-hidden="true">↑</span>
-                          <span><UiText zh={"加载更早消息"} /></span>
-                        </>
-                      )}
-                    </button>
-                  )}
-                  <span className="camp-history-separator" aria-hidden="true">·</span>
-                  <span className="camp-history-count"><UiText zh={"已显示 "} />{messageHistory.loadedCount} / {messageHistory.totalCount}<UiText zh={" 条"} /></span>
-                </div>
-              )}
+              {!anchorWindowBeforeNormal && historyLoader}
               {(() => {
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
                 let previousMessageAuthorKey: string | null = null
                 for (let timelineIndex = 0; timelineIndex < conversationTimeline.length; timelineIndex += 1) {
                   const timelineItem = conversationTimeline[timelineIndex]
+                  if (timelineItem.id === historyBoundaryId) {
+                    if (hasAnchorGap) items.push(<div className="camp-history-gap" role="status" key="anchor-history-gap">{uiAttribute('中间消息尚未加载')}</div>)
+                    if (historyLoader) items.push(historyLoader)
+                    previousMessageAuthorKey = null
+                  }
                   const dayKey = localDayKey(timelineItem.createdAt)
                   if (dayKey && dayKey !== lastDayKey) {
                     lastDayKey = dayKey
@@ -5483,6 +5499,10 @@ export function ThreadWorkspace({
                   items.push(messageElement)
                   previousMessageAuthorKey = messageAuthorKey
                 }
+                if (anchorWindowBeforeNormal && !historyBoundaryId) {
+                  if (hasAnchorGap) items.push(<div className="camp-history-gap" role="status" key="anchor-history-gap">{uiAttribute('中间消息尚未加载')}</div>)
+                  if (historyLoader) items.push(historyLoader)
+                }
                 return items
               })()}
               {!missionBoard && conversationTimeline.length === 0 && snapshot.agentRuns.length === 0 && (
@@ -5501,7 +5521,17 @@ export function ThreadWorkspace({
             </div>
             <UserMessageAnchors key={snapshot.thread.id} anchors={userAnchors}
               viewportRef={timelineScrollRef} enabled={conversationView === 'conversation'}
-              followingLatest={groupingFollowsLatest} onNavigate={navigateUserAnchor} />
+              followingLatest={groupingFollowsLatest} onNavigate={navigateUserAnchor}
+              contentRevision={visibleThreadMessages} previews={anchorNavigation.previews}
+              onPreview={anchorNavigation.navigation.preview}
+              onRetryPreview={id => void anchorNavigation.navigation.readPreview(id)} />
+            {conversationView === 'conversation' && anchorNavigation.status !== 'ready' && <div className="conversation-anchor-index-status" role="status">
+              {anchorNavigation.status === 'loading'
+                ? <span className="sr-only">{uiAttribute('正在加载消息目录…')}</span>
+                : <button className="camp-history-text-button" type="button" onClick={() => void anchorNavigation.navigation.refresh()}>
+                  {uiAttribute('消息目录暂不可用，重试')}
+                </button>}
+            </div>}
             <ReturnToLatest
               viewportRef={timelineScrollRef}
               ownerKey={snapshot.thread.id}

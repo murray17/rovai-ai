@@ -16,6 +16,7 @@ describe('Thread message anchored read contract', () => {
       threadId: CAMP_ID,
       anchorMessageId: 'message-1',
       sourceAvailable: false,
+      nextMessageSequence: null,
       messages: []
     }
 
@@ -27,6 +28,7 @@ describe('Thread message anchored read contract', () => {
       threadId: CAMP_ID,
       anchorMessageId: 'message-1',
       sourceAvailable: false,
+      nextMessageSequence: null,
       messages: []
     })
   })

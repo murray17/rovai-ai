@@ -382,6 +382,15 @@ impl PlannedShutdownCoordinator {
         })
     }
 
+    /// Until the prompt route is handed off, the launch future owns activation
+    /// failures and its bounded replacement attempt. Host EOF must not revoke
+    /// that owner or independently move the Run into recovery waiting.
+    pub async fn owns_unbound_launch(&self, key: &ActiveExecutionKey) -> bool {
+        self.active.lock().await.get(key).is_some_and(|execution| {
+            execution.cancellation.launching.load(Ordering::Acquire) && execution.binding.is_none()
+        })
+    }
+
     pub async fn cleanup_completed(&self, key: &ActiveExecutionKey) -> bool {
         self.remove_active_inner(key, true).await
     }
@@ -916,12 +925,14 @@ mod tests {
                 .await
         );
         assert!(coordinator.launch_in_progress(&key).await);
+        assert!(coordinator.owns_unbound_launch(&key).await);
         coordinator.cancel_active(&key).await;
         assert!(permit.check_cancelled().is_err());
         assert!(!coordinator.remove_active_if_unbound(&key).await);
         assert!(!coordinator.remove_active(&key).await);
         drop(permit);
         assert!(!coordinator.launch_in_progress(&key).await);
+        assert!(!coordinator.owns_unbound_launch(&key).await);
         assert_eq!(coordinator.active_snapshots().await.len(), 1);
         assert!(coordinator.cleanup_completed(&key).await);
         assert!(coordinator.active_snapshots().await.is_empty());

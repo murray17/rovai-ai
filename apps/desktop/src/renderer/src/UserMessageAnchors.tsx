@@ -1,14 +1,19 @@
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { useId, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import type { AnchorPreviewState } from './thread-user-anchor-navigation'
 import { uiAttribute } from './interface-language'
 import { captureTimelineReadingAnchor, restoreTimelineReadingAnchor, type TimelineReadingAnchor } from './timeline-reading-anchor'
 import { USER_ANCHOR_MIN_COUNT, USER_ANCHOR_MIN_WIDTH, USER_ANCHOR_ROW_HEIGHT,
   userAnchorKeyIndex, userAnchorStackHeight, type UserMessageAnchor } from './user-message-anchors'
 
-export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLatest, onNavigate }: {
+export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLatest, onNavigate, previews, onPreview, onRetryPreview, contentRevision }: {
   anchors: readonly UserMessageAnchor[]
   viewportRef: RefObject<HTMLElement | null>
   enabled: boolean
   followingLatest(): boolean
+  previews?: ReadonlyMap<string, AnchorPreviewState>
+  onPreview?(messageId: string | null): void
+  onRetryPreview?(messageId: string): void
+  contentRevision?: unknown
   onNavigate(messageId: string): void
 }): React.JSX.Element | null {
   const navRef = useRef<HTMLElement>(null)
@@ -23,6 +28,10 @@ export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLat
   const [visibleIds, setVisibleIds] = useState<ReadonlySet<string>>(new Set())
   const [tabId, setTabId] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ id: string; top: number } | null>(null)
+  useEffect(() => {
+    onPreview?.(preview?.id ?? null)
+    return () => onPreview?.(null)
+  }, [preview?.id, onPreview])
   const previewSource = useRef<'keyboard' | 'pointer' | null>(null)
   const browsing = useRef({ pointer: false, until: 0 })
   const lastRange = useRef('')
@@ -96,7 +105,7 @@ export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLat
       }
     }
     return () => observer.disconnect()
-  }, [anchors, available, room.show, viewportRef])
+  }, [anchors, available, room.show, viewportRef, contentRevision])
 
   useLayoutEffect(() => {
     if (!room.show) return
@@ -136,12 +145,14 @@ export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLat
     const inset = nav.getBoundingClientRect().top - stage.getBoundingClientRect().top
     const top = Math.max(half + 8 - inset, Math.min(stage.clientHeight - half - 8 - inset, preview.top))
     card.style.top = `${top}px`
-  }, [preview, anchors, room.height, viewportRef])
+  }, [preview, anchors, room.height, viewportRef, previews])
 
   if (!available || !room.show) return null
   const rovingId = anchors.some(anchor => anchor.id === tabId) ? tabId
     : anchors.find(anchor => visibleIds.has(anchor.id))?.id ?? anchors[0].id
   const previewAnchor = preview && anchors.find(anchor => anchor.id === preview.id)
+  const previewState = previewAnchor ? previews?.get(previewAnchor.id) : undefined
+  const firstReply = previewState?.status === 'ready' ? previewState.value.firstReply?.summary : null
   return (
     <nav className="conversation-anchor-nav" ref={navRef} aria-label={uiAttribute('用户消息锚点')}
       style={{ '--user-anchor-height': `${room.height}px` } as CSSProperties}
@@ -150,8 +161,16 @@ export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLat
         browsing.current.pointer = false
         if (previewSource.current === 'pointer') { previewSource.current = null; setPreview(null) }
       }}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPreview(null) }}
       onKeyDown={event => {
-        if (event.key === 'Escape') { event.preventDefault(); previewSource.current = null; setPreview(null) }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          if (previewRef.current?.contains(document.activeElement)) {
+            const button = [...(railRef.current?.children ?? [])].find(node => (node as HTMLElement).dataset.userMessageAnchor === preview?.id) as HTMLElement | undefined
+            button?.focus({ preventScroll: true })
+          }
+          previewSource.current = null; setPreview(null)
+        }
       }}>
       <div className="conversation-anchor-items" ref={railRef}
         onWheel={() => { browsing.current.until = Date.now() + 1500; previewSource.current = null; setPreview(null) }}
@@ -181,9 +200,12 @@ export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLat
                 revealPreview(anchor.id, event.currentTarget)
               }
             }}
-            onBlur={() => setPreview(null)}
+            onBlur={event => { if (!previewRef.current?.contains(event.relatedTarget as Node | null)) setPreview(null) }}
             onKeyDown={event => {
               if (event.nativeEvent.isComposing) return
+              if (event.key.toLowerCase() === 'r' && previews?.get(anchor.id)?.status === 'error') {
+                event.preventDefault(); onRetryPreview?.(anchor.id); return
+              }
               const next = userAnchorKeyIndex(event.key, index, anchors.length, room.height)
               if (next === null) return
               event.preventDefault()
@@ -204,10 +226,20 @@ export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLat
         ))}
       </div>
       {previewAnchor && (
-        <div className="conversation-anchor-preview" ref={previewRef} id={previewId} role="tooltip"
+        <div className="conversation-anchor-preview" ref={previewRef} id={previewId} role={previewState?.status === 'error' ? 'group' : 'tooltip'}
           style={{ top: preview.top }}>
           <div className="conversation-anchor-preview-title">{previewAnchor.title}</div>
-          {previewAnchor.firstReply && <p className="conversation-anchor-preview-copy">{previewAnchor.firstReply}</p>}
+          {firstReply && <p className="conversation-anchor-preview-copy">{firstReply}</p>}
+          {previewState?.status === 'loading' && <p className="conversation-anchor-preview-copy" role="status">{uiAttribute('正在读取回复…')}</p>}
+          {previewState?.status === 'error' && <p className="conversation-anchor-preview-copy">
+            {uiAttribute('回复暂时不可用')} · <button type="button" className="camp-history-text-button"
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => {
+                const button = [...(railRef.current?.children ?? [])].find(node => (node as HTMLElement).dataset.userMessageAnchor === previewAnchor.id) as HTMLElement | undefined
+                button?.focus({ preventScroll: true })
+                onRetryPreview?.(previewAnchor.id)
+              }}>{uiAttribute('重试')}</button>
+          </p>}
         </div>
       )}
     </nav>

@@ -108,8 +108,12 @@ pub(crate) fn has_unresolved_native_turn(
              WHERE terminal.entity_type='agent_run' AND terminal.entity_id=run.id
                AND terminal.execution_epoch=delivery.execution_epoch
                AND terminal.event_type IN ('agent_run.failed','agent_run.cancelled')
-               AND completed.event_type='agent_run.succeeded'
-               AND recovered.conversation_id=current.id AND recovered.status='succeeded'
+               AND completed.event_type IN ('agent_run.succeeded','agent_run.failed')
+               AND recovered.conversation_id=current.id AND recovered.status IN ('succeeded','failed')
+               AND recovered.execution_epoch=completed.execution_epoch
+               AND COALESCE(recovered.last_error_code,'') NOT IN (
+                 'runtime_session_unavailable','runtime_session_incompatible','runtime_stream_incompatible',
+                 'runtime_failed_after_input_accepted','runtime_missing_final_result','runtime_missing_final_output')
                AND recovered.terminal_resolution_source='runtime_terminal'
                AND accepted.status='accepted' AND accepted.native_binding_id=current.native_binding_id
                AND accepted.native_binding_generation=current.native_binding_generation
@@ -178,6 +182,7 @@ pub fn continue_agent_run(
             params![delivery.delivery_id,command.agent_run_id,command.use_new_session])?;
         append_domain_event(tx,"camp_message.sent",Some(&command.camp_id),Some(("camp_message",&message_id)),&envelope.actor,None,
             &json!({"sequence":sequence,"recipientFree":true,"operation":"continue_execution"}))?;
+        crate::message_changes::record(tx, &command.camp_id, false, &[]);
         Ok(CommandHandlerResult::applied("agent_run.continuation_requested",
             json!({"threadId":command.camp_id,"deliveryId":delivery.delivery_id,"messageId":message_id}),
             Some(EntityReference { entity_type:"camp_message_delivery".into(),entity_id:delivery.delivery_id })))

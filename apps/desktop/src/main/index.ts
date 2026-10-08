@@ -315,6 +315,8 @@ const allowedMethods = new Set<CoreMethod>([
   'agentRunFileChanges.get',
   'agentRunImages.read',
   'thread.messages.page',
+  'thread.messages.anchors',
+  'thread.messages.anchorPreview',
   'thread.messages.around',
   'thread.messages.find',
   'agentRunEvidence.getContent',

@@ -9414,3 +9414,7 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .member-joined-card time { white-space: nowrap; }
 
 .execution-fast-observation { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--muted); font-size: 10.5px; line-height: 1.6; overflow-wrap: anywhere; }
+
+.conversation-anchor-preview button { pointer-events: auto; }
+.conversation-anchor-index-status { position: absolute; left: 16px; top: 8px; z-index: 4; color: var(--muted); font-size: 12px; }
+.camp-history-gap { margin: 16px 0 4px; color: var(--muted); text-align: center; font-size: 12px; }

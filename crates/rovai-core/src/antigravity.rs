@@ -31,7 +31,7 @@ use rovai_core::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
     process::Command,
     sync::{Mutex, mpsc, oneshot},
@@ -54,7 +54,19 @@ pub struct AntigravityRunRequest {
     pub input_accepted: Option<mpsc::UnboundedSender<AntigravityInputAccepted>>,
     pub runtime_events: Option<mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
     pub launch_handoff: Option<oneshot::Sender<()>>,
+    pub input_ready: Option<mpsc::UnboundedSender<oneshot::Sender<String>>>,
 }
+
+#[derive(Debug)]
+pub(crate) struct AntigravityInputNotSent {
+    pub session_unavailable: bool,
+}
+impl fmt::Display for AntigravityInputNotSent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Antigravity startup ended before business input dispatch")
+    }
+}
+impl StdError for AntigravityInputNotSent {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AntigravityInputAccepted {
     pub native_session_id: String,
@@ -94,14 +106,58 @@ impl fmt::Display for AntigravityDeliveredFailure {
 
 impl StdError for AntigravityDeliveredFailure {}
 
-#[derive(Debug)]
 struct AntigravityProcessControl {
     interrupt: Mutex<Option<oneshot::Sender<()>>>,
+    pending_cleanup: Mutex<Option<ManagedProcess>>,
 }
 
+#[derive(Clone)]
 pub struct AntigravityAppRuntimeAdapter {
-    active: Mutex<HashMap<(String, i64), Arc<AntigravityProcessControl>>>,
+    active: Arc<Mutex<HashMap<(String, i64), Arc<AntigravityProcessControl>>>>,
     log_dir: PathBuf,
+}
+
+async fn release_antigravity_input(
+    request: &AntigravityRunRequest,
+    interrupted: &mut oneshot::Receiver<()>,
+) -> Result<String> {
+    if let Some(ready) = &request.input_ready {
+        let (release, released) = oneshot::channel();
+        ready
+            .send(release)
+            .map_err(|_| anyhow::anyhow!("Antigravity dispatch owner is unavailable"))?;
+        tokio::select! {
+            biased;
+            _ = interrupted => anyhow::bail!("Antigravity was interrupted before input delivery"),
+            release = released => release.context("Antigravity input dispatch was fenced"),
+        }
+    } else {
+        Ok(request.prompt.clone())
+    }
+}
+
+async fn reap_antigravity_process(
+    child: &mut ManagedProcess,
+    deadline: Instant,
+) -> Result<std::process::ExitStatus> {
+    child
+        .force_terminate_tree()
+        .context("failed to terminate Antigravity process tree")?;
+    let status = tokio::time::timeout_at(deadline, child.wait())
+        .await
+        .context("Antigravity root reap timed out")??;
+    #[cfg(any(windows, target_os = "macos"))]
+    loop {
+        if child.tree_is_empty()? {
+            break;
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("Antigravity descendant cleanup is unconfirmed");
+        }
+        child.force_terminate_tree()?;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    Ok(status)
 }
 
 impl AntigravityAppRuntimeAdapter {
@@ -114,7 +170,7 @@ impl AntigravityAppRuntimeAdapter {
 
     pub fn deferred(data_dir: &Path) -> Self {
         Self {
-            active: Mutex::new(HashMap::new()),
+            active: Arc::new(Mutex::new(HashMap::new())),
             log_dir: data_dir.join("runtime-private").join("antigravity"),
         }
     }
@@ -153,6 +209,7 @@ impl AntigravityAppRuntimeAdapter {
         let (interrupt, interrupted) = oneshot::channel();
         let control = Arc::new(AntigravityProcessControl {
             interrupt: Mutex::new(Some(interrupt)),
+            pending_cleanup: Mutex::new(None),
         });
         {
             let mut active = self.active.lock().await;
@@ -161,14 +218,31 @@ impl AntigravityAppRuntimeAdapter {
                     "Antigravity companion process already exists for this AgentRun epoch"
                 );
             }
-            active.insert(key.clone(), control);
+            active.insert(key.clone(), control.clone());
         }
         let launch_handoff = request.launch_handoff.take();
-        let result = self
-            .run_process(&request, interrupted, launch_handoff)
-            .await;
-        self.active.lock().await.remove(&key);
-        result
+        let adapter = self.clone();
+        let (result_sender, result_receiver) = oneshot::channel();
+        // Keep process ownership when the caller is cancelled during the input
+        // handoff. Cleanup continues through this registered Run, as for Claude.
+        tokio::spawn(async move {
+            let result = adapter
+                .run_process(&request, interrupted, launch_handoff, &control)
+                .await;
+            if control.pending_cleanup.lock().await.is_none() {
+                let mut active = adapter.active.lock().await;
+                if active
+                    .get(&key)
+                    .is_some_and(|current| Arc::ptr_eq(current, &control))
+                {
+                    active.remove(&key);
+                }
+            }
+            let _ = result_sender.send(result);
+        });
+        result_receiver
+            .await
+            .context("Antigravity managed run ended without a result")?
     }
 
     pub async fn interrupt(&self, agent_run_id: &str, execution_epoch: i64) -> bool {
@@ -198,9 +272,18 @@ impl AntigravityAppRuntimeAdapter {
         let key = (agent_run_id.to_string(), execution_epoch);
         let deadline = Instant::now() + timeout;
         loop {
-            if !self.active.lock().await.contains_key(&key) {
+            let Some(control) = self.active.lock().await.get(&key).cloned() else {
+                return true;
+            };
+            let mut pending = control.pending_cleanup.lock().await;
+            if let Some(child) = pending.as_mut()
+                && reap_antigravity_process(child, deadline).await.is_ok()
+            {
+                *pending = None;
+                self.active.lock().await.remove(&key);
                 return true;
             }
+            drop(pending);
             if Instant::now() >= deadline {
                 return false;
             }
@@ -225,7 +308,9 @@ impl AntigravityAppRuntimeAdapter {
         while !self.active.lock().await.is_empty() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        self.active.lock().await.clear();
+        for (run_id, epoch) in self.active.lock().await.keys() {
+            eprintln!("Antigravity cleanup remains unconfirmed: run={run_id} epoch={epoch}");
+        }
     }
 
     async fn run_process(
@@ -233,6 +318,7 @@ impl AntigravityAppRuntimeAdapter {
         request: &AntigravityRunRequest,
         mut interrupted: oneshot::Receiver<()>,
         launch_handoff: Option<oneshot::Sender<()>>,
+        control: &AntigravityProcessControl,
     ) -> Result<AntigravityRunResult> {
         let requested_execution_root = Path::new(&request.workspace.execution_root);
         if !requested_execution_root.is_dir() {
@@ -390,9 +476,14 @@ impl AntigravityAppRuntimeAdapter {
             )
         };
 
+        let stream_input = preflight
+            .result
+            .capabilities
+            .iter()
+            .any(|value| value == "input.stream_json");
         let mut runtime_args = vec![
             OsString::from("--print"),
-            OsString::from(&request.prompt),
+            OsString::from(if stream_input { "" } else { &request.prompt }),
             OsString::from("--print-timeout"),
             OsString::from("5m"),
             OsString::from("--mode"),
@@ -405,6 +496,12 @@ impl AntigravityAppRuntimeAdapter {
             .capabilities
             .iter()
             .any(|capability| capability == "output.stream_json");
+        if stream_input {
+            runtime_args.extend([
+                OsString::from("--input-format"),
+                OsString::from("stream-json"),
+            ]);
+        }
         if structured_output {
             runtime_args.push(OsString::from("--output-format"));
             runtime_args.push(OsString::from("stream-json"));
@@ -435,7 +532,6 @@ impl AntigravityAppRuntimeAdapter {
             runtime_args.push(OsString::from(session_id));
         }
         let mut command = Command::new(executable);
-        command.args(&runtime_args);
         rovai_core::runtime_discovery::configure_runtime_command(
             rovai_core::agent_profile::AdapterKind::AntigravityApp,
             &mut command,
@@ -461,11 +557,21 @@ impl AntigravityAppRuntimeAdapter {
                 == verified_identity,
             "Antigravity executable changed before input delivery"
         );
+        if !stream_input {
+            runtime_args[1] = release_antigravity_input(request, &mut interrupted)
+                .await?
+                .into();
+        }
+        command.args(&runtime_args);
         let launch_result: Result<ManagedProcess> = (|| {
             let spec = ManagedProcessLaunchSpec::capture(
                 &command,
                 ManagedProcessPurpose::RuntimeOneShot,
-                ManagedStdinPolicy::Null,
+                if stream_input {
+                    ManagedStdinPolicy::Piped
+                } else {
+                    ManagedStdinPolicy::Null
+                },
                 ManagedWindowsArgvDialect::MicrosoftCrt,
                 format!("agent-run:{}:antigravity-app", request.agent_run_id),
             )?;
@@ -490,16 +596,80 @@ impl AntigravityAppRuntimeAdapter {
                     executable.display()
                 ))
                 .context(RuntimeFailureError::new(failure))
+                .context(AntigravityInputNotSent {
+                    session_unavailable: false,
+                })
         })?;
-        if let Some(handoff) = launch_handoff {
-            let _ = handoff.send(());
-        }
-        let stdout = child
-            .take_stdout()
-            .context("Antigravity companion stdout was unavailable")?;
+        let mut stdout = BufReader::new(
+            child
+                .take_stdout()
+                .context("Antigravity companion stdout was unavailable")?,
+        );
         let stderr = child
             .take_stderr()
             .context("Antigravity companion stderr was unavailable")?;
+        let stderr_task = tokio::spawn(capture_bounded(stderr));
+        let mut initialization = Vec::new();
+        let dispatch: Result<()> = async {
+            if stream_input {
+                let mut bounded_stdout = (&mut stdout).take(MAX_CAPTURE_BYTES as u64);
+                let read = tokio::select! {
+                    biased;
+                    _ = &mut interrupted => anyhow::bail!("Antigravity was interrupted before input delivery"),
+                    read = tokio::time::timeout(Duration::from_secs(45), bounded_stdout.read_until(b'\n', &mut initialization)) => read,
+                };
+                let initialized: Result<()> = (|| {
+                    read.context("Antigravity initialization timed out")??;
+                    let event: Value = serde_json::from_slice(&initialization).context("Antigravity initialization is not valid JSON")?;
+                    anyhow::ensure!(event["event"] == "init", "Antigravity initialization event is missing");
+                    let observed = antigravity_event_conversation_id(&event, "init")?;
+                    validate_session_id(observed)?;
+                    if let Some(expected) = request.resumable_native_session_id.as_deref()
+                        && expected != observed
+                    {
+                        let missing = std::fs::read_to_string(&log_path).ok().is_some_and(|log| {
+                            log.lines().any(|line| line.ends_with(&format!("Conversation {expected} not found, ignoring --conversation flag")))
+                        });
+                        return Err(anyhow::anyhow!("Antigravity initialized a different conversation before input dispatch")
+                            .context(AntigravityInputNotSent { session_unavailable: missing }));
+                    }
+                    Ok(())
+                })();
+                initialized.map_err(|error| {
+                    if error.downcast_ref::<AntigravityInputNotSent>().is_some() { error }
+                    else { error.context(AntigravityInputNotSent { session_unavailable: false }) }
+                })?;
+                let prompt = release_antigravity_input(request, &mut interrupted).await?;
+                let mut stdin = child.take_stdin().context("Antigravity input stream is unavailable")?;
+                let mut message = serde_json::to_vec(&serde_json::json!({"event":"user","message":{"role":"user","content":prompt}}))?;
+                message.push(b'\n');
+                // From here on a write error can be ambiguous. Never classify it
+                // as an activation rejection or automatically send it again.
+                tokio::select! {
+                    biased;
+                    _ = &mut interrupted => anyhow::bail!("Antigravity was interrupted during input delivery"),
+                    written = async {
+                        stdin.write_all(&message).await.context("Antigravity input stream write failed")?;
+                        stdin.shutdown().await.context("Antigravity input stream close failed")
+                    } => written?,
+                }
+            }
+            Ok(())
+        }.await;
+        if let Err(error) = dispatch {
+            if reap_antigravity_process(&mut child, Instant::now() + Duration::from_secs(3))
+                .await
+                .is_err()
+            {
+                *control.pending_cleanup.lock().await = Some(child);
+            }
+            stderr_task.abort();
+            return Err(error);
+        }
+        if let Some(handoff) = launch_handoff {
+            let _ = handoff.send(());
+        }
+        let stdout = AsyncReadExt::chain(std::io::Cursor::new(initialization), stdout);
         let stdout_task = if structured_output {
             let resumable_native_session_id = request.resumable_native_session_id.clone();
             let runtime_events = request.runtime_events.clone();
@@ -522,7 +692,6 @@ impl AntigravityAppRuntimeAdapter {
                     .map(AntigravityStdoutCapture::Legacy)
             })
         };
-        let stderr_task = tokio::spawn(capture_bounded(stderr));
         let mut was_interrupted = false;
         let mut acceptance_emitted = false;
         let mut acceptance_poll = tokio::time::interval(Duration::from_millis(50));
@@ -530,19 +699,28 @@ impl AntigravityAppRuntimeAdapter {
         let status = loop {
             tokio::select! {
                 status = child.wait() => {
-                    break status.context("failed to wait for Antigravity companion process")?;
+                    break Some(status.context("failed to wait for Antigravity companion process"));
                 }
                 _ = &mut interrupted => {
                     was_interrupted = true;
-                    let _ = child.force_terminate_tree();
-                    break child.wait().await.context("failed to reap interrupted Antigravity companion process")?;
+                    break None;
                 }
                 _ = acceptance_poll.tick(), if !acceptance_emitted && request.input_accepted.is_some() => {
                     acceptance_emitted = emit_input_accepted_if_observed(request, &log_path);
                 }
             }
         };
-        let _ = child.force_terminate_tree();
+        let reaped =
+            match reap_antigravity_process(&mut child, Instant::now() + Duration::from_secs(3))
+                .await
+            {
+                Ok(status) => status,
+                Err(error) => {
+                    *control.pending_cleanup.lock().await = Some(child);
+                    return Err(error);
+                }
+            };
+        let status = status.transpose()?.unwrap_or(reaped);
         if !acceptance_emitted {
             // A short-lived process can exit between polling ticks. Inspect the
             // now-closed log once more before classifying any terminal result.
@@ -2099,6 +2277,7 @@ mod tests {
                 input_accepted: None,
                 runtime_events: None,
                 launch_handoff: None,
+                input_ready: None,
             })
             .await
             .unwrap();
@@ -2289,6 +2468,131 @@ mod tests {
             input_accepted: None,
             runtime_events: None,
             launch_handoff: None,
+            input_ready: None,
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stream_input_waits_for_exact_session_and_dispatch_authority() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // The stream parser owns output mapping; this owner proves the native
+        // initialization/input boundary with real pipes, including cancellation.
+        for mode in ["missing", "foreign", "fenced", "aborted", "released"] {
+            let root =
+                std::env::temp_dir().join(format!("rovai-agy-gate-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("agy");
+            let session = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+            let expected = "27f72a67-9ca9-4797-8419-c0b12fc716c3";
+            let missing_log = if mode == "missing" {
+                format!(
+                    "printf '%s\\n' 'Conversation {expected} not found, ignoring --conversation flag' >> \"$log\"\n"
+                )
+            } else {
+                String::new()
+            };
+            std::fs::write(&executable, format!(r#"#!/bin/sh
+case "$1" in
+  --help) printf '%s\n' '--print --conversation --model --mode --sandbox --add-dir --log-file --print-timeout --output-format stream-json --input-format'; exit 0 ;;
+  models) printf '%s\n' 'test-model'; exit 0 ;;
+esac
+printf '%s\n' "$@" > args
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--log-file' ]; then shift; log="$1"; fi
+  shift
+done
+{missing_log}printf '%s\n' '{{"event":"init","conversation_id":"{session}","init":{{}}}}'
+IFS= read -r input || exit 7
+printf '%s' "$input" > input.json
+printf '%s\n' 'Created conversation {session}' 'Forwarding user message to conversation {session}' 'I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1' >> "$log"
+printf '%s\n' '{{"event":"result","result":{{"conversation_id":"{session}","status":"SUCCESS","response":"ok"}}}}'
+"#)).unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let adapter = Arc::new(AntigravityAppRuntimeAdapter::new(&root).unwrap());
+            let run_id = uuid::Uuid::new_v4().to_string();
+            let mut request = fake_antigravity_request(&root, &executable, run_id.clone());
+            request.prompt = "original 中文\ninput".into();
+            request.resumable_native_session_id = Some(
+                if matches!(mode, "missing" | "foreign") {
+                    expected
+                } else {
+                    session
+                }
+                .into(),
+            );
+            let (ready, mut received) = mpsc::unbounded_channel();
+            request.input_ready = Some(ready);
+            let running = adapter.clone();
+            let task = tokio::spawn(async move { running.run(request).await });
+            if matches!(mode, "missing" | "foreign") {
+                let error = tokio::time::timeout(Duration::from_secs(5), task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap_err();
+                assert_eq!(
+                    error
+                        .downcast_ref::<AntigravityInputNotSent>()
+                        .unwrap()
+                        .session_unavailable,
+                    mode == "missing"
+                );
+                assert!(received.recv().await.is_none());
+                assert!(!root.join("input.json").exists());
+            } else {
+                let release = tokio::time::timeout(Duration::from_secs(5), received.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(!root.join("input.json").exists());
+                if mode == "aborted" {
+                    task.abort();
+                    assert!(task.await.unwrap_err().is_cancelled());
+                    assert!(adapter.interrupt(&run_id, 1).await);
+                    assert!(!root.join("input.json").exists());
+                } else if mode == "fenced" {
+                    assert!(adapter.interrupt(&run_id, 1).await);
+                    assert!(
+                        tokio::time::timeout(Duration::from_secs(5), task)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .is_err()
+                    );
+                    assert!(!root.join("input.json").exists());
+                } else {
+                    release.send("original 中文\ninput".into()).unwrap();
+                    assert_eq!(
+                        tokio::time::timeout(Duration::from_secs(5), task)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .unwrap()
+                            .final_output,
+                        "ok"
+                    );
+                    let input: Value =
+                        serde_json::from_slice(&std::fs::read(root.join("input.json")).unwrap())
+                            .unwrap();
+                    assert_eq!(
+                        input,
+                        serde_json::json!({"event":"user","message":{"role":"user","content":"original 中文\ninput"}})
+                    );
+                }
+            }
+            assert!(
+                !std::fs::read_to_string(root.join("args"))
+                    .unwrap()
+                    .contains("original")
+            );
+            assert!(
+                adapter
+                    .wait_for_agent_run_quiescence(&run_id, 1, Duration::from_secs(3))
+                    .await
+            );
+            std::fs::remove_dir_all(root).unwrap();
         }
     }
 
@@ -2747,6 +3051,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                 input_accepted: None,
                 runtime_events: None,
                 launch_handoff: None,
+                input_ready: None,
             })
             .await
             .expect_err("a verified Session without final text must not look successful");
@@ -2859,6 +3164,7 @@ exec sleep 30
             input_accepted: Some(accepted_sender),
             runtime_events: None,
             launch_handoff: None,
+            input_ready: None,
         };
         let running_adapter = adapter.clone();
         let task = tokio::spawn(async move { running_adapter.run(request).await });

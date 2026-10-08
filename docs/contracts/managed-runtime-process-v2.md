@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # Managed Runtime Process v2
@@ -183,6 +183,15 @@ Linux ZCode 的显式 Host 回收也采用 pidfd 退出确认，包含捕获到�
 Unix 显式回收仍等待其组退出报告；不能把两种确认方式混用。
 这不是 cgroup/Windows Job 等价的强隔离：捕获前已脱离祖先链的未知进程、跨 UID 后代以及 Core 被强杀后的
 自动回收不由 Linux pidfd 捕获承诺。正式 Server 的 systemd unit 另外使用 control-group 终止策略。
+
+macOS 显式 Stop 在祖先关系断开前捕获当前受管树，使用 libproc 的进程生命周期身份保留归属，
+以 audit-token PID version 核验后发送信号，包含独立 process group 中的已捕获工具子进程。
+所有 Managed Process 在 spawn 时捕获根生命周期身份，取消前重新读取后代，不能复用早于最近 fork 的快照。
+macOS 信号只发给核验后的身份；Claude、Antigravity 和普通 ACP 的清理确认还必须等待已捕获后代退出；
+身份查询或终止能力不可用时保持未确认并保留清理句柄。ZCode 保留自己的 ledger 确认路径。
+ACP 可在同一内存所有权树上启用上述持久 ledger，不建立第二棵互不一致的清理树；未启用的临时 Probe
+仍保留内核身份与取消回收，但不宣称 Core 崩溃后的持久恢复。
+这不承诺捕获前已脱离祖先链的未知后台服务；不按进程名扫杀，也不把进程退出当作原生 turn 终态。
 
 User Automation 的 `rovai app` 防误调用由 CLI 入口拥有，见 [User Automation v5](user-automation-v5.md)。
 该检查不形成同 UID 恶意进程隔离，不是 Managed Process 的启动前置条件。

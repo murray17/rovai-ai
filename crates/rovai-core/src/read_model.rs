@@ -31,6 +31,8 @@ use crate::{
 
 mod navigation;
 use navigation::*;
+mod user_anchors;
+pub use user_anchors::{ThreadUserAnchorIndex, ThreadUserAnchorPreview};
 mod message_model;
 pub use message_model::ThreadMessageRuntimeModelView;
 
@@ -862,6 +864,7 @@ pub struct ThreadMessageAroundSnapshot {
     pub anchor_message_id: String,
     pub source_available: bool,
     pub messages: Vec<ThreadMessageView>,
+    pub next_message_sequence: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1401,6 +1404,17 @@ impl ReadModelService {
             )?,
             None => Vec::new(),
         };
+        // A real next-row boundary distinguishes adjacent windows from an unloaded gap;
+        // sequence numbers themselves need not be contiguous.
+        let next_message_sequence = match messages.last() {
+            Some(last) => transaction.query_row(
+                "SELECT MIN(sequence) FROM camp_message
+                WHERE camp_id = ?1 AND tombstoned_at IS NULL AND sequence > ?2",
+                params![camp_id, last.sequence],
+                |row| row.get(0),
+            )?,
+            None => None,
+        };
         transaction.commit()?;
         Ok(ThreadMessageAroundSnapshot {
             schema_version: CAMP_MESSAGE_AROUND_SCHEMA_VERSION,
@@ -1409,6 +1423,7 @@ impl ReadModelService {
             anchor_message_id: message_id.to_string(),
             source_available: anchor_sequence.is_some(),
             messages,
+            next_message_sequence,
         })
     }
 
@@ -4851,6 +4866,7 @@ mod slow_tests {
         assert_eq!(around.messages.len(), 41);
         assert_eq!(around.messages.first().unwrap().sequence, 5);
         assert_eq!(around.messages.last().unwrap().sequence, 45);
+        assert_eq!(around.next_message_sequence, Some(46));
         assert!(
             around
                 .messages

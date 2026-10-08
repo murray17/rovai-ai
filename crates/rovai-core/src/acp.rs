@@ -3334,6 +3334,20 @@ impl AcpHost {
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
+            #[cfg(target_os = "macos")]
+            if self.adapter_kind != AdapterKind::ZcodeApp {
+                loop {
+                    match child.captured_tree_is_empty() {
+                        Ok(true) => return true,
+                        Err(_) => return false,
+                        Ok(false) => {}
+                    }
+                    if tokio::time::Instant::now() >= deadline {
+                        return false;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
             if self.adapter_kind != AdapterKind::ZcodeApp
                 || self.zcode_cleanup_confirmed.load(Ordering::Acquire)
             {
@@ -3916,6 +3930,15 @@ pub struct AcpRuntime {
 
 pub(crate) use rovai_core::agent_runtime_adapter::LiveModelValidationError as AcpLiveModelValidationError;
 
+#[derive(Debug)]
+pub(crate) struct AcpSessionRestoreError;
+impl std::fmt::Display for AcpSessionRestoreError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ACP Native Session restoration failed before configuration")
+    }
+}
+impl std::error::Error for AcpSessionRestoreError {}
+
 fn select_acp_session_continuation(
     adapter_kind: AdapterKind,
     same_host_knows_session: bool,
@@ -4220,7 +4243,8 @@ impl AcpRuntime {
                         &self.owner,
                         AcpSessionPhase::loading_replay(),
                     )
-                    .await?;
+                    .await
+                    .context(AcpSessionRestoreError)?;
                 let method = if continuation == AcpSessionContinuation::Resume {
                     "session/resume"
                 } else {
@@ -4255,7 +4279,7 @@ impl AcpRuntime {
                         self.host
                             .unbind_session(existing_session_id, &self.owner)
                             .await;
-                        return Err(error);
+                        return Err(error.context(AcpSessionRestoreError));
                     }
                 };
                 if let Some(returned_session_id) = result.get("sessionId").and_then(Value::as_str)
@@ -4265,7 +4289,7 @@ impl AcpRuntime {
                         "ACP {method} returned a different Session ID than the exact restore target"
                     );
                     self.host.reject_loading_replay(reason.clone()).await;
-                    bail!(reason);
+                    return Err(anyhow::anyhow!(reason).context(AcpSessionRestoreError));
                 }
                 *self.session_result.write().await = Some(result);
                 (existing_session_id.to_string(), true)
@@ -11085,73 +11109,96 @@ while IFS= read -r ignored; do :; done
 
     #[tokio::test]
     async fn real_acp_session_catalog_rejects_a_missing_explicit_model_without_fallback() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-acp-live-model-validation-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let executable = root.join("traecli");
-        make_executable(
-            &executable,
-            r#"#!/bin/sh
+        for configuration_rejected in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "rovai-acp-live-model-validation-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("traecli");
+            make_executable(
+                &executable,
+                r#"#!/bin/sh
 IFS= read -r initialize || exit 1
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
 IFS= read -r session || exit 1
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]},"sessionId":"session-live-model","models":{"currentModelId":"trae-default","availableModels":[{"modelId":"trae-default","name":"TRAE Default"}]}}}'
+IFS= read -r configuration || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"configuration refused after successful resume"}}'
 while IFS= read -r ignored; do :; done
 "#,
-        );
-        let frozen = frozen_trae_runtime(&executable);
-        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
-        let (incoming, _receiver) = mpsc::unbounded_channel();
-        let builtin_tools = exact_builtin_tools(&root);
-        let host = AcpHost::spawn(
-            &root,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &frozen,
-            incoming,
-            Some(builtin_tools),
-            CompactionDetectorPolicy::Disabled,
-            true,
-            &BTreeMap::new(),
-            &root.join("private"),
-            None,
-        )
-        .await
-        .unwrap();
-        let runtime = AcpRuntime::from_host(
-            AcpRuntimeOwner {
-                agent_run_id: "run-live-model-validation".to_string(),
-                execution_epoch: 1,
-            },
-            host.clone(),
-            "sha256:compatibility".to_string(),
-            "sha256:mcp".to_string(),
-            root.clone(),
-            Some(exact_attachment_root(&root)),
-            "runtime_managed".to_string(),
-            AcpSessionPermissions::default(),
-        );
-
-        let error = runtime
-            .start_or_resume_session(
-                None,
-                AcpSessionCapabilities::default(),
-                "explicit",
-                "claude-opus-5",
-                &json!({}),
+            );
+            let frozen = frozen_trae_runtime(&executable);
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+            let (incoming, _receiver) = mpsc::unbounded_channel();
+            let builtin_tools = exact_builtin_tools(&root);
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                Some(builtin_tools),
+                CompactionDetectorPolicy::Disabled,
+                true,
                 &BTreeMap::new(),
+                &root.join("private"),
+                None,
             )
             .await
-            .expect_err("a model absent from the real Session catalog must fail closed");
-        let validation = error
-            .downcast_ref::<AcpLiveModelValidationError>()
-            .expect("the launch layer needs a typed model failure");
-        assert_eq!(validation.code, "runtime_model_unavailable");
+            .unwrap();
+            let runtime = AcpRuntime::from_host(
+                AcpRuntimeOwner {
+                    agent_run_id: "run-live-model-validation".to_string(),
+                    execution_epoch: 1,
+                },
+                host.clone(),
+                "sha256:compatibility".to_string(),
+                "sha256:mcp".to_string(),
+                root.clone(),
+                Some(exact_attachment_root(&root)),
+                "runtime_managed".to_string(),
+                AcpSessionPermissions::default(),
+            );
 
-        host.shutdown().await;
-        std::fs::remove_dir_all(root).unwrap();
+            let error = runtime
+                .start_or_resume_session(
+                    configuration_rejected.then_some("session-live-model"),
+                    AcpSessionCapabilities {
+                        can_resume: true,
+                        can_load_history: false,
+                    },
+                    "explicit",
+                    if configuration_rejected {
+                        "trae-default"
+                    } else {
+                        "claude-opus-5"
+                    },
+                    &json!({}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .expect_err("a model absent from the real Session catalog must fail closed");
+            assert!(
+                error.downcast_ref::<AcpSessionRestoreError>().is_none(),
+                "a model/configuration error after activation must not authorize session replacement"
+            );
+            if configuration_rejected {
+                assert!(
+                    format!("{error:#}").contains("configuration refused after successful resume")
+                );
+                assert!(host.knows_session("session-live-model").await);
+            } else {
+                let validation = error
+                    .downcast_ref::<AcpLiveModelValidationError>()
+                    .expect("typed catalog failure");
+                assert_eq!(validation.code, "runtime_model_unavailable");
+            }
+
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[tokio::test]

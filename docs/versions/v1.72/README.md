@@ -35,11 +35,14 @@ User 95 已替换此前 Hub 方向。Cline 唯一执行链为选中安装的 `cl
 
 ## 主干与 Preview 数据合流（2026-10-08）
 
-当前 schema 为 **137**。Migration 184 / schema 134 在主干用于继续执行，在 Preview 用于 Cline catalog；
+当前 schema 为 **138**。Migration 184 / schema 134 在主干用于继续执行，在 Preview 用于 Cline catalog；
 Migration 185 / schema 135 在主干用于结构化 Mission 描述，在 Preview 用于 Command Code catalog。
 Classifier 按完整结构、收据及旧 classifier 识别来源，拒绝部分结构，不能只凭编号推断已具备能力。
 Migration 186 将两边的 catalog 与继续执行结构汇合到 schema 136；Migration 187 保留主干已有的
 Mission 描述 Atom，或为 Preview 回填原文字，统一到 schema 137。结构、收据与 marker 在同一事务提交。
+随后主干 `c2281636` 的 Migration 186 / schema 136 已交付直接回复索引；该来源不具备 Preview catalog。
+Classifier 按结构区分两种 186，先保留主干已有描述，再由 Migration 188 原子收敛 catalog 与索引到 schema 138。
+既有 186 收据不改写，已存在的索引和结构化描述不重建；Preview/137 则只补索引。
 旧业务行、冻结证据、结构化提及和继续执行授权不重建、不重投；失败一起回滚。既有迁移 owner 覆盖
 两种 134、两种 135、136 来源和写入失败；下文旧编号仅描述当时分支状态。
 
@@ -124,6 +127,8 @@ Task 准入修正按 [Camp Message Send v25](../../contracts/camp-message-send-v
 提交和领取均检查全部原业务输入，不依赖 batch Run 的单值 `task_id`；提示词及 Schema 不变。
 2026-10-08 按 User 可用性优先要求取消新会话确认，复用正常 Runtime 的兼容判断，允许投递前一次降级；
 旧输入未知时在清理完成后自动选择新会话，工作区和提示词保持不变。
+后续真实验收发现的进程树清理、ACP 启动结算、旧 Session 引用保留与投递前降级问题，
+修复和逐 Adapter 验证见[续做可靠性验收](continuation-reliability-verification.md)。提示词保持不变。
 
 ## 并行实施：Member CLI
 
@@ -436,6 +441,18 @@ User 于 2026-10-06 授权在独立 worktree 实施并推送分支。Codex 仅�
 正文、计划和工具之后的根思考均可显示；活动工具与根思考并列，实际压缩、等待/取消/恢复和终态保留优先级。
 Codex/Copilot 的合格原生短标题瞬时替换“思考中”；Claude 暂不接入短标题。实现与验证以任务分支测试和真实
 Runtime Smoke 为证据，不从合同 accepted 状态推断所有 Provider 都能返回标题。
+
+
+## 全会话用户消息导航
+
+按 User 确认的范围，将左侧锚点改为完整用户消息目录，保留正文分页和现有外观。Core 只读取首条有效直接 reply 队员回复，
+预览按需读取；锚点定位窗口独立且有界，分页入口与自动加载跟随正常连续区间。合同见
+[Camp Open Projection v26](../../contracts/camp-open-projection-v26.md)，实现与验证见
+[用户锚点验收](thread-user-anchors-verification.md)。这是局部读取正确性修复，不增加持久副本、全局缓存框架或时间线重构。
+
+本轮以 `4563d23d` 为修正基线，修复缓存清窗和重同步可信状态，正文先显示再请求目录，格式化移出数据库锁，
+消息提示在实际写入路径收集、提交后发送。主干最初的 Migration 186 / schema 136 仅增加直接回复组合索引，无历史回填；
+本分支合流后由上节 Migration 188 / schema 138 保留该索引并收敛两种来源。
 
 ## 一键草稿邀请队外队员
 

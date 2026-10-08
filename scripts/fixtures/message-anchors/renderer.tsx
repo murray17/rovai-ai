@@ -40,12 +40,40 @@ const initial: ThreadSnapshot = { schemaVersion: 35, throughGlobalSequence: 1,
     isDefaultLead: true, version: 1 }],
   membershipReconciliations: [], tasks: [], messages: messages(12), messageDeliveries: [], turns: [], agentRuns: [],
   executionEvidence: [], agentRunFileChanges: [], agentRunImages: [], contextManifests: [], approvals: [], actions: [], timeline: [] }
+let fullMessages = initial.messages
+let watermark = 1
+let previewFailure = false
+const events = new Set<(event: unknown) => void>()
+const emitChange = (indexChanged: boolean) => {
+  watermark++
+  for (const listener of events) listener({ method: 'thread.messages.changed', params: { threadId, indexChanged, throughGlobalSequence: watermark } })
+}
 const requests: string[] = []
+const indexBodyMounted: boolean[] = []
+const earlierCursors: number[] = []
 Object.assign(window, { rovai: {
-  platform: 'darwin', onEvent: () => () => {}, clipboard: { write: async () => {} },
-  request: async (method: string) => {
+  platform: 'darwin', onEvent: (listener: (event: unknown) => void) => { events.add(listener); return () => events.delete(listener) }, clipboard: { write: async () => {} },
+  request: async (method: string, params?: { messageId: string }) => {
     requests.push(method)
-    if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
+    if (method === 'thread.messages.anchors') {
+      indexBodyMounted.push(Boolean(document.querySelector('[data-message-id]')))
+      const items = fullMessages.filter(message => message.authorType === 'user' && !message.withdrawn)
+        .map(message => ({ messageId: message.id, sequence: message.sequence, title: message.body, messageVersion: message.version }))
+      return { schemaVersion: 1, throughGlobalSequence: watermark, threadId, totalCount: items.length, items }
+    }
+    if (method === 'thread.messages.anchorPreview') {
+      if (previewFailure) { previewFailure = false; throw new Error('fixture preview failure') }
+      const reply = fullMessages.find(message => message.replyToThreadMessageId === params?.messageId)
+      return { schemaVersion: 1, throughGlobalSequence: watermark, threadId, messageId: params?.messageId,
+        sourceAvailable: true, firstReply: reply ? { messageId: reply.id, sequence: reply.sequence, summary: reply.body, messageVersion: reply.version } : null }
+    }
+    if (method === 'thread.messages.around') {
+      const index = fullMessages.findIndex(message => message.id === params?.messageId)
+      return { schemaVersion: 1, throughGlobalSequence: watermark, threadId, anchorMessageId: params?.messageId,
+        sourceAvailable: index >= 0, messages: fullMessages.slice(Math.max(0, index - 20), index + 21),
+        nextMessageSequence: fullMessages[index + 21]?.sequence ?? null }
+    }
+    if (method === 'skills.list'  || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.pendingInputs.get') return { threadId, executionActive: false, items: [], editSession: null, submissionOutcomes: [] }
     throw new Error(`Unexpected anchor fixture request: ${method}`)
   }
@@ -53,7 +81,10 @@ Object.assign(window, { rovai: {
 let updateSnapshot: React.Dispatch<React.SetStateAction<ThreadSnapshot>>
 let updateWidth: React.Dispatch<React.SetStateAction<number | undefined>>
 let updateHistory: React.Dispatch<React.SetStateAction<ThreadOpenMessageCoverage | null>>
+let updateBodyReady: React.Dispatch<React.SetStateAction<boolean>>
 function Fixture(): React.JSX.Element {
+  const [bodyReady, setBodyReady] = useState(false)
+  updateBodyReady = setBodyReady
   const [snapshot, setSnapshot] = useState(initial)
   const [paneWidth, setPaneWidth] = useState<number>()
   const [history, setHistory] = useState<ThreadOpenMessageCoverage | null>(null)
@@ -66,12 +97,18 @@ function Fixture(): React.JSX.Element {
     <AppHeader threadTitle={snapshot.thread.title} contextLabel="rovai-ai" thread={snapshot}
       detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content" style={{ width: paneWidth }}>
-      <ThreadWorkspace snapshot={snapshot} projectName="rovai-ai" agents={[agent]} busy={false} stopping={false}
+      <ThreadWorkspace workspaceEntrySnapshotReady={bodyReady} snapshot={snapshot} projectName="rovai-ai" agents={[agent]} busy={false} stopping={false}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}}
         onResolveApproval={() => {}} worldMapEnabled={false} detailEntryHost={entryHost}
         messageHistory={history} onLoadEarlierMessages={async () => {
-          setSnapshot(current => ({ ...current, messages: [...messages(20), ...current.messages] }))
-          setHistory(null)
+          const before = history?.oldestLoadedSequence ?? null
+          if (before === null) return
+          earlierCursors.push(before)
+          const start = Math.max(1, before / 3 - 20)
+          const page = fullMessages.filter(message => message.sequence >= start * 3 && message.sequence < before)
+          setSnapshot(current => ({ ...current, messages: [...page, ...current.messages] }))
+          setHistory(current => current && ({ ...current, oldestLoadedSequence: start * 3,
+            loadedCount: current.loadedCount + page.length, hasEarlier: start > 1, complete: start === 1 }))
         }} />
     </main>
   </div>
@@ -82,7 +119,7 @@ const rail = (): HTMLElement | null => document.querySelector('.conversation-anc
 const target = (id: string): HTMLElement => document.querySelector(`[data-message-id="${id}"]`)!
 const markers = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.conversation-anchor-item')]
 const settle = async (): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, 100))
+  await new Promise(resolve => setTimeout(resolve, 220))
   await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
 }
 const point = (node: Element): { x: number; y: number } => {
@@ -91,7 +128,12 @@ const point = (node: Element): { x: number; y: number } => {
 }
 Object.assign(window, { anchorsTest: {
   settle, longTitle, firstReply,
+  bodyReady: async () => { updateBodyReady(true); await settle() },
+  indexBodyMounted: () => indexBodyMounted,
   count: async (count: number, start = 1) => {
+    fullMessages = messages(count + start - 1)
+    earlierCursors.length = 0
+    emitChange(true)
     updateHistory(start > 1 ? { loadedCount: count * 2 - 1, totalCount: (count + start - 1) * 2 - 1,
       omittedCount: (start - 1) * 2, complete: false, hasEarlier: true,
       oldestLoadedSequence: start * 3, newestLoadedSequence: (count + start - 1) * 3 } : null)
@@ -106,16 +148,31 @@ Object.assign(window, { anchorsTest: {
     await settle()
   },
   firstMarker: () => point(markers()[0]),
+  jump: async (id: string) => { markers().find(marker => marker.dataset.userMessageAnchor === id)!.click(); await settle() },
+  failNextPreview: () => { previewFailure = true; emitChange(false) },
+  earlierCursors: () => [...earlierCursors],
+  upInput: async () => { viewport().dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -20 })); await settle(); await settle() },
+  atLoader: async () => { const loader = document.querySelector('.camp-history-loader')!;
+    viewport().scrollTop += loader.getBoundingClientRect().top - viewport().getBoundingClientRect().top; await settle() },
+  gap: () => Boolean(document.querySelector('.camp-history-gap')),
+  loadedIds: () => [...viewport().querySelectorAll<HTMLElement>('[data-message-id]')].map(node => node.dataset.messageId),
+  loaderTop: () => document.querySelector('.camp-history-loader')?.getBoundingClientRect().top,
+  targetTop: (id: string) => target(id).getBoundingClientRect().top,
+  runtimeEvent: () => { for (const listener of events) listener({ method: 'agent.run.phase_changed', params: { threadId } }) },
   focus: () => markers().find(button => button.tabIndex === 0)!.focus({ preventScroll: true }),
   firstFocus: () => markers()[0].focus({ preventScroll: true }),
   railTop: async () => { rail()!.scrollTop = 0; await settle() },
   railPoint: () => point(rail()!),
   appendAgent: async () => {
+    fullMessages = [...fullMessages, message('background-reply', 10000, 'agent', '后台队员回复。', fullMessages.at(-1)!.id)]
+    emitChange(false)
     updateSnapshot(current => ({ ...current, messages: [...current.messages,
       message('background-reply', 10000, 'agent', '后台队员回复。', current.messages.at(-1)!.id)] }))
     await settle()
   },
   appendUser: async () => {
+    fullMessages = [...fullMessages, message('new-user', 10001, 'user', '新增用户问题。')]
+    emitChange(true)
     updateSnapshot(current => ({ ...current, messages: [...current.messages, message('new-user', 10001, 'user', '新增用户问题。')] }))
     await settle()
   },

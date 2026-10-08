@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # 测试与 Smoke Test
@@ -248,6 +248,45 @@ Cline 窗口补采扩展既有 observer/config 两个 Rust owner 和 `scripts/li
 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`、
 `cargo test -p rovai-core --features extended-tests --lib runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`；
 其余定向与真实 Smoke 命令见上述验收记录，默认 workspace 门禁仍按下方路由。
+
+## 2026-10-09 主干合流的回归归属
+
+迁移编号 186 的冲突由既有 `db::user_anchors::tests::direct_reply_index_migration_is_atomic` 扩为两种来源：
+Preview/137 缺索引，main/136 有索引但缺 Cline/Command catalog；后者先经 187 保留 Mission 描述，
+再由 188/schema 138 收敛。失败收据回滚、部分来源拒绝、历史摘要不变及重开准入均保留；没有新增 Rust owner。
+既有 catalog migration owner 同步去掉后续 188 receipt 后再构造旧来源，不删除原输入矩阵。
+
+macOS 采用一个内核身份树，保留主干取消时捕获与本分支的可选持久 ledger。既有
+`runtime_probe_process::tests::cancelling_the_owner_kills_the_spawned_process_group` 在合流时暴露 100 ms
+缓存漏掉新 fork 的问题；取消捕获改为新鲜快照，原断言保留。PID-version 内核负例与崩溃恢复仍由
+`managed_process::process_tree::tests::pid_version_and_restart_ledger_preserve_process_ownership` 拥有，
+模块路径从原 macos 名称归入共享 process_tree 后同步 helper filter，未退役测试。
+
+Claude 既有公开文本测试保留 thinking/text/tool 交错与批量终态矩阵；绑定原生 message ID 后允许
+私有 thought started/completed 事件，并精确检查它们只有 itemId。公开文本仍单独断言，私有内容不外发。
+
+定向执行上述 owner、`managed_process::`、`acp::`、`claude::`、`antigravity::` 和 `continuation_`；
+默认 workspace、前端与文档门禁在合流后重跑。模型测试仍与这些本地控制夹具分开记录。
+
+## 续做可靠性回归
+
+复用 `managed_process::tests::cancellation_reaps_captured_detached_children_after_parent_exit`，将既有 Linux
+owner 扩展到 macOS，证明捕获后脱离进程组的子进程被回收、无关进程仍存活。Claude 既有初始化失败和
+stdin 中断 owner 增加缺失会话、投递门禁取消；ACP 模型目录 owner 增加恢复成功后的配置 RPC 拒绝。
+`delivery_queue::tests::continuation_rechecks_scope_and_selects_safe_session_at_claim` 增加可信失败终态和
+binding/epoch/native turn 不匹配矩阵；既有 unknown、取消、Task 关联和整批范围断言保留。
+
+新增 `runtime::tests::failed_session_replacement_retains_reference_without_reviving_old_binding` 拥有替代启动
+失败后的持久引用恢复：修复前旧引用清空；须同时验证凭证不复活、旧 epoch/unknown 不准入和新会话不覆盖。
+已有会话选择 owner 不拥有凭证轮换事务，故复用最小 claimed-run SQLite fixture，纯函数不足以证明该 seam。
+新增 `antigravity::tests::stream_input_waits_for_exact_session_and_dispatch_authority` 拥有真实 pipe 的初始化／
+输入边界；输出 parser owner 无法证明输入尚未发送，覆盖明确缺失、非缺失身份冲突、门禁取消、调用方 abort
+和释放后原始字节。使用本地受控子进程，不访问模型或真实用户数据，属于扩展层。
+
+最小命令：`cargo test -p rovai-core --features extended-tests --lib` 后分别过滤以上 owner，以及
+`managed_process::`、`claude::`、`antigravity::`、`acp::`、`planned_shutdown::`、`continuation_`。
+真实模型、透明代理终止原生进程和隔离数据目录的验收单列于
+[续做可靠性验收](../versions/v1.72/continuation-reliability-verification.md)，不以协议夹具替代真实结果。
 
 ## Run 思考反馈
 

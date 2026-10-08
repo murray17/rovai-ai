@@ -78,7 +78,7 @@ function WebEntry() {
   }), [])
   useEffect(() => {
     if (!authenticated) return
-    return transport.subscribe(() => adapter?.invalidate(), setConnection)
+    return transport.subscribe(change => adapter?.invalidate(change), setConnection)
   }, [authenticated, authGeneration, adapter])
   useEffect(() => {
     let cancelled = false

@@ -1,3 +1,4 @@
+import { useThreadUserAnchorCache } from './useThreadUserAnchors'
 import { hasPendingThreadDraftInput } from './pending-thread-draft'
 import { memberCreationHelper, memberCreationInitialDraft, navigationWithMemberCreationDrafts, type MemberCreationDraft } from './member-creation-flow'
 import { navigationThreadReadState } from './navigation-unread'
@@ -173,6 +174,7 @@ import { appendLiveRuntimeEventBatch, createLiveRuntimeEventBuffer } from './liv
 export { allNavigationThreads }
 
 const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
+  'thread.messages.changed',
   'thread.memberCreated',
   'thread.member.fast.updated',
   'camp.member_added',
@@ -1020,6 +1022,7 @@ export function BusinessApp({
   startupFeedbackDelayElapsed?: boolean
 }): React.JSX.Element {
   const { client, preferences: uiPreferences, desktop } = environment
+  const userAnchorNavigationFor = useThreadUserAnchorCache(client)
   const interfaceLanguage = useInterfaceLanguage()
   const onboardingLanguageRequest = useRef(0)
   const mobile = useMobileViewport(!desktop)
@@ -1926,7 +1929,7 @@ export function BusinessApp({
       }
       return false
     }
-  }, [clearThreadOpenFeedback, navigationRefreshCoordinator, requestThreadProjection, setThreadSnapshot])
+  }, [clearThreadOpenFeedback, navigationRefreshCoordinator, requestThreadProjection, setThreadSnapshot, userAnchorNavigationFor])
 
   const activateThread = useCallback(async (
     threadId: string,
@@ -2326,6 +2329,7 @@ export function BusinessApp({
     loadNavigation,
     loadOverview,
     requestThreadProjection,
+    userAnchorNavigationFor,
     setThreadSnapshot,
     startupPrerequisitesReady,
     startupSnapshot
@@ -2551,7 +2555,7 @@ export function BusinessApp({
       if (event.method === 'preferences.new_conversation_changed') {
         void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))
       }
-      if (event.method === 'members.invalidated' && viewRef.current === 'members') {
+      if (event.method === 'members.invalidated' && (viewRef.current === 'members' || viewRef.current === 'camp')) {
         void loadAgents().catch((nextError) => setError(errorMessage(nextError)))
       }
       if (event.method === 'agent_run.terminal') liveEvents.flush()
@@ -4394,6 +4398,7 @@ export function BusinessApp({
               generalPreferences.executionConsolePlacement
             )}
             snapshot={visibleThreadSnapshot}
+            userAnchorNavigation={userAnchorNavigationFor(activeThreadId)}
             memberCreation={memberCreationDrafts.has(activeThreadId)}
             initialComposerDraft={memberCreationDrafts.get(activeThreadId)?.draft ?? campSnapshotState.initialComposerDraft}
             onPendingDraftChange={updateMemberCreationDraft}

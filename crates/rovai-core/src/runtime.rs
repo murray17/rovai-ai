@@ -1145,6 +1145,52 @@ impl ExecutionRuntimeService {
         Ok(())
     }
 
+    /// A failed replacement has no authority to erase the previous session
+    /// reference. Retain it under the new binding; never restore old credentials
+    /// or clear any accepted/unknown input evidence.
+    pub(crate) fn retain_session_after_failed_replacement(
+        &self,
+        database: &mut Database,
+        execution: &AgentRunExecution,
+    ) -> Result<bool> {
+        let Some(session_id) = execution.native_session_id.as_deref() else {
+            return Ok(false);
+        };
+        let tx = database.connection_mut().transaction()?;
+        let changed = tx.execute(
+            "UPDATE conversation SET native_session_id=?2,
+                native_adapter_installation_id=?3, native_binding_compatibility_digest=?4,
+                native_installation_generation=?5, native_session_compatibility_key=?6,
+                version=version+1, updated_at=?9
+             WHERE id=?1 AND native_session_id IS NULL AND native_binding_id IS NOT NULL
+               AND EXISTS(SELECT 1 FROM agent_run WHERE id=?7 AND conversation_id=?1
+                   AND execution_epoch=?8 AND status IN ('running','waiting') AND cancel_requested_at IS NULL)
+               AND EXISTS(SELECT 1 FROM event_log WHERE entity_type='agent_run' AND entity_id=?7
+                   AND execution_epoch=?8 AND event_type='agent_run.native_session_continuity_lost')
+               AND NOT EXISTS(SELECT 1 FROM runtime_input_delivery WHERE agent_run_id=?7
+                   AND (status IN ('accepted','delivery_unknown') OR dispatch_started_at IS NOT NULL))",
+            params![execution.conversation_id, session_id, execution.native_adapter_installation_id,
+                execution.native_binding_compatibility_digest, execution.native_installation_generation,
+                execution.native_session_compatibility_key, execution.agent_run_id, execution.execution_epoch,
+                chrono::Utc::now().to_rfc3339()],
+        )?;
+        if changed != 0 {
+            append_domain_event(
+                &tx,
+                "agent_run.native_session_reference_retained",
+                &execution.camp_id,
+                ("agent_run", &execution.agent_run_id),
+                &ActorRef::System {
+                    component_id: "runtime-adapter:session-continuation".into(),
+                },
+                Some(execution.execution_epoch),
+                &json!({"conversationId": execution.conversation_id, "nativeSessionId": session_id}),
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed != 0)
+    }
+
     pub fn expire_elapsed_camp_turn_execution_budgets(
         &self,
         database: &mut Database,
@@ -4926,6 +4972,14 @@ fn settle_failed_agent_run_in_tx(
     if updated != 1 {
         anyhow::bail!("AgentRun changed inside its failure transaction");
     }
+    let native_turn_id: Option<String> = if terminal_resolution_source == Some("runtime_terminal") {
+        transaction.query_row(
+            "SELECT native_input_id FROM runtime_input_delivery WHERE agent_run_id=?1 AND execution_epoch=?2 AND status='accepted'",
+            params![target.agent_run_id, failure.execution_epoch], |row| row.get(0),
+        ).optional()?.flatten()
+    } else {
+        None
+    };
     append_domain_event(
         transaction,
         "agent_run.failed",
@@ -4940,6 +4994,7 @@ fn settle_failed_agent_run_in_tx(
             "manualRetryAllowed": failure.manual_retry_allowed,
             "endingGitObservation": failure.ending_git_observation,
             "terminalResolutionSource": terminal_resolution_source,
+            "nativeTurnId": native_turn_id,
         }),
     )?;
     settle_materialized_delivery_for_agent_run(
@@ -5612,6 +5667,7 @@ fn persist_recipient_free_agent_publication(
             "recipientFree": true,
         }),
     )?;
+    crate::message_changes::record(transaction, &target.camp_id, false, &[]);
     Ok(message_id)
 }
 
@@ -8891,6 +8947,95 @@ mod tests {
                 panic!("terminal remained ordinary after launch closure")
             }
         }
+    }
+
+    // Distinct regression owner: preserving an old reference must not restore
+    // its credential, overwrite a replacement, or reinterpret dispatched input.
+    #[test]
+    fn failed_session_replacement_retains_reference_without_reviving_old_binding() {
+        let (directory, mut database, _, _, run_id, epoch) =
+            claimed_run_for_planned_shutdown("required");
+        let service = ExecutionRuntimeService::default();
+        let binding = crate::team_tool::TeamToolService::default()
+            .prepare_binding_credential(&mut database, &run_id, epoch, false)
+            .unwrap();
+        database.connection().execute("UPDATE conversation SET native_session_id='recoverable-old-session' WHERE id=(SELECT conversation_id FROM agent_run WHERE id=?1)", [&run_id]).unwrap();
+        let execution = service
+            .load_agent_run_execution(&database, &run_id, epoch)
+            .unwrap()
+            .unwrap();
+        service
+            .record_native_session_continuity_lost(
+                &mut database,
+                &execution,
+                "native_resume",
+                NativeSessionResumeFailure::Ambiguous,
+            )
+            .unwrap();
+        let replacement = crate::team_tool::TeamToolService::default()
+            .prepare_binding_credential(&mut database, &run_id, epoch, true)
+            .unwrap();
+        assert_ne!(replacement.native_binding_id, binding.native_binding_id);
+        assert_ne!(replacement.binding_credential, binding.binding_credential);
+        assert!(
+            service
+                .retain_session_after_failed_replacement(&mut database, &execution)
+                .unwrap()
+        );
+        let retained: (String, String, i64) = database.connection().query_row(
+            "SELECT native_session_id,native_binding_id,native_binding_generation FROM conversation WHERE id=?1",
+            [&execution.conversation_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            retained,
+            (
+                "recoverable-old-session".into(),
+                replacement.native_binding_id,
+                replacement.native_binding_generation
+            )
+        );
+        assert!(
+            !service
+                .retain_session_after_failed_replacement(&mut database, &execution)
+                .unwrap(),
+            "never overwrite a bound session"
+        );
+        // An old epoch has no authority over the current binding, even if empty.
+        database
+            .connection()
+            .execute(
+                "UPDATE conversation SET native_session_id=NULL WHERE id=?1",
+                [&execution.conversation_id],
+            )
+            .unwrap();
+        let mut stale = execution.clone();
+        stale.execution_epoch += 1;
+        assert!(
+            !service
+                .retain_session_after_failed_replacement(&mut database, &stale)
+                .unwrap()
+        );
+        insert_test_runtime_input(&database, &run_id, epoch, "delivery_unknown");
+        assert!(
+            !service
+                .retain_session_after_failed_replacement(&mut database, &execution)
+                .unwrap(),
+            "dispatched unknown input cannot be reinterpreted as failed activation"
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status='cancelled',ended_at=datetime('now') WHERE id=?1",
+                [&run_id],
+            )
+            .unwrap();
+        assert!(
+            !service
+                .retain_session_after_failed_replacement(&mut database, &execution)
+                .unwrap()
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

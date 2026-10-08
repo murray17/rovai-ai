@@ -1867,90 +1867,91 @@ mod tests {
         use crate::run_continuation::{
             ContinueAgentRunCommand, continue_agent_run, has_unresolved_native_turn,
         };
-        let mut fixture = Fixture::new();
-        fixture.enqueue("scope-original", "继续原有范围");
-        let source = claim_waiting_delivery_batches(&mut fixture.database, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        let command = CommandEnvelope {
-            command_id: "scope-1".into(),
-            actor: ActorRef::User {
-                user_id: "local_user".into(),
-            },
-            camp_id: Some(fixture.camp_id.clone()),
-            expected_versions: vec![],
-            execution_epoch: None,
-            payload: ContinueAgentRunCommand {
-                camp_id: fixture.camp_id.clone(),
-                agent_run_id: source.clone(),
-                use_new_session: false,
-            },
-        };
-        let mut request = command.clone();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
+        for terminal_failure in [false, true] {
+            let mut fixture = Fixture::new();
+            fixture.enqueue("scope-original", "继续原有范围");
+            let source = claim_waiting_delivery_batches(&mut fixture.database, 1)
                 .unwrap()
-                .result
-                .code,
-            "agent_run.continuation_unavailable"
-        );
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET status='cancelled',ended_at=datetime('now') WHERE id=?1",
-                [&source],
-            )
-            .unwrap();
-        request.command_id = "agent-cannot-authorize".into();
-        request.execution_epoch = Some(1);
-        request.actor = ActorRef::Agent {
-            source_agent_run_id: source.clone(),
-            agent_id: "agent_1".into(),
-        };
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
+                .pop()
+                .unwrap();
+            let command = CommandEnvelope {
+                command_id: "scope-1".into(),
+                actor: ActorRef::User {
+                    user_id: "local_user".into(),
+                },
+                camp_id: Some(fixture.camp_id.clone()),
+                expected_versions: vec![],
+                execution_epoch: None,
+                payload: ContinueAgentRunCommand {
+                    camp_id: fixture.camp_id.clone(),
+                    agent_run_id: source.clone(),
+                    use_new_session: false,
+                },
+            };
+            let mut request = command.clone();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .code,
+                "agent_run.continuation_unavailable"
+            );
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET status='cancelled',ended_at=datetime('now') WHERE id=?1",
+                    [&source],
+                )
+                .unwrap();
+            request.command_id = "agent-cannot-authorize".into();
+            request.execution_epoch = Some(1);
+            request.actor = ActorRef::Agent {
+                source_agent_run_id: source.clone(),
+                agent_id: "agent_1".into(),
+            };
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .code,
+                "agent_run.continue_user_required"
+            );
+            request = command.clone();
+            request.command_id = "wrong-thread".into();
+            request.camp_id = Some("another-thread".into());
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .code,
+                "agent_run.camp_mismatch"
+            );
+            request = command.clone();
+            request.command_id = "session-changes-while-waiting".into();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .status,
+                crate::command::CommandResultStatus::Applied
+            );
+            fixture.database.connection().execute("UPDATE conversation SET native_session_id='changed-session',native_adapter_installation_id='adapter-test-codex',native_binding_compatibility_digest='incompatible' WHERE id='delivery-queue-agent-1'",[]).unwrap();
+            let continued_run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
                 .unwrap()
-                .result
-                .code,
-            "agent_run.continue_user_required"
-        );
-        request = command.clone();
-        request.command_id = "wrong-thread".into();
-        request.camp_id = Some("another-thread".into());
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
-                .unwrap()
-                .result
-                .code,
-            "agent_run.camp_mismatch"
-        );
-        request = command.clone();
-        request.command_id = "session-changes-while-waiting".into();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
-                .unwrap()
-                .result
-                .status,
-            crate::command::CommandResultStatus::Applied
-        );
-        fixture.database.connection().execute("UPDATE conversation SET native_session_id='changed-session',native_adapter_installation_id='adapter-test-codex',native_binding_compatibility_digest='incompatible' WHERE id='delivery-queue-agent-1'",[]).unwrap();
-        let continued_run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        let projected = crate::read_model::ReadModelService
-            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
-            .unwrap();
-        let continued_run = projected
-            .agent_runs
-            .iter()
-            .find(|r| r.id == continued_run_id)
-            .unwrap();
-        assert_eq!(continued_run.status, "queued");
-        assert!(continued_run.failure.is_none());
-        assert_eq!(
+                .pop()
+                .unwrap();
+            let projected = crate::read_model::ReadModelService
+                .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+                .unwrap();
+            let continued_run = projected
+                .agent_runs
+                .iter()
+                .find(|r| r.id == continued_run_id)
+                .unwrap();
+            assert_eq!(continued_run.status, "queued");
+            assert!(continued_run.failure.is_none());
+            assert_eq!(
             fixture
                 .database
                 .connection()
@@ -1963,31 +1964,31 @@ mod tests {
             "changed-session",
             "compatibility is resolved by the ordinary Runtime path"
         );
-        fixture.stop_run(&continued_run_id);
-        assert_continuation_task_links();
-        fixture.database.connection().execute("UPDATE camp_member SET leave_requested_at=datetime('now'),leave_request_command_id='leave-fixture' WHERE camp_id=?1 AND agent_id='agent_1'",[&fixture.camp_id]).unwrap();
-        request = command.clone();
-        request.command_id = "member-leaving".into();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
-                .unwrap()
-                .result
-                .code,
-            "agent_run.continuation_unavailable"
-        );
-        fixture.database.connection().execute("UPDATE camp_member SET leave_requested_at=NULL,leave_request_command_id=NULL WHERE camp_id=?1 AND agent_id='agent_1'",[&fixture.camp_id]).unwrap();
-        // Known incompatibility is accepted directly; only claim clears the binding.
-        fixture.database.connection().execute("UPDATE conversation SET native_session_id='old-session',native_adapter_installation_id='adapter-test-codex',native_binding_compatibility_digest='incompatible' WHERE id='delivery-queue-agent-1'",[]).unwrap();
-        request = command.clone();
-        request.command_id = "automatic-new-session".into();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
-                .unwrap()
-                .result
-                .status,
-            crate::command::CommandResultStatus::Applied
-        );
-        assert_eq!(
+            fixture.stop_run(&continued_run_id);
+            assert_continuation_task_links();
+            fixture.database.connection().execute("UPDATE camp_member SET leave_requested_at=datetime('now'),leave_request_command_id='leave-fixture' WHERE camp_id=?1 AND agent_id='agent_1'",[&fixture.camp_id]).unwrap();
+            request = command.clone();
+            request.command_id = "member-leaving".into();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .code,
+                "agent_run.continuation_unavailable"
+            );
+            fixture.database.connection().execute("UPDATE camp_member SET leave_requested_at=NULL,leave_request_command_id=NULL WHERE camp_id=?1 AND agent_id='agent_1'",[&fixture.camp_id]).unwrap();
+            // Known incompatibility is accepted directly; only claim clears the binding.
+            fixture.database.connection().execute("UPDATE conversation SET native_session_id='old-session',native_adapter_installation_id='adapter-test-codex',native_binding_compatibility_digest='incompatible' WHERE id='delivery-queue-agent-1'",[]).unwrap();
+            request = command.clone();
+            request.command_id = "automatic-new-session".into();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .status,
+                crate::command::CommandResultStatus::Applied
+            );
+            assert_eq!(
             fixture
                 .database
                 .connection()
@@ -1999,217 +2000,265 @@ mod tests {
                 .unwrap(),
             "old-session"
         );
-        let run = claim_waiting_delivery_batches(&mut fixture.database, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        // Claim does not preempt the shared Runtime's Compatible/Controlled/New
-        // decision, including upgrade metadata that still permits a resume attempt.
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
-                [&run],
-            )
-            .unwrap();
-        let execution = crate::runtime::ExecutionRuntimeService::default()
-            .load_agent_run_execution(&fixture.database, &run, 1)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            execution.native_session_resume_disposition(),
-            crate::runtime::NativeSessionResumeDisposition::New
-        );
-        assert!(
-            crate::run_continuation::can_replace_session_before_dispatch(
-                fixture.database.connection(),
-                &run,
-                1
-            )
-            .unwrap()
-        );
-        for (key, generation) in [
-            (
-                Some("previous-key"),
-                execution.runtime.installation_generation,
-            ),
-            (None, execution.runtime.installation_generation - 1),
-        ] {
-            let tx = fixture.database.connection_mut().transaction().unwrap();
-            tx.execute("UPDATE conversation SET native_binding_compatibility_digest=?1,
-                native_installation_generation=?2,native_session_compatibility_key=?3 WHERE id='delivery-queue-agent-1'",
-                params![execution.runtime.binding_compatibility_digest, generation, key]).unwrap();
-            assert!(!has_unresolved_native_turn(&tx, "delivery-queue-agent-1").unwrap());
-            tx.commit().unwrap();
-            let current = crate::runtime::ExecutionRuntimeService::default()
-                .load_agent_run_execution(&fixture.database, &run, 1)
+            let run = claim_waiting_delivery_batches(&mut fixture.database, 1)
                 .unwrap()
+                .pop()
                 .unwrap();
-            assert_eq!(
-                current.native_session_resume_disposition(),
-                crate::runtime::NativeSessionResumeDisposition::Controlled
-            );
-        }
-        let context = fixture.materialize_run(&run);
-        fixture.database.connection().execute(
-            "UPDATE conversation SET native_session_id='continuation-session' WHERE id='delivery-queue-agent-1'", [],
-        ).unwrap();
-        let stop_unknown = |fixture: &mut Fixture, run: &str, manifest: &str| {
-            let delivery = crate::context::ContextService
-                .prepare_input_delivery(&mut fixture.database, run, 1, manifest)
-                .unwrap();
-            crate::context::ContextService
-                .mark_input_delivery_unknown(
-                    &mut fixture.database,
-                    &delivery.id,
-                    "stopped during dispatch",
-                )
-                .unwrap();
-            assert!(
-                !crate::run_continuation::can_replace_session_before_dispatch(
-                    fixture.database.connection(),
-                    run,
-                    1,
-                )
-                .unwrap(),
-                "a potentially accepted input cannot be resent by session fallback"
-            );
-            fixture.stop_run(run);
+            // Claim does not preempt the shared Runtime's Compatible/Controlled/New
+            // decision, including upgrade metadata that still permits a resume attempt.
             fixture
                 .database
                 .connection()
                 .execute(
-                    "UPDATE agent_run SET cancel_acknowledged_at=datetime('now') WHERE id=?1",
-                    [run],
+                    "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
+                    [&run],
                 )
                 .unwrap();
-        };
-        stop_unknown(&mut fixture, &run, &context.manifest_id);
-        // A later ordinary execution can prove this same binding usable. An
-        // accepted input or a successful completion on another binding cannot.
-        let needs_new_session = |fixture: &mut Fixture| {
-            has_unresolved_native_turn(fixture.database.connection(), "delivery-queue-agent-1")
+            let execution = crate::runtime::ExecutionRuntimeService::default()
+                .load_agent_run_execution(&fixture.database, &run, 1)
                 .unwrap()
-        };
-        assert!(needs_new_session(&mut fixture));
-        fixture.enqueue("ordinary-recovery", "正常消息恢复现有会话");
-        request = command.clone();
-        request.command_id = "resume-failed".into();
-        request.payload.agent_run_id = run.clone();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
-                .unwrap()
-                .result
-                .code,
-            "agent_run.continuation_requested"
-        );
-        let recovered = claim_waiting_delivery_batches(&mut fixture.database, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        let context = fixture.materialize_run(&recovered);
-        let delivery = crate::context::ContextService
-            .prepare_input_delivery(&mut fixture.database, &recovered, 1, &context.manifest_id)
-            .unwrap();
-        crate::context::ContextService
-            .acknowledge_input_delivery(
-                &mut fixture.database,
-                &delivery.id,
-                "recovered-native-turn",
-            )
-            .unwrap();
-        assert!(
-            needs_new_session(&mut fixture),
-            "an accepted input is not a completed native turn"
-        );
-        let recovered_execution = crate::runtime::ExecutionRuntimeService::default()
-            .load_agent_run_execution(&fixture.database, &recovered, 1)
-            .unwrap()
-            .unwrap();
-        let completed = crate::runtime::ExecutionRuntimeService::default()
-            .succeed_agent_run(
-                &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: "ordinary-session-recovered".into(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex-cli".into(),
-                    },
-                    camp_id: Some(fixture.camp_id.clone()),
-                    expected_versions: vec![],
-                    execution_epoch: None,
-                    payload: crate::runtime::SucceedAgentRunCommand {
-                        agent_run_id: recovered,
-                        expected_version: recovered_execution.version,
-                        execution_epoch: 1,
-                        native_turn_id: "recovered-native-turn".into(),
-                        final_output: "会话恢复成功".into(),
-                        missing_send_recovery_candidate: None,
-                        ending_git_observation: None,
-                    },
-                },
-            )
-            .unwrap();
-        assert_eq!(completed.result.code, "agent_run.succeeded");
-        assert!(
-            !needs_new_session(&mut fixture),
-            "later trusted completion must supersede the historical unknown turn"
-        );
-        {
-            let tx = fixture.database.connection_mut().transaction().unwrap();
-            tx.execute("UPDATE runtime_input_delivery SET native_binding_id='another-binding' WHERE agent_run_id=?1", [&recovered_execution.agent_run_id]).unwrap();
-            assert!(
-                has_unresolved_native_turn(&tx, "delivery-queue-agent-1").unwrap(),
-                "completion in another binding must not clear this session's unknown turn"
+                .unwrap();
+            assert_eq!(
+                execution.native_session_resume_disposition(),
+                crate::runtime::NativeSessionResumeDisposition::New
             );
-            tx.rollback().unwrap();
-        }
-        // The queued request sees the ordinary Run's later success at claim.
-        let retried = claim_waiting_delivery_batches(&mut fixture.database, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        let retried_context = fixture.materialize_run(&retried);
-        let retried_execution = crate::runtime::ExecutionRuntimeService::default()
-            .load_agent_run_execution(&fixture.database, &retried, 1)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            retried_execution.native_session_id.as_deref(),
-            Some("continuation-session")
-        );
-        stop_unknown(&mut fixture, &retried, &retried_context.manifest_id);
-        assert!(
-            needs_new_session(&mut fixture),
-            "a new unknown native turn must supersede older successful completion"
-        );
-        request.command_id = "automatic-session-after-unknown-turn".into();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
+            assert!(
+                crate::run_continuation::can_replace_session_before_dispatch(
+                    fixture.database.connection(),
+                    &run,
+                    1
+                )
                 .unwrap()
-                .result
-                .status,
-            crate::command::CommandResultStatus::Applied
-        );
-        let replacement = claim_waiting_delivery_batches(&mut fixture.database, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        assert!(fixture.database.connection().query_row(
+            );
+            for (key, generation) in [
+                (
+                    Some("previous-key"),
+                    execution.runtime.installation_generation,
+                ),
+                (None, execution.runtime.installation_generation - 1),
+            ] {
+                let tx = fixture.database.connection_mut().transaction().unwrap();
+                tx.execute("UPDATE conversation SET native_binding_compatibility_digest=?1,
+                native_installation_generation=?2,native_session_compatibility_key=?3 WHERE id='delivery-queue-agent-1'",
+                params![execution.runtime.binding_compatibility_digest, generation, key]).unwrap();
+                assert!(!has_unresolved_native_turn(&tx, "delivery-queue-agent-1").unwrap());
+                tx.commit().unwrap();
+                let current = crate::runtime::ExecutionRuntimeService::default()
+                    .load_agent_run_execution(&fixture.database, &run, 1)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    current.native_session_resume_disposition(),
+                    crate::runtime::NativeSessionResumeDisposition::Controlled
+                );
+            }
+            let context = fixture.materialize_run(&run);
+            fixture.database.connection().execute(
+            "UPDATE conversation SET native_session_id='continuation-session' WHERE id='delivery-queue-agent-1'", [],
+        ).unwrap();
+            let stop_unknown = |fixture: &mut Fixture, run: &str, manifest: &str| {
+                let delivery = crate::context::ContextService
+                    .prepare_input_delivery(&mut fixture.database, run, 1, manifest)
+                    .unwrap();
+                crate::context::ContextService
+                    .mark_input_delivery_unknown(
+                        &mut fixture.database,
+                        &delivery.id,
+                        "stopped during dispatch",
+                    )
+                    .unwrap();
+                assert!(
+                    !crate::run_continuation::can_replace_session_before_dispatch(
+                        fixture.database.connection(),
+                        run,
+                        1,
+                    )
+                    .unwrap(),
+                    "a potentially accepted input cannot be resent by session fallback"
+                );
+                fixture.stop_run(run);
+                fixture
+                    .database
+                    .connection()
+                    .execute(
+                        "UPDATE agent_run SET cancel_acknowledged_at=datetime('now') WHERE id=?1",
+                        [run],
+                    )
+                    .unwrap();
+            };
+            stop_unknown(&mut fixture, &run, &context.manifest_id);
+            // A later ordinary execution can prove this same binding usable. An
+            // accepted input or a successful completion on another binding cannot.
+            let needs_new_session = |fixture: &mut Fixture| {
+                has_unresolved_native_turn(fixture.database.connection(), "delivery-queue-agent-1")
+                    .unwrap()
+            };
+            assert!(needs_new_session(&mut fixture));
+            fixture.enqueue("ordinary-recovery", "正常消息恢复现有会话");
+            request = command.clone();
+            request.command_id = "resume-failed".into();
+            request.payload.agent_run_id = run.clone();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .code,
+                "agent_run.continuation_requested"
+            );
+            let recovered = claim_waiting_delivery_batches(&mut fixture.database, 1)
+                .unwrap()
+                .pop()
+                .unwrap();
+            let context = fixture.materialize_run(&recovered);
+            let delivery = crate::context::ContextService
+                .prepare_input_delivery(&mut fixture.database, &recovered, 1, &context.manifest_id)
+                .unwrap();
+            crate::context::ContextService
+                .acknowledge_input_delivery(
+                    &mut fixture.database,
+                    &delivery.id,
+                    "recovered-native-turn",
+                )
+                .unwrap();
+            assert!(
+                needs_new_session(&mut fixture),
+                "an accepted input is not a completed native turn"
+            );
+            let recovered_execution = crate::runtime::ExecutionRuntimeService::default()
+                .load_agent_run_execution(&fixture.database, &recovered, 1)
+                .unwrap()
+                .unwrap();
+            if terminal_failure {
+                let completed = crate::runtime::ExecutionRuntimeService::default()
+                    .fail_agent_run(
+                        &mut fixture.database,
+                        &CommandEnvelope {
+                            command_id: "ordinary-session-native-failed".into(),
+                            actor: ActorRef::System {
+                                component_id: "runtime-adapter:codex-cli".into(),
+                            },
+                            camp_id: Some(fixture.camp_id.clone()),
+                            expected_versions: vec![],
+                            execution_epoch: None,
+                            payload: crate::runtime::FailAgentRunCommand {
+                                agent_run_id: recovered.clone(),
+                                expected_version: recovered_execution.version,
+                                execution_epoch: 1,
+                                error_code: "runtime_turn_failed".into(),
+                                error_detail: Some(
+                                    "trusted native tool failure after resume".into(),
+                                ),
+                                failure: None,
+                                manual_retry_allowed: false,
+                                ending_git_observation: None,
+                            },
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(completed.result.code, "agent_run.failed");
+            } else {
+                let completed = crate::runtime::ExecutionRuntimeService::default()
+                    .succeed_agent_run(
+                        &mut fixture.database,
+                        &CommandEnvelope {
+                            command_id: "ordinary-session-recovered".into(),
+                            actor: ActorRef::System {
+                                component_id: "runtime-adapter:codex-cli".into(),
+                            },
+                            camp_id: Some(fixture.camp_id.clone()),
+                            expected_versions: vec![],
+                            execution_epoch: None,
+                            payload: crate::runtime::SucceedAgentRunCommand {
+                                agent_run_id: recovered,
+                                expected_version: recovered_execution.version,
+                                execution_epoch: 1,
+                                native_turn_id: "recovered-native-turn".into(),
+                                final_output: "会话恢复成功".into(),
+                                missing_send_recovery_candidate: None,
+                                ending_git_observation: None,
+                            },
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(completed.result.code, "agent_run.succeeded");
+            }
+            assert!(
+                !needs_new_session(&mut fixture),
+                "later trusted completion must supersede the historical unknown turn"
+            );
+            {
+                let tx = fixture.database.connection_mut().transaction().unwrap();
+                tx.execute("UPDATE runtime_input_delivery SET native_binding_id='another-binding' WHERE agent_run_id=?1", [&recovered_execution.agent_run_id]).unwrap();
+                assert!(
+                    has_unresolved_native_turn(&tx, "delivery-queue-agent-1").unwrap(),
+                    "completion in another binding must not clear this session's unknown turn"
+                );
+                tx.rollback().unwrap();
+            }
+            if terminal_failure {
+                for mutation in [
+                    "UPDATE agent_run SET terminal_resolution_source=NULL WHERE id=?1",
+                    "UPDATE agent_run SET last_error_code='runtime_session_incompatible' WHERE id=?1",
+                    "UPDATE runtime_input_delivery SET native_binding_generation=native_binding_generation+1 WHERE agent_run_id=?1",
+                    "UPDATE runtime_input_delivery SET native_input_id='different-native-turn' WHERE agent_run_id=?1",
+                    "UPDATE event_log SET execution_epoch=99 WHERE entity_type='agent_run' AND entity_id=?1 AND event_type='agent_run.failed'",
+                ] {
+                    let tx = fixture.database.connection_mut().transaction().unwrap();
+                    tx.execute(mutation, [&recovered_execution.agent_run_id])
+                        .unwrap();
+                    assert!(
+                        has_unresolved_native_turn(&tx, "delivery-queue-agent-1").unwrap(),
+                        "untrusted or mismatched native failure must preserve the unknown turn: {mutation}"
+                    );
+                    tx.rollback().unwrap();
+                }
+            }
+            // The queued request sees the ordinary Run's later native terminal at claim.
+            let retried = claim_waiting_delivery_batches(&mut fixture.database, 1)
+                .unwrap()
+                .pop()
+                .unwrap();
+            let retried_context = fixture.materialize_run(&retried);
+            let retried_execution = crate::runtime::ExecutionRuntimeService::default()
+                .load_agent_run_execution(&fixture.database, &retried, 1)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                retried_execution.native_session_id.as_deref(),
+                Some("continuation-session")
+            );
+            stop_unknown(&mut fixture, &retried, &retried_context.manifest_id);
+            assert!(
+                needs_new_session(&mut fixture),
+                "a new unknown native turn must supersede older successful completion"
+            );
+            request.command_id = "automatic-session-after-unknown-turn".into();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .status,
+                crate::command::CommandResultStatus::Applied
+            );
+            let replacement = claim_waiting_delivery_batches(&mut fixture.database, 1)
+                .unwrap()
+                .pop()
+                .unwrap();
+            assert!(fixture.database.connection().query_row(
             "SELECT native_session_id IS NULL FROM conversation WHERE id='delivery-queue-agent-1'",
             [], |row| row.get::<_, bool>(0),
         ).unwrap());
-        fixture.stop_run(&replacement);
-        request.command_id = "input-withdrawn-while-waiting".into();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
-                .unwrap()
-                .result
-                .status,
-            crate::command::CommandResultStatus::Applied
-        );
-        // An input invalidated while waiting is cancelled, never revived or dispatched.
-        fixture
+            fixture.stop_run(&replacement);
+            request.command_id = "input-withdrawn-while-waiting".into();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .status,
+                crate::command::CommandResultStatus::Applied
+            );
+            // An input invalidated while waiting is cancelled, never revived or dispatched.
+            fixture
             .database
             .connection()
             .execute(
@@ -2217,38 +2266,38 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(
-            claim_waiting_delivery_batches(&mut fixture.database, 1)
-                .unwrap()
-                .is_empty()
-        );
-        let cancelled:bool=fixture.database.connection().query_row("SELECT EXISTS(SELECT 1 FROM camp_message_delivery WHERE status='cancelled' AND failure_code='agent_run.continuation_unavailable')",[],|r|r.get(0)).unwrap();
-        assert!(cancelled);
-        let cancellation_events: i64 = fixture.database.connection().query_row(
+            assert!(
+                claim_waiting_delivery_batches(&mut fixture.database, 1)
+                    .unwrap()
+                    .is_empty()
+            );
+            let cancelled:bool=fixture.database.connection().query_row("SELECT EXISTS(SELECT 1 FROM camp_message_delivery WHERE status='cancelled' AND failure_code='agent_run.continuation_unavailable')",[],|r|r.get(0)).unwrap();
+            assert!(cancelled);
+            let cancellation_events: i64 = fixture.database.connection().query_row(
             "SELECT count(*) FROM event_log WHERE event_type='agent_run.continuation_cancelled' AND camp_id=?1",
             [&fixture.camp_id], |row| row.get(0),
         ).unwrap();
-        assert_eq!(
-            cancellation_events, 1,
-            "a cancelled request must invalidate the visible queue even without a new Run"
-        );
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE camp_message SET tombstoned_at=NULL WHERE id='scope-original'",
-                [],
-            )
-            .unwrap();
-        request.command_id = "expires-before-following-message".into();
-        assert_eq!(
-            continue_agent_run(&mut fixture.database, &request)
-                .unwrap()
-                .result
-                .status,
-            crate::command::CommandResultStatus::Applied
-        );
-        fixture
+            assert_eq!(
+                cancellation_events, 1,
+                "a cancelled request must invalidate the visible queue even without a new Run"
+            );
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE camp_message SET tombstoned_at=NULL WHERE id='scope-original'",
+                    [],
+                )
+                .unwrap();
+            request.command_id = "expires-before-following-message".into();
+            assert_eq!(
+                continue_agent_run(&mut fixture.database, &request)
+                    .unwrap()
+                    .result
+                    .status,
+                crate::command::CommandResultStatus::Applied
+            );
+            fixture
             .database
             .connection()
             .execute(
@@ -2256,23 +2305,24 @@ mod tests {
                 [],
             )
             .unwrap();
-        fixture.enqueue("after-expired-continuation", "处理后面的普通消息");
-        let following = claim_waiting_delivery_batches(&mut fixture.database, 1).unwrap();
-        assert_eq!(
-            following.len(),
-            1,
-            "expired requests must not delay the following input until the next fallback tick"
-        );
-        let input: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT message_id FROM agent_run_input WHERE agent_run_id=?1",
-                [&following[0]],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(input, "after-expired-continuation");
+            fixture.enqueue("after-expired-continuation", "处理后面的普通消息");
+            let following = claim_waiting_delivery_batches(&mut fixture.database, 1).unwrap();
+            assert_eq!(
+                following.len(),
+                1,
+                "expired requests must not delay the following input until the next fallback tick"
+            );
+            let input: String = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT message_id FROM agent_run_input WHERE agent_run_id=?1",
+                    [&following[0]],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(input, "after-expired-continuation");
+        }
     }
 
     #[test]

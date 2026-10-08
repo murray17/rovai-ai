@@ -652,7 +652,21 @@ async fn events(
                     if matches!(result, Err(tokio::sync::broadcast::error::RecvError::Closed)) { break; }
                     revision += 1;
                     let event = if result.is_err() { "resync" } else { "invalidate" };
-                    yield Ok(Event::default().event(event).data(json!({"epoch":state.epoch,"revision":revision}).to_string()));
+                    let mut payload = json!({"epoch":state.epoch,"revision":revision});
+                    if let Ok(change) = &result {
+                        if change["method"] == "thread.messages.changed" {
+                            let params = &change["params"];
+                            if let (Some(thread_id), Some(index_changed), Some(through)) = (
+                                params["threadId"].as_str(), params["indexChanged"].as_bool(),
+                                params["throughGlobalSequence"].as_i64()) {
+                                payload["messages"] = json!([{"threadId":thread_id,
+                                    "indexChanged":index_changed,"throughGlobalSequence":through,
+                                    "unavailableMessageIds":params["unavailableMessageIds"].as_array()
+                                        .map(|ids| ids.iter().filter_map(|id| id.as_str()).collect::<Vec<_>>()).unwrap_or_default()}]);
+                            }
+                        }
+                    }
+                    yield Ok(Event::default().event(event).data(payload.to_string()));
                     // Bound browser refresh work during Runtime output bursts.
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }

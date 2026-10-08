@@ -33,7 +33,7 @@ export type ThreadClient = Pick<RovaiApi,
   }) | null
   onEvent?: RovaiApi['onEvent']
   /** Authorized invalidation signal; it is deliberately not a CoreEvent. */
-  onInvalidated?: (listener: () => void) => () => void
+  onInvalidated?: (listener: (change?: import('@contracts').ThreadReadInvalidation) => void) => () => void
   /** Optional host shortcut; browsers retain their own tab/window shortcuts. */
   onClosePreviewRequested?: RovaiApi['windowControls']['onCloseTabRequested']
   attachmentLocation?: (locator: import('@contracts').LocalAttachmentOwnerLocator) => Promise<{ path: string; location: 'local' | 'server' } | null>

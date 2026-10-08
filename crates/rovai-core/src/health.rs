@@ -980,6 +980,9 @@ async fn antigravity_probe_at(path: &Path, include_version: bool) -> Antigravity
     }
     if antigravity_stream_json_supported(&help) {
         capabilities.push("output.stream_json".to_string());
+        if help.contains("--input-format") {
+            capabilities.push("input.stream_json".to_string());
+        }
     }
 
     let model_output = antigravity_model_output(&canonical).await;

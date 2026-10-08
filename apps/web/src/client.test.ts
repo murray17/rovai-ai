@@ -119,6 +119,10 @@ describe('console transport', () => {
       }
     }
     expect(() => new InvalidationDecoder().push('x'.repeat(65_537))).toThrow('超出限制')
+    const scoped = new InvalidationDecoder()
+    expect(scoped.push('event: invalidate\ndata: {"messages":[{"threadId":"t","indexChanged":false,"throughGlobalSequence":42}]}\n\n')).toBe(true)
+    expect(scoped.takeChanges()).toEqual([{ messages: [{ threadId: 't', indexChanged: false, throughGlobalSequence: 42 }] }])
+    expect(scoped.takeChanges()).toEqual([])
   })
 
   it('retains an unknown command across reauthentication and only looks up its original receipt', async () => {

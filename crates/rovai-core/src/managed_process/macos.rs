@@ -8,7 +8,7 @@ use std::{
     io::{self, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock, Mutex},
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
@@ -24,15 +24,12 @@ struct UniqueInfo {
     original_parent_version: i32,
     reserved: [u64; 2],
 }
+const _: () = assert!(std::mem::size_of::<UniqueInfo>() == 56);
 
 #[repr(C)]
 struct ProcessInfo {
     bsd: libc::proc_bsdinfo,
     unique: UniqueInfo,
-}
-
-unsafe extern "C" {
-    fn proc_signal_with_audittoken(token: *const [u32; 8], signal: i32) -> i32;
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -87,31 +84,53 @@ impl Identity {
     }
 
     fn signal(&self, signal: i32) -> io::Result<()> {
-        let mut token = [0; 8];
-        token[5] = self.pid as u32;
-        token[7] = self.version as u32;
-        // SAFETY: the token names a process captured through an owned ancestor.
-        // XNU checks PID version atomically with the signal, avoiding PID reuse.
-        let error = unsafe { proc_signal_with_audittoken(&token, signal) };
-        match error {
-            0 | libc::ESRCH => Ok(()),
-            _ => Err(io::Error::from_raw_os_error(error)),
+        let Some(current) = identity(self.pid)? else {
+            return Ok(());
+        };
+        if current.unique != self.unique || current.uid != self.uid {
+            return Ok(());
         }
+        signal_audited(self.pid, current.version, signal)
     }
 }
 
-type Snapshot = Option<(Instant, Arc<Vec<Identity>>)>;
-static SNAPSHOT: LazyLock<Mutex<Snapshot>> = LazyLock::new(|| Mutex::new(None));
-
-fn snapshot() -> io::Result<Arc<Vec<Identity>>> {
-    let mut cached = SNAPSHOT
-        .lock()
-        .map_err(|_| io::Error::other("process snapshot poisoned"))?;
-    if let Some((at, rows)) = cached.as_ref()
-        && at.elapsed() < Duration::from_millis(100)
-    {
-        return Ok(rows.clone());
+fn signal_audited(pid: i32, version: i32, signal: i32) -> io::Result<()> {
+    type Signal = unsafe extern "C" fn(*mut [u32; 8], i32) -> i32;
+    static SIGNAL: OnceLock<Option<Signal>> = OnceLock::new();
+    let function = SIGNAL
+        .get_or_init(|| {
+            // SAFETY: libproc is linked; absence must remain an unsupported
+            // cleanup result, never a fallback to signalling a bare PID.
+            let address =
+                unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"proc_signal_with_audittoken".as_ptr()) };
+            if address.is_null() {
+                None
+            } else {
+                Some(unsafe { std::mem::transmute::<*mut libc::c_void, Signal>(address) })
+            }
+        })
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "identity-bound process signalling unavailable",
+            )
+        })?;
+    let mut token = [0; 8];
+    token[5] = pid as u32;
+    // exec keeps the lifetime identity but advances its audit-token version.
+    token[7] = version as u32;
+    // SAFETY: the token names a process captured through an owned ancestor.
+    // XNU checks PID version atomically with the signal, avoiding PID reuse.
+    let error = unsafe { function(&mut token, signal) };
+    match error {
+        0 | libc::ESRCH => Ok(()),
+        _ => Err(io::Error::from_raw_os_error(error)),
     }
+}
+
+// Cancellation requires a fresh snapshot: a shared TTL may predate the last
+// fork and leave a stdio-holding child alive after its root has been killed.
+fn snapshot() -> io::Result<Vec<Identity>> {
     let mut pids = vec![0_i32; 32768];
     // SAFETY: the output points at a writable PID array. Type 1 is PROC_ALL_PIDS.
     let bytes =
@@ -123,13 +142,10 @@ fn snapshot() -> io::Result<Arc<Vec<Identity>>> {
     }
     // SAFETY: geteuid has no preconditions.
     let uid = unsafe { libc::geteuid() };
-    let rows: Arc<Vec<Identity>> = Arc::new(
-        pids[..bytes as usize / 4]
-            .iter()
-            .filter_map(|pid| identity(*pid).ok().flatten().filter(|row| row.uid == uid))
-            .collect(),
-    );
-    *cached = Some((Instant::now(), rows.clone()));
+    let rows = pids[..bytes as usize / 4]
+        .iter()
+        .filter_map(|pid| identity(*pid).ok().flatten().filter(|row| row.uid == uid))
+        .collect();
     Ok(rows)
 }
 
@@ -167,11 +183,11 @@ struct Ledger {
 
 pub(super) struct ProcessTree {
     ledger: Ledger,
-    path: PathBuf,
+    path: Option<PathBuf>,
 }
 
 impl ProcessTree {
-    pub(super) fn new(pid: i32, directory: &Path) -> io::Result<Self> {
+    pub(super) fn new(pid: i32) -> io::Result<Self> {
         let root =
             identity(pid)?.ok_or_else(|| io::Error::other("managed root exited before capture"))?;
         let owner = identity(std::process::id() as i32)?
@@ -179,9 +195,7 @@ impl ProcessTree {
         if root.parent != owner.unique || root.uid != owner.uid {
             return Err(io::Error::other("managed root is not owned by this Core"));
         }
-        fs::create_dir_all(directory)?;
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
-        let tree = Self {
+        Ok(Self {
             ledger: Ledger {
                 schema: 1,
                 boot: boot_session()?,
@@ -189,14 +203,25 @@ impl ProcessTree {
                 root: root.unique,
                 processes: BTreeMap::from([(root.unique, root)]),
             },
-            path: directory.join(format!("{}.json", uuid::Uuid::new_v4())),
-        };
-        tree.persist()?;
-        Ok(tree)
+            path: None,
+        })
+    }
+
+    pub(super) fn track(&mut self, directory: &Path) -> io::Result<()> {
+        if self.path.is_some() {
+            return Err(io::Error::other("managed process ledger already assigned"));
+        }
+        fs::create_dir_all(directory)?;
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+        self.path = Some(directory.join(format!("{}.json", uuid::Uuid::new_v4())));
+        self.persist()
     }
 
     fn persist(&self) -> io::Result<()> {
-        let temporary = self.path.with_extension("pending");
+        let Some(path) = self.path.as_ref() else {
+            return Ok(());
+        };
+        let temporary = path.with_extension("pending");
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -205,7 +230,7 @@ impl ProcessTree {
         let result = (|| {
             file.write_all(&serde_json::to_vec(&self.ledger).map_err(io::Error::other)?)?;
             file.sync_all()?;
-            fs::rename(&temporary, &self.path)
+            fs::rename(&temporary, path)
         })();
         if result.is_err() {
             let _ = fs::remove_file(temporary);
@@ -282,7 +307,10 @@ impl ProcessTree {
         if !self.is_empty()? {
             return Err(io::Error::other("managed process cleanup unconfirmed"));
         }
-        match fs::remove_file(&self.path) {
+        let Some(path) = self.path.as_ref() else {
+            return Ok(());
+        };
+        match fs::remove_file(path) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             result => result,
         }
@@ -328,7 +356,7 @@ pub(super) fn recover(directory: &Path) -> io::Result<()> {
         }
         let mut tree = ProcessTree {
             ledger,
-            path: entry.path(),
+            path: Some(entry.path()),
         };
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -360,8 +388,14 @@ mod tests {
         let mut other = Command::new("/bin/sleep").arg("30").spawn().unwrap();
         let other_identity = identity(other.id() as i32).unwrap().unwrap();
         let mut wrong = other_identity.clone();
-        wrong.version = wrong.version.wrapping_add(1);
+        wrong.unique = wrong.unique.wrapping_add(1);
         wrong.signal(libc::SIGKILL).unwrap();
+        signal_audited(
+            other_identity.pid,
+            other_identity.version.wrapping_add(1),
+            libc::SIGKILL,
+        )
+        .unwrap();
         assert!(
             other_identity.alive().unwrap(),
             "stale PID version must not target a live process"
@@ -369,7 +403,7 @@ mod tests {
         let status = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "managed_process::macos::tests::crash_owner_helper",
+                "managed_process::process_tree::tests::crash_owner_helper",
                 "--nocapture",
             ])
             .env("ROVAI_TEST_MACOS_OWNER_DIR", &directory)
@@ -420,7 +454,8 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let mut tree = ProcessTree::new(child.id() as i32, &directory).unwrap();
+        let mut tree = ProcessTree::new(child.id() as i32).unwrap();
+        tree.track(&directory).unwrap();
         std::thread::sleep(Duration::from_millis(150));
         tree.capture().unwrap();
         assert!(tree.owns_live_pid(child.id()).unwrap());

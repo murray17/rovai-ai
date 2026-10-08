@@ -761,3 +761,366 @@ fn camp_open_work_is_independent_of_unrelated_event_and_evidence_volume() {
         previous_evidence_volume = volume;
     }
 }
+
+// Owns full navigation's SQL/read-only boundary. CampOpen's existing owner only
+// covers its bounded body window, and cannot detect truncation or heavy hydration here.
+#[test]
+fn user_anchor_index_is_complete_lightweight_and_read_only() {
+    let (mut database, camp_id, _, _) = business_fixture();
+    for sequence in 3..=203 {
+        database.connection().execute(
+            "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body,
+             structured_content_json, content_digest, address_mode, addressed_agent_ids_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'user', 'local_user', 'stale body cache', ?4, 'sha256:anchor', 'default', '[]',
+             '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z')",
+            params![format!("anchor-{sequence}"), camp_id, sequence,
+                json!([{"kind":"text","text":format!("  问题 {sequence}\n {}", "🌷".repeat(250))}]).to_string()],
+        ).unwrap();
+    }
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET recall_state = 'withdrawn' WHERE id = 'anchor-3'",
+            [],
+        )
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET tombstoned_at = '2026-08-31T00:00:00Z' WHERE id = 'anchor-4'",
+            [],
+        )
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET author_type = 'external_principal' WHERE id = 'anchor-5'",
+            [],
+        )
+        .unwrap();
+    database.connection().execute("UPDATE camp_message SET structured_content_json = '[{\"kind\":\"member_mention\",\"agentId\":\"agent_1\"}]' WHERE id = 'anchor-6'", []).unwrap();
+    database.connection().execute("UPDATE camp_message SET structured_content_json = '[]', source_attachments_json = ?1 WHERE id = 'anchor-7'",
+        [json!([{"id":"00000000-0000-4000-8000-000000000001","sourcePath":"/missing/never-read-anchor-file",
+            "displayName":"设计稿.html","kind":"file","mediaType":"text/html","observedByteSize":2}]).to_string()]).unwrap();
+    database.connection().execute("UPDATE camp_message SET structured_content_json = '[]', quotes_json = ?1 WHERE id = 'anchor-8'",
+        [json!([{"version":1,"quoteId":"quote","source":{"scope":"camp","campId":camp_id,"messageId":"source"},
+            "authorAtCapture":{"type":"user","displayName":"User"},"text":"引用的文本","format":"plain_text",
+            "capturedAt":"2026-08-31T00:00:00Z","sourceContentDigest":"sha256:source","snapshotDigest":"sha256:quote"}]).to_string()]).unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET structured_content_json = '[]' WHERE id = 'anchor-9'",
+            [],
+        )
+        .unwrap();
+    let before = database.connection().total_changes();
+    // Deny the heavy reader's dependent tables, message body cache, and all writes.
+    database
+        .connection()
+        .authorizer(Some(|context: AuthContext<'_>| match context.action {
+            AuthAction::Read {
+                table_name,
+                column_name,
+            } if matches!(
+                table_name,
+                "agent_run"
+                    | "camp_turn"
+                    | "agent_run_execution_evidence"
+                    | "managed_attachment"
+                    | "event_log"
+            ) || (table_name == "camp_message" && column_name == "body") =>
+            {
+                Authorization::Deny
+            }
+            AuthAction::Insert { .. } | AuthAction::Update { .. } | AuthAction::Delete { .. } => {
+                Authorization::Deny
+            }
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+    let material = ReadModelService
+        .user_anchors(&mut database, &camp_id)
+        .unwrap();
+    assert!(
+        database.connection().is_autocommit(),
+        "formatting must not retain the read transaction"
+    );
+    let index = material.format().unwrap();
+    database
+        .connection()
+        .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
+    assert_eq!(index.total_count, 200); // original source + 201 users - withdrawn - tombstoned
+    assert_eq!(index.items.last().unwrap().message_id, "anchor-203");
+    assert!(index.items.iter().any(|item| item.message_id == "anchor-5"));
+    assert!(
+        index
+            .items
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence)
+    );
+    let title = &index
+        .items
+        .iter()
+        .find(|item| item.message_id == "anchor-5")
+        .unwrap()
+        .title;
+    assert_eq!(title.chars().count(), 240);
+    assert!(title.starts_with("问题 5 ") && title.ends_with('…'));
+    for (id, expected) in [
+        ("anchor-7", "设计稿.html"),
+        ("anchor-8", "引用的文本"),
+        ("anchor-9", "（无文本）"),
+    ] {
+        assert_eq!(
+            index
+                .items
+                .iter()
+                .find(|item| item.message_id == id)
+                .unwrap()
+                .title,
+            expected
+        );
+    }
+    let name: String = database
+        .connection()
+        .query_row(
+            "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        index
+            .items
+            .iter()
+            .find(|item| item.message_id == "anchor-6")
+            .unwrap()
+            .title
+            .contains(&name)
+    );
+    assert_eq!(before, database.connection().total_changes());
+    let wire = serde_json::to_value(&index).unwrap();
+    assert_eq!(wire["threadId"], camp_id);
+    assert!(wire.get("campId").is_none());
+    assert!(wire["items"][0].get("body").is_none());
+}
+
+// Owns direct child reply identity and its indexed read boundary. Run/Turn inference
+// is intentionally retired; existing relationship fixtures now prove it stays absent.
+#[test]
+fn user_anchor_preview_resolves_first_valid_direct_reply() {
+    let (mut database, camp_id, completed_run, _) = business_fixture();
+    let source: String = database.connection().query_row(
+        "SELECT id FROM camp_message WHERE camp_id = ?1 AND author_type = 'user' ORDER BY sequence LIMIT 1",
+        [&camp_id], |r| r.get(0)).unwrap();
+    database
+        .connection()
+        .authorizer(Some(|context: AuthContext<'_>| match context.action {
+            AuthAction::Read {
+                table_name: "agent_run" | "agent_run_input" | "camp_turn",
+                ..
+            } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+    let preview = ReadModelService
+        .user_anchor_preview(&mut database, &camp_id, &source)
+        .unwrap()
+        .format()
+        .unwrap();
+    assert!(preview.first_reply.is_none());
+    database
+        .connection()
+        .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
+    let plan = database
+        .connection()
+        .prepare(&format!(
+            "EXPLAIN QUERY PLAN {}",
+            user_anchors::DIRECT_REPLY_SQL
+        ))
+        .unwrap()
+        .query_map(params![camp_id, source, 1], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join("\n");
+    assert!(plan.contains("camp_message_direct_reply_idx (camp_id=? AND reply_to_camp_message_id=? AND sequence>?)"), "{plan}");
+    assert!(!plan.contains("TEMP B-TREE"), "{plan}");
+    let candidate_steps = |database: &Database| {
+        let mut query = database
+            .connection()
+            .prepare(user_anchors::DIRECT_REPLY_SQL)
+            .unwrap();
+        assert!(
+            query
+                .query_row(params![camp_id, source, 1], |r| r.get::<_, String>(0))
+                .optional()
+                .unwrap()
+                .is_none()
+        );
+        query.get_status(rusqlite::StatementStatus::VmStep)
+    };
+    let before_steps = candidate_steps(&database);
+    // More later messages without this reply relationship must not increase candidate work.
+    database.connection().execute("WITH RECURSIVE n(i) AS (VALUES(100) UNION ALL SELECT i+1 FROM n WHERE i<10100)
+        INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,structured_content_json,
+            content_digest,address_mode,addressed_agent_ids_json,created_at,updated_at)
+        SELECT 'unrelated-anchor-reply-'||i,?1,i,'agent','agent_1','never hydrated','[]','sha256:unrelated','default','[]','2026-10-08','2026-10-08' FROM n", [&camp_id]).unwrap();
+    assert_eq!(candidate_steps(&database), before_steps);
+    eprintln!("direct_reply_candidates unrelated_later_messages=10001 vm_steps={before_steps}");
+
+    database.connection().execute(
+        "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body,
+         structured_content_json, content_digest, address_mode, addressed_agent_ids_json, created_at, updated_at)
+         VALUES ('anchor-later-user', ?1, 3, 'user', 'local_user', '后来加入',
+         '[{\"kind\":\"text\",\"text\":\"后来加入\"}]', 'sha256:later', 'default', '[]',
+         '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z')", [&camp_id]).unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE agent_run SET anchor_message_id = 'anchor-later-user' WHERE id = ?1",
+            [&completed_run],
+        )
+        .unwrap();
+    assert!(
+        ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, &source)
+            .unwrap()
+            .format()
+            .unwrap()
+            .first_reply
+            .is_none()
+    );
+    // Run input/anchor relationships never supply a preview; neither does an output
+    // published before the user it explicitly replies to.
+    assert!(
+        ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, "anchor-later-user")
+            .unwrap()
+            .format()
+            .unwrap()
+            .first_reply
+            .is_none()
+    );
+    database.connection().execute("UPDATE camp_message SET reply_to_camp_message_id = 'anchor-later-user' WHERE id = 'open-agent-message'", []).unwrap();
+    assert!(
+        ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, &source)
+            .unwrap()
+            .format()
+            .unwrap()
+            .first_reply
+            .is_none()
+    );
+    database.connection().execute("UPDATE camp_message SET reply_to_camp_message_id = ?1, sequence = 5 WHERE id = 'open-agent-message'", [&source]).unwrap();
+    database.connection().execute(
+        "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body,
+         structured_content_json, content_digest, address_mode, addressed_agent_ids_json, reply_to_camp_message_id, created_at, updated_at)
+         VALUES ('anchor-earliest-reply', ?1, 4, 'agent', 'agent_1', 'earliest',
+         '[{\"kind\":\"text\",\"text\":\"首条有效回复\"}]', 'sha256:earliest', 'default', '[]', ?2,
+         '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z')", params![camp_id, source]).unwrap();
+    let preview = ReadModelService
+        .user_anchor_preview(&mut database, &camp_id, &source)
+        .unwrap()
+        .format()
+        .unwrap();
+    assert_eq!(
+        preview.first_reply.unwrap().message_id,
+        "anchor-earliest-reply"
+    );
+    database.connection().execute("INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, created_at, updated_at,
+        execution_budget_schema_version, execution_budget_accepted_at, execution_budget_max_agent_run_responsibilities,
+        execution_budget_max_accepted_a2a, execution_budget_root_agent_run_responsibilities)
+        VALUES ('anchor-turn', ?1, 'camp_message', 'anchor-later-user', 'running', '2026-08-31T00:00:00Z',
+        '2026-08-31T00:00:00Z', 1, '2026-08-31T00:00:00Z', 32, 16, 1)", [&camp_id]).unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE agent_run SET anchor_message_id = ?2 WHERE id = ?1",
+            params![completed_run, source],
+        )
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET reply_to_camp_message_id = NULL, source_agent_run_id = ?1,
+        camp_turn_id = 'anchor-turn' WHERE id = 'anchor-earliest-reply'",
+            [&completed_run],
+        )
+        .unwrap();
+    assert!(
+        ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, "anchor-later-user")
+            .unwrap()
+            .format()
+            .unwrap()
+            .first_reply
+            .is_none()
+    );
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET source_agent_run_id = NULL WHERE id = 'anchor-earliest-reply'",
+            [],
+        )
+        .unwrap();
+    assert!(
+        ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, "anchor-later-user")
+            .unwrap()
+            .format()
+            .unwrap()
+            .first_reply
+            .is_none()
+    );
+    database.connection().execute("UPDATE camp_message SET reply_to_camp_message_id = ?1, camp_turn_id = NULL WHERE id = 'anchor-earliest-reply'", [&source]).unwrap();
+
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET recall_state = 'withdrawn' WHERE id = 'anchor-earliest-reply'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, &source)
+            .unwrap()
+            .format()
+            .unwrap()
+            .first_reply
+            .unwrap()
+            .message_id,
+        "open-agent-message"
+    );
+    database.connection().execute("UPDATE camp_message SET tombstoned_at = '2026-08-31T00:00:00Z' WHERE id = 'open-agent-message'", []).unwrap();
+    assert!(
+        ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, &source)
+            .unwrap()
+            .format()
+            .unwrap()
+            .first_reply
+            .is_none()
+    );
+    for id in [&source, &"missing".to_string()] {
+        if id == &source {
+            database
+                .connection()
+                .execute(
+                    "UPDATE camp_message SET recall_state = 'withdrawn' WHERE id = ?1",
+                    [id],
+                )
+                .unwrap();
+        }
+        let unavailable = ReadModelService
+            .user_anchor_preview(&mut database, &camp_id, id)
+            .unwrap()
+            .format()
+            .unwrap();
+        assert!(!unavailable.source_available);
+        assert!(unavailable.first_reply.is_none());
+    }
+}

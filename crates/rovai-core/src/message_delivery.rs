@@ -493,6 +493,7 @@ pub fn persist_queued_agent_message(
             "taskId": request.task_id,
         }),
     )?;
+    crate::message_changes::record(transaction, request.camp_id, false, &[]);
     for delivery in &deliveries {
         append_domain_event(
             transaction,

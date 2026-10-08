@@ -251,6 +251,7 @@ impl DomainCommandGateway {
             return replay_or_conflict(result, envelope, &request_digest);
         }
 
+        let message_output = database.message_changes.clone();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -261,6 +262,8 @@ impl DomainCommandGateway {
             return replay_or_conflict(result, envelope, &request_digest);
         }
 
+        let message_changes =
+            crate::message_changes::MessageChanges::begin(&transaction, message_output);
         let deletion_in_progress = if C::ALLOWED_WHILE_CAMP_DELETING {
             false
         } else if let Some(camp_id) = envelope.camp_id.as_deref() {
@@ -295,7 +298,7 @@ impl DomainCommandGateway {
             camp_id: envelope.camp_id.clone(),
         };
         append_command_result(&transaction, envelope, &stored_result)?;
-        transaction.commit()?;
+        message_changes.commit(transaction)?;
         // Publish the hint at the actual commit, even if post-commit text flushing fails.
         if stored_result.status != CommandResultStatus::Rejected {
             database.execution_wake.command_committed(C::TYPE);
@@ -1088,9 +1091,15 @@ mod tests {
     fn committed_results_replay_after_reopen_and_handler_errors_roll_back_atomically() {
         let (mut database, directory) = database();
         let gateway = DomainCommandGateway;
+        let (output, mut events) = tokio::sync::mpsc::unbounded_channel();
+        database.message_changes = Some(output.clone());
         let committed = system_command("command-committed", json!({ "value": 1 }));
         let first = gateway
-            .execute(&mut database, &committed, |_| {
+            .execute(&mut database, &committed, |transaction| {
+                transaction.execute("INSERT INTO event_log(event_id,event_type,camp_id,entity_type,entity_id,payload_json,created_at)
+                    VALUES ('message-hint-fixture','camp_message.withdrawn','scope-fixture','camp_message','message-fixture','{}','2026-10-08T00:00:00Z')", [])?;
+                crate::message_changes::record(transaction, "scope-fixture", true, &["message-fixture".into()]);
+                assert!(events.try_recv().is_err(), "uncommitted writes must not emit");
                 Ok(CommandHandlerResult::applied(
                     "test.persisted",
                     json!({ "first": true }),
@@ -1098,9 +1107,18 @@ mod tests {
                 ))
             })
             .unwrap();
+        let change: Value = serde_json::from_str(&events.try_recv().unwrap()).unwrap();
+        assert_eq!(change["method"], "thread.messages.changed");
+        assert_eq!(change["params"]["threadId"], "scope-fixture");
+        assert_eq!(
+            change["params"]["unavailableMessageIds"],
+            json!(["message-fixture"])
+        );
+        assert!(events.try_recv().is_err());
         drop(database);
 
         let mut database = Database::open(&directory).unwrap();
+        database.message_changes = Some(output);
         let replay = gateway
             .execute(&mut database, &committed, |_| {
                 unreachable!("a committed command must replay after database reopen")
@@ -1108,14 +1126,19 @@ mod tests {
             .unwrap();
         assert!(replay.replayed);
         assert_eq!(replay.result, first.result);
+        assert!(
+            events.try_recv().is_err(),
+            "replay must not re-emit change hints"
+        );
 
         let failed = system_command("command-failed", json!({ "value": 2 }));
         let error = gateway
             .execute(&mut database, &failed, |transaction| {
                 transaction.execute(
-                    "INSERT INTO event_log(event_id,event_type,payload_json,created_at) VALUES (?1,'test.partial','{}',?2)",
+                    "INSERT INTO event_log(event_id,event_type,camp_id,entity_type,entity_id,payload_json,created_at) VALUES (?1,'camp_message.sent','scope-fixture','camp_message','message-fixture','{}',?2)",
                     params![Uuid::new_v4().to_string(), chrono::Utc::now().to_rfc3339()],
                 )?;
+                crate::message_changes::record(transaction, "scope-fixture", false, &[]);
                 anyhow::bail!("handler fixture failure")
             })
             .expect_err("handler failure must abort the transaction");
@@ -1125,12 +1148,71 @@ mod tests {
             .query_row(
                 "SELECT
                     (SELECT COUNT(*) FROM event_log WHERE command_id='command-failed'),
-                    (SELECT COUNT(*) FROM event_log WHERE event_type='test.partial')",
+                    (SELECT COUNT(*) FROM event_log WHERE event_type='camp_message.sent')",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(remaining, (0, 0));
+        assert!(
+            events.try_recv().is_err(),
+            "rolled-back writes must not emit change hints"
+        );
+
+        // A successful handler is insufficient: receipt/commit failure must discard hints too.
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TRIGGER reject_hint_receipt BEFORE INSERT ON event_log
+            WHEN NEW.command_id='receipt-failed' BEGIN SELECT RAISE(ABORT,'receipt failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            gateway
+                .execute(
+                    &mut database,
+                    &system_command("receipt-failed", json!({})),
+                    |transaction| {
+                        crate::message_changes::record(
+                            transaction,
+                            "scope-fixture",
+                            true,
+                            &["not-committed".into()],
+                        );
+                        Ok(CommandHandlerResult::applied("fixture", json!({}), None))
+                    }
+                )
+                .is_err()
+        );
+        assert!(events.try_recv().is_err());
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_hint_receipt")
+            .unwrap();
+
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        database
+            .connection()
+            .authorizer(Some(|context: AuthContext<'_>| match context.action {
+                AuthAction::Read {
+                    table_name: "camp_message" | "event_sequence",
+                    ..
+                } if context.accessor.is_none() => Authorization::Deny,
+                _ => Authorization::Allow,
+            }))
+            .unwrap();
+        gateway
+            .execute(
+                &mut database,
+                &system_command("unrelated-command", json!({})),
+                |_| Ok(CommandHandlerResult::applied("unrelated", json!({}), None)),
+            )
+            .unwrap();
+        assert!(events.try_recv().is_err());
+        database
+            .connection()
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

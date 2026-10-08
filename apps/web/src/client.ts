@@ -3,7 +3,7 @@ import { browserEditingRecovery } from './editing-recovery'
 import { RECOVERY_KEY, type RecoveryStorage } from './tab-recovery'
 import { fileDigest } from './file-digest'
 import { newCommandId } from '../../desktop/src/shared/command-id'
-import type { ChannelKind, ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
+import type { ThreadReadInvalidation, ChannelKind, ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
 
 const HOST_WEB_PROTOCOL_VERSION = 4
 
@@ -113,6 +113,8 @@ export const WEB_OPERATIONS = [
   'threads.open',
   'threads.enter',
   'thread.messages.page',
+  'thread.messages.anchors',
+  'thread.messages.anchorPreview',
   'thread.messages.around',
   'thread.messages.find',
   'members.list',
@@ -231,6 +233,8 @@ type CommandReceipt = { state: 'unknown' | 'recorded'; result?: unknown; error?:
 /** Decodes bounded SSE frames; payloads are invalidations, never private Core events. */
 export class InvalidationDecoder {
   #buffer = ''
+  #changes: ThreadReadInvalidation[] = []
+  takeChanges(): ThreadReadInvalidation[] { return this.#changes.splice(0) }
   push(text: string): boolean {
     this.#buffer += text
     if (this.#buffer.length > 64 * 1024) throw new Error('实时连接的数据超出限制。')
@@ -240,7 +244,18 @@ export class InvalidationDecoder {
       if (!match) return changed
       const frame = this.#buffer.slice(0, match.index)
       this.#buffer = this.#buffer.slice(match.index + match[0].length)
-      if (/^event: ?(?:resync|invalidate)\r?$/m.test(frame)) changed = true
+      if (/^event: ?(?:resync|invalidate)\r?$/m.test(frame)) {
+        changed = true
+        if (/^event: ?resync\r?$/m.test(frame)) this.#changes.push({ resync: true })
+        else {
+          const data = /^data: ?(.*)\r?$/m.exec(frame)?.[1]
+          const payload = data ? JSON.parse(data) as ThreadReadInvalidation : {}
+          const messages = Array.isArray(payload.messages) ? payload.messages.filter(change =>
+            typeof change.threadId === 'string' && typeof change.indexChanged === 'boolean'
+            && Number.isSafeInteger(change.throughGlobalSequence)) : []
+          this.#changes.push({ messages })
+        }
+      }
     }
   }
 }
@@ -764,7 +779,7 @@ export class ConsoleClient {
     return response
   }
 
-  subscribe(invalidate: () => void, status: (state: ConnectionState) => void): () => void {
+  subscribe(invalidate: (change: ThreadReadInvalidation) => void, status: (state: ConnectionState) => void): () => void {
     const controller = new AbortController()
     const lifetime = this.#lifetime.signal
     const signal = AbortSignal.any([controller.signal, lifetime])
@@ -784,7 +799,11 @@ export class ConsoleClient {
           for (;;) {
             const { value, done } = await reader.read()
             if (done) break
-            if (frames.push(decoder.decode(value, { stream: true }))) { invalidate(); void this.reconcilePending() }
+            if (frames.push(decoder.decode(value, { stream: true }))) {
+              const changes = frames.takeChanges()
+              invalidate({ resync: changes.some(change => change.resync), messages: changes.flatMap(change => change.messages ?? []) })
+              void this.reconcilePending()
+            }
           }
         } catch (error) {
           if (error instanceof SessionRequired) { status('expired'); return }

@@ -2,7 +2,7 @@ import { createBrowserHtmlPreview } from './html-preview'
 import { browserMemberAvatars } from './member-avatars'
 import type { ThreadClient } from '../../desktop/src/renderer/src/camp-client'
 import type { BusinessEnvironment } from '../../desktop/src/renderer/src/business-environment'
-import type { SingleChatSnapshot, CoreMethod, FilePreviewApi, FilePreviewExternalUpdateEvent, FilePreviewOperationResult, OpenFilePreviewResult, RestoreFilePreviewRequest } from '@contracts'
+import type { ThreadReadInvalidation, SingleChatSnapshot, CoreMethod, FilePreviewApi, FilePreviewExternalUpdateEvent, FilePreviewOperationResult, OpenFilePreviewResult, RestoreFilePreviewRequest } from '@contracts'
 import { ConsoleClient, WEB_OPERATIONS, type WebOperation } from './client'
 import { createBrowserNavigationHistory } from './navigation-history'
 import { browserEditingRecovery } from './editing-recovery'
@@ -19,7 +19,7 @@ export function browserPlatform(): ThreadClient['platform'] {
 
 export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDirectory: BusinessEnvironment['selectWorkspaceDirectory']) {
   if (!transport.editingScope || !transport.presentationScope) throw new Error('必须先认证才能建立编辑作用域。')
-  const listeners = new Set<() => void>()
+  const listeners = new Set<(change?: ThreadReadInvalidation) => void>()
   const unimplemented = async (): Promise<never> => { throw new Error('此操作的 Web 适配尚未接通。') }
   const channelAdapter: NonNullable<ThreadClient['channels']> = {
     native: null,
@@ -189,7 +189,7 @@ export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDir
   const { preferences, profile } = browserPreferences(transport.presentationScope, transport)
   const environment: BusinessEnvironment = { navigationHistory: createBrowserNavigationHistory(transport.editingScope), client, preferences, files, selectWorkspaceDirectory,
     serverUpdates: transport.channels === 'desktop' ? undefined : createServerUpdates(transport) }
-  return { environment, profile, invalidate: () => { for (const listener of listeners) listener(); void refreshUpdates() } }
+  return { environment, profile, invalidate: (change: ThreadReadInvalidation = { resync: true }) => { for (const listener of listeners) listener(change); void refreshUpdates() } }
 }
 
 function downloadJson(value: unknown, name: string): { exported: true } {
