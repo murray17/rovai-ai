@@ -9,7 +9,6 @@ import { adapterLabel, PRODUCT_RUNTIME_LOGOS } from './runtime-products'
 import { normalizedStartupConfiguration, runtimeEnvironmentErrors, runtimeStartupKey, startupEdits } from './runtime-startup-draft'
 import { readErrorMessage } from './error-message'
 import { UiText, uiAttribute } from './interface-language'
-import { ClineNativeLogin } from './ClineNativeLogin'
 
 const EMPTY: RuntimeStartupConfiguration = { programPath: null, environment: [] }
 const INSPECTION_LABELS: Record<RuntimeStartupInspection['status'], string> = {
@@ -34,7 +33,6 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   const [confirmAction, setConfirmAction] = useState<'back' | null>(null)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [saveCompleted, setSaveCompleted] = useState(false)
-  const [nativeLoginActive, setNativeLoginActive] = useState(false)
   const sequence = useRef(0)
   const loaded = useRef(false)
   const state = useRef({ draft, busy, dirty: false, saved })
@@ -184,13 +182,13 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
       : initialPath ? 'recognized' : item?.discovery.discoveryStatus === 'missing' ? 'missing' : null
     : null)
   const statusLabel = busy === 'inspect' ? uiAttribute('正在验证程序…') : busy === 'check' ? uiAttribute('正在检查状态…') : status ? uiAttribute(INSPECTION_LABELS[status]) : null
-  const locked = busy !== null || saved === null || loadError !== null || nativeLoginActive
+  const locked = busy !== null || saved === null || loadError !== null
   const displayedPath = draft.programPath ?? (inspection ? inspection.executablePath :
     !dirty && !saved?.reconnectRequired && !error && busy !== 'inspect' && busy !== 'check' ? initialPath : null)
   const environmentIncomplete = (inspection?.searchEnvironment?.diagnosticCodes?.length ?? 0) > 0
 
   return <section className="runtime-startup-page" aria-busy={busy === 'load' || busy === 'save'}>
-    <button className="quiet-button runtime-startup-back" type="button" disabled={busy !== null || nativeLoginActive}
+    <button className="quiet-button runtime-startup-back" type="button" disabled={busy !== null}
       onClick={() => dirty ? setConfirmAction('back') : onBack()}><DialogControlIcon name="back" /><UiText zh={"智能体"} /></button>
     <header className="runtime-startup-heading">
       <span className="runtime-product-logo" aria-hidden="true"><img src={PRODUCT_RUNTIME_LOGOS[runtimeKind]} alt="" /></span>
@@ -215,7 +213,6 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
         </div>
         {environmentIncomplete && <p className="runtime-startup-result is-warning" role="status"><UiText zh={"部分查找来源不可用，本次结果使用已读取的可用环境。"} /></p>}
       </section>
-      {runtimeKind === 'cline-cli' && <ClineNativeLogin disabled={locked || dirty} onCheck={() => void inspect(draft, true)} onActiveChange={setNativeLoginActive} />}
       <section className="runtime-startup-section runtime-startup-environment-section">
         <div className="runtime-startup-section-heading"><h2><UiText zh={"环境变量"} /></h2><button className="quiet-button" type="button" disabled={locked || draft.environment.length >= 128}
           onClick={() => { setRowIds([...rowIds, newCommandId()]); change({ ...draft, environment: [...draft.environment, { name: '', value: '' }] }) }}><DialogControlIcon name="plus" /><UiText zh={"添加变量"} /></button></div>

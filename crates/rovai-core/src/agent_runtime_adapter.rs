@@ -986,9 +986,7 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli => resolve_acp_runtime(kind, input),
-            AdapterKind::ClineCli => {
-                resolve_session_runtime(kind, crate::cline_hub::PROTOCOL, input)
-            }
+            AdapterKind::ClineCli => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -1094,7 +1092,7 @@ impl AgentRuntimeAdapterRegistry {
                 acp_capability_snapshot(observation, command_code_permission_options())
             }
             AdapterKind::ClineCli => {
-                anyhow::bail!("Cline capabilities require the native Hub probe")
+                acp_capability_snapshot(observation, cline_permission_options())
             }
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
@@ -1176,7 +1174,6 @@ impl AgentRuntimeAdapterRegistry {
             && !crate::dsh::supported_version(reported_version.as_deref());
         let command_code_version_unsupported = kind == AdapterKind::CommandCodeCli
             && !crate::command_code_acp::supported_version(reported_version.as_deref());
-        // Cline Hub readiness comes from its owned authenticated handshake.
         let pi_version_unsupported =
             kind == AdapterKind::Pi && !pi_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
@@ -2417,7 +2414,7 @@ fn acp_capability_snapshot(
             ]
         } else if matches!(
             adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
+            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
         ) {
             &[
                 "acp.initialize",
@@ -2691,8 +2688,10 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
-    if adapter_kind == AdapterKind::CommandCodeCli
-        && acp_runtime_model_id_from_session(session_result).is_some()
+    if matches!(
+        adapter_kind,
+        AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+    ) && acp_runtime_model_id_from_session(session_result).is_some()
         && !models.iter().any(|model| model.is_default)
     {
         // Native configuration can select a custom BYOK model omitted from
@@ -2705,8 +2704,8 @@ pub fn acp_model_catalog_for_adapter(
             ModelDescriptor {
                 description: None,
                 runtime_metadata: None,
-                id: "command-code-cli://runtime-default".into(),
-                display_name: "Command Code runtime default".into(),
+                id: format!("{}://runtime-default", adapter_kind.as_str()),
+                display_name: format!("{} runtime default", adapter_kind.display_name()),
                 is_default: true,
                 hidden: false,
                 deprecated: false,
@@ -3667,6 +3666,14 @@ mod tests {
         let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();
         assert_eq!(command[0].id, "command-code-cli://runtime-default");
         assert!(command[0].is_default);
+        let cline = acp_model_catalog_for_adapter(AdapterKind::ClineCli, &custom).unwrap();
+        assert_eq!(cline[0].id, "cline-cli://runtime-default");
+        assert!(cline[0].is_default);
+        assert!(
+            !cline
+                .iter()
+                .any(|model| model.id == "private-provider/custom-model")
+        );
         assert!(
             command
                 .iter()

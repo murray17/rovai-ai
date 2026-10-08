@@ -179,10 +179,11 @@ fn admit_candidate(
                 && source_event_kind == "session/update.tool_call_update.completed.edit_file"
         }
         AdapterKind::ClineCli if semantic_kind == "reported_mutation" => {
-            protocol_family == crate::cline_hub::PROTOCOL
+            protocol_family == "acp-v1"
                 && matches!(
                     source_event_kind,
-                    "tool.finished.completed.apply_patch" | "tool.finished.completed.editor"
+                    "session/update.tool_call_update.completed.apply_patch"
+                        | "session/update.tool_call_update.completed.editor"
                 )
         }
         adapter if adapter.uses_acp() => {
@@ -1529,8 +1530,8 @@ mod tests {
     #[test]
     fn reported_mutations_preserve_native_fragments_without_claiming_exact_or_full_states() {
         let mut payload = serde_json::json!({"runtimeDiff":{
-            "adapterKind":"cline-cli","protocolFamily":crate::cline_hub::PROTOCOL,
-            "sourceEventKind":"tool.finished.completed.apply_patch",
+            "adapterKind":"cline-cli","protocolFamily":"acp-v1",
+            "sourceEventKind":"session/update.tool_call_update.completed.apply_patch",
             "semanticKind":"reported_mutation","entries":[{
                 "semantics":"reported_mutation","path":"src/中文 edit.ts",
                 "fragments":[{"oldText":"old\n","newText":"new\n","private":"PRIVATE"},
@@ -1548,25 +1549,25 @@ mod tests {
         assert_eq!(admitted.entries[0].diff, "-old\n+new\n-second\n+changed\n");
         assert!(!admitted.evidence_entries.to_string().contains("PRIVATE"));
         let mut legacy = payload.clone();
-        legacy["runtimeDiff"]["protocolFamily"] = json!("acp-v1");
+        legacy["runtimeDiff"]["protocolFamily"] = json!("cline-hub-v1");
         assert!(
             admit_runtime_diff(&legacy, Path::new("/repo"), Some("cline-cli"))
                 .unwrap()
                 .is_err()
         );
-        let mut hub = payload.clone();
-        hub["runtimeDiff"]["protocolFamily"] = serde_json::json!(crate::cline_hub::PROTOCOL);
-        hub["runtimeDiff"]["sourceEventKind"] =
-            serde_json::json!("tool.finished.completed.apply_patch");
+        let mut terminal = payload.clone();
+        terminal["runtimeDiff"]["protocolFamily"] = serde_json::json!("acp-v1");
+        terminal["runtimeDiff"]["sourceEventKind"] =
+            serde_json::json!("session/update.tool_call_update.completed.apply_patch");
         assert!(
-            admit_runtime_diff(&hub, Path::new("/repo"), Some("cline-cli"))
+            admit_runtime_diff(&terminal, Path::new("/repo"), Some("cline-cli"))
                 .unwrap()
                 .is_ok()
         );
-        hub["runtimeDiff"]["sourceEventKind"] =
-            serde_json::json!("tool.finished.failed.apply_patch");
+        terminal["runtimeDiff"]["sourceEventKind"] =
+            serde_json::json!("session/update.tool_call_update.failed.apply_patch");
         assert!(
-            admit_runtime_diff(&hub, Path::new("/repo"), Some("cline-cli"))
+            admit_runtime_diff(&terminal, Path::new("/repo"), Some("cline-cli"))
                 .unwrap()
                 .is_err()
         );
@@ -1586,7 +1587,7 @@ mod tests {
             );
         }
         payload["runtimeDiff"]["sourceEventKind"] =
-            serde_json::json!("tool.finished.completed.editor");
+            serde_json::json!("session/update.tool_call_update.completed.editor");
         assert!(
             admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
                 .unwrap()

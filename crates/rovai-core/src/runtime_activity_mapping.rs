@@ -51,12 +51,7 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 18] = [
     descriptor(AdapterKind::CursorAgent, "acp-v1", "run_level", "acp"),
     descriptor(AdapterKind::KimiCodeCli, "acp-v1", "run_level", "acp"),
     descriptor(AdapterKind::GrokBuild, "acp-v1", "run_level", "acp"),
-    descriptor(
-        AdapterKind::ClineCli,
-        crate::cline_hub::PROTOCOL,
-        "run_level",
-        "cline",
-    ),
+    descriptor(AdapterKind::ClineCli, "acp-v1", "run_level", "cline"),
     descriptor(AdapterKind::CommandCodeCli, "acp-v1", "run_level", "acp"),
     descriptor(
         AdapterKind::DeepseekHarness,
@@ -294,7 +289,7 @@ mod tests {
         assert_eq!(RUNTIME_ACTIVITY_MAPPINGS.len(), AdapterKind::ALL.len());
         assert_eq!(
             descriptor_for(AdapterKind::ClineCli).protocol_family,
-            crate::cline_hub::PROTOCOL
+            "acp-v1"
         );
     }
 

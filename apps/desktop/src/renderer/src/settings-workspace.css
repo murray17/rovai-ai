@@ -1454,8 +1454,6 @@
 .runtime-startup-heading p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 .runtime-startup-form { max-width: 800px; }
 .runtime-startup-section + .runtime-startup-section { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
-.cline-native-login > p { margin: 12px 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
-.cline-native-login-output { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; }
 .runtime-startup-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .runtime-startup-section-heading h2, .runtime-startup-section-heading > label { margin: 0; color: var(--ink); font-size: 13px; font-weight: 550; }
 .runtime-startup-form .quiet-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; font-size: 12px; }

@@ -1198,3 +1198,14 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
 - 文档门禁使用同基线、包含完整改动的干净验证 worktree，执行 `pnpm docs:check` 与
   `DOCS_BASE_REF=3e6c22fc pnpm docs:check:ci`；日常工作区的本机原型保持原样。
   仅使用隔离测试 fixture，不启动日常 App 或真实模型；48 小时推进使用确定性测试时间，并非实机连续运行两天。
+
+
+## 2026-10-08 Cline 官方 ACP 与 Hub 完整退役（User 95）
+
+- 接回共享 ACP Client/Host/Fleet、诊断、事件、权限、load 重放隔离与工具解码；无版本或认证字段门槛。
+- 删除 Hub 模块、类型、WebSocket 依赖、登录 UI/IPC、全部 Hub/shim 实验入口；Pi 结算与共享进程能力保留。
+- 原生认证源直引，无凭据副本。冻结 Bootstrap 使用成员 Host 不可变原生文件 Rule，普通 warm 和并行不依赖认证类型。
+- 旧 Binding 按共享不兼容替换，公开历史及原生历史保留，旧输入不自动重发。
+- 当前安装 3.0.3 广告 loadSession 却返回 -32601；cold 真实验收不通过，不能沿用 Hub 结论。
+- 合同/Architecture/Context/当前导航已更新，历史报告固定退役前复现链接；当前验收见
+  [ACP 退役报告](../../research/cline-runtime/acp-retirement-2026-10-08.md)。不改变 schema、current_version 或其他 Runtime 的合同。

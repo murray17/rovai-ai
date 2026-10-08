@@ -14,6 +14,10 @@ last_updated: 2026-10-07
 
 # Cline Native Hub：冻结 System Bootstrap 与原生压缩
 
+> 此方案已按 User 95 退役；保留为已确认输入方案的历史记录。当前说明见
+> [Cline 官方 ACP](model-context-change-cline-acp.md)，不再执行 Hub 历史恢复或 compaction 注入。
+
+
 ## 变更前
 
 [Cline ACP revision 2](model-context-change-cline-system.md)由 Plugin registerRule 返回 Native Binding

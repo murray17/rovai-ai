@@ -1524,6 +1524,7 @@ async fn acp_probe_at(
             | AdapterKind::GrokBuild
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli
+            | AdapterKind::ClineCli
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
             | AdapterKind::ZcodeApp
@@ -1843,6 +1844,9 @@ async fn run_acp_probe_with_scope(
     }
     let mut command = runtime_command(path, Some(kind));
     configure_acp_command(&mut command, kind, false);
+    if kind == AdapterKind::ClineCli {
+        crate::cline::configure_native_environment(&mut command)?;
+    }
     if kind == AdapterKind::CodebuddyCli
         && let Ok(model) = env::var("ROVAI_CODEBUDDY_MODEL")
     {
@@ -2580,8 +2584,12 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::GrokBuild => {
             configure_grok_acp_command(command, None);
         }
-        AdapterKind::ClineCli
-        | AdapterKind::CodexCli
+        AdapterKind::ClineCli => {
+            command
+                .arg("--acp")
+                .env("CLINE_SESSION_BACKEND_MODE", "local");
+        }
+        AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp
@@ -2812,6 +2820,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
             | AdapterKind::GrokBuild
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli
+            | AdapterKind::ClineCli
     )
 }
 
@@ -3879,6 +3888,7 @@ esac
         assert_eq!(arguments(AdapterKind::CursorAgent), ["acp"]);
         assert_eq!(arguments(AdapterKind::KimiCodeCli), ["acp"]);
         assert_eq!(arguments(AdapterKind::CommandCodeCli), ["acp"]);
+        assert_eq!(arguments(AdapterKind::ClineCli), ["--acp"]);
         assert_eq!(
             crate::command_code_acp::native_mcp_names("\nNo MCP servers configured\n").unwrap(),
             BTreeSet::new()

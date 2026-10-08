@@ -334,7 +334,9 @@ pub enum MissingSendRecoveryBoundary {
     AntigravityPrintStdout,
     AcpEndTurnAssistantSuffix,
     PiAgentSettled,
-    ClineHubRunResult,
+    /// Passive decoding of pre-ACP receipts; never admitted for a new result.
+    #[serde(rename = "cline_hub_run_result")]
+    RetiredClineHubRunResult,
     ZcodeCompletedTurn,
 }
 
@@ -346,7 +348,7 @@ impl MissingSendRecoveryBoundary {
             Self::AntigravityPrintStdout => "antigravity_print_stdout",
             Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
             Self::PiAgentSettled => "pi_agent_settled",
-            Self::ClineHubRunResult => "cline_hub_run_result",
+            Self::RetiredClineHubRunResult => "cline_hub_run_result",
             Self::ZcodeCompletedTurn => "zcode_completed_turn",
         }
     }
@@ -357,13 +359,12 @@ impl MissingSendRecoveryBoundary {
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
             Self::AcpEndTurnAssistantSuffix => {
-                adapter_kind.uses_acp() && adapter_kind != AdapterKind::ZcodeApp
+                adapter_kind.uses_acp()
+                    && adapter_kind != AdapterKind::ZcodeApp
+                    && (adapter_kind != AdapterKind::ClineCli || protocol == Some("acp-v1"))
             }
             Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
-            Self::ClineHubRunResult => {
-                adapter_kind == AdapterKind::ClineCli
-                    && protocol == Some(crate::cline_hub::PROTOCOL)
-            }
+            Self::RetiredClineHubRunResult => false,
             Self::ZcodeCompletedTurn => matches!(adapter_kind, AdapterKind::ZcodeApp),
         }
     }
@@ -7263,7 +7264,6 @@ mod tests {
                         MissingSendRecoveryBoundary::AntigravityPrintStdout
                     }
                     AdapterKind::Pi => MissingSendRecoveryBoundary::PiAgentSettled,
-                    AdapterKind::ClineCli => MissingSendRecoveryBoundary::ClineHubRunResult,
                     _ => unreachable!("non-ACP Adapter must have a dedicated boundary"),
                 }
             };
@@ -7273,18 +7273,11 @@ mod tests {
                 MissingSendRecoveryBoundary::AntigravityPrintStdout,
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
                 MissingSendRecoveryBoundary::PiAgentSettled,
-                MissingSendRecoveryBoundary::ClineHubRunResult,
+                MissingSendRecoveryBoundary::RetiredClineHubRunResult,
                 MissingSendRecoveryBoundary::ZcodeCompletedTurn,
             ] {
                 assert_eq!(
-                    boundary.is_compatible_with(
-                        adapter_kind,
-                        Some(if adapter_kind == AdapterKind::ClineCli {
-                            crate::cline_hub::PROTOCOL
-                        } else {
-                            "acp-v1"
-                        })
-                    ),
+                    boundary.is_compatible_with(adapter_kind, Some("acp-v1")),
                     boundary == expected,
                     "{} must accept only its frozen recovery boundary",
                     adapter_kind.as_str(),
@@ -7294,8 +7287,8 @@ mod tests {
         for (protocol, acp, hub) in [
             (None, false, false),
             (Some("unknown"), false, false),
-            (Some("acp-v1"), false, false),
-            (Some(crate::cline_hub::PROTOCOL), false, true),
+            (Some("acp-v1"), true, false),
+            (Some("cline-hub-v1"), false, false),
         ] {
             assert_eq!(
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix
@@ -7303,7 +7296,7 @@ mod tests {
                 acp
             );
             assert_eq!(
-                MissingSendRecoveryBoundary::ClineHubRunResult
+                MissingSendRecoveryBoundary::RetiredClineHubRunResult
                     .is_compatible_with(AdapterKind::ClineCli, protocol),
                 hub
             );

@@ -11,19 +11,16 @@ last_updated: 2026-10-08
 
 # Rovai-ai v1.72：Lark 独立渠道
 
-## Cline Native Hub（2026-10-07）
+## Cline 官方 ACP 与 Hub 退役（2026-10-08）
 
-User 消息 80 要求 Cline 新会话切换到已验证的 Native Hub。当前分支新增 `cline-hub-v1`，使用
-用户所选官方 CLI 的独立认证 Hub，复用共享 Fleet、Binding、投递、审批、Builtin CLI 和监控结算。
-原生 off/basic/agentic 从实际配置/默认传入，不加入自有压缩器。User 消息 83 确认没有旧会话，
-现已删除 Cline ACP 后端、版本门槛与兼容查询。User 85/87 要求原生认证并授权直接使用已登录账号；
-User 89 进一步取消认证字段准入、同源进程互斥与账号强制 cold；所有认证直接引用原生源，恢复共享 Fleet warm/并行。
-已有账号的真实 first/续接/cold 请求已观察到成功；首次产品登录、实际刷新与压缩资格分别记录在
-[原生账号报告](../../research/cline-runtime/native-account-auth-2026-10-08.md)，不由登录元数据或零模型检查推断。
-仍为 macOS arm64 Preview。取舍见 [V1.72-D23](decisions.md#v1-72-d23)，精确上下文及兼容说明见
-[Native Hub 输入说明](model-context-change-cline-native-hub.md)，验证范围见
-[产品接入矩阵](../../research/cline-runtime/hub-adapter-implementation.md)。认证改动自身无 schema 迁移，
-未改变 current_version；此前实验 shim、ACP 和 Hub 最小探针不替代产品验收。
+User 95 已替换此前 Hub 方向。Cline 唯一执行链为选中安装的 `cline --acp` 与共享 ACP Host/Fleet，
+恢复原生不可变 System Rule、工具解码、审批、监控与 session/load 重放隔离。删除 Hub 代码、依赖、
+专属登录 UI/IPC 和测试入口，保留 Pi 结算与通用进程回收。不恢复版本、账号白名单或强制 cold。
+旧 Hub Binding 仅在新输入前按共享不兼容替换，公开数据及原生历史保留；不迁移或重放旧输入。
+当前合同 [Runtime Launch v54](../../contracts/runtime-launch-and-verification-v54.md)，理由
+[V1.72-D25](decisions.md#v1-72-d25)，[输入说明](model-context-change-cline-acp.md)。
+实际结果见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)，旧 Hub 报告均为历史证据。
+保持 Preview，ACP compact 缺口和实际安装的能力失败不宣称修复。本次无需 schema 迁移，不改变 current_version。
 
 ## 主干与 Preview 数据合流（2026-10-08）
 

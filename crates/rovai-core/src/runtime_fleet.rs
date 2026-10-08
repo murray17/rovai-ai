@@ -175,7 +175,6 @@ pub(crate) enum RuntimeProcessHost {
     Codex(Arc<CodexHost>),
     Acp(Arc<AcpHost>),
     Pi(Arc<PiHost>),
-    ClineHub(Arc<crate::cline_hub::ClineHubHost>),
     #[cfg(all(test, feature = "extended-tests"))]
     Fake(Arc<FakeRuntimeProcessHost>),
 }
@@ -226,7 +225,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.host_instance_id(),
             Self::Acp(host) => host.host_instance_id(),
             Self::Pi(host) => host.host_instance_id(),
-            Self::ClineHub(host) => host.host_instance_id(),
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(host) => &host.process_id,
         }
@@ -237,7 +235,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.is_alive(),
             Self::Acp(host) => host.is_alive(),
             Self::Pi(host) => host.is_alive(),
-            Self::ClineHub(host) => host.is_alive(),
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
@@ -257,7 +254,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.is_quiescent().await,
             Self::Acp(host) => host.is_quiescent().await,
             Self::Pi(host) => host.is_quiescent().await,
-            Self::ClineHub(host) => host.is_quiescent().await,
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
@@ -268,7 +264,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.shutdown_and_reap().await,
             Self::Acp(host) => host.shutdown_and_reap().await,
             Self::Pi(host) => host.shutdown_and_reap().await,
-            Self::ClineHub(host) => host.shutdown_and_reap().await,
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(host) => {
                 host.shutdown_calls
@@ -290,7 +285,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.force_reap_until(deadline).await,
             Self::Acp(host) => host.force_reap_until(deadline).await,
             Self::Pi(host) => host.force_reap_until(deadline).await,
-            Self::ClineHub(host) => host.force_reap_until(deadline).await,
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(host) => {
                 host.reaped.load(std::sync::atomic::Ordering::Acquire)
@@ -311,7 +305,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.pid(),
             Self::Acp(host) => host.pid(),
             Self::Pi(host) => host.pid(),
-            Self::ClineHub(host) => host.pid(),
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(host) => {
                 (!host.reaped.load(std::sync::atomic::Ordering::Acquire)).then_some(42)
@@ -324,7 +317,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.executable_path(),
             Self::Acp(host) => host.executable_path(),
             Self::Pi(host) => host.executable_path(),
-            Self::ClineHub(host) => host.executable_path(),
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(_) => Path::new("fake-runtime"),
         }
@@ -335,7 +327,6 @@ impl RuntimeProcessHost {
             Self::Codex(host) => host.builtin_tool_process_config().cloned(),
             Self::Acp(host) => host.builtin_tool_process_config().cloned(),
             Self::Pi(host) => host.builtin_tool_process_config().cloned(),
-            Self::ClineHub(host) => host.builtin_tool_process_config().cloned(),
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(_) => None,
         }
@@ -345,7 +336,6 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => Ok(host),
             Self::Acp(_) => bail!("Fleet returned an ACP Host to the Codex Adapter"),
-            Self::ClineHub(_) => bail!("Fleet returned a Cline Hub to another Adapter"),
             Self::Pi(_) => bail!("Fleet returned a Pi Host to the Codex Adapter"),
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(_) => bail!("Fleet returned a fake Host to the Codex Adapter"),
@@ -356,24 +346,15 @@ impl RuntimeProcessHost {
         match self {
             Self::Acp(host) => Ok(host),
             Self::Codex(_) => bail!("Fleet returned a Codex Host to an ACP Adapter"),
-            Self::ClineHub(_) => bail!("Fleet returned a Cline Hub to another Adapter"),
             Self::Pi(_) => bail!("Fleet returned a Pi Host to an ACP Adapter"),
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(_) => bail!("Fleet returned a fake Host to the ACP Adapter"),
         }
     }
 
-    pub(crate) fn into_cline_hub(self) -> Result<Arc<crate::cline_hub::ClineHubHost>> {
-        match self {
-            Self::ClineHub(host) => Ok(host),
-            _ => bail!("Fleet returned another backend to Cline Hub"),
-        }
-    }
-
     pub(crate) fn into_pi(self) -> Result<Arc<PiHost>> {
         match self {
             Self::Pi(host) => Ok(host),
-            Self::ClineHub(_) => bail!("Fleet returned a Cline Hub to the Pi Adapter"),
             Self::Codex(_) => bail!("Fleet returned a Codex Host to the Pi Adapter"),
             Self::Acp(_) => bail!("Fleet returned an ACP Host to the Pi Adapter"),
             #[cfg(all(test, feature = "extended-tests"))]

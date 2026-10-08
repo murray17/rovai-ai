@@ -11,11 +11,10 @@ last_updated: 2026-10-07
 
 # Cline 官方 Runtime 接入
 
-> 2026-10-08 认证后续：User 已授权直接使用本机 ChatGPT 登录。最新实现及逐项资格见[原生账号报告](native-account-auth-2026-10-08.md)；下文此前 BYOK 范围保留为当时证据。
-
-最新产品方向已按 User 消息 80 切换到独立 Native Hub；消息 83 确认没有旧会话，已删除 ACP 后端及兼容逻辑。
-当前实现和验收边界以 [Native Hub 产品矩阵](hub-adapter-implementation.md)为准。下文 ACP、shim
-和最小 Hub 调查按发生顺序保留，不再将“Hub 尚未实现”作为当前状态。
+当前方向以 User 95 为准：Cline 唯一入口是用户实际安装的 `cline --acp`，接回共享 ACP Client/Host/Fleet，
+完整删除 Native Hub 和 shim 测试入口。认证交还原生，不恢复版本或账号字段门槛；旧 Hub 隐含历史不迁移。
+[ACP 退役验收](acp-retirement-2026-10-08.md)分别记录当前安装的真实能力与失败，不能沿用旧 Hub 通过结论。
+下文按时间保留研究历史，曾经的“当前”、版本门槛、候选 shim 与 Hub 仅描述当时状态。
 
 Principal 在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 选择官方 ACP，在
 `292c2ea2-5695-40ca-ad5d-8de31832d8fe` 允许使用 sub2api BYOK。候选入口是独立

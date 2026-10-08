@@ -99,6 +99,23 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 135 及缺失 186 收据。SQLite 结构、事务和重开边界不能由纯 parser 代替；定向命令为
 `cargo test -p rovai-core --features extended-tests --lib migration`，默认门禁仍为 `pnpm test:rust:pr`。
 
+## Cline 官方 ACP 与 Hub 退役 owner（2026-10-08，User 95）
+
+User 95 退役整个 Hub 执行合同，因此删除 cline_hub 的 config/events/failure/login/platform/transport/tests，
+以及 native_hub_*、仅供旧 SDK/shim 实验的 compaction fixtures 和专用 Bun 依赖。历史复现链接固定 ada6f6c1，
+成功、失败证据不删。对应 Hub 握手、WebSocket 限额、认证登录状态机/锁和全历史恢复已无当前 successor。
+保留 ManagedProcess/Pi 结算及共享权限、取消、generation/未知输入、文件证据 owner。
+
+恢复既有 ACP owner（不恢复固定版本门槛测试）：Cline 原生 Rule/observer、工具失败与 mutation 配对、
+原生配置投影、模式、load replay quarantine；Node 的 cline-observer owner 继续检查数值过滤；Rust Host owner 检查冻结 Rule、成员隔离与源文件不变。
+默认模型不在 switchable catalog 的本机负例扩展 grouped_acp_models 既有 owner：原生当前模型可以使用 shared
+runtime-default 哨兵，不伪造可切换模型。协议分类、旧 Hub Missing-Send 拒绝和文件来源扩展原有 owner。
+Host 配置/协议/恢复定向测试以 extended-tests 执行，分类全表 owner 使用 slow-tests；不以零测试通过替代执行。
+真实安装与打包 App 使用精简 acp_product_probe/packaged_client，和模拟服务、旧 Hub 矩阵分开记录。
+验证结果及未通过项见 [ACP 退役验收](../research/cline-runtime/acp-retirement-2026-10-08.md)。
+
+以下小节保留先前测试演变的历史，并非当前入口清单。
+
 ## Cline 原生账号认证初版 owner（2026-10-08，历史）
 
 本节是 User 85/87 阶段记录；当前测试归属与退役说明见下方 User 89 简化小节。

@@ -574,3 +574,26 @@ D23 后续的原生认证实现把未验证刷新风险变成 Provider/账号字
 未保留单一刷新所有者，因为它继续阻断本轮要求的 warm 和多成员；未共享一个 Hub，因为那需要另证成员配置隔离。
 不通过复制 refresh token 建立伪独立账号。已授权的原生日常凭据可能被 Cline 更新，Rovai 自身不写回或删除。
 登录成功仅说明原生命令完成；保持 Preview，首次授权、真实刷新和外部并发刷新未验证范围不被写成通过。
+
+
+<a id="v1-72-d25"></a>
+## V1.72-D25：Cline 唯一官方 ACP，完整退役 Native Hub
+
+- 状态：accepted
+- 日期：2026-10-08
+- 确认：User 消息 `eeac1efb-50bd-4361-853f-dc77d0341d32`（Thread 95）
+- 当前权威：[Runtime Launch v54](../../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)、[Cline 实施边界](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)、[ACP 输入说明](model-context-change-cline-acp.md)
+
+### 背景与选择
+
+Hub 增加 daemon、WebSocket 认证与完整历史搬运职责。User 明确要求回归官方 ACP，即使 ACP 仍有 compact 缺口。
+只保留所选安装 cline --acp，复用共享 Host/Fleet、能力检查、恢复重放隔离、审批与结算。
+D23 的后端选择被本决定取代；D24 的原生认证来源、普通 warm/并行原则继续适用于 ACP。
+不整段回退，不恢复固定版本准入、账号白名单、旧 Bootstrap user 注入或认证锁。
+
+### 后果与替代方案
+
+旧 Binding 不兼容时正常重建原生 Session，generation 推进且明确连续性变化，不迁移隐含上下文或重发旧输入。
+历史数据与通用进程账本保留，执行/探测/登录/恢复不再具备 Hub 分支。Pi 结算归回 Pi，不随 Hub 删除。
+没有保留 Hub 备用、恢复 shim 或实现自有压缩；已知 ACP 原生方法、Rule 和 compact 差异逐项报告。
+握手、已有登录、真实请求、warm/cold 与刷新分别验收，不用旧 Hub 成绩替代本轮结果。

@@ -268,6 +268,7 @@ impl ProcessTree {
         Ok(true)
     }
 
+    #[cfg(test)]
     pub(super) fn owns_live_pid(&self, pid: u32) -> io::Result<bool> {
         for process in self.ledger.processes.values() {
             if process.pid == pid as i32 && process.alive()? {

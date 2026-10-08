@@ -83,15 +83,6 @@ fn admit_candidate(
     let source_is_allowlisted = if adapter == AdapterKind::ZcodeApp {
         protocol_family == Some(crate::zcode::PROTOCOL)
             && source_event_kind == Some("tool.updated.result")
-    } else if adapter == AdapterKind::ClineCli
-        && protocol_family == Some(crate::cline_hub::PROTOCOL)
-    {
-        matches!(
-            (operation_kind, source_event_kind),
-            ("read", Some("tool.finished.completed.read_files"))
-                | ("write", Some("tool.finished.completed.apply_patch"))
-                | ("write", Some("tool.finished.completed.editor"))
-        )
     } else if adapter.uses_acp() {
         protocol_family == Some("acp-v1")
             && source_event_kind == Some("session/update.tool_call_update.completed")
@@ -384,8 +375,8 @@ mod tests {
             ("pi", "pi-jsonl-rpc-v1", "tool_execution_end.completed"),
             (
                 "cline-cli",
-                crate::cline_hub::PROTOCOL,
-                "tool.finished.completed.read_files",
+                "acp-v1",
+                "session/update.tool_call_update.completed",
             ),
         ] {
             let admitted = admit_runtime_file_operation(
@@ -427,16 +418,16 @@ mod tests {
         );
 
         for (source, operation, accepted) in [
-            ("tool.finished.completed.apply_patch", "write", true),
-            ("tool.finished.completed.editor", "write", true),
+            ("tool.finished.completed.apply_patch", "write", false),
+            ("tool.finished.completed.editor", "write", false),
             ("tool.finished.completed.read_files", "write", false),
             ("tool.finished.completed.apply_patch", "read", false),
             ("tool.finished.failed.apply_patch", "write", false),
-            ("session/update.tool_call_update.completed", "write", false),
+            ("session/update.tool_call_update.completed", "write", true),
         ] {
             let result = admit_runtime_file_operation(
                 &json!({"runtimeFileOperation": {
-                    "adapterKind":"cline-cli", "protocolFamily":crate::cline_hub::PROTOCOL,
+                    "adapterKind":"cline-cli", "protocolFamily":"acp-v1",
                     "sourceEventKind":source, "operationKind":operation,
                     "path":absolute_test_path("/repo/src/app.ts")
                 }}),

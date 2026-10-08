@@ -282,7 +282,7 @@ Claude Code / Codex 的自定义 API 配置功能已退出。启动页只显示�
 
 保存收到本地回执即更新基线、结束加载并显示“已保存”，不追加观察或列表刷新。
 普通字段冲突继续按项选择并保留草稿。已有本机原生配置不删除、不重写，连接由原生 CLI 使用；
-完整边界见 [Runtime Launch v53](../../contracts/runtime-launch-and-verification-v53.md)。
+完整边界见 [Runtime Launch v54](../../contracts/runtime-launch-and-verification-v54.md)。
 
 Cline 启动设置另外提供显式 ChatGPT 原生登录/重新登录。只调用当前已保存的所选安装；有未保存编辑时先保存。
 授权中锁定来源编辑，保留取消及原生输入；授权输出仅当前交互可见，退出页面即取消，迟到启动结果也须取消。

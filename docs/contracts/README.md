@@ -102,7 +102,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v53（当前）](runtime-launch-and-verification-v53.md) | Cline 原生认证来源直引；取消字段准入、认证独占和强制 cold，恢复普通 Fleet warm/并行；登录完成不推断模型认证 |
+| [Runtime Launch and Verification v54（当前）](runtime-launch-and-verification-v54.md) | Cline 唯一官方 ACP；原生认证、共享 Fleet 与能力控制恢复，完整退役 Hub，保留历史数据及 compact 缺口 |
+| [Runtime Launch and Verification v53](runtime-launch-and-verification-v53.md) | Cline 原生认证来源直引；取消字段准入、认证独占和强制 cold，恢复普通 Fleet warm/并行；登录完成不推断模型认证 |
 | [Runtime Launch and Verification v52（历史）](runtime-launch-and-verification-v52.md) | 继承 v51；移除 Claude/Codex 原生连接编辑，保留本地启动设置、原生执行、只读兼容与脱敏 |
 | [Runtime Launch and Verification v51](runtime-launch-and-verification-v51.md) | 继承 v50；保存只做本地提交，不触发发现、检查、目录或 Host 工作；保存回执不含完整 Key，界面按回执结束保存 |
 | [Runtime Launch and Verification v50（历史）](runtime-launch-and-verification-v50.md) | 继承 v49；Owner 设置回显可读的原生静态 API Key，默认隐藏，查看不写入，不增加持久副本 |

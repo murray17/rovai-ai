@@ -10,6 +10,11 @@ last_updated: 2026-10-07
 
 # 用户实际安装的 Cline Native Hub 验证
 
+> **退役方案的历史证据**：User 95 已要求 Cline 唯一官方 ACP。本文的 Hub/shim 结果不属于当前能力矩阵；
+> 复现脚本已从当前树删除，链接固定到退役前提交 `ada6f6c1`。原成功、失败与未验证记录保留。
+> 当前实现和本机限制见 [ACP 退役验收](acp-retirement-2026-10-08.md)。
+
+
 User 消息 76（`537efdf5-963f-4def-9f88-9c088eb1f4ee`）要求先用实际安装验证独立
 Hub 和原生压缩，再接共享 Runtime 合同。基线为 `ca58d8d3`，分支 `rovai/mission/052`。
 
@@ -81,7 +86,7 @@ cline hub --host 127.0.0.1 --port 0 --cwd <owned workspace> start
 - 自有 Hub PID 4924 → 22154 → 27277 → 33180，每次旧进程退出后才启动新进程，token 轮换。
 - 用户已有 Hub PID 68550 始终存活，原 owner 记录字节不变；未向它发送管理或 Session 命令。
 
-这些检查在首次启动和最终自有进程上分别执行。[认证探针](fixtures/native_hub_auth_probe.mjs)
+这些检查在首次启动和最终自有进程上分别执行。[认证探针](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_auth_probe.mjs)
 只连接已经建立来源证据的私有 Hub，不能单凭任意 SDK 的 import 成功认定来源。
 
 ## 原生配置语义与阶段 B
@@ -115,7 +120,7 @@ session.create.payload.sessionConfig
 
 ### 相同输入的三组真实对照
 
-[压缩探针](fixtures/native_hub_compaction_probe.mjs)依次创建三个独立原生 Session。
+[压缩探针](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_compaction_probe.mjs)依次创建三个独立原生 Session。
 每组先存身份/记忆，再发送 30 个相同的确定性数据块，最后询问身份与早期记忆；每组 32 次请求。
 三组逐轮 Prompt 摘要、System 摘要、Provider/模型/窗口、配置源摘要相同，只有 compaction 参数不同。
 96 次正式对照均为原生 `finishReason=completed`，真实模型回包均报告
@@ -149,7 +154,7 @@ System 摘要每轮相同，最早用户消息仍含记忆标记。客户端没�
 
 ### Cold：保留 attach 负例，验证官方恢复序列
 
-[冷恢复探针](fixtures/native_hub_cold_probe.mjs)在正式 basic 组完成后停止自有 Hub，再用同一
+[冷恢复探针](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_cold_probe.mjs)在正式 basic 组完成后停止自有 Hub，再用同一
 安装、数据和设置启动。新 Hub 对同一 Session：
 
 1. `session.attach` → `ok:true`，ID 相同。
@@ -171,7 +176,7 @@ System 摘要每轮相同，最早用户消息仍含记忆标记。客户端没�
 原生 Hub runtime host 对应 `session.messages` → `session.create`，保持同一个 ID；
 这与单独注册 participant 的 `attach` 是两条不同路径。
 
-[原生恢复探针](fixtures/native_hub_resume_probe.mjs)在新的自有 Hub PID 33180 上复现该序列：
+[原生恢复探针](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_resume_probe.mjs)在新的自有 Hub PID 33180 上复现该序列：
 
 1. 精确 `session.get` 返回原 ID；System SHA、provider/model 与冻结的 basic 对照一致。
 2. 使用 **Hub 自己返回**的 27 条消息作为原生启动的 initialMessages，客户端不编辑消息。
@@ -190,11 +195,11 @@ System 摘要每轮相同，最早用户消息仍含记忆标记。客户端没�
 普通 Hub 事件 envelope 有 eventId/Session ID，但未带原生 Run ID。继续测试了原生
 `kind:"hook"` 贡献，**没有**注册 `kind:"compaction"`：
 
-- [只读 hook 探针](fixtures/native_hub_hook_probe.mjs)仅记录哈希/计数/原生标识，所有响应都是空对象。
+- [只读 hook 探针](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_hook_probe.mjs)仅记录哈希/计数/原生标识，所有响应都是空对象。
 - 原生 Session `1791373561713_34be2`、Run `run_ZAu3GwbR` 的 beforeRun/beforeModel/afterModel/
   afterRun/onEvent 可关联；真实请求完成，beforeModel 的 System SHA 与预期一致。
 - 这证明 Run 归属有可用原生观测入口，不能据普通事件缺字段便宣布原生 Run ID 不存在。
-- 文件式[只读 Plugin](fixtures/native_hub_witness.mjs)在本轮未产出记录；不把 hook 贡献的通过
+- 文件式[只读 Plugin](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_witness.mjs)在本轮未产出记录；不把 hook 贡献的通过
   冒称现有 Plugin/managed System Rule 已验收。未对安装做补丁来解决 Plugin 加载。
 
 共享 Adapter 仍须处理 client/capability ownership、断线未决请求、迟到事件、Binding generation
@@ -228,7 +233,7 @@ System 摘要每轮相同，最早用户消息仍含记忆标记。客户端没�
 
 ## 可复核文件与运行边界
 
-[最小客户端](fixtures/native_hub_client.mjs)仅依赖 Node 内建 WebSocket/文件/crypto API，
+[最小客户端](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_client.mjs)仅依赖 Node 内建 WebSocket/文件/crypto API，
 不导入 Cline SDK。支持认证、注册、订阅、命令 requestId 配对、明确的超时/断线不确定结果，
 默认不重试；关闭连接不冒称取消原生 Run。研究协议只支持已理解的 v1，不按 CLI 版本白名单启动。
 

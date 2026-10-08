@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { realpath, writeFile } from 'node:fs/promises'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-export async function startPackagedHubAcceptance({ app, data, cwd, onNotification }) {
+export async function startPackagedAcceptance({ app, data, cwd, onNotification }) {
   const reservation = createServer()
   await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
   const port = reservation.address().port

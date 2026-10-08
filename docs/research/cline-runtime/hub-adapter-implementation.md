@@ -8,6 +8,11 @@ last_updated: 2026-10-08
 
 # Cline Native Hub 产品接入
 
+> **退役方案的历史证据**：User 95 已要求 Cline 唯一官方 ACP。本文的 Hub/shim 结果不属于当前能力矩阵；
+> 复现脚本已从当前树删除，链接固定到退役前提交 `ada6f6c1`。原成功、失败与未验证记录保留。
+> 当前实现和本机限制见 [ACP 退役验收](acp-retirement-2026-10-08.md)。
+
+
 > 2026-10-08 认证后续：User 已授权直接使用本机 ChatGPT 登录。最新实现及逐项资格见[原生账号报告](native-account-auth-2026-10-08.md)；下文此前 BYOK 范围保留为当时证据。
 
 User 消息 80（`c023f19a-9f1c-4558-b4d4-1bbab3ddffe9`）授权将 Cline 改为 Native Hub，验证后推送
@@ -65,7 +70,7 @@ Host 只在子进程环境导出 `rovai` shell function，转调共享配置已�
 ## 产品验证与负例
 
 隔离 Core data-dir、Skill Library、MCP、workspace 和原生配置副本；使用已授权的 Cline BYOK，未写日常数据。
-脚本 [native_hub_product_probe.mjs](fixtures/native_hub_product_probe.mjs)只用 Core commands 创建成员/发送/审批/取消，
+脚本 [native_hub_product_probe.mjs](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_product_probe.mjs)只用 Core commands 创建成员/发送/审批/取消，
 SQL 只读验证回执、Binding、Usage 和文件投影。默认流程覆盖两个成员、first/warm/cold；`--extended` 加入
 native add/read/edit、批准、拒绝、执行中取消、延迟副作用排除和后续恢复。
 `--lifecycle-only` 单独复验拒绝/取消/恢复，`--extensions-only` 通过 Core 启用并分配真实 stdio MCP、
@@ -178,14 +183,14 @@ Vitest 2605 passed、Node 337 passed / 2 skipped，typecheck、fmt 与面向 `or
 
 中断旧 fixture 的诊断曾留下一个独立 Hub，已用该探针私有 token 关闭。诊断 Host 的 kernel ledger
 现与产品 Host 一同保存在 Core data-dir，纳入启动回收。新增可复验脚本
-[native_hub_diagnostic_recovery_probe.mjs](fixtures/native_hub_diagnostic_recovery_probe.mjs)，参数与上面的
+[native_hub_diagnostic_recovery_probe.mjs](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/native_hub_diagnostic_recovery_probe.mjs)，参数与上面的
 产品脚本相同。真实验证在 ledger 记录后 SIGKILL 自有隔离 Core：原生 Hub 在重启前仍存活，新 Core
 回收了准确进程和私有 Host 目录，随后普通诊断 Ready；全程零模型输入，Provider 源摘要不变。
 这只证明诊断中断后的同机重启回收，不替代未完成的全故障矩阵。
 
 完整逐项结果见下表；原先 ACP 的 App/Skill/MCP 证据不会自动成为 Hub 证据。
 
-## 当前 Parity Matrix
+## 退役前 Parity Matrix（历史）
 
 | 核心能力轴 | 共享行为与接入 | 已有证据 / 仍缺范围 |
 | --- | --- | --- |

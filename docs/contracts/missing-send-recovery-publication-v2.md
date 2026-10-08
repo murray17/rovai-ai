@@ -23,7 +23,10 @@ The successful AgentRun and its terminal evidence remain authoritative and may s
 the candidate body is not published, `finalCampMessageId` remains unset, and replay returns the stored decision without
 retrying publication. A later ordinary add creates a new membership lifetime and cannot change this result.
 
-## Cline backend boundary
+## Cline backend boundary (retired addition)
+
+Superseded for Cline by [Runtime Launch v54](runtime-launch-and-verification-v54.md#cline-official-acp):
+only ACP can create new candidates. The old boundary below is retained as passive historical data and is never eligible.
 
 Cline Native Hub adds the internal candidate boundary `cline_hub_run_result`: only the full successful
 `run.start` result text after observed native acceptance/model execution is eligible. It matches only

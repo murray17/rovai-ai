@@ -8,6 +8,11 @@ last_updated: 2026-10-08
 
 # Cline Native Hub 原生 ChatGPT 账号认证
 
+> **退役方案的历史证据**：User 95 已要求 Cline 唯一官方 ACP。本文的 Hub/shim 结果不属于当前能力矩阵；
+> 复现脚本已从当前树删除，链接固定到退役前提交 `ada6f6c1`。原成功、失败与未验证记录保留。
+> 当前实现和本机限制见 [ACP 退役验收](acp-retirement-2026-10-08.md)。
+
+
 User 85 要求保留 Native Hub、让实际 Cline 读取和刷新凭据；User 87 明确授权直接使用本机已登录账号，
 无需隔离认证。沿 `rovai/mission/052` / `8eb7f648` 推进，保留已有 Windows/错误/清理/历史边界修正。
 账号来源复用不等于所有 OAuth Provider 通过，也不把登录或 Session 配置成功当作真实请求成功。

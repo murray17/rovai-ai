@@ -72,39 +72,25 @@ Core 重启、CLI 公开发送、文件 +/− 与 272000 Context 窗口通过。
 
 ## Cline 实施边界
 
-Cline 只使用用户选中或正常发现的官方 CLI 启动独立 Native Hub，协议为 `cline-hub-v1`。
-User 已确认不存在需要兼容的旧 Cline 会话，因此删除 ACP 后端、版本门槛和 Binding 后端推断；
-不提供旧会话迁移或回退。Hub 复用 `cline-cli`、Skill group `cline`、共享 Fleet、Builtin Tool lease、
-输入投递、审批、监控和终态结算。Host 使用 member scope，冻结 Bootstrap/原生配置不兼容时由 Fleet 回收。
+Cline 仅使用用户选中或正常发现的官方 `cline --acp`，协议 `acp-v1`，复用共享 ACP Client/Host/Fleet。
+Native Hub、WebSocket、discovery、私有登录后端、完整历史搬运和 compaction 注入已退出。
+无固定版本门槛、认证 Provider/字段白名单、凭据副本、独占锁或账号强制 cold。
+用户原生来源由同一安装认证与刷新；必要静态 Key 参数仅做原生 BYOK 适配，Rovai 不变更端点或凭据。
 
-官方 `hub ... start` 的 launcher 可以成功退出，实际 daemon 必须通过 Managed Process 的内核身份
-核验；独立 loopback、随机端口、私有 discovery/token 和认证 WebSocket 不连接用户已有 Hub。
-进程启动前由本次独占创建目录的准备 guard 回收失败配置；启动后只在确认自有进程树退出后删除临时配置，原生 Session 历史独立保留。当前实现仅 macOS arm64
-`Preview`；其他平台 `NotQualified`，不借此提高整个 Runtime 的资格。
+冻结 Bootstrap 仍由原生不可变 System Rule 提供，user 只有 Dynamic Context；原生只读观察保留稀疏数值。
+同名 MCP 按既有策略只投影一条路径；当前安装未使用 ACP mcpServers，保留 Host 私有原生配置。
+成功 apply_patch/editor 仍为 reported_mutation，run_commands 原生失败不伪报成功；不扫磁盘补造 Diff。
 
-Hub 通过原生文件 Rule 交付冻结 B，user 只传 P；每个 root beforeModel 校验 B 恰好一次。
-只读 hook 用于接受证据和稀疏 Usage，不提供 compaction contribution。压缩配置读取原生明确
-off/basic/agentic；未设置时核验所选 CLI 的实际 help 默认，无效配置不当作未设置。
-Rovai 不修改安装 wrapper、二进制或 node_modules，也不下载另一套 SDK/Core。Rule/MCP/运行偏好仍按 Host 隔离；
-用户明确选择的持久原生账号文件允许 Cline 自身登录和刷新写回。
+warm 使用正常 Fleet，cold 按广告能力 session/load/resume，重放进入共享 quarantine 后才允许新 prompt。
+旧 Hub Binding 通过不兼容替换推进 generation，公开历史和原生历史保留，不迁移隐含上下文、不重发旧输入。
+通用进程账本仍可回收退役后端的已确认自有进程，但不保留可启动 Hub 的兼容实现。
 
-Hub 用实际连接认证协议和原生 Session 探测判断能力，不设版本或认证 Provider 白名单。
-所有认证直接引用所选原生 Provider 源，不生成每 Host 凭据副本；原生负责读取、优先级、刷新及保存。
-缺 accountId、未知认证字段、混合 Key/OAuth 均不作为执行准入条件。零模型探测不推断登录成功。
-账号和 BYOK 都按共享 Fleet 进入 IdleWarm、cold 与多成员并行；各自保留冻结 Rule、MCP 和 Session。
-旧认证文件锁退出启动/登录路径，通用进程账本及崩溃回收保留。不修改普通认证环境或隐式切换计费。
-实际刷新及外部并发仍单独记录，未验证不默认禁止运行。显式登录仅显示原生命令结果，不验证自定义账号结构。
-当前选择见 [V1.72-D24](../versions/v1.72/decisions.md#v1-72-d24)，历史账号证据见
-[原生账号验收](../research/cline-runtime/native-account-auth-2026-10-08.md)。
-模型目录读取所选 Provider 的
-原生本地 models.json，保留当前配置模型；不声称可发现所有远端模型或切换 Provider。
-原生完整历史接口无分页；WebSocket 接收单帧和消息上限为 64 MiB，发送请求上限为 16 MiB，超限明确失败且不裁剪原生历史。
-匹配 requestId 的明确原生失败与传输结果未知分开；公开错误只保留封闭码、分类和固定安全说明，不自动重发。
-原生费用、缺失 token 桶和无法确认的压缩事件保持未知。实现、真实验证和剩余差异见
-[Hub 产品矩阵](../research/cline-runtime/hub-adapter-implementation.md)；取舍见
-[V1.72-D23](../versions/v1.72/decisions.md#v1-72-d23)，上下文见
-[Native Hub 输入说明](../versions/v1.72/model-context-change-cline-native-hub.md)。
-已退役 ACP 的 Rule/Plugin 历史验收见 [System revision 2](../versions/v1.72/model-context-change-cline-system.md)。
+保持 macOS arm64 Preview。实际安装的方法、Rule、认证、模型请求与冷恢复分别实测，不能以握手成功推断。
+ACP compaction 缺口保留，不能沿用 Hub 的压缩结论。当前范围见
+[Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)、
+[ACP 退役验收](../research/cline-runtime/acp-retirement-2026-10-08.md)及
+[输入说明](../versions/v1.72/model-context-change-cline-acp.md)，理由见
+[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)。
 
 ## 可执行准入
 
@@ -137,7 +123,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 显式程序路径失效时保持缺失，不能换用自动候选；用户恢复自动后再使用原有发现来源。
 草稿浅检不写安装，草稿深检复用 Check Manager 的并发、deadline 与清理 owner，结果只回到编辑器。
 环境只传入对应 Runtime 进程与原生配置读取，既不修改系统环境，也不投影到公共上下文。
-字段、CAS、迁移和错误边界由 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)拥有。
+字段、CAS、迁移和错误边界由 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)拥有。
 
 主动正式检查在后端先读取最新基础环境、加载已保存启动设置，再将不可变环境快照交给 Check Manager。
 刷新后的请求不与旧搜索代数合并；结果写回与保存/刷新共用更新锁并重验代数和程序身份。
@@ -157,7 +143,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 
 执行仍保留只读连接摘要、凭据来源引用和输出脱敏，以保持旧快照与 Host/binding 兼容隔离；
 内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
-推理强度 fallback。边界由 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)拥有。
+推理强度 fallback。边界由 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)拥有。
 
 <a id="浅检测与按需深检"></a>
 ## 安装发现与真实 Host 验证

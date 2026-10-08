@@ -46,52 +46,6 @@ struct SaveParams {
 }
 
 impl Core {
-    pub(crate) async fn handle_cline_login(&self, method: &str, params: Value) -> Result<Value> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct LoginParams {
-            attempt_id: Option<String>,
-            input: Option<String>,
-        }
-        let params: LoginParams =
-            serde_json::from_value(params).map_err(|_| anyhow::anyhow!("Cline 登录请求无效。"))?;
-        if method != "runtime.clineLogin.start" {
-            return self
-                .cline_hub
-                .login_interaction(
-                    method,
-                    params
-                        .attempt_id
-                        .as_deref()
-                        .context("Cline 登录会话缺失。")?,
-                    params.input.as_deref(),
-                )
-                .await;
-        }
-        ensure!(
-            params.attempt_id.is_none() && params.input.is_none(),
-            "Cline 登录启动参数无效。"
-        );
-        let kind = AdapterKind::ClineCli;
-        ensure!(
-            current_runtime_platform_blocker(kind).is_none(),
-            "当前平台不支持 Cline 原生登录。"
-        );
-        // Fresh shell discovery does not contain saved per-Runtime preferences.
-        // Reapply the selected path and credential source before either help or
-        // login is invoked; otherwise an unrelated global CLI could authorize.
-        let search = self.read_runtime_check_environment(true).await?;
-        let configurations = runtime_startup::load_all(&*self.database.lock().await)?;
-        let search = search.with_startup_configurations(configurations);
-        let observation = discover_runtime_path(kind, &search);
-        let path = PathBuf::from(
-            observation
-                .executable_path
-                .context("未找到所选 Cline 安装。")?,
-        );
-        with_runtime_configuration(kind, &search, self.cline_hub.start_login(&path)).await
-    }
-
     pub(crate) async fn handle_runtime_startup(
         &self,
         method: &str,

@@ -10,6 +10,11 @@ last_updated: 2026-10-07
 
 # Cline ACP 原生压缩启动 shim 实验
 
+> **退役方案的历史证据**：User 95 已要求 Cline 唯一官方 ACP。本文的 Hub/shim 结果不属于当前能力矩阵；
+> 复现脚本已从当前树删除，链接固定到退役前提交 `ada6f6c1`。原成功、失败与未验证记录保留。
+> 当前实现和本机限制见 [ACP 退役验收](acp-retirement-2026-10-08.md)。
+
+
 User 消息 `20469780-9f12-408e-bdf7-9b5a2e3aeb8c` 授权试验薄启动 shim。结果：在固定的
 Cline CLI 3.0.68 / 官方 Core 0.0.90 / sub2api `gpt-6-sol` 场景，仅补启动
 `config.compaction` 就能触发原生自动压缩；隔离 Rovai Core 的 Session、Binding、System Rule、
@@ -28,7 +33,7 @@ User 74 后续要求只使用用户实际安装的 Runtime；[实际入口核验
 `679dfc4085e0085061ba0ca4aa83716f0b6d29146856c3cb519672f3f248c256`；447 个 CLI 源文件逐一
 与该包相同。完整依赖锁随 fixture 保留，发布二进制和 SDK 入口摘要在证据中。
 
-[实验入口](fixtures/compaction_acp_shim.mjs)加载未修改的官方 ACP 源码，在进程内拦截公开
+[实验入口](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/compaction_acp_shim.mjs)加载未修改的官方 ACP 源码，在进程内拦截公开
 `ClineCore.start` 方法，将官方 `AcpAgent.buildConfig()` 的原对象加上一个 `compaction` 字段。
 这是固定版本实验用的原型方法拦截，不是 Cline 提供的稳定 ACP 扩展接口。保护检查要求 ACP client、
 固定版本/源码摘要、原配置尚无 compaction，并断言其他配置字段保持同一值。独立启动日志只记录
@@ -125,8 +130,8 @@ System 请求级断言以最终 11 Run 的持久 trace 为准。
 
 ## 复现与边界
 
-[准备脚本](fixtures/compaction_setup.py)只下载固定官方源代码及发布包，使用
-[保留的依赖锁](fixtures/compaction-dependencies/bun.lock)，不读取凭据、不发模型请求。
+[准备脚本](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/compaction_setup.py)只下载固定官方源代码及发布包，使用
+[保留的依赖锁](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/compaction-dependencies/bun.lock)，不读取凭据、不发模型请求。
 已在第二个全新目录重新安装，并完成一次真实 pilot。无需修改全局 Cline。
 
 ```sh
@@ -140,9 +145,9 @@ python3 docs/research/cline-runtime/fixtures/compaction_acp_probe.py \
 设置映射使用 `--variant pilot --pilot --preference default|basic|off|agentic`，并分别指定唯一
 `--case-name`。这些探针会向指定 Cline 原生 Provider 发真实请求。
 
-[产品探针](fixtures/compaction_product_probe.mjs)接受 `--root`、`--core`、`--settings-source`、
+[产品探针](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/compaction_product_probe.mjs)接受 `--root`、`--core`、`--settings-source`、
 `--case-name`；它以单成员隔离 Camp 发真实请求，观察到原生压缩后再追加两批并完成 cold 验证。
-[证据检查器](fixtures/compaction_evidence.py)核验本轮保留的 case 矩阵并输出允许公开的字段，
+[证据检查器](https://github.com/murray17/rovai-ai/blob/ada6f6c16630872f21610a66cd842cd684545465/docs/research/cline-runtime/fixtures/compaction_evidence.py)核验本轮保留的 case 矩阵并输出允许公开的字段，
 不导出认证、Provider endpoint、完整 System 或原始模型历史。
 
 本轮只验证自动阈值路径，未重做 overflow recovery + automatic retry、手动压缩、取消压缩、

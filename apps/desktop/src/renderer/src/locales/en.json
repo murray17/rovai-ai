@@ -3599,20 +3599,5 @@
   "查看大图": "View full image",
   "已复制图片": "Image copied",
   "未能复制图片，请重试或保存图片。": "Could not copy the image. Try again or save it.",
-  "未能保存图片，请重试。": "Could not save the image. Try again.",
-  "请按 Cline 提示完成浏览器授权。": "Follow Cline’s instructions to authorize in your browser.",
-  "原生登录流程已完成。": "Native login flow completed.",
-  "原生登录未完成，可重新尝试。": "Native login did not complete. You can try again.",
-  "登录已取消。": "Login cancelled.",
-  "登录已超时，请重新尝试。": "Login timed out. Please try again.",
-  "原生登录进程尚未退出，请重试取消。": "The native login process is still running. Retry cancellation.",
-  "Cline 原生登录": "Cline native login",
-  "ChatGPT 账号": "ChatGPT account",
-  "取消登录": "Cancel login",
-  "登录／重新登录": "Log in / reauthorize",
-  "使用所选 Cline 的原生账号。登录和刷新会由 Cline 更新其凭据文件。": "Use the selected Cline installation’s native account. Cline updates its credential file during login and refresh.",
-  "Cline 登录输出": "Cline login output",
-  "原生终端输入": "Native terminal input",
-  "仅在 Cline 提示时输入": "Enter only when prompted by Cline",
-  "正在启动…": "Starting…"
+  "未能保存图片，请重试。": "Could not save the image. Try again."
 }

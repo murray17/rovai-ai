@@ -223,6 +223,7 @@ impl AdapterKind {
             Self::OpencodeCli
                 | Self::CopilotCli
                 | Self::CommandCodeCli
+                | Self::ClineCli
                 | Self::KiroCli
                 | Self::QoderCli
                 | Self::CodebuddyCli
@@ -3919,7 +3920,7 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::GrokBuild
         | AdapterKind::DeepseekHarness
         | AdapterKind::CommandCodeCli => "acp-v1",
-        AdapterKind::ClineCli => crate::cline_hub::PROTOCOL,
+        AdapterKind::ClineCli => "acp-v1",
         AdapterKind::ZcodeApp => crate::zcode::PROTOCOL,
     }
 }
@@ -5369,6 +5370,8 @@ mod slow_tests {
             vec![
                 AdapterKind::OpencodeCli,
                 AdapterKind::CopilotCli,
+                AdapterKind::CommandCodeCli,
+                AdapterKind::ClineCli,
                 AdapterKind::KiroCli,
                 AdapterKind::QoderCli,
                 AdapterKind::CodebuddyCli,
