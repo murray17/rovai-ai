@@ -282,7 +282,15 @@ impl WindowsManagedProcess {
     pub(super) fn tree_is_empty(&self) -> io::Result<bool> {
         // The current Job membership count is the Windows cleanup boundary.
         // Completion notifications and lifetime totals are not reliable gates.
-        Ok(job_accounting(&self.job)?.ActiveProcesses == 0)
+        let accounting = job_accounting(&self.job)?;
+        #[cfg(feature = "extended-tests")]
+        if std::env::var_os("ROVAI_INTERNAL_DSH_CANCEL_TRACE").is_some() {
+            eprintln!(
+                "[dsh-cancel-trace] {}",
+                serde_json::json!({"stage":"job_query","pid":self.pid,"job":self.job_name,"active":accounting.ActiveProcesses,"total":accounting.TotalProcesses})
+            );
+        }
+        Ok(accounting.ActiveProcesses == 0)
     }
 
     pub(super) fn terminate_job(&mut self) -> io::Result<()> {
@@ -290,10 +298,18 @@ impl WindowsManagedProcess {
             // SAFETY: job is owned by this process wrapper and never inherited.
             TerminateJobObject(raw_handle(&self.job), MANAGED_PROCESS_TERMINATION_CODE)
         };
+        let termination_error = (terminated == 0).then(io::Error::last_os_error);
+        #[cfg(feature = "extended-tests")]
+        if std::env::var_os("ROVAI_INTERNAL_DSH_CANCEL_TRACE").is_some() {
+            eprintln!(
+                "[dsh-cancel-trace] {}",
+                serde_json::json!({"stage":"terminate_job","pid":self.pid,"job":self.job_name,"success":terminated != 0,"error":termination_error.as_ref().map(ToString::to_string)})
+            );
+        }
         if terminated != 0 {
             Ok(())
         } else {
-            let termination_error = io::Error::last_os_error();
+            let termination_error = termination_error.expect("failed termination has an OS error");
             if self.tree_is_empty()? {
                 Ok(())
             } else {
@@ -306,6 +322,37 @@ impl WindowsManagedProcess {
     pub(super) fn job_process_counts_for_test(&self) -> io::Result<(u32, u32)> {
         let accounting = job_accounting(&self.job)?;
         Ok((accounting.TotalProcesses, accounting.ActiveProcesses))
+    }
+
+    #[cfg(test)]
+    pub(super) fn restrict_job_access_for_test(&mut self, access: u32) -> OwnedHandle {
+        use windows_sys::Win32::{
+            Foundation::DuplicateHandle, System::Threading::GetCurrentProcess,
+        };
+        let mut duplicate = null_mut();
+        // SAFETY: duplicate the owned Job with reduced rights only. Keeping the
+        // original handle lets the same cleanup owner retry after the fault.
+        assert_ne!(
+            unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    raw_handle(&self.job),
+                    GetCurrentProcess(),
+                    &mut duplicate,
+                    access,
+                    0,
+                    0,
+                )
+            },
+            0
+        );
+        let duplicate = owned_handle(duplicate, "test Job duplicate").unwrap();
+        std::mem::replace(&mut self.job, duplicate)
+    }
+
+    #[cfg(test)]
+    pub(super) fn restore_job_access_for_test(&mut self, handle: OwnedHandle) {
+        self.job = handle;
     }
 }
 

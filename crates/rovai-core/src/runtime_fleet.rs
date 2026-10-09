@@ -294,6 +294,10 @@ impl RuntimeProcessHost {
     }
 
     async fn shutdown_and_reap_until(&self, deadline: Instant) -> bool {
+        #[cfg(windows)]
+        if let Self::Acp(host) = self {
+            return host.force_reap_until(deadline).await;
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         let reserve = std::cmp::min(Duration::from_millis(250), remaining / 4);
         let _ = timeout_at(deadline - reserve, self.shutdown_and_reap()).await;
@@ -532,6 +536,9 @@ struct ProcessEntry {
     startup: Option<Arc<FleetStartupOperation>>,
     stop: Option<Arc<FleetStopCompletion>>,
     run_lease: Option<RunLeaseKey>,
+    // One warm-release identity closes the small ACP interval before Core's
+    // durable terminal. Never follow it after another Run has claimed the Host.
+    last_released_lease: Option<RunLeaseKey>,
     idle_since: Option<Instant>,
     last_used_sequence: u64,
     retire_after_run: bool,
@@ -544,7 +551,7 @@ struct FleetState {
     deleting_camps: HashSet<String>,
     processes: HashMap<String, ProcessEntry>,
     process_by_run: HashMap<RunLeaseKey, String>,
-    // Retain only Codex cleanup receipts until Core durably acknowledges them.
+    // Retain cancellation cleanup receipts until Core durably acknowledges them.
     // These are stop-operation evidence, not another process state machine.
     reaped_leases: HashSet<RunLeaseKey>,
     resident_processes: HashSet<String>,
@@ -891,6 +898,7 @@ impl FleetState {
             idle_since: None,
             last_used_sequence: sequence,
             retire_after_run: false,
+            last_released_lease: None,
             retirement: None,
         });
         self.process_by_run
@@ -1685,8 +1693,12 @@ impl AgentRuntimeFleetManager {
     }
 
     fn launch_stop(&self, launch: FleetStopLaunch) {
+        self.launch_stop_until(launch, Instant::now() + self.config.stop_timeout);
+    }
+
+    fn launch_stop_until(&self, launch: FleetStopLaunch, deadline: Instant) {
         tokio::spawn(Self::drive_stop(
-            self.config.stop_timeout,
+            deadline,
             self.operations.clone(),
             self.state.clone(),
             self.owner_records.clone(),
@@ -1696,7 +1708,7 @@ impl AgentRuntimeFleetManager {
     }
 
     async fn drive_stop(
-        stop_timeout: Duration,
+        deadline: Instant,
         operations: Arc<Mutex<()>>,
         state: Arc<Mutex<FleetState>>,
         owner_records: Option<RuntimeOwnerRecordStore>,
@@ -1706,10 +1718,7 @@ impl AgentRuntimeFleetManager {
         if let Some(config) = launch.host.builtin_tool_process_config() {
             builtin_tool_leases.unregister(config.process_id()).await;
         }
-        let reaped = launch
-            .host
-            .shutdown_and_reap_until(Instant::now() + stop_timeout)
-            .await;
+        let reaped = launch.host.shutdown_and_reap_until(deadline).await;
         {
             let state = state.lock().await;
             if let Some(entry) = state.processes.get(&launch.process_id)
@@ -1735,7 +1744,8 @@ impl AgentRuntimeFleetManager {
                             .as_ref()
                             .is_some_and(|current| Arc::ptr_eq(current, &launch.completion)) =>
                 {
-                    if entry.adapter_kind == AdapterKind::CodexCli
+                    if (entry.adapter_kind == AdapterKind::CodexCli
+                        || (cfg!(windows) && entry.adapter_kind == AdapterKind::DeepseekHarness))
                         && let Some(key) = entry.run_lease.clone()
                     {
                         state.reaped_leases.insert(key);
@@ -1810,6 +1820,51 @@ impl AgentRuntimeFleetManager {
         }
         entry.retire_after_run = true;
         true
+    }
+
+    /// Commit a Run stop and fence its lease under the same short admission
+    /// gate used by Reusable. Process teardown belongs to the cleanup worker.
+    #[cfg(windows)]
+    pub(crate) async fn install_run_cancellation_cutover<T>(
+        &self,
+        cutover: impl FnOnce() -> Result<(T, Option<(String, i64)>)>,
+    ) -> Result<T> {
+        let _operation = self.operations.lock().await;
+        let (value, cancelled) = cutover()?;
+        if let Some((agent_run_id, execution_epoch)) = cancelled {
+            let key = RunLeaseKey {
+                agent_run_id,
+                execution_epoch,
+            };
+            let mut state = self.state.lock().await;
+            let id = state.process_by_run.get(&key).cloned().or_else(|| {
+                state
+                    .processes
+                    .iter()
+                    .find(|(_, entry)| {
+                        entry.adapter_kind == AdapterKind::DeepseekHarness
+                            && entry.state == FleetProcessState::IdleWarm
+                            && entry.run_lease.is_none()
+                            && entry.last_released_lease.as_ref() == Some(&key)
+                    })
+                    .map(|(id, _)| id.clone())
+            });
+            if let Some(id) = id
+                && let Some(entry) = state.processes.get_mut(&id)
+            {
+                entry.retire_after_run = true;
+                entry.last_released_lease = None;
+                entry.run_lease = Some(key.clone());
+                let idle_sequence = entry.last_used_sequence;
+                if entry.state == FleetProcessState::IdleWarm {
+                    entry.state = FleetProcessState::BusyResident;
+                    entry.idle_since = None;
+                }
+                state.idle_lru.remove(&(idle_sequence, id.clone()));
+                state.process_by_run.insert(key, id);
+            }
+        }
+        Ok(value)
     }
 
     pub(crate) async fn release(
@@ -1937,6 +1992,9 @@ impl AgentRuntimeFleetManager {
                     .get_mut(&process_id)
                     .expect("reusable Fleet entry disappeared");
                 entry.run_lease = None;
+                if cfg!(windows) && entry.adapter_kind == AdapterKind::DeepseekHarness {
+                    entry.last_released_lease = Some(run_lease.clone());
+                }
                 entry.state = FleetProcessState::IdleWarm;
                 entry.idle_since = Some(Instant::now());
                 entry.last_used_sequence = sequence;
@@ -1998,9 +2056,15 @@ impl AgentRuntimeFleetManager {
             }
             state.plan_stop(&id)
         };
-        let stopped = timeout_at(deadline, self.dispatch_stop_plan(plan).wait())
-            .await
-            .unwrap_or(false);
+        let wait = match plan {
+            FleetStopPlan::Launch(launch) => {
+                let completion = launch.completion.clone();
+                self.launch_stop_until(launch, deadline);
+                FleetStopWait::Process(completion)
+            }
+            other => self.dispatch_stop_plan(other),
+        };
+        let stopped = timeout_at(deadline, wait.wait()).await.unwrap_or(false);
         self.stop_outcome(&key, stopped).await
     }
 
@@ -2461,6 +2525,7 @@ mod tests {
                 startup: None,
                 stop: None,
                 run_lease: Some(run_lease),
+                last_released_lease: None,
                 idle_since: None,
                 last_used_sequence: 0,
                 retire_after_run: false,
@@ -3175,6 +3240,7 @@ mod tests {
                     startup: startup.clone(),
                     stop: stop.clone(),
                     run_lease: None,
+                    last_released_lease: None,
                     idle_since: (process_state == FleetProcessState::IdleWarm).then(Instant::now),
                     last_used_sequence: 1,
                     retire_after_run: false,
@@ -3562,43 +3628,139 @@ mod tests {
 
     #[tokio::test]
     async fn failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor() {
-        let fleet = AgentRuntimeFleetManager::new(Default::default());
-        let request = |run| {
-            let mut request = acquire_request(run, "camp");
-            request.adapter_kind = AdapterKind::CodexCli;
-            request
+        let kinds = if cfg!(windows) {
+            vec![AdapterKind::CodexCli, AdapterKind::DeepseekHarness]
+        } else {
+            vec![AdapterKind::CodexCli]
         };
-        fleet
-            .acquire(request("failed"), || async { Ok(fake_host("host-a")) })
-            .await
-            .unwrap();
-        assert!(!fleet.retire_agent_run_on_host("failed", 0, "host-a").await);
-        assert!(
-            !fleet
-                .retire_agent_run_on_host("failed", 1, "other-host")
+        for kind in kinds {
+            let fleet = AgentRuntimeFleetManager::new(Default::default());
+            let request = |run| {
+                let mut request = acquire_request(run, "camp");
+                request.adapter_kind = kind;
+                request
+            };
+            fleet
+                .acquire(request("failed"), || async { Ok(fake_host("host-a")) })
                 .await
-        );
-        assert!(fleet.retire_agent_run_on_host("failed", 1, "host-a").await);
-        assert_eq!(
-            fleet
-                .release_with_outcome("failed", 1, FleetReleaseDisposition::Reusable)
-                .await,
-            FleetReleaseOutcome::Reaped
-        );
-        let next = fleet
-            .acquire(request("next"), || async { Ok(fake_host("host-b")) })
-            .await
-            .unwrap();
-        assert_eq!(next.host.process_id(), "host-b");
-        assert!(!fleet.retire_agent_run_on_host("failed", 1, "host-a").await);
-        assert_eq!(
-            fleet
-                .release_with_outcome("failed", 1, FleetReleaseDisposition::Stop)
-                .await,
-            FleetReleaseOutcome::Reaped
-        );
-        assert!(next.host.is_healthy());
-        fleet.shutdown_all().await;
+                .unwrap();
+            assert!(!fleet.retire_agent_run_on_host("failed", 0, "host-a").await);
+            assert!(
+                !fleet
+                    .retire_agent_run_on_host("failed", 1, "other-host")
+                    .await
+            );
+            #[cfg(windows)]
+            if kind == AdapterKind::DeepseekHarness {
+                fleet
+                    .install_run_cancellation_cutover(|| Ok(((), None)))
+                    .await
+                    .unwrap();
+                fleet
+                    .install_run_cancellation_cutover(|| Ok(((), Some(("failed".into(), 0)))))
+                    .await
+                    .unwrap();
+                assert!(
+                    !fleet
+                        .state
+                        .lock()
+                        .await
+                        .processes
+                        .values()
+                        .next()
+                        .unwrap()
+                        .retire_after_run
+                );
+                fleet
+                    .install_run_cancellation_cutover(|| Ok(((), Some(("failed".into(), 1)))))
+                    .await
+                    .unwrap();
+            } else {
+                assert!(fleet.retire_agent_run_on_host("failed", 1, "host-a").await);
+            }
+            #[cfg(not(windows))]
+            assert!(fleet.retire_agent_run_on_host("failed", 1, "host-a").await);
+            let mut parallel_request = request("parallel");
+            parallel_request.compatibility =
+                RuntimeCompatibilityKey::member("camp", "other-member", "digest-1");
+            let parallel = fleet
+                .acquire(parallel_request, || async {
+                    Ok(fake_host("unrelated-host"))
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                fleet
+                    .release_with_outcome("failed", 1, FleetReleaseDisposition::Reusable)
+                    .await,
+                FleetReleaseOutcome::Reaped
+            );
+            assert!(parallel.host.is_healthy());
+            let next = fleet
+                .acquire(request("next"), || async { Ok(fake_host("host-b")) })
+                .await
+                .unwrap();
+            assert_eq!(next.host.process_id(), "host-b");
+            assert!(!fleet.retire_agent_run_on_host("failed", 1, "host-a").await);
+            assert_eq!(
+                fleet
+                    .release_with_outcome("failed", 1, FleetReleaseDisposition::Stop)
+                    .await,
+                FleetReleaseOutcome::Reaped
+            );
+            assert!(next.host.is_healthy());
+            #[cfg(windows)]
+            if kind == AdapterKind::DeepseekHarness {
+                // ACP normally releases before its durable terminal callback.
+                // A stop committed in that interval must still retire this warm
+                // Host, without changing the normal reusable release path.
+                assert_eq!(
+                    fleet
+                        .release_with_outcome("next", 1, FleetReleaseDisposition::Reusable)
+                        .await,
+                    FleetReleaseOutcome::Reusable
+                );
+                fleet
+                    .install_run_cancellation_cutover(|| Ok(((), Some(("next".into(), 1)))))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    fleet
+                        .stop_agent_run_until_with_outcome(
+                            "next",
+                            1,
+                            Instant::now() + Duration::from_secs(1)
+                        )
+                        .await,
+                    FleetReleaseOutcome::Reaped
+                );
+                assert!(!next.host.is_healthy());
+                let successor = fleet
+                    .acquire(request("successor"), || async { Ok(fake_host("host-c")) })
+                    .await
+                    .unwrap();
+                fleet
+                    .install_run_cancellation_cutover(|| Ok(((), Some(("next".into(), 1)))))
+                    .await
+                    .unwrap();
+                assert!(successor.host.is_healthy());
+                assert!(parallel.host.is_healthy());
+                assert_eq!(
+                    fleet
+                        .release_with_outcome("successor", 1, FleetReleaseDisposition::Reusable)
+                        .await,
+                    FleetReleaseOutcome::Reusable
+                );
+                let reused = fleet
+                    .acquire(request("normal-next"), || async {
+                        panic!("a healthy normally completed DSH Host remains reusable")
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(reused.host.process_id(), "host-c");
+            }
+            fleet.shutdown_all().await;
+        }
     }
 
     #[tokio::test]

@@ -14,6 +14,8 @@ target_adapter: "deepseek-harness"
 当前接入与验收见 [0.1.5-rc.2 ACP Parity Matrix](acp-0.1.5-parity.md)。本文保留
 2026-08-14、0.1.0-rc.5 的实现前研究，不代表当前 Adapter、能力或平台准入状态。
 
+Windows 取消的最新问题与未完成修复见 [2026-10-09 Job 回收实测](windows-cancel-2026-10-09.md)。
+
 > 本文研究对象是 DeepSeek AI 官方仓库 [`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)，不是其他同名的协议适配库、模型包装器或第三方 Coding TUI。
 >
 > 目标是明确：官方 DeepSeek Harness 能否作为 Rovai Runtime、应通过哪一层接入、哪些能力已经由上游代码证明、哪些行为必须实机验证，以及 Rovai 需要调整哪些运行时边界。

@@ -699,6 +699,36 @@ impl ManagedProcess {
         self.child.tree_is_empty()
     }
 
+    /// Windows teardown shares the caller's deadline across termination and
+    /// Job queries. Neither a successful signal nor an exited root proves an
+    /// empty Job. Transient API failures are retried inside the same budget.
+    #[cfg(windows)]
+    pub(crate) async fn reap_job_until(
+        &mut self,
+        deadline: tokio::time::Instant,
+    ) -> io::Result<()> {
+        loop {
+            let termination = self.force_terminate_tree();
+            let query = self.tree_is_empty();
+            if matches!(query, Ok(true)) {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "Windows Job cleanup unconfirmed: terminate={termination:?}, active_zero={query:?}"
+                    ),
+                ));
+            }
+            tokio::time::sleep_until(std::cmp::min(
+                deadline,
+                tokio::time::Instant::now() + std::time::Duration::from_millis(10),
+            ))
+            .await;
+        }
+    }
+
     #[cfg(target_os = "macos")]
     pub(crate) fn tree_is_empty(&self) -> io::Result<bool> {
         self.captured_tree_is_empty()
@@ -752,6 +782,7 @@ impl ManagedProcess {
             let signalled = self.owned_tree.signal(libc::SIGKILL);
             captured.and(signalled)
         };
+        #[cfg(not(windows))]
         if self.tree_termination_requested {
             #[cfg(target_os = "macos")]
             descendants?;
@@ -1547,11 +1578,30 @@ mod tests {
         let late_child = windows::TestProcess::open(late_pid).unwrap();
         assert!(late_child.is_running().unwrap());
 
-        process.force_terminate_tree().unwrap();
+        // A real access-denied termination must leave this owner retryable.
+        // Query-only rights cannot terminate the still-active Job.
+        let full_job = process.child.restrict_job_access_for_test(0x0004);
+        assert!(
+            process
+                .reap_job_until(tokio::time::Instant::now() + Duration::from_millis(25))
+                .await
+                .is_err()
+        );
+        assert!(grandchild.is_running().unwrap());
+        process.child.restore_job_access_for_test(full_job);
+
+        // Conversely, termination-only rights kill the children, but querying
+        // fails. Even an actually empty Job must not be acknowledged on error.
+        let full_job = process.child.restrict_job_access_for_test(0x0008);
+        assert!(
+            process
+                .reap_job_until(tokio::time::Instant::now() + Duration::from_millis(25))
+                .await
+                .is_err()
+        );
+        process.child.restore_job_access_for_test(full_job);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while !process.tree_is_empty().unwrap() && tokio::time::Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        process.reap_job_until(deadline).await.unwrap();
         assert!(
             process.tree_is_empty().unwrap(),
             "Cleanup confirmation must query the owned Job, not a kill request"

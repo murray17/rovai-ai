@@ -2872,23 +2872,67 @@ impl AcpHost {
     }
 
     pub(crate) async fn force_reap_until(&self, deadline: tokio::time::Instant) -> bool {
+        #[cfg(windows)]
+        return self.reap_windows_job_until(deadline).await;
+        #[cfg(not(windows))]
+        {
+            self.alive.store(false, Ordering::Release);
+            let (host_reaped, terminals_reaped) = tokio::join!(
+                async {
+                    let Ok(mut child) = tokio::time::timeout_at(deadline, self.child.lock()).await
+                    else {
+                        return false;
+                    };
+                    if self.capture_native_descendants(&mut child).is_err() {
+                        let _ = child.force_terminate_tree();
+                        return false;
+                    }
+                    let terminated = child.force_terminate_tree().is_ok();
+                    terminated
+                        && matches!(
+                            tokio::time::timeout_at(deadline, child.wait()).await,
+                            Ok(Ok(_))
+                        )
+                },
+                async {
+                    let Some(bridge) = &self.client_terminal_bridge else {
+                        return true;
+                    };
+                    tokio::time::timeout_at(deadline, async {
+                        bridge.release_all().await;
+                        bridge.is_empty().await
+                    })
+                    .await
+                        == Ok(true)
+                }
+            );
+            let native_groups_reaped =
+                match tokio::time::timeout_at(deadline, self.child.lock()).await {
+                    Ok(mut child) => self.confirm_native_cleanup(&mut child, deadline).await,
+                    Err(_) => false,
+                };
+            host_reaped && terminals_reaped && native_groups_reaped
+        }
+    }
+
+    #[cfg(windows)]
+    async fn reap_windows_job_until(&self, deadline: tokio::time::Instant) -> bool {
         self.alive.store(false, Ordering::Release);
-        let (host_reaped, terminals_reaped) = tokio::join!(
+        let (job_reaped, terminals_reaped) = tokio::join!(
             async {
                 let Ok(mut child) = tokio::time::timeout_at(deadline, self.child.lock()).await
                 else {
                     return false;
                 };
-                if self.capture_native_descendants(&mut child).is_err() {
-                    let _ = child.force_terminate_tree();
-                    return false;
+                #[cfg(feature = "extended-tests")]
+                if std::env::var_os("ROVAI_INTERNAL_DSH_CANCEL_TRACE").is_some() {
+                    eprintln!(
+                        "[dsh-cancel-trace] {}",
+                        json!({"stage":"host_force_reap",
+                        "host":self.host_instance_id,"pid":child.id(),"job":child.windows_job_name()})
+                    );
                 }
-                let terminated = child.force_terminate_tree().is_ok();
-                terminated
-                    && matches!(
-                        tokio::time::timeout_at(deadline, child.wait()).await,
-                        Ok(Ok(_))
-                    )
+                self.confirm_native_cleanup(&mut child, deadline).await
             },
             async {
                 let Some(bridge) = &self.client_terminal_bridge else {
@@ -2902,19 +2946,46 @@ impl AcpHost {
                     == Ok(true)
             }
         );
-        let native_groups_reaped = match tokio::time::timeout_at(deadline, self.child.lock()).await
-        {
-            Ok(child) => self.confirm_native_cleanup(&child, deadline).await,
-            Err(_) => false,
-        };
-        host_reaped && terminals_reaped && native_groups_reaped
+        if job_reaped && terminals_reaped {
+            let private_root = self
+                .remove_private_config_root_on_shutdown
+                .then(|| self.private_config_root.clone())
+                .flatten();
+            let detector_root = self.detector_config_root.clone();
+            tokio::task::spawn_blocking(move || {
+                for root in private_root.into_iter().chain(detector_root) {
+                    let _ = std::fs::remove_dir_all(root);
+                }
+            });
+        }
+        job_reaped && terminals_reaped
     }
 
     async fn confirm_native_cleanup(
         &self,
-        child: &ManagedProcess,
+        child: &mut ManagedProcess,
         deadline: tokio::time::Instant,
     ) -> bool {
+        #[cfg(windows)]
+        {
+            match child.reap_job_until(deadline).await {
+                Ok(()) => {
+                    if self.adapter_kind == AdapterKind::ZcodeApp {
+                        self.zcode_cleanup_confirmed.store(true, Ordering::Release);
+                        self.record_zcode_host_closed(true);
+                    }
+                    return true;
+                }
+                Err(error) => {
+                    self.send_host_diagnostic(format!(
+                        "ACP cleanup failed: host={} job={:?}: {error}; retrying locally",
+                        self.host_instance_id,
+                        child.windows_job_name()
+                    ));
+                    return false;
+                }
+            }
+        }
         #[cfg(target_os = "linux")]
         {
             loop {
@@ -2935,7 +3006,7 @@ impl AcpHost {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             #[cfg(target_os = "macos")]
             if self.adapter_kind != AdapterKind::ZcodeApp {
@@ -3019,31 +3090,40 @@ impl AcpHost {
     }
 
     pub(crate) async fn shutdown_and_reap(&self) {
-        self.alive.store(false, Ordering::Release);
-        self.release_all_client_terminals().await;
-        let mut child = self.child.lock().await;
-        let ownership_captured = self.capture_native_descendants(&mut child).is_ok();
-        let _ = child.request_graceful_termination();
-        if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
-            let _ = child.force_terminate_tree();
-            let _ = timeout(Duration::from_secs(1), child.wait()).await;
-        }
-        let _ = child.force_terminate_tree();
-        let groups_reaped = ownership_captured
-            && self
-                .confirm_native_cleanup(
-                    &child,
-                    tokio::time::Instant::now() + Duration::from_millis(2500),
-                )
-                .await;
-        if groups_reaped
-            && self.remove_private_config_root_on_shutdown
-            && let Some(root) = self.private_config_root.as_ref()
+        #[cfg(windows)]
         {
-            let _ = std::fs::remove_dir_all(root);
+            self.reap_windows_job_until(tokio::time::Instant::now() + Duration::from_secs(5))
+                .await;
+            return;
         }
-        if let Some(root) = self.detector_config_root.as_ref() {
-            let _ = std::fs::remove_dir_all(root);
+        #[cfg(not(windows))]
+        {
+            self.alive.store(false, Ordering::Release);
+            self.release_all_client_terminals().await;
+            let mut child = self.child.lock().await;
+            let ownership_captured = self.capture_native_descendants(&mut child).is_ok();
+            let _ = child.request_graceful_termination();
+            if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
+                let _ = child.force_terminate_tree();
+                let _ = timeout(Duration::from_secs(1), child.wait()).await;
+            }
+            let _ = child.force_terminate_tree();
+            let groups_reaped = ownership_captured
+                && self
+                    .confirm_native_cleanup(
+                        &mut child,
+                        tokio::time::Instant::now() + Duration::from_millis(2500),
+                    )
+                    .await;
+            if groups_reaped
+                && self.remove_private_config_root_on_shutdown
+                && let Some(root) = self.private_config_root.as_ref()
+            {
+                let _ = std::fs::remove_dir_all(root);
+            }
+            if let Some(root) = self.detector_config_root.as_ref() {
+                let _ = std::fs::remove_dir_all(root);
+            }
         }
     }
 
@@ -4141,6 +4221,13 @@ impl AcpRuntime {
             .context("ACP Session is not ready")?;
         {
             let mut child = self.host.child.lock().await;
+            #[cfg(all(windows, feature = "extended-tests"))]
+            if std::env::var_os("ROVAI_INTERNAL_DSH_CANCEL_TRACE").is_some() {
+                eprintln!(
+                    "[dsh-cancel-trace] {}",
+                    json!({"stage":"native_cancel","host":self.host.host_instance_id,"pid":child.id(),"job":child.windows_job_name(),"run":self.owner.agent_run_id,"epoch":self.owner.execution_epoch})
+                );
+            }
             self.host.capture_native_descendants(&mut child)?;
         }
         self.host
@@ -4750,6 +4837,16 @@ impl AcpCliRuntimeAdapter {
         let _process_id = &fleet_lease.process_id;
         let _residency = fleet_lease.residency;
         let host = fleet_lease.host.into_acp()?;
+        #[cfg(all(windows, feature = "extended-tests"))]
+        if std::env::var_os("ROVAI_INTERNAL_DSH_CANCEL_TRACE").is_some() {
+            let child = host.child.lock().await;
+            eprintln!(
+                "[dsh-cancel-trace] {}",
+                json!({"stage":"host_bound",
+                "host":host.host_instance_id,"pid":child.id(),"job":child.windows_job_name(),
+                "run":agent_run_id,"epoch":execution_epoch})
+            );
+        }
         let runtime = AcpRuntime::from_host(
             AcpRuntimeOwner {
                 agent_run_id: agent_run_id.to_string(),

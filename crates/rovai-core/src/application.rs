@@ -10068,6 +10068,24 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
+                #[cfg(windows)]
+                let execution = self.runtime_fleet.install_run_cancellation_cutover(|| {
+                    let agent_run_id = params.command.agent_run_id.clone();
+                    let execution = ExecutionRuntimeService::default().request_agent_run_cancellation(
+                        &mut database,
+                        &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                    )?;
+                    let cancelled = if execution.result.status == CommandResultStatus::Applied {
+                        database.connection().query_row(
+                            "SELECT execution_epoch FROM agent_run WHERE id = ?1
+                             AND runtime_adapter_kind = 'deepseek-harness'
+                             AND cancel_requested_at IS NOT NULL AND cancel_acknowledged_at IS NULL",
+                            [&agent_run_id], |row| row.get::<_, i64>(0)
+                        ).optional()?.map(|epoch| (agent_run_id, epoch))
+                    } else { None };
+                    Ok((execution, cancelled))
+                }).await?;
+                #[cfg(not(windows))]
                 let execution = ExecutionRuntimeService::default().request_agent_run_cancellation(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
@@ -12895,6 +12913,21 @@ impl Core {
             let flush_deadline = started + Duration::from_millis(1500);
             let key = ActiveExecutionKey::new(agent_run_id, execution_epoch);
             self.planned_shutdown.cancel_active(&key).await;
+            #[cfg(windows)]
+            if adapter_kind == "deepseek-harness" {
+                // Turn-level cancellation and a Host materialized during launch
+                // use the same reuse fence as the immediate Run stop command.
+                if self
+                    .runtime_fleet
+                    .install_run_cancellation_cutover(|| {
+                        Ok(((), Some((agent_run_id.to_owned(), execution_epoch))))
+                    })
+                    .await
+                    .is_err()
+                {
+                    return RuntimeCancellationIngressFence::Unproven;
+                }
+            }
             let mut flushed = false;
             let one_shot = matches!(adapter_kind, "antigravity-app" | "claude-code-cli");
             loop {
@@ -12954,7 +12987,9 @@ impl Core {
                             .wait_for_agent_run_quiescence(agent_run_id, execution_epoch, remaining)
                             .await
                     }
-                } else if adapter_kind == "codex-cli" {
+                } else if adapter_kind == "codex-cli"
+                    || (cfg!(windows) && adapter_kind == "deepseek-harness")
+                {
                     match self
                         .runtime_fleet
                         .stop_agent_run_until_with_outcome(agent_run_id, execution_epoch, deadline)
