@@ -2,7 +2,7 @@
 document_type: implementation-record
 version: v1.72
 authority: implementation-evidence
-last_updated: 2026-10-08
+last_updated: 2026-10-10
 ---
 
 # 续做可靠性修复与验收
@@ -115,3 +115,21 @@ continuation 5、引用保留与终态归因各 1 项通过；Antigravity 另有
 `public_text_streams_and_success_fallback_create_narration_without_thinking` 的 thinking 空事件断言
 在未修改的 `52ecf398` 独立 worktree 同样失败。本次保留测试与生产行为，未改写或跳过以制造全绿。
 macOS 为本轮真实验证平台；Linux / Windows 原生执行未复测，不推断通过。
+
+## v0.4.7 发布门禁补充：macOS 已退出进程组的回收
+
+基线为 `a87f13a6cfdf13f959adf5f4ff0d2832b5f9a0c9`。macOS ARM 原生 Server 门禁两次在
+Antigravity 输入准入 owner 的清理断言失败。本地单项复放及 CI 单项诊断通过；CI 并发模块诊断
+在首轮复现 `EPERM`，没有把重试或最终取消的诊断工作流算作通过。
+
+根因是按生命周期身份终止整树之后，原进程组只剩 zombie，Darwin 的 `killpg` 仍可能返回
+`EPERM`，原实现直接退出而没有继续 reap。修正只在捕获完整、根与所有已捕获后代均已按身份确认
+不再执行时允许继续根进程回收；仍活跃、不完整捕获、查询错误及其他 errno 保持原阻断。
+不放宽清理超时，不伪造原生终态，不改动输入、提示词、会话引用或 Windows / Linux 信号路径。
+
+扩展既有 detached-child owner，旧策略先在新增正向断言上失败；保留原真实后代和无关进程存活断言。
+准入矩阵与命令见[测试政策记录](../../development/testing.md#续做可靠性回归)。修复后本地默认
+`cargo test --workspace` 460 项通过、1 项既有真实 Runtime ignore；Antigravity 模块 16 项通过、
+1 项既有 ignore；前端 239 文件 / 2613 项通过，Node 337 项通过、2 项平台 skip。
+临时 syscall 打印和诊断 workflow 步骤均移除；保留准入断言的 mode 提示。以上不是新一轮真实模型验收，
+原生发布门禁与最终安装包验收仍以统一发布提交的独立证据为准。

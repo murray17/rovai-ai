@@ -657,11 +657,10 @@ impl AntigravityAppRuntimeAdapter {
             Ok(())
         }.await;
         if let Err(error) = dispatch {
-            if let Err(cleanup_error) =
-                reap_antigravity_process(&mut child, Instant::now() + Duration::from_secs(3)).await
+            if reap_antigravity_process(&mut child, Instant::now() + Duration::from_secs(3))
+                .await
+                .is_err()
             {
-                #[cfg(test)]
-                eprintln!("Antigravity input cleanup failed: {cleanup_error:#}");
                 *control.pending_cleanup.lock().await = Some(child);
             }
             stderr_task.abort();
@@ -2483,7 +2482,6 @@ mod tests {
         // The stream parser owns output mapping; this owner proves the native
         // initialization/input boundary with real pipes, including cancellation.
         for mode in ["missing", "foreign", "fenced", "aborted", "released"] {
-            eprintln!("input gate diagnostic mode {mode}");
             let root =
                 std::env::temp_dir().join(format!("rovai-agy-gate-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&root).unwrap();

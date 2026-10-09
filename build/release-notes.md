@@ -17,7 +17,7 @@
 - 【交互】**执行中的思考提示不再中途消失。** 输出正文或调用工具后再次思考时，状态继续更新；Codex、Copilot 提供原生短标题时会直接显示，Web 和手机端同步更新。
 - 【调整】**普通执行不再默认受 24 小时限制。** 新执行不会仅因超过一天而结束，已有执行和定时任务的超时规则保持不变。
 - 【性能】**减少空闲时的后台扫描。** 移除每 500 毫秒的全局业务扫描，消息、取消和权限审批按状态变化推进，并修复执行准备期间遗漏通知的问题。
-- 【修复】**修复停止和会话恢复中的异常。** 解决 macOS 停止后后台工具仍写入文件、ACP 启动失败一直等待，以及连续启动失败丢失仍可恢复的会话引用等问题。
+- 【修复】**修复停止和会话恢复中的异常。** 解决 macOS 停止后后台工具仍写入文件、进程已退出却卡在清理中、ACP 启动失败一直等待，以及连续启动失败丢失仍可恢复的会话引用等问题。
 - 【修复】**修复 Windows 上 Claude Code 后续消息卡在排队的问题。** 上一条结束或停止后，下一条在清理完成后自动运行，无需重启；执行台会明确显示等待清理和重试状态。
 - 【修复】**修复 Windows 下 DeepSeek Harness 检查结果失效的问题。** 同一程序的不同路径写法不再被误判为配置变化，首次检查和模型刷新可以正常确认结果。
 - 【修复】**长消息可以正常选文引用。** 超过 20 行的用户消息，在折叠、展开和再次收起后都能引用。
@@ -56,7 +56,7 @@ This release adds one-click execution continuation and teammate invitations in n
 - [Interaction] **Thinking indicators stay visible during execution.** Status continues updating when an agent thinks again after producing text or using tools. Native short titles from Codex and Copilot are shown when available, with updates also reflected on Web and mobile.
 - [Change] **New ordinary executions no longer have a default 24-hour limit.** They do not end solely because a day has passed. Existing executions and scheduled-task timeout rules remain unchanged.
 - [Performance] **Less background scanning while idle.** The global 500-millisecond business scan has been removed. Messages, cancellation, and permission approvals advance on state changes, with a fix for missed notifications during execution preparation.
-- [Fix] **Fix cancellation and session recovery issues.** Background tools on macOS stop writing after cancellation; failed ACP startup no longer waits indefinitely, and repeated startup failures retain recoverable session references.
+- [Fix] **Fix cancellation and session recovery issues.** Background tools on macOS stop writing after cancellation, and already-exited processes no longer get stuck in cleanup. Failed ACP startup no longer waits indefinitely, and repeated startup failures retain recoverable session references.
 - [Fix] **Fix subsequent Claude Code messages getting stuck in the queue on Windows.** After an execution finishes or stops, the next message runs once cleanup completes, without restarting the app. The execution view shows cleanup waiting and retry states.
 - [Fix] **Fix stale DeepSeek Harness check results on Windows.** Different path representations of the same program no longer count as configuration changes, allowing initial checks and model refreshes to complete normally.
 - [Fix] **Quote text from long messages.** User messages longer than 20 lines can be quoted when collapsed, expanded, or collapsed again.

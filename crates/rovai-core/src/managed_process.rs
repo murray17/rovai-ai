@@ -743,6 +743,19 @@ impl ManagedProcess {
         self.owned_tree.is_empty()
     }
 
+    #[cfg(target_os = "macos")]
+    fn macos_group_signal_already_complete(&self, error: &io::Error) -> io::Result<bool> {
+        // Darwin killpg can report EPERM when the group only contains zombies,
+        // after the identity-bound signal has already stopped this launch.
+        // The error alone proves nothing: require the complete captured tree
+        // (including the root) to have no remaining user execution before reap.
+        if error.raw_os_error() == Some(libc::EPERM) {
+            self.captured_tree_is_empty()
+        } else {
+            Ok(false)
+        }
+    }
+
     pub fn force_terminate_tree(&mut self) -> io::Result<()> {
         // Capture before killing the root: native tools may own a different
         // process group and are reparented as soon as their parent exits.
@@ -770,6 +783,12 @@ impl ManagedProcess {
                 return Ok(());
             }
             let error = io::Error::last_os_error();
+            #[cfg(target_os = "macos")]
+            if self.macos_group_signal_already_complete(&error)? {
+                descendants?;
+                self.tree_termination_requested = true;
+                return Ok(());
+            }
             if error.raw_os_error() != Some(libc::ESRCH) {
                 return Err(error);
             }
@@ -1126,6 +1145,13 @@ mod tests {
             .unwrap()
             .unwrap();
         process.capture_descendants().unwrap();
+        #[cfg(target_os = "macos")]
+        assert!(
+            !process
+                .macos_group_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                .unwrap(),
+            "a live managed tree cannot turn a group permission error into cleanup"
+        );
         let detached_pid: i32 = line.trim().parse().unwrap();
         let detached = tokio::time::timeout(Duration::from_secs(3), async {
             // The handshake observes the actual setsid boundary, not a sleep
@@ -1159,6 +1185,13 @@ mod tests {
             !process.captured_tree_is_empty().unwrap(),
             "root exit does not reap a detached child"
         );
+        #[cfg(target_os = "macos")]
+        assert!(
+            !process
+                .macos_group_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                .unwrap(),
+            "root exit is insufficient while a captured detached child is alive"
+        );
         process.force_terminate_tree().unwrap();
         tokio::time::timeout(Duration::from_secs(3), async {
             while !process.captured_tree_is_empty().unwrap() {
@@ -1167,6 +1200,30 @@ mod tests {
         })
         .await
         .expect("captured child must exit even after reparenting");
+        #[cfg(target_os = "macos")]
+        {
+            assert!(
+                process
+                    .macos_group_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                    .unwrap(),
+                "confirmed identity-bound tree exit must permit root reap after EPERM"
+            );
+            assert!(
+                !process
+                    .macos_group_signal_already_complete(&io::Error::from_raw_os_error(
+                        libc::EACCES
+                    ))
+                    .unwrap(),
+                "other errors retain their ordinary failure semantics"
+            );
+            process.descendant_capture_failed = true;
+            assert!(
+                process
+                    .macos_group_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                    .is_err(),
+                "an incomplete capture cannot be repaired by a later empty observation"
+            );
+        }
         assert!(
             control.try_wait().unwrap().is_none(),
             "unrelated same-UID processes must survive"

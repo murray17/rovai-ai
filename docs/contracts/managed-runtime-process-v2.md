@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Managed Runtime Process v2
@@ -174,6 +174,11 @@ macOS 显式 Stop 在祖先关系断开前捕获当前受管树，使用 libproc
 保留既有进程组回收，Claude、Antigravity 和普通 ACP 的清理确认还必须等待已捕获后代退出；
 身份查询或终止能力不可用时保持未确认并保留清理句柄。ZCode 保留自己的 ledger 确认路径。
 这不承诺捕获前已脱离祖先链的未知后台服务；不按进程名扫杀，也不把进程退出当作原生 turn 终态。
+
+identity-bound 终止后，macOS 对仅剩 zombie 的原进程组再次发送信号可能返回 `EPERM`。
+该错误不能单独证明成功：只有捕获完整，且按生命周期身份确认根进程及全部已捕获后代均已退出或
+成为不再执行用户代码的 zombie，才允许继续根进程 reap。仍有活跃后代、捕获不完整、查询失败
+或其他信号错误时保留原清理门禁；不增加超时，不把原生输入失败改成成功。
 
 User Automation 的 `rovai app` 防误调用由 CLI 入口拥有，见 [User Automation v5](user-automation-v5.md)。
 该检查不形成同 UID 恶意进程隔离，不是 Managed Process 的启动前置条件。

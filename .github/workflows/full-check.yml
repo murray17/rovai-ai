@@ -255,14 +255,6 @@ jobs:
       - name: Verify credentials and content versions
         id: web_check
         run: cargo test --locked -p rovai-web
-      - name: Diagnose native input-gate cleanup
-        if: matrix.target == 'macos-arm64'
-        # Bounded diagnostic for the CI-only concurrent cleanup race; stop at
-        # the first failure. This temporary step is not a release retry policy.
-        run: |
-          for attempt in 1 2 3; do
-            cargo test --locked -p rovai-core --lib antigravity::tests:: -- --nocapture || exit 1
-          done
       - name: Verify updater and process handoff
         if: ${{ !cancelled() && (steps.web_check.conclusion == 'success' || steps.web_check.conclusion == 'failure') }}
         run: cargo test --locked -p rovai-host --lib server_updates
