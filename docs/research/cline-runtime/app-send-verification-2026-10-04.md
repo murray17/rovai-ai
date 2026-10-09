@@ -12,7 +12,7 @@ last_updated: 2026-10-04
 按 User 消息 `33c5ae08-46e3-40ed-92ae-533dd4353b68` 构建并保留 arm64 ad-hoc App，
 在独立 userData 中配置既有测试队员叮叮、芝士。Cline 使用完整官方 npm 3.0.65 安装、
 自身的 OpenAI-compatible provider 配置与已授权的 sub2api/gpt-6-sol。全局 CLI 与日常 App 未改动。
-平台使用 [V1.72-D20](../../versions/v1.72/decisions.md#v1-72-d20) 的 Preview；本记录不是资格证书。
+平台使用 [V1.72-D23](../../versions/v1.72/decisions.md#v1-72-d23) 的 Preview；本记录不是资格证书。
 
 ## 路径与核验
 

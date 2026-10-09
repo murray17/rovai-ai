@@ -31,8 +31,9 @@ use crate::{
         validate_frozen_camp_attachment_view_receipt,
     },
     camp_content::{
-        AGENT_MESSAGE_PROJECTION_AUDIENCE, StructuredThreadMessageContent, mentions_current_user,
-        normalize_content, render_agent_plain_text, render_agent_plain_text_for_audience,
+        AGENT_MESSAGE_PROJECTION_AUDIENCE, MessageMention, StructuredThreadMessageContent,
+        mentions_current_user, message_mentions, normalize_content, render_agent_plain_text,
+        render_agent_plain_text_for_audience, render_agent_plain_text_with_names,
         render_member_mention_plain_text, valid_agent_projection_audience,
     },
     camp_message_publication::public_camp_message_publication_cte,
@@ -77,6 +78,7 @@ fn context_manifest_is_dispatchable(
         (manifest_version == PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
             && formatter_version == PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
             && profile_version == 10)
+            || (manifest_version == 32 && formatter_version == 32 && profile_version == 10)
             || (manifest_version == 31 && formatter_version == 31 && profile_version == 10)
             || (manifest_version == 30 && formatter_version == 30 && profile_version == 10)
             || (manifest_version == 29 && formatter_version == 29 && profile_version == 9)
@@ -92,7 +94,7 @@ fn context_manifest_is_dispatchable(
 fn run_facts_schema_version(manifest_version: i64, invocation_kind: &str) -> i64 {
     if invocation_kind == "batch" {
         match manifest_version {
-            32 => 9,
+            32 | 33 => 9,
             31 => 8,
             _ => 7,
         }
@@ -664,7 +666,14 @@ impl ContextService {
         let profile_json = profile.frozen_json()?;
         let profile_digest = profile.canonical_digest()?;
         let batch_model_context = (snapshot.invocation_kind == "batch")
-            .then(|| load_batch_model_context(database, &snapshot, profile))
+            .then(|| {
+                load_batch_model_context(
+                    database,
+                    &snapshot,
+                    profile,
+                    batch_context_manifest_version.expect("batch version"),
+                )
+            })
             .transpose()?;
         let (mut self_active_tasks, mut self_active_task_omitted_count) =
             if snapshot.invocation_kind == "single_chat" {
@@ -1127,7 +1136,7 @@ impl ContextService {
             .inspect(|&version| {
                 debug_assert!(matches!(
                     version,
-                    29 | 30 | 31 | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
+                    29 | 30 | 31 | 32 | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
                 ));
             })
             .unwrap_or(CONTEXT_FORMATTER_VERSION);
@@ -4140,6 +4149,7 @@ struct SharedMessage {
     source_conversation_id: Option<String>,
     content_digest: String,
     default_recipient_mention: Option<DefaultRecipientMention>,
+    mentions: Option<Vec<MessageMention>>,
     mentions_current_user: bool,
     skill_names: Vec<String>,
     skill_mentions: Vec<(String, String)>,
@@ -4327,7 +4337,9 @@ fn model_batch_message(message: &SharedMessage) -> Value {
                 .collect(),
         );
     }
-    if message.mentions_current_user {
+    if let Some(mentions) = &message.mentions {
+        value["mentions"] = json!(mentions);
+    } else if message.mentions_current_user {
         value["mentionsCurrentUser"] = json!(true);
     }
     value
@@ -4396,7 +4408,8 @@ pub(crate) fn project_batch_run_input_for_claim(
                        source_conversation.id, message.body,
                        message.structured_content_json,
                        message.reply_to_camp_message_id,
-                       message.address_mode, message.addressed_agent_ids_json
+                       message.address_mode, message.addressed_agent_ids_json,
+                       message.effective_recipient_ids_json
                 FROM camp_message AS message
                 LEFT JOIN agent_run AS source_run
                   ON source_run.id = message.source_agent_run_id
@@ -4420,6 +4433,7 @@ pub(crate) fn project_batch_run_input_for_claim(
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, String>(7)?,
                         row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
                     ))
                 },
             )
@@ -4431,7 +4445,7 @@ pub(crate) fn project_batch_run_input_for_claim(
             .map(batch_message_skill_mentions)
             .transpose()?
             .unwrap_or_default();
-        let (body, mentions_current_user, default_recipient_mention) =
+        let (body, mentions_current_user, default_recipient_mention, mut names) =
             projected_public_batch_camp_message(
                 transaction,
                 row.4,
@@ -4459,6 +4473,12 @@ pub(crate) fn project_batch_run_input_for_claim(
             Some(&claimed_source_message_ids),
         )?;
         message.default_recipient_mention = default_recipient_mention;
+        message.mentions = Some(message_mentions(
+            transaction,
+            &serde_json::from_str::<Vec<String>>(&row.9)?,
+            &mut names,
+            mentions_current_user,
+        )?);
         message.skill_names = skill_names;
         message.skill_mentions = skill_mentions;
         messages.push(model_batch_input_message(
@@ -4500,7 +4520,7 @@ fn frozen_batch_context_manifest_version(
     anyhow::ensure!(
         matches!(
             version,
-            29 | 30 | 31 | PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
+            29 | 30 | 31 | 32 | PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
         ),
         "Batch AgentRun uses an unsupported context version"
     );
@@ -4519,6 +4539,7 @@ type BatchMessageRow = (
     String,
     String,
     Option<String>,
+    String,
 );
 
 type BatchMessageSkillMentions = (Vec<String>, Vec<(String, String)>);
@@ -4527,6 +4548,7 @@ fn load_batch_model_context<R: ContextReadConnection>(
     database: &R,
     snapshot: &RunSnapshot,
     profile: ContextDeliveryProfile,
+    context_version: i64,
 ) -> Result<BatchModelContext> {
     let complete_profile = ContextDeliveryProfile {
         max_public_history_chars: usize::MAX,
@@ -4548,13 +4570,14 @@ fn load_batch_model_context<R: ContextReadConnection>(
                     address_mode,
                     addressed_agent_ids_json,
                     frozen_default_recipient_display_name,
+                    effective_recipients_json,
                 )| {
                     let (skill_names, skill_mentions) = structured_content_json
                         .as_deref()
                         .map(batch_message_skill_mentions)
                         .transpose()?
                         .unwrap_or_default();
-                    let (body, mentions_current_user, default_recipient_mention) =
+                    let (body, mentions_current_user, default_recipient_mention, mut names) =
                         projected_public_batch_camp_message(
                             database.context_connection(),
                             stored_body,
@@ -4582,6 +4605,14 @@ fn load_batch_model_context<R: ContextReadConnection>(
                         None,
                     )?;
                     message.default_recipient_mention = default_recipient_mention;
+                    if context_version >= 33 {
+                        message.mentions = Some(message_mentions(
+                            database.context_connection(),
+                            &serde_json::from_str::<Vec<String>>(&effective_recipients_json)?,
+                            &mut names,
+                            mentions_current_user,
+                        )?);
+                    }
                     message.skill_names = skill_names;
                     message.skill_mentions = skill_mentions;
                     Ok(message)
@@ -4597,7 +4628,7 @@ fn load_batch_model_context<R: ContextReadConnection>(
                    source_conversation.id, message.body, message.structured_content_json,
                    message.reply_to_camp_message_id, message.address_mode,
                    message.addressed_agent_ids_json,
-                   input.default_recipient_display_name
+                   input.default_recipient_display_name, message.effective_recipient_ids_json
             FROM agent_run_input AS input
             JOIN camp_message AS message ON message.id = input.message_id
             LEFT JOIN agent_run AS source_run ON source_run.id = message.source_agent_run_id
@@ -4621,6 +4652,7 @@ fn load_batch_model_context<R: ContextReadConnection>(
                     row.get(8)?,
                     row.get(9)?,
                     row.get(10)?,
+                    row.get(11)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
@@ -5464,6 +5496,7 @@ fn project_shared_message<R: ContextReadConnection>(
         source_conversation_id,
         content_digest,
         default_recipient_mention: None,
+        mentions: None,
         mentions_current_user,
         skill_names: Vec::new(),
         skill_mentions: Vec::new(),
@@ -5811,17 +5844,34 @@ fn projected_public_batch_camp_message(
     addressed_agent_ids_json: &str,
     derive_default_recipient_mention: bool,
     frozen_default_recipient_display_name: Option<&str>,
-) -> Result<(String, bool, Option<DefaultRecipientMention>)> {
-    let (authored_body, mentions_current_user) =
-        projected_current_camp_message(connection, stored_body, structured_content_json)?;
+) -> Result<(
+    String,
+    bool,
+    Option<DefaultRecipientMention>,
+    BTreeMap<String, String>,
+)> {
+    let mut names = BTreeMap::new();
+    let (authored_body, mentions_current_user) = match structured_content_json {
+        Some(content_json) => {
+            let content = normalize_content(
+                serde_json::from_str::<StructuredThreadMessageContent>(&content_json)
+                    .context("CampMessage Structured Content is invalid")?,
+            );
+            (
+                render_agent_plain_text_with_names(connection, &content, &mut names)?,
+                mentions_current_user(&content),
+            )
+        }
+        None => (stored_body, false),
+    };
     if !derive_default_recipient_mention || address_mode != "default" {
-        return Ok((authored_body, mentions_current_user, None));
+        return Ok((authored_body, mentions_current_user, None, names));
     }
 
     let addressed_agent_ids = serde_json::from_str::<Vec<String>>(addressed_agent_ids_json)
         .context("CampMessage addressed Agent identities are invalid")?;
     let Some(agent_id) = addressed_agent_ids.first() else {
-        return Ok((authored_body, mentions_current_user, None));
+        return Ok((authored_body, mentions_current_user, None, names));
     };
     anyhow::ensure!(
         addressed_agent_ids.len() == 1,
@@ -5839,6 +5889,7 @@ fn projected_public_batch_camp_message(
             .context("Default-addressed CampMessage recipient identity does not exist")?,
     };
     let mention_token = render_member_mention_plain_text(&display_name);
+    names.insert(agent_id.clone(), display_name.clone());
     let body = if authored_body.is_empty() {
         mention_token
     } else if authored_body
@@ -5857,6 +5908,7 @@ fn projected_public_batch_camp_message(
             agent_id: agent_id.clone(),
             display_name,
         }),
+        names,
     ))
 }
 
@@ -7577,7 +7629,7 @@ fn load_existing_manifest(
     }
     if matches!(
         row.15,
-        27 | CONTEXT_FORMATTER_VERSION | 30 | 31 | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
+        27 | CONTEXT_FORMATTER_VERSION | 30 | 31 | 32 | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
     ) {
         let dynamic_evidence: Option<(String, String, String)> = database.connection().query_row(
             "SELECT section_text, section_digest, omitted_json FROM context_additional_skills_evidence WHERE context_manifest_id = ?1",
@@ -8699,7 +8751,7 @@ mod tests {
             ("\n正文", "@爱丽丝\n正文"),
             ("", "@爱丽丝"),
         ] {
-            let (body, mentions_current_user, evidence) = projected_public_batch_camp_message(
+            let (body, mentions_current_user, evidence, _) = projected_public_batch_camp_message(
                 &connection,
                 authored.to_string(),
                 content(authored),
@@ -8718,7 +8770,7 @@ mod tests {
         }
 
         for (address_mode, recipients) in [("explicit", r#"["agent-1"]"#), ("default", "[]")] {
-            let (body, _, evidence) = projected_public_batch_camp_message(
+            let (body, _, evidence, _) = projected_public_batch_camp_message(
                 &connection,
                 "正文".to_string(),
                 content("正文"),
@@ -8747,7 +8799,7 @@ mod tests {
             );
         }
 
-        let (body, _, evidence) = projected_public_batch_camp_message(
+        let (body, _, evidence, _) = projected_public_batch_camp_message(
             &connection,
             "正文".to_string(),
             content("正文"),
@@ -8763,7 +8815,7 @@ mod tests {
             json!({"agentId": "agent-1", "displayName": "领取时名字"})
         );
 
-        let (body, _, evidence) = projected_public_batch_camp_message(
+        let (body, _, evidence, _) = projected_public_batch_camp_message(
             &connection,
             "正文".to_string(),
             content("正文"),
@@ -8788,8 +8840,8 @@ mod tests {
                     context_manifest_version INTEGER
                 );
                 INSERT INTO agent_run_input VALUES ('historical', 26);
-                INSERT INTO agent_run_input VALUES ('current', 32);
-                INSERT INTO agent_run_input VALUES ('current', 32);
+                INSERT INTO agent_run_input VALUES ('current', 33);
+                INSERT INTO agent_run_input VALUES ('current', 33);
                 INSERT INTO agent_run_input VALUES ('previous', 30);
                 INSERT INTO agent_run_input VALUES ('previous', 30);
                 INSERT INTO agent_run_input VALUES ('legacy', 29);
@@ -8821,6 +8873,7 @@ mod tests {
     #[test]
     fn dispatch_admission_accepts_current_and_frozen_predecessor_contracts() {
         assert!(context_manifest_is_dispatchable(28, 28, 7, "single_chat"));
+        assert!(context_manifest_is_dispatchable(33, 33, 10, "batch"));
         assert!(context_manifest_is_dispatchable(32, 32, 10, "batch"));
         assert!(context_manifest_is_dispatchable(27, 27, 7, "single_chat"));
         assert!(context_manifest_is_dispatchable(31, 31, 10, "batch"));
@@ -8877,7 +8930,7 @@ mod tests {
 
     #[test]
     fn batch_run_input_projects_only_the_skills_selected_by_each_message() {
-        let message = SharedMessage {
+        let mut message = SharedMessage {
             quotes: Vec::new(),
             quote_scope_current: true,
             camp_id: "camp-1".to_string(),
@@ -8888,6 +8941,7 @@ mod tests {
             source_conversation_id: None,
             content_digest: "sha256:test".to_string(),
             default_recipient_mention: None,
+            mentions: None,
             mentions_current_user: false,
             skill_names: vec!["review-code".to_string()],
             skill_mentions: Vec::new(),
@@ -8898,6 +8952,25 @@ mod tests {
             body_truncated: false,
             next_body_offset: None,
         };
+        // New empty metadata is mandatory; it changes neither body nor author or skill fields.
+        let legacy = model_batch_message(&message);
+        message.mentions = Some(Vec::new());
+        let mut current = model_batch_message(&message);
+        assert_eq!(
+            current.as_object_mut().unwrap().remove("mentions"),
+            Some(json!([]))
+        );
+        assert_eq!(current, legacy);
+        message.mentions_current_user = true;
+        message.mentions = None;
+        assert_eq!(model_batch_message(&message)["mentionsCurrentUser"], true);
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        message.mentions =
+            Some(message_mentions(&connection, &[], &mut BTreeMap::new(), true).unwrap());
+        let current = model_batch_message(&message);
+        assert_eq!(current["mentions"], json!([{"id":"user"}]));
+        assert!(current.get("mentionsCurrentUser").is_none());
+        assert_eq!(current["body"], legacy["body"]);
         let context = BatchModelContext {
             run_input_messages: vec![message],
         };
@@ -8938,6 +9011,7 @@ mod tests {
             source_conversation_id: None,
             content_digest: "sha256:test".to_string(),
             default_recipient_mention: None,
+            mentions: None,
             mentions_current_user: false,
             skill_names: vec!["review-code".to_string()],
             skill_mentions: vec![("native:one".to_string(), "review-code".to_string())],
@@ -11176,6 +11250,69 @@ mod slow_tests {
         fixture.cleanup();
     }
 
+    // A claimed input without a Manifest must survive an upgrade using its frozen formatter.
+    #[test]
+    fn claimed_legacy_batch_keeps_its_format_after_mention_upgrade() {
+        let mut fixture = fixture();
+        crate::db::downgrade_message_mentions_fixture(&fixture.database);
+        crate::db::upgrade_message_mentions_fixture(&mut fixture.database);
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let request = MaterializeContextRequest {
+            agent_run_id: &fixture.run_id,
+            execution_epoch: fixture.execution_epoch,
+            charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+            max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+        };
+        let ContextMaterialization::Ready(first) = ContextService
+            .materialize(&mut fixture.database, &store, &request)
+            .unwrap()
+        else {
+            panic!("legacy input must remain materializable");
+        };
+        let input: Value = serde_json::from_str(
+            first
+                .rendered_payload
+                .split_once("[RUN_INPUT]\n")
+                .unwrap()
+                .1
+                .split_once("\n[/RUN_INPUT]")
+                .unwrap()
+                .0,
+        )
+        .unwrap();
+        assert!(input["messages"][0].get("mentions").is_none());
+        let version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT context_manifest_version FROM context_manifest WHERE id=?1",
+                [&first.manifest_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, 32);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name='Later name' WHERE id='agent_1'",
+                [],
+            )
+            .unwrap();
+        let ContextMaterialization::Ready(replay) = ContextService
+            .materialize(&mut fixture.database, &store, &request)
+            .unwrap()
+        else {
+            panic!("frozen legacy payload must be reusable");
+        };
+        assert_eq!(replay.rendered_payload, first.rendered_payload);
+        assert_eq!(
+            replay.rendered_payload_digest,
+            first.rendered_payload_digest
+        );
+        fixture.cleanup();
+    }
+
     #[test]
     fn attachment_only_current_input_is_empty_and_reuses_stable_camp_attachment_paths() {
         let mut fixture = fixture();
@@ -11214,7 +11351,8 @@ mod slow_tests {
             .execute(
                 r#"
                 UPDATE camp_message
-                SET body = '', structured_content_json = ?2, content_digest = ?3
+                SET body = '', structured_content_json = ?2, content_digest = ?3,
+                    effective_recipient_ids_json = '["agent_1"]'
                 WHERE id = ?1
                 "#,
                 params![
@@ -11365,7 +11503,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             (manifest_version, formatter_version, facts_version),
-            (32, 32, 9)
+            (33, 33, 9)
         );
         assert_eq!(
             serde_json::from_str::<Value>(&profile_json).unwrap(),
@@ -11378,6 +11516,15 @@ mod slow_tests {
         assert_eq!(
             run_input["messages"][0]["body"],
             format!("@{claim_recipient_display_name}")
+        );
+        assert_eq!(
+            run_input["messages"][0]["mentions"],
+            json!([{"id":"agent_1","name":claim_recipient_display_name}])
+        );
+        assert!(
+            run_input["messages"][0]
+                .get("mentionsCurrentUser")
+                .is_none()
         );
         assert!(!first.rendered_payload.contains("[SHARED_THREAD]"));
         assert_eq!(
@@ -14491,6 +14638,7 @@ mod slow_tests {
                 source_conversation_id: None,
                 content_digest: sha256_text(&body),
                 default_recipient_mention: None,
+                mentions: None,
                 mentions_current_user: false,
                 skill_names: Vec::new(),
                 skill_mentions: Vec::new(),
@@ -14681,6 +14829,14 @@ mod slow_tests {
         assert_eq!(
             run_input_evidence["messages"][0]["projectedBodyDigest"],
             sha256_text(projected_body.as_str())
+        );
+        assert_eq!(
+            run_input_evidence["projectedInputDigest"],
+            canonical_json_digest(&run_input).unwrap()
+        );
+        assert_eq!(
+            context.rendered_payload_digest,
+            sha256_text(&context.rendered_payload)
         );
         assert_eq!(
             run_input_evidence["messages"][0]["defaultRecipientMention"],

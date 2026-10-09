@@ -2,6 +2,8 @@
 mod attachment_paths;
 #[path = "db_member_creation.rs"]
 mod member_creation;
+#[path = "db_message_mentions.rs"]
+mod message_mentions;
 #[path = "db_mission_context.rs"]
 mod mission_context;
 #[path = "db_mission_description.rs"]
@@ -20,6 +22,16 @@ mod thread_names;
 mod user_anchors;
 #[path = "db_user_projection.rs"]
 mod user_projection;
+
+#[cfg(all(test, feature = "slow-tests"))]
+pub(crate) fn downgrade_message_mentions_fixture(database: &Database) {
+    message_mentions::downgrade_for_test(database.connection());
+}
+
+#[cfg(all(test, feature = "slow-tests"))]
+pub(crate) fn upgrade_message_mentions_fixture(database: &mut Database) {
+    message_mentions::migrate(database).unwrap();
+}
 
 // Exercise upgrade against the context owner's populated, isolated legacy fixture.
 #[cfg(all(test, feature = "slow-tests"))]
@@ -321,7 +333,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 138;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 139;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -784,6 +796,7 @@ struct CurrentMigrationState {
     v186: bool,
     v187: bool,
     v188: bool,
+    v189: bool,
 }
 
 impl CurrentMigrationState {
@@ -805,11 +818,19 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v189 {
+            let mut previous = *self;
+            previous.v189 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && self.v188
+                && previous.admits("v1.72", 138, classifier);
+        }
         if self.v188 {
             let mut previous = *self;
             previous.v188 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            return contract == "v1.72"
+                && schema == 138
                 && self.v187
                 && previous.admits("v1.72", 137, classifier);
         }
@@ -3365,7 +3386,10 @@ pub(crate) fn classify_database_contract(
         || (migrations.v184 && !runtime_v184_source_schema_matches(connection, migrations.v185)?)
         || (migrations.v186 && !run_continuation::schema_matches(connection)?)
         || (migrations.v185 && !runtime_v185_source_schema_matches(connection, migrations.v186)?)
-        || (migrations.v187 && !mission_description::schema_matches(connection)?)
+        || (migrations.v187
+            && (!mission_description::schema_matches(connection)?
+                || !message_mentions::source_schema_matches(connection)?))
+        || (migrations.v189 && !message_mentions::schema_matches(connection)?)
         || (migrations.v188
             && (!user_anchors::schema_matches(connection)?
                 || !command_code_runtime_v185_schema_matches(connection)?))
@@ -3641,7 +3665,7 @@ fn camp_message_agent_run_v163_schema_matches(connection: &Connection) -> rusqli
             'context_manifest_v28_only_insert',
             'context_manifest_v29_only_insert',
             'context_manifest_v30_only_insert',
-            'context_manifest_v31_only_insert','context_manifest_v32_only_insert',
+            'context_manifest_v31_only_insert','context_manifest_v32_only_insert','context_manifest_v33_only_insert',
             'context_manifest_quote_profile_insert',
             'runtime_input_delivery_attachment_auth_insert'
         )
@@ -3666,7 +3690,7 @@ fn camp_message_agent_run_v163_schema_matches(connection: &Connection) -> rusqli
             || context_manifest_schema
                 .contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)")
             || (context_manifest_schema
-                .contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)") || context_manifest_schema.contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)")))
+                .contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)") || (context_manifest_schema.contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)") || context_manifest_schema.contains("formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33)"))))
         && (context_manifest_schema
             .contains("context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26)")
             || context_manifest_schema
@@ -3681,7 +3705,7 @@ fn camp_message_agent_run_v163_schema_matches(connection: &Connection) -> rusqli
             )
             || (context_manifest_schema.contains(
                 "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)",
-            ) || context_manifest_schema.contains("context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)")))
+            ) || (context_manifest_schema.contains("context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)") || context_manifest_schema.contains("context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33)"))))
         && (context_manifest_schema.contains("run_facts_schema_version IN (1, 2, 3, 4, 5)")
             || context_manifest_schema.contains("run_facts_schema_version IN (1, 2, 3, 4, 5, 6)")
             || context_manifest_schema
@@ -3718,7 +3742,7 @@ fn default_recipient_mention_v166_schema_matches(
             'agent_run_input_v28_only_insert',
             'agent_run_input_v29_only_insert',
             'agent_run_input_v30_only_insert',
-            'agent_run_input_v31_only_insert','agent_run_input_v32_only_insert',
+            'agent_run_input_v31_only_insert','agent_run_input_v32_only_insert','agent_run_input_v33_only_insert',
             'agent_run_input_context_projection_immutable'
         )
         "#,
@@ -3738,7 +3762,7 @@ fn default_recipient_mention_v166_schema_matches(
             'context_manifest_v28_only_insert',
             'context_manifest_v29_only_insert',
             'context_manifest_v30_only_insert',
-            'context_manifest_v31_only_insert','context_manifest_v32_only_insert',
+            'context_manifest_v31_only_insert','context_manifest_v32_only_insert','context_manifest_v33_only_insert',
             'context_manifest_quote_profile_insert',
             'runtime_input_delivery_attachment_auth_insert'
         )
@@ -3748,7 +3772,7 @@ fn default_recipient_mention_v166_schema_matches(
     )?;
     let new_write_trigger: String = connection
         .query_row(
-            "SELECT COALESCE(sql, '') FROM sqlite_master WHERE type = 'trigger' AND name IN ('context_manifest_v27_only_insert', 'context_manifest_v28_only_insert', 'context_manifest_v29_only_insert', 'context_manifest_v30_only_insert', 'context_manifest_v31_only_insert','context_manifest_v32_only_insert')",
+            "SELECT COALESCE(sql, '') FROM sqlite_master WHERE type = 'trigger' AND name IN ('context_manifest_v27_only_insert', 'context_manifest_v28_only_insert', 'context_manifest_v29_only_insert', 'context_manifest_v30_only_insert', 'context_manifest_v31_only_insert','context_manifest_v32_only_insert','context_manifest_v33_only_insert')",
             [],
             |row| row.get(0),
         )
@@ -3764,6 +3788,27 @@ fn default_recipient_mention_v166_schema_matches(
         [],
         |row| row.get(0),
     )?;
+    if manifest_schema.contains(
+        "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33)",
+    ) {
+        return Ok(input_columns == 2
+            && input_guards == 2
+            && triggers == 3
+            && manifest_schema.contains(
+                "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33)",
+            )
+            && manifest_schema
+                .contains("context_delivery_profile_version IN (4, 5, 6, 7, 8, 9, 10)")
+            && new_write_trigger.contains("NEW.context_manifest_version = 33")
+            && new_write_trigger.contains("NEW.context_manifest_version = 28")
+            && new_write_trigger.contains("NEW.context_manifest_version = 30")
+            && new_write_trigger.contains("NEW.context_manifest_version = 27")
+            && new_write_trigger.contains("invocation_kind = 'batch'")
+            && profile_trigger.contains("NEW.context_manifest_version = 31")
+            && profile_trigger.contains("NEW.context_delivery_profile_version = 10")
+            && attachment_trigger
+                .contains("context_manifest_version IN (26, 27, 28, 29, 30, 31, 32, 33)"));
+    }
     if manifest_schema.contains(
         "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)",
     ) {
@@ -4253,9 +4298,12 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
         [],
         |row| row.get(0),
     )?;
+    let mentions = message_mentions::schema_matches(connection)?;
     let manifest_guard = schema(
         "trigger",
-        if thread_names {
+        if mentions {
+            "context_manifest_v33_only_insert"
+        } else if thread_names {
             "context_manifest_v32_only_insert"
         } else {
             "context_manifest_v31_only_insert"
@@ -4263,7 +4311,9 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
     )?;
     let input_guard = schema(
         "trigger",
-        if thread_names {
+        if mentions {
+            "agent_run_input_v33_only_insert"
+        } else if thread_names {
             "agent_run_input_v32_only_insert"
         } else {
             "agent_run_input_v31_only_insert"
@@ -4296,12 +4346,12 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
         && run.contains(
             "claim_has_additional_public_messages INTEGER CHECK(claim_has_additional_public_messages IN (0, 1))",
         )
-        && manifest.contains(if thread_names { "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)" } else { "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)" })
-        && manifest.contains(if thread_names { "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)" })
+        && manifest.contains(if mentions { "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33)" } else if thread_names { "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)" } else { "formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)" })
+        && manifest.contains(if mentions { "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33)" } else if thread_names { "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)" })
         && manifest.contains(if thread_names { "run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9)" } else { "run_facts_schema_version IN (1, 2, 3, 4, 5, 6, 7, 8)" })
         && manifest.contains("context_manifest_version = 31 AND formatter_version = 31 AND run_facts_schema_version = 8")
         && manifest.contains("context_manifest_version = 30 AND formatter_version = 30 AND run_facts_schema_version = 7")
-        && input.contains(if thread_names { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (26, 27, 28, 29, 30, 31)" })
+        && input.contains(if mentions { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32, 33)" } else if thread_names { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (26, 27, 28, 29, 30, 31)" })
         && manifest_guard.contains("NEW.context_manifest_version = 31 AND NEW.formatter_version = 31")
         && manifest_guard.contains("NEW.run_facts_schema_version = 8 AND NEW.context_delivery_profile_version = 10")
         && manifest_guard.contains("run.claim_previous_public_boundary_sequence IS NOT NULL")
@@ -4311,10 +4361,10 @@ fn public_history_claim_v174_schema_matches(connection: &Connection) -> rusqlite
         && manifest_guard.contains("NEW.context_manifest_version = 29")
         && manifest_guard.contains("NEW.context_manifest_version = 27")
         && manifest_guard.contains("NEW.context_manifest_version = 26")
-        && input_guard.contains(if thread_names { "NEW.context_manifest_version IS NOT 32" } else { "NEW.context_manifest_version IS NOT 31" })
+        && input_guard.contains(if mentions { "NEW.context_manifest_version IS NOT 33" } else if thread_names { "NEW.context_manifest_version IS NOT 32" } else { "NEW.context_manifest_version IS NOT 31" })
         && profile_guard.contains("NEW.context_manifest_version = 31 AND NEW.context_delivery_profile_version = 10")
         && profile_guard.contains("NEW.context_manifest_version = 30 AND NEW.context_delivery_profile_version = 10")
-        && attachment_guard.contains(if thread_names { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (26, 27, 29, 30, 31)" }))
+        && attachment_guard.contains(if mentions { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32, 33)" } else if thread_names { "context_manifest_version IN (26, 27, 28, 29, 30, 31, 32)" } else { "context_manifest_version IN (26, 27, 29, 30, 31)" }))
 }
 
 fn skills_rebuild_v173_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
@@ -4909,7 +4959,7 @@ fn message_quote_v148_schema_matches(connection: &Connection) -> rusqlite::Resul
             return Ok(false);
         }
     }
-    let guards: i64 = connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE type='trigger' AND name IN ('context_manifest_v23_only_insert','context_manifest_v24_only_insert','context_manifest_v25_only_insert','context_manifest_v26_only_insert','context_manifest_v27_only_insert','context_manifest_v28_only_insert','context_manifest_v29_only_insert','context_manifest_v30_only_insert','context_manifest_v31_only_insert','context_manifest_v32_only_insert','context_manifest_quote_profile_insert')", [], |row| row.get(0))?;
+    let guards: i64 = connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE type='trigger' AND name IN ('context_manifest_v23_only_insert','context_manifest_v24_only_insert','context_manifest_v25_only_insert','context_manifest_v26_only_insert','context_manifest_v27_only_insert','context_manifest_v28_only_insert','context_manifest_v29_only_insert','context_manifest_v30_only_insert','context_manifest_v31_only_insert','context_manifest_v32_only_insert','context_manifest_v33_only_insert','context_manifest_quote_profile_insert')", [], |row| row.get(0))?;
     Ok(guards == 2)
 }
 
@@ -5429,7 +5479,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 185),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 186),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 187),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 188)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 188),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 189)
         "#,
         [],
         |row| {
@@ -5553,6 +5604,7 @@ fn load_current_migration_state(
                 v186: row.get(116)?,
                 v187: row.get(117)?,
                 v188: row.get(118)?,
+                v189: row.get(119)?,
             })
         },
     )
@@ -8717,6 +8769,9 @@ impl Database {
             if !self.schema_migration_applied(188)? {
                 migration_step!("migration_188", user_anchors::migrate(self));
             }
+            if !self.schema_migration_applied(189)? {
+                migration_step!("migration_189", message_mentions::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -9499,6 +9554,9 @@ impl Database {
         }
         if !self.schema_migration_applied(188)? {
             migration_step!("migration_188", user_anchors::migrate(self));
+        }
+        if !self.schema_migration_applied(189)? {
+            migration_step!("migration_189", message_mentions::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -39637,7 +39695,7 @@ mod tests {
         assert!(
             old_insert
                 .to_string()
-                .contains("must use ContextManifest v32")
+                .contains("must use ContextManifest v33")
         );
         for (column, invalid) in [
             ("claim_previous_public_boundary_sequence", -1),
@@ -40613,6 +40671,7 @@ mod tests {
         run_continuation::migrate(&mut database).unwrap();
         mission_description::migrate(&mut database).unwrap();
         user_anchors::migrate(&mut database).unwrap();
+        message_mentions::migrate(&mut database).unwrap();
         let successor_run_id = claim_waiting_delivery_batches(&mut database, 1)
             .unwrap()
             .pop()
@@ -41174,6 +41233,7 @@ mod tests {
             v186: version >= 186,
             v187: version >= 187,
             v188: version >= 188,
+            v189: version >= 189,
         }
     }
 
@@ -41368,6 +41428,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                189,
+            ),
+            (
+                "v1.72/schema 138 before Message Mention convergence",
+                "v1.72",
+                138,
                 188,
             ),
             (
@@ -41902,7 +41968,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(188);
+        let current = migration_state_through(189);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -42448,7 +42514,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(188));
+        assert_eq!(state, migration_state_through(189));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -44055,7 +44121,7 @@ mod tests {
             )
             .unwrap();
         assert!(manifest_schema.contains(
-            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32))"
+            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33))"
         ));
         let conversation: (Option<String>, Option<String>, i64, i64) = reopened
             .connection()
@@ -44389,7 +44455,7 @@ mod tests {
             )
             .unwrap();
         assert!(manifest_schema.contains(
-            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32))"
+            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33))"
         ));
         assert!(
             manifest_schema
@@ -45126,6 +45192,8 @@ mod tests {
                     | SkillDeliveryGroupKey::Pi
                     | SkillDeliveryGroupKey::Zcode
                     | SkillDeliveryGroupKey::Dsh
+                    | SkillDeliveryGroupKey::Cline
+                    | SkillDeliveryGroupKey::CommandCode
             )
         }) {
             for (skill_id, revision_id) in [
@@ -45307,6 +45375,8 @@ mod tests {
                     | SkillDeliveryGroupKey::Pi
                     | SkillDeliveryGroupKey::Zcode
                     | SkillDeliveryGroupKey::Dsh
+                    | SkillDeliveryGroupKey::Cline
+                    | SkillDeliveryGroupKey::CommandCode
             )
         }) {
             for (skill_id, revision_id) in [
@@ -55069,9 +55139,9 @@ mod tests {
             connection,
             "trigger",
             &[
-                "context_manifest_v32_only_insert",
+                "context_manifest_v33_only_insert",
                 "context_manifest_version_immutable",
-                "agent_run_input_v32_only_insert",
+                "agent_run_input_v33_only_insert",
                 "agent_run_input_context_projection_immutable",
                 "runtime_input_delivery_attachment_auth_insert",
                 "camp_attachment_view_camp_insert",
@@ -55093,6 +55163,8 @@ mod tests {
                 "context_manifest_v21_only_insert",
                 "context_manifest_v29_only_insert",
                 "agent_run_input_v29_only_insert",
+                "context_manifest_v32_only_insert",
+                "agent_run_input_v32_only_insert",
             ],
             false,
         );

@@ -353,10 +353,12 @@ last_updated: 2026-10-08
 
 ### 公共历史按需读取与实时读取
 
+- 公开 batch 的 RUN_INPUT.messages 与 thread.read 正常条目共用 [Message Mentions v1](../contracts/message-mentions-v1.md)：保存的完整有效目标 ID、同次解析的成员名，以及固定 user 条目；不是正文人物索引或执行状态。正文/作者的各自投影不变，非 batch 和单聊保持旧字段。新 Run 使用 [Manifest v33](../contracts/context-manifest-evidence-v33.md)，已领取 Run 按冻结版本恢复；不要求换 Session。
+
 - 新公开 batch AgentRun 不自动生成 `SHARED_CONVERSATION`、历史摘要或遗漏 locator。`RUN_INPUT` 仍完整有序。`RUN_FACTS.historyHint` 依据本 Agent 在此 Camp 上一次有效 accepted ACK 对应执行前公屏尾 `P` 以及本轮 claim 冻结的额外可见消息布尔结果选四种完整句子；存在只表示额外可见消息，不增加工作责任、不要求读取。提示是历史参考点，不代表阅读或完成，也不是 `camp.read --before` 游标。Charter 保留不推断遗漏、仅需当前工作时读取的纪律；`RUN_INPUT` 和已有上下文足够就直接推进，仅在缺少当前工作所需 Camp context 时 `rovai camp read`。
 - claim 同一事务用 `P`、本轮公屏尾 `T`、最终领取进入 `RUN_INPUT.messages` 的全部 ID `I` 与当前 Agent `A` 检查额外可见消息：`P > 0` 查 `(P, T]`、`P = 0` 查 `<= T`，首轮也查实际历史。可见性沿用当前 Camp `camp.read` 时间线的同 Camp／非 tombstone 规则，撤回占位符计入；仅排除 `I` 和 `author_type = agent, author_id = A`。发给其他 Agent 的可见消息及未领取队尾仍计入；不能用 waiting Delivery 候选代替历史可见集合。只做无正文、无数量、无分页上限的 `EXISTS`，失败回滚整个 claim，不创建无判断结果的 Run。Run 内部冻结 `P` 与布尔值，不复制历史；后续消息、撤回或水位变化均不重算原提示。
 - `(CampId, AgentId)` 接受水位只由匹配 Run/binding/generation 的整批 Runtime accepted ACK 推进，并跨 Native Session 保留；prepared、rejected、unknown、claim、read/search、发布、执行结束、stale ACK 或后续 Stop 都不能新增或回退有效边界。同一 Run 复用冻结 Manifest／payload 和原输入。
-- `RUN_INPUT` 与 quote-source 投影继续隔离 recallable、waiting Delivery 或已撤回原文。显式 read/search 按 [Camp History v11](../contracts/camp-history-v11.md) 使用主动查询可见性：已发布、未撤回的原文可读；撤回项只进入 `camp.read` 的时间线和按 ID 结果，以 `Message withdrawn` 状态占一个分页位置，不进入搜索或冻结输入。
+- `RUN_INPUT` 与 quote-source 投影继续隔离 recallable、waiting Delivery 或已撤回原文。显式 read/search 按 [Camp History v12](../contracts/camp-history-v12.md) 使用主动查询可见性：已发布、未撤回的原文可读；撤回项只进入 `camp.read` 的时间线和按 ID 结果，以 `Message withdrawn` 状态占一个分页位置，不进入搜索或冻结输入。
 - `camp.read` 始终读取调用时最新授权和可见状态，不受当前 ContextManifest 的历史上下界限制；timeline/thread 默认 20、显式 1–100，从最新页用排他 `before` 倒翻，超出一页必须给出真实续读位置。它不 claim Delivery、不关闭撤回、不推进 accepted 水位，也不把新读到的消息变成当前 Run 输入。
 - Agent 与 Human Principal 的 body/snippet/search offset 使用分开、版本化投影。外部渠道引用必须经 CampMessage Structured Content 进入标准投影，不能用 prompt override 绕过可见性或 evidence。
 

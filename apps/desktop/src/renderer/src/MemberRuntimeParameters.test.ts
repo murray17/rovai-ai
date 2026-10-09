@@ -118,6 +118,15 @@ describe('explicit model changes', () => {
     expect(explicitSelection(model, { mode: 'runtime_default' }, true)).toEqual({
       mode: 'explicit', modelId: 'runtime/next', options: {}
     })
+    for (const dshSource of ['native', 'web'] as const) {
+      expect(explicitSelection({ ...model, runtimeMetadata: { dshSource } }, {
+        mode: 'explicit', modelId: model.id, options: {},
+        dshSource: dshSource === 'web' ? 'native' : 'web'
+      }, true)).toEqual({ mode: 'explicit', modelId: model.id, options: {}, dshSource })
+    }
+    expect(explicitSelection(model, {
+      mode: 'explicit', modelId: 'old-web', options: {}, dshSource: 'web'
+    }, true)).toEqual({ mode: 'explicit', modelId: model.id, options: {} })
   })
 
   it('retains an explicit value while an expired historical catalog cannot verify the new model', () => {

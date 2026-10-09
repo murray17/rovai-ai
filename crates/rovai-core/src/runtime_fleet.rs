@@ -3898,7 +3898,7 @@ mod tests {
                     .unwrap()
                     .reaped
             );
-            // Only the owner with complete process-exit evidence persists this.
+            // Only the owner that confirms its current Job is empty persists this.
             store.finish_stop("crashed-host");
             live_child.force_terminate_tree().unwrap();
             tokio::time::timeout(Duration::from_secs(5), live_child.wait())

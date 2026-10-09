@@ -1059,6 +1059,8 @@
   "条输入": "Input line",
   "终止本次执行": "Terminate current execution",
   "排队中": "In queue",
+  "等待上次执行清理": "Waiting for the previous run to clean up",
+  "上次执行清理未确认，正在重试": "Previous run cleanup is unconfirmed; retrying",
   "终止本批排队": "Terminate current batch queue",
   "排队输入当前未载入。": "Queue input not loaded yet.",
   "调整执行详情高度": "Adjust execution detail height",

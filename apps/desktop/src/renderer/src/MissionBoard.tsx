@@ -294,7 +294,9 @@ function MissionEdit({ mission, projects, agents, catalog, onSave, onSaved, onCl
     <Dialog.Portal>
       <Dialog.Overlay className="dialog-overlay new-camp-dialog-overlay"/>
       <Dialog.Content ref={setDialogContent} className={`compact-dialog mission-definition-dialog mission-edit-dialog${expanded ? ' is-expanded' : ''}`} aria-describedby="mission-edit-description"
-        onOpenAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}>
+        onOpenAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => {
+          if (busy || dialogContent?.querySelector('.composer-caret-menu')) event.preventDefault()
+        }}>
         <header className="compact-header mission-editor-header">
           <div className="mission-editor-heading"><Dialog.Title><UiText zh={"编辑使命"} /></Dialog.Title><span>{`M-${String(mission.number).padStart(3, '0')}`}</span></div>
           <div className="mission-editor-header-actions"><button className="mission-editor-icon-button" type="button" aria-label={expanded ? uiAttribute("恢复编辑区域大小") : uiAttribute("展开编辑区域")} title={expanded ? uiAttribute("恢复编辑区域大小") : uiAttribute("展开编辑区域")} onClick={() => setExpanded(value => !value)} disabled={busy}><svg viewBox="0 0 24 24" aria-hidden="true">{expanded ? <><path d="M9 3v6H3M15 21v-6h6M3 9l6-6M21 15l-6 6"/></> : <><path d="M9 3H3v6M15 21h6v-6M3 9l6-6M21 15l-6 6"/></>}</svg></button><Dialog.Close asChild><button className="compact-close" type="button" aria-label={uiAttribute("关闭编辑使命")} disabled={busy}><DialogControlIcon name="close"/></button></Dialog.Close></div>

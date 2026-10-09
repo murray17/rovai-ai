@@ -1410,7 +1410,7 @@ The sole current human user identity resolved and owned by Core in the single-us
 _Avoid_: `local-user` alias, Agent-selected user ID, message author as current user, Renderer-inferred identity, multi-user binding
 
 **Current User Mention**:
-A Core-generated `current_user_mention(local_user)` segment in authoritative Structured Thread Message Content, requested only through `mentionUser` / `--to-user`. Its visible `@displayName` and `mentionsCurrentUser` projections never make the user an Agent recipient or Message Delivery target.
+A Core-generated `current_user_mention(local_user)` segment in authoritative Structured Thread Message Content, requested only through `mentionUser` / `--to-user`. Its visible `@displayName`, public batch/read `mentions: [{"id":"user"}]`, and non-batch `mentionsCurrentUser` projections never make the user an Agent recipient or Message Delivery target.
 _Avoid_: parsed `@you`, Member Mention, user recipient, notification-only decoration, Renderer token without Core content
 
 **Current User Attention**:

@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
 };
 
 use anyhow::{Context, Result};
@@ -12,8 +12,9 @@ use uuid::Uuid;
 
 use crate::{
     camp_content::{
-        StructuredThreadMessageContent, mentions_current_user, normalize_content,
-        render_agent_plain_text, render_agent_search_projection, validate_content,
+        StructuredThreadMessageContent, mentions_current_user, message_mentions, normalize_content,
+        render_agent_plain_text, render_agent_plain_text_with_names,
+        render_agent_search_projection, validate_content,
     },
     camp_id::{CAMP_ID_PATTERN, ThreadId},
     camp_message_publication::public_camp_message_publication_cte,
@@ -28,7 +29,7 @@ pub const CAMP_LIST_TOOL_NAME: &str = "thread.list";
 pub const CAMP_SEARCH_TOOL_NAME: &str = "thread.search";
 pub const HISTORY_SEARCH_TOOL_NAME: &str = "history.search";
 pub const CAMP_READ_TOOL_NAME: &str = "thread.read";
-pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 11;
+pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 12;
 
 const CAMP_LIST_DEFAULT_LIMIT: usize = 20;
 const CAMP_LIST_MAX_LIMIT: usize = 50;
@@ -131,6 +132,7 @@ pub(crate) struct ThreadTarget {
 
 #[derive(Debug, Clone)]
 struct MessageRow {
+    member_names: BTreeMap<String, String>,
     id: String,
     camp_id: String,
     sequence: i64,
@@ -1390,6 +1392,7 @@ fn extract_query_references(query: &str) -> Vec<(String, String)> {
 
 fn message_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
     Ok(MessageRow {
+        member_names: BTreeMap::new(),
         id: row.get(0)?,
         camp_id: row.get(1)?,
         sequence: row.get(2)?,
@@ -1668,7 +1671,9 @@ fn read_item(
         }));
     }
     let (attachments, attachment_count) = load_attachments(transaction, message_id)?;
-    let addressing = load_exact_addressing(transaction, message_id)?;
+    let mentions = load_message_mentions(transaction, &[&message])?
+        .remove(message_id)
+        .context("normal message is missing mentions")?;
     let mut value = json!({
         "threadId": target.camp_id,
         "mode": "item",
@@ -1684,7 +1689,7 @@ fn read_item(
             "attachments": attachments,
             "attachmentsTruncated": attachment_count > MAX_ATTACHMENTS,
             "attachmentOmittedCount": attachment_count.saturating_sub(MAX_ATTACHMENTS),
-            "addressing": addressing,
+            "mentions": mentions,
         }]
     });
     attach_message_quotes(transaction, target, message_id, &mut value["items"][0])?;
@@ -1769,21 +1774,16 @@ fn load_committed_self_written_message(
         )
         .optional()?;
     if let Some(message) = message.as_mut() {
-        message.body = projected_message_body(transaction, &message.id)?;
+        (message.body, message.member_names) = projected_message_body(transaction, &message.id)?;
     }
     Ok(message)
 }
 
-fn load_exact_addressing(transaction: &Transaction<'_>, message_id: &str) -> Result<Value> {
-    load_message_addressing(transaction, &[message_id])?
-        .remove(message_id)
-        .context("normal message is missing addressing")
-}
-
-fn load_message_addressing(
+fn load_message_mentions(
     transaction: &Transaction<'_>,
-    message_ids: &[&str],
+    messages: &[&MessageRow],
 ) -> Result<HashMap<String, Value>> {
+    let message_ids: Vec<_> = messages.iter().map(|message| message.id.as_str()).collect();
     if message_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -1795,28 +1795,36 @@ fn load_message_addressing(
           AND recall_state <> 'withdrawn'
         "#,
     )?;
-    let sources = statement.query_map([serde_json::to_string(message_ids)?], |row| {
+    let sources = statement.query_map([serde_json::to_string(&message_ids)?], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
         ))
     })?;
-    let mut addressing = HashMap::new();
+    let mut mentions = HashMap::new();
     for source in sources {
         let (id, recipients_json, content_json) = source?;
         let recipients: Vec<String> = serde_json::from_str(&recipients_json)?;
         let content: StructuredThreadMessageContent = serde_json::from_str(&content_json)?;
         validate_content(&content)?;
-        addressing.insert(
+        let mut names = messages
+            .iter()
+            .find(|message| message.id == id)
+            .context("Mention source is outside the requested messages")?
+            .member_names
+            .clone();
+        mentions.insert(
             id,
-            json!({
-                "effectiveAgentRecipients": recipients,
-                "mentionsCurrentUser": mentions_current_user(&content),
-            }),
+            json!(message_mentions(
+                transaction,
+                &recipients,
+                &mut names,
+                mentions_current_user(&content)
+            )?),
         );
     }
-    Ok(addressing)
+    Ok(mentions)
 }
 
 fn read_thread(
@@ -1971,13 +1979,22 @@ fn load_visible_message(
         )
         .optional()?;
     if let Some(message) = message.as_mut().filter(|message| !message.withdrawn) {
-        message.body = projected_message_body(transaction, &message.id)?;
+        (message.body, message.member_names) = projected_message_body(transaction, &message.id)?;
     }
     Ok(message)
 }
 
-fn projected_message_body(transaction: &Transaction<'_>, message_id: &str) -> Result<String> {
-    render_agent_plain_text(transaction, &load_message_content(transaction, message_id)?)
+fn projected_message_body(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+) -> Result<(String, BTreeMap<String, String>)> {
+    let mut names = BTreeMap::new();
+    let body = render_agent_plain_text_with_names(
+        transaction,
+        &load_message_content(transaction, message_id)?,
+        &mut names,
+    )?;
+    Ok((body, names))
 }
 
 fn load_message_content(
@@ -2091,7 +2108,8 @@ fn load_ordered_messages(
         .map_err(anyhow::Error::from)?;
     for message in &mut messages {
         if !message.withdrawn {
-            message.body = projected_message_body(transaction, &message.id)?;
+            (message.body, message.member_names) =
+                projected_message_body(transaction, &message.id)?;
         }
     }
     Ok(messages)
@@ -2294,15 +2312,11 @@ fn fit_collection_response(
     rows: Vec<MessageRow>,
     mut response: Value,
 ) -> Result<Value> {
-    let message_ids: Vec<_> = rows
-        .iter()
-        .filter(|row| !row.withdrawn)
-        .map(|row| row.id.as_str())
-        .collect();
-    let addressing = load_message_addressing(transaction, &message_ids)?;
+    let messages: Vec<_> = rows.iter().filter(|row| !row.withdrawn).collect();
+    let mentions = load_message_mentions(transaction, &messages)?;
     response["items"] = Value::Array(
         rows.iter()
-            .map(|row| collection_item(transaction, target, row, addressing.get(&row.id)))
+            .map(|row| collection_item(transaction, target, row, mentions.get(&row.id)))
             .collect::<Result<Vec<_>>>()?,
     );
     Ok(response)
@@ -2312,7 +2326,7 @@ fn collection_item(
     transaction: &Transaction<'_>,
     target: &ThreadTarget,
     row: &MessageRow,
-    addressing: Option<&Value>,
+    mentions: Option<&Value>,
 ) -> Result<Value> {
     if row.withdrawn {
         return Ok(withdrawn_item(row));
@@ -2326,7 +2340,7 @@ fn collection_item(
         "createdAt": row.created_at,
         "body": row.body,
         "attachmentCount": attachment_count(transaction, &row.id)?,
-        "addressing": addressing.context("normal message is missing addressing")?,
+        "mentions": mentions.context("normal message is missing mentions")?,
     });
     attach_message_quotes(transaction, target, &row.id, &mut value)?;
     Ok(value)
@@ -2402,6 +2416,7 @@ mod slow_tests {
     fn candidate_budget_and_top_k_truncation_are_independent() {
         let rows = (1..=9)
             .map(|sequence| MessageRow {
+                member_names: BTreeMap::new(),
                 id: format!("message-{sequence}"),
                 camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 sequence,
@@ -2481,6 +2496,7 @@ mod slow_tests {
     #[test]
     fn top_k_reorders_by_relevance_without_exposing_a_cursor() {
         let row = |id: &str, body: &str, recency: i64| MessageRow {
+            member_names: BTreeMap::new(),
             id: id.to_string(),
             camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             sequence: recency,
@@ -2568,6 +2584,7 @@ mod slow_tests {
             .unwrap();
         let transaction = connection.transaction().unwrap();
         let row = MessageRow {
+            member_names: BTreeMap::new(),
             id: "message-projection".to_string(),
             camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             sequence: 1,
@@ -2635,13 +2652,10 @@ mod slow_tests {
             fence: MessageFence::Current { boundary: 1 },
             viewer_agent_id: "agent_1".into(),
         };
-        let addressing = load_message_addressing(&transaction, &[rows[0].id.as_str()]).unwrap();
+        let addressing = load_message_mentions(&transaction, &[&rows[0]]).unwrap();
         let collection =
             collection_item(&transaction, &target, &rows[0], addressing.get(&rows[0].id)).unwrap();
-        assert_eq!(
-            collection["addressing"],
-            json!({"effectiveAgentRecipients": [], "mentionsCurrentUser": true})
-        );
+        assert_eq!(collection["mentions"], json!([{"id": "user"}]));
         let mut withdrawn = rows[0].clone();
         withdrawn.withdrawn = true;
         let marker = collection_item(&transaction, &target, &withdrawn, None).unwrap();
@@ -2891,6 +2905,8 @@ mod slow_tests {
         connection
             .execute_batch(
                 r#"
+                CREATE TABLE agent_profile(id TEXT PRIMARY KEY, display_name TEXT NOT NULL);
+                INSERT INTO agent_profile VALUES('agent_5','Target'),('agent_1','Alice');
                 CREATE TABLE camp_message (
                     id TEXT PRIMARY KEY,
                     camp_id TEXT NOT NULL,
@@ -3021,11 +3037,55 @@ mod slow_tests {
         assert_eq!(item["attachments"][0]["name"], "source.txt");
         assert!(!item.to_string().contains("definitely-missing-source"));
         assert_eq!(
-            item["addressing"],
-            json!({
-                "effectiveAgentRecipients": ["agent_5"],
-                "mentionsCurrentUser": true,
-            })
+            item["mentions"],
+            json!([{"id":"agent_5","name":"Target"},{"id":"user"}])
+        );
+        for (author_type, author_id) in [
+            ("user", "local_user"),
+            ("external_principal", "external_principal_example"),
+            ("agent", "agent_1"),
+        ] {
+            transaction
+                .execute(
+                    "UPDATE camp_message SET author_type=?1,author_id=?2 WHERE id='message-1'",
+                    params![author_type, author_id],
+                )
+                .unwrap();
+            for read in [
+                read_item(&transaction, &target, &run, "message-1").unwrap(),
+                read_timeline(&transaction, &target, ReadDirection::Before, None, 20).unwrap(),
+                read_thread(
+                    &transaction,
+                    &target,
+                    "message-1",
+                    ReadDirection::Before,
+                    None,
+                    20,
+                )
+                .unwrap(),
+            ] {
+                let message = &read["items"][0];
+                assert_eq!(message["body"], item["body"]);
+                assert_eq!(message["mentions"], item["mentions"]);
+                assert_eq!(message["authorType"], author_type);
+                assert_eq!(message["authorId"], author_id);
+                assert!(message.get("addressing").is_none());
+                assert!(message.get("mentionsCurrentUser").is_none());
+            }
+        }
+        transaction
+            .execute(
+                "UPDATE agent_profile SET display_name='Renamed target' WHERE id='agent_5'",
+                [],
+            )
+            .unwrap();
+        let renamed = read_item(&transaction, &target, &run, "message-1").unwrap();
+        assert_eq!(renamed["items"][0]["body"], item["body"]);
+        assert_eq!(
+            renamed["items"][0]["mentions"],
+            json!([
+                {"id":"agent_5","name":"Renamed target"}, {"id":"user"}
+            ])
         );
         assert!(item.get("storagePath").is_none());
         assert!(
@@ -3180,6 +3240,7 @@ mod slow_tests {
         // These rows must still be normal messages when collection metadata is read.
         let rows = (4..=23)
             .map(|sequence| MessageRow {
+                member_names: BTreeMap::new(),
                 id: format!("message-{sequence}"),
                 camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 sequence,

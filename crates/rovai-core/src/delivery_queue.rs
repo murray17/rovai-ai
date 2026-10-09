@@ -3513,6 +3513,9 @@ mod tests {
             "observedByteSize": 11
         }]);
         let second_content = vec![
+            StructuredThreadMessageSegment::CurrentUserMention {
+                user_id: "local_user".to_string(),
+            },
             StructuredThreadMessageSegment::Text {
                 text: "review this ".to_string(),
             },
@@ -3536,7 +3539,8 @@ mod tests {
                 r#"
                 UPDATE camp_message
                 SET source_attachments_json=?2, structured_content_json=?3,
-                    content_digest=?4
+                    content_digest=?4,
+                    effective_recipient_ids_json='["agent_2","agent_1","agent_2"]'
                 WHERE id=?1
                 "#,
                 params![
@@ -3605,7 +3609,31 @@ mod tests {
             messages[1]["skills"][0]["path"],
             "/tmp/.codex/skills/review-code/SKILL.md"
         );
-        assert!(serialized_batch_run_input_len(&projection).unwrap() > 0);
+        assert_eq!(messages[0]["mentions"][0]["id"], "agent_1");
+        assert!(messages[0]["mentions"][0]["name"].as_str().is_some());
+        assert_eq!(
+            messages[1]["mentions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|mention| mention["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["agent_2", "agent_1", "user"]
+        );
+        assert_eq!(messages[1]["mentions"][2], json!({"id":"user"}));
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.get("mentionsCurrentUser").is_none())
+        );
+        let mut without_mentions = projection.clone();
+        for message in without_mentions["messages"].as_array_mut().unwrap() {
+            message.as_object_mut().unwrap().remove("mentions");
+        }
+        assert!(
+            serialized_batch_run_input_len(&projection).unwrap()
+                > serialized_batch_run_input_len(&without_mentions).unwrap()
+        );
         transaction.rollback().unwrap();
     }
 }

@@ -402,6 +402,13 @@ impl FromStr for InstallationClass {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DshModelSource {
+    Native,
+    Web,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum ModelSelection {
@@ -411,6 +418,8 @@ pub enum ModelSelection {
         model_id: String,
         #[serde(default)]
         options: Value,
+        #[serde(default, rename = "dshSource", skip_serializing_if = "Option::is_none")]
+        dsh_source: Option<DshModelSource>,
     },
 }
 
@@ -445,6 +454,8 @@ pub struct ResolvedModelSelection {
     pub source: String,
     pub model_id: String,
     pub options: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsh_source: Option<DshModelSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1574,6 +1585,7 @@ impl AgentProfileService {
         let model = match frozen.model.source.as_str() {
             "runtime_default" => ModelSelection::RuntimeDefault,
             "explicit" => ModelSelection::Explicit {
+                dsh_source: frozen.model.dsh_source,
                 model_id: frozen.model.model_id.clone(),
                 options: model_options,
             },
@@ -2659,15 +2671,41 @@ impl AgentProfileService {
                     }),
                 ));
             }
-            let binding = ResolvedRuntimeBinding {
+            let mut binding = ResolvedRuntimeBinding {
                 adapter_kind: envelope.payload.adapter_kind,
                 installation_id: ready.installation_id.clone(),
                 model: envelope.payload.model.clone(),
                 permissions: envelope.payload.permissions.clone(),
             };
+            if binding.adapter_kind == AdapterKind::DeepseekHarness {
+                if let ModelSelection::Explicit { model_id, dsh_source, .. } = &mut binding.model {
+                    if dsh_source.is_none() {
+                        let previous: Option<String> = transaction.query_row(
+                            "SELECT default_model_selection_json FROM agent_profile WHERE id = ?1 AND selected_runtime_adapter_kind = 'deepseek-harness'",
+                            [&envelope.payload.agent_id], |row| row.get(0),
+                        ).optional()?.flatten();
+                        let catalog: Option<String> = transaction.query_row(
+                            "SELECT model_catalog_json FROM adapter_capability_snapshot WHERE installation_id = ?1",
+                            [&ready.installation_id], |row| row.get(0),
+                        ).optional()?;
+                        *dsh_source = previous.and_then(|value| serde_json::from_str::<ModelSelection>(&value).ok())
+                            .and_then(|selection| match selection {
+                                ModelSelection::Explicit { model_id: previous_id, dsh_source, .. } if previous_id == *model_id => Some(dsh_source.unwrap_or(DshModelSource::Native)),
+                                _ => None,
+                            }).or_else(|| {
+                                serde_json::from_str::<Vec<ModelDescriptor>>(catalog.as_deref()?).ok()?
+                                    .into_iter().find(|model| model.id == *model_id)?
+                                    .runtime_metadata?.get("dshSource")
+                                    .and_then(|value| serde_json::from_value(value.clone()).ok())
+                            });
+                    }
+                }
+            } else if let ModelSelection::Explicit { dsh_source, .. } = &mut binding.model {
+                *dsh_source = None;
+            }
             // Saving configuration records exact user intent. Dynamic catalog validation
             // belongs to the real Host, including when an old diagnostic failed.
-            if let ModelSelection::Explicit { model_id, options } = &binding.model
+            if let ModelSelection::Explicit { model_id, options, .. } = &binding.model
                 && (model_id.trim().is_empty() || !options.is_object())
             {
                 return Ok(CommandHandlerResult::rejected(
@@ -4309,7 +4347,9 @@ fn resolve_frozen_runtime_binding_with_snapshot(
     let permission_descriptors = registry.permission_options(adapter_kind);
     let mut validation_binding = binding.clone();
     validation_binding.model = ModelSelection::RuntimeDefault;
-    if let ModelSelection::Explicit { model_id, options } = &binding.model
+    if let ModelSelection::Explicit {
+        model_id, options, ..
+    } = &binding.model
         && (model_id.trim().is_empty() || !options.is_object())
     {
         return Ok(Err(runtime_blocker(
@@ -4400,15 +4440,26 @@ fn resolve_model_selection(
     models: &[ModelDescriptor],
     selection: &ModelSelection,
 ) -> Result<std::result::Result<ResolvedModelSelection, RuntimeConfigurationBlocker>> {
+    let dsh_source = match selection {
+        ModelSelection::Explicit { dsh_source, .. }
+            if adapter_kind == AdapterKind::DeepseekHarness =>
+        {
+            *dsh_source
+        }
+        _ => None,
+    };
     let (source, model, configured_options) = match selection {
         ModelSelection::RuntimeDefault => {
             return Ok(Ok(ResolvedModelSelection {
+                dsh_source,
                 source: "runtime_default".to_string(),
                 model_id: runtime_default_model_id(adapter_kind),
                 options: json!({}),
             }));
         }
-        ModelSelection::Explicit { model_id, options } => {
+        ModelSelection::Explicit {
+            model_id, options, ..
+        } => {
             if model_id.trim().is_empty() {
                 return Ok(Err(runtime_blocker(
                     "runtime_model_unavailable",
@@ -4429,6 +4480,7 @@ fn resolve_model_selection(
                 // previously validated explicit selection so the real Runtime Session can make
                 // the final decision without silently falling back.
                 return Ok(Ok(ResolvedModelSelection {
+                    dsh_source,
                     source: "explicit".to_string(),
                     model_id: model_id.clone(),
                     options: Value::Object(configured_options.clone()),
@@ -4451,6 +4503,7 @@ fn resolve_model_selection(
         }
     }
     Ok(Ok(ResolvedModelSelection {
+        dsh_source,
         source: source.to_string(),
         model_id: model.id.clone(),
         options: Value::Object(options),
@@ -4868,7 +4921,10 @@ fn runtime_configuration_issue(
     let issue = |code, payload| Some(RuntimeConfigurationIssue { code, payload });
     let models: Vec<ModelDescriptor> =
         serde_json::from_str(models_json).context("invalid Adapter model catalog")?;
-    if let ModelSelection::Explicit { model_id, options } = &configuration.model {
+    if let ModelSelection::Explicit {
+        model_id, options, ..
+    } = &configuration.model
+    {
         if model_id.trim().is_empty() {
             return Ok(issue(
                 "runtime_model_unavailable",
@@ -4999,6 +5055,7 @@ fn model_option_validation_rejects_preserved_effort_after_catalog_refresh() {
         adapter_kind: AdapterKind::CodexCli,
         installation_id: "test-codex".to_string(),
         model: ModelSelection::Explicit {
+            dsh_source: None,
             model_id: "gpt-next".to_string(),
             options: json!({"reasoning_effort": "high"}),
         },
@@ -6047,6 +6104,7 @@ mod slow_tests {
                             expected_version: configured.version,
                             adapter_kind: kind,
                             model: ModelSelection::Explicit {
+                                dsh_source: None,
                                 model_id: model_id.to_string(),
                                 options: json!({}),
                             },
@@ -6797,6 +6855,7 @@ mod slow_tests {
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: ModelSelection::Explicit {
+                            dsh_source: None,
                             model_id: "gpt-test".to_string(),
                             options: json!({}),
                         },
@@ -6821,6 +6880,7 @@ mod slow_tests {
         assert_eq!(
             configuration.model,
             ModelSelection::Explicit {
+                dsh_source: None,
                 model_id: "gpt-test".to_string(),
                 options: json!({}),
             }
@@ -6956,6 +7016,7 @@ mod slow_tests {
             };
             let model = if changed_options {
                 ModelSelection::Explicit {
+                    dsh_source: None,
                     model_id: "gpt-test".into(),
                     options: json!({"reasoning_effort":"high"}),
                 }
@@ -7216,6 +7277,7 @@ mod slow_tests {
             let defaults = installation.member_runtime_defaults.unwrap();
             let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
             let selected = ModelSelection::Explicit {
+                dsh_source: None,
                 model_id: "saved-model".to_string(),
                 options: json!({"native-option":"saved-value"}),
             };
@@ -7235,6 +7297,68 @@ mod slow_tests {
                 )
                 .unwrap();
             assert_eq!(configured.result.status, CommandResultStatus::Applied);
+            if kind == AdapterKind::DeepseekHarness {
+                // Reuse the existing no-health database fixture: provenance is
+                // saved intent, independent of a current successful catalog.
+                for (provided, expected) in [
+                    (None, DshModelSource::Native),
+                    (Some(DshModelSource::Web), DshModelSource::Web),
+                    (Some(DshModelSource::Native), DshModelSource::Native),
+                ] {
+                    for source in [provided, None] {
+                        let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+                        let mut choice = selected.clone();
+                        if let ModelSelection::Explicit { dsh_source, .. } = &mut choice {
+                            *dsh_source = source;
+                        }
+                        let saved = service
+                            .set_runtime(
+                                &mut database,
+                                &user_command(
+                                    &uuid::Uuid::new_v4().to_string(),
+                                    SetMemberRuntimeConfigurationCommand {
+                                        agent_id: profile.agent_id,
+                                        expected_version: profile.version,
+                                        adapter_kind: kind,
+                                        model: choice,
+                                        permissions: defaults.permissions.clone(),
+                                    },
+                                ),
+                            )
+                            .unwrap();
+                        assert_eq!(saved.result.status, CommandResultStatus::Applied);
+                    }
+                    let saved = service
+                        .get_profile(&database, "agent_1")
+                        .unwrap()
+                        .unwrap()
+                        .runtime_configuration
+                        .unwrap()
+                        .model;
+                    let frozen = resolve_frozen_runtime_binding(
+                        database.connection(),
+                        &ResolvedRuntimeBinding {
+                            adapter_kind: kind,
+                            installation_id: installation_id.clone(),
+                            model: saved,
+                            permissions: defaults.permissions.clone(),
+                        },
+                    )
+                    .unwrap()
+                    .unwrap();
+                    assert_eq!(frozen.model.dsh_source, Some(expected));
+                    assert_eq!(
+                        service
+                            .resolve_rebound_runtime(&database, &frozen)
+                            .unwrap()
+                            .unwrap()
+                            .model
+                            .dsh_source,
+                        Some(expected),
+                        "rebound must retain selection provenance"
+                    );
+                }
+            }
             if kind == AdapterKind::ClaudeCodeCli {
                 service
                     .record_managed_probe_failure(

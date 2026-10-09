@@ -411,11 +411,71 @@ User 确认交互稿及模型仍读取 `@名字` 文字后，授权实现、创�
 产生隐式邀请。未复用会话先入队再发消息的跨命令流程，因为使命保存失败必须保持原队伍。成员准入与事件仍复用
 现有 Camp owner；不引入第二套队伍、执行路由或模型正文数组。
 
+<a id="v1-72-d19"></a>
+## V1.72-D19：Mention 只统一模型消息元数据，格式按 Run 冻结
+
+- 状态：accepted
+- 日期：2026-10-09
+- 当前权威：[Message Mentions v1](../../contracts/message-mentions-v1.md)、[ContextManifest v33](../../contracts/context-manifest-evidence-v33.md)、[Camp History v12](../../contracts/camp-history-v12.md)
+
+公开自动输入与 read 需要向模型提供完整目标身份，但两者已有不同的正文、作者字段和恢复证据。
+选择共用已保存目标的 Mention 投影，保留各入口正文；格式切换沿用 Run 的冻结版本，旧回执原样回放。
+这样已有 Session 的后续 Run 能直接生效，旧 Run 未物化的中间态仍可按原格式恢复。
+
+重解析 @文字或查询当前 Lead/队伍会改变历史目标；把切换绑到 Session 会扩大升级、轮换与上下文成本。
+本次均不采用。代价是保留旧 Run formatter 与旧回执的封闭输出分支，并在既有数据库约束中准入新版本；
+不建设第二套名称、预算或格式协商机制。
+
+<a id="v1-72-d20"></a>
+## V1.72-D20：Windows 以当前 Job 活跃数归零解除后继执行门禁
+
+- 状态：accepted
+- 日期：2026-10-09
+- 当前权威：[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md#4-ownership-and-termination)、[Windows Desktop Platform](../../architecture/windows-desktop-platform.md#3-managed-processes-and-shutdown)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md#后续执行与清理)、[Camp 会话工作区](../../ui/components/conversation-workspace.md#public-camp-v160-当前边界)
+
+### 背景与选择
+
+非队长 Claude 完成后，Windows 收尾曾要求 Job 的生命周期累计成员数、完成端口通知和逐成员退出句柄
+全部吻合。普通 Job 通知可能丢失；现场可出现 `ActiveProcesses=0` 而累计 91、通知 90 的状态，
+使已完成 Run 的下一条 Delivery 长期 waiting，直到重启。现改为本次持有的有效 Job 成功查询
+`ActiveProcesses == 0` 即完成资源收尾，提交 ACK 并唤醒现有调度器。用户停止和正常结束使用
+同一判据；查询失败或仍有活动成员只在一次有界预算内重试，并通过现有 worker 局部恢复。
+
+### 后果与替代方案
+
+这是可用性优先的边界：不额外等待所有历史进程对象和在途 I/O 完成；可信原生业务结果
+与 Job 清理分别结算，临时启动文件删除错误不延迟后继执行。保留原子 Job 所有权、
+`KILL_ON_JOB_CLOSE`、精确 Run/epoch 持久回执和会话恢复规则。
+未保留累计计数与通知对账，也未改用 PID 枚举或逐进程句柄补扫；前者依赖不保证送达的消息，
+后两者重新引入历史身份与等待门禁。macOS、Linux 进程管理不随此决定改变。
+
+
+<a id="v1-72-d21"></a>
+## V1.72-D21：DSH 原生 ACP 为主，Web 模型在原生迁移完成后补充
+
+- 状态：accepted
+- 日期：2026-10-09
+- 当前权威：[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#deepseek-harness-acp)
+
+DSH 将共享 settings 改为 Profile 配置后，仅在 Web 保存的模型不会自动出现在 ACP。
+User 要求保留 `0.1.5-rc.2` 支持底线和原生配置优先级，以新增补充解决问题。
+采用同进程内的配置准备插件，由 Probe 与 Host 共用，模型目录继续由 ACP 返回。
+迁移完全由 DSH 拥有，Rovai 只做原生迁移期间的 Patch 隔离、非破坏性备份和完成核对。
+
+没有选用升级强制迁移、复制 Home、配置迁移数据库或自行生成模型目录。
+CLI 整块模型覆盖也不适合：本地原生实验表明，DSH 导入时会吸收当时加载的配置，
+可能漏导旧模型或永久保存 Web 补充。改用原生 Loader 的非持久化更新，代价是维护一个窄的
+初始化能力适配，并用最低版、旧共享版与 Profile 版的真实进程/HTTP 回归守住边界。
+来源判断和一次回退只服务于配置准备，不能扩展成路由切换或新的恢复系统。
+同 ID 的原生与 Web 选择需要区分时，仅在现有成员/冻结模型选择中保存可选来源标记，
+由目录元信息在显式选择时提供；不维护来源数据库或历史。Web 故障只阻断依赖补充的选择，
+Host 后续复用沿用现有配置指纹，选模阶段不再重复核验全部原始文件。
+
 提示词不追加来源 ID、证据和恢复指令；会话真正恢复失败时结束当前尝试，显式确认才能以新会话继续。
 
 
-<a id="v1-72-d19"></a>
-## V1.72-D19：Command Code headless 使用冻结的普通 Prompt Bootstrap
+<a id="v1-72-d22"></a>
+## V1.72-D22：Command Code headless 使用冻结的普通 Prompt Bootstrap
 
 - 状态：accepted
 - 日期：2026-09-27
@@ -442,8 +502,8 @@ Command Code 的官方 headless NDJSON 提供精确 Session 恢复，但没有�
 - 改写共享 `AGENTS.md`：会把成员私有的冻结 Bootstrap 投到项目／用户级并造成跨成员串线。
 - 自封 ACP 代理：只改接口形状，不能补出上游缺失的高权限投递和审批保证。
 
-<a id="v1-72-d20"></a>
-## V1.72-D20：Cline 先在 macOS arm64 开放真实开发预览
+<a id="v1-72-d23"></a>
+## V1.72-D23：Cline 先在 macOS arm64 开放真实开发预览
 
 - 状态：accepted
 - 日期：2026-10-04
@@ -463,8 +523,8 @@ Cline 已有 shared ACP Host 和隔离真实模型证据，但尚未完成全部
 却不能满足本次开发包的使用要求。此决定只允许开发预览，不接受 Cline 的尚未确认 Plugin Rule 提案，
 也不把现有 FirstPayload 的试运行结果等同于 Bootstrap 或压缩连续性的正式资格。
 
-<a id="v1-72-d21"></a>
-## V1.72-D21：成功的模糊匹配编辑保留为补丁片段
+<a id="v1-72-d24"></a>
+## V1.72-D24：成功的模糊匹配编辑保留为补丁片段
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -482,8 +542,8 @@ Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation �
 行号及实际旧字节的限制；不会据此提升 Runtime 资格。没有选择执行前后读取文件或 Git 捕获，因为并发写入、非 Git
 工作区及完整状态归属会引入另一套观测权威。继续只显示路径可保持旧边界，却不能满足用户审阅已执行修改的要求。
 
-<a id="v1-72-d22"></a>
-## V1.72-D22：Command Code 使用官方 ACP 与必需 System Mod 开发预览
+<a id="v1-72-d25"></a>
+## V1.72-D25：Command Code 使用官方 ACP 与必需 System Mod 开发预览
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -494,7 +554,7 @@ Cline 甚至在零 fuzz 时规范化标点。把输入复用为 exact mutation �
 User 在消息 `677d610d-e4cf-4ffb-aba2-d4ebb021cbcd` 与 `1bd0ab39-6939-40cd-9653-b472b3b69082`
 要求修复 System Bootstrap、warm 及全部可接能力。1.74.1 已有官方多 Session ACP，继续仅用 one-shot 会
 丢失可接的常驻能力。选择共享 ACP Host/Fleet，macOS arm64 开放 Preview；新产品路径采用带 readiness 与
-逐 Session 绑定校验的官方 System Mod，替代 D19 的候选 first_payload。完整输入变化由
+逐 Session 绑定校验的官方 System Mod，替代 D22 的候选 first_payload。完整输入变化由
 [revision 5](model-context-change-command-code-acp.md)记录，Cline 的缺失插件反例独立保留。
 
 ### 后果与替代方案
@@ -506,8 +566,8 @@ MCP 同名选择已有 native_wins_skip，避免改写原生全局/项目配置�
 Preview 不代表完整资格：原生账号额度、自定义 BYOK 目录和压缩等未验证轴仍公开记录。
 
 
-<a id="v1-72-d23"></a>
-## V1.72-D23：macOS ACP 按内核身份回收独立进程组，并保留重启记录
+<a id="v1-72-d26"></a>
+## V1.72-D26：macOS ACP 按内核身份回收独立进程组，并保留重启记录
 
 - 状态：accepted
 - 日期：2026-10-05
@@ -528,8 +588,8 @@ ACP 另行观察 leader，保留有界的末帧消费。结果未知的公开 ba
 自动回收，也不等价于 Windows Job 对未观测后代的内核级限制。
 
 
-<a id="v1-72-d24"></a>
-## V1.72-D24：Cline 正常 System Rule 交付与 Command 原生 MCP 配置
+<a id="v1-72-d27"></a>
+## V1.72-D27：Cline 正常 System Rule 交付与 Command 原生 MCP 配置
 
 - 状态：accepted
 - 日期：2026-10-06
@@ -553,8 +613,8 @@ Core 把分配结果写入 Host 私有 mcp.json，保留原生同名优先，更
 原生 MCP 发现成功不代表当前自定义 BYOK 调用成功；未通过项保留，两个 Runtime 仍为 Preview。
 
 
-<a id="v1-72-d25"></a>
-## V1.72-D25：Cline 采用独立 Native Hub，删除 ACP 后端
+<a id="v1-72-d28"></a>
+## V1.72-D28：Cline 采用独立 Native Hub，删除 ACP 后端
 
 - 状态：accepted
 - 日期：2026-10-07
@@ -578,7 +638,7 @@ Cline 仅冻结 `cline-hub-v1`；删除 ACP Host、3.0.65 门槛、Plugin observ
 User 85（`6dbd9e73-aef0-45cd-afcc-0688d3c4cf39`）要求 Cline 自己认证，User 87
 （`a8b7cc52-e1b9-4293-9e65-278962e9823f`）进一步授权直接使用已登录账号。选择引用持久原生认证文件，
 允许 Cline 自行写回，不复制日常 refresh token 创建伪独立授权。Rovai 仅管理认证来源和进程所有权。
-以下为 User 85/87 阶段选择，已由 D26 取消认证独占与强制 cold：
+以下为 User 85/87 阶段选择，已由 D29 取消认证独占与强制 cold：
 实际安装只有实例内刷新合并，故账号 Host 结束即回收，同文件单个 Rovai 登录/Hub 进程；忙时明确拒绝。
 接受每轮 cold 成本，避免 IdleWarm 长期占有认证源；不为了共享刷新器而合并成员可变 System 环境。
 外部原生 CLI 不服从此锁，不能宣称所有 Cline 进程的刷新安全；实际刷新及外部并发资格单独保留。
@@ -590,8 +650,8 @@ Host 重建，接受此成本以保证身份隔离。不保留不存在的旧会
 原生安装、配置权威和恢复证据边界。
 
 
-<a id="v1-72-d26"></a>
-## V1.72-D26：Cline 认证交还原生，恢复普通 warm 与并行
+<a id="v1-72-d29"></a>
+## V1.72-D29：Cline 认证交还原生，恢复普通 warm 与并行
 
 - 状态：accepted
 - 日期：2026-10-08
@@ -600,7 +660,7 @@ Host 重建，接受此成本以保证身份隔离。不保留不存在的旧会
 
 ### 背景与选择
 
-D25 后续的原生认证实现把未验证刷新风险变成 Provider/账号字段门槛和文件级独占，账号每轮必须 cold，
+D28 后续的原生认证实现把未验证刷新风险变成 Provider/账号字段门槛和文件级独占，账号每轮必须 cold，
 多个成员无法同时使用用户已配置的原生来源。User 明确优先日常可用性并撤销这些附加策略。
 所有认证直接引用所选原生来源，Cline 自己认证和保存刷新结果；Rovai 仅控制任务、隔离成员配置并反馈原生结果。
 删除专属认证模块、锁和模式标记，复用共享 Fleet，不增加替代账号服务或兼容门槛。
@@ -614,8 +674,8 @@ D25 后续的原生认证实现把未验证刷新风险变成 Provider/账号字
 登录成功仅说明原生命令完成；保持 Preview，首次授权、真实刷新和外部并发刷新未验证范围不被写成通过。
 
 
-<a id="v1-72-d27"></a>
-## V1.72-D27：Cline 唯一官方 ACP，完整退役 Native Hub
+<a id="v1-72-d30"></a>
+## V1.72-D30：Cline 唯一官方 ACP，完整退役 Native Hub
 
 - 状态：accepted
 - 日期：2026-10-08
@@ -626,7 +686,7 @@ D25 后续的原生认证实现把未验证刷新风险变成 Provider/账号字
 
 Hub 增加 daemon、WebSocket 认证与完整历史搬运职责。User 明确要求回归官方 ACP，即使 ACP 仍有 compact 缺口。
 只保留所选安装 cline --acp，复用共享 Host/Fleet、能力检查、恢复重放隔离、审批与结算。
-D25 的后端选择被本决定取代；D26 的原生认证来源、普通 warm/并行原则继续适用于 ACP。
+D28 的后端选择被本决定取代；D29 的原生认证来源、普通 warm/并行原则继续适用于 ACP。
 不整段回退，不恢复固定版本准入、账号白名单、旧 Bootstrap user 注入或认证锁。
 
 ### 后果与替代方案
@@ -636,8 +696,8 @@ D25 的后端选择被本决定取代；D26 的原生认证来源、普通 warm/
 没有保留 Hub 备用、恢复 shim 或实现自有压缩；已知 ACP 原生方法、Rule 和 compact 差异逐项报告。
 握手、已有登录、真实请求、warm/cold 与刷新分别验收，不用旧 Hub 成绩替代本轮结果。
 
-<a id="v1-72-d28"></a>
-## V1.72-D28：Cline 暂缓公开，保留官方 ACP 与历史数据
+<a id="v1-72-d31"></a>
+## V1.72-D31：Cline 暂缓公开，保留官方 ACP 与历史数据
 
 - 状态：accepted
 - 日期：2026-10-09
@@ -647,8 +707,8 @@ D25 的后端选择被本决定取代；D26 的原生认证来源、普通 warm/
 ### 背景与选择
 
 3.0.70 的官方 ACP 已通过账号/BYOK first、warm、cold，但其配置仍未接入原生自动 compaction。
-User 要求暂不对外暴露；撤回 D20 的 macOS arm64 Preview，所有平台为 NotQualified，隐藏产品入口与安装引导。
-D27 的唯一官方 ACP 后端保持，已有实现和正负证据保留，后续资格必须重新验证。
+User 要求暂不对外暴露；撤回 D23 的 macOS arm64 Preview，所有平台为 NotQualified，隐藏产品入口与安装引导。
+D30 的唯一官方 ACP 后端保持，已有实现和正负证据保留，后续资格必须重新验证。
 
 ### 后果与替代方案
 

@@ -7,6 +7,99 @@ use serde::{Deserialize, Serialize};
 use crate::command::canonical_json_digest;
 use crate::current_user::{CURRENT_USER_ID, CurrentUserResolver};
 
+#[cfg(test)]
+mod model_mention_tests {
+    use super::*;
+    use serde_json::json;
+
+    // Owns target identity/order and projection-time names, independently of any Run or read fixture.
+    #[test]
+    fn model_mentions_use_saved_targets_and_reuse_projected_names() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE agent_profile(id TEXT PRIMARY KEY, display_name TEXT, profile_status TEXT);
+            INSERT INTO agent_profile VALUES ('agent_1','Now','active'),('agent_2','Alice','active'),('agent_3','Former','removed');").unwrap();
+        let content = vec![
+            StructuredThreadMessageSegment::Text {
+                text: "literal @User `@Ghost` ".into(),
+            },
+            StructuredThreadMessageSegment::MemberMention {
+                agent_id: "agent_2".into(),
+            },
+            StructuredThreadMessageSegment::MemberMention {
+                agent_id: "agent_2".into(),
+            },
+            StructuredThreadMessageSegment::AllMembersMention,
+            StructuredThreadMessageSegment::CurrentUserMention {
+                user_id: CURRENT_USER_ID.into(),
+            },
+            StructuredThreadMessageSegment::ExternalQuote {
+                sender_display_name: "Someone".into(),
+                body: "@Ghost".into(),
+                attachment_summaries: vec![],
+                content_digest: "sha256:quote".into(),
+            },
+        ];
+        let mut names = BTreeMap::new();
+        let body = render_agent_plain_text_with_names(&connection, &content, &mut names).unwrap();
+        assert_eq!(
+            body,
+            render_agent_plain_text(&connection, &content).unwrap()
+        );
+        assert!(body.contains("@Alice@Alice"));
+        connection
+            .execute(
+                "UPDATE agent_profile SET display_name='Renamed' WHERE id='agent_2'",
+                [],
+            )
+            .unwrap();
+        names.insert("agent_1".into(), "Frozen".into());
+        let targets = ["agent_3", "agent_2", "agent_3", "agent_1"].map(String::from);
+        let mentions = message_mentions(
+            &connection,
+            &targets,
+            &mut names,
+            mentions_current_user(&content),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(mentions).unwrap(),
+            json!([
+                {"id":"agent_3","name":"Former"}, {"id":"agent_2","name":"Alice"},
+                {"id":"agent_1","name":"Frozen"}, {"id":"user"}
+            ])
+        );
+        let mut fresh = BTreeMap::new();
+        assert_eq!(
+            serde_json::to_value(
+                message_mentions(&connection, &["agent_2".into()], &mut fresh, false).unwrap()
+            )
+            .unwrap(),
+            json!([{"id":"agent_2","name":"Renamed"}])
+        );
+        assert!(
+            message_mentions(&connection, &[], &mut fresh, false)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            serde_json::to_value(message_mentions(&connection, &[], &mut fresh, true).unwrap())
+                .unwrap(),
+            json!([{"id":"user"}])
+        );
+        for invalid in ["user", "agent_0", "agent_01", "agent_4"] {
+            assert!(
+                message_mentions(&connection, &[invalid.into()], &mut fresh, false).is_err(),
+                "{invalid}"
+            );
+        }
+        assert!(!mentions_current_user(&[
+            StructuredThreadMessageSegment::Text {
+                text: "@User".into()
+            }
+        ]));
+    }
+}
+
 pub const AGENT_MESSAGE_PROJECTION_AUDIENCE: &str = "agent_v2";
 pub const LEGACY_AGENT_MESSAGE_PROJECTION_AUDIENCE: &str = "agent_v1";
 pub const AGENT_USER_DISPLAY_NAME: &str = "User";
@@ -641,6 +734,88 @@ pub fn render_agent_plain_text(
     render_agent_plain_text_for_audience(connection, content, AGENT_MESSAGE_PROJECTION_AUDIENCE)
 }
 
+/// One projection shares resolved names between the authored body and target metadata.
+pub(crate) fn render_agent_plain_text_with_names(
+    connection: &Connection,
+    content: &[StructuredThreadMessageSegment],
+    names: &mut BTreeMap<String, String>,
+) -> Result<String> {
+    resolve_member_names(connection, &member_mention_ids(content), names)?;
+    render_plain_text_with_user_offsets(
+        content,
+        |agent_id| names.get(agent_id).cloned(),
+        AGENT_USER_DISPLAY_NAME,
+        &mut |_| {},
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct MessageMention {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// Targets are publication facts, never parsed from text or expanded from today's roster.
+pub(crate) fn message_mentions(
+    connection: &Connection,
+    effective_recipients: &[String],
+    names: &mut BTreeMap<String, String>,
+    mentions_user: bool,
+) -> Result<Vec<MessageMention>> {
+    for id in effective_recipients {
+        anyhow::ensure!(
+            crate::agent_identity::parse_agent_id(id).is_some(),
+            "Message Mention requires a canonical Agent ID"
+        );
+    }
+    resolve_member_names(connection, effective_recipients, names)?;
+    let mut seen = HashSet::new();
+    let mut mentions = Vec::new();
+    for id in effective_recipients {
+        if seen.insert(id) {
+            let name = names
+                .get(id)
+                .context("Message Mention identity does not exist")?;
+            anyhow::ensure!(!name.trim().is_empty(), "Message Mention name is empty");
+            mentions.push(MessageMention {
+                id: id.clone(),
+                name: Some(name.clone()),
+            });
+        }
+    }
+    if mentions_user {
+        mentions.push(MessageMention {
+            id: "user".to_string(),
+            name: None,
+        });
+    }
+    Ok(mentions)
+}
+
+fn resolve_member_names(
+    connection: &Connection,
+    agent_ids: &[String],
+    names: &mut BTreeMap<String, String>,
+) -> Result<()> {
+    for agent_id in agent_ids {
+        if names.contains_key(agent_id) {
+            continue;
+        }
+        let display_name = connection
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(display_name) = display_name {
+            names.insert(agent_id.clone(), display_name);
+        }
+    }
+    Ok(())
+}
+
 /// Frozen evidence uses its recorded audience, never the current display token.
 pub(crate) fn render_agent_plain_text_for_audience(
     connection: &Connection,
@@ -677,18 +852,7 @@ fn render_plain_text_for_connection_with_current_user(
     user_offset: &mut dyn FnMut(usize),
 ) -> Result<String> {
     let mut names = BTreeMap::new();
-    for agent_id in member_mention_ids(content) {
-        let display_name = connection
-            .query_row(
-                "SELECT display_name FROM agent_profile WHERE id = ?1",
-                [&agent_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if let Some(display_name) = display_name {
-            names.insert(agent_id, display_name);
-        }
-    }
+    resolve_member_names(connection, &member_mention_ids(content), &mut names)?;
     render_plain_text_with_user_offsets(
         content,
         |agent_id| names.get(agent_id).cloned(),

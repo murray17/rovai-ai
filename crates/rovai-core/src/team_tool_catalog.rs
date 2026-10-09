@@ -198,13 +198,35 @@ fn camp_search_success_schema(include_camp_title: bool) -> Value {
     })
 }
 
-fn collection_message_schema() -> Value {
+fn message_mentions_schema(legacy: bool) -> Value {
+    if legacy {
+        return json!({
+            "type": "object", "additionalProperties": false,
+            "required": ["effectiveAgentRecipients", "mentionsCurrentUser"],
+            "properties": {
+                "effectiveAgentRecipients": {"type":"array", "maxItems":16, "uniqueItems":true, "items":{"type":"string"}},
+                "mentionsCurrentUser": {"type":"boolean"}
+            }
+        });
+    }
+    json!({
+        "type":"array", "maxItems":17, "uniqueItems":true,
+        "items":{"oneOf":[
+            {"type":"object", "additionalProperties":false, "required":["id","name"],
+             "properties":{"id":{"type":"string","pattern":"^agent_[1-9][0-9]*$"},"name":{"type":"string","minLength":1}}},
+            {"type":"object", "additionalProperties":false, "required":["id"],
+             "properties":{"id":{"const":"user"}}}
+        ]}
+    })
+}
+
+fn collection_message_schema(legacy: bool) -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
         "required": [
             "messageId", "sequence", "authorType", "authorId", "anchorMessageId",
-            "createdAt", "body", "attachmentCount", "addressing"
+            "createdAt", "body", "attachmentCount", if legacy { "addressing" } else { "mentions" }
         ],
         "properties": {
             "messageId": {"type": "string"},
@@ -216,7 +238,7 @@ fn collection_message_schema() -> Value {
             "body": {"type": "string"},
             "quotes": crate::message_quote::model_quotes_schema("thread_messages"),
             "attachmentCount": {"type": "integer", "minimum": 0},
-            "addressing": item_message_schema()["properties"]["addressing"].clone()
+            (if legacy { "addressing" } else { "mentions" }): message_mentions_schema(legacy)
         }
     })
 }
@@ -254,14 +276,14 @@ fn camp_read_attachment_schema() -> Value {
     })
 }
 
-fn item_message_schema() -> Value {
+fn item_message_schema(legacy: bool) -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
         "required": [
             "messageId", "sequence", "authorType", "authorId", "anchorMessageId",
             "createdAt", "body", "attachmentCount", "attachments", "attachmentsTruncated",
-            "attachmentOmittedCount", "addressing"
+            "attachmentOmittedCount", if legacy { "addressing" } else { "mentions" }
         ],
         "properties": {
             "messageId": {"type": "string"},
@@ -279,23 +301,12 @@ fn item_message_schema() -> Value {
             },
             "attachmentsTruncated": {"type": "boolean"},
             "attachmentOmittedCount": {"type": "integer", "minimum": 0},
-            "addressing": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["effectiveAgentRecipients", "mentionsCurrentUser"],
-                "properties": {
-                    "effectiveAgentRecipients": {
-                        "type": "array", "maxItems": 16, "uniqueItems": true,
-                        "items": {"type": "string"}
-                    },
-                    "mentionsCurrentUser": {"type": "boolean"}
-                }
-            }
+            (if legacy { "addressing" } else { "mentions" }): message_mentions_schema(legacy)
         }
     })
 }
 
-fn camp_read_item_schema() -> Value {
+fn camp_read_item_schema(legacy: bool) -> Value {
     json!({
         "additionalProperties": false,
         "required": ["threadId", "mode", "items"],
@@ -304,13 +315,13 @@ fn camp_read_item_schema() -> Value {
             "mode": {"const": "item"},
             "items": {
                 "type": "array", "minItems": 1, "maxItems": 1,
-                "items": {"oneOf": [item_message_schema(), withdrawn_message_schema()]}
+                "items": {"oneOf": [item_message_schema(legacy), withdrawn_message_schema()]}
             }
         }
     })
 }
 
-fn camp_read_thread_schema() -> Value {
+fn camp_read_thread_schema(legacy: bool) -> Value {
     json!({
         "additionalProperties": false,
         "required": [
@@ -325,14 +336,14 @@ fn camp_read_thread_schema() -> Value {
             "replyChainRootMessageId": {"type": "string"},
             "direction": {"type": "string", "enum": ["before", "after"]},
             "items": {"type": "array", "maxItems": 100,
-                "items": {"oneOf": [collection_message_schema(), withdrawn_message_schema()]}},
+                "items": {"oneOf": [collection_message_schema(legacy), withdrawn_message_schema()]}},
             "nextCursor": {"type": ["integer", "null"], "minimum": 1},
             "hasMore": {"type": "boolean"}
         }
     })
 }
 
-fn camp_read_timeline_schema() -> Value {
+fn camp_read_timeline_schema(legacy: bool) -> Value {
     json!({
         "additionalProperties": false,
         "required": [
@@ -344,7 +355,7 @@ fn camp_read_timeline_schema() -> Value {
             "mode": {"const": "timeline"},
             "direction": {"type": "string", "enum": ["before", "after"]},
             "items": {"type": "array", "maxItems": 100,
-                "items": {"oneOf": [collection_message_schema(), withdrawn_message_schema()]}},
+                "items": {"oneOf": [collection_message_schema(legacy), withdrawn_message_schema()]}},
             "nextCursor": {"type": ["integer", "null"], "minimum": 1},
             "hasMore": {"type": "boolean"}
         }
@@ -352,12 +363,20 @@ fn camp_read_timeline_schema() -> Value {
 }
 
 fn camp_read_success_schema() -> Value {
+    read_success_schema(false)
+}
+
+pub(crate) fn legacy_camp_read_success_schema() -> Value {
+    read_success_schema(true)
+}
+
+fn read_success_schema(legacy: bool) -> Value {
     json!({
         "type": "object",
         "oneOf": [
-            camp_read_item_schema(),
-            camp_read_thread_schema(),
-            camp_read_timeline_schema()
+            camp_read_item_schema(legacy),
+            camp_read_thread_schema(legacy),
+            camp_read_timeline_schema(legacy)
         ]
     })
 }
@@ -1196,7 +1215,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_READ_TOOL_NAME,
             "title": "Read public Thread messages",
-            "description": "Read published messages from one public Thread using its live state, including an explicit historical Thread. Target membership is not a read permission. With no selector, return the newest page; use before/nextCursor for older messages. Default limit: 20; range: 1-100. Use messageId for one message or replyChain for a reply chain. messageId cannot combine with replyChain, before or limit. Normal items include addressing; withdrawn items contain only a withdrawal marker. IDs and cursors never bypass visibility.",
+            "description": "Read published messages from one public Thread using its live state, including an explicit historical Thread. Target membership is not a read permission. With no selector, return the newest page; use before/nextCursor for older messages. Default limit: 20; range: 1-100. Use messageId for one message or replyChain for a reply chain. messageId cannot combine with replyChain, before or limit. Normal items include mentions: Agent entries {id,name} are persisted effective targets; {id:\"user\"} marks a structured current User mention. Mentions do not indicate reading or execution; withdrawn items contain only a withdrawal marker. IDs and cursors never bypass visibility.",
             "inputSchema": ThreadHistoryService::camp_read_input_schema(),
             "outputSchema": camp_read_success_schema()
         }),
@@ -1605,10 +1624,7 @@ mod tests {
                 }],
                 "attachmentsTruncated": false,
                 "attachmentOmittedCount": 0,
-                "addressing": {
-                    "effectiveAgentRecipients": ["agent_1"],
-                    "mentionsCurrentUser": false
-                }
+                "mentions": [{"id":"agent_1","name":"Alice"}]
             }]
         });
         crate::builtin_tool_cli_output::validate_schema(&item, &schema).unwrap();
@@ -1620,13 +1636,16 @@ mod tests {
         ] {
             collection.as_object_mut().unwrap().remove(field);
         }
-        crate::builtin_tool_cli_output::validate_schema(&collection, &collection_message_schema())
-            .unwrap();
-        collection.as_object_mut().unwrap().remove("addressing");
+        crate::builtin_tool_cli_output::validate_schema(
+            &collection,
+            &collection_message_schema(false),
+        )
+        .unwrap();
+        collection.as_object_mut().unwrap().remove("mentions");
         assert!(
             crate::builtin_tool_cli_output::validate_schema(
                 &collection,
-                &collection_message_schema()
+                &collection_message_schema(false)
             )
             .is_err()
         );

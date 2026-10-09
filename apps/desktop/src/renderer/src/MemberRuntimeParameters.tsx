@@ -91,8 +91,7 @@ function cloneRuntimeDraft(draft: MemberRuntimeDraft): MemberRuntimeDraft {
     model: draft.model.mode === 'runtime_default'
       ? { mode: 'runtime_default' }
       : {
-          mode: 'explicit',
-          modelId: draft.model.modelId,
+          ...draft.model,
           options: { ...draft.model.options }
         },
     permissions: {
@@ -745,7 +744,10 @@ export function explicitSelection(
   return {
     mode: 'explicit',
     modelId: model.id,
-    options
+    options,
+    ...(model.runtimeMetadata?.dshSource === 'native' || model.runtimeMetadata?.dshSource === 'web'
+      ? { dshSource: model.runtimeMetadata.dshSource }
+      : {})
   }
 }
 

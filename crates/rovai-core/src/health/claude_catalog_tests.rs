@@ -74,7 +74,9 @@ while IFS= read -r request; do printf '%s\n' "$request" >> "$root/requests"; don
         // branch instead of accepting a timeout as an equivalent error.
         let deadline = Duration::from_secs(if case.ends_with("timeout") { 1 } else { 10 });
         let result = if case == "success" {
-            refresh_model_catalog(&executable, AdapterKind::ClaudeCodeCli).await
+            refresh_model_catalog(&executable, AdapterKind::ClaudeCodeCli)
+                .await
+                .map(|catalog| catalog.models)
         } else {
             claude_code_model_catalog(&executable, deadline).await
         };

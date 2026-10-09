@@ -721,7 +721,7 @@ export function onboardingRuntimeSelectionFor(
   return {
     adapterKind,
     model: model?.mode === 'explicit'
-      ? { mode: 'explicit', modelId: model.modelId, options: { ...model.options } }
+      ? { ...model, options: { ...model.options } }
       : model ? { mode: 'runtime_default' } : null
   }
 }

@@ -928,7 +928,7 @@ button.mission-avatars.is-card-roster:hover .member-avatar { filter: brightness(
 .compact-dialog.mission-definition-dialog .mission-editor-description { position: relative; min-height: 0; padding: 0; }
 .mission-editor-description .structured-mention-editor { min-height: 78px; height: 100%; max-height: none; padding: 0 0 12px; font: inherit; line-height: 1.85; }
 .mission-editor-description .structured-mention-placeholder { top: 0; font-size: 14px; line-height: 1.85; }
-.mission-editor-description .structured-mention-menu { max-height: min(280px, 44vh); z-index: 12; }
+.mission-definition-dialog .mention-menu.composer-caret-menu { max-height: min(280px, 44vh, var(--radix-popover-content-available-height)); z-index: 12; }
 .mission-pending-members { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 0 12px; color: var(--muted); font-size: 11px; }
 .mission-pending-member { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 3px 5px; background: var(--neutral-hover); }
 .mission-pending-member button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }

@@ -312,7 +312,9 @@ export function NewConversationDialog({
             target?.focus()
           }}
           onCloseAutoFocus={(event) => event.preventDefault()}
-          onEscapeKeyDown={(event) => { if (busy || quickHelpOpen) event.preventDefault() }}
+          onEscapeKeyDown={(event) => {
+            if (busy || quickHelpOpen || missionDialogContent?.querySelector('.composer-caret-menu')) event.preventDefault()
+          }}
           onPointerDownOutside={(event) => {
             if (event.target instanceof Element && event.target.closest('.new-camp-quick-tooltip')) event.preventDefault()
           }}

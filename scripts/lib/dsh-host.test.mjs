@@ -1,10 +1,105 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, readdirSync, readFileSync, rmSync, renameSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { apply, readinessService } from '../../crates/rovai-core/src/dsh/bootstrap.mjs'
+import { prepareModels, withResponsesDefaults, observeNativeImport } from '../../crates/rovai-core/src/dsh/models.mjs'
+
+test('DSH Web supplementation preserves whole native routes and localizes unknown sources', () => {
+  const route = (url, model = 'same-model') => ({ api: 'openai-responses', baseURL: url,
+    apiKeyEnv: 'PRIVATE_KEY_REFERENCE', models: [{ id: model }] })
+  const native = { providers: { relay: route('https://native.invalid'), unknown: route('https://unknown.invalid'), disabled: null } }
+  const web = { relay: route('https://web.invalid'), extra: route('https://extra.invalid'),
+    unknown: route('https://unsafe.invalid'), disabled: route('https://enable.invalid') }
+  const diagnostics = []
+  const prepared = prepareModels(native, web, new Set(['relay', 'disabled']), diagnostics)
+  assert.deepEqual(prepared.config.providers.relay, native.providers.relay)
+  assert.deepEqual(prepared.config.providers.unknown, native.providers.unknown)
+  assert.equal(prepared.config.providers.disabled, null)
+  assert.deepEqual(prepared.webProviders, ['extra'])
+  assert.deepEqual(prepared.config.providers.extra, web.extra)
+  assert.equal(prepareModels(native, { relay: native.providers.relay }, new Set(['relay']), []).webProviders.length, 0)
+  assert.equal(JSON.stringify(diagnostics).includes('https://'), false)
+  assert.equal(JSON.stringify(diagnostics).includes('PRIVATE_KEY'), false)
+  const builtin = prepareModels({ providers: { relay: {} } }, { relay: web.relay }, new Set(), [], new Set(['relay']))
+  assert.deepEqual(builtin.webProviders, ['relay'])
+  const opaque = { __jsExpr: 'configurationFromEnvironment()' }
+  assert.equal(prepareModels(opaque, web, new Set(), []).config, opaque)
+  const partial = prepareModels({ providers: {} }, { bad: opaque, good: web.extra }, new Set(), [])
+  assert.deepEqual(partial.webProviders, ['good'])
+  assert.deepEqual(partial.rejectedProviders, ['bad'])
+  for (const source of [opaque, null, false]) {
+    const failed = prepareModels(native, { relay: source, disabled: source, unknown: source,
+      extra: source }, new Set(['relay', 'disabled']), [])
+    assert.deepEqual(failed.config.providers, native.providers)
+    assert.deepEqual(failed.webProviders, [])
+    assert.deepEqual(failed.rejectedProviders, ['extra'], 'Web failure must not reject preserved native routes')
+  }
+})
+
+test('DSH Responses defaults preserve explicit Provider and Model compatibility parameters', () => {
+  // Successor of the Rust settings-file transformation owner: all its positive,
+  // negative and explicit null cases now exercise the runtime transformation.
+  const original = { providers: {
+    gateway: { api: 'openai-responses', baseURL: 'https://private.invalid/v1',
+      headers: { Authorization: 'private-test-credential' }, models: [{ id: 'model', compat: { supportsStrictMode: false } }] },
+    off: { api: 'openai-responses', compat: { supportsStrictMode: false } },
+    on: { api: 'openai-responses', compat: { supportsStrictMode: true } },
+    null: { api: 'openai-responses', compat: { supportsStrictMode: null } },
+    completions: { api: 'openai-completions' }, anthropic: { api: 'anthropic-messages' }, builtin: {},
+  } }
+  const snapshot = structuredClone(original)
+  const prepared = withResponsesDefaults(original)
+  assert.deepEqual(prepared, { providers: { ...original.providers,
+    gateway: { ...original.providers.gateway, compat: { supportsStrictMode: true } } } })
+  assert.deepEqual(original, snapshot)
+  assert.deepEqual(withResponsesDefaults({ providers: {} }, original).providers, { gateway: { compat: { supportsStrictMode: true } } })
+  for (const config of [{}, { providers: {} }, { __jsExpr: 'nativeExpression()' }]) {
+    assert.deepEqual(withResponsesDefaults(config), config.providers ? config : config.__jsExpr ? config : { providers: {} })
+  }
+})
+
+test('DSH Patch isolation waits for native writes after rename and verifies swallowed failures', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rovai-dsh-migration-test-'))
+  try {
+    const legacy = join(root, 'settings.yaml')
+    const bytes = '{"llm-pi-ai":{"providers":{"relay":{"apiKeyEnv":"REFERENCE"}}}}'
+    writeFileSync(legacy, bytes)
+    let release, finished = false, user
+    const gate = new Promise(resolve => { release = resolve })
+    const settings = {
+      describe: () => [{ ns: 'llm-pi-ai', user }],
+      async update(ns, patch) { user = patch },
+      async importLegacyDocument() {
+        renameSync(legacy, `${legacy}.imported`)
+        await gate
+        await this.update('llm-pi-ai', JSON.parse(bytes)['llm-pi-ai'])
+      },
+    }
+    const diagnostics = []
+    const observed = observeNativeImport(settings, { home: root }, diagnostics).then(() => { finished = true })
+    assert(existsSync(legacy)) // observation never invokes native migration
+    const importing = settings.importLegacyDocument()
+    await Promise.resolve()
+    assert(existsSync(`${legacy}.imported`))
+    assert.equal(finished, false)
+    const backup = readdirSync(join(root, 'backups'))[0]
+    assert.equal(readFileSync(join(root, 'backups', backup), 'utf8'), bytes)
+    release()
+    await importing
+    await observed
+    assert.deepEqual(diagnostics, [])
+    settings.update = async () => { throw new Error('private-endpoint-or-key') }
+    settings.importLegacyDocument = async function () { try { await this.update('llm-pi-ai', {}) } catch {} }
+    const failed = observeNativeImport(settings, { home: root }, diagnostics)
+    await settings.importLegacyDocument()
+    await failed
+    assert.deepEqual(diagnostics, [{ code: 'native_model_import_failed' }])
+    await observeNativeImport({}, { home: root }, []) // old DSH has no import wait
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
 
 test('DSH official prompt seam binds immutable root identity per session and fails closed', async () => {
   const root = mkdtempSync(join(tmpdir(), 'rovai-dsh-host-test-'))

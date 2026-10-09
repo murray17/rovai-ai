@@ -3,18 +3,20 @@
 // not model quality or public-message delivery.
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import { startQualificationCore } from './lib/qualification-core.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 
 const repository = resolve(import.meta.dirname, '..')
-const root = await realpath(await mkdtemp(join(tmpdir(), 'rovai-dsh-responses-')))
+const root = await realpath(process.env.ROVAI_DSH_SMOKE_ROOT ?? await mkdtemp(join(tmpdir(), 'rovai-dsh-responses-')))
+assert.equal((await readdir(root)).length, 0, 'Smoke root must be an empty, isolated directory')
 const data = join(root, 'data'), project = join(root, 'project'), home = join(root, 'home')
+const source = process.env.ROVAI_DSH_SMOKE_SOURCE ?? 'shared'
+assert(['shared', 'web'].includes(source))
 const cases = [
   { id: 'default', provider: 'fixture', strict: false },
   { id: 'model-off', provider: 'fixture', strict: undefined },
@@ -89,7 +91,14 @@ try {
   const settings = JSON.stringify({ 'llm-pi-ai': { providers: {
     fixture: route, 'explicit-off': { ...route, compat: { supportsStrictMode: false } }
   } } })
-  await writeFile(join(home, 'settings.yaml'), settings, { mode: 0o600 })
+  const webPatch = JSON.stringify([{ id: 'llm-pi-ai', config: JSON.parse(settings)['llm-pi-ai'] }])
+  if (source === 'shared') await writeFile(join(home, 'settings.yaml'), settings, { mode: 0o600 })
+  else {
+    await mkdir(join(home, 'profiles/web'), { recursive: true })
+    await writeFile(join(home, 'profiles/web/package.json'), JSON.stringify({ private: true,
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } } }))
+    await writeFile(join(home, 'profiles/web/cordis.patch.yml'), webPatch, { mode: 0o600 })
+  }
   await writeFile(join(root, 'mcp.json'), '{}')
   process.env.DSH_HOME = home
   process.env.DSH_AGENTS_HOME = join(root, 'agents-home')
@@ -100,7 +109,27 @@ try {
     workingDirectory: repository, runtimeCacheDirectory: join(root, 'cache'), mcpConfigPath: join(root, 'mcp.json')
   })
   await core.request('health.check')
-  const installation = await configureProductRuntime(core.request, 'deepseek-harness', ['agent_2'])
+  // Runtime readiness is advisory after light-launch admission. Wait for this
+  // explicit check's snapshot, rather than repeatedly reconfiguring a member
+  // until its unrelated advisory readiness happens to say "ready".
+  await core.request('runtime.product.check', { runtimeKind: 'deepseek-harness' })
+  let installation
+  const checkDeadline = Date.now() + 45000
+  while (Date.now() < checkDeadline) {
+    installation = (await core.request('runtime.installations.list')).find(row => row.adapterKind === 'deepseek-harness' && row.installationClass === 'managed_default')
+    if (installation?.snapshot?.probeStatus === 'ready') break
+    await new Promise(done => setTimeout(done, 100))
+  }
+  assert.equal(installation?.snapshot?.probeStatus, 'ready', 'Native DSH check must succeed')
+  if (source === 'web') {
+    assert(installation.snapshot.models.some(model => model.id === JSON.stringify(['fixture', 'default']) && model.description?.includes('DSH Web')))
+  }
+  const initial = await core.request('members.get', { agentId: 'agent_2' })
+  const selected = await core.request('members.runtime.set', { commandId: crypto.randomUUID(), command: {
+    agentId: 'agent_2', expectedVersion: initial.version, adapterKind: 'deepseek-harness',
+    model: installation.memberRuntimeDefaults.model, permissions: installation.memberRuntimeDefaults.permissions,
+  } })
+  assert.equal(selected.status, 'applied')
   const workspace = await core.request('workspaces.inspect', { path: project })
   for (const scenario of cases) {
     const profile = await core.request('members.get', { agentId: 'agent_2' })
@@ -150,9 +179,17 @@ try {
     results.push({ scenario: scenario.id, strict: scenario.strict ?? 'omitted', requests: 2,
       nativeTool: scenario.rejected ? 'rejected' : 'succeeded', markerWritten: file !== null })
   }
-  assert.equal(await readFile(join(home, 'settings.yaml'), 'utf8'), settings, 'Native settings changed')
+  const legacy = await readFile(join(home, 'settings.yaml'), 'utf8').catch(error => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
+  if (source === 'web') {
+    assert.equal(await readFile(join(home, 'profiles/web/cordis.patch.yml'), 'utf8'), webPatch)
+    assert(!(await readFile(join(home, 'profiles/acp/cordis.patch.yml'), 'utf8')).includes('explicit-off'))
+  } else if (legacy !== null) assert.equal(legacy, settings, 'Legacy native settings changed')
+  else assert.equal(await readFile(join(home, 'settings.yaml.imported'), 'utf8'), settings, 'DSH native import lost the original settings')
   console.log(JSON.stringify({ passed: true, runtimeVersion: installation.reportedVersion ?? installation.snapshot?.reportedVersion,
-    platform: `${process.platform}-${process.arch}`, controlledEndpoint: true, nativeSettingsUnchanged: true, results }, null, 2))
+    platform: `${process.platform}-${process.arch}`, controlledEndpoint: true, source, nativeSettingsPreserved: true, nativeImport: source === 'shared' && legacy === null, results }, null, 2))
 } finally {
   if (core) await core.stop()
   await new Promise(resolveClose => server.close(resolveClose))

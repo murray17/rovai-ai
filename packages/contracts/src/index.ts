@@ -215,7 +215,7 @@ export interface MemberThreadMembership {
 
 export type ModelSelection =
   | { mode: 'runtime_default' }
-  | { mode: 'explicit'; modelId: string; options: Record<string, unknown> }
+  | { mode: 'explicit'; modelId: string; options: Record<string, unknown>; dshSource?: 'native' | 'web' }
 
 export interface AdapterPermissionConfig {
   adapterKind: AdapterKind

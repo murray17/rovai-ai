@@ -1,4 +1,5 @@
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
+import * as Popover from '@radix-ui/react-popover'
 import {
   COMMAND_PRIORITY_CRITICAL,
   HISTORY_PUSH_TAG,
@@ -12,6 +13,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type JSX,
@@ -29,6 +31,7 @@ interface ComposerTypeaheadRenderState {
 export interface ComposerTypeaheadPluginProps {
   match: ComposerTriggerMatch | null
   memberOnly?: boolean
+  menuAnchor?: 'editor' | 'caret'
   selectionScope?: string
   optionCount: number
   getOptionState(match: ComposerTriggerMatch): ComposerTypeaheadOptionState
@@ -56,6 +59,7 @@ export function composerTypeaheadEnterAction(
 export function ComposerTypeaheadPlugin({
   match,
   memberOnly = false,
+  menuAnchor = 'editor',
   selectionScope,
   optionCount,
   getOptionState,
@@ -66,6 +70,20 @@ export function ComposerTypeaheadPlugin({
   const [editor] = useLexicalComposerContext()
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null)
+  const caretAnchor = useMemo(() => ({ current: {
+    get contextElement() { return editor.getRootElement() ?? undefined },
+    getBoundingClientRect() {
+      const root = editor.getRootElement()
+      const selection = root?.ownerDocument.getSelection()
+      if (root && selection?.rangeCount && root.contains(selection.anchorNode)) {
+        const range = selection.getRangeAt(0).cloneRange()
+        range.collapse(false)
+        const bounds = range.getBoundingClientRect()
+        if (bounds.height) return bounds
+      }
+      return root?.getBoundingClientRect() ?? new DOMRect()
+    }
+  } }), [editor])
   const selectedIndexRef = useRef(selectedIndex)
   const memberOnlyRef = useRef(memberOnly)
   memberOnlyRef.current = memberOnly
@@ -92,8 +110,10 @@ export function ComposerTypeaheadPlugin({
   }, [close, editor, findMatch])
 
   useEffect(() => editor.registerRootListener((root) => {
-    setPortalHost(root?.parentElement ?? null)
-  }), [editor])
+    // Stay inside the modal's focus/scroll boundary, outside its clipped writing plane.
+    setPortalHost((menuAnchor === 'caret' ? root?.closest<HTMLElement>('[role="dialog"]') : null)
+      ?? root?.parentElement ?? null)
+  }), [editor, menuAnchor])
 
   useEffect(() => editor.registerEditableListener((editable) => {
     if (!editable) close()
@@ -185,9 +205,13 @@ export function ComposerTypeaheadPlugin({
     const menuId = root.getAttribute('aria-controls')
     const menu = match && menuId ? root.ownerDocument.getElementById(menuId) : null
     const selected = menu?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')
-    if (selected?.id) {
+    if (menu && selected?.id) {
       root.setAttribute('aria-activedescendant', selected.id)
-      selected.scrollIntoView({ block: 'nearest' })
+      // Only scroll the list; scrollIntoView also moves clipped dialog/editor ancestors.
+      const bounds = selected.getBoundingClientRect()
+      const top = menu.getBoundingClientRect().top + menu.clientTop
+      if (bounds.top < top) menu.scrollTop += bounds.top - top
+      else if (bounds.bottom > top + menu.clientHeight) menu.scrollTop += bounds.bottom - top - menu.clientHeight
     } else {
       root.removeAttribute('aria-activedescendant')
     }
@@ -195,7 +219,22 @@ export function ComposerTypeaheadPlugin({
   }, [editor, match, optionCount, portalHost, selectedIndex])
 
   if (!match || !portalHost) return null
-  return createPortal(renderMenu({ selectedIndex, setHighlightedIndex: setSelectedIndex, selectIndex }), portalHost)
+  const menu = renderMenu({ selectedIndex, setHighlightedIndex: setSelectedIndex, selectIndex })
+  return createPortal(menuAnchor === 'caret'
+    ? <Popover.Root open onOpenChange={(open) => { if (!open) close() }}>
+        <Popover.Anchor virtualRef={caretAnchor} />
+        <Popover.Content asChild className="composer-caret-menu" side="bottom" align="start"
+          sideOffset={7} collisionPadding={12} updatePositionStrategy="always" hideWhenDetached
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onInteractOutside={(event) => {
+            if (editor.getRootElement()?.contains(event.target as Node)) event.preventDefault()
+          }}
+          onEscapeKeyDown={(event) => { event.preventDefault(); close() }}>
+          {menu}
+        </Popover.Content>
+      </Popover.Root>
+    : menu, portalHost)
 }
 
 function composerTriggerMatchesEqual(

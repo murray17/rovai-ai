@@ -47,7 +47,7 @@ selector 同样不展示 Cursor 与 Cline；其他成员选项来自 `AdapterKin
 `command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
 Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
 原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
-[V1.72-D22](../versions/v1.72/decisions.md#v1-72-d22)仅在 macOS arm64 开放开发 Preview，其余平台
+[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)仅在 macOS arm64 开放开发 Preview，其余平台
 NotQualified；没有 qualification evidence，不声称 First-Class。旧 headless 传输只保留研究/兼容测试。
 
 Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
@@ -93,8 +93,8 @@ warm 使用正常 Fleet，cold 按广告能力 session/load/resume，重放进�
 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)、
 [ACP 退役验收](../research/cline-runtime/acp-retirement-2026-10-08.md)及
 [输入说明](../versions/v1.72/model-context-change-cline-acp.md)，理由见
-[V1.72-D27](../versions/v1.72/decisions.md#v1-72-d27)与
-[V1.72-D28](../versions/v1.72/decisions.md#v1-72-d28)。
+[V1.72-D30](../versions/v1.72/decisions.md#v1-72-d30)与
+[V1.72-D31](../versions/v1.72/decisions.md#v1-72-d31)。
 
 ## 可执行准入
 
@@ -576,13 +576,46 @@ ACP composition 的 provider/model 是该入口自己的 native default，独立
 agent-default-model settings。BYOK 仍通过原生 llm-pi-ai providers 与 ACP profile patch 配置，
 Rovai 显式选模使用真实 catalog ID；产品不读取其他 Runtime 的凭据。
 
-Host 为原生 `settings.yaml` 中显式采用 `openai-responses`、且未声明
-`compat.supportsStrictMode` 的 Provider 添加 composition 层默认值 `true`。该开关表示端点接受
-`strict` 字段；DSH 的普通工具由此显式发送 `strict: false`，保留可选参数。原生 settings 中
-Provider / Model 的显式开关仍按原生优先级生效，其他协议不增加默认值。Host patch 只投影路由名与布尔值，
-不复制 endpoint、headers、模型列表或凭据，也不改写原生 settings、工具参数或 sandbox/approval 校验。
-Bootstrap revision 参与已有配置摘要，使旧 Host 不继续复用。实测范围与配置来源限制见
-[Responses 工具兼容验收](../research/deepseek-harness-runtime/responses-tools-2026-10-04.md)。
+Probe 与执行 Host 共用 `dsh/models.mjs` 模型配置准备插件。最终目录仍来自 ACP 的
+`session/new.configOptions`；原生共享 settings、ACP Profile、Home Patch、环境变量与凭据引用由 DSH
+按自身规则加载。标准 Web Profile（base + web-app bundles）的 `llm-pi-ai` Provider 配置作为补充，不要求用户先开 Web 或升级旧版。
+原生用户配置以完整 Provider 为冲突边界优先保留；普通内置目录条目不构成用户配置。
+同名模型继续保留原生 Provider + Model ID，不拼接两条路由的 URL、凭据或模型数组。
+不透明配置只停止相应块/Provider 的补充，不求值配置表达式，也不建立持久化来源账本。
+首版不复用自定义 Web bundle 引入的模型，显示能力诊断并保留原生 ACP，避免另造依赖解析与跟踪系统。
+
+**DSH 原生迁移期间的 Patch 隔离**：新式 Settings 存在原生导入能力时，插件观察 DSH 自己发起的
+导入 promise，先保存私有的非覆盖备份，待逐项写入结束并核对模型部分后才准备补充与兼容参数。
+文件改名或握手成功不能代替完成信号。旧式 Settings 不等待迁移；无法确认新式导入完成能力时，
+保留原生路径并诊断，不冒险注入模型覆盖。Rovai 不解析旧文件执行搬迁、不重命名文件、不写 ACP Profile，
+不读取 `settings.yaml.imported` 作为活动配置，也不另建 DSH Home 或迁移数据库。
+
+补充与 Responses 兼容默认值合成完整的模型配置，通过原生 Loader 的 `Entry.update` 仅在进程内应用；
+不能使用会写 Profile 的 `loader.update`，也不能通过 CLI 提前覆盖 `llm-pi-ai.config`。
+后者会影响 DSH 导入时读取的配置，可能使旧模型漏导入或临时 Web 模型被永久保存。
+`openai-responses` 且没有显式 `compat.supportsStrictMode` 的 Provider 仍获得 `true` 默认值，
+普通工具因此发送 `strict: false`。Provider / Model 显式值和其他兼容参数保持原生优先级，其他协议不增加默认。
+凭据和表达式留在 DSH 中解析，不进入补丁文件、模型目录或诊断。
+
+Web 补充失败时，最多在业务输入之前撤销一次本次补充，保留原生模型、兼容修正、权限和 Bootstrap。
+被拒绝的 Web 选择不能凭同名原生 ID 继续执行。先保护原生用户配置、显式禁用与来源不明的原生块，
+再解析 Web 同名 Provider；补充失败名单不禁用 ACP 实际保留的原生模型。Web 整体损坏也不以
+llm-pi-ai 的局部 Provider 集合作为全部原生插件的白名单。请求发出后的认证、限流和超时不触发换路由。
+
+目录的现有 runtime metadata 标注 DSH 来源；显式选择以可选的 dshSource（native / web）随现有
+成员选择 JSON 与冻结 Run 保存，不新增表或来源历史。旧版无标记选择保留原生语义；显式保存时可从
+已有目录元信息补齐，已有标记不会被后台刷新或无关配置编辑改写。执行对照实际准备结果核验来源，
+再由真实 ACP 目录验证模型；失效的 Web 选择明确报错，新选择仍可使用同名的原生路由。
+来源仅用于内部路由核验，不显示在模型选项说明中；配置异常的简短诊断继续复用现有目录说明，
+不增加确认弹窗。
+
+准备结果中的诊断、摘要与输入指纹用于本次启动。准备完成及发布刷新结果前复验输入，过期结果沿用
+现有 Superseded 处理；已准备 Host 的后续执行沿用获取/复用入口的配置指纹，不在显式选模时重复
+校验全部原始文件。等待准备结果、结果有效性与路由校验仍保留，不增加全局锁或无限重试。
+Web 模型文件纳入已有 Host 摘要；可解析的非模型 Web 设置、临时路径与生成时间不引起 Host 重建。
+能力检查失败不收窄既有 DSH 最低版本；已运行的 Run 沿用 Fleet 现有退役规则。
+实现及验收范围见[当前记录](../versions/v1.72/implementation-plan.md#dsh-native-web-models)。
+历史旧版工具请求证据仍见[Responses 工具兼容验收](../research/deepseek-harness-runtime/responses-tools-2026-10-04.md)。
 
 共享 ACP Host/Fleet 拥有 resident_multi_session、租约、LRU 与停止。Run-local MCP evidence 与 Session 模型
 不进入进程兼容键；真实 MCP 定义、权限、cwd、原生 settings/credentials/profile 配置摘要变化会 fence 复用。

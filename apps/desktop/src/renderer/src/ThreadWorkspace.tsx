@@ -6252,6 +6252,19 @@ export function runPulseMemberNameLines(
 
 type RunPulseStateShape = ExecutionStatusShape
 
+function pendingRuntimeCleanupLabel(runs: readonly AgentRunView[]): string | null {
+  const pending = runs.find(run =>
+    ['succeeded', 'failed', 'cancelled'].includes(run.status)
+    && run.cancelRequestedAt !== null
+    && run.cancelAcknowledgedAt === null
+  )
+  if (!pending) return null
+  const age = Date.now() - Date.parse(pending.cancelRequestedAt!)
+  return age >= 5_000
+    ? uiAttribute('上次执行清理未确认，正在重试')
+    : uiAttribute('等待上次执行清理')
+}
+
 function runPulseStateShape(run: AgentRunView, stopping: boolean): RunPulseStateShape {
   if (stopping && NON_TERMINAL_RUNS.has(run.status)) return 'cancelling'
   if (run.status === 'running') return 'running'
@@ -6274,11 +6287,15 @@ function runPulseProcessState(
 } {
   const run = preferredAgentProcessRun(process.runs)
   if (run && NON_TERMINAL_RUNS.has(run.status)) {
+    if (run.status === 'queued') {
+      const cleanupLabel = pendingRuntimeCleanupLabel(process.runs)
+      if (cleanupLabel) return { run, label: cleanupLabel, tone: 'attention', shape: 'queued' }
+    }
     const presentation = localizedAgentRunPresentation(run, stopping && NON_TERMINAL_RUNS.has(run.status))
     return { run, label: presentation.label, tone: presentation.tone, shape: runPulseStateShape(run, stopping) }
   }
   if (process.waitingDeliveries.length > 0) {
-    return { run: null, label:uiAttribute("排队中"), tone: 'attention', shape: 'queued' }
+    return { run: null, label: pendingRuntimeCleanupLabel(process.runs) ?? uiAttribute("排队中"), tone: 'attention', shape: 'queued' }
   }
   if (run) {
     const presentation = localizedAgentRunPresentation(run)
@@ -7442,6 +7459,8 @@ function ExecutionDrawer({
       batch.runs[0]
     )
     const stoppingBatch = batch.runs.some((run) => runStopState(run) !== 'available')
+    const queueLabel = pendingRuntimeCleanupLabel(process.runs)
+      ?? uiAttribute('排队中')
     const contentId = `execution-queue-content-${batch.agentId}`
     const toggle = (): void => setExpandedQueueAgents((current) => {
       const next = new Set(current)
@@ -7472,7 +7491,7 @@ function ExecutionDrawer({
               subject={uiAttribute("排队批次")}
             />
             <span className="execution-run-trailing">
-              <span className="execution-run-metric is-queued"><UiText zh={"排队中"} /></span>
+              <span className="execution-run-metric is-queued">{queueLabel}</span>
               <span className="execution-run-operations">
                 <button type="button" aria-label={expanded ? uiAttribute("收起排队批次") : uiAttribute("展开排队批次")}
                   aria-expanded={expanded} aria-controls={contentId} onClick={toggle}>
@@ -7503,6 +7522,8 @@ function ExecutionDrawer({
     const expanded = expandedQueueAgents.has(expansionKey)
     const runMember = memberById.get(batch.agentId)
     const runMemberName = runMember?.displayName ?? batch.agentId
+    const queueLabel = pendingRuntimeCleanupLabel(process.runs)
+      ?? uiAttribute('排队中')
     const sourceMessage = messageById.get(batch.messageIds[0]) ?? null
     const summary = sourceMessage
       ? sourceMessage.body.trim().replace(/\s+/gu, ' ')
@@ -7540,7 +7561,7 @@ function ExecutionDrawer({
               subject={uiAttribute("排队消息")}
             />
             <span className="execution-run-trailing">
-              <span className="execution-run-metric is-queued"><UiText zh={"排队中"} /></span>
+              <span className="execution-run-metric is-queued">{queueLabel}</span>
               <span className="execution-run-operations">
                 <button type="button" aria-label={expanded ? uiAttribute("收起排队消息") : uiAttribute("展开排队消息")}
                   aria-expanded={expanded} aria-controls={contentId} onClick={toggle}>

@@ -7534,6 +7534,7 @@ mod tests {
                 capabilities: Vec::new(),
                 protocol_version: "codex-app-server-v2".to_string(),
                 model: ResolvedModelSelection {
+                    dsh_source: None,
                     source: "runtime_default".to_string(),
                     model_id: "gpt-test".to_string(),
                     options: json!({}),

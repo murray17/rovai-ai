@@ -2252,6 +2252,7 @@ mod tests {
                     capabilities: vec!["cli.print".to_string()],
                     protocol_version: "antigravity-app-cli-v1".to_string(),
                     model: ResolvedModelSelection {
+                        dsh_source: None,
                         source: "runtime_default".to_string(),
                         model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                         options: json!({}),
@@ -2443,6 +2444,7 @@ mod tests {
                 capabilities: vec!["cli.print".to_string()],
                 protocol_version: "antigravity-app-cli-v1".to_string(),
                 model: ResolvedModelSelection {
+                    dsh_source: None,
                     source: "runtime_default".to_string(),
                     model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                     options: json!({}),
@@ -3026,6 +3028,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                     capabilities: vec!["cli.print".to_string()],
                     protocol_version: "antigravity-app-cli-v1".to_string(),
                     model: ResolvedModelSelection {
+                        dsh_source: None,
                         source: "runtime_default".to_string(),
                         model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                         options: json!({}),
@@ -3139,6 +3142,7 @@ exec sleep 30
                 capabilities: vec!["cli.print".to_string()],
                 protocol_version: "antigravity-app-cli-v1".to_string(),
                 model: ResolvedModelSelection {
+                    dsh_source: None,
                     source: "runtime_default".to_string(),
                     model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                     options: json!({}),

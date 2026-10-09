@@ -16,7 +16,7 @@ last_updated: 2026-10-09
 User 99 因原生 ACP 自动 compaction 缺口要求暂不对外暴露 Cline。所有平台回到 NotQualified，
 移除设置、新手引导、成员选择和安装引导入口；已存身份、配置与历史保持可读，官方 ACP 实现保留。
 没有重新引入 Hub、版本或账号白名单。当前范围见 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#cline-实施边界)，
-理由见 [V1.72-D28](decisions.md#v1-72-d28)。下文 Cline Preview 与各轮成功均为此前实施证据。
+理由见 [V1.72-D31](decisions.md#v1-72-d31)。下文 Cline Preview 与各轮成功均为此前实施证据。
 
 Command Code 1.74.1/1.79.1 的 BYOK 默认 first/warm/cold 本轮真实通过，两种 ACP 显式模型选择均被
 原生目录拒绝。OpenCode/Pi 以合成 Provider 完成切换与恢复对照；生产模型目录继续尊重原生广告，
@@ -29,13 +29,13 @@ User 95 已替换此前 Hub 方向。Cline 唯一执行链为选中安装的 `cl
 专属登录 UI/IPC 和测试入口，保留 Pi 结算与通用进程回收。不恢复版本、账号白名单或强制 cold。
 旧 Hub Binding 仅在新输入前按共享不兼容替换，公开数据及原生历史保留；不迁移或重放旧输入。
 当前合同 [Runtime Launch v54](../../contracts/runtime-launch-and-verification-v54.md)，理由
-[V1.72-D27](decisions.md#v1-72-d27)，[输入说明](model-context-change-cline-acp.md)。
+[V1.72-D30](decisions.md#v1-72-d30)，[输入说明](model-context-change-cline-acp.md)。
 实际结果见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)，旧 Hub 报告均为历史证据。
 切换时保持 Preview，现已按上节撤回；ACP compact 缺口和实际安装的能力失败不宣称修复。后端切换本身不改 schema；主干合流迁移见下节，current_version 不变。
 
 ## 主干与 Preview 数据合流（2026-10-08）
 
-当前 schema 为 **138**。Migration 184 / schema 134 在主干用于继续执行，在 Preview 用于 Cline catalog；
+当前 schema 为 **139**。Migration 184 / schema 134 在主干用于继续执行，在 Preview 用于 Cline catalog；
 Migration 185 / schema 135 在主干用于结构化 Mission 描述，在 Preview 用于 Command Code catalog。
 Classifier 按完整结构、收据及旧 classifier 识别来源，拒绝部分结构，不能只凭编号推断已具备能力。
 Migration 186 将两边的 catalog 与继续执行结构汇合到 schema 136；Migration 187 保留主干已有的
@@ -45,6 +45,10 @@ Classifier 按结构区分两种 186，先保留主干已有描述，再由 Migr
 既有 186 收据不改写，已存在的索引和结构化描述不重建；Preview/137 则只补索引。
 旧业务行、冻结证据、结构化提及和继续执行授权不重建、不重投；失败一起回滚。既有迁移 owner 覆盖
 两种 134、两种 135、136 来源和写入失败；下文旧编号仅描述当时分支状态。
+
+主干 `81f8b1fc` 的 Migration 187/schema 137 已包含 Mention v33，Preview 的同编号只包含 Mission 描述。
+合流保留两种完整格式来源与原 187 收据：先由 188 补齐 catalog/索引，再由 189/schema 139
+为旧格式扩展 Mention 约束；已有 v33 只补收敛收据，不重建表或重算冻结记录。部分 v33 结构拒绝升级。
 
 ## 并行实施：Command Code 与 Cline
 
@@ -75,13 +79,13 @@ Cline observer v2 补齐原生模型配置快照与实际 Provider/模型匹配�
 [窗口补采](../../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
 
 Cline 增加 closed Runtime/Skill identity、共享 Host 接线与 Migration 184，从 schema 133 升为 **134**，
-macOS arm64 按 [V1.72-D20](decisions.md#v1-72-d20)开放开发 `Preview`，其余平台保持 `NotQualified`；
+macOS arm64 按 [V1.72-D23](decisions.md#v1-72-d23)开放开发 `Preview`，其余平台保持 `NotQualified`；
 完整资格仍在实施。Command Code 随后接入官方 1.74.1 ACP 与共享 Fleet，Migration 185 升至 schema **135**，
 也仅在 macOS arm64 开放 Preview。按 User 后续修复要求，Bootstrap 从旧候选 first_payload 改为受管
-System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D22](decisions.md#v1-72-d22)
+System Mod；[revision 5](model-context-change-command-code-acp.md)与 [V1.72-D25](decisions.md#v1-72-d25)
 记录加载门禁、逐 Session 绑定与失败收敛。Cline 随后按 User 明确指示改为正常 System Rule，
 不再以故意缺失插件的极端场景阻挡。冻结 B 逐 Session 绑定、user P 独立，见
-[Cline System revision 2](model-context-change-cline-system.md)及 [V1.72-D24](decisions.md#v1-72-d24)。
+[Cline System revision 2](model-context-change-cline-system.md)及 [V1.72-D27](decisions.md#v1-72-d27)。
 共享 Core 的 Command 门禁与常驻接线已过；原生默认 BYOK 路径已解决先前额度阻碍，真实模型 A→B→A、
 exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证通过。显式自定义模型切换仍被上游拒绝，
 因此保留原生默认哨兵而不伪造目录。Cline ACP 未传 compaction 配置，真实探针未得到完成信号。完整 14 轴对照与实际验证见
@@ -92,7 +96,7 @@ exact cold、手动/自动压缩后连续性及 App 文件/CLI/warm/重启验证
 超过 75 秒无迟到写入、cleanup 后排队输入自动成功均通过。Command 官方 resume/load 会接受不存在历史，
 已增加官方 session/list 精确 ID/cwd 门禁；有效 cold 的 Session/Binding/generation 保留通过。
 范围、失败候选和平台限制见[故障恢复验收](../../research/runtime-monitoring/command-cline-fault-recovery-2026-10-05.md)
-与 [V1.72-D23](decisions.md#v1-72-d23)，不改变两者 Preview 或未闭合的上游差异。
+与 [V1.72-D26](decisions.md#v1-72-d26)，不改变两者 Preview 或未闭合的上游差异。
 
 2026-10-06 追加完成 Command 原生私有 MCP 配置与 Cline System 新包真实验收：两者 first/warm/cold、
 文件工具与显式 CLI 发送通过；MCP cwd、字面 env/headers、原生同名优先和更新/撤销边界通过。
@@ -468,3 +472,12 @@ User 于 2026-10-08 授权独立 worktree、PR 与 main 合入。Pending Compose
 [Mission v12](../../contracts/mission-v12.md)冻结结构与原子性，Migration 185 将 schema 134 升至 135；
 模型 `mission get` 继续返回可读 description，不增加字段或修改 Bootstrap/Run Facts。
 决定见 [V1.72-D18](decisions.md#v1-72-d18)，测试与交付证据见[实施记录](mission-member-mentions-implementation.md)。
+
+## 消息 Mention 元数据统一
+
+User 于 2026-10-09 确认[完整方案及补充边界 r1](model-context-change-message-mentions.md)。
+仅公开 batch RUN_INPUT.messages 与 thread.read 正常条目改为 mentions；正文、作者、渠道和非 batch 保持。
+新公开 Formatter/Manifest 33，Profile 10/Facts 9，旧 Run 和成功回执按原版本恢复，无 Session 轮换。
+主干原 Migration 187/schema 137 只扩展现有格式约束；本分支合流后由 189/schema 139 保留或补齐。当前合同见 [Mention v1](../../contracts/message-mentions-v1.md)、
+[ContextManifest v33](../../contracts/context-manifest-evidence-v33.md)、[History v12](../../contracts/camp-history-v12.md)。
+状态与证据见[确认稿实施记录](model-context-change-message-mentions.md#实施与验证记录)。

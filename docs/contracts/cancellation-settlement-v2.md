@@ -5,13 +5,13 @@ authority: camp-cancellation-business-terminal-and-runtime-cleanup
 status: accepted
 version: 2
 source_version: v1.37
-last_updated: 2026-09-01
+last_updated: 2026-10-09
 ---
 
 # Cancellation Settlement v2
 
 继承 [v1](cancellation-settlement-v1.md) 的事务线性化、定向 membership cutover、Delivery/Gather 收口、
-terminal delivery pump、三秒 Runtime 清理、Conversation cleanup fence、渠道边界和目标 Camp 补偿。
+terminal delivery pump、Runtime 有界清理、Conversation cleanup fence、渠道边界和目标 Camp 补偿。
 本版只修正取消终态与效果证据之间的关系。
 
 ## 取消终态
@@ -51,3 +51,6 @@ cleanup ACK 不改写；普通 Recovery Blocker resolution 和 Runtime terminal 
 仍先关闭该 Turn 的 pending Delivery，因此不调用 pump。Runtime cleanup 继续在 scheduler 外后台执行并按
 `ActiveExecutionKey` 去重；同 Conversation 只有 `cancel_acknowledged_at` 能解除旧执行隔离，其他 Conversation、
 同轮无关 Run 与已 admitted 渠道请求不等待该清理。
+Windows 的 Runtime 清理使用一次总计五秒的预算；本次有效 Job 成功查询 `ActiveProcesses == 0`
+后立即 ACK 并主动唤醒 Delivery。预算耗尽或查询持续失败进入既有局部重试，不修改已经提交的
+业务终态，也不重投旧输入；启动私有临时文件删除失败不延迟 cleanup ACK。

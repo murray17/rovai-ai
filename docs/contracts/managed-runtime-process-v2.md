@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # Managed Runtime Process v2
@@ -137,18 +137,23 @@ Job handle 非 inheritable，并由 Core generation 独占。planned shutdown �
 Windows Managed Process 为每次启动创建带随机身份的 `Global\Rovai.Runtime.<UUID>` Job，创建时使用
 受保护的当前用户/SYSTEM DACL，拒绝复用已有名字；不设置 breakaway。全局 namespace 使 launch 身份不依赖 Windows
 登录 Session；名称不承担退出证明。控制 handle 仍由启动代际拥有、不可继承。
-Job 活跃数归零、名称消失、根进程退出均不能单独证明后代已完成异步终止及在途 I/O 取消。
-当前 owner 在空 Job 上、启动任何进程前关联私有 IOCP；既有 `tree_is_empty()` 在有界清理期间读取成员通知，
-保留不可继承的进程 handle，并确认这些 handle 已 signaled，或通知对应的进程对象已不存在。
-去重成员数必须严格等于最后读取的 Job 生命周期 `TotalProcesses`，且 `ActiveProcesses` 为零，才提交回收凭据。
-最终计数在所有观察成员退出后读取，防止先前快照遗漏清理期间新建的后代；重复通知不能抵消缺失成员。
-每轮通知读取及成员退出核验分别有数量上限，不占用全局调度锁，也不新增后台轮询。通知丢失、Job 内 PID 复用导致少计、
-计数异常或无法查询退出时保持未确认；不以等待次数或固定延时补齐证据。
+本次持有的有效 Job 成功查询 `JobObjectBasicAccountingInformation`，且 `ActiveProcesses == 0`，
+即为 Windows 资源收尾完成的唯一 Job 条件。查询失败不能视作零；活跃数仍大于零时，按本次 Job 的所有权
+执行 `TerminateJobObject` 并在同一有界预算内重查，成功归零立即提交回收凭据和唤醒后继调度。
+`TotalProcesses` 是生命周期累计数，不参与放行。无需完成端口通知、历史成员账本、PID 补扫、
+逐后代进程句柄退出或额外稳定轮询；普通 Job 通知不保证送达。
 
-Fleet 只保存内部 Job 身份用于归属定位；跨 Core 无法继承完整成员与退出证明，只接受已有持久化、精确 Run/epoch
-的已回收凭据。没有凭据的 scoped 记录，即使 Job 可查询且活跃数为零，也继续阻塞相关后继输入。
-恢复不按记录中的 PID 终止进程，不通过轮换 Native Session 或重新登录解除门禁。
-本期不增加跨 Core 的 Job handle 保活服务。Codex 当前代际的 bounded reap 使用上述证明，再提交既有回收凭据。
+该判据是明确的可用性取舍：Job 当前为空就可启动后继，不额外证明历史进程对象及其在途 I/O
+已经全部完成。根进程的正常 `wait()` 仍可用于取得退出码和回收根进程资源，但不扩展为后代句柄门禁。
+查询暂时失败可在同一预算内重试；持续失败或活跃成员未退出时保留精确执行范围的清理错误，
+由既有 worker 局部重试。Windows 的直接输入保留 queued 请求，后继消息 Delivery 保留 waiting；
+执行台在先前 Run 清理未 ACK 时显示清理中，超过单次预算后显示清理未确认、正在重试，
+不能无声地永久显示普通排队。可信原生终态、资源清理和后继调度
+分别结算；临时启动文件删除失败只记诊断并延后回收，不撤销 Job 清理成功，也不重投旧输入。
+
+Fleet 只保存内部 Job 身份用于归属定位；跨 Core 不保活 Job handle，只接受已有持久化、精确
+Run/epoch 的回收凭据及既有恢复规则。恢复不按记录中的 PID 终止进程，不通过轮换 Native Session
+或重新登录解除门禁。本代 Codex bounded reap 与其他 Windows Managed Process 调用方使用同一 Job 当前状态判据。
 
 Unix 直接启动目标进程并保留 process group、stdio、环境快照与退出回收语义；Windows 保留原子 Job、
 handle list 与受控 entrypoint。所有 Runtime/Probe/derived child 都不经过 Rovai 的 `sandbox-exec` 包装。
@@ -172,7 +177,7 @@ Core 在开放 readiness 前处理前代 ledger；仅同次系统启动且原 ow
 
 这是既有 Unix 回收的补强，不是 Windows Job/cgroup：未观测且已消失的中间祖先、跨 UID 后代、Core 停止后
 直到再次启动前的空窗不受此记录保证。macOS 使用 XNU libproc 的固定结构与 PID-version signal 接口，
-字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D23](../versions/v1.72/decisions.md#v1-72-d23)。
+字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D26](../versions/v1.72/decisions.md#v1-72-d26)。
 
 Linux ACP Host 在原生 cancel、graceful stop 或强制回收之前，先由 Managed Process 捕获同 UID 后代的
 父子关系与启动身份，并持有 pidfd。原生取消使父进程退出或后代重新挂靠后，仍通过已捕获的 pidfd 终止后代；

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-10-02
+last_updated: 2026-10-09
 ---
 
 # Windows Desktop Platform
@@ -44,6 +44,10 @@ Windows creates the child with its Job and explicit inheritable handles in one `
 is a closed `native_executable | windows_command_shim` union: native `.exe` remains direct; `.cmd/.bat` uses canonical
 System32 `cmd.exe` with a Core-owned batch serializer, disabled AutoRun/delayed expansion and a composite shim/interpreter
 identity. `.com/.ps1` and PowerShell fallback remain unsupported.
+The owned Job's current `ActiveProcesses == 0` is the Windows cleanup boundary. Core commits cleanup and wakes the
+Delivery scheduler as soon as that query succeeds; transient query failures and active members stay within one bounded
+cleanup attempt and the existing local retry worker. Historical completion notifications, cumulative counts and
+descendant process handles do not gate the next Run. Native terminal settlement remains separate from resource cleanup.
 
 Windows Runtime Search Environment 每次 capture/rescan 都按 inherited process PATH、HKCU User PATH、HKLM Machine
 PATH、known locations 的稳定顺序生成新快照；Registry 只读失败不会阻断 inherited PATH，环境变量展开、目录存在性

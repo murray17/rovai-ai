@@ -65,3 +65,4 @@ test('Mission drawer expands directly from a wide saved width', { timeout: 100_0
 test('Mission editor popovers accept pointer clicks and wheel scrolling', { timeout: 100_000 }, t => runFixture(t, 1, 'editor-pointer'))
 
 test('Mission member references survive save failure and invite only on commit', { timeout: 100_000 }, t => runFixture(t, 1, 'mentions'))
+test('Mission mention candidates remain visible and accept native pointer selection', { timeout: 100_000 }, t => runFixture(t, 1, 'mention-pointer'))

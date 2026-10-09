@@ -1641,6 +1641,25 @@ impl AcpHost {
         Self::spawn_exit_watcher(&host);
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
+        if host.adapter_kind == AdapterKind::DeepseekHarness {
+            let root = host
+                .private_config_root
+                .as_deref()
+                .context("DSH private configuration missing")?;
+            if let Err(error) =
+                crate::dsh::await_model_preparation(root)
+                    .await
+                    .and_then(|prepared| {
+                        if !crate::dsh::model_inputs_unchanged(&prepared) {
+                            bail!("dsh_model_configuration_changed_during_preparation");
+                        }
+                        Ok(())
+                    })
+            {
+                host.shutdown().await;
+                return Err(error);
+            }
+        }
         let mut initialize_params = json!({
             "protocolVersion": 1,
             "clientCapabilities": {
@@ -3924,6 +3943,7 @@ pub struct AcpRuntime {
     attachment_access_root: Option<PathBuf>,
     workspace_access: String,
     session_permissions: AcpSessionPermissions,
+    dsh_model_source: Option<rovai_core::agent_profile::DshModelSource>,
     active_observation: Mutex<Option<AcpPromptObservation>>,
     native_usage: Mutex<Option<Arc<std::sync::Mutex<NativeUsageReader>>>>,
 }
@@ -4062,6 +4082,7 @@ impl AcpRuntime {
         attachment_access_root: Option<PathBuf>,
         workspace_access: String,
         session_permissions: AcpSessionPermissions,
+        dsh_model_source: Option<rovai_core::agent_profile::DshModelSource>,
     ) -> Arc<Self> {
         Arc::new(Self {
             owner,
@@ -4074,6 +4095,7 @@ impl AcpRuntime {
             attachment_access_root,
             workspace_access,
             session_permissions,
+            dsh_model_source,
             active_observation: Mutex::new(None),
             native_usage: Mutex::new(None),
         })
@@ -4370,6 +4392,21 @@ impl AcpRuntime {
             }
         }
         if model_source == "explicit" {
+            if self.host.adapter_kind == AdapterKind::DeepseekHarness {
+                let root = self
+                    .host
+                    .private_config_root
+                    .as_deref()
+                    .context("DSH private configuration missing")?;
+                let prepared = crate::dsh::await_model_preparation(root).await?;
+                if !crate::dsh::selected_route_available(&prepared, model, self.dsh_model_source) {
+                    return Err(anyhow::Error::new(AcpLiveModelValidationError {
+                        code: "runtime_model_unavailable",
+                        model_id: model.to_string(),
+                        detail: "所选 DSH 模型来源不可用；未切换到同名的其他来源".to_string(),
+                    }));
+                }
+            }
             let session_result = session_result.as_ref().ok_or_else(|| {
                 anyhow::Error::new(AcpLiveModelValidationError {
                     code: "runtime_model_catalog_unavailable",
@@ -5343,6 +5380,7 @@ impl AcpCliRuntimeAdapter {
                 "runtime_managed".to_string()
             },
             session_permissions,
+            frozen_runtime.model.dsh_source,
         );
         self.runtimes
             .lock()
@@ -8257,6 +8295,7 @@ mod tests {
             capabilities: Vec::new(),
             protocol_version: "acp-v1".to_string(),
             model: ResolvedModelSelection {
+                dsh_source: None,
                 source: "runtime_default".to_string(),
                 model_id: TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                 options: json!({}),
@@ -8288,6 +8327,7 @@ mod tests {
             capabilities: Vec::new(),
             protocol_version: "acp-v1".to_string(),
             model: ResolvedModelSelection {
+                dsh_source: None,
                 source: "runtime_default".to_string(),
                 model_id: "kiro-cli://runtime-default".to_string(),
                 options: json!({}),
@@ -8323,6 +8363,7 @@ mod tests {
             ],
             protocol_version: "acp-v1".to_string(),
             model: ResolvedModelSelection {
+                dsh_source: None,
                 source: "runtime_default".to_string(),
                 model_id: "cursor-agent://runtime-default".to_string(),
                 options: json!({}),
@@ -8357,6 +8398,7 @@ mod tests {
             capabilities: vec!["session.load".to_string(), "session.resume".to_string()],
             protocol_version: "acp-v1".to_string(),
             model: ResolvedModelSelection {
+                dsh_source: None,
                 source: "runtime_default".to_string(),
                 model_id: "runtime_default".to_string(),
                 options: json!({}),
@@ -8388,6 +8430,7 @@ mod tests {
             capabilities: vec!["session.resume".to_string()],
             protocol_version: "acp-v1".to_string(),
             model: ResolvedModelSelection {
+                dsh_source: None,
                 source: "runtime_default".to_string(),
                 model_id: "MiniMax-M3".to_string(),
                 options: json!({}),
@@ -8593,6 +8636,7 @@ while IFS= read -r ignored; do :; done
             Some(exact_attachment_root(&root)),
             "read_only".to_string(),
             AcpSessionPermissions::default(),
+            None,
         );
         let target = outside.join("runtime-owned.txt");
         let first_write = runtime
@@ -8737,6 +8781,7 @@ while IFS= read -r ignored; do :; done
                 mode: Some("yolo".to_string()),
                 ..Default::default()
             },
+            None,
         );
         runtime
             .start_or_resume_session(
@@ -9311,6 +9356,7 @@ done
                 mode: Some("default".to_string()),
                 ..Default::default()
             },
+            None,
         );
         runtime
             .start_or_resume_session(
@@ -9877,6 +9923,7 @@ while IFS= read -r ignored; do :; done
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
             AcpSessionPermissions::default(),
+            None,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -10079,6 +10126,7 @@ while IFS= read -r ignored; do :; done
                         Some(exact_attachment_root(&root)),
                         "runtime_managed".into(),
                         AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+                        frozen.model.dsh_source,
                     );
                     let id = runtime
                         .start_or_resume_session(
@@ -10363,6 +10411,7 @@ while IFS= read -r ignored; do :; done
             Some(attachments.clone()),
             "runtime_managed".to_string(),
             AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+            frozen.model.dsh_source,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -10421,6 +10470,7 @@ while IFS= read -r ignored; do :; done
             Some(attachments.clone()),
             "runtime_managed".to_string(),
             AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+            frozen.model.dsh_source,
         );
         let session_b_id = session_b
             .start_or_resume_session(
@@ -10715,6 +10765,7 @@ while IFS= read -r ignored; do :; done
             Some(attachments),
             "runtime_managed".to_string(),
             AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+            frozen.model.dsh_source,
         );
         assert_eq!(
             cold_runtime
@@ -10809,6 +10860,7 @@ while IFS= read -r ignored; do :; done
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
                 AcpSessionPermissions::default(),
+                None,
             );
             runtime
                 .start_or_resume_session(
@@ -10926,6 +10978,7 @@ while IFS= read -r ignored; do :; done
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
             AcpSessionPermissions::default(),
+            None,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -11061,6 +11114,7 @@ while IFS= read -r ignored; do :; done
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
             AcpSessionPermissions::default(),
+            None,
         );
 
         let session_id = runtime
@@ -11160,6 +11214,7 @@ while IFS= read -r ignored; do :; done
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
                 AcpSessionPermissions::default(),
+                None,
             );
 
             let error = runtime
@@ -11269,6 +11324,7 @@ while IFS= read -r ignored; do :; done
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
             AcpSessionPermissions::default(),
+            None,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -11396,6 +11452,7 @@ while IFS= read -r ignored; do :; done
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
                 AcpSessionPermissions::default(),
+                None,
             );
             let error = runtime
                 .start_or_resume_session(
@@ -12040,6 +12097,7 @@ while IFS= read -r ignored; do :; done
                 mode: Some("default".to_string()),
                 ..Default::default()
             },
+            None,
         );
         let session_id = runtime
             .start_or_resume_session(
@@ -12208,6 +12266,7 @@ while IFS= read -r ignored; do :; done
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
             AcpSessionPermissions::default(),
+            None,
         );
         let prompt_id = "prompt-final-assistant-suffix";
         *runtime.active_observation.lock().await = Some(AcpPromptObservation::new(

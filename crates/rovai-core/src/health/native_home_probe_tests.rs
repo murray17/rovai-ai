@@ -36,7 +36,8 @@ async fn acp_probes_keep_native_homes_without_prompting() {
         let result = if catalog_only {
             refresh_model_catalog(&root.join("runtime"), kind)
                 .await
-                .map(|models| {
+                .map(|catalog| {
+                    let models = catalog.models;
                     assert!(models.iter().any(|model| model.id == "fixture"));
                     if kind == AdapterKind::KiroCli {
                         assert!(models.iter().all(|model| model.options.is_empty()));

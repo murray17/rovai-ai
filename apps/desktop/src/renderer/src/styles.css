@@ -4508,6 +4508,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .mention-menu button small { color: var(--muted); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mention-menu button > i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
 .structured-mention-menu { right: auto; width: min(360px, 100%); max-height: min(360px, 46vh); }
+.mention-menu.composer-caret-menu { position: relative; inset: auto; width: 360px; max-width: calc(100vw - 24px); max-height: min(360px, 46vh, var(--radix-popover-content-available-height)); overscroll-behavior: contain; }
 .structured-mention-menu button { grid-template-columns: 28px minmax(0, 1fr) auto; }
 .structured-mention-menu .is-mention-action { margin-top: 3px; border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .structured-mention-menu .mention-action-avatar { border-color: var(--line); color: var(--muted); background: var(--surface-subtle); }

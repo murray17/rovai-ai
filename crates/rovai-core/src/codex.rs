@@ -658,13 +658,19 @@ impl CodexHost {
         }
         #[cfg(windows)]
         {
+            let mut query_failure_logged = false;
             tokio::time::timeout_at(deadline, async {
                 loop {
                     match child.tree_is_empty() {
                         Ok(true) => return true,
-                        Ok(false) => tokio::time::sleep(Duration::from_millis(10)).await,
-                        Err(_) => return false,
+                        Ok(false) => {}
+                        Err(error) if !query_failure_logged => {
+                            eprintln!("Codex Job accounting query failed; retrying: {error}");
+                            query_failure_logged = true;
+                        }
+                        Err(_) => {}
                     }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             })
             .await
@@ -2301,6 +2307,7 @@ mod tests {
             capabilities: vec!["codex.app_server_v2".to_string()],
             protocol_version: "codex-app-server-v2".to_string(),
             model: rovai_core::agent_profile::ResolvedModelSelection {
+                dsh_source: None,
                 source: "explicit".to_string(),
                 model_id: "gpt-test".to_string(),
                 options: json!({"reasoning_effort": "medium"}),
@@ -3086,6 +3093,7 @@ for line in sys.stdin:
             capabilities: vec!["codex.app_server_v2".to_string()],
             protocol_version: "codex-app-server-v2".to_string(),
             model: rovai_core::agent_profile::ResolvedModelSelection {
+                dsh_source: None,
                 source: "runtime_default".to_string(),
                 model_id: "default".to_string(),
                 options: json!({}),

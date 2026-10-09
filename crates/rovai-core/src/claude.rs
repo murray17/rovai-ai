@@ -44,6 +44,9 @@ use crate::{
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(windows)]
+const CLAUDE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(not(windows))]
 const CLAUDE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 // The catalog is advisory. Validate only options this adapter can transmit;
@@ -70,7 +73,7 @@ fn claude_model_effort(options: &Value) -> Result<Option<&str>> {
 
 // Keep prompt/settings bytes out of argv, including for Windows command shims.
 // Only a pre-spawn guard removes a file on drop. After spawn the registered run
-// owns its path until the process tree has been confirmed empty.
+// owns its path until its managed Job has been confirmed empty on Windows.
 struct ClaudeLaunchFile(PathBuf);
 
 impl ClaudeLaunchFile {
@@ -101,6 +104,49 @@ impl Drop for ClaudeLaunchFile {
             && let Err(error) = std::fs::remove_file(&self.0)
         {
             eprintln!("Claude Code pre-spawn launch file cleanup failed: {error}");
+        }
+    }
+}
+
+fn remove_stale_claude_inputs(private_runtime_dir: &Path) {
+    let directory = private_runtime_dir.join("claude-inputs");
+    if !directory.exists() {
+        return;
+    }
+    let directory =
+        match rovai_core::platform::private_storage::prepare_private_directory(&directory) {
+            Ok(directory) => directory,
+            Err(error) => {
+                eprintln!("Claude Code stale input directory could not be inspected: {error:#}");
+                return;
+            }
+        };
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("Claude Code stale inputs could not be listed: {error}");
+            return;
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                eprintln!("Claude Code stale input entry could not be read: {error}");
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".txt")) else {
+            continue;
+        };
+        if uuid::Uuid::parse_str(stem).is_err()
+            || !entry.file_type().is_ok_and(|kind| kind.is_file())
+        {
+            continue;
+        }
+        if let Err(error) = std::fs::remove_file(entry.path()) {
+            eprintln!("Claude Code stale input {name:?} could not be removed: {error}");
         }
     }
 }
@@ -155,7 +201,20 @@ pub struct ClaudeCodeRunResult {
     pub native_turn_id: String,
     pub final_output: String,
     pub usage: Option<Value>,
+    /// A trusted native result may precede confirmation of Job cleanup.
+    pub cleanup_confirmed: bool,
 }
+
+#[derive(Debug)]
+pub(crate) struct ClaudeCodeCleanupPending;
+
+impl fmt::Display for ClaudeCodeCleanupPending {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Claude Code Job cleanup remains pending")
+    }
+}
+
+impl StdError for ClaudeCodeCleanupPending {}
 
 #[derive(Debug, Clone)]
 pub struct ClaudeCodeDeliveredFailure {
@@ -208,33 +267,39 @@ impl Drop for ClaudeOutputTasks {
 }
 
 impl ClaudeCodeRunResources {
-    async fn finish(&mut self, terminate: bool) -> Result<()> {
-        let deadline = Instant::now() + CLAUDE_CLEANUP_TIMEOUT;
+    async fn finish(&mut self, terminate: bool, deadline: Instant) -> Result<()> {
         if terminate && let Err(error) = self.child.force_terminate_tree() {
             eprintln!("Claude Code tree termination request failed: {error}");
         }
+        #[cfg(not(windows))]
         tokio::time::timeout_at(deadline, self.child.wait())
             .await
             .context("Claude Code root process reap timed out")?
             .context("failed to reap Claude Code root process")?;
 
         #[cfg(any(windows, target_os = "macos"))]
-        loop {
-            match self.child.tree_is_empty() {
-                Ok(true) => break,
-                Ok(false) => {
-                    if let Err(error) = self.child.force_terminate_tree() {
-                        eprintln!("Claude Code descendant termination request failed: {error}");
-                    }
+        {
+            loop {
+                let last_error = match self.child.tree_is_empty() {
+                    Ok(true) => break,
+                    Ok(false) => self
+                        .child
+                        .force_terminate_tree()
+                        .err()
+                        .map(anyhow::Error::from),
+                    Err(error) => Some(anyhow::Error::from(error)),
+                };
+                if Instant::now() >= deadline {
+                    return Err(last_error.unwrap_or_else(|| {
+                        anyhow::anyhow!(
+                            "Claude Code descendants remained active before cleanup deadline"
+                        )
+                    }))
+                    .context("Claude Code process tree cleanup is unconfirmed");
                 }
-                Err(error) => {
-                    return Err(error).context("Claude Code process tree state is unknown");
-                }
+                tokio::time::sleep(Duration::from_millis(if cfg!(windows) { 10 } else { 20 }))
+                    .await;
             }
-            if Instant::now() >= deadline {
-                anyhow::bail!("Claude Code descendants did not exit before cleanup deadline");
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
         }
 
         for (name, file) in [
@@ -246,9 +311,9 @@ impl ClaudeCodeRunResources {
                     Ok(()) => *file = None,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => *file = None,
                     Err(error) => {
-                        return Err(error).with_context(|| {
-                            format!("failed to delete Claude Code {name} launch file")
-                        });
+                        eprintln!(
+                            "Claude Code {name} launch file cleanup failed after process cleanup: {error}"
+                        );
                     }
                 }
             }
@@ -288,6 +353,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         })?;
         restrict_directory_permissions(private_runtime_dir)?;
         remove_stale_mcp_configs(private_runtime_dir)?;
+        remove_stale_claude_inputs(private_runtime_dir);
         Ok(())
     }
 
@@ -405,7 +471,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             {
                 let reaped = match owned.as_mut() {
                     Some(resources) => matches!(
-                        tokio::time::timeout_at(deadline, resources.finish(true)).await,
+                        tokio::time::timeout_at(deadline, resources.finish(true, deadline)).await,
                         Ok(Ok(()))
                     ),
                     None => true,
@@ -705,6 +771,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             settings_file: settings_file.map(ClaudeLaunchFile::into_managed_path),
         });
         let resources = owned.as_mut().expect("Claude Code run was just installed");
+        let mut cleanup_deadline = None;
         let result = Self::execute_spawned(
             private_runtime_dir,
             request,
@@ -714,9 +781,15 @@ impl ClaudeCodeCliRuntimeAdapter {
             interrupted,
             launch_handoff,
             native_session_id,
+            &mut cleanup_deadline,
         )
         .await;
-        let cleanup = resources.finish(result.is_err()).await;
+        let cleanup = resources
+            .finish(
+                result.is_err(),
+                cleanup_deadline.unwrap_or_else(|| Instant::now() + CLAUDE_CLEANUP_TIMEOUT),
+            )
+            .await;
         match cleanup {
             Ok(()) => {
                 *owned = None;
@@ -724,12 +797,17 @@ impl ClaudeCodeCliRuntimeAdapter {
             }
             Err(error) => {
                 eprintln!(
-                    "Claude Code launch file cleanup remains pending for run={} epoch={}: {error:#}",
+                    "Claude Code process cleanup remains pending for run={} epoch={}: {error:#}",
                     request.agent_run_id, request.execution_epoch
                 );
-                // Keep the registered process and any remaining files. The
-                // original execution failure remains the returned error.
-                result.and(Err(error))
+                // Keep the Job owner registered for the existing cleanup worker.
+                // A trusted native terminal remains the business result.
+                result
+                    .map(|mut result| {
+                        result.cleanup_confirmed = false;
+                        result
+                    })
+                    .map_err(|error| error.context(ClaudeCodeCleanupPending))
             }
         }
     }
@@ -747,6 +825,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         mut interrupted: oneshot::Receiver<()>,
         launch_handoff: Option<oneshot::Sender<()>>,
         native_session_id: String,
+        cleanup_deadline: &mut Option<Instant>,
     ) -> Result<ClaudeCodeRunResult> {
         let child = &mut resources.child;
         let stdin = child
@@ -816,15 +895,16 @@ impl ClaudeCodeCliRuntimeAdapter {
         let initialize = match initialization {
             Ok(initialize) => initialize,
             Err(error) => {
+                let deadline = Instant::now() + CLAUDE_CLEANUP_TIMEOUT;
+                *cleanup_deadline = Some(deadline);
                 let _ = child.force_terminate_tree();
                 protocol.disconnect();
-                let detail =
-                    match tokio::time::timeout(CLAUDE_CLEANUP_TIMEOUT, &mut tasks.stderr).await {
-                        Ok(Ok(Ok(captured))) => {
-                            protocol.redact_text(&String::from_utf8_lossy(&captured.bytes))
-                        }
-                        _ => protocol.redact_text(&format!("{error:#}")),
-                    };
+                let detail = match tokio::time::timeout_at(deadline, &mut tasks.stderr).await {
+                    Ok(Ok(Ok(captured))) => {
+                        protocol.redact_text(&String::from_utf8_lossy(&captured.bytes))
+                    }
+                    _ => protocol.redact_text(&format!("{error:#}")),
+                };
                 // This diagnostic is only considered before send_prompt. A
                 // later error, even with identical text, cannot authorize retry.
                 let missing = request
@@ -960,6 +1040,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                     stdin_closed = true;
                     child.force_terminate_tree().context("failed to terminate Claude Code descendants after root exit")?;
                     output_deadline = Some(Instant::now() + CLAUDE_CLEANUP_TIMEOUT);
+                    *cleanup_deadline = output_deadline;
                 }
             }
         }
@@ -1058,6 +1139,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                     "model_calls_observed": output.model_calls_observed,
                 })
             }),
+            cleanup_confirmed: true,
         })
     }
 }
@@ -2673,6 +2755,26 @@ mod tests {
     use serde_json::json;
     use tokio::io::AsyncWriteExt;
 
+    async fn remove_claude_fixture(root: &Path) {
+        #[cfg(windows)]
+        {
+            // Job-level cleanup can complete before Windows releases a fixture
+            // executable's directory handle; this retry is only test teardown.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                match std::fs::remove_dir_all(root) {
+                    Ok(()) => break,
+                    Err(_) if Instant::now() < deadline => {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                    Err(error) => panic!("Claude fixture directory remained locked: {error}"),
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn model_options_must_be_transmittable_without_a_catalog() {
         assert_eq!(claude_model_effort(&json!({})).unwrap(), None);
@@ -2728,6 +2830,7 @@ mod tests {
                 capabilities: vec!["cli.print".to_string()],
                 protocol_version: "claude-code-cli-v1".to_string(),
                 model: ResolvedModelSelection {
+                    dsh_source: None,
                     source: "runtime_default".to_string(),
                     model_id: CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                     options: json!({}),
@@ -3027,7 +3130,7 @@ mod tests {
         assert_eq!(result.final_output, "ok");
         assert!(claude_launch_files(&root).is_empty());
         assert!(adapter.active.lock().unwrap().is_empty());
-        std::fs::remove_dir_all(root).unwrap();
+        remove_claude_fixture(&root).await;
     }
 
     #[tokio::test]
@@ -3046,7 +3149,7 @@ mod tests {
         assert!(adapter.run(request).await.is_err());
         assert!(claude_launch_files(&root).is_empty());
         assert!(adapter.active.lock().unwrap().is_empty());
-        std::fs::remove_dir_all(root).unwrap();
+        remove_claude_fixture(&root).await;
     }
 
     #[tokio::test]
@@ -3105,7 +3208,7 @@ mod tests {
             );
             assert!(claude_launch_files(&root).is_empty());
             assert!(adapter.active.lock().unwrap().is_empty());
-            std::fs::remove_dir_all(root).unwrap();
+            remove_claude_fixture(&root).await;
         }
     }
 
@@ -3130,7 +3233,7 @@ mod tests {
         assert!(error.downcast_ref::<RuntimeFailureError>().is_some());
         assert!(claude_launch_files(&root).is_empty());
         assert!(adapter.active.lock().unwrap().is_empty());
-        std::fs::remove_dir_all(root).unwrap();
+        remove_claude_fixture(&root).await;
     }
 
     #[tokio::test]
@@ -3184,7 +3287,7 @@ mod tests {
             drop(release);
             assert!(claude_launch_files(&root).is_empty());
             assert!(adapter.active.lock().unwrap().is_empty());
-            std::fs::remove_dir_all(root).unwrap();
+            remove_claude_fixture(&root).await;
         }
     }
 
@@ -3216,7 +3319,7 @@ mod tests {
         assert!(adapter.interrupt(&first_id, 1).await);
         assert!(first_task.await.unwrap().is_err());
         assert!(claude_launch_files(&root).is_empty());
-        std::fs::remove_dir_all(root).unwrap();
+        remove_claude_fixture(&root).await;
     }
 
     #[test]
@@ -3403,6 +3506,18 @@ mod tests {
         assert_eq!(proof.failure.origin, RuntimeFailureOrigin::Runtime);
         assert_eq!(proof.failure.phase, RuntimeFailurePhase::Terminal);
         assert_eq!(proof.failure.detail.as_deref(), Some("provider detail"));
+        let cleanup_pending = error.context(ClaudeCodeCleanupPending);
+        assert!(
+            cleanup_pending
+                .downcast_ref::<ClaudeCodeDeliveredFailure>()
+                .is_some(),
+            "resource cleanup must not erase the native failure proof"
+        );
+        assert!(
+            cleanup_pending
+                .downcast_ref::<ClaudeCodeCleanupPending>()
+                .is_some()
+        );
 
         let mismatched = ClaudeCodeJsonResult {
             session_id: Some("5ade59ac-f87e-4827-8cf2-0e1f3ba720ea".to_string()),
@@ -3447,7 +3562,7 @@ mod tests {
             .expect("shutdown must finish the tracked Claude Code run");
         assert!(claude_launch_files(&root).is_empty());
         assert!(adapter.active.lock().unwrap().is_empty());
-        std::fs::remove_dir_all(root).unwrap();
+        remove_claude_fixture(&root).await;
     }
 
     #[cfg(windows)]
@@ -3509,8 +3624,21 @@ mod tests {
             resources.child.force_terminate_tree().unwrap();
             assert!(resources.bootstrap_file.as_ref().unwrap().exists());
             assert!(resources.settings_file.as_ref().unwrap().exists());
-            resources.finish(false).await.unwrap();
+            resources
+                .finish(false, Instant::now() + CLAUDE_CLEANUP_TIMEOUT)
+                .await
+                .unwrap();
             assert!(claude_launch_files(&root).is_empty());
+            let undeletable = root.join("undeletable-launch-path");
+            std::fs::create_dir(&undeletable).unwrap();
+            resources.bootstrap_file = Some(undeletable.clone());
+            resources
+                .finish(false, Instant::now() + CLAUDE_CLEANUP_TIMEOUT)
+                .await
+                .expect("launch-file deletion failure must not block an empty Job");
+            assert!(resources.bootstrap_file.is_some());
+            resources.bootstrap_file = None;
+            std::fs::remove_dir(&undeletable).unwrap();
             drop(resources);
             let deadline = Instant::now() + Duration::from_secs(2);
             loop {
@@ -3847,6 +3975,7 @@ mod tests {
                     events[0].payload,
                     json!({"itemId":"claude-thinking:message-with-thinking:0"})
                 );
+                assert!(!events[0].payload.to_string().contains("PRIVATE"));
             }
             assert!(emit(&mut state, json!({"type":"assistant","session_id":session_id,"uuid":"thinking-packet",
                 "message":{"id":"message-with-thinking","content":[{"type":"thinking","thinking":"PRIVATE"}]}})).is_empty());

@@ -38,7 +38,7 @@ Command Code 1.74.1、Cline 3.0.65、两者各自的 sub2api/gpt-6-sol BYOK；�
 macOS 所用 ABI 与身份校验依据 Apple 的
 [libproc 实现](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)和
 [内核 proc_info](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/proc_info.c)。
-设计选择与限制由 [V1.72-D23](../../versions/v1.72/decisions.md#v1-72-d23)及
+设计选择与限制由 [V1.72-D26](../../versions/v1.72/decisions.md#v1-72-d26)及
 [Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md#macos-acp-descendants)拥有。
 
 ## Packaged App 真实故障矩阵

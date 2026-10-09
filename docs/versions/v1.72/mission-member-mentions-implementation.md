@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.72
 status: implemented
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # 使命描述提及队员
@@ -60,3 +60,19 @@ cargo test -p rovai-core --features extended-tests --lib description_members_com
 桌面验收使用隔离 userData 和内存 API；Core 使用临时 SQLite，不启动真实 Runtime，不升级日常 App 数据。
 验收夹具同步当前 Thread API 与通知 schema 9；窄窗口回归同时修复最后状态列在滚动到底后被前列覆盖选中状态，
 保留并稳定执行原有导航断言。
+
+## 候选菜单裁剪回归
+
+2026-10-09 用户反馈新使命中无法选择队员。隔离 Electron 的真实指针验收复现：候选沿用会话输入框
+固定向上的定位，首项落在视口上方（菜单 top=-82px、首项 top=-45.5px），并被使命正文容器裁剪。
+此前候选流程使用 DOM `.click()`，只证明身份替换与保存行为，未覆盖菜单可见性及鼠标命中。
+
+Mission 候选改为光标锚定，复用现有 Radix Popover 的视口避让，向下优先、必要时向上翻转或约束高度；
+Portal 留在所属 Dialog 内、移出正文裁剪区域。候选方向键仅滚动自身列表，Escape 先关闭候选并保留使命表单。
+普通会话继续使用原有输入框上方位置。回归纳入既有 `mission-board.test.mjs`，覆盖真实鼠标选择、滚轮、
+Enter/Tab/Escape、邀请层、新建/编辑、展开、长正文、深浅主题、1040×700、1440×920、2560×1440 与 200% 缩放。
+
+本次修复验证：Mission board 8 项通过，最终原生指针矩阵单独复跑通过；普通 Composer 与会话邀请
+2 项 Electron 回归通过。`pnpm typecheck`、`pnpm test`（239 个 Vitest 文件、2,612 项测试，Node 334 项通过、
+2 项平台跳过）、`pnpm build:desktop` 通过。深浅主题及 200% 缩放截图已人工检查；继续使用临时 userData
+和内存 API，不启动 Core 或真实 Runtime。

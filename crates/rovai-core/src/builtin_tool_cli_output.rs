@@ -421,10 +421,55 @@ fn project_error(error: &BuiltinToolError) -> Result<Value> {
 
 fn validate_projected_document(operation: &str, success: bool, value: &Value) -> Result<()> {
     if success {
-        let schema = agent_output_schema(operation)?;
+        // Historical receipts are validated above against their original bytes. Keep the
+        // old, closed read shape at this replay boundary; the live catalog stays strict.
+        let legacy_read = operation == "thread.read"
+            && value
+                .get("items")
+                .and_then(Value::as_array)
+                .is_some_and(|items| items.iter().any(|item| item.get("addressing").is_some()));
+        let schema = if legacy_read {
+            crate::team_tool_catalog::legacy_camp_read_success_schema()
+        } else {
+            agent_output_schema(operation)?
+        };
         validate_schema(value, &schema).with_context(|| {
             format!("Agent output projection does not match {operation} agentOutputSchema")
         })?;
+        if operation == "thread.read" && !legacy_read {
+            for item in value["items"]
+                .as_array()
+                .context("read items must be an array")?
+            {
+                let Some(mentions) = item.get("mentions").and_then(Value::as_array) else {
+                    continue;
+                };
+                let mut ids = std::collections::HashSet::new();
+                for (index, mention) in mentions.iter().enumerate() {
+                    let id = mention["id"]
+                        .as_str()
+                        .context("Mention ID must be a string")?;
+                    anyhow::ensure!(ids.insert(id), "Mention IDs must be unique");
+                    if id == "user" {
+                        anyhow::ensure!(
+                            mention.get("name").is_none() && index + 1 == mentions.len(),
+                            "User Mention has no name and must be last"
+                        );
+                    } else {
+                        anyhow::ensure!(
+                            crate::agent_identity::parse_agent_id(id).is_some(),
+                            "Mention ID must be a canonical Agent ID"
+                        );
+                        anyhow::ensure!(
+                            mention["name"]
+                                .as_str()
+                                .is_some_and(|name| !name.trim().is_empty()),
+                            "Agent Mention requires a name"
+                        );
+                    }
+                }
+            }
+        }
     } else {
         validate_schema(value, &agent_error_schema())
             .context("Agent error projection does not match the closed error schema")?;
@@ -898,9 +943,9 @@ mod tests {
 
     #[test]
     fn every_operation_has_a_schema_valid_golden_projection() {
-        // v9 adds closed member list/get/update results.
+        // v10 changes only normal thread.read Mention metadata.
         let golden: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/builtin-tool-agent-output-v9.json"
+            "../tests/fixtures/builtin-tool-agent-output-v10.json"
         ))
         .unwrap();
         // Old receipts must validate their original digest before live-name projection.
@@ -916,9 +961,10 @@ mod tests {
             )
             .unwrap();
             let projected = project_envelope(envelope).unwrap();
-            validate_schema(
+            validate_projected_document(
+                crate::thread_compat::canonical_operation(operation),
+                true,
                 &projected,
-                &agent_output_schema(crate::thread_compat::canonical_operation(operation)).unwrap(),
             )
             .unwrap();
         }
@@ -941,7 +987,52 @@ mod tests {
             projected["items"][0]["quotes"][0]["text"],
             "campId and Thread are quoted verbatim"
         );
-        let mut old_result = golden["thread.read"]["canonicalResult"].clone();
+        let previous: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/builtin-tool-agent-output-v9.json"
+        ))
+        .unwrap();
+        let previous_read = previous["thread.read"]["canonicalResult"].clone();
+        assert_eq!(
+            project_envelope(
+                BuiltinToolInvocationEnvelope::success(
+                    "thread.read",
+                    "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                    previous_read.clone(),
+                )
+                .unwrap()
+            )
+            .unwrap(),
+            previous["thread.read"]["agentOutput"]
+        );
+        assert!(
+            validate_schema(&previous_read, &agent_output_schema("thread.read").unwrap()).is_err()
+        );
+        for mentions in [
+            json!([{"id":"user", "name":"User"}]),
+            json!([{"id":"agent_1", "name":"Alice"}, {"id":"agent_1", "name":"Renamed"}]),
+            json!([{"id":"agent_01", "name":"Alice"}]),
+            json!([{"id":"agent_9223372036854775808", "name":"Alice"}]),
+            json!([{"id":"agent_1", "name":" "}]),
+            json!([{"id":"user"}, {"id":"agent_1", "name":"Alice"}]),
+        ] {
+            let mut invalid = golden["thread.read"]["canonicalResult"].clone();
+            invalid["items"][0]["mentions"] = mentions;
+            assert!(
+                project_envelope(
+                    BuiltinToolInvocationEnvelope::success(
+                        "thread.read",
+                        "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                        invalid
+                    )
+                    .unwrap()
+                )
+                .is_err()
+            );
+        }
+        let mut mixed = golden["thread.read"]["canonicalResult"].clone();
+        mixed["items"][0]["addressing"] = previous_read["items"][0]["addressing"].clone();
+        assert!(validate_projected_document("thread.read", true, &mixed).is_err());
+        let mut old_result = previous_read;
         old_result["items"][0]["body"] = json!("@Principal old successful result");
         let old_envelope = BuiltinToolInvocationEnvelope::success(
             "thread.read",

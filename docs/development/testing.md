@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # 测试与 Smoke Test
@@ -255,6 +255,16 @@ Cline 窗口补采扩展既有 observer/config 两个 Rust owner 和 `scripts/li
 Preview/137 缺索引，main/136 有索引但缺 Cline/Command catalog；后者先经 187 保留 Mission 描述，
 再由 188/schema 138 收敛。失败收据回滚、部分来源拒绝、历史摘要不变及重开准入均保留；没有新增 Rust owner。
 既有 catalog migration owner 同步去掉后续 188 receipt 后再构造旧来源，不删除原输入矩阵。
+
+随后 Mention 主干也使用 receipt 187。扩展其既有
+`db::message_mentions::tests::mention_format_upgrade_preserves_frozen_rows_and_is_atomic`：覆盖 Preview/138 的 v32
+升级与 main/137 已有 v33、缺 Preview catalog 的来源，189/schema 139 收敛；验证部分 v33 拒绝、
+收据失败回滚、冻结行摘要与旧 187 收据不变及重开。沿既有 downgrade 链构造旧数据，不新增或退役 owner。
+最低命令为 `cargo test -p rovai-core --features extended-tests --lib db::`。
+完整迁移回归另发现 v104/v105 的旧目录 fixture 从当前 ALL 枚举意外带入 Cline/Command；
+只从其旧来源中排除后加入的两项，原迁移结果、Skill 分配及自定义范围断言不变。
+
+
 
 macOS 采用一个内核身份树，保留主干取消时捕获与本分支的可选持久 ledger。既有
 `runtime_probe_process::tests::cancelling_the_owner_kills_the_spawned_process_group` 在合流时暴露 100 ms
@@ -657,8 +667,9 @@ pnpm test:rust:full
 Windows Runtime 改动可用 `Full check` 的 `windows-runtime` scope 单独执行既有 Windows 原生 job，
 其中 Fleet 回收凭据及 Codex 释放策略显式启用 `extended-tests`。该 runner 证据不替代实体 Windows 10/11、
 真实 CLI 账号，或仍由 Unix/macOS 条件编译限定的 Codex/Core 集成测试。
-既有 Managed Process 孙进程 owner 用稳定 handle 验证 Job 计数不能抢先确认退出，并覆盖首次观察后
-新增后代、缺失/重复/非法成员通知；Fleet receipt owner 验证跨 Core 仅凭已持久化回执放行。
+既有 Managed Process 孙进程 owner 验证根进程退出后仍有活跃后代时继续阻塞，以及
+`ActiveProcesses` 归零时直接放行；完成端口通知、累计计数与后代句柄不再是必需条件。
+Fleet receipt owner 继续验证精确 Run/epoch 的持久化回执与跨 Core 恢复边界。
 
 默认 fast suite 保留纯 parser/serde、确定性 policy、常量和最小原子 regression，并以 400 项作为当前
 反馈预算。`extended-tests` 承担大型模块矩阵、SQLite、子进程、并发与跨边界 owner；`slow-tests`
@@ -1304,3 +1315,17 @@ version/auth 零调用及一次正文/零重放。Codex 既有真实 Host owner 
 以及关闭参数被原生协议拒绝时返回错误且不重放。
 最小命令：`cargo test -p rovai-core --features extended-tests --lib camp_fast::`、相同参数的 `claude::`、`codex::`，
 以及 `execution_evidence::tests::` 的字段脱敏、Run/epoch 所属和逻辑执行窗口回归。
+
+
+### 模型消息 Mention 测试准入（2026-10-09）
+
+`camp_content::model_mention_tests` 拥有保存目标的顺序、去重与一次投影名称复用。此前只有正文渲染 owner，
+无法发现正文之外的显式目标丢失或离队目标被过滤；使用三行 profile 的内存 SQLite，不创建完整 Core。
+`context::slow_tests::claimed_legacy_batch_keeps_its_format_after_mention_upgrade` 拥有已领取、未物化 Run 的升级恢复，
+单纯 formatter 断言不能证明数据库新约束允许旧版本物化；复用既有 Run fixture，检查重试字节和摘要。
+`db::message_mentions::tests` 拥有 schema 136 → 137 的 DDL 回滚和冻结证据保留；纯投影测试无法证明事务原子性。
+其余作者、三种 read 模式、旧回执、封闭 Schema、输入大小和非 batch 字段扩展既有 owner，不删除或停用测试。
+
+最小命令为 `cargo test -p rovai-core --lib model_mention_tests`、
+`cargo test -p rovai-core --features slow-tests --lib claimed_legacy_batch_keeps_its_format_after_mention_upgrade`、
+`cargo test -p rovai-core --features extended-tests --lib db::message_mentions::`。

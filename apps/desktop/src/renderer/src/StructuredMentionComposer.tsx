@@ -581,6 +581,7 @@ function ComposerBridge({
       placeholder={<span className="structured-mention-placeholder">{placeholder}</span>}
       aria-placeholder={placeholder} />
     <ComposerTypeaheadPlugin match={triggerMatch} memberOnly={purpose === 'mission'}
+      menuAnchor={purpose === 'mission' ? 'caret' : 'editor'}
       selectionScope={inviteLayer ? 'inviting' : 'camp'}
       optionCount={mentionOpen ? mentionMenuOptions.length : skillMenuOptions.length}
       getOptionState={(match) => match.kind === 'member'

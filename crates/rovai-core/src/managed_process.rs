@@ -715,8 +715,8 @@ impl ManagedProcess {
         ))
     }
 
-    /// Complete Job membership plus exact process-exit evidence proves that
-    /// every owned Windows descendant has exited. Missing evidence stays unknown.
+    /// A successful query of this launch's Job reports no active members.
+    /// Historical notifications and descendant process handles do not gate cleanup.
     #[cfg(windows)]
     pub(crate) fn tree_is_empty(&self) -> io::Result<bool> {
         self.child.tree_is_empty()
@@ -1602,55 +1602,26 @@ mod tests {
 
         process.force_terminate_tree().unwrap();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while (grandchild.is_running().unwrap() || late_child.is_running().unwrap())
-            && tokio::time::Instant::now() < deadline
-        {
-            if process.tree_is_empty().unwrap() {
-                assert!(
-                    !grandchild.is_running().unwrap() && !late_child.is_running().unwrap(),
-                    "Tree reported reaped but the retained process handle is unsignaled: pid={grandchild_pid}, created={}",
-                    grandchild.creation_time
-                );
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+        while !process.tree_is_empty().unwrap() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(!grandchild.is_running().unwrap());
-        assert!(!late_child.is_running().unwrap());
-        tokio::time::timeout(Duration::from_secs(2), stdout_reader)
-            .await
-            .expect("stdout handle remained inherited after Job termination")
-            .unwrap();
         assert!(
             process.tree_is_empty().unwrap(),
-            "Cleanup confirmation must observe the owned Job, not a kill request"
+            "Cleanup confirmation must query the owned Job, not a kill request"
         );
-        tokio::time::timeout(Duration::from_secs(2), stderr_reader)
-            .await
-            .expect("stderr handle remained inherited after Job termination")
-            .unwrap();
-        // A duplicate notification cannot replace a lost member, even with an
-        // empty Job. Unknown evidence also cannot become true on a later poll.
-        process
-            .child
-            .repeat_pending_exit_check_for_test(grandchild_pid);
-        assert!(!process.tree_is_empty().unwrap());
+        let (total, active) = process.child.job_process_counts_for_test().unwrap();
+        assert!(
+            total >= 3,
+            "root, grandchild and late child entered the Job"
+        );
+        assert_eq!(active, 0);
+        // No completion port is attached and no per-member exit handle is read.
+        // Lifetime totals and still-owned observation handles cannot block zero.
         assert!(process.tree_is_empty().unwrap());
-        process
-            .child
-            .post_member_notification_for_test(grandchild_pid);
-        assert!(process.tree_is_empty().unwrap());
-        process.child.discard_exit_witness_for_test(grandchild_pid);
-        process
-            .child
-            .post_member_notification_for_test(process.id().unwrap());
-        assert!(!process.tree_is_empty().unwrap());
-        process
-            .child
-            .post_member_notification_for_test(grandchild_pid);
-        assert!(process.tree_is_empty().unwrap());
-        process.child.post_member_notification_for_test(0);
-        assert!(process.tree_is_empty().is_err());
-        assert!(process.tree_is_empty().is_err());
+        stdout_reader.abort();
+        stderr_reader.abort();
+        drop(grandchild);
+        drop(late_child);
         drop(process);
         let _ = std::fs::remove_file(handshake);
         let _ = std::fs::remove_file(fork);

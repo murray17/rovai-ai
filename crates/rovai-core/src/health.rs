@@ -287,12 +287,22 @@ pub fn catalog_refresh_evidence_current(
 }
 
 /// Catalog-only branch of the same check task. Returns models, never Ready evidence.
-pub async fn refresh_model_catalog(path: &Path, kind: AdapterKind) -> Result<Vec<ModelDescriptor>> {
+#[derive(Debug)]
+pub struct RefreshedModelCatalog {
+    pub models: Vec<ModelDescriptor>,
+    pub dsh_preparation: Option<Value>,
+}
+
+pub async fn refresh_model_catalog(
+    path: &Path,
+    kind: AdapterKind,
+) -> Result<RefreshedModelCatalog> {
     let purpose = RuntimeLaunchPurpose::AvailabilityCheck;
     if !runtime_launch_allowed(kind, purpose) {
         bail!(runtime_launch_disallowed_detail(purpose));
     }
-    match kind {
+    let mut dsh_preparation = None;
+    let models = match kind {
         AdapterKind::CodexCli => {
             rovai_core::agent_runtime_adapter::codex_models(&codex_model_catalog(path).await?)
         }
@@ -315,6 +325,12 @@ pub async fn refresh_model_catalog(path: &Path, kind: AdapterKind) -> Result<Vec
         }
         _ => {
             let (_, session, _) = run_acp_probe_with_scope(path, kind, true, purpose, true).await?;
+            if kind == AdapterKind::DeepseekHarness {
+                dsh_preparation = session
+                    .as_ref()
+                    .and_then(|session| session.pointer("/_meta/rovaiDshModels"))
+                    .cloned();
+            }
             let mut models = rovai_core::agent_runtime_adapter::acp_model_catalog_for_adapter(
                 kind,
                 session
@@ -329,7 +345,11 @@ pub async fn refresh_model_catalog(path: &Path, kind: AdapterKind) -> Result<Vec
             }
             Ok(models)
         }
-    }
+    }?;
+    Ok(RefreshedModelCatalog {
+        models,
+        dsh_preparation,
+    })
 }
 
 pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
@@ -1765,7 +1785,7 @@ async fn acp_probe_at(
             } else {
                 AgentRuntimeProbeStatus::MissingCapabilities
             };
-            let detail = if matches!(
+            let mut detail = if matches!(
                 kind,
                 AdapterKind::ZcodeApp | AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
             ) && missing.is_empty()
@@ -1779,6 +1799,13 @@ async fn acp_probe_at(
                     )
                 })
             };
+            if kind == AdapterKind::DeepseekHarness
+                && let Some(diagnostic) = initialize_result
+                    .pointer("/_meta/rovaiDshModels")
+                    .and_then(crate::dsh::preparation_diagnostic)
+            {
+                detail = Some(format!("{} {diagnostic}", detail.unwrap_or_default()));
+            }
             AcpCapabilityProbe {
                 result: agent_probe_result(
                     kind.as_str(),
@@ -1846,7 +1873,11 @@ async fn run_acp_probe_with_scope(
         write_kiro_additive_agent_config(&probe_root, &Default::default())?;
     }
     let mut command = runtime_command(path, Some(kind));
-    configure_acp_command(&mut command, kind, false);
+    if kind == AdapterKind::DeepseekHarness {
+        crate::dsh::configure_probe(&mut command, &probe_root)?;
+    } else {
+        configure_acp_command(&mut command, kind, false);
+    }
     if kind == AdapterKind::ClineCli {
         crate::cline::configure_native_environment(&mut command)?;
     }
@@ -1880,6 +1911,15 @@ async fn run_acp_probe_with_scope(
     let result = {
         let (stdin, lines) = process.split_io()?;
         let exchange = async {
+            let model_preparation = if kind == AdapterKind::DeepseekHarness {
+                let prepared = crate::dsh::await_model_preparation(&probe_root).await?;
+                if !crate::dsh::model_inputs_unchanged(&prepared) {
+                    bail!("dsh_model_configuration_changed_during_preparation");
+                }
+                Some(prepared)
+            } else {
+                None
+            };
             write_json_line(
                 stdin,
                 &json!({
@@ -1901,7 +1941,10 @@ async fn run_acp_probe_with_scope(
                 }),
             )
             .await?;
-            let initialize = read_rpc_result(lines, 1).await?;
+            let mut initialize = read_rpc_result(lines, 1).await?;
+            if let Some(preparation) = &model_preparation {
+                crate::dsh::annotate_session(&mut initialize, preparation);
+            }
             if initialize.get("protocolVersion").and_then(Value::as_u64) != Some(1) {
                 bail!("Runtime did not negotiate ACP v1");
             }
@@ -1977,7 +2020,13 @@ async fn run_acp_probe_with_scope(
                 }),
             )
             .await?;
-            let session = read_rpc_result(lines, session_request_id).await?;
+            let mut session = read_rpc_result(lines, session_request_id).await?;
+            if let Some(preparation) = &model_preparation {
+                if !crate::dsh::model_inputs_unchanged(preparation) {
+                    bail!("dsh_model_configuration_changed_during_preparation");
+                }
+                crate::dsh::annotate_session(&mut session, preparation);
+            }
             let session_id = session
                 .get("sessionId")
                 .and_then(Value::as_str)
@@ -3808,7 +3857,7 @@ esac
             .unwrap();
         let light_ms = light_started.elapsed().as_millis();
         assert_eq!(
-            models,
+            models.models,
             rovai_core::agent_runtime_adapter::antigravity_models(full.models)
         );
         assert_eq!(

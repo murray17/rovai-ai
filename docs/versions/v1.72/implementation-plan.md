@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # v1.72 实施与验收
@@ -1240,7 +1240,7 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
 - 保留 main 的 Mission 原子保存、结构化提及、Pending 首发邀请和续做修复。
 - Migration 184/185 的双来源由完整 schema 识别，186 汇合 Runtime catalog/续做，187 保留或回填 Mission 描述到 schema 137。
 - 扩展已有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，覆盖 main/135 结构化 Atom、部分结构拒绝、失败回滚和重开库；保留 Mission 描述及 continuation 的原 owner。未新增平行测试体系。
-- 主干 Runtime Launch v53 和 D17/D18 保留原编号；本分支决定顺延 D19–D27，现行后端由 v54/D27 拥有。
+- 主干 Runtime Launch v53 和 D17/D18 保留原编号；本分支决定顺延 D22–D30，现行后端由 v54/D30 拥有。
 
 ## 2026-10-08 官方 ACP 切换交付
 
@@ -1249,3 +1249,102 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
 - 打包账号 6 成功 / 1 预期取消，独立双成员并行、同 Host warm、审批与取消后继续成立；BYOK 打包 first/warm 两轮通过。
 - 无凭据诊断返回原生 authentication_required，未自动登录。3.0.3 load 广告与实际不符仍是明确 native cold 缺口，ACP compact 不宣称修复。
 - 最终边界、负例、真实/模拟验证区分和公开证据见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)。PR #662 更新后保留未合并。
+
+## 2026-10-09 消息 Mention 元数据
+
+按[确认稿 r1](model-context-change-message-mentions.md)实施公开 batch/read 的公共目标投影，
+复用名称与正文、原版本恢复、封闭 Schema、预算与摘要。仅 Agent Output 升至 10；
+Transport/CLI、Bootstrap、非 batch 与 Binding 兼容身份保持。验证记录统一追加在确认稿，避免多份验收状态。
+
+## 2026-10-09 Windows Claude 后继任务排队修复
+
+本节按 [V1.72-D20](decisions.md#v1-72-d20) 取代上文 2026-10-07 Windows Job 回收证明的当前执行要求；
+旧段落保留当时的实现和验收记录，不再要求累计计数、完成端口通知及逐后代句柄退出。
+Windows Managed Process 现在只以本次有效 Job 查询 `ActiveProcesses == 0` 放行。
+Claude 的可信原生成功或失败先结算业务，未确认的 Job 清理保留精确 Run/epoch 门禁并唤醒现有 worker；
+启动临时文件删除失败仅记录诊断，启动时对本 Core 私有 `claude-inputs` 做限定范围的尽力回收。
+用户 Stop 在 Windows 使用五秒单次总预算与既有局部重试；直接排队请求在清理期间保留，
+执行台以清理中／清理未确认重试中代替普通排队提示。macOS/Linux 原有预算保持。
+
+验收以隔离 Windows Core、Thread 和工作区中第二条非队长 Claude 消息实际执行为准，另查
+Stop 后续做、真实工具停止、Job 活跃成员、暂时查询失败、文件删除错误及持久回执门禁。
+定向 owner 为 `managed_process::tests::windows_job_contains_an_immediate_grandchild_after_leader_exit`
+和 `claude::tests::cmd_and_native_roots_keep_both_files_until_the_job_descendants_exit`；真实模型复测
+及未覆盖环境须在合入前记录，不把测试函数返回当作队列验收结果。
+
+隔离实测使用 Windows 10 22H2（19045）、Core 0.4.6 开发构建、Claude Code 2.1.288、
+本机已有的 Claude 默认模型配置；新建独立 Core 数据目录、Thread 和 Git 工作区，没有操作日常 Core。
+非队长 Claude 的第一条执行期间提交第二条：正常结束时两条 Run 均 succeeded，第二条无需重启即启动；
+Stop 场景中取消命令在两次实测中分别用时 26 和 23 毫秒，第一条 cancelled，第二条自动 succeeded，等待 22 秒后
+被取消工具预定的延迟写入没有出现。两组原始报告保存在本次会话附件的
+`claude-final-normal-report.json` 与 `claude-final-stop-report.json`（另保留先前构建的对照报告）。
+这两次真实模型试验使用环境现有的 `bypassPermissions` 默认值；修复没有改变权限配置。
+Windows 11、打包版和其他模型／权限模式尚未在本机验收，Job 查询持续失败需在现场诊断中观察。
+
+
+<a id="dsh-native-web-models"></a>
+### 2026-10-09：DSH 原生 ACP 与 Web 模型配置兼容
+
+范围收敛为一个模型准备入口，最低支持仍为 `0.1.5-rc.2`。迁移归 DSH，术语统一为
+“DSH 原生迁移期间的 Patch 隔离”。普通 Web 的 llm-pi-ai 模型可受控补充，原生模型和权限、
+Bootstrap、Session/Fleet 主路径保留；不建设配置平台、迁移数据库或持久化来源账本。
+
+Probe 与 Host 注入相同插件，在原生初始化后准备完整配置并原位应用到 Loader 的内存 entry。
+私有结果只含来源 ID、诊断、摘要与文件指纹；目录来自 ACP。变化检测覆盖 Web 模型设置，
+发布前检查过期结果，失败时保留原生能力，显式失败选择不切换同名路由。
+
+测试延伸既有 `dsh::tests`、`grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`
+与 `scripts/lib/dsh-host.test.mjs` owner。Rust settings 转换的 Provider/Model 显式 true/false/null、
+其他协议与空配置断言移到实际 JS 转换 owner；Rust 继续拥有命令私密性、文件不变、权限与摘要。
+没有删除、合并或禁用 Rust owner。新增 JS owner 分别拥有 Provider 冲突、兼容默认与原生异步导入完成。
+
+| 验收 | 证据与边界 |
+| --- | --- |
+| 最低版与旧共享版 | `smoke-dsh-model-configuration.mjs` 在 `0.1.5-rc.2`、`0.1.5-rc.3` 各完成 3 次本地 HTTP 请求，原路由、Provider/Model 显式兼容参数通过；旧版不等待迁移 |
+| Profile 版补充 | `0.2.1-alpha.1` 普通 Web-only、原生冲突保留、不同 Provider 同名模型、坏 Web、补充拒绝、迁移后删除 Web、先 Web 后 ACP 等原生进程场景通过；端点、凭据与 strict 在接收端核验 |
+| Core 主链 | `smoke-dsh-responses-tools.mjs` 检查、实际 Host、两轮工具调用/结果完成，包含缺省 strict、Provider/Model 显式关闭及原生参数拒绝；使用独立 data-dir、Skill Library、DSH Home 和本地服务 |
+| 真实中转 | 仅一次模型请求：隔离复制当前 Web 的 `sub2api / gpt-6.1-sol`，原生选模后返回 `OK`；没有改动日常配置，不推广为其他中转站或所有模型资格 |
+| 单元与命令 | 默认 workspace 通过；DSH 与 grouped ACP 定向 owner、JS 模型准备及 Bootstrap owner 通过 |
+| 限制 | 其他真实中转服务、Windows/Linux 实机与 Renderer 点击不由本轮本地 HTTP 证据代替；不存在模型质量或所有 Web 专用插件可复用的承诺 |
+
+可重复入口：`node scripts/smoke-dsh-model-configuration.mjs <DSH 安装包目录>`；
+`node scripts/smoke-dsh-responses-tools.mjs`，或设置 `ROVAI_DSH_SMOKE_SOURCE=web` 验证 Web-only。
+后者需先构建当前 worktree 的 Core/CLI；`ROVAI_DEEPSEEK_HARNESS_BIN` 可指定隔离安装的原生 DSH。
+所有夹具只使用合成凭据，结束时回收自身进程与目录，日常 App 与 DSH 配置不参与。
+
+#### 858e8295 后的两处可用性修复
+
+先保留原生 Provider，再处理无法解析的同名 Web Provider；Web 整体故障不再用局部 nativeProviders
+集合拒绝其他原生插件。沿用目录 runtime metadata 和现有成员/冻结选择 JSON，增加可选 dshSource
+标记，区分同 ID 的原生与 Web 选择；不新增表，不改模型 ID、参数或提示词。
+目录刷新不改写已有选择。准备完成与目录发布继续检查输入，后续显式选模只读取准备结果并校验路由，
+配置更新由已有 Host 兼容性入口负责，活动 Run 与清理机制保持原行为。
+
+扩展既有 JS Provider 冲突、Rust DSH 摘要/路由、grouped ACP 目录、成员无健康证据配置/冻结及 Renderer 选择 owner：
+同名不透明 Web、显式禁用、非 pi 原生身份、同 ID 不同来源、主题变化与过期准备结果均在原矩阵中验证，
+没有新增或删除 Rust owner。新增 smoke 入口
+`node scripts/smoke-dsh-model-availability.mjs` 使用隔离 Core/DSH 与本地 Responses/Messages 接收服务，
+验证实际端点、合成凭据、来源保存与冻结、复用 Host 以及失效 Web 选择的零业务请求。
+纯配置函数无法证明这些跨 Run 行为，因此由真实进程 smoke 单独拥有。
+定向入口：`cargo test -p rovai-core --lib dsh::`；
+`cargo test -p rovai-core --features extended-tests --lib grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`；
+`cargo test -p rovai-core --features slow-tests --lib discovered_entry_configures_and_freezes_without_health_evidence`。
+目录迟到结果的共享代次门禁沿用并运行
+`cargo test -p rovai-core --features slow-tests --lib codex_catalog_waiters_share_refresh_without_satisfying_full_validation`；
+DSH 输入在准备期间变化的检查由其摘要 owner 验证，两者不互相替代。
+
+## 2026-10-09 headless 候选与最新主干合流（User 101）
+
+- headless 显式 A→B→A 同 Session 与 System Mod 已由实际 1.66.0 和官方 1.79.1 对照验证；
+  普通写入仍受原生 print permission gate 阻断，生产保持 ACP，不把全权限 Mod 实验冒充普通审批。
+  真实 BYOK 四次成功、一次预期取消及无模型覆盖的差异见[专门报告](../../research/command-code-runtime/headless-resume-2026-10-09.md)。
+- 合流 main `81f8b1fc`，保留 Mention v33、DSH 原生/Web 模型来源与 Windows Job 当前活跃数清理。
+  共享 ACP 同时保留本分支 Session permissions 和 DSH 来源字段，Cline 保持隐藏。
+- 保留主干 D19–D21；本分支当前版本决定顺延 D22–D31，仅调整追溯链接，不改变已接受的语义。
+- 两种 receipt 187 按真实格式识别，189/schema 139 收敛；原有 184–188 兼容与收据保留，
+  既有 Mention 迁移 owner 扩展两种来源、部分结构、失败回滚及冻结证据保留。
+
+本地合流验证：默认 Rust workspace 465 通过／2 人工 Smoke 忽略，共享 ACP 69 通过／2 人工 Smoke 忽略，
+Claude 34、DSH 5 与模型目录 owner 通过。前端类型、239 文件／2615 Vitest、339 Node 测试、文档门禁
+及桌面构建通过。Mention 两来源／回滚／旧收据保留与修正后的 v104/v105 fixture 定向通过。
+这些检查不新增 headless 产品准入，也不代替 Windows runner 或真实打包模型验收。

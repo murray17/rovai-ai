@@ -2,7 +2,7 @@
 document_type: ui-contract
 authority: mission-renderer-presentation
 status: accepted
-last_updated: 2026-09-26
+last_updated: 2026-10-09
 ---
 
 # Mission board
@@ -219,6 +219,13 @@ clipboard and keyboard behavior. `@` and the footer mention button open current-
 “邀请其他队员”; names and roles can search outsiders directly. Enter selects a candidate when open and otherwise
 inserts a line; Escape dismisses the candidate menu. No broadcast or Skill selector appears in a Mission.
 Plain pasted `@name` stays text. Member atoms delete as a unit and remain tied to their IDs after rename.
+
+The candidate menu anchors to the description caret, prefers opening below it, and flips or constrains its
+height at the viewport edge. It portals into the owning Mission dialog outside the clipped writing plane,
+so candidates remain visible and accept pointer/wheel input in ordinary and expanded editors. Focus stays in
+the description; arrow navigation scrolls only the candidate list. Escape dismisses this menu before the dialog.
+Creation, editing, long scrolled descriptions, both themes and 200% zoom require native pointer/keyboard
+acceptance with hit testing; programmatic option clicks alone do not prove candidates are usable.
 
 Referenced outsiders appear in a compact “新建时加入” / “保存时加入” row with a cancel action; the primary action
 reads “邀请并新建” / “邀请并保存”. The row is derived from distinct referenced IDs, so deleting the final mention
