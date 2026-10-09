@@ -9,7 +9,7 @@ use tokio::process::Command;
 use crate::{agent_profile::AdapterKind, command::canonical_json_digest};
 
 pub const MINIMUM_VERSION: &str = "0.1.5-rc.2";
-pub const BOOTSTRAP_REVISION: &str = "dsh-responses-tool-compat-v4";
+pub const BOOTSTRAP_REVISION: &str = "dsh-windows-job-launch-v5";
 const BOOTSTRAP_PLUGIN: &str = include_str!("dsh/bootstrap.mjs");
 const MAX_OBSERVED_FILE_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 

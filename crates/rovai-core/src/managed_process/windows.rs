@@ -282,6 +282,8 @@ impl WindowsManagedProcess {
     pub(super) fn tree_is_empty(&self) -> io::Result<bool> {
         // The current Job membership count is the Windows cleanup boundary.
         // Completion notifications and lifetime totals are not reliable gates.
+        #[cfg(feature = "extended-tests")]
+        self.cleanup_fault_for_smoke("query")?;
         let accounting = job_accounting(&self.job)?;
         #[cfg(feature = "extended-tests")]
         if std::env::var_os("ROVAI_INTERNAL_DSH_CANCEL_TRACE").is_some() {
@@ -294,6 +296,8 @@ impl WindowsManagedProcess {
     }
 
     pub(super) fn terminate_job(&mut self) -> io::Result<()> {
+        #[cfg(feature = "extended-tests")]
+        self.cleanup_fault_for_smoke("terminate")?;
         let terminated = unsafe {
             // SAFETY: job is owned by this process wrapper and never inherited.
             TerminateJobObject(raw_handle(&self.job), MANAGED_PROCESS_TERMINATION_CODE)
@@ -316,6 +320,32 @@ impl WindowsManagedProcess {
                 Err(termination_error)
             }
         }
+    }
+
+    // The isolated smoke targets one named Job and removes its fault file to
+    // exercise the existing cleanup worker's retry and Delivery wakeup. This
+    // seam is absent from production builds and never changes Job ownership.
+    #[cfg(feature = "extended-tests")]
+    fn cleanup_fault_for_smoke(&self, operation: &str) -> io::Result<()> {
+        if std::env::var_os("ROVAI_INTERNAL_DSH_CANCEL_TRACE").is_none() {
+            return Ok(());
+        }
+        let fault = std::env::var_os("ROVAI_INTERNAL_JOB_FAULT_FILE")
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        if fault
+            .is_some_and(|fault| fault["job"] == self.job_name && fault["operation"] == operation)
+        {
+            eprintln!(
+                "[dsh-cancel-trace] {}",
+                serde_json::json!({"stage":"job_fault","pid":self.pid,"job":self.job_name,"operation":operation})
+            );
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "isolated Job cleanup fault",
+            ));
+        }
+        Ok(())
     }
 
     #[cfg(test)]

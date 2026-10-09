@@ -532,6 +532,13 @@ Bootstrap revision 参与已有配置摘要，使旧 Host 不继续复用。实�
 共享 ACP Host/Fleet 拥有 resident_multi_session、租约、LRU 与停止。Run-local MCP evidence 与 Session 模型
 不进入进程兼容键；真实 MCP 定义、权限、cwd、原生 settings/credentials/profile 配置摘要变化会 fence 复用。
 新会话与 cold resume 使用精确 sessionId；DSH 不支持 session/load 或额外 additionalDirectories。
+Windows Host 在 ACP ready 前为原生 PowerShell executor 选择受 Job 管理的启动入口：自动选择保留
+普通 PowerShell 7、PATH、Windows PowerShell 的原生顺序，但跳过 Store `WindowsApps` 激活入口。
+显式普通 `pwshPath` 保留；显式 Store 入口在启动时明确失败，不能启动脱离目标 Job 的工具后再报告清理成功。
+配置只经 Host 内的 Cordis config/noSave 生命周期应用，不写回原生 profile，不改变命令或 sandbox/approval。
+仅有 Store PowerShell 7 的机器因此使用 DSH 已支持的内置 Windows PowerShell 5.1；需要 7 专有语法时使用
+非 Store 的 PowerShell 7。没有新增自动下载依赖。证据与覆盖范围见
+[Windows 取消验收](../research/deepseek-harness-runtime/windows-cancel-2026-10-09.md)。
 DSH 的持久 Session 有进程锁；同一复用范围的配置变化先由共享 Fleet 回收不兼容的 idle Host，
 确认原进程已经退出后再启动 replacement 并 exact resume。活动 Host 只标记退役，不能抢占其 Run；replacement
 等待该 Run 正常结束和旧 Host 确认回收。回收失败会阻断新 Host，不能并行争用锁或退化为 fresh Session。

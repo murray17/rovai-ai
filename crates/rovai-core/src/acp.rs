@@ -7623,6 +7623,99 @@ mod route_policy_tests {
     }
 }
 
+#[cfg(all(test, windows, feature = "extended-tests"))]
+mod windows_cleanup_tests {
+    use super::*;
+
+    // The existing Unix ACP fixtures cannot exercise the Windows confirmation
+    // seam. Use a real owned Job without model/network/SQLite setup; the lower
+    // ManagedProcess owner owns descendant and native API fault matrices.
+    #[tokio::test]
+    async fn acp_callers_confirm_the_owned_windows_job_before_releasing() {
+        for adapter_kind in [
+            AdapterKind::DeepseekHarness,
+            AdapterKind::KimiCodeCli,
+            AdapterKind::QwenCode,
+            AdapterKind::ZcodeApp,
+        ] {
+            let executable_path = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+            let mut command = Command::new(&executable_path);
+            command.current_dir(std::env::temp_dir()).args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ]);
+            let spec = ManagedProcessLaunchSpec::capture(
+                &command,
+                ManagedProcessPurpose::RuntimeHost,
+                ManagedStdinPolicy::Piped,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "ACP Windows cleanup fixture".to_string(),
+            )
+            .unwrap();
+            let mut child = ManagedProcess::spawn(spec).unwrap();
+            assert!(!child.tree_is_empty().unwrap());
+            let stdin = child.take_stdin().unwrap();
+            let (incoming, _events) = mpsc::unbounded_channel();
+            let host = AcpHost {
+                adapter_kind,
+                reported_version: None,
+                client_terminal_mode: AgentRuntimeAdapterRegistry::default()
+                    .acp_client_terminal_mode(adapter_kind),
+                client_terminal_bridge: None,
+                host_instance_id: uuid::Uuid::new_v4().to_string(),
+                child: Mutex::new(child),
+                stdin: Mutex::new(Box::new(stdin)),
+                pending: Mutex::new(HashMap::new()),
+                next_id: AtomicU64::new(1),
+                next_compaction_observation_sequence: AtomicU64::new(1),
+                grok_acceptance_auto_compact_armed: AtomicBool::new(false),
+                routes: RwLock::new(HashMap::new()),
+                late_context_owners: RwLock::new(HashMap::new()),
+                ingress_fence: Mutex::new(()),
+                compaction_observers: RwLock::new(HashMap::new()),
+                known_sessions: RwLock::new(HashSet::new()),
+                zcode_background: std::sync::Mutex::new(HashMap::new()),
+                zcode_detached_prompts: RwLock::new(HashMap::new()),
+                zcode_cleanup_confirmed: AtomicBool::new(false),
+                session_results: RwLock::new(HashMap::new()),
+                incoming,
+                alive: AtomicBool::new(true),
+                protocol_violated: AtomicBool::new(false),
+                initialize_result: RwLock::new(None),
+                trae_permission_mode: None,
+                startup_diagnostics: Mutex::new(String::new()),
+                private_config_root: None,
+                remove_private_config_root_on_shutdown: false,
+                detector_config_root: None,
+                ephemeral_config: Mutex::new(None),
+                executable_path,
+                builtin_tools: None,
+                grok_context_windows: BTreeMap::new(),
+            };
+            // This used to return true for ordinary ACP while the Job was live.
+            let mut child = host.child.lock().await;
+            assert!(
+                host.confirm_native_cleanup(
+                    &mut child,
+                    tokio::time::Instant::now() + Duration::from_secs(5)
+                )
+                .await
+            );
+            assert!(child.tree_is_empty().unwrap(), "{}", adapter_kind.as_str());
+            drop(child);
+            assert!(
+                host.force_reap_until(tokio::time::Instant::now() + Duration::from_secs(5))
+                    .await
+            );
+            assert!(!host.alive.load(Ordering::Acquire));
+        }
+    }
+}
+
 #[cfg(all(test, unix, feature = "extended-tests"))]
 mod tests {
     use super::*;

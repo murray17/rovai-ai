@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, renameSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, writeFileSync, renameSync, realpathSync, lstatSync } from 'node:fs'
+import { join, win32 } from 'node:path'
 import { createHash } from 'node:crypto'
 import { Buffer } from 'node:buffer'
 
@@ -8,6 +8,61 @@ export const inject = ['loader', 'systemPrompt', 'tools']
 export const readinessService = 'rovaiDshReady'
 const MAX_OBSERVED_FILE_CONTENT_BYTES = 2 * 1024 * 1024
 const DSH_MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
+const WINDOWS_PWSH_EXECUTORS = new Set(['@deepseek-ai/dsh-pwsh-local', '@deepseek-ai/dsh-pwsh-sandbox'])
+const packagedPath = path => path.split(/[\\/]/).some(part => part.toLowerCase() === 'windowsapps')
+
+// Store activation can launch outside the caller's Job even when the native
+// runner uses CreateProcessW + AssignProcessToJobObject. Keep DSH's ordinary
+// PowerShell 7 / PATH / Windows PowerShell fallback order, excluding that entry.
+// This is a launch default, never a change to a command or sandbox policy.
+export function windowsPwshPath(configured, env = process.env, inspect = path => {
+  try {
+    const entry = lstatSync(path)
+    if (!entry.isFile() && !entry.isSymbolicLink()) return null
+    try { return realpathSync.native(path) } catch { return packagedPath(path) ? path : null }
+  } catch { return null }
+}) {
+  const directories = (env.PATH ?? env.Path ?? '').split(';').map(p => p.trim().replace(/^"|"$/g, '')).filter(Boolean)
+  const explicit = typeof configured === 'string' && configured.length > 0
+  const program = explicit && !win32.extname(configured) ? `${configured}.exe` : configured
+  const candidates = explicit
+    ? win32.isAbsolute(program) || /[\\/]/.test(program) ? [program] : directories.map(p => win32.join(p, program))
+    : [win32.join(env.ProgramFiles ?? 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
+      ...directories.map(p => win32.join(p, 'pwsh.exe')),
+      win32.join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')]
+  for (const candidate of candidates) {
+    if (!explicit && packagedPath(candidate)) continue
+    const resolved = inspect(candidate)
+    if (!resolved) continue
+    if (packagedPath(candidate) || packagedPath(resolved)) {
+      if (explicit) throw new Error('rovai_dsh_store_powershell_not_job_managed: configure pwshPath to a non-Store PowerShell executable')
+      continue
+    }
+    return candidate
+  }
+  throw new Error('rovai_dsh_powershell_unavailable: no non-Store PowerShell executable is available')
+}
+
+async function configureWindowsPwsh(ctx) {
+  if (process.platform !== 'win32') return
+  // Cordis' config waterfall and noSave update apply only to this Host. Keep
+  // raw profile entries/settings untouched, including explicit native paths.
+  ctx.on('internal/config', function (raw, next) {
+    const value = next()
+    return WINDOWS_PWSH_EXECUTORS.has(this.entry?.options.name)
+      ? { ...value, pwshPath: windowsPwshPath(value?.pwshPath) } : value
+  }, { global: true })
+  for (const entry of ctx.loader.entries()) {
+    if (entry.disabled || !WINDOWS_PWSH_EXECUTORS.has(entry.options.name)) continue
+    await entry.refresh()
+    await (entry._await ? entry._await() : entry.fiber?.await())
+    // A sibling may have started before this plugin's config hook was added.
+    // Re-resolve it before publishing the readiness dependency to ACP.
+    if (!entry.fiber) throw new Error('rovai_dsh_powershell_executor_unavailable')
+    await entry.fiber.update(entry.options.config, true)
+    await (entry._await ? entry._await() : entry.fiber.await())
+  }
+}
 
 // The ACP app can claim stdio while sibling Loader entries are still starting.
 // Hold its injected readiness service until every configured native MCP client
@@ -26,6 +81,7 @@ async function awaitNativeMcpReadiness(ctx) {
 // the step after native compaction. Variables are substituted only once, so
 // braces inside user-authored identity text remain literal.
 export async function apply(ctx, config) {
+  await configureWindowsPwsh(ctx)
   // DSH's documented MCP namespace normalization (0.1.5). A Session's
   // scoped MCP must replace the entire inherited server, including native-only
   // tools. The official restriction seam leaves scoped registrations visible.

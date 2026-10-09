@@ -4,14 +4,15 @@
 // Default: deterministic loopback Responses fixture; shell/DSH/Core are real.
 // ROVAI_REPRO_REMOTE=1 uses the configured Sub2API route and inherited key.
 // ROVAI_REPRO_MODEL chooses an available model. ROVAI_REPRO_CASES accepts comma-separated
-// normal, cancel, cancel-stop-only. Artifacts and bounded writers are retained for review.
+// normal, cancel, cancel-stop-only, cancel-query-fault, cancel-terminate-fault,
+// cancel-parallel, cancel-race. Artifacts and bounded writers are retained for review.
 // Optional ROVAI_REPRO_PWSH changes only this isolated DSH fixture's PowerShell path.
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { randomUUID, createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, unlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -27,6 +28,8 @@ const root = await mkdtemp(join(tmpdir(), 'rovai-dsh-member-queue-'))
 const data = join(root, 'Core')
 const project = join(root, 'project')
 const dshHome = join(root, 'dsh-home')
+const faultFile = join(root, 'job-fault.json')
+const nativePatchPath = join(dshHome, 'profiles', 'acp', 'cordis.patch.yml')
 const report = { schemaVersion: 1, startedAt: new Date().toISOString(), root, data, project, dshHome, coreExe,
   model: remote ? 'configured-sub2api' : 'loopback-controlled-responses', pwshOverride: process.env.ROVAI_REPRO_PWSH ?? null,
   sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8', windowsHide: true }).trim(),
@@ -83,7 +86,8 @@ function launchCore() {
   log('ISOLATION_BEFORE_LAUNCH', { coreExe, data, skillLibrary: join(data, 'managed-skill-library'), project, dshHome })
   const child = spawn(coreExe, args, { cwd: project, windowsHide: true,
     env: { ...process.env, DSH_HOME: dshHome, DSH_AGENTS_HOME: join(root, 'agents-home'),
-      DSH_TELEMETRY_DISABLED: '1', ROVAI_INTERNAL_DSH_CANCEL_TRACE: '1', ROVAI_DSH_FIXTURE_KEY: 'synthetic-loopback-only' }, stdio: ['pipe', 'pipe', 'pipe'] })
+      DSH_TELEMETRY_DISABLED: '1', ROVAI_INTERNAL_DSH_CANCEL_TRACE: '1', ROVAI_INTERNAL_JOB_FAULT_FILE: faultFile,
+      ROVAI_DSH_FIXTURE_KEY: 'synthetic-loopback-only' }, stdio: ['pipe', 'pipe', 'pipe'] })
   const pending = new Map(); let nextId = 1, stderr = '', stopped = false
   const closed = new Promise(r => child.once('close', (code, signal) => {
     stopped = true
@@ -103,7 +107,7 @@ function launchCore() {
   createInterface({ input: child.stdout }).on('line', line => {
     let m; try { m = JSON.parse(line) } catch { return }
     if (m.method) {
-      if (/agent_run\.|runtime\.action|turn\.state|^error$/.test(m.method)) report.events.push({ at: new Date().toISOString(), method: m.method, params: m.params })
+      if (/agent_run\.|runtime\.action|runtime\.host\.log|turn\.state|^error$/.test(m.method)) report.events.push({ at: new Date().toISOString(), method: m.method, params: m.params })
       if (m.method === 'agent_run.runtime_cleanup_completed') observeJobs('cleanup_ack_event')
       return
     }
@@ -173,6 +177,11 @@ async function modelRequest(request, response) {
       if (which === 'FIRST') {
         const outputs = body.input?.filter?.(x => x.type === 'function_call_output') ?? []
         plan.toolOutputs = outputs.map(x => ({ call_id: x.call_id, output: x.output }))
+        if (plan.mode === 'cancel-race') {
+          plan.finalResponseReady = true
+          await new Promise(resolve => { plan.releaseFinalResponse = resolve })
+          plan.finalResponseReleasedAt = new Date().toISOString()
+        }
       }
       const value = `DSH_CASE_${key}_${which}_DONE`
       streamResponse(response, { type: 'message', id: `msg_${fixtureCount + 1}`, role: 'assistant', status: 'completed',
@@ -188,9 +197,9 @@ async function snapshot(threadId) { return core.request('threads.snapshot', { th
 function locateRun(snap, msg) { return snap.agentRuns.find(r => r.anchorMessageId === msg || r.inputMessageIds?.includes(msg)) }
 function compact(snap) { return { runs: snap.agentRuns.map(r => ({ id: r.id, agentId: r.agentId, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt, waitReason: r.waitReason ?? null })),
   messages: snap.messages.filter(m => m.authorType === 'agent').map(m => ({ body: m.body, sourceAgentRunId: m.sourceAgentRunId })) } }
-async function send(threadId, body) {
+async function send(threadId, body, agentId = 'agent_2') {
   const r = await core.request('thread.messages.send', { commandId: randomUUID(), threadId,
-    content: { version: 2, segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } }, { kind: 'text', text: ' ' + body }] },
+    content: { version: 2, segments: [{ kind: 'atom', atom: { type: 'member', agentId } }, { kind: 'text', text: ' ' + body }] },
     sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
     execution: { taskId: null, purpose: 'Isolated DSH non-lead queue reproduction', completionRole: 'required' } })
   const c = r.commandResult ?? r; assert.equal(c.status, 'accepted', JSON.stringify(c)); return c.payload.threadMessageId
@@ -219,7 +228,7 @@ async function main() {
     p.once('error', reject); p.once('exit', code => { if (code !== 0) reject(new Error('child failed')); else { count++; resolve(); } });
   })));
   fs.writeFileSync(key + '.children.json', JSON.stringify({ completed: count, at: Date.now() }));
-  await new Promise(r => setTimeout(r, mode.startsWith('cancel') ? 25000 : 3000));
+  await new Promise(r => setTimeout(r, mode.startsWith('cancel') && mode !== 'cancel-race' ? 25000 : mode === 'control' ? 12000 : 3000));
   clearInterval(heartbeat);
   fs.writeFileSync(key + '.finished.json', JSON.stringify({ pid: process.pid, count, finishedAt: Date.now() }));
   console.log('REAL_SHELL_DONE ' + key + ' children=' + count);
@@ -244,7 +253,8 @@ main().catch(e => { clearInterval(heartbeat); console.error(e); process.exitCode
   }
   const nativePatch = [{ id: 'llm-pi-ai', config: { providers: { fixture: route } } }]
   if (process.env.ROVAI_REPRO_PWSH) nativePatch.push({ id: 'pwsh-sandbox', config: { pwshPath: process.env.ROVAI_REPRO_PWSH } })
-  await writeFile(join(dshHome, 'profiles', 'acp', 'cordis.patch.yml'), JSON.stringify(nativePatch))
+  await writeFile(nativePatchPath, JSON.stringify(nativePatch))
+  report.nativePatchSha256 = createHash('sha256').update(await readFile(nativePatchPath)).digest('hex')
   core = launchCore(); report.corePid = core.pid
   report.health = (await core.request('health.check')).core
   await core.request('runtime.product.check', { runtimeKind: 'deepseek-harness' })
@@ -263,7 +273,8 @@ main().catch(e => { clearInterval(heartbeat); console.error(e); process.exitCode
   log('READY', { health: report.health, installation: report.installation, catalog: report.catalog })
   const workspace = await core.request('workspaces.inspect', { path: project })
   const modes = (process.env.ROVAI_REPRO_CASES ?? 'normal,normal,cancel-stop-only,cancel,cancel').split(',')
-  assert(modes.every(mode => ['normal', 'cancel', 'cancel-stop-only'].includes(mode)))
+  assert(modes.every(mode => ['normal', 'cancel', 'cancel-stop-only', 'cancel-query-fault', 'cancel-terminate-fault', 'cancel-parallel', 'cancel-race'].includes(mode)))
+  assert(!remote || !modes.includes('cancel-race'), 'the response/cancel race requires the controlled endpoint')
   for (let index = 0; index < modes.length; index++) {
     const key = `q${index}`, mode = modes[index], item = { key, mode, nonLeadAgent: 'agent_2', defaultLeadAgent: 'agent_1', startedAt: new Date().toISOString() }
     const cancelled = mode.startsWith('cancel'), hasSuccessor = mode !== 'cancel-stop-only'
@@ -273,6 +284,16 @@ main().catch(e => { clearInterval(heartbeat); console.error(e); process.exitCode
     assert.equal(created.status, 'applied', JSON.stringify(created))
     const threadId = created.payload.threadId ?? created.payload.campId; item.threadId = threadId
     try {
+      if (mode === 'cancel-parallel') {
+        const controlKey = key + 'control'
+        plans.set(controlKey, { mode: 'control' })
+        const control = await core.request('threads.create', { commandId: randomUUID(), name: 'DSH parallel control', workspace: { projectPath: workspace.projectPath },
+          memberAgentIds: ['agent_1', 'agent_2'], defaultLeadAgentId: 'agent_2', collaborationMode: 'peer' })
+        assert.equal(control.status, 'applied')
+        item.control = { key: controlKey, threadId: control.payload.threadId ?? control.payload.campId }
+        item.control.messageId = await send(item.control.threadId, `DSH_CASE_${controlKey}_FIRST: Execute node queue-work.cjs ${controlKey} control and wait for completion.`, 'agent_1')
+        await waitFor(() => existsSync(join(project, controlKey + '.started.json')), 'parallel control tool')
+      }
       item.firstMessageId = await send(threadId, `DSH_CASE_${key}_FIRST: This is an isolated queue test. Use the pwsh tool to execute exactly node queue-work.cjs ${key} ${mode}, with timeoutMs 40000 and workdir ${project}. Wait for it to finish, then publish DSH_CASE_${key}_FIRST_DONE with rovai send --public-only and finish. Do not inspect other files, contact other members, change configuration, or execute other commands except that required publication. If the shell fails, report the failure instead of claiming completion.`)
       await waitFor(() => existsSync(join(project, key + '.started.json')), 'real shell start', remote ? 90_000 : 45_000)
       item.shellStart = JSON.parse(await readFile(join(project, key + '.started.json'), 'utf8'))
@@ -286,10 +307,38 @@ main().catch(e => { clearInterval(heartbeat); console.error(e); process.exitCode
         const lineageQuery = `$ancestor = ${item.shellStart.pid}; $rows = @(); while ($ancestor -and $ancestor -ne ${core.pid} -and $rows.Count -lt 20) { $p = Get-CimInstance Win32_Process -Filter "ProcessId=$ancestor" | Select-Object ProcessId,ParentProcessId,ExecutablePath; if (!$p) { break }; $rows += $p; $ancestor = $p.ParentProcessId }; ConvertTo-Json -InputObject $rows -Compress`
         item.processLineage = JSON.parse(execFileSync(join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', lineageQuery], { windowsHide: true, encoding: 'utf8' }))
         observeJobs('before_cancel')
+        if (mode === 'cancel-race') await waitFor(() => plans.get(key).finalResponseReady, 'native completion response barrier')
         const run = locateRun(await snapshot(threadId), item.firstMessageId)
+        if (mode.endsWith('-fault')) {
+          const host = report.diagnostics.find(d => d.stage === 'host_bound' && d.run === run.id)
+          assert(host?.job, 'fault requires the exact target Job')
+          item.fault = { job: host.job, operation: mode === 'cancel-query-fault' ? 'query' : 'terminate' }
+          await writeFile(faultFile, JSON.stringify(item.fault))
+        }
         item.cancelSentAt = new Date().toISOString(); const before = Date.now()
-        item.cancelResult = await core.request('agentRuns.cancel', { commandId: randomUUID(), command: { threadId, agentRunId: run.id, expectedVersion: run.version } })
+        const cancelling = core.request('agentRuns.cancel', { commandId: randomUUID(), command: { threadId, agentRunId: run.id, expectedVersion: run.version } })
+        if (mode === 'cancel-race') plans.get(key).releaseFinalResponse()
+        item.cancelResult = await cancelling
         item.cancelRpcMs = Date.now() - before
+        if (mode === 'cancel-race') item.finalResponseReleasedAt = plans.get(key).finalResponseReleasedAt
+        if (item.fault) {
+          await sleep(6200) // Exceed one 5s attempt; a new message must remain waiting.
+          item.fault.heldUntil = new Date().toISOString()
+          item.fault.evidence = dbEvidence(threadId)
+          const stopped = item.fault.evidence.runs.find(r => r.id === run.id)
+          item.fault.failClosed = stopped?.status === 'cancelled' && !stopped.cancel_acknowledged_at
+            && item.fault.evidence.deliveries.some(d => d.status === 'waiting' && !d.claimed_agent_run_id)
+            && !item.fault.evidence.runs.some(r => r.id !== run.id)
+          item.fault.observed = report.diagnostics.some(d => d.stage === 'job_fault' && d.job === item.fault.job && d.operation === item.fault.operation)
+          item.fault.error = report.events.find(e => e.method === 'runtime.host.log'
+            && e.params?.text?.includes('ACP cleanup failed:') && e.params.text.includes(item.fault.job.replaceAll('\\', '\\\\')))
+            ?? report.events.find(e => e.method === 'runtime.host.log' && e.params?.text?.includes('ACP cleanup failed:') && e.at >= item.cancelSentAt)
+          item.fault.attempts = report.diagnostics.filter(d => d.stage === 'host_force_reap' && d.job === item.fault.job && d.at >= item.cancelSentAt).length
+          await unlink(faultFile)
+          item.fault.releasedAt = new Date().toISOString()
+          assert(item.fault.observed && item.fault.failClosed && item.fault.error && item.fault.attempts >= 2,
+            'cleanup must report an error, retry locally, and keep the successor waiting during fault')
+        }
       }
       const final = await waitFor(async () => {
         const s = await snapshot(threadId), first = locateRun(s, item.firstMessageId), second = hasSuccessor && locateRun(s, item.secondMessageId)
@@ -305,6 +354,20 @@ main().catch(e => { clearInterval(heartbeat); console.error(e); process.exitCode
       item.hostReused = item.firstHost && item.secondHost ? item.firstHost.host === item.secondHost.host : null
       item.successorStartedAt = second ? second.startedAt : null
       item.toolOutputs = plans.get(key).toolOutputs
+      if (item.control) {
+        const s = await waitFor(async () => {
+          const snapshot = await core.request('threads.snapshot', { threadId: item.control.threadId })
+          return terminal(locateRun(snapshot, item.control.messageId)?.status) ? snapshot : null
+        }, 'unrelated Host natural completion')
+        const run = locateRun(s, item.control.messageId)
+        item.control.status = run.status
+        item.control.host = report.diagnostics.find(d => d.stage === 'host_bound' && d.run === run.id)
+        item.control.finished = existsSync(join(project, item.control.key + '.finished.json'))
+          ? JSON.parse(await readFile(join(project, item.control.key + '.finished.json'), 'utf8')) : null
+        const acknowledgedAt = item.db.runs.find(r => r.id === first.id)?.cancel_acknowledged_at
+        item.control.pass = run.status === 'succeeded' && !!item.control.finished && item.control.finished.finishedAt > Date.parse(acknowledgedAt)
+          && !!item.control.host?.job && item.control.host.job !== item.firstHost?.job
+      }
       item.children = JSON.parse(await readFile(join(project, key + '.children.json'), 'utf8'))
       item.workFinished = existsSync(join(project, key + '.finished.json'))
       if (cancelled) {
@@ -315,7 +378,8 @@ main().catch(e => { clearInterval(heartbeat); console.error(e); process.exitCode
         item.cleanupAcknowledgedAt = r.cancel_acknowledged_at
       }
       item.pass = item.firstStatus === (cancelled ? 'cancelled' : 'succeeded') && (!hasSuccessor || item.secondStatus === 'succeeded')
-        && item.children.completed === 64 && (cancelled ? item.heartbeatStopped && !item.workFinished && (!hasSuccessor || item.hostReused === false) : item.workFinished && item.hostReused === true)
+        && item.children.completed === 64 && (cancelled ? item.heartbeatStopped && (mode === 'cancel-race' || !item.workFinished) && (!hasSuccessor || item.hostReused === false) : item.workFinished && item.hostReused === true)
+        && (!item.fault || item.fault.failClosed && item.fault.observed) && (!item.control || item.control.pass)
       log('CASE_RESULT', { key, mode, pass: item.pass, first: item.firstStatus, second: item.secondStatus, cancelRpcMs: item.cancelRpcMs, cleanupAckMs: item.cleanupAckMs })
     } catch (e) { item.error = String(e.stack); item.final = compact(await snapshot(threadId)); item.db = dbEvidence(threadId); log('CASE_ERROR', { key, error: item.error }); break }
     await persist()
@@ -346,13 +410,15 @@ finally {
       c.noWritesAfterCleanup = !!c.cleanupAcknowledgedAt && beats.every(at => at <= Date.parse(c.cleanupAcknowledgedAt))
       c.noOverlap = !c.successorStartedAt || beats.every(at => at <= Date.parse(c.successorStartedAt))
       c.pass = !!c.pass && c.cancelRpcMs < 1000 && c.noWritesAfterCleanup && c.noOverlap
-        && !c.lateObservation.finished && c.toolInTargetJobBeforeCancel === true && !!c.jobZero
+        && (c.mode === 'cancel-race' || !c.lateObservation.finished) && c.toolInTargetJobBeforeCancel === true && !!c.jobZero
     }
   }
   report.endedAt = new Date().toISOString()
   report.queuePass = !report.error && report.cases.length > 0 && report.cases.every(c => c.firstStatus === (c.mode.startsWith('cancel') ? 'cancelled' : 'succeeded') && (c.mode === 'cancel-stop-only' || c.secondStatus === 'succeeded'))
-  report.cancellationStopsTool = cancelCases.length ? cancelCases.every(c => c.heartbeatStopped && !c.lateObservation.finished) : null
+  report.cancellationStopsTool = cancelCases.length ? cancelCases.every(c => c.heartbeatStopped && (c.mode === 'cancel-race' || !c.lateObservation.finished)) : null
+  if (report.nativePatchSha256) report.nativePatchUnchanged = report.nativePatchSha256 === createHash('sha256').update(await readFile(nativePatchPath)).digest('hex')
   report.pass = !report.error && report.cases.length > 0 && report.cases.every(c => c.pass)
+    && report.nativePatchUnchanged !== false
   await persist(); log('RESULT', { output, root, pass: report.pass, cases: report.cases.length })
   if (!report.pass) process.exitCode = 1
 }

@@ -4,7 +4,26 @@ import { mkdtempSync, writeFileSync, readdirSync, readFileSync, rmSync } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { apply, readinessService } from '../../crates/rovai-core/src/dsh/bootstrap.mjs'
+import { apply, readinessService, windowsPwshPath } from '../../crates/rovai-core/src/dsh/bootstrap.mjs'
+
+test('Windows DSH defaults exclude Store activation while retaining explicit ordinary PowerShell', () => {
+  const msi = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
+  const store = 'C:\\Users\\fixture\\Microsoft\\WindowsApps\\pwsh.exe'
+  const portable = 'D:\\portable\\pwsh.exe'
+  const fallback = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  const env = { PATH: 'C:\\Users\\fixture\\Microsoft\\WindowsApps;D:\\portable' }
+  for (const [files, expected] of [[ [msi, store, portable, fallback], msi ], [[store, portable, fallback], portable], [[store, fallback], fallback]]) {
+    const inspect = p => files.includes(p) ? p : null
+    assert.equal(windowsPwshPath(undefined, env, inspect), expected)
+    assert.equal(windowsPwshPath('', env, inspect), expected)
+  }
+  assert.equal(windowsPwshPath(portable, env, p => p), portable)
+  assert.equal(windowsPwshPath('pwsh', env, p => p === portable ? p : null), portable)
+  assert.throws(() => windowsPwshPath(store, env, p => p), /store_powershell_not_job_managed/)
+  assert.throws(() => windowsPwshPath('pwsh.exe', env, p => p), /store_powershell_not_job_managed/)
+  assert.throws(() => windowsPwshPath(portable, env, () => store), /store_powershell_not_job_managed/)
+  assert.throws(() => windowsPwshPath(undefined, env, () => null), /powershell_unavailable/)
+})
 
 test('DSH official prompt seam binds immutable root identity per session and fails closed', async () => {
   const root = mkdtempSync(join(tmpdir(), 'rovai-dsh-host-test-'))
@@ -117,7 +136,7 @@ test('DSH bootstrap publishes ACP readiness only after native MCP entries settle
     on: () => {},
     provide: key => { assert.equal(key, readinessService); ready = true }
   }, { bindingRoot: '/unused', observationRoot: '/unused', mcpServerNames: [] })
-  await Promise.resolve()
+  await new Promise(resolve => setImmediate(resolve))
   assert.equal(ready, false)
   assert.deepEqual(calls, ['refresh'])
   release()
